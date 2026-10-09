@@ -30,7 +30,7 @@ It binds the original place skill's distance to the exact canonical object and
 destination, preserves its original release action and 0.02m threshold, and
 qualifies completion with actual agent grasp release. It permits original arm
 reset after an observed skill exit while holding, without declaring placement.
-Local How v0.8 / feedback v0.2 disclose this controlled-arm difference; original
+Local How v0.8 / feedback v0.3 disclose this controlled-arm difference; original
 vendor files, selected tools, speeds, budgets and official truth remain intact.
 See [ADR-0073](../../docs/decisions/0073-bound-relocation-place-completion.md).
 

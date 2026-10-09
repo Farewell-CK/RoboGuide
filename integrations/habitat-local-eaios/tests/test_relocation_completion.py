@@ -101,11 +101,54 @@ class OriginalPlace:
         return ([done or budget or kwargs["hl_wants_skill_term"][0]], [False], [False])
 
 
+class OriginalReset:
+    """Mirror the native reset's first-action initialization and pre-step exit behavior."""
+
+    def __init__(self) -> None:
+        """Keep a fixed existing result, budget and independent exception for attribution tests."""
+        self._cur_skill_step = [1]
+        self._max_skill_steps = 100
+        self.act_calls = self.check_calls = self.termination_calls = 0
+        self.base_done = True
+        self.bad_terminate = False
+        self.error: BaseException | None = None
+        self.action = object()
+
+    def _internal_act(self) -> Any:
+        """Generate one original-shaped reset action without a simulator or added call."""
+        self.act_calls += 1
+        if self.error is not None:
+            raise self.error
+        return self.action
+
+    def _is_skill_done(self, **kwargs: Any) -> list[bool]:
+        """Expose the native first-input completion without claiming a post-step arm result."""
+        del kwargs
+        self.check_calls += 1
+        return [self.base_done]
+
+    def should_terminate(self, **kwargs: Any) -> Any:
+        """Return the original result once, independently of feedback bookkeeping."""
+        self.termination_calls += 1
+        done = self._is_skill_done(**kwargs)[0]
+        budget = self._cur_skill_step[0] >= self._max_skill_steps
+        return (
+            [done or budget or kwargs["hl_wants_skill_term"][0]],
+            [self.bad_terminate],
+            object(),
+        )
+
+
 class CompletionHarness:
     """Compose production hooks, guard and feedback around an actual-shaped read-only world."""
 
     def __init__(
-        self, *, index: int = 1, world: Any = None, object_index: int | None = None
+        self,
+        *,
+        index: int = 1,
+        world: Any = None,
+        object_index: int | None = None,
+        enabled: bool = True,
     ) -> None:
         """Use deliberately nonordinal object names and absolute rigid IDs."""
         self.index = index
@@ -153,19 +196,20 @@ class CompletionHarness:
         )
         self.agent.name = self.name
         self.skill = OriginalPlace()
+        self.reset = OriginalReset()
         self.policy = SimpleNamespace(
-            _idx_to_name={23: "place"},
-            _skills={23: self.skill},
+            _idx_to_name={23: "place", 24: "reset_arm"},
+            _skills={23: self.skill, 24: self.reset},
             _high_level_policy=SimpleNamespace(llm_agent=self.agent),
         )
         self.rows: list[dict[str, Any]] = []
-        self.state = RelocationExecutionState(phase="holding", allow_holding_reset=True)
+        self.state = RelocationExecutionState(phase="holding", allow_holding_reset=enabled)
         self.binding = RelocationCompletionBinding(self.world, {self.name: self.contract})
         self.feedback = Stage2ExecutionFeedback(
             {self.name: self.contract},
             self.rows.append,
             completion=lambda name, action, succeeded: self.state.complete(action, succeeded),
-            completion_binding=self.binding,
+            completion_binding=self.binding if enabled else None,
         )
         self.feedback.install([self.policy])
         self.restore_guard = install_stage2_contract_guard(
@@ -243,7 +287,7 @@ def test_original_release_precedes_actual_release_qualified_completion() -> None
         harness.release_at_goal()
         harness.feedback.physical_step()
         receipt = harness.receipt()
-        assert receipt["schema_version"].endswith("/v0.2")
+        assert receipt["schema_version"].endswith("/v0.3")
         assert receipt["local_skill_completed"] is True
         assert receipt["benchmark_goal_satisfied"] is None
         assert receipt["source"] == "post-step-bound-object-release"
@@ -273,6 +317,14 @@ def test_last_budget_step_release_supersedes_false_without_erasing_budget() -> N
         assert harness.receipt()["termination"]["base_is_skill_done"] is False
         assert harness.receipt()["status"] == "local-skill-completed"
         assert harness.state.phase == "placed"
+        evidence = harness.receipt()["place_policy_input"]
+        assert evidence["source_timing"] == "before-completed-gym-step"
+        before = evidence["observation"]
+        assert before["check_purpose"] == "termination"
+        assert before["native_sensor_under_threshold"] is True
+        assert before["object_released"] is False
+        assert before["tool_call_id"] == harness.receipt()["tool_call_id"]
+        assert harness.receipt()["place_binding"]["object_released"] is True
     finally:
         harness.close()
 
@@ -344,6 +396,112 @@ def test_holding_reset_is_allowed_only_after_observed_skill_exit() -> None:
         assert harness.agent.dispatched[-1] == ("reset_arm", {})
         assert harness.state.phase == "holding"
         assert not harness.feedback.operation_completed(harness.name)
+    finally:
+        harness.close()
+
+
+def test_first_reset_exit_is_confirmed_after_its_existing_step_without_inventing_success() -> None:
+    """A current reset's native first-input exit clears pending only after its actual step."""
+    harness = CompletionHarness()
+    try:
+        harness.agent.llm_model.response = ("reset_arm", {})
+        harness.admit()
+        assert harness.reset._internal_act() is harness.reset.action
+        result = harness.reset.should_terminate(
+            batch_idx=[0], skill_name=["reset_arm"], hl_wants_skill_term=[False]
+        )
+        assert result[0] == [True]
+        assert harness.receipt()["status"] == "completion-evidence-unavailable"
+        assert harness.state.pending_action == "reset_arm"
+        harness.feedback.physical_step()
+        receipt = harness.receipt()
+        assert receipt["status"] == "skill-exited-completion-unconfirmed"
+        assert receipt["local_skill_completed"] is None
+        assert receipt["benchmark_goal_satisfied"] is None
+        assert receipt["termination"]["base_is_skill_done"] is True
+        assert receipt["physical_steps_since_call"] == 1
+        assert harness.state.pending_action is None
+        assert harness.state.phase == "holding"
+        assert not harness.feedback.operation_completed(harness.name)
+        harness.agent.llm_model.response = ("wait", {})
+        harness.agent.chat("unchanged original observation")
+        assert harness.agent.dispatched[-1] == ("wait", {})
+        assert harness.reset.act_calls == harness.reset.termination_calls == 1
+        assert sum(row["event"] == "reset-exit-confirmed" for row in harness.rows) == 1
+    finally:
+        harness.close()
+    assert "_internal_act" not in vars(harness.reset)
+    assert "should_terminate" not in vars(harness.reset)
+
+
+@pytest.mark.parametrize("missing", ["act", "step", "termination", "skill", "bad", "call"])
+def test_reset_exit_requires_current_action_step_and_definite_nonabort_termination(
+    missing: str,
+) -> None:
+    """Peer steps, zero-step exits, aborts and replaced calls cannot release the pending fence."""
+    harness = CompletionHarness()
+    try:
+        harness.agent.llm_model.response = ("reset_arm", {})
+        harness.admit()
+        if missing != "act":
+            harness.reset._internal_act()
+        if missing == "bad":
+            harness.reset.bad_terminate = True
+        if missing != "termination":
+            harness.reset.should_terminate(
+                batch_idx=[0],
+                skill_name=["wait" if missing == "skill" else "reset_arm"],
+                hl_wants_skill_term=[False],
+            )
+        if missing == "call":
+            model = harness.agent.llm_model
+            model.chat("a separately selected raw call")
+            harness.feedback.admit(harness.name, model, {"name": "reset_arm", "arguments": {}})
+        if missing != "step":
+            harness.feedback.physical_step()
+        assert harness.state.pending_action == "reset_arm"
+        assert harness.receipt()["local_skill_completed"] is None
+        assert not any(row["event"] == "reset-exit-confirmed" for row in harness.rows)
+    finally:
+        harness.close()
+
+
+def test_disabled_profile_keeps_first_reset_observation_unknown() -> None:
+    """Legacy feedback and guard retain their existing result under the default-off option."""
+    harness = CompletionHarness(enabled=False)
+    try:
+        harness.state.phase = "before_pick"
+        harness.agent.llm_model.response = ("reset_arm", {})
+        harness.admit()
+        harness.reset._internal_act()
+        harness.reset.should_terminate(
+            batch_idx=[0], skill_name=["reset_arm"], hl_wants_skill_term=[False]
+        )
+        harness.feedback.physical_step()
+        assert harness.receipt()["status"] == "completion-evidence-unavailable"
+        assert harness.state.pending_action == "reset_arm"
+        assert "_internal_act" not in vars(harness.reset)
+    finally:
+        harness.close()
+
+
+def test_reset_action_exception_keeps_original_error_and_pending_fence() -> None:
+    """An original action exception never becomes a current reset witness or silent completion."""
+    harness = CompletionHarness()
+    try:
+        harness.agent.llm_model.response = ("reset_arm", {})
+        harness.admit()
+        error = RuntimeError("original reset action failure")
+        harness.reset.error = error
+        with pytest.raises(RuntimeError) as captured:
+            harness.reset._internal_act()
+        assert captured.value is error
+        harness.reset.should_terminate(
+            batch_idx=[0], skill_name=["reset_arm"], hl_wants_skill_term=[False]
+        )
+        harness.feedback.physical_step()
+        assert harness.state.pending_action == "reset_arm"
+        assert harness.receipt()["local_skill_completed"] is None
     finally:
         harness.close()
 

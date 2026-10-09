@@ -221,7 +221,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   The separate default-off exact-object place completion profile (ADR-0073) binds
   canonical attempt/object/destination and actual grasp release through instance-local
   observation/termination hooks, with the original release action, 0.02m threshold and
-  budgets. Local How v0.8 / feedback v0.2 disclose this controlled-arm difference.
+  budgets. Local How v0.8 / feedback v0.3 disclose this controlled-arm difference.
   The enabled guard admits holding reset after observed skill exit and offers phase-bound
   navigation targets; it never fabricates placement, rewrites actions or changes official truth.
   `relocation_completion.py` owns these local bindings, never Control or Task satisfaction.

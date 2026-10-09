@@ -25,7 +25,7 @@ successful placement.
 shared relocation. The generic B1 launcher forwards it only with explicit
 `HABITAT_RELOCATION_COMPLETION_BINDING=1`. Existing disabled and navigation paths
 retain their earlier behavior. Enabled execution discloses Local How v0.8,
-feedback v0.2 and `exact-object-released-place/v0.1`.
+feedback v0.3 and `exact-object-released-place/v0.1`.
 
 The adapter freezes agent, canonical attempt/invocation digest, exact object,
 destination and absolute rigid-object identity for each execution segment.
@@ -71,7 +71,11 @@ source manifest disclose the enabled profile. Sparse action/termination feedback
 records the exact binding, native shared-sensor comparison when readable,
 actual distance, grasp, release eligibility and qualified completion, with
 completed simulator-step attribution. Post-step completion retains earlier
-termination causes. Missing native comparisons remain unavailable.
+termination causes. Missing native comparisons remain unavailable. Feedback v0.3 retains the
+pre-step native sensor decision beside the post-step exact-object release
+observation when both are attributable to the same place call. A reset-arm
+exit is cleared only after its own generated action crosses the existing Gym
+step; it remains completion-unconfirmed and never advances relocation phase.
 Only current records per agent are retained; the existing bounded streaming
 audit owns history. No per-step JSON/file write is added. Storage failures do
 not create successful feedback. Hook installation rolls back on failure and

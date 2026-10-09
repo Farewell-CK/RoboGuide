@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 _LOG = logging.getLogger(__name__)
 _MISSING = object()
 FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.1"
-BOUND_FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.2"
+BOUND_FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.3"
 _SCHEMA = "roboguide.stage2-execution-feedback/v0.1"
 _COMPLETED_PREFIX = "You have completed your previous action. "
 
@@ -133,6 +133,8 @@ class _PendingAction:
     physical_steps: int = 0
     place_physical_steps: int = 0
     deferred_completion: bool = False
+    reset_action_call: tuple[str, int] | None = None
+    deferred_reset_exit: bool = False
 
 
 class Stage2ExecutionFeedback:
@@ -182,7 +184,7 @@ class Stage2ExecutionFeedback:
         self._sequences[agent_name] = sequence
         document = {
             "schema_version": (
-                "roboguide.stage2-execution-feedback/v0.2" if self._completion_binding else _SCHEMA
+                "roboguide.stage2-execution-feedback/v0.3" if self._completion_binding else _SCHEMA
             ),
             "profile": BOUND_FEEDBACK_PROFILE if self._completion_binding else FEEDBACK_PROFILE,
             "agent_name": agent_name,
@@ -259,6 +261,25 @@ class Stage2ExecutionFeedback:
             if self._completion_binding is not None and pending.document["tool_name"] == "place":
                 self._post_step_place(agent_name, pending)
                 continue
+            reset_call, pending.reset_action_call = pending.reset_action_call, None
+            if pending.deferred_reset_exit:
+                pending.deferred_reset_exit = False
+                if reset_call == (
+                    pending.document["tool_call_id"],
+                    pending.document["action_sequence"],
+                ):
+                    pending.document = dict(
+                        pending.document,
+                        status="skill-exited-completion-unconfirmed",
+                        local_skill_completed=None,
+                        source="completed-gym-step-after-observed-reset-exit",
+                        source_timing="after-completed-gym-step-with-prior-policy-input-evidence",
+                        physical_steps_since_call=pending.physical_steps,
+                    )
+                    self._write_observed_receipt(pending)
+                    self._emit("reset-exit-confirmed", pending.document)
+                    self._notify_completion(agent_name, pending)
+                    continue
             if not pending.deferred_completion:
                 continue
             pending.deferred_completion = False
@@ -307,9 +328,19 @@ class Stage2ExecutionFeedback:
             return
         pending.place_physical_steps += 1
         observation = binding.observe(agent_name)
+        policy_input = binding.last_check(agent_name)
+        if policy_input is not None and (
+            policy_input.get("tool_call_id") != pending.document["tool_call_id"]
+            or policy_input.get("action_sequence") != pending.document["action_sequence"]
+        ):
+            policy_input = None
         pending.document = dict(
             pending.document,
             place_binding=observation,
+            place_policy_input={
+                "source_timing": "before-completed-gym-step",
+                "observation": policy_input,
+            },
             place_physical_steps=pending.place_physical_steps,
         )
         if (
@@ -346,13 +377,27 @@ class Stage2ExecutionFeedback:
                 if not isinstance(skills, dict):
                     continue
                 seen: set[int] = set()
-                for skill in skills.values():
+                names = getattr(policy, "_idx_to_name", {})
+                for index, skill in skills.items():
                     if id(skill) in seen:
                         continue
                     seen.add(id(skill))
                     if id(skill) in owners and owners[id(skill)] != agent_name:
                         raise IntegrationError("Stage2 skill feedback cannot share agent ownership")
                     owners[id(skill)] = agent_name
+                    skill_name = (
+                        names.get(index)
+                        if isinstance(names, Mapping)
+                        else names[index]
+                        if isinstance(names, (list, tuple)) and 0 <= index < len(names)
+                        else None
+                    )
+                    if (
+                        self._completion_binding is not None
+                        and skill_name == "reset_arm"
+                        and callable(getattr(skill, "_internal_act", None))
+                    ):
+                        self._restores.append(self._observe_reset_action(agent_name, skill))
                     if callable(getattr(skill, "should_terminate", None)) and callable(
                         getattr(skill, "_is_skill_done", None)
                     ):
@@ -360,6 +405,34 @@ class Stage2ExecutionFeedback:
         except BaseException:
             self.close()
             raise
+
+    def _observe_reset_action(self, agent_name: str, skill: Any) -> Callable[[], None]:
+        """Witness the assigned original reset action once without changing its return value."""
+        original = skill._internal_act
+        previous = vars(skill).get("_internal_act", _MISSING)
+
+        def observed(*args: Any, **kwargs: Any) -> Any:
+            """Bind a generated reset to the pending exact call, never a peer or earlier call."""
+            pending = self._pending.get(agent_name)
+            result = original(*args, **kwargs)
+            if (
+                pending is not None
+                and pending is self._pending.get(agent_name)
+                and pending.document["tool_name"] == "reset_arm"
+            ):
+                pending.reset_action_call = (
+                    pending.document["tool_call_id"],
+                    pending.document["action_sequence"],
+                )
+            return result
+
+        skill._internal_act = observed
+
+        def restore() -> None:
+            """Remove only this action witness after normal, exceptional or cancelled exit."""
+            _restore(skill, "_internal_act", previous)
+
+        return restore
 
     def _observe_skill(self, agent_name: str, skill: Any) -> Callable[[], None]:
         """Tap one existing termination decision, calling each vendor method exactly once."""
@@ -438,6 +511,7 @@ class Stage2ExecutionFeedback:
         if expected_skill is None or names[0] != expected_skill:
             return
         pending.deferred_completion = False
+        pending.deferred_reset_exit = False
         if not isinstance(result, tuple) or len(result) != 3:
             return
         returned_control = _boolean(result[0])
@@ -448,8 +522,20 @@ class Stage2ExecutionFeedback:
         high_level = _boolean(inputs.get("hl_wants_skill_term"))
         base_done = base_done if base_count == 1 else None
         if base_done is True and bad_terminate is False:
+            pending.deferred_reset_exit = (
+                self._completion_binding is not None
+                and expected_skill == "reset_arm"
+                and pending.physical_steps == 0
+                and returned_control is True
+                and high_level is False
+                and budget["current_skill_steps"] == 1
+                and budget["over_max_len"] is False
+                and pending.reset_action_call
+                == (pending.document["tool_call_id"], pending.document["action_sequence"])
+            )
             pending.deferred_completion = (
-                pending.physical_steps == 0
+                not pending.deferred_reset_exit
+                and pending.physical_steps == 0
                 and "retry_of_tool_call_id" in pending.document
                 and returned_control is True
                 and budget["current_skill_steps"] == 1
@@ -519,6 +605,7 @@ class Stage2ExecutionFeedback:
             "wait-finished",
             "skill-budget-exhausted",
             "high-level-interrupted",
+            "skill-exited-completion-unconfirmed",
         }:
             try:
                 self._completion(agent_name, str(pending.document["tool_name"]), completed)

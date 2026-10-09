@@ -75,7 +75,7 @@ unknown/不发布，不能把到 destination 的距离当作整个搬运过程�
 `--relocation-completion-binding` 默认关闭，且只允许与 shared relocation 同时开启。
 通用 B1 launcher 通过 `HABITAT_RELOCATION_COMPLETION_BINDING=1` 显式传递。
 该 profile 不修改原始 EMOS 文件或 MI Prompt，但确实改变受控臂的本地观测/完成判断，
-必须以 Local How v0.8 和 Stage2 feedback v0.2 披露，不能宣称与原生 EMOS 相同。
+必须以 Local How v0.8 和 Stage2 feedback v0.3 披露，不能宣称与原生 EMOS 相同。
 
 原始 place 读取的共享 `targ_idx` 距离没有绑定本次搬运对象。新 profile 用 canonical
 attempt、invocation digest、精确 object/destination 和该 agent 的实际 grasp 绑定观测，

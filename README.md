@@ -583,7 +583,7 @@ episode-start source evidence 与通用 B1 runner 接线已实现并通过离线
 Profile 与实现图](docs/extensions/habitat-relocation-profile.md)。默认关闭的
 `HABITAT_RELOCATION_COMPLETION_BINDING=1` 配置进一步启用 adapter 所有的
 `relocation_completion.py`：把原始 place 的距离绑定到 canonical 对象，并以实际释放
-核验本地完成。该 Local How v0.8 / feedback v0.2 差异保留原始动作、0.02m 条件和预算，
+核验本地完成。该 Local How v0.8 / feedback v0.3 差异保留原始动作、0.02m 条件和预算，
 不修改官方 PDDL；详见 [ADR-0073](docs/decisions/0073-bound-relocation-place-completion.md)。
 搬运部署采用版本化 operation admission，绑定实际 reset 的物体来源、目的地与配置 endpoint；
 导航负面候选检查仍保留，不能用它替代搬运可达性判断。共享拓扑与资源保护继续生效，

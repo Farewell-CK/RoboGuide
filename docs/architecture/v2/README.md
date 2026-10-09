@@ -538,7 +538,7 @@ Core 资源语义，不放宽官方成功或 Formal admission。Task3 受控物�
 正式配对公平性与批量就绪仍需独立验证。默认关闭的精确对象完成 profile
 （[ADR-0073](../../decisions/0073-bound-relocation-place-completion.md)）用本次 canonical
 对象距离驱动原始 place 释放，并以实际 grasp release 核验本地完成。它允许技能退出后的
-持物 reset，模型仍自行选择动作；Local How v0.8 / feedback v0.2 明示受控臂差异，
+持物 reset，模型仍自行选择动作；Local How v0.8 / feedback v0.3 明示受控臂差异，
 不会改动原生文件或官方评测。
 [当前实现图和边界](../../extensions/habitat-relocation-profile.md)单独记录该可选路径。
 
