@@ -26,6 +26,8 @@ shared relocation. The generic B1 launcher forwards it only with explicit
 `HABITAT_RELOCATION_COMPLETION_BINDING=1`. Existing disabled and navigation paths
 retain their earlier behavior. Enabled execution discloses Local How v0.8,
 feedback v0.3 and `exact-object-released-place/v0.1`.
+The follow-up sparse-state and communication scope described below emits
+feedback v0.4. Historical v0.3 evidence is not relabeled.
 
 The adapter freezes agent, canonical attempt/invocation digest, exact object,
 destination and absolute rigid-object identity for each execution segment.
@@ -82,6 +84,28 @@ not create successful feedback. Hook installation rolls back on failure and
 all exits restore original instance methods; serial endpoint reuse creates a
 new binding in the existing reset world.
 
+Feedback v0.4 additionally reads the bound object's actual grasp and optional
+base/end-effector/joint state at admission, original termination, and next-model
+boundaries only. Each read retains its timing, exact attempt and invocation.
+The existing original end-effector getter is used; no IK, FK, action, metric
+refresh, predicate evaluation or random sampling is invoked. Joint copies are
+limited to 64 values and each serialized observation to 8 KiB. Partial/failed
+reads remain unavailable and never alter original skill results. Distance to
+the PDDL entity reference is not contact or workspace feasibility; physical
+reachability remains unknown rather than becoming an Actor exclusion.
+
+The enabled profile also supplies the immutable peer canonical commitments
+and current assigned/completed-idle model status. Original `send_request`
+queues text and selects wait; neither transfers Control-owned work nor proves
+peer delivery or execution. Completed endpoints use model-free idle and cannot
+consume original model messages. Their recipients are removed from the offered
+tool schema and raw requests are independently rejected before dispatch. Active
+recipient enums may only narrow the original declaration. Legitimate messaging
+and wait remain; no natural-language handoff parser or adapter reassignment is
+introduced. A rejected request retains the completed sibling's outcome. Default
+and navigation feedback are unchanged. This is an explicit controlled local
+contract difference, not a new distributed peer-channel or Task recovery rule.
+
 Local completion, official `at`/`pddl_success`, Node outcome, Task satisfaction
 and Formal admission remain separate. The official simulator metric is not
 computed, edited or replaced here. A completed local place can still drift or
@@ -107,7 +131,11 @@ flowchart LR
   S --> H[Existing single Gym step]
   H --> R[Actual object position and grasp read]
   R --> F[Bound local completion feedback]
+  R -->|sparse actual arm state / unknown| F
   F --> M
+  C --> P[Peer canonical scope: message only]
+  F -->|completed-idle cannot receive model messages| P
+  P --> G
   F --> N[Existing Node local outcome]
   H --> O[Unchanged official Habitat metric]
 ```

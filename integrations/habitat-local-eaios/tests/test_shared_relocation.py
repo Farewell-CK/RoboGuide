@@ -426,6 +426,82 @@ def test_bound_completion_in_production_pair_loop_keeps_one_reset_and_official_f
     assert all(row["place_binding"]["object_released"] is True for row in completed)
 
 
+def test_bound_pair_rejects_message_to_completed_idle_without_losing_peer_completion(
+    tmp_path: Path,
+) -> None:
+    """An actual idle transition cannot leave the failed peer waiting for nonexistent takeover."""
+
+    class FailedPickGym(BoundRelocationGym):
+        """Keep one failed grasp empty while preserving the successful peer's release."""
+
+        def step(self, action: object) -> tuple[dict[str, Any], float, bool, dict[str, bool]]:
+            """Use the existing one fake Gym step without creating a successful failed grasp."""
+            result = super().step(action)
+            manager = self.environment.sim.get_agent_data(0).grasp_mgr
+            manager.is_grasped, manager.snap_idx = False, None
+            return result
+
+    actor = BoundRelocationActor()
+    first = actor.originals[0]
+    first.llm_model.choices = [
+        ("nav_to_obj", {"target_obj": "object:0"}),
+        ("pick", {"target_obj": "object:0"}),
+        ("wait", {}),
+        ("send_request", {"target_agent": "agent_1", "request": "status?"}),
+    ]
+    first.llm_model.actions.append(
+        {
+            "name": "send_request",
+            "parameters": {
+                "properties": {
+                    "target_agent": {"type": "string"},
+                    "request": {"type": "string"},
+                },
+                "required": ["request", "target_agent"],
+            },
+        }
+    )
+    actor._active_policies[0]._skills[1].required = 1000
+    actor._active_policies[0]._skills[1]._max_skill_steps = 2
+    actor._active_policies[0]._skills[3].required = 6
+    gym = FailedPickGym(actor)
+    runtime = RelocationRuntime(tmp_path, actor, gym)
+    runtime._config = replace(runtime._config, relocation_completion_binding=True)
+    environment = runtime._habitat_env
+    assert environment is not None
+    environment.task.pddl_problem.sim_info.obj_ids = {
+        f"object:{index}": index for index in range(2)
+    }
+    environment.sim.scene_obj_ids = [700, 701]
+    for index in range(2):
+        data = environment.sim.get_agent_data(index)
+        data.grasp_mgr = data.grasp_mgrs[0]
+        data.grasp_mgr.snap_idx = None
+    gym.environment = environment
+    outcomes, summary = runtime.execute_pair(_pair_invocations(), lambda: False, lambda *_: None)
+    assert outcomes[0].state == "FAILED" and outcomes[0].terminal_basis == "local-contract-failure"
+    assert "not another active agent" in outcomes[0].detail
+    assert outcomes[1].state == "COMPLETED"
+    assert outcomes[1].terminal_basis == "relocation-place-skill"
+    assert gym.resets == 1 and gym.steps < runtime._config.max_steps
+    assert actor.calls == gym.steps + 1
+    assert summary["identity"]["episode_terminated"] is False
+    assert summary["final_info"]["pddl_success"] is False
+    assert len(first.dispatched) == 3 and first.llm_model.calls == 4
+    assert len(actor.originals[1].dispatched) == actor.originals[1].llm_model.calls == 4
+    assert [
+        policy._high_level_policy.llm_agent for policy in actor._active_policies
+    ] == actor.originals
+    assert first.llm_model.offered_actions is not None
+    assert "send_request" not in {tool["name"] for tool in first.llm_model.offered_actions}
+    rejected = json.loads(
+        (runtime._evidence_dir() / "stage2-actions.jsonl").read_text().splitlines()[-1]
+    )
+    assert rejected["decision"] == "rejected"
+    assert rejected["selected_action"]["name"] == "send_request"
+    assert rejected["peer_execution_scope"]["peers"][0]["model_status"] == "completed-idle"
+
+
 @pytest.fixture(autouse=True)
 def original_wait_class(monkeypatch: pytest.MonkeyPatch) -> None:
     """Validate the same wait class used by every fake original skill map."""

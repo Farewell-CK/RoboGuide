@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 _LOG = logging.getLogger(__name__)
 _MISSING = object()
 FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.1"
-BOUND_FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.3"
+BOUND_FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.4"
 _SCHEMA = "roboguide.stage2-execution-feedback/v0.1"
 _COMPLETED_PREFIX = "You have completed your previous action. "
 
@@ -184,7 +184,7 @@ class Stage2ExecutionFeedback:
         self._sequences[agent_name] = sequence
         document = {
             "schema_version": (
-                "roboguide.stage2-execution-feedback/v0.3" if self._completion_binding else _SCHEMA
+                "roboguide.stage2-execution-feedback/v0.4" if self._completion_binding else _SCHEMA
             ),
             "profile": BOUND_FEEDBACK_PROFILE if self._completion_binding else FEEDBACK_PROFILE,
             "agent_name": agent_name,
@@ -212,6 +212,18 @@ class Stage2ExecutionFeedback:
             document["retry_of_action_sequence"] = previous.document["action_sequence"]
             document["prior_call_physical_steps"] = previous.physical_steps
         self._pending[agent_name] = _PendingAction(model, receipt, document, exact_action)
+        if self._completion_binding is not None:
+            document["manipulation_observation"] = self._observe_manipulation(
+                agent_name, "before-crab-agent-dispatch"
+            )
+            if action["name"] == "send_request":
+                document["peer_request"] = {
+                    "target_agent": action["arguments"]["target_agent"],
+                    "delivery_status": "unobserved",
+                    "peer_action_completed": None,
+                    "operation_delegation_supported": False,
+                    "wait_completion_is_acknowledgement": False,
+                }
         if self._completion_binding is not None and action["name"] == "place":
             self._completion_binding.bind_call(agent_name, receipt["tool_call_id"], sequence)
             document["place_binding"] = self._completion_binding.observe(agent_name)
@@ -232,6 +244,10 @@ class Stage2ExecutionFeedback:
             pending.document = dict(
                 pending.document, physical_steps_since_call=pending.physical_steps
             )
+            if self._completion_binding is not None:
+                pending.document["current_manipulation_observation"] = self._observe_manipulation(
+                    agent_name, "before-next-model-call"
+                )
             # Reassert the attributed receipt if vendor logging copied or edited its content.
             pending.receipt["content"] = json.dumps(
                 pending.document, allow_nan=False, sort_keys=True
@@ -247,7 +263,67 @@ class Stage2ExecutionFeedback:
             content += "\n\nLocal execution feedback:\n" + json.dumps(
                 pending.document, allow_nan=False, sort_keys=True
             )
+        if self._completion_binding is not None:
+            content += "\n\nCommitted peer execution scope:\n" + json.dumps(
+                self.peer_execution_scope(agent_name), allow_nan=False, sort_keys=True
+            )
         return content
+
+    def _observe_manipulation(self, agent_name: str, timing: str) -> dict[str, Any]:
+        """Keep sparse observation faults and oversized data out of model/physical decisions."""
+        try:
+            assert self._completion_binding is not None
+            record = dict(
+                self._completion_binding.observe_manipulation(agent_name), source_timing=timing
+            )
+            encoded = json.dumps(record, allow_nan=False, sort_keys=True)
+            if len(encoded.encode("utf-8")) > 8192:
+                raise ValueError("manipulation observation exceeds its byte bound")
+            result: dict[str, Any] = json.loads(encoded)
+            return result
+        except Exception as error:  # noqa: BLE001 - optional feedback cannot invent sensor values
+            return {
+                "status": "unavailable",
+                "reason": type(error).__name__,
+                "source_timing": timing,
+            }
+
+    def request_peer_names(self, agent_name: str) -> frozenset[str]:
+        """Expose model-bearing peers only; completion-idle cannot receive original messages."""
+        return frozenset(
+            name
+            for name, contract in self._contracts.items()
+            if name != agent_name
+            and contract.operation != "unassigned"
+            and not self.operation_completed(name)
+        )
+
+    def peer_execution_scope(self, agent_name: str) -> dict[str, Any]:
+        """Describe existing local commitments without transferring Control's ownership."""
+        eligible = self.request_peer_names(agent_name)
+        return {
+            "schema_version": "roboguide.stage2-peer-execution-scope/v0.1",
+            "agent_name": agent_name,
+            "operation_delegation_supported": False,
+            "request_effect": "message-only; peers retain their committed canonical operations",
+            "wait_completion_is_acknowledgement": False,
+            "peers": [
+                {
+                    "agent_name": name,
+                    "accepting_model_messages": name in eligible,
+                    "model_status": (
+                        "unassigned"
+                        if contract.operation == "unassigned"
+                        else "completed-idle"
+                        if self.operation_completed(name)
+                        else "assigned"
+                    ),
+                    "canonical_contract": dict(contract.as_dict(), attempt_id=contract.attempt_id),
+                }
+                for name, contract in sorted(self._contracts.items())
+                if name != agent_name
+            ],
+        }
 
     def physical_step(self) -> None:
         """Count existing Gym steps and confirm only an exact retry's deferred terminal fact.
@@ -575,6 +651,10 @@ class Stage2ExecutionFeedback:
                 **budget,
             },
         )
+        if self._completion_binding is not None:
+            pending.document["manipulation_observation"] = self._observe_manipulation(
+                agent_name, "policy-input-before-following-gym-step"
+            )
         if self._completion_binding is not None and expected_skill == "place":
             pending.document["place_binding"] = self._completion_binding.last_check(agent_name)
             # A fresh released-object read is required even when the original geometric

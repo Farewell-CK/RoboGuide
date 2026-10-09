@@ -17,7 +17,9 @@ if TYPE_CHECKING:
     from .stage2_contract import Stage2ExecutionContract
 
 COMPLETION_PROFILE = "exact-object-released-place/v0.1"
+MANIPULATION_OBSERVATION_PROFILE = "bound-manipulation-observation/v0.1"
 LOCAL_PLACE_THRESHOLD_M = 0.02
+_MAX_ARM_JOINTS = 64
 _MISSING = object()
 
 
@@ -216,6 +218,74 @@ class RelocationCompletionBinding:
         """Expose a detached bounded check without claiming an official goal result."""
         record = self._last.get(agent_name)
         return dict(record) if record is not None else None
+
+    def observe_manipulation(self, agent_name: str) -> dict[str, Any]:
+        """Read bounded actual arm geometry without IK, action, RNG or feasibility claims.
+
+        This sparse feedback uses the same end-effector reader as original
+        OraclePickAction. Missing optional arm readers do not affect execution;
+        a changed world or object identity fences all additional reads.
+        """
+        binding = self.observe(agent_name)
+        record: dict[str, Any] = {
+            "profile": MANIPULATION_OBSERVATION_PROFILE,
+            "agent_name": agent_name,
+            "attempt_id": binding["attempt_id"],
+            "invocation_digest": binding["invocation_digest"],
+            "object_entity_id": binding["object_entity_id"],
+            "bound_object_id": binding["bound_object_id"],
+            "coordinate_frame": "habitat-world",
+            "position_units": "meters",
+            "object_position_source": "original-pddl-entity-reference",
+            "object_position": binding["object_position"],
+            "is_grasped": binding["is_grasped"],
+            "snap_object_id": binding["snap_object_id"],
+            "base_position": None,
+            "end_effector_position": None,
+            "arm_joint_positions": None,
+            "end_effector_to_object_distance_m": None,
+            "physical_reachability": "unknown",
+            "status": "unavailable",
+            "gaps": [],
+        }
+        if binding["status"] != "observed":
+            record["gaps"] = [{"field": "exact_binding", "reason": binding["reason"]}]
+            return record
+        try:
+            agent = self._environment.sim.get_agent_data(_agent_id(agent_name)).articulated_agent
+        except Exception as error:  # noqa: BLE001 - diagnostics never invent an arm or pose
+            record["gaps"] = [{"field": "articulated_agent", "reason": type(error).__name__}]
+            return record
+        readers: dict[str, Callable[[], Any]] = {
+            "base_position": lambda: _position(agent.base_pos),
+            "end_effector_position": lambda: _position(agent.ee_transform().translation),
+            "arm_joint_positions": lambda: self._arm_positions(agent.arm_joint_pos),
+        }
+        for field, reader in readers.items():
+            try:
+                record[field] = reader()
+            except Exception as error:  # noqa: BLE001 - retain available independent observations
+                record["gaps"].append({"field": field, "reason": type(error).__name__})
+        if record["end_effector_position"] is not None:
+            distance = math.dist(record["end_effector_position"], binding["object_position"])
+            if math.isfinite(distance):
+                record["end_effector_to_object_distance_m"] = distance
+            else:
+                record["gaps"].append(
+                    {"field": "end_effector_to_object_distance_m", "reason": "nonfinite-distance"}
+                )
+        record["status"] = "partial" if record["gaps"] else "observed"
+        return record
+
+    @staticmethod
+    def _arm_positions(value: Any) -> list[float]:
+        """Copy only finite, bounded original joint positions, never solve or set joints."""
+        if not 0 < len(value) <= _MAX_ARM_JOINTS:
+            raise ValueError("arm joint observation exceeds its bound")
+        result = [float(value[index]) for index in range(len(value))]
+        if not all(math.isfinite(coordinate) for coordinate in result):
+            raise ValueError("arm joint observation is not finite")
+        return result
 
     def install(self, policies: Sequence[Any]) -> None:
         """Scope place checks to assigned instances and restore partial installation on failure."""

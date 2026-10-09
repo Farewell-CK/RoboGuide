@@ -287,7 +287,7 @@ def test_original_release_precedes_actual_release_qualified_completion() -> None
         harness.release_at_goal()
         harness.feedback.physical_step()
         receipt = harness.receipt()
-        assert receipt["schema_version"].endswith("/v0.3")
+        assert receipt["schema_version"].endswith("/v0.4")
         assert receipt["local_skill_completed"] is True
         assert receipt["benchmark_goal_satisfied"] is None
         assert receipt["source"] == "post-step-bound-object-release"

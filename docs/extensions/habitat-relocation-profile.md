@@ -75,7 +75,8 @@ unknown/不发布，不能把到 destination 的距离当作整个搬运过程�
 `--relocation-completion-binding` 默认关闭，且只允许与 shared relocation 同时开启。
 通用 B1 launcher 通过 `HABITAT_RELOCATION_COMPLETION_BINDING=1` 显式传递。
 该 profile 不修改原始 EMOS 文件或 MI Prompt，但确实改变受控臂的本地观测/完成判断，
-必须以 Local How v0.8 和 Stage2 feedback v0.3 披露，不能宣称与原生 EMOS 相同。
+必须以 Local How v0.8 和 Stage2 feedback v0.4 披露，不能宣称与原生 EMOS 相同。
+历史 feedback v0.3 保留其原始身份，不追溯改写。
 
 原始 place 读取的共享 `targ_idx` 距离没有绑定本次搬运对象。新 profile 用 canonical
 attempt、invocation digest、精确 object/destination 和该 agent 的实际 grasp 绑定观测，
@@ -92,6 +93,29 @@ attempt、invocation digest、精确 object/destination 和该 agent 的实际 g
 distance、grasp、release eligibility、qualified completion 和可读时的 native sensor 对照。
 只保留每 agent 的当前记录，沿用有界流式 audit，不新增每步序列化或磁盘写入。
 见 [ADR-0073](../decisions/0073-bound-relocation-place-completion.md)。
+
+### 搬运状态反馈与消息边界
+
+启用对象绑定 profile 时，feedback v0.4 在工具接纳、原始技能退出和下一次模型调用边界
+采集精确物体、实际 grasp、base position、末端 position 和原始 arm joint positions。
+每份观察绑定当前 agent/attempt/invocation，标明采集时机；末端距离使用原始 PDDL entity
+位置，不是接触距离或可抓取性证明。最多 64 个关节、每份观察最多 8 KiB；读取或
+序列化失败保留 partial/unavailable。世界或对象身份改变后不读取其他世界的机械臂。
+这些稀疏读取不调用 IK/FK、动作、RNG、predicate 或 Gym step；抓取预算耗尽仍然是失败，
+没有由距离或失败次数推导出的不可达排除规则。
+
+`roboguide.stage2-peer-execution-scope/v0.1` 描述同一执行段内各 peer 的现有 canonical
+operation 和模型状态。`send_request` 是原始 message pipe 的文本通信，不是 Task 交接，
+不改变 Control 的 Actor/Node/resource 承诺，也不扩大 peer 的物理操作权限。尚未完成的
+peer 可以接收消息，但消息递送、接管或完成不能由一次 wait 的退出推出；receipt 将这些
+结果保留为 unobserved/unknown。
+
+原始工具 schema 的 recipient enum 只会收窄到当前仍有已分配模型的 peer；无可用 peer
+时不提供该工具。未分配或完成后进入 passive idle 的 endpoint 不再接收新请求。即便模型
+仍返回这样的 raw request，独立 Guard 也在 CrabAgent 派发和下一次 Gym step 前拒绝，
+保留原始选择并报告 local contract failure。它不解析消息文本来自动转交任务、不补动作，
+也不禁止合法 wait。真正跨执行任务的转交仍需要 Control 所有的重新承诺与生命周期机制，
+本 profile 不实现该能力。关闭对象绑定 profile 时保留此前输入与工具路径。
 
 ```mermaid
 flowchart LR
@@ -111,8 +135,12 @@ flowchart LR
   Q -->|精确距离，原始动作释放| S
   S -->|原有 step 后的位置与释放| Q
   Q --> F
+  Q -->|稀疏机械臂与对象实际状态 / unknown| F
   F --> G
   F -->|place 本地完成| W[原始 wait / 完成 endpoint 无模型 idle]
+  E --> P2[既有 peer canonical scope：通信不转交任务]
+  W -->|completed-idle 不接收模型消息| P2
+  P2 -->|对象绑定 profile 的 recipient schema 与 Guard| G
   F --> L[Node local outcome]
   S --> H[Habitat 官方联合目标与 pddl_success]
   H --> B[官方 benchmark 结果 / 既有 verifier]

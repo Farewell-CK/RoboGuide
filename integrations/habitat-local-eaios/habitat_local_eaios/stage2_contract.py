@@ -509,6 +509,45 @@ def _bound_relocation_tools(
     return offered
 
 
+def _bound_peer_request_tools(
+    actions: list[dict[str, Any]], peers: frozenset[str]
+) -> list[dict[str, Any]]:
+    """Offer original peer messaging only to currently model-bearing committed peers."""
+    messages = [action for action in actions if action.get("name") == "send_request"]
+    if not messages:
+        return actions
+    if len(messages) != 1:
+        raise IntegrationError("Stage2 peer message declaration is ambiguous")
+    tool = messages[0]
+    parameters = tool.get("parameters")
+    properties = parameters.get("properties") if isinstance(parameters, dict) else None
+    target = properties.get("target_agent") if isinstance(properties, dict) else None
+    required = parameters.get("required") if isinstance(parameters, dict) else None
+    if (
+        not isinstance(target, dict)
+        or target.get("type") != "string"
+        or not isinstance(required, list)
+        or "target_agent" not in required
+        or "request" not in required
+    ):
+        raise IntegrationError("Stage2 peer message target schema is unavailable")
+    declared = target.get("enum")
+    if "enum" in target:
+        if not isinstance(declared, list) or any(not isinstance(name, str) for name in declared):
+            raise IntegrationError("Stage2 peer message target enum is invalid")
+        peers = peers.intersection(declared)
+    if not peers:
+        return [action for action in actions if action is not tool]
+    target["enum"] = sorted(peers)
+    tool["description"] = (
+        str(tool.get("description", ""))
+        + " Send text within the peers' committed execution scopes. This is communication; "
+        "it does not delegate or reassign a task. A wait exit is not an acknowledgement "
+        "or evidence of a peer action."
+    ).strip()
+    return actions
+
+
 def _guard_agent(
     agent: Any,
     contract: Stage2ExecutionContract,
@@ -540,11 +579,12 @@ def _guard_agent(
             history_length = _raw_history_length(model) if not crab_planning else None
             original_actions = getattr(model, "actions", _MISSING)
             bound_actions = not crab_planning and contract.expected_destination is not None
+            offered_message_targets: frozenset[str] | None = None
             if bound_actions:
                 if contract.is_relocation:
                     if contract.expected_object is None or contract.expected_destination is None:
                         raise IntegrationError("relocation contract is missing semantic bindings")
-                    model.actions = _bound_relocation_tools(
+                    offered_actions = _bound_relocation_tools(
                         original_actions,
                         contract.expected_object,
                         contract.expected_destination,
@@ -557,6 +597,17 @@ def _guard_agent(
                             else None
                         ),
                     )
+                    if feedback is not None and feedback.has_bound_relocation_completion:
+                        offered_actions = _bound_peer_request_tools(
+                            offered_actions, feedback.request_peer_names(agent_name)
+                        )
+                        offered_message_targets = frozenset(
+                            target
+                            for tool in offered_actions
+                            if tool.get("name") == "send_request"
+                            for target in tool["parameters"]["properties"]["target_agent"]["enum"]
+                        )
+                    model.actions = offered_actions
                 else:
                     destination = contract.expected_destination
                     if destination is None:
@@ -592,7 +643,22 @@ def _guard_agent(
                     raise Stage2ContractViolation(
                         agent_name, action, "execution model must return an action tuple"
                     )
-                contract.validate(agent_name, action, peer_names, relocation_state)
+                active_peers = (
+                    feedback.request_peer_names(agent_name)
+                    if contract.is_relocation
+                    and feedback is not None
+                    and feedback.has_bound_relocation_completion
+                    else peer_names
+                )
+                contract.validate(agent_name, action, active_peers, relocation_state)
+                if (
+                    offered_message_targets is not None
+                    and action["name"] == "send_request"
+                    and action["arguments"]["target_agent"] not in offered_message_targets
+                ):
+                    raise Stage2ContractViolation(
+                        agent_name, action, "peer request target is outside the offered tool schema"
+                    )
                 if feedback is not None:
                     reason = feedback.action_failure(agent_name, action)
                     if reason is not None:
@@ -610,7 +676,8 @@ def _guard_agent(
                 "boundary": "before-crab-agent-dispatch",
             }
             if feedback is not None and feedback.has_bound_relocation_completion:
-                document["relocation_guard_profile"] = "observed-object-relocation/v0.2"
+                document["relocation_guard_profile"] = "observed-object-relocation/v0.3"
+                document["peer_execution_scope"] = feedback.peer_execution_scope(agent_name)
             try:
                 record(document)
             except Exception:  # noqa: BLE001 - failed evidence never authorizes a tool

@@ -186,6 +186,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Original termination methods execute once; existing post-step local terminal facts
   may supersede earlier policy-input evidence. This changes local model input, not
   selected actions, robot abilities, simulator/model budgets or official truth.
+  The opt-in bound relocation feedback v0.4 adds sparse exact-object arm/grasp
+  observations and existing peer canonical scopes. Missing reads remain unknown;
+  geometric distance or repeated failures never establish manipulation infeasibility.
+  Original peer messages cannot transfer Control-owned Tasks. Completed model-free
+  idle recipients are withheld and raw requests fail before dispatch; wait completion
+  is neither delivery acknowledgement nor peer action evidence. Navigation and
+  disabled binding retain their previous inputs and tool contracts.
   It grants no Control, Task satisfaction or MI replanning authority and must be
   disclosed separately from the original native EMOS feedback path.
   The shared-world adapter freezes the exact Node-config floor-transition facts in a digest-bound
