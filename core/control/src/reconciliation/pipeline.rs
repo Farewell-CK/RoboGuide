@@ -5,7 +5,9 @@ use super::model::{
     RecoveryAssignmentProposal, RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,
     recovery_commitment_key, recovery_role, validate_recovery_resources,
 };
-use crate::{ControlError, ControlPlane, GroupLifecycle, coordination::Reservation, valid_evidence_digest};
+use crate::{
+    ControlError, ControlPlane, GroupLifecycle, coordination::Reservation, valid_evidence_digest,
+};
 use domain::{
     CorrelationId, EventPayload, ExecutionGroupId, MissionPlan, NodeId, OperationRef, ResourceId,
     RoleId, TaskRequirement, TimestampMs,
@@ -49,9 +51,13 @@ impl ControlPlane {
         let actor_id = role.actor_id().ok_or_else(|| {
             ControlError::InvalidProposal("Actor takeover requires an Actor-bound role".into())
         })?;
-        let binding = self.actor_binding(requirement.mission_id(), actor_id).ok_or_else(|| {
-            ControlError::InvalidProposal("Actor takeover requires an existing ActorBinding".into())
-        })?;
+        let binding = self
+            .actor_binding(requirement.mission_id(), actor_id)
+            .ok_or_else(|| {
+                ControlError::InvalidProposal(
+                    "Actor takeover requires an existing ActorBinding".into(),
+                )
+            })?;
         if binding.node_id() != need.current_node_id() {
             return Err(ControlError::InvalidProposal(
                 "Actor takeover source differs from the current ActorBinding".into(),
@@ -68,7 +74,9 @@ impl ControlPlane {
             ));
         }
         let registry = self.physical_entity_registry.as_ref().ok_or_else(|| {
-            ControlError::InvalidProposal("Actor takeover requires a current physical registry".into())
+            ControlError::InvalidProposal(
+                "Actor takeover requires a current physical registry".into(),
+            )
         })?;
         let previous = registry.entity(&previous_entity_id).ok_or_else(|| {
             ControlError::InvalidProposal("takeover source entity is not registered".into())
@@ -77,13 +85,18 @@ impl ControlPlane {
             ControlError::InvalidProposal("takeover replacement entity is not registered".into())
         })?;
         if previous.node_id() != need.current_node_id()
-            || binding.physical_entity_id().is_some_and(|entity| entity != &previous_entity_id)
+            || binding
+                .physical_entity_id()
+                .is_some_and(|entity| entity != &previous_entity_id)
         {
             return Err(ControlError::InvalidProposal(
                 "takeover source entity does not match Actor authority".into(),
             ));
         }
-        if self.actor_node_constraint(requirement.mission_id(), actor_id).is_some() {
+        if self
+            .actor_node_constraint(requirement.mission_id(), actor_id)
+            .is_some()
+        {
             return Err(ControlError::InvalidProposal(
                 "fixed Actor placement must be replaced by an explicit candidate restriction before takeover".into(),
             ));
@@ -96,12 +109,16 @@ impl ControlPlane {
                 "takeover replacement violates the admitted Actor candidate restriction".into(),
             ));
         }
-        if self.actor_bindings.iter().any(|((mission_id, other_actor), other)| {
-            mission_id == requirement.mission_id()
-                && other_actor != actor_id
-                && (other.physical_entity_id() == Some(&replacement_entity_id)
-                    || other.node_id() == replacement.node_id())
-        }) {
+        if self
+            .actor_bindings
+            .iter()
+            .any(|((mission_id, other_actor), other)| {
+                mission_id == requirement.mission_id()
+                    && other_actor != actor_id
+                    && (other.physical_entity_id() == Some(&replacement_entity_id)
+                        || other.node_id() == replacement.node_id())
+            })
+        {
             return Err(ControlError::InvalidProposal(
                 "takeover replacement is already authoritative for another Mission Actor".into(),
             ));
@@ -151,17 +168,18 @@ impl ControlPlane {
             .actor_binding(requirement.mission_id(), authorization.actor_id())
             .ok_or_else(|| ControlError::InvalidProposal("ActorBinding disappeared".into()))?;
         if binding.node_id() != authorization.previous_node_id()
-            || binding.physical_entity_id().is_some_and(|entity| {
-                entity != authorization.previous_entity_id()
-            })
+            || binding
+                .physical_entity_id()
+                .is_some_and(|entity| entity != authorization.previous_entity_id())
         {
             return Err(ControlError::InvalidProposal(
                 "Actor authority changed after takeover authorization".into(),
             ));
         }
-        let registry = self.physical_entity_registry.as_ref().ok_or_else(|| {
-            ControlError::InvalidProposal("physical registry disappeared".into())
-        })?;
+        let registry = self
+            .physical_entity_registry
+            .as_ref()
+            .ok_or_else(|| ControlError::InvalidProposal("physical registry disappeared".into()))?;
         if registry.registry_id() != authorization.registry_id()
             || registry.revision() != authorization.registry_revision()
             || registry
@@ -683,9 +701,11 @@ impl ControlPlane {
 
         let actor_authority_node = actor_takeover
             .map(|authorization| authorization.replacement_node_id().clone())
-            .or_else(|| role.actor_id().and_then(|actor_id| {
-                self.actor_authority_node(requirement.mission_id(), actor_id)
-            }));
+            .or_else(|| {
+                role.actor_id().and_then(|actor_id| {
+                    self.actor_authority_node(requirement.mission_id(), actor_id)
+                })
+            });
         let actor_candidate_restriction = role.actor_id().and_then(|actor_id| {
             self.actor_candidate_restriction(requirement.mission_id(), actor_id)
         });

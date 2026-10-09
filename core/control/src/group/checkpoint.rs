@@ -31,7 +31,8 @@ impl ControlPlane {
             }
             if let Some(actor_id) = role.and_then(RoleRequirement::actor_id)
                 && commitment.actor_takeover().is_none()
-                && self.actor_authority_node(commitment.task_ref().mission_id(), actor_id)
+                && self
+                    .actor_authority_node(commitment.task_ref().mission_id(), actor_id)
                     .is_none_or(|node_id| node_id != *commitment.replacement_node_id())
             {
                 return Err(ControlError::InvalidProposal(

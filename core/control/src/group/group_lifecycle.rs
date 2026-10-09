@@ -482,16 +482,18 @@ impl ControlPlane {
                 ControlError::InvalidProposal("takeover ActorBinding disappeared".into())
             })?;
             if binding.node_id() != authorization.previous_node_id()
-                || binding.physical_entity_id().is_some_and(|entity| {
-                    entity != authorization.previous_entity_id()
-                })
+                || binding
+                    .physical_entity_id()
+                    .is_some_and(|entity| entity != authorization.previous_entity_id())
             {
                 return Err(ControlError::InvalidProposal(
                     "takeover source no longer owns Actor authority".into(),
                 ));
             }
             let registry = self.physical_entity_registry.as_ref().ok_or_else(|| {
-                ControlError::InvalidProposal("takeover requires current deployment topology".into())
+                ControlError::InvalidProposal(
+                    "takeover requires current deployment topology".into(),
+                )
             })?;
             if registry.registry_id() != authorization.registry_id()
                 || registry.revision() != authorization.registry_revision()

@@ -44,27 +44,49 @@ pub struct ActorTakeoverAuthorization {
 
 impl ActorTakeoverAuthorization {
     /// Returns the blocked Group covered by this authorization.
-    pub const fn group_id(&self) -> &ExecutionGroupId { &self.group_id }
+    pub const fn group_id(&self) -> &ExecutionGroupId {
+        &self.group_id
+    }
     /// Returns the exact Task covered by this authorization.
-    pub const fn task_ref(&self) -> &TaskRef { &self.task_ref }
+    pub const fn task_ref(&self) -> &TaskRef {
+        &self.task_ref
+    }
     /// Returns the exact role covered by this authorization.
-    pub const fn role_id(&self) -> &RoleId { &self.role_id }
+    pub const fn role_id(&self) -> &RoleId {
+        &self.role_id
+    }
     /// Returns the logical Actor whose physical executor may change.
-    pub const fn actor_id(&self) -> &domain::ActorId { &self.actor_id }
+    pub const fn actor_id(&self) -> &domain::ActorId {
+        &self.actor_id
+    }
     /// Returns the old authoritative Node.
-    pub const fn previous_node_id(&self) -> &NodeId { &self.previous_node_id }
+    pub const fn previous_node_id(&self) -> &NodeId {
+        &self.previous_node_id
+    }
     /// Returns the old physical entity.
-    pub const fn previous_entity_id(&self) -> &domain::PhysicalEntityId { &self.previous_entity_id }
+    pub const fn previous_entity_id(&self) -> &domain::PhysicalEntityId {
+        &self.previous_entity_id
+    }
     /// Returns the selected standby Node.
-    pub const fn replacement_node_id(&self) -> &NodeId { &self.replacement_node_id }
+    pub const fn replacement_node_id(&self) -> &NodeId {
+        &self.replacement_node_id
+    }
     /// Returns the selected standby physical entity.
-    pub const fn replacement_entity_id(&self) -> &domain::PhysicalEntityId { &self.replacement_entity_id }
+    pub const fn replacement_entity_id(&self) -> &domain::PhysicalEntityId {
+        &self.replacement_entity_id
+    }
     /// Returns the deployment registry identity.
-    pub const fn registry_id(&self) -> &domain::PhysicalEntityRegistryId { &self.registry_id }
+    pub const fn registry_id(&self) -> &domain::PhysicalEntityRegistryId {
+        &self.registry_id
+    }
     /// Returns the exact deployment registry revision.
-    pub const fn registry_revision(&self) -> u64 { self.registry_revision }
+    pub const fn registry_revision(&self) -> u64 {
+        self.registry_revision
+    }
     /// Returns the external evidence digest.
-    pub fn evidence_digest(&self) -> &str { &self.evidence_digest }
+    pub fn evidence_digest(&self) -> &str {
+        &self.evidence_digest
+    }
 }
 
 /// One assigned role whose current node can no longer satisfy Control eligibility.
