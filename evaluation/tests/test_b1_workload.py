@@ -58,6 +58,39 @@ def test_episode51_fixture_remains_a_valid_workload() -> None:
 
 
 @pytest.mark.parametrize(
+    ("attempts", "preflight", "accepted"),
+    [
+        ("0", "0", True),
+        ("2", "1", True),
+        ("1", "0", False),
+        ("4", "1", False),
+        ("true", "1", False),
+    ],
+)
+def test_reconsideration_launcher_gate_is_explicit_and_bounded(
+    attempts: str, preflight: str, accepted: bool
+) -> None:
+    """Execute the real gate; invalid options cannot reach workload parsing or SUT launch."""
+    script = RUNNER.read_text()
+    gate = script.split('INITIAL_SUPPORT_FLAG="', 1)[1].split("# The workload", 1)[0]
+    outcome = subprocess.run(
+        ["bash", "-c", 'INITIAL_SUPPORT_FLAG="' + gate],
+        env={
+            "ROBOGUIDE_B1_DEPLOYMENT_RECOVERY_ATTEMPTS": attempts,
+            "ROBOGUIDE_B1_INITIAL_SUPPORT_ASSESSMENT": preflight,
+            "ROBOGUIDE_B1_INITIAL_CANDIDATE_PREFERENCES": "1",
+            "ROBOGUIDE_B1_RESET_ROUTE_SUPPORT": "1",
+            "ROBOGUIDE_B1_RESET_ROUTE_GEOMETRY": "1",
+            "ROBOGUIDE_B1_SPATIAL_NAVIGATION_ARRIVAL": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (outcome.returncode == 0) is accepted
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("episode_id", None),
@@ -195,6 +228,6 @@ wait_http http://unused/v1/health "$probe_budget" ONLINE
     assert (result.returncode == 0) is success
     assert int(counter.read_text(encoding="utf-8")) == len(responses)
     assert "timeout waiting" in result.stderr if not success else result.stderr == ""
-    for port, budget in ((28100, 240), (28102, 30)):
-        gate = f"wait_http http://127.0.0.1:{port}/v1/health {budget} ONLINE"
+    for variable, budget in (("HABITAT_PORT", 240), ("HABITAT_PORT_B", 30)):
+        gate = f"wait_http http://127.0.0.1:${{{variable}}}/v1/health {budget} ONLINE"
         assert script.index(gate) < script.index("# Production Mission Intelligence ingress")

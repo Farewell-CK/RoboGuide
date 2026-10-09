@@ -275,7 +275,7 @@ impl ControlPlane {
         Ok(())
     }
 
-    /// Marks one active Task failed while retaining the parent Group for recovery policy.
+    /// Marks an active, blocked, or finally disproven Task failed before Group policy applies.
     pub fn fail_task_execution<E: EventSink>(
         &mut self,
         group_id: &ExecutionGroupId,
@@ -294,10 +294,12 @@ impl ControlPlane {
             .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
         if !matches!(
             execution.lifecycle(),
-            TaskExecutionLifecycle::Active | TaskExecutionLifecycle::Blocked
+            TaskExecutionLifecycle::Active
+                | TaskExecutionLifecycle::Blocked
+                | TaskExecutionLifecycle::AwaitingSatisfaction
         ) {
             return Err(ControlError::InvalidProposal(
-                "only an active or blocked Task can fail".to_string(),
+                "only an active, blocked, or awaiting-satisfaction Task can fail".to_string(),
             ));
         }
         group.task_executions.insert(

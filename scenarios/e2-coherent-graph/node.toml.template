@@ -9,6 +9,9 @@ id = "LOCAL_SYSTEM_PLACEHOLDER"
 runtime_name = "coherent-public-graph"
 runtime_version = "e2-s1"
 
+[local_systems.metadata]
+"roboguide.execution-recovery" = '''{"schema_version":"roboguide.local-execution-recovery/v0.1","operations":[{"operation":{"namespace":"coherent","name":"RECOVERY_OPERATION_PLACEHOLDER","version":"v1"},"stop_scope":"execution","continuation":"repeat-after-stop"}]}'''
+
 [local_systems.health]
 state_pointer = "/state"
 detail_pointer = "/detail"
@@ -106,6 +109,13 @@ target = "/invocation"
 [operations.workflow.execute.request.bindings.value]
 kind = "pointer"
 pointer = "/invocation"
+
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation/attempt_id"
+
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/attempt_id"
 
 [[operations.workflow.status]]
 id = "status"

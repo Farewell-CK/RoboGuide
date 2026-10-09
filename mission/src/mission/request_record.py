@@ -6,12 +6,15 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
 
+from mission.deployment_recovery import DeploymentRecoverySession
 from mission.grounding_context import GroundingContextSnapshot, dialogue_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.recovery import FailureReason, FailureStage, RequestRecoveryEvidence
 from mission.rejected_draft import RejectedDraftEvidence
 from mission.review import MissionPlanReviewAttempt, MissionReviewError
 from mission.submission_evidence import (
+    ControllerAdmissionEvidence,
     ControllerSubmissionEvidence,
     MissionRequestObservations,
     canonical_plan_digest,
@@ -213,9 +216,80 @@ class MissionRequestRecord:
     submission_evidence: ControllerSubmissionEvidence | None = None
     failure_evidence: JSONObject | None = None
     rejected_drafts: tuple[RejectedDraftEvidence, ...] = ()
+    recovery_evidence: RequestRecoveryEvidence | None = None
+    admission_evidence: ControllerAdmissionEvidence | None = None
+    deployment_recovery: DeploymentRecoverySession | None = None
 
     def __post_init__(self) -> None:
         """Reject a snapshot detached from the request or its captured dialogue revision."""
+        recovery = self.recovery_evidence
+        session = self.deployment_recovery
+        if session is not None:
+            if session.request_id != self.request_id or session.mission_id != self.mission_id:
+                raise MissionRequestError("deployment recovery belongs to another request")
+            if (
+                session.attempts
+                and session.attempts[-1].outcome == "pending"
+                and (
+                    self.plan is None
+                    or session.attempts[-1].input_plan_digest != self.draft_digest
+                    or self.grounding_context is None
+                    or session.attempts[-1].grounding_context_digest
+                    != self.grounding_context.context_digest
+                    or self.submission_evidence is not None
+                    or self.admission_evidence is not None
+                )
+            ):
+                raise MissionRequestError(
+                    "pending deployment recovery is detached from current draft/context"
+                )
+        if (
+            recovery is not None
+            and recovery.reason is FailureReason.SUBMISSION_RECONCILED
+            and self.admission_evidence is None
+        ):
+            raise MissionRequestError("reconciled admission requires an authority receipt")
+        admission, sent = self.admission_evidence, self.submission_evidence
+        if (
+            recovery is not None
+            and recovery.stage is FailureStage.CONTROLLER_PREFLIGHT
+            and (admission is not None or sent is not None)
+        ):
+            raise MissionRequestError("Controller preflight cannot contain submission evidence")
+        if admission is not None and (
+            sent is None
+            or admission.mission_id != self.mission_id
+            or sent.submitted_mission_id != self.mission_id
+            or admission.accepted_request_body_sha256 != sent.raw_request_body_sha256
+            or sent.submitted_plan_digest != self.draft_digest
+            or self.plan is None
+            or canonical_plan_digest(self.plan.to_json()) != self.draft_digest
+        ):
+            raise MissionRequestError(
+                "Controller admission receipt is detached from the submitted plan"
+            )
+        if recovery is not None and (
+            recovery.request_id != self.request_id
+            or recovery.mission_id != self.mission_id
+            or recovery.draft_revision != self.draft_revision
+            or recovery.draft_digest != self.draft_digest
+            or (
+                self.plan is not None
+                and recovery.draft_digest is not None
+                and recovery.draft_digest != canonical_plan_digest(self.plan.to_json())
+            )
+            or recovery.grounding_context_digest
+            != (self.grounding_context.context_digest if self.grounding_context else None)
+            or (
+                recovery.deployment_assessment is not None
+                and (
+                    self.plan is None or not recovery.deployment_assessment.matches_plan(self.plan)
+                )
+            )
+        ):
+            raise MissionRequestError(
+                "recovery evidence is detached from the current draft/context"
+            )
         context = self.grounding_context
         if context is None:
             return
@@ -259,6 +333,9 @@ class MissionRequestRecord:
             self.submission_evidence,
             self.failure_evidence,
             self.rejected_drafts,
+            self.recovery_evidence,
+            self.admission_evidence,
+            self.deployment_recovery,
         )
 
     @classmethod

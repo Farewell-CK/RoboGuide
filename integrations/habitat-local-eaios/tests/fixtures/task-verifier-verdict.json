@@ -1,0 +1,26 @@
+{
+  "digest": "sha256:97bf02325412861421b12c42b0c06539d8c4babb5a49ec981225ea666389bb25",
+  "predicate": "any_at(any_targets|0) AND any_at(TARGET_any_targets|0)",
+  "satisfied": true,
+  "schema_version": "roboguide.task-verifier-verdict/v0.1",
+  "source_digest": "sha256:37592584dc384b740f689b17d4ecd7fd7d527fdf18b74bd6e6ba62b793467b3d",
+  "source_id": "habitat-official-pddl",
+  "source_observed_at_ms": 123,
+  "tasks": [
+    {
+      "attempts": [
+        {
+          "attempt_id": "attempt-a",
+          "role_id": "role-1"
+        }
+      ],
+      "mission_id": "mission-1",
+      "task_id": "task-1"
+    }
+  ],
+  "verifier": {
+    "name": "verify",
+    "namespace": "observation",
+    "version": "v1"
+  }
+}

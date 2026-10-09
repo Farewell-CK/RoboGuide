@@ -225,6 +225,19 @@ impl RuntimeExecutionManager {
                 .copied();
             match status {
                 Some(ExecutionStatus::Completed) => {}
+                Some(ExecutionStatus::Cancelled)
+                    if self
+                        .active_executions
+                        .get(&(group_id.clone(), task_ref.clone(), role_id.clone()))
+                        .is_some_and(|id| {
+                            self.recovery_stops
+                                .get(id)
+                                .is_some_and(|intent| !intent.aborted)
+                                || self.group_recovery_preserves_cancelled(id)
+                        }) =>
+                {
+                    all_terminal = false
+                }
                 Some(ExecutionStatus::Failed | ExecutionStatus::Cancelled) => {
                     saw_failed = true;
                 }
@@ -259,6 +272,19 @@ pub(super) fn normalized_resources(resource_ids: &[ResourceId]) -> Vec<ResourceI
 pub(super) fn validate_checkpoint(
     checkpoint: &RuntimeExecutionCheckpoint,
 ) -> Result<(), ExecutionRuntimeError> {
+    // Validate admission before restore turns every nonterminal status into Unknown.
+    if checkpoint.group_recoveries.iter().any(|intent| {
+        intent.admitted_at_ms.keys().any(|id| {
+            checkpoint
+                .execution_status
+                .get(id)
+                .is_none_or(|status| *status == ExecutionStatus::Dispatched)
+        })
+    }) {
+        return Err(ExecutionRuntimeError::InvalidCheckpoint(
+            "Group continuation admission lacks a Node execution fact".into(),
+        ));
+    }
     let mut attempt_slots = BTreeSet::new();
     for attempt in &checkpoint.attempt_generations {
         let slot = (
@@ -301,6 +327,17 @@ pub(super) fn validate_checkpoint(
         ));
     }
     for (execution_id, context) in &checkpoint.executions {
+        if context
+            .command
+            .recovery_support()
+            .is_some_and(|declaration| {
+                declaration.support.operation != *context.command.intent().operation()
+            })
+        {
+            return Err(ExecutionRuntimeError::InvalidCheckpoint(
+                "checkpoint recovery declaration belongs to a different operation".into(),
+            ));
+        }
         if execution_id.is_empty() {
             return Err(ExecutionRuntimeError::InvalidCheckpoint(
                 "checkpoint contains an empty execution id".to_string(),

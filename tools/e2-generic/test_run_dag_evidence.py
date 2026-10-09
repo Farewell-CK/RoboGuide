@@ -60,19 +60,45 @@ class RecoveryEvidenceTests(unittest.TestCase):
         outcomes = mission_executions(rows, "wanted")
         self.assertEqual(outcomes[0]["local_outcome"], {"error": "not currently available"})
 
-    def test_planner_feedback_excludes_runtime_diagnostic_blob(self) -> None:
-        """The Planner receives structured fields rather than complete event-log payloads."""
+    def test_planner_feedback_excludes_internal_execution_evidence(self) -> None:
+        """The Planner receives semantic facts without attempt identities or evidence paths."""
         compact = planner_feedback(
             [
                 {
                     "segment": 1,
-                    "controller_execution_attempts": [{"status": "Failed"}],
+                    "mission_id": "internal-mission-id",
+                    "controller_execution_attempts": [
+                        {"execution_id": "internal-attempt-id", "status": "Failed"}
+                    ],
+                    "execution_outcomes": [
+                        {
+                            "execution_id": "internal-execution-id",
+                            "operation": "coherent.agent-24-primitive@v1",
+                            "parameters": {"action": "[grab] <book>(34)"},
+                            "state": "FAILED",
+                            "local_outcome": {
+                                "error": "not currently available",
+                                "evidence_file": "/internal/absolute/path.json",
+                            },
+                        }
+                    ],
                     "runtime_diagnostics": {"events": ["large"]},
                 }
             ]
         )
-        self.assertIn("controller_execution_attempts", compact[0])
+        self.assertNotIn("mission_id", compact[0])
+        self.assertNotIn("controller_execution_attempts", compact[0])
         self.assertNotIn("runtime_diagnostics", compact[0])
+        serialized = json.dumps(compact)
+        self.assertNotIn("internal-attempt-id", serialized)
+        self.assertNotIn("internal-execution-id", serialized)
+        self.assertNotIn("/internal/absolute/path.json", serialized)
+        self.assertIn("not currently available", serialized)
+
+    def test_planner_feedback_keeps_only_three_recent_segments(self) -> None:
+        """Replanning context remains bounded even after many observation segments."""
+        compact = planner_feedback([{"segment": index} for index in range(1, 7)])
+        self.assertEqual([row["segment"] for row in compact], [4, 5, 6])
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import urllib.error
 import urllib.request
 from http.client import HTTPException
@@ -12,10 +13,12 @@ from typing import Any
 
 from roboguide_eval.b1_admission import FailureOwner
 from roboguide_eval.b1_event_archive import collect_controller_events
+from roboguide_eval.b1_goal_geometry import write_goal_geometry_diagnostic
 from roboguide_eval.b1_provenance import (
     PLANNING_SOURCE_REQUIREMENT_ARTIFACT,
     RUN_FAILURE_SCHEMA,
     build_b1_provenance_record,
+    controller_submission_group,
     load_document,
     observed_request,
     plan_digest,
@@ -81,7 +84,6 @@ def collect_b1_artifacts(
     _write(run / "execution-attempts.json", _fetch(f"{controller_endpoint}/v1/execution-attempts"))
     if owner is not FailureOwner.NONE:
         observations = load_document(run / "b1-request-observations.json") or {}
-        sent = observations.get("submission_evidence") or {}
         _write(
             run / "run-failure.json",
             {
@@ -92,7 +94,8 @@ def collect_b1_artifacts(
                 "reason": reason,
                 "request_id": request.get("request_id"),
                 "mission_id": mission_id,
-                "group_id": sent.get("controller_group_id"),
+                "group_id": controller_submission_group(observed_request(request, observations))
+                or None,
                 "input_digest": plan_digest(load_document(run / "b1-input-used.json")),
                 "observation_source": "scenario_process_boundary",
             },
@@ -119,7 +122,14 @@ def collect_b1_artifacts(
         failure_evidence_path=run / "run-failure.json",
     )
     write_b1_provenance(record, run / "b1-provenance.json")
-    return write_b1_verdict(run)
+    verdict = write_b1_verdict(run)
+    try:
+        write_goal_geometry_diagnostic(run)
+    except Exception as error:  # noqa: BLE001 - optional diagnostics never alter B1 admission
+        logging.getLogger(__name__).warning(
+            "optional goal geometry diagnostic could not be archived: %s", type(error).__name__
+        )
+    return verdict
 
 
 def main() -> None:

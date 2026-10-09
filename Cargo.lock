@@ -795,12 +795,14 @@ dependencies = [
  "orchestration",
  "ports",
  "runtime",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",
  "state",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tonic",
 ]
 
@@ -1493,6 +1495,7 @@ dependencies = [
  "domain",
  "ports",
  "serde",
+ "serde_json",
  "state",
  "testkit",
 ]

@@ -515,6 +515,21 @@ impl NodeRegistration {
             });
         }
         self.operation_support = operation_support;
+        for system in &self.local_systems {
+            if let Some(raw) = system.metadata().get(EXECUTION_RECOVERY_METADATA_KEY) {
+                let profile = ExecutionRecoveryProfile::from_metadata(raw)
+                    .map_err(|reason| DomainError::InvalidMissionPlan { reason })?;
+                if profile
+                    .operations()
+                    .iter()
+                    .any(|support| self.operation_owner(&support.operation) != Some(system.id()))
+                {
+                    return Err(DomainError::InvalidMissionPlan {
+                        reason: "recovery declarations must reference exact operations owned by the declaring Local System".into(),
+                    });
+                }
+            }
+        }
         Ok(self)
     }
 
@@ -638,6 +653,28 @@ impl NodeRegistration {
             .iter()
             .find(|support| support.operation() == operation)
             .map(OperationSupport::local_system_id)
+    }
+
+    /// Reads an exact owner-qualified recovery fact; absent or invalid restored metadata stays unknown.
+    pub fn execution_recovery_support(
+        &self,
+        operation: &OperationRef,
+    ) -> Option<ExecutionRecoverySupport> {
+        let owner = self.operation_owner(operation)?;
+        let system = self
+            .local_systems
+            .iter()
+            .find(|system| system.id() == owner)?;
+        let raw = system.metadata().get(EXECUTION_RECOVERY_METADATA_KEY)?;
+        let profile = ExecutionRecoveryProfile::from_metadata(raw).ok()?;
+        let support = profile
+            .operations()
+            .iter()
+            .find(|support| &support.operation == operation)?;
+        Some(ExecutionRecoverySupport {
+            local_system_id: owner.clone(),
+            support: support.clone(),
+        })
     }
 
     /// Returns the selective State channels declared by this node.

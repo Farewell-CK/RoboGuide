@@ -27,19 +27,29 @@ use std::fmt::{Display, Formatter};
 mod conversion;
 mod dispatch;
 mod execution_facts;
+mod group_recovery;
 mod ingestion;
 mod liveness;
 mod relation_view;
 
 use conversion::*;
+pub use dispatch::{RecoveryDeploymentSupport, RecoverySupportDisposition};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 15 adds registry anti-rollback provenance without restoring deployment routing.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v15";
+/// Version 18 preserves exact-set Group recovery purposes without renewing original budgets.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v18";
 
-/// Immediately previous checkpoint accepted for one-step migration.
-const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v14";
+/// Pre-Group recovery checkpoints have isolated Role declarations but no Group permission.
+const PRE_GROUP_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
+
+/// Pre-declaration attempts restore without independent-stop or repetition support.
+const PRE_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
+
+/// Historical registry watermark checkpoint accepted without renewal of evidence.
+const PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v15";
+/// Historical checkpoint with no registry watermark or operation progress.
+const LEGACY_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v14";
 
 /// Remote execution lifecycle observed by Runtime before Control terminal handling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

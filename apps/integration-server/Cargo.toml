@@ -20,5 +20,7 @@ tokio = { version = "1.53", features = ["fs", "io-util", "macros", "net", "rt-mu
 tonic = { version = "0.14.6", features = ["transport"] }
 
 [dev-dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
 node-service = { path = "../../core/node-service" }
 tempfile = "3"
+tokio-stream = { version = "0.1", features = ["net"] }

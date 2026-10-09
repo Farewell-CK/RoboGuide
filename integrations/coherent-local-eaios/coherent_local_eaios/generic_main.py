@@ -26,9 +26,16 @@ def main() -> None:
     parser.add_argument("--pefa-root", type=Path, required=True)
     parser.add_argument("--env", required=True)
     parser.add_argument("--task", type=int, required=True)
+    parser.add_argument("--pre-effect-hold-step", type=int)
+    parser.add_argument("--pre-effect-hold-seconds", type=float, default=0.0)
     arguments = parser.parse_args()
     if arguments.host not in {"127.0.0.1", "localhost"}:
         raise SystemExit("COHERENT generic bridge must bind a loopback host")
+    if (
+        arguments.pre_effect_hold_step is not None
+        and arguments.pre_effect_hold_step < 1
+    ) or arguments.pre_effect_hold_seconds < 0:
+        raise SystemExit("pre-effect hold step and duration must be non-negative")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     task_data = load_task_data(arguments.pefa_root, arguments.env, arguments.task)
     config = GenericBackendConfig(
@@ -37,6 +44,8 @@ def main() -> None:
         pefa_root=arguments.pefa_root,
         evidence_dir=arguments.evidence_dir,
         task_data=task_data,
+        pre_effect_hold_step=arguments.pre_effect_hold_step,
+        pre_effect_hold_seconds=arguments.pre_effect_hold_seconds,
     )
     adapter = CoherentPrimitiveAdapter(
         PrimitiveStore(arguments.state_db, initial_graph(task_data)), config

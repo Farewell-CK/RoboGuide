@@ -234,6 +234,19 @@ pub enum EventPayload {
         /// Task whose local execution aggregate completed.
         task_ref: TaskRef,
     },
+    /// An attributed final verifier verdict was admitted against current physical attempts.
+    TaskVerifierVerdictObserved {
+        /// Task whose expected effect the external source assessed.
+        task_ref: TaskRef,
+        /// Configured deployment source identity.
+        source_id: String,
+        /// Startup-frozen source revision.
+        source_revision: String,
+        /// Digest of the immutable verdict artifact retained by the deployment.
+        verdict_digest: String,
+        /// Source verdict; false is not Task satisfaction.
+        satisfied: bool,
+    },
     /// Orchestration accepted the declared evidence basis as Task semantic satisfaction.
     TaskSatisfied {
         /// Group retaining the Mission execution context.
@@ -372,6 +385,24 @@ pub enum EventPayload {
         replacement_node_id: NodeId,
         /// Replacement resources released by the abort.
         resource_ids: Vec<ResourceId>,
+    },
+    /// Control validated a same-owner continuation proposal without changing reservations.
+    GroupContinuationProposed {
+        /// Group retaining all original resource ownership.
+        group_id: ExecutionGroupId,
+        /// Explicit operator recovery identity.
+        recovery_id: String,
+        /// Exact logical slots that may receive fresh attempts after complete stop proof.
+        task_roles: Vec<(TaskRef, RoleId)>,
+    },
+    /// Control revalidated every retained binding and resource before new attempt preparation.
+    GroupContinuationCommitted {
+        /// Group retaining its original reservations and Completed peers.
+        group_id: ExecutionGroupId,
+        /// Explicit operator recovery identity, not a new Mission.
+        recovery_id: String,
+        /// Unchanged original Nodes and resources, attributed to exact Task roles.
+        assignments: Vec<(TaskRef, RoleAssignment)>,
     },
     /// A node emitted an execution observation.
     NodeObservation(NodeEvent),

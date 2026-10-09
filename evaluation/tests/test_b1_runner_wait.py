@@ -234,7 +234,10 @@ def test_mission_wait_budget_is_separate_from_mi_budget() -> None:
     script = RUNNER.read_text(encoding="utf-8")
     accepted_branch = script.index("accepted)")
     assert script.index("wait_mission_terminal", accepted_branch) > accepted_branch
-    assert "1800" in script[accepted_branch : accepted_branch + 400]
+    assert (
+        '"$MISSION_OBSERVATION_BUDGET_SECONDS"' in script[accepted_branch : accepted_branch + 400]
+    )
+    assert '"$MI_OBSERVATION_BUDGET_SECONDS"' not in script[accepted_branch : accepted_branch + 400]
     # The observation budget (POST + polling) is distinct from the mission
     # execution wait, and the MI worst-case derivation is archived, not used.
     assert script.count("MI_OBSERVATION_BUDGET_SECONDS") >= 2
@@ -264,6 +267,19 @@ def test_budget_follows_the_actual_run_configuration(tmp_path: Path) -> None:
     )
     changed = derive_wait_budget(mission, service)
     assert changed.total_seconds == pytest.approx(120 + 120 + 120 + 20 + 30 + 300)
+    service.write_text(service.read_text() + "controller_preflight_enabled = true\n")
+    preflight = derive_wait_budget(mission, service)
+    assert preflight.total_seconds == changed.total_seconds + 30
+    assert preflight.components["controller_preflight"] == 30
+    service.write_text(
+        service.read_text()
+        + "max_deployment_recovery_attempts = 3\ndeployment_recovery_timeout_ms = 100000\n"
+    )
+    recovery = derive_wait_budget(mission, service)
+    assert recovery.components["deployment_reconsideration"] == 100
+    assert recovery.components["deployment_rereview"] == 360
+    assert recovery.components["controller_preflight"] == 120
+    assert recovery.total_seconds == preflight.total_seconds + 100 + 360 + 90
     with pytest.raises(WaitConfigurationError):
         derive_wait_budget(tmp_path / "missing.toml", service)
 

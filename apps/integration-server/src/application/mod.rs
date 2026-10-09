@@ -3,10 +3,14 @@
 mod actor_placement;
 mod deployment_feasibility;
 mod dispatch;
+mod initial_operation_assessment;
+mod initial_operation_preferences;
+pub(crate) use initial_operation_assessment::unavailable as unavailable_initial_assessment;
 mod outcomes;
 mod persistence;
 mod physical_entity_registry;
 mod recovery;
+mod task_verifier;
 mod timer;
 
 pub(crate) use actor_placement::{
@@ -27,4 +31,10 @@ pub(crate) use recovery::{apply_recovery_required, resume_role_recovery};
 pub(crate) use recovery::{
     apply_runtime_events, begin_current_ambiguity_recoveries, resume_pending_recoveries,
 };
+pub(crate) use task_verifier::{
+    TaskVerifierFeed, apply_task_verifier, validate_restored_verifier_source,
+    validate_task_verifier,
+};
+#[cfg(test)]
 pub(crate) use timer::drive_application_timer;
+pub(crate) use timer::drive_application_timer_with_clock;

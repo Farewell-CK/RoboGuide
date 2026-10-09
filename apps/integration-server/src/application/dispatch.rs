@@ -9,6 +9,17 @@ pub(crate) fn drive_ready_tasks(
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for mission_id in controller.orchestrator.mission_ids() {
+        if controller
+            .orchestrator
+            .execution(&mission_id)
+            .is_some_and(|mission| {
+                controller
+                    .bridge
+                    .group_recovery_holds_dispatch(mission.group_id(), timestamp)
+            })
+        {
+            continue;
+        }
         'ready: for task_ref in controller
             .orchestrator
             .dispatchable_tasks(&mission_id, controller.bridge.control())
@@ -31,6 +42,7 @@ pub(crate) fn drive_ready_tasks(
                 let ControllerState {
                     bridge,
                     orchestrator,
+                    ..
                 } = controller;
                 match orchestrator.prepare_task(
                     &mission_id,
@@ -146,11 +158,11 @@ pub(crate) fn drive_rebound_attempts(
                 continue;
             };
             for assignment in task_execution.assignments() {
-                if controller.bridge.current_attempt_matches_binding(
+                if !controller.bridge.recovery_attempt_permitted(
                     group.group_id(),
                     task_execution.task_ref(),
                     assignment.role_id(),
-                    assignment.node_id(),
+                    timestamp,
                 ) {
                     continue;
                 }

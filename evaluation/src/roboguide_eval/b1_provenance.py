@@ -16,10 +16,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from mission.deployment_recovery import DeploymentRecoverySession
+from mission.models import MissionPlan
 from mission.planning_world_evidence import (
     AuthoritativePlanningWorldEvidence,
     PlanningWorldEvidenceError,
 )
+from mission.recovery import FailureStage, RequestRecoveryEvidence
+from mission.submission_evidence import ControllerAdmissionEvidence
 
 from roboguide_eval.b1_workload import B1WorkloadError, extract_b1_workload
 
@@ -32,6 +36,14 @@ SUBMISSION_SCHEMA = "roboguide.controller-submission-evidence/v0.1"
 REQUEST_FAILURE_SCHEMA = "roboguide.mission-request-failure/v0.1"
 RUN_FAILURE_SCHEMA = "roboguide.e1.run-failure/v0.1"
 OBSERVATIONS_SCHEMA = "roboguide.mission-request-observations/v0.1"
+COMPATIBLE_OBSERVATIONS_SCHEMAS = frozenset(
+    {
+        OBSERVATIONS_SCHEMA,
+        "roboguide.mission-request-observations/v0.2",
+        "roboguide.mission-request-observations/v0.3",
+        "roboguide.mission-request-observations/v0.4",
+    }
+)
 _DIGEST = re.compile(r"sha256:[a-f0-9]{64}$")
 
 
@@ -94,6 +106,7 @@ class ProvenanceFailure(StrEnum):
     MI_GENERATION_EVIDENCE_MISSING = "mi_generation_evidence_missing"
     MI_RUN_PLAN_DIGEST_MISMATCH = "mi_run_plan_digest_mismatch"
     MI_REVIEW_CONTEXT_MISMATCH = "mi_review_context_mismatch"
+    MI_DEPLOYMENT_RECOVERY_INVALID = "mi_deployment_recovery_invalid"
     PLAN_MISSING = "plan_missing"
     PLAN_DIGEST_MISMATCH = "plan_digest_mismatch"
     FINAL_REVIEW_MISMATCH = "final_review_mismatch"
@@ -117,6 +130,8 @@ class ProvenanceFailure(StrEnum):
     CONTROLLER_TASK_REGISTRATION_MISMATCH = "controller_task_registration_mismatch"
     EXECUTION_IDENTITY_MISMATCH = "execution_identity_mismatch"
     EXECUTION_ATTEMPTS_EMPTY = "execution_attempts_empty"
+    TASK_VERIFIER_EVIDENCE_INVALID = "task_verifier_evidence_invalid"
+    TASK_VERIFIER_EVIDENCE_MISSING = "task_verifier_evidence_missing"
     FAILURE_EVIDENCE_MISMATCH = "failure_evidence_mismatch"
     STATIC_B2_PLAN_EQUALITY = "static_b2_plan_equality"
 
@@ -204,12 +219,40 @@ def request_failure(request: Any) -> dict[str, Any]:
             "reviewer",
             "repairer",
             "controller_submission",
+            "controller_preflight",
         }
         or not failure.get("detail")
         or type(failure.get("observed_at_ms")) is not int
     ):
         return {}
+    if failure["stage"] == "controller_preflight" and not _valid_preflight_failure(doc):
+        return {}
     return failure
+
+
+def _valid_preflight_failure(request: dict[str, Any]) -> bool:
+    """Keep typed deployment holds before submission without hiding actual execution gates."""
+    try:
+        recovery = RequestRecoveryEvidence.from_json(request.get("recovery_evidence"))
+        plan = MissionPlan.from_json(request["plan"])
+    except (TypeError, ValueError, KeyError):
+        return False
+    return (
+        _object(request.get("failure_evidence")).get("failure_owner") == "SUT_SYSTEM"
+        and not request.get("submission_evidence")
+        and not request.get("admission_evidence")
+        and recovery.stage is FailureStage.CONTROLLER_PREFLIGHT
+        and recovery.request_id == request.get("request_id")
+        and recovery.mission_id == request.get("mission_id")
+        and recovery.draft_revision == request.get("draft_revision")
+        and recovery.draft_digest == request.get("draft_digest") == plan_digest(request["plan"])
+        and recovery.grounding_context_digest
+        == _object(request.get("grounding_context")).get("context_digest")
+        and (
+            recovery.deployment_assessment is None
+            or recovery.deployment_assessment.matches_plan(plan)
+        )
+    )
 
 
 def observed_request(request: Any, observations: Any) -> dict[str, Any]:
@@ -217,20 +260,44 @@ def observed_request(request: Any, observations: Any) -> dict[str, Any]:
     doc = _object(request)
     obs = _object(observations)
     if (
-        obs.get("schema_version") != OBSERVATIONS_SCHEMA
+        not isinstance(obs.get("schema_version"), str)
+        or obs.get("schema_version") not in COMPATIBLE_OBSERVATIONS_SCHEMAS
         or obs.get("request_id") != doc.get("request_id")
         or obs.get("mission_id") != doc.get("mission_id")
         or obs.get("request_record_digest") != plan_digest(doc)
+        or (
+            (obs.get("schema_version") == "roboguide.mission-request-observations/v0.4")
+            != ("deployment_recovery" in obs)
+        )
     ):
         return {
             key: value
             for key, value in doc.items()
-            if key not in {"submission_evidence", "failure_evidence"}
+            if key
+            not in {
+                "submission_evidence",
+                "failure_evidence",
+                "admission_evidence",
+                "deployment_recovery",
+            }
         }
     return {
         **doc,
         "submission_evidence": obs.get("submission_evidence"),
         "failure_evidence": obs.get("failure_evidence"),
+        "recovery_evidence": obs.get("recovery_evidence"),
+        **(
+            {"deployment_recovery": obs.get("deployment_recovery")}
+            if obs.get("schema_version") == "roboguide.mission-request-observations/v0.4"
+            else {}
+        ),
+        "admission_evidence": obs.get("admission_evidence")
+        if obs.get("schema_version")
+        in {
+            "roboguide.mission-request-observations/v0.3",
+            "roboguide.mission-request-observations/v0.4",
+        }
+        else None,
     }
 
 
@@ -280,6 +347,27 @@ def _check_draft(request: dict[str, Any], early: bool) -> list[ProvenanceFailure
         failures.append(ProvenanceFailure.FINAL_REVIEW_MISMATCH)
         history = []
     context_digest = _object(request.get("grounding_context")).get("context_digest")
+    if "deployment_recovery" in request:
+        try:
+            session = DeploymentRecoverySession.from_json(request["deployment_recovery"])
+            approved_digests = {
+                _object(item).get("draft_digest")
+                for item in history
+                if _object(_object(item).get("review")).get("approved") is True
+            }
+            if (
+                session.request_id != request.get("request_id")
+                or session.mission_id != request.get("mission_id")
+                or any(
+                    item.grounding_context_digest != context_digest
+                    or item.input_plan_digest not in approved_digests
+                    for item in session.attempts
+                )
+                or (not early and any(item.outcome == "pending" for item in session.attempts))
+            ):
+                raise ValueError("deployment recovery is detached from review/context")
+        except (KeyError, TypeError, ValueError):
+            failures.append(ProvenanceFailure.MI_DEPLOYMENT_RECOVERY_INVALID)
     for item in history:
         review_context_digest = _object(item).get("grounding_context_digest")
         if (
@@ -326,6 +414,28 @@ def _check_draft(request: dict[str, Any], early: bool) -> list[ProvenanceFailure
     return failures
 
 
+def controller_submission_group(request: dict[str, Any]) -> str:
+    """Scope evidence by a real POST receipt or a matching complete-body authority receipt."""
+    sent = _object(request.get("submission_evidence"))
+    proof = request.get("admission_evidence")
+    if proof is not None and request.get("lifecycle") == "Accepted":
+        try:
+            admission = ControllerAdmissionEvidence.from_json(proof)
+        except (TypeError, ValueError):
+            return ""
+        plan = _object(request.get("plan"))
+        if (
+            admission.mission_id == request.get("mission_id") == sent.get("submitted_mission_id")
+            and admission.accepted_request_body_sha256 == sent.get("raw_request_body_sha256")
+            and plan
+            and sent.get("submitted_plan_digest") == plan_digest(plan)
+            and request.get("draft_digest") == plan_digest(plan)
+        ):
+            return str(admission.group_id)
+        return ""
+    return str(sent.get("controller_group_id") or "")
+
+
 def _check_submission(
     request: dict[str, Any],
     controller: dict[str, Any],
@@ -348,6 +458,20 @@ def _check_submission(
     if sent.get("submitted_mission_id") != request.get("mission_id"):
         failures.append(ProvenanceFailure.CONTROLLER_MISSION_MISSING)
     failure = request_failure(request)
+    admission = None
+    raw_admission = request.get("admission_evidence")
+    if raw_admission is not None:
+        try:
+            admission = ControllerAdmissionEvidence.from_json(raw_admission)
+        except (TypeError, ValueError):
+            failures.append(ProvenanceFailure.SUBMISSION_EVIDENCE_MISMATCH)
+        if admission is not None and (
+            admission.mission_id != request.get("mission_id")
+            or admission.accepted_request_body_sha256 != sent.get("raw_request_body_sha256")
+            or admission.group_id != controller.get("group_id")
+        ):
+            failures.append(ProvenanceFailure.SUBMISSION_EVIDENCE_MISMATCH)
+            admission = None
     if (
         failure
         and failure["stage"] == "controller_submission"
@@ -356,13 +480,18 @@ def _check_submission(
         return failures
     if (
         request.get("lifecycle") != "Accepted"
-        or type(sent.get("controller_status_code")) is not int
-        or sent.get("controller_status_code") not in {200, 202}
-        or sent.get("controller_mission_id") != request.get("mission_id")
+        or (
+            admission is None
+            and (
+                type(sent.get("controller_status_code")) is not int
+                or sent.get("controller_status_code") not in {200, 202}
+                or sent.get("controller_mission_id") != request.get("mission_id")
+            )
+        )
         or controller.get("mission_id") != request.get("mission_id")
     ):
         failures.append(ProvenanceFailure.CONTROLLER_MISSION_MISSING)
-    group = sent.get("controller_group_id")
+    group = admission.group_id if admission is not None else sent.get("controller_group_id")
     if not group or controller.get("group_id") != group:
         failures.append(ProvenanceFailure.CONTROLLER_GROUP_ID_MISSING)
     task_ids = {
@@ -380,6 +509,191 @@ def _check_submission(
     if not execution_ids and not attributable_failure:
         failures.append(ProvenanceFailure.EXECUTION_ATTEMPTS_EMPTY)
     return failures
+
+
+def _check_task_verifier_evidence(
+    request: dict[str, Any],
+    controller: dict[str, Any],
+    events: Any,
+    attempts: Any,
+    semantic: Any,
+    shared_world_summary: Any,
+    frozen: dict[str, Any],
+    source: Any,
+    verdict: Any,
+    run_id: str | None,
+) -> list[ProvenanceFailure]:
+    """Bind verifier-backed terminal Tasks to actual source, verdict, and Controller events."""
+    if request.get("lifecycle") != "Accepted":
+        return []
+    plan = _object(request.get("plan"))
+    verifier_tasks = {
+        task["id"]: task
+        for task in _array(plan.get("tasks"))
+        if isinstance(task, dict)
+        and isinstance(task.get("id"), str)
+        and _object(task.get("satisfaction")).get("basis") == "verifier-evidence"
+    }
+    if not verifier_tasks:
+        return []
+    mission_id = request.get("mission_id")
+    relevant: list[tuple[int, dict[str, Any], str]] = []
+    satisfied: dict[str, int] = {}
+    for event in _array(_object(events).get("events")):
+        item = _object(event)
+        sequence = item.get("sequence")
+        payload = _object(item.get("payload"))
+        observed = _object(payload.get("TaskVerifierVerdictObserved"))
+        task_ref = _object(observed.get("task_ref"))
+        if task_ref.get("mission_id") == mission_id:
+            task_id = task_ref.get("task_id")
+            if type(sequence) is not int or not isinstance(task_id, str):
+                return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+            relevant.append((sequence, observed, task_id))
+        task_satisfied = _object(payload.get("TaskSatisfied"))
+        satisfied_ref = _object(task_satisfied.get("task_ref"))
+        if (
+            satisfied_ref.get("mission_id") == mission_id
+            and isinstance(satisfied_ref.get("task_id"), str)
+            and type(sequence) is int
+        ):
+            satisfied[satisfied_ref["task_id"]] = sequence
+    if not relevant:
+        if controller.get("mission_status") == "Completed":
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_MISSING]
+        return []
+    src, result, semantic_doc = _object(source), _object(verdict), _object(semantic)
+    summary = _object(shared_world_summary)
+    summary_identity = _object(summary.get("identity"))
+    src_identity = _object(src.get("identity"))
+    src_body = {key: value for key, value in src.items() if key != "digest"}
+    result_body = {key: value for key, value in result.items() if key != "digest"}
+    try:
+        source_digest_valid = src.get("digest") == plan_digest(src_body)
+        verdict_digest_valid = result.get("digest") == plan_digest(result_body)
+    except (TypeError, ValueError):
+        source_digest_valid = False
+        verdict_digest_valid = False
+    if (
+        set(src)
+        != {
+            "schema_version",
+            "source_id",
+            "source_revision",
+            "identity",
+            "verifier",
+            "supported_predicates",
+            "verdict_finality",
+            "digest",
+        }
+        or set(src_identity)
+        != {"run_id", "episode_id", "scene_id", "dataset_revision", "dataset_sha256"}
+        or set(result)
+        != {
+            "schema_version",
+            "source_digest",
+            "source_id",
+            "verifier",
+            "predicate",
+            "source_observed_at_ms",
+            "satisfied",
+            "tasks",
+            "digest",
+        }
+        or src.get("schema_version") != "roboguide.task-verifier-source/v0.1"
+        or result.get("schema_version") != "roboguide.task-verifier-verdict/v0.1"
+        or not source_digest_valid
+        or not verdict_digest_valid
+        or src.get("source_revision") != semantic_doc.get("digest")
+        or src.get("verdict_finality") != "terminal"
+        or src_identity.get("run_id") != run_id
+        or src_identity.get("episode_id") != frozen.get("episode_id")
+        or src_identity.get("scene_id") != frozen.get("scene_id")
+        or src_identity.get("dataset_revision") != frozen.get("dataset_revision")
+        or src_identity.get("dataset_sha256") != frozen.get("dataset_sha256")
+        or summary_identity.get("episode_id") != frozen.get("episode_id")
+        or summary_identity.get("scene_id") != frozen.get("scene_id")
+        or type(summary_identity.get("habitat_seed")) is not int
+        or summary_identity.get("habitat_seed") != frozen.get("seed")
+        or summary.get("authoritative_semantic_evidence_digest") != semantic_doc.get("digest")
+        or result.get("source_digest") != src.get("digest")
+        or result.get("source_id") != src.get("source_id")
+        or result.get("verifier") != src.get("verifier")
+        or result.get("predicate") not in _array(src.get("supported_predicates"))
+        or type(result.get("satisfied")) is not bool
+        or type(result.get("source_observed_at_ms")) is not int
+        or result.get("source_observed_at_ms", 0) <= 0
+        or type(summary.get("official_pddl_success")) is not bool
+        or result.get("satisfied") is not summary.get("official_pddl_success")
+    ):
+        return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+    observed_attempts = {
+        (item["mission_id"], item["task_id"], item["role_id"], item["execution_id"])
+        for item in _array(_object(attempts).get("attempts"))
+        if isinstance(item, dict)
+        and all(
+            isinstance(item.get(field), str)
+            for field in ("mission_id", "task_id", "role_id", "execution_id")
+        )
+    }
+    for sequence, event, task_id in relevant:
+        planned = verifier_tasks.get(task_id)
+        if planned is None:
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        specification = _object(_object(planned.get("satisfaction")).get("verifier"))
+        if (
+            event.get("source_id") != src.get("source_id")
+            or event.get("source_revision") != src.get("source_revision")
+            or event.get("verdict_digest") != result.get("digest")
+            or event.get("satisfied") is not result.get("satisfied")
+            or result.get("verifier") != specification.get("contract")
+            or result.get("predicate") != specification.get("predicate")
+        ):
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        rows = [
+            row
+            for row in _array(result.get("tasks"))
+            if _object(row).get("mission_id") == mission_id
+            and _object(row).get("task_id") == task_id
+        ]
+        roles = {
+            role.get("id")
+            for role in _array(planned.get("roles"))
+            if isinstance(role, dict) and isinstance(role.get("id"), str)
+        }
+        row_attempts = _array(_object(rows[0]).get("attempts")) if len(rows) == 1 else []
+        if any(
+            not isinstance(item, dict)
+            or not isinstance(item.get("role_id"), str)
+            or not isinstance(item.get("attempt_id"), str)
+            for item in row_attempts
+        ):
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        if (
+            len(row_attempts) != len(roles)
+            or {_object(item).get("role_id") for item in row_attempts} != roles
+        ):
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        if any(
+            (
+                mission_id,
+                task_id,
+                _object(item).get("role_id"),
+                _object(item).get("attempt_id"),
+            )
+            not in observed_attempts
+            for item in row_attempts
+        ):
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        if event.get("satisfied") is True and satisfied.get(task_id, -1) <= sequence:
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+        if event.get("satisfied") is False and task_id in satisfied:
+            return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_INVALID]
+    if controller.get("mission_status") == "Completed" and any(
+        task_id not in satisfied for task_id in verifier_tasks
+    ):
+        return [ProvenanceFailure.TASK_VERIFIER_EVIDENCE_MISSING]
+    return []
 
 
 def _semantic_expression_valid(value: Any) -> bool:
@@ -645,6 +959,11 @@ def verify_b1_provenance(
     semantic_evidence: Any = None,
     planning_world_evidence: Any = None,
     planning_source: Any = None,
+    controller_events: Any = None,
+    execution_attempts: Any = None,
+    verifier_source: Any = None,
+    verifier_verdict: Any = None,
+    shared_world_summary: Any = None,
 ) -> ProvenanceVerification:
     """Check each reached boundary, allowing only attributable early failures."""
     failures: list[ProvenanceFailure] = []
@@ -776,7 +1095,7 @@ def verify_b1_provenance(
             failures.append(ProvenanceFailure.SUBMISSION_EVIDENCE_MISMATCH)
         if record.failure_evidence_digest != (digest(observed_failure) if observed_failure else ""):
             failures.append(ProvenanceFailure.FAILURE_EVIDENCE_MISMATCH)
-        if record.controller_submission_identity != (sent.get("controller_group_id") or ""):
+        if record.controller_submission_identity != controller_submission_group(request):
             failures.append(ProvenanceFailure.CONTROLLER_SUBMISSION_IDENTITY_MISMATCH)
         if record.execution_identity != ",".join(sorted(set(observed_execution_ids))):
             failures.append(ProvenanceFailure.EXECUTION_IDENTITY_MISMATCH)
@@ -784,6 +1103,20 @@ def verify_b1_provenance(
         failures.extend(
             _check_submission(
                 request, _object(controller_submission), observed_execution_ids, observed_failure
+            )
+        )
+        failures.extend(
+            _check_task_verifier_evidence(
+                request,
+                _object(controller_submission),
+                controller_events,
+                execution_attempts,
+                semantic_evidence,
+                shared_world_summary,
+                frozen,
+                verifier_source,
+                verifier_verdict,
+                run_id,
             )
         )
     b2 = _object(static_b2_plan)
@@ -833,7 +1166,7 @@ def build_b1_provenance_record(
     request = observed_request(public_request, observations)
     sent = _object(request.get("submission_evidence"))
     mission_id = str(request.get("mission_id", ""))
-    group_id = str(sent.get("controller_group_id") or "")
+    group_id = controller_submission_group(request)
     scoped = scoped_execution_evidence(
         mission_id,
         group_id,

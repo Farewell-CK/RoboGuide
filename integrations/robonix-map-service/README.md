@@ -67,6 +67,18 @@ the target map remains valid and the recorded digest is identical. A different
 digest, or a pre-existing map without adapter provenance, remains an immutable
 conflict.
 
+## Cancellation evidence
+
+`POST /v1/executions/cancel` persists intent and retains the observed state.
+Queued work becomes `CANCELLED` only when its worker observes that intent
+before invoking local work. The synchronous Robonix calls have no implemented
+abort/stop-confirmation API; a request during an in-flight call therefore stays
+`RUNNING` until the actual call returns. Completion and failure retain their
+original terminal result. Neither a cancel receipt nor a client timeout proves
+that the vendor stopped, and the adapter must not advertise independent safe
+recovery for such calls. Historical prematurely cancelled records are not
+rewritten or retroactively certified as physical stop evidence.
+
 ## Safety boundary
 
 The service rejects path traversal, symlink and special tar members, archives

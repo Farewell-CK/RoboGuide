@@ -14,6 +14,7 @@ pub(crate) async fn serve_http(
     event_write_gate: Arc<Mutex<()>>,
     clock: Arc<runtime::SystemMonotonicClock>,
     deployment_feasibility: Option<Arc<DeploymentFeasibility>>,
+    verifier_feed: Option<Arc<TaskVerifierFeed>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = tokio::net::TcpListener::bind(address).await?;
     loop {
@@ -23,14 +24,16 @@ pub(crate) async fn serve_http(
         let write_gate = event_write_gate.clone();
         let shared_clock = clock.clone();
         let shared_feasibility = deployment_feasibility.clone();
+        let shared_verifier_feed = verifier_feed.clone();
         tokio::spawn(async move {
             if let Err(error) = handle_http_connection(
                 &mut stream,
                 &shared_controller,
                 &log,
                 &write_gate,
-                &shared_clock,
+                shared_clock.as_ref(),
                 shared_feasibility.as_deref(),
+                shared_verifier_feed.as_deref(),
             )
             .await
             {
@@ -47,8 +50,9 @@ pub(crate) async fn handle_http_connection(
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
     event_write_gate: &Arc<Mutex<()>>,
-    clock: &runtime::SystemMonotonicClock,
+    clock: &(impl Clock + Sync),
     deployment_feasibility: Option<&DeploymentFeasibility>,
+    verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let request = match tokio::time::timeout(
         CONTROL_HTTP_REQUEST_TIMEOUT,
@@ -129,24 +133,77 @@ pub(crate) async fn handle_http_connection(
                 .get("limit")
                 .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(100);
-            let events = event_log.events_page(after_sequence, limit)?;
-            let records = events
-                .iter()
-                .map(|event| {
-                    let payload = serde_json::from_str(&event.payload_json)
-                        .unwrap_or_else(|_| serde_json::json!(event.payload_json));
-                    serde_json::json!({
-                        "sequence": event.sequence,
-                        "event_id": event.event_id,
-                        "timestamp_ms": event.timestamp_ms,
-                        "correlation_id": event.correlation_id,
-                        "causation_id": event.causation_id,
-                        "payload_schema": event.payload_schema,
-                        "payload": payload,
-                    })
-                })
-                .collect::<Vec<_>>();
-            ("200 OK", serde_json::json!({"events": records}))
+            let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            // The shared connection must never expose an application's uncommitted batch.
+            // Wait off the async executor, then hold the existing write gate only for the read.
+            let events = tokio::task::spawn_blocking(move || {
+                let _guard = gate
+                    .lock()
+                    .map_err(|_| "event-log write gate is poisoned".to_string())?;
+                log.events_page(after_sequence, limit)
+                    .map_err(|error| error.to_string())
+            })
+            .await
+            .unwrap_or_else(|_| Err("event-log reader failed".to_string()));
+            match events {
+                Ok(events) => {
+                    let records = events
+                        .iter()
+                        .map(|event| {
+                            let payload = serde_json::from_str(&event.payload_json)
+                                .unwrap_or_else(|_| serde_json::json!(event.payload_json));
+                            serde_json::json!({
+                                "sequence": event.sequence,
+                                "event_id": event.event_id,
+                                "timestamp_ms": event.timestamp_ms,
+                                "correlation_id": event.correlation_id,
+                                "causation_id": event.causation_id,
+                                "payload_schema": event.payload_schema,
+                                "payload": payload,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    ("200 OK", serde_json::json!({"events": records}))
+                }
+                Err(error) => (
+                    "503 Service Unavailable",
+                    serde_json::json!({"error": error}),
+                ),
+            }
+        }
+        ("POST", "/v1/missions/assess-initial-support") => {
+            let plan = match decode_mission_plan(request_body) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error.to_string()}),
+                    )
+                    .await;
+                }
+            };
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            let assessment = match deployment_feasibility {
+                Some(source) => source.assess_initial_plan(
+                    &plan,
+                    live.bridge.control(),
+                    live.bridge.state(),
+                    clock.now(),
+                    live.orchestrator.mission_ids().is_empty(),
+                    request_body.as_bytes(),
+                ),
+                None => unavailable_initial_assessment(
+                    &plan,
+                    request_body.as_bytes(),
+                    clock.now(),
+                    "source_unconfigured",
+                ),
+            };
+            ("200 OK", assessment)
         }
         ("POST", "/v1/missions") => {
             let plan = match decode_mission_plan(request_body) {
@@ -160,6 +217,21 @@ pub(crate) async fn handle_http_connection(
                     .await;
                 }
             };
+            let verifier_admission = match verifier_feed {
+                Some(feed) => feed.validate_plan(&plan),
+                None if plan.task_graph().tasks().iter().any(|task| {
+                    matches!(task.satisfaction_basis(), domain::TaskSatisfactionBasis::VerifierEvidence(_))
+                }) => Err("Mission requires verifier evidence but no deployment verifier source is configured".to_string()),
+                None => Ok(()),
+            };
+            if let Err(error) = verifier_admission {
+                return write_http_response(
+                    stream,
+                    "422 Unprocessable Entity",
+                    serde_json::json!({"error": error}),
+                )
+                .await;
+            }
             let mission_id = plan.goal().mission_id().clone();
             let group_id = domain::ExecutionGroupId::new(format!("group-{mission_id}"))?;
             let _write_guard = event_write_gate
@@ -178,7 +250,9 @@ pub(crate) async fn handle_http_connection(
                     let ControllerState {
                         bridge,
                         orchestrator,
+                        ..
                     } = &mut candidate;
+                    let first_mission = orchestrator.mission_ids().is_empty();
                     let eligibility = deployment_feasibility
                         .map(|snapshot| snapshot.restrictions_for_plan(&plan, &group_id))
                         .transpose();
@@ -216,6 +290,16 @@ pub(crate) async fn handle_http_connection(
                                     &mut events,
                                 )
                                 .map_err(|error| error.to_string())?;
+                            if first_mission && let Some(snapshot) = deployment_feasibility
+                                && let Some(preferences) = snapshot.initial_preferences_for_plan(
+                                    &plan, bridge.control(), bridge.state(), now, &submit_correlation, &mut events,
+                                )?
+                            {
+                                let source = preferences.source_digest().to_string();
+                                bridge.control_mut().set_initial_candidate_preferences(&plan, preferences)
+                                    .map_err(|error| error.to_string())?;
+                                eprintln!("initial candidate preferences admitted for {mission_id}: {source}; commitment remains pending");
+                            }
                             bridge
                                 .register_execution_relations(
                                     &plan,
@@ -235,6 +319,17 @@ pub(crate) async fn handle_http_connection(
                             .map_err(|error| error.to_string())
                     })
                     .and_then(|_| {
+                        candidate
+                            .mission_admissions
+                            .entry(mission_id.as_str().to_string())
+                            .or_insert_with(|| {
+                                controller_http::MissionAdmission::new(
+                                    mission_id.clone(),
+                                    group_id.clone(),
+                                    request_body.as_bytes(),
+                                    now,
+                                )
+                            });
                         server_checkpoint_json(&candidate).map_err(|error| error.to_string())
                     })
                     .inspect(|_| pending_controller = Some(candidate))
@@ -266,7 +361,7 @@ pub(crate) async fn handle_http_connection(
                             .lock()
                             .map_err(|_| "controller lock is poisoned")?;
                         *live = candidate;
-                        if let Err(error) = live.bridge.flush_command_outboxes() {
+                        if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
                             eprintln!("durable command outbox delivery deferred: {error}");
                         }
                     }
@@ -284,6 +379,25 @@ pub(crate) async fn handle_http_connection(
                     drop(_write_guard);
                     ("409 Conflict", serde_json::json!({"error": error}))
                 }
+            }
+        }
+        ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/admission") => {
+            let mission_text = path
+                .trim_start_matches("/v1/missions/")
+                .trim_end_matches("/admission");
+            let mission_id = domain::MissionId::new(mission_text)?;
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            match controller.mission_admissions.get(mission_id.as_str()) {
+                Some(admission) => {
+                    admission.validate(&controller, mission_id.as_str())?;
+                    ("200 OK", admission.to_json())
+                }
+                None => (
+                    "404 Not Found",
+                    serde_json::json!({"error": "admission receipt unavailable"}),
+                ),
             }
         }
         ("GET", path) if path.starts_with("/v1/missions/") => {
@@ -404,6 +518,7 @@ pub(crate) async fn handle_http_connection(
                     let ControllerState {
                         bridge,
                         orchestrator,
+                        ..
                     } = &mut candidate;
                     orchestrator
                         .request_cancel(
@@ -482,7 +597,7 @@ pub(crate) async fn handle_http_connection(
                             .lock()
                             .map_err(|_| "controller lock is poisoned")?;
                         *live = candidate;
-                        if let Err(error) = live.bridge.flush_command_outboxes() {
+                        if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
                             eprintln!("durable command outbox delivery deferred: {error}");
                         }
                     }
@@ -573,29 +688,121 @@ pub(crate) async fn handle_http_connection(
                 }),
             )
         }
-        ("GET", path) if path.starts_with("/v1/executions/") => {
-            let execution_id = path.trim_start_matches("/v1/executions/");
-            let execution_id = execution_id.trim_end_matches("/");
+        ("GET", path) if path.starts_with("/v1/executions/") && path.ends_with("/progress") => {
+            let execution_id = path
+                .trim_start_matches("/v1/executions/")
+                .trim_end_matches("/progress");
+            let parameters = parse_query(query);
+            let stall_after_ms = parameters
+                .get("stall_after_ms")
+                .map(|value| value.parse::<u64>())
+                .transpose();
+            let Ok(stall_after_ms) = stall_after_ms else {
+                return write_http_response(
+                    stream,
+                    "400 Bad Request",
+                    serde_json::json!({"error": "invalid progress policy interval"}),
+                )
+                .await;
+            };
+            if stall_after_ms.is_some_and(|value| value == 0 || value > 86_400_000) {
+                return write_http_response(
+                    stream,
+                    "400 Bad Request",
+                    serde_json::json!({"error": "invalid progress policy interval"}),
+                )
+                .await;
+            }
             let controller = controller
                 .lock()
                 .map_err(|_| "controller lock is poisoned")?;
-            match controller.bridge.execution_status(execution_id) {
-                Some(status) => (
-                    "200 OK",
-                    serde_json::json!({"execution_id": execution_id, "status": format!("{status:?}")}),
-                ),
-                None => (
+            if controller.bridge.execution_status(execution_id).is_none() {
+                (
                     "404 Not Found",
                     serde_json::json!({"error": "unknown execution"}),
-                ),
+                )
+            } else {
+                (
+                    "200 OK",
+                    serde_json::json!({
+                            "schema_version": "roboguide.execution-progress-view/v0.1",
+                            "execution_id": execution_id,
+                        "disposition": controller.bridge.execution_progress(execution_id, clock.now(), stall_after_ms),
+                    "sample": controller.bridge.execution_progress_sample(execution_id),
+                    "evidence": controller.bridge.execution_progress_evidence(execution_id),
+                            "stall_after_ms": stall_after_ms,
+                            "observation_only": true,
+                        }),
+                )
             }
         }
-        ("POST", path) if path.starts_with("/v1/executions/") && path.ends_with("/cancel") => {
-            let execution_id = path
-                .trim_start_matches("/v1/executions/")
-                .trim_end_matches("/cancel")
-                .trim_end_matches('/')
-                .to_string();
+        ("GET", path) if path.starts_with("/v1/groups/") && path.ends_with("/recovery") => {
+            let group_id = match domain::ExecutionGroupId::new(
+                path.trim_start_matches("/v1/groups/")
+                    .trim_end_matches("/recovery")
+                    .trim_end_matches('/'),
+            ) {
+                Ok(group_id) => group_id,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error.to_string()}),
+                    )
+                    .await;
+                }
+            };
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            if live.bridge.control().group(&group_id).is_none() {
+                (
+                    "404 Not Found",
+                    serde_json::json!({"error": "unknown Group"}),
+                )
+            } else {
+                (
+                    "200 OK",
+                    serde_json::json!({
+                        "schema_version": "roboguide.group-recovery-view/v0.1",
+                        "group_id": group_id,
+                        "disposition": live.bridge.group_recovery_disposition(&group_id, clock.now()),
+                        "stop_intent": live.bridge.group_recovery(&group_id),
+                        "deployment_support_unchanged": live.bridge.group_recovery_support_unchanged(&group_id),
+                        "continuation_admission_error": live.bridge.group_continuation_blocker(&group_id, clock.now()),
+                        "resources_released_by_recovery": false,
+                        "command_receipt_is_stop_proof": false,
+                    }),
+                )
+            }
+        }
+        ("POST", path) if path.starts_with("/v1/groups/") && path.ends_with("/recover") => {
+            let command = match super::recovery::GroupRecoveryCommand::parse(request_body) {
+                Ok(command) => command,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error}),
+                    )
+                    .await;
+                }
+            };
+            let group_id = match domain::ExecutionGroupId::new(
+                path.trim_start_matches("/v1/groups/")
+                    .trim_end_matches("/recover")
+                    .trim_end_matches('/'),
+            ) {
+                Ok(group_id) => group_id,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error.to_string()}),
+                    )
+                    .await;
+                }
+            };
             let _write_guard = event_write_gate
                 .lock()
                 .map_err(|_| "event-log write gate is poisoned")?;
@@ -605,9 +812,32 @@ pub(crate) async fn handle_http_connection(
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
                 let mut candidate = live.clone();
+                let mission_id = candidate
+                    .bridge
+                    .control()
+                    .group(&group_id)
+                    .ok_or_else(|| "unknown recovery Group".to_string())?
+                    .mission_id()
+                    .clone();
+                if !candidate
+                    .orchestrator
+                    .execution(&mission_id)
+                    .is_some_and(|mission| {
+                        mission.lifecycle() == orchestration::MissionExecutionLifecycle::Running
+                    })
+                {
+                    return Err("only a running Mission can authorize Group recovery".into());
+                }
                 candidate
                     .bridge
-                    .cancel(&execution_id)
+                    .request_group_recovery(
+                        &group_id,
+                        &command.recovery_id,
+                        command.members,
+                        clock.now(),
+                        command.timeout_ms,
+                        command.max_replacements,
+                    )
                     .map_err(|error| error.to_string())?;
                 let checkpoint =
                     server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
@@ -629,12 +859,171 @@ pub(crate) async fn handle_http_connection(
                         .lock()
                         .map_err(|_| "controller lock is poisoned")?;
                     *live = candidate;
-                    if let Err(error) = live.bridge.flush_command_outboxes() {
+                    if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
+                        eprintln!("durable Group command delivery deferred: {error}");
+                    }
+                    (
+                        "202 Accepted",
+                        serde_json::json!({"status": "group_recovery_stop_requested",
+                        "group_id": group_id, "stop_intent": live.bridge.group_recovery(&group_id),
+                        "resources_released_by_recovery": false, "command_receipt_is_stop_proof": false}),
+                    )
+                }
+                Err(error) => {
+                    event_log.rollback_batch()?;
+                    ("409 Conflict", serde_json::json!({"error": error}))
+                }
+            }
+        }
+        ("GET", path) if path.starts_with("/v1/executions/") && path.ends_with("/recovery") => {
+            let execution_id = path
+                .trim_start_matches("/v1/executions/")
+                .trim_end_matches("/recovery");
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            match controller.bridge.execution_status(execution_id) {
+                Some(status) => (
+                    "200 OK",
+                    serde_json::json!({
+                        "schema_version": "roboguide.execution-recovery-view/v0.2",
+                        "execution_id": execution_id,
+                        "execution_status": format!("{status:?}"),
+                        "disposition": controller.bridge.execution_recovery_disposition(execution_id, clock.now()),
+                        "stop_intent": controller.bridge.execution_recovery_stop(execution_id),
+                        "deployment_support": controller.bridge.attempt_history().into_iter()
+                            .find(|attempt| attempt.execution_id() == execution_id)
+                            .map(|attempt| controller.bridge.recovery_deployment_support(attempt.command())),
+                        "support_is_authorization": false,
+                    }),
+                ),
+                None => (
+                    "404 Not Found",
+                    serde_json::json!({"error": "unknown execution"}),
+                ),
+            }
+        }
+        ("GET", path) if path.starts_with("/v1/executions/") => {
+            let execution_id = path.trim_start_matches("/v1/executions/");
+            let execution_id = execution_id.trim_end_matches("/");
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            match controller.bridge.execution_status(execution_id) {
+                Some(status) => (
+                    "200 OK",
+                    serde_json::json!({"execution_id": execution_id, "status": format!("{status:?}")}),
+                ),
+                None => (
+                    "404 Not Found",
+                    serde_json::json!({"error": "unknown execution"}),
+                ),
+            }
+        }
+        ("POST", path)
+            if path.starts_with("/v1/executions/")
+                && (path.ends_with("/cancel") || path.ends_with("/recover")) =>
+        {
+            let recovery = if path.ends_with("/recover") {
+                match super::recovery::RecoveryCommand::parse(request_body) {
+                    Ok(command) => Some(command),
+                    Err(error) => {
+                        return write_http_response(
+                            stream,
+                            "400 Bad Request",
+                            serde_json::json!({"error": error}),
+                        )
+                        .await;
+                    }
+                }
+            } else {
+                None
+            };
+            let execution_id = path
+                .trim_start_matches("/v1/executions/")
+                .trim_end_matches("/cancel")
+                .trim_end_matches("/recover")
+                .trim_end_matches('/')
+                .to_string();
+            let _write_guard = event_write_gate
+                .lock()
+                .map_err(|_| "event-log write gate is poisoned")?;
+            event_log.begin_batch()?;
+            let result: Result<(ControllerState, String), String> = (|| {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned")?;
+                let mut candidate = live.clone();
+                if let Some(command) = &recovery {
+                    let mission_id = candidate
+                        .bridge
+                        .attempt_history()
+                        .into_iter()
+                        .find(|attempt| attempt.execution_id() == execution_id)
+                        .map(|attempt| attempt.command().mission_id().clone())
+                        .ok_or_else(|| "unknown recovery attempt".to_string())?;
+                    if !candidate
+                        .orchestrator
+                        .execution(&mission_id)
+                        .is_some_and(|mission| {
+                            mission.lifecycle() == orchestration::MissionExecutionLifecycle::Running
+                        })
+                    {
+                        return Err("only a running Mission can authorize recovery".into());
+                    }
+                    let node = domain::NodeId::new(&command.expected_node_id)
+                        .map_err(|error| error.to_string())?;
+                    candidate
+                        .bridge
+                        .request_execution_recovery(
+                            &execution_id,
+                            &node,
+                            clock.now(),
+                            command.timeout_ms,
+                            command.max_replacements,
+                        )
+                        .map_err(|error| error.to_string())?;
+                } else {
+                    candidate
+                        .bridge
+                        .cancel(&execution_id)
+                        .map_err(|error| error.to_string())?;
+                }
+                let checkpoint =
+                    server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
+                Ok((candidate, checkpoint))
+            })();
+            match result {
+                Ok((candidate, checkpoint)) => {
+                    if let Err(error) =
+                        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint)
+                    {
+                        event_log.rollback_batch()?;
+                        return Err(error.into());
+                    }
+                    if let Err(error) = event_log.commit_batch() {
+                        let _ = event_log.rollback_batch();
+                        return Err(error.into());
+                    }
+                    let mut live = controller
+                        .lock()
+                        .map_err(|_| "controller lock is poisoned")?;
+                    *live = candidate;
+                    if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
                         eprintln!("durable command outbox delivery deferred: {error}");
                     }
                     (
                         "202 Accepted",
-                        serde_json::json!({"status": "cancel_requested"}),
+                        if recovery.is_some() {
+                            serde_json::json!({
+                                "status": "recovery_stop_requested",
+                                "execution_id": execution_id,
+                                "stop_intent": live.bridge.execution_recovery_stop(&execution_id),
+                                "command_receipt_is_stop_proof": false,
+                            })
+                        } else {
+                            serde_json::json!({"status": "cancel_requested"})
+                        },
                     )
                 }
                 Err(error) => {

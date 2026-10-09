@@ -11,6 +11,20 @@ machine-checkable artifacts that the harness, the pilot runner, and future
 Formal E1 runs all share. Nothing in this module integrates with runners or
 verifiers yet, and nothing here touches Formal population admission.
 
+Current deployment note (2026-09-29): this document describes the original
+strict Controlled protocol and the v0.1 foundation, not a certification of
+the present RoboGuide Stage2 decision surface. The current deployment binds
+the assigned navigation target in the Provider tool schema, enforces a
+canonical action guard, and gives an unassigned endpoint a model-free wait
+policy. Native EMOS does not have those same decision boundaries. The v0.1
+`stage2_identity` compares source-file digests; it does not observe these
+adapter policy choices. `additional_observations` records differences but
+does not gate comparability. Consequently, a `PAIR_COMPARABLE` verdict alone
+cannot establish the organization-only claim for this deployment. A current
+paired diagnostic must use Protocol A's end-to-end system claim and preserve
+the local-policy differences in its run evidence. Protocol B requires a
+separately validated equivalent local-policy condition.
+
 ## The three layers
 
 1. **PopulationManifest** (`roboguide.e1.population-manifest/v0.1`) — the

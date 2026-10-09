@@ -2,12 +2,32 @@
 
 use crate::*;
 /// Persists all time-driven application transitions before exposing their new live projection.
+#[cfg(test)]
 pub(crate) fn drive_application_timer(
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
     event_write_gate: &Arc<Mutex<()>>,
     now: domain::TimestampMs,
+    verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    drive_application_timer_with_clock(
+        controller,
+        event_log,
+        event_write_gate,
+        &runtime::FixedClock::new(now),
+        verifier_feed,
+    )
+}
+
+/// Uses one receive clock for transition time and a fresh read after durable Commit for delivery.
+pub(crate) fn drive_application_timer_with_clock(
+    controller: &Arc<Mutex<ControllerState>>,
+    event_log: &state::SqliteEventLog,
+    event_write_gate: &Arc<Mutex<()>>,
+    clock: &impl Clock,
+    verifier_feed: Option<&TaskVerifierFeed>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let now = clock.now();
     let _write_guard = event_write_gate
         .lock()
         .map_err(|_| "event-log write gate is poisoned")?;
@@ -26,6 +46,23 @@ pub(crate) fn drive_application_timer(
         resume_pending_recoveries(&mut candidate, now, &correlation, &mut events)?;
         apply_pending_cancellations(&mut candidate, now, &correlation, &mut events)?;
         apply_runtime_outcomes(&mut candidate, now, &correlation, &mut events)?;
+        if let Some(feed) = verifier_feed {
+            match feed.read_verdict() {
+                Ok(Some(verdict)) => match validate_task_verifier(&candidate, feed, &verdict) {
+                    Ok(()) => apply_task_verifier(
+                        &mut candidate,
+                        feed,
+                        &verdict,
+                        now,
+                        &correlation,
+                        &mut events,
+                    )?,
+                    Err(error) => eprintln!("task verifier verdict rejected: {error}"),
+                },
+                Ok(None) => {}
+                Err(error) => eprintln!("task verifier evidence unavailable: {error}"),
+            }
+        }
         drive_ready_tasks(&mut candidate, now, &correlation, &mut events)?;
         drive_rebound_attempts(&mut candidate, now, &correlation)?;
         if let Some(error) = event_log.take_error()? {
@@ -38,7 +75,7 @@ pub(crate) fn drive_application_timer(
             .lock()
             .map_err(|_| "controller lock is poisoned")?;
         *live = candidate;
-        if let Err(error) = live.bridge.flush_command_outboxes() {
+        if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
             eprintln!("durable command outbox delivery deferred: {error}");
         }
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())

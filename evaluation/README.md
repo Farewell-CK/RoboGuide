@@ -20,6 +20,11 @@ admission，Harness 消费并核对已持久化 verdict。自定义 B1 启动 wr
 继续分页并重新确认尾部。采集前后必须读到身份一致、状态不变的终态 Mission
 （Completed / Failed / Cancelled）。
 
+Controller HTTP 读取复用应用的 event write gate，等待当前 SQLite batch 提交或回滚后
+读取已持久化页；等待在 blocking worker 中进行，不持有 gate 执行 HTTP 写出。
+日志或 gate 不可用时返回带 JSON 错误的 HTTP 503，不返回伪造空页或未提交事件。
+采集器对 503 仍按归档失败保存原始响应并 fail closed；此机制不提供跨页 snapshot token。
+
 现有 API 没有 snapshot token 或全局高水位。这里确认的是 **终态 Mission 的已持久化
 事件前缀**（`terminal_durable_prefix`），不保证未来无心跳或迟到事件，也不宣称全局一致
 快照。Running、终态无法确认、持续写入导致预算耗尽，都显式归档为 incomplete。
@@ -36,6 +41,23 @@ socket 等待至多 2 秒；大小探测最多额外保留一个字节。每次�
 归档异常记为 `context.event_archive_error`，CLI 返回 2，不改写 `run-failure.json`
 中的 SUT failure owner。Formal admission、semantic goal diagnostic 与官方 benchmark
 判定规则保持不变；完整分页仍不能使缺少真实任务注册事件的归档通过 provenance。
+
+### B1 终态高度对照诊断
+
+启用物理诊断的新 B1 运行会在 `evidence/diagnostics-terminal.json` v0.4 中只读记录
+本次实际 PDDL `robot_at_thresh`。自动归档额外写出
+`evidence/goal-geometry-diagnostic.json`：对冻结 goal 中可表达的 `any_at` 谓词，
+使用终态目标位置与所有 agent 的 PDDL 参考位置，计算完整三维距离和忽略世界 Y
+坐标后的 X/Z 距离。两个谓词都在**同一个终态**成立才得到联合反事实 true；并不要求
+两个不同机器人。计算支持任意已记录的 agent 数量。
+
+结果以 Habitat 原始 `pddl_success` 为官方值；三维重建必须与它一致，否则对照
+标记 unavailable。源摘要、终态 episode/scene/step、机器人集合、阈值、目标或 provenance 缺失/不匹配
+也标记 unavailable。X/Z 结果仅为诊断性的假设重算，不是另一套官方评分，不能进入
+Formal/benchmark population 或替代 Mission satisfaction。旧版 v0.3 终态诊断没有直接
+记录阈值，因此不会被自动伪装成 v0.4 对照。需要离线重算时可运行
+`uv run python -m roboguide_eval.b1_goal_geometry <run-dir> --output <new-output-path>`，
+输出应放在新目录以保留原始归档。
 
 ## 边界（必须遵守）
 
@@ -122,8 +144,9 @@ RoboGuide 执行。因此 manifest 的 `episode_selection` 区分两层：
 **不伪造**：解析不到就 unresolved/partial 并记录原因。
 
 相同 episode 仍不足以形成 paired workload。两侧还必须覆盖同一 semantic goal
-predicates。当前 episode 51 的官方任务要求两个 agent 分别满足两个 `any_at`
-谓词；Habitat adapter 会把完整的 joint terminal-state goal 冻结进 Mission
+predicates。当前 episode 51 的官方任务要求两个 `any_at` 谓词在联合终态
+成立；每个谓词都允许任意机器人满足，不要求两个不同机器人分别执行。
+Habitat adapter 会把完整的 joint terminal-state goal 冻结进 Mission
 Grounding Context。最终 MissionPlan 是否覆盖全部谓词由 MI Reviewer/Repairer 和
 provenance diagnostic 记录；遗漏谓词属于 RoboGuide/model outcome，不会伪造成
 provenance invalid，也不会把该次观察从 Formal population 中静默排除。只有官方
@@ -180,6 +203,16 @@ episode id 在 dataset 内唯一时给出 `resolved_scene_id` / `dataset_index` 
 > 本地记账代理（`roboguide-eval proxy`）保留为**诊断工具**：不改 baseline
 > 的透明转发 + 落盘，用于排查中转问题或交叉核对——`--upstream` 必须是不带
 > `/v1` 的根地址，`OPENAI_BASE_URL` 指向 `http://127.0.0.1:<port>/v1`。
+> MI Responses 可通过同一个代理的 `/responses`；两臂须固定是否经过代理。
+> `--run-id <public-id>` 要求新的 log path，并分别记录 `requested_model` 与真实
+> `response_model` / `response_id` / `system_fingerprint` 及非敏感推理参数。
+> 返回身份缺失、非 JSON、流式或超过 4 MiB 的 metadata parsing budget 时保持 unavailable，
+> 不能从请求模型名补造。只记录已知 numeric usage 字段，不记录 Prompt、输出文本、
+> headers、URL query 或凭据。默认最多 10000 条、每条 64 KiB；预算或落盘失败
+> 不改变转发的响应。旁路 `<log>.status.json` 区分记录丢失和 in-flight 请求，只有
+> graceful close 且所有已进入代理的请求已归档，才会给出 `complete=true`。
+> 消费者必须校验 run_id、顺序、记录数、sidecar 和每次返回身份；此状态不证明
+> 绕过代理的请求不存在，也不证明 relay 内部实际模型权重身份。
 > TTFT 在 baseline 非流式调用下不可观测，如实不记录（插桩记录的是每次调用
 > 的请求/响应时间戳与总延迟）。
 >

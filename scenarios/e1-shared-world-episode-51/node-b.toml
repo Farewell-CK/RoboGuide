@@ -8,7 +8,9 @@ reconnect_delay_ms = 500
 id = "habitat-local-eaios"
 runtime_name = "emos-habitat-local-eaios"
 runtime_version = "c1-s0"
-metadata = { "roboguide.execution-session" = "roboguide.execution-session/v0.1" }
+[local_systems.metadata]
+"roboguide.execution-session" = "roboguide.execution-session/v0.1"
+"roboguide.execution-recovery" = '''{"schema_version":"roboguide.local-execution-recovery/v0.1","operations":[{"operation":{"namespace":"mobility","name":"navigate","version":"v1"},"stop_scope":"execution-group","continuation":"unsupported"},{"operation":{"namespace":"mobility","name":"move","version":"v1"},"stop_scope":"execution-group","continuation":"unsupported"}]}'''
 
 [local_systems.health]
 state_pointer = "/state"
@@ -84,6 +86,30 @@ path = "/v1/capabilities/mobility.move"
 [capability_profiles.readiness.step.request]
 base = {}
 
+[[state_exports]]
+id = "execution-progress"
+owner = "habitat-local-eaios"
+object_class = "node"
+object_type = "local-execution"
+object_id = "e1-shared-node-b"
+semantic = "reported"
+payload_schema = "roboguide.execution-progress/v0.1"
+valid_for_ms = 1500
+interval_ms = 500
+value_pointer = ""
+
+[state_exports.step]
+id = "execution-progress-observer"
+connection = "habitat-http"
+
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/executions/progress"
+
+[state_exports.step.request]
+base = {}
+
 [[resources]]
 id = "habitat-navigation-slot-b"
 kind = "space"
@@ -131,6 +157,13 @@ target = "/invocation"
 [operations.workflow.execute.request.bindings.value]
 kind = "pointer"
 pointer = "/invocation"
+
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation/attempt_id"
+
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/attempt_id"
 
 [[operations.workflow.status]]
 id = "status"
@@ -211,6 +244,13 @@ target = "/invocation"
 [operations.workflow.execute.request.bindings.value]
 kind = "pointer"
 pointer = "/invocation"
+
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation/attempt_id"
+
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/attempt_id"
 
 [[operations.workflow.status]]
 id = "status"

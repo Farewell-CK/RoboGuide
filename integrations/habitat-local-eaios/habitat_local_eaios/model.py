@@ -150,6 +150,7 @@ class CanonicalMobilityInvocation:
     parameters: dict[str, ScalarValue]
     resource_ids: tuple[str, ...]
     execution_session: ExecutionSessionMetadata | None = None
+    attempt_id: str | None = None
 
     @classmethod
     def from_request(cls, request: object) -> CanonicalMobilityInvocation:
@@ -168,7 +169,10 @@ class CanonicalMobilityInvocation:
             "parameters",
             "resource_ids",
         }
-        if set(invocation) not in (expected, expected | {"execution_session"}):
+        if not expected.issubset(invocation) or set(invocation) - expected - {
+            "execution_session",
+            "attempt_id",
+        }:
             raise IntegrationError("canonical invocation fields do not match the C1-S0 contract")
         operation = _non_empty_string(invocation["operation"], "operation")
         if operation not in SUPPORTED_OPERATIONS:
@@ -201,6 +205,11 @@ class CanonicalMobilityInvocation:
             parameters=parameters,
             resource_ids=tuple(resources),
             execution_session=session,
+            attempt_id=(
+                _non_empty_string(invocation["attempt_id"], "attempt_id")
+                if "attempt_id" in invocation
+                else None
+            ),
         )
 
     @property
@@ -225,6 +234,8 @@ class CanonicalMobilityInvocation:
         }
         if self.execution_session is not None:
             result["execution_session"] = self.execution_session.as_dict()
+        if self.attempt_id is not None:
+            result["attempt_id"] = self.attempt_id
         return result
 
     def request_key(self) -> str:

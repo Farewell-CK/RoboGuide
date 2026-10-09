@@ -1,7 +1,11 @@
 use super::*;
 
+mod admission;
+mod event_snapshot;
+mod group_recovery;
 mod runtime_replay;
 mod scheduling_disposition;
+mod stop_recovery;
 
 /// A rejected execution cancellation closes its transaction and leaves the writer usable.
 #[tokio::test]
@@ -18,6 +22,9 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
             integration::GrpcNodeRouter::default(),
         ),
         orchestrator: MissionOrchestrator::new(),
+        mission_admissions: BTreeMap::new(),
+        verifier_seen: BTreeSet::new(),
+        verifier_source_digest: None,
     }));
     let gate = Arc::new(Mutex::new(()));
     let clock = runtime::SystemMonotonicClock::new();
@@ -27,9 +34,17 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
     let address = listener.local_addr().expect("listener has address");
     let server = async {
         let (mut stream, _) = listener.accept().await.expect("request connects");
-        handle_http_connection(&mut stream, &controller, &event_log, &gate, &clock, None)
-            .await
-            .expect("rejection is a valid HTTP response");
+        handle_http_connection(
+            &mut stream,
+            &controller,
+            &event_log,
+            &gate,
+            &clock,
+            None,
+            None,
+        )
+        .await
+        .expect("rejection is a valid HTTP response");
     };
     let client = async {
         let mut stream = tokio::net::TcpStream::connect(address)
@@ -65,67 +80,137 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
     );
 }
 
-/// Builds one actor-free Mission whose bound role may be rebound between eligible Nodes.
-fn recovery_driver_plan() -> domain::MissionPlan {
-    let mission_id = domain::MissionId::new("mission-recovery-driver").expect("mission valid");
-    let role_id = domain::RoleId::new("worker").expect("role valid");
-    let requirement = domain::TaskRequirement::new(
-        mission_id.clone(),
-        domain::TaskId::new("work").expect("task valid"),
-        vec![domain::RoleRequirement::new(
-            role_id.clone(),
-            domain::CapabilityKind::Compute,
-            Some(domain::ResourceKind::Compute),
-        )],
-    )
-    .expect("requirement valid");
-    let intent = domain::ExecutionIntent::new(
-        domain::CapabilityContractRef::new("compute", "work", "v1").expect("contract valid"),
-        std::collections::BTreeMap::new(),
-    )
-    .expect("intent valid");
-    let context_id = domain::CoordinationContextId::new("recovery-context").expect("context valid");
-    let task = domain::PlannedTask::new(
-        "exercise committed recovery resumption",
-        requirement,
-        std::collections::BTreeMap::from([(role_id, intent)]),
-        Vec::new(),
-        domain::TaskContinuity::new(
-            context_id.clone(),
-            std::collections::BTreeMap::new(),
-            std::collections::BTreeMap::new(),
+/// HTTP admission refuses a verifier Task before creating a Group when no source exists.
+#[tokio::test]
+async fn verifier_plan_without_deployment_source_is_not_submitted() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let directory = tempfile::tempdir().expect("temporary directory exists");
+    let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
+        .expect("event log opens");
+    let controller = Arc::new(Mutex::new(ControllerState {
+        bridge: IntegrationRuntimeBridge::new(
+            control::ControlPlane::new(),
+            state::InMemorySharedNodeState::new(),
+            event_log.clone(),
+            integration::GrpcNodeRouter::default(),
         ),
-    )
-    .expect("task valid");
-    domain::MissionPlan::new(
-        domain::MissionGoal::new(mission_id.clone(), "recover committed replacement")
-            .expect("goal valid"),
-        domain::TaskGraph::new(mission_id, vec![task]).expect("graph valid"),
-        vec![domain::CoordinationContext::new(context_id, Vec::new()).expect("context valid")],
-    )
-    .expect("plan valid")
+        orchestrator: MissionOrchestrator::new(),
+        mission_admissions: BTreeMap::new(),
+        verifier_seen: BTreeSet::new(),
+        verifier_source_digest: None,
+    }));
+    let mut plan: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../scenarios/e1-shared-world-episode-51/mission-plan.json"
+    ))
+    .expect("canonical plan fixture");
+    plan["tasks"][0]["satisfaction"] = serde_json::json!({
+        "expected_effect": "joint goal observed", "basis": "verifier-evidence",
+        "verifier": {
+            "contract": {"namespace": "observation", "name": "verify", "version": "v1"},
+            "predicate": "goal-predicate", "max_evidence_age_ms": 5000
+        }
+    });
+    let body = plan.to_string();
+    let gate = Arc::new(Mutex::new(()));
+    let clock = runtime::SystemMonotonicClock::new();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener binds");
+    let address = listener.local_addr().expect("listener has address");
+    let server = async {
+        let (mut stream, _) = listener.accept().await.expect("request connects");
+        handle_http_connection(
+            &mut stream,
+            &controller,
+            &event_log,
+            &gate,
+            &clock,
+            None,
+            None,
+        )
+        .await
+        .expect("admission rejection is a valid HTTP response");
+    };
+    let client = async {
+        let mut stream = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("client connects");
+        let request = format!(
+            "POST /v1/missions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("request writes");
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .await
+            .expect("response reads");
+        assert!(response.starts_with("HTTP/1.1 422 Unprocessable Entity"));
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(server, client)
+    })
+    .await
+    .expect("HTTP rejection completes");
+    assert_eq!(event_log.latest_sequence().expect("events readable"), 0);
 }
 
 /// Builds one eligible node for the recovery-driver fixture.
 fn recovery_driver_node(node_id: &str, resource_id: &str) -> domain::NodeRegistration {
-    domain::NodeRegistration::new_with_contracts(
+    recovery_driver_node_with_support(
+        node_id,
+        resource_id,
+        Some(("execution", "repeat-after-stop")),
+    )
+}
+
+/// Declares fake deployment implementation support independently from the plan and operation.
+fn recovery_driver_node_with_support(
+    node_id: &str,
+    resource_id: &str,
+    support: Option<(&str, &str)>,
+) -> domain::NodeRegistration {
+    let owner = domain::LocalSystemId::new("fixture-runtime").expect("owner");
+    let contract = domain::CapabilityContractRef::new("compute", "work", "v1").expect("contract");
+    let operation = domain::OperationRef::from(contract.clone());
+    let resource = domain::Resource::new(
+        domain::ResourceId::new(resource_id).expect("resource"),
+        domain::ResourceKind::Compute,
+        1,
+    )
+    .expect("resource");
+    let metadata = support.map_or_else(BTreeMap::new, |(stop_scope, continuation)| {
+        BTreeMap::from([(
+            domain::EXECUTION_RECOVERY_METADATA_KEY.to_string(),
+            serde_json::json!({
+                "schema_version": domain::EXECUTION_RECOVERY_PROFILE_SCHEMA,
+                "operations": [{"operation": operation, "stop_scope": stop_scope, "continuation": continuation}]
+            }).to_string(),
+        )])
+    });
+    domain::NodeRegistration::new_with_local_systems(
         domain::NodeId::new(node_id).expect("node valid"),
-        domain::LocalRuntime::new("fixture", "1").expect("runtime valid"),
-        domain::NodeContractVersion::v0_4(),
+        vec![domain::LocalSystemDescriptor::new(
+            owner.clone(),
+            domain::LocalRuntime::new("fixture", "1").expect("runtime"),
+            metadata,
+        )],
+        domain::NodeContractVersion::v0_6(),
         vec![domain::Capability::new(
             domain::CapabilityKind::Compute,
             true,
         )],
-        vec![domain::CapabilityContractRef::new("compute", "work", "v1").expect("contract valid")],
-        vec![
-            domain::Resource::new(
-                domain::ResourceId::new(resource_id).expect("resource valid"),
-                domain::ResourceKind::Compute,
-                1,
-            )
-            .expect("resource valid"),
-        ],
+        BTreeMap::from([(contract, owner.clone())]),
+        Vec::new(),
+        vec![resource.clone()],
+        BTreeMap::from([(resource.id().clone(), owner.clone())]),
     )
+    .expect("registration")
+    .with_operation_support(vec![domain::OperationSupport::new(operation, owner)])
+    .expect("exact operation ownership")
 }
 
 /// Only the local owner of a selected operation may opt its Node into session transport.
@@ -618,171 +703,7 @@ fn expected_dispatch_deferrals_do_not_fail_server() {
 /// The application driver consumes a restored commitment before considering a new proposal.
 #[test]
 fn recovery_driver_rebinds_existing_commitment_first() {
-    let directory = tempfile::tempdir().expect("temporary directory exists");
-    let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
-        .expect("event log opens");
-    let correlation =
-        domain::CorrelationId::new("committed-recovery-resume").expect("correlation valid");
-    let plan = recovery_driver_plan();
-    let mission_id = plan.goal().mission_id().clone();
-    let requirement = plan.task_graph().tasks()[0].requirement().clone();
-    let task_ref = requirement.task_ref().clone();
-    let role_id = requirement.roles()[0].role_id().clone();
-    let group_id = domain::ExecutionGroupId::new("group-recovery-driver").expect("group valid");
-    let node_a = domain::NodeId::new("node-a").expect("node valid");
-    let node_b = domain::NodeId::new("node-b").expect("node valid");
-    let mut state = state::InMemorySharedNodeState::new();
-    let mut control = control::ControlPlane::new();
-    for (node, resource) in [("node-a", "cpu-a"), ("node-b", "cpu-b")] {
-        control
-            .register_node(
-                &mut state,
-                recovery_driver_node(node, resource),
-                domain::NodeStatus::new(domain::NodeHealth::Online, domain::TimestampMs::new(1)),
-                domain::TimestampMs::new(1),
-                &correlation,
-                &mut event_log.clone(),
-            )
-            .expect("fixture node registers");
-    }
-    let mut orchestrator = MissionOrchestrator::new();
-    orchestrator
-        .submit(
-            plan,
-            group_id.clone(),
-            &mut control,
-            domain::TimestampMs::new(2),
-            &correlation,
-            &mut event_log.clone(),
-        )
-        .expect("Mission submits");
-    orchestrator
-        .prepare_task(
-            &mission_id,
-            &task_ref,
-            &state,
-            &mut control,
-            domain::TimestampMs::new(3),
-            &correlation,
-            &mut event_log.clone(),
-        )
-        .expect("Task binds deterministically");
-    control
-        .activate_task_execution(
-            &group_id,
-            &task_ref,
-            domain::TimestampMs::new(4),
-            &correlation,
-            &mut event_log.clone(),
-        )
-        .expect("Task activates");
-    let need = control
-        .begin_execution_recovery(
-            &group_id,
-            &task_ref,
-            &role_id,
-            &node_a,
-            domain::TimestampMs::new(5),
-            &correlation,
-            &mut event_log.clone(),
-        )
-        .expect("Runtime ambiguity begins recovery");
-    let candidates = control
-        .match_recovery_candidates(
-            &state,
-            &need,
-            &requirement,
-            domain::TimestampMs::new(6),
-            &correlation,
-            &mut event_log.clone(),
-        )
-        .expect("replacement candidates match");
-    let proposal = control
-        .propose_role_recovery(
-            &state,
-            &candidates,
-            &requirement,
-            node_b.clone(),
-            vec![domain::ResourceId::new("cpu-b").expect("resource valid")],
-            domain::TimestampMs::new(7),
-            &correlation,
-            &mut event_log.clone(),
-        )
-        .expect("replacement proposes");
-    control
-        .commit_role_recovery(
-            &state,
-            &requirement,
-            &proposal,
-            domain::TimestampMs::new(8),
-            &correlation,
-            &mut event_log.clone(),
-        )
-        .expect("replacement commits without rebind");
-    let mut controller = ControllerState {
-        bridge: IntegrationRuntimeBridge::new(
-            control,
-            state,
-            event_log.clone(),
-            integration::GrpcNodeRouter::default(),
-        ),
-        orchestrator,
-    };
-
-    resume_role_recovery(
-        &mut controller,
-        &need,
-        domain::TimestampMs::new(9),
-        &correlation,
-        &mut event_log.clone(),
-    )
-    .expect("existing commitment rebinds without a second Commit");
-
-    assert!(
-        controller
-            .bridge
-            .control()
-            .pending_recovery_commitment_for_task(&group_id, &task_ref, &role_id)
-            .is_none()
-    );
-    let assignment = controller
-        .bridge
-        .control()
-        .group(&group_id)
-        .and_then(|group| group.task_execution(&task_ref))
-        .and_then(|task| task.assignments().first())
-        .expect("rebound assignment remains");
-    assert_eq!(assignment.node_id(), &node_b);
-    let old_command = domain::ExecutionCommand::new(
-        task_ref.mission_id().clone(),
-        task_ref.task_id().clone(),
-        group_id.clone(),
-        role_id.clone(),
-        node_a,
-        domain::ExecutionIntent::new(
-            domain::CapabilityContractRef::new("compute", "work", "v1").expect("contract valid"),
-            std::collections::BTreeMap::new(),
-        )
-        .expect("intent valid"),
-        correlation.clone(),
-    );
-    apply_recovery_required(
-        &mut controller,
-        &old_command,
-        domain::TimestampMs::new(10),
-        &correlation,
-        &mut event_log.clone(),
-    )
-    .expect("old ambiguity cannot invalidate a rebound role awaiting dispatch");
-    assert_eq!(
-        controller
-            .bridge
-            .control()
-            .group(&group_id)
-            .expect("group remains")
-            .lifecycle(),
-        control::GroupLifecycle::Adapted
-    );
+    stop_recovery::committed_recovery_resumes();
 }
 
 /// Startup rejects a replacement placement policy that does not cover a restored Mission.

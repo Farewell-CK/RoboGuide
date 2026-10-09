@@ -6,6 +6,7 @@ import importlib.util
 import sqlite3
 import sys
 import tarfile
+import threading
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
@@ -26,6 +27,80 @@ def _load_adapter_module() -> ModuleType:
 
 
 ADAPTER = _load_adapter_module()
+
+
+@pytest.mark.parametrize("vendor_fails", [False, True])
+def test_cancel_inflight_vendor_call_is_not_physical_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, vendor_fails: bool
+) -> None:
+    """Blocked vendor work cannot report Cancelled before its actual result returns."""
+    adapter = _adapter(tmp_path)
+    started, release = threading.Event(), threading.Event()
+
+    def controlled_vendor(invocation: object) -> str:
+        """Hold the original local call until an explicit test gate releases it."""
+        del invocation
+        started.set()
+        assert release.wait(2)
+        if vendor_fails:
+            raise ADAPTER.AdapterError("original vendor failure")
+        return "original vendor operation completed"
+
+    monkeypatch.setattr(adapter, "_verify_localization", controlled_vendor)
+    try:
+        accepted = adapter.submit(
+            {
+                "operation": "verify-localization",
+                "invocation": _invocation("map-a"),
+                "artifact_path": str(tmp_path / "artifacts/map.tar.gz"),
+            }
+        )
+        execution_id = str(accepted["execution_id"])
+        assert started.wait(1)
+        assert adapter.status(execution_id)["state"] == "RUNNING"
+        receipt = adapter.cancel(execution_id)
+        assert receipt["state"] == "RUNNING"
+        assert adapter.status(execution_id)["state"] == "RUNNING"
+        assert adapter._store.get(execution_id)["cancel_requested"]
+        release.set()
+        adapter._futures[execution_id].result(timeout=3)
+        terminal = adapter.status(execution_id)
+        assert terminal["state"] == ("FAILED" if vendor_fails else "COMPLETED")
+        assert terminal["detail"] == (
+            "original vendor failure" if vendor_fails else "original vendor operation completed"
+        )
+        assert adapter.cancel(execution_id) == terminal
+    finally:
+        release.set()
+        adapter.close()
+
+
+def test_cancel_before_worker_prevents_vendor_call_only_after_observed_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Queued cancellation is acknowledged by the worker before any side-effecting call."""
+    adapter = _adapter(tmp_path)
+    artifact = tmp_path / "artifacts/map.tar.gz"
+    invocation = _invocation("map-a")
+    row, _ = adapter._store.create_or_get(
+        "queued-request", "verify-localization", artifact, invocation
+    )
+    execution_id = str(row["execution_id"])
+
+    def forbidden_call(invocation: object) -> str:
+        """Reject any local work after the worker has observed queued cancellation."""
+        del invocation
+        raise AssertionError("cancelled queued work must not call vendor")
+
+    monkeypatch.setattr(adapter, "_verify_localization", forbidden_call)
+    try:
+        receipt = adapter.cancel(execution_id)
+        assert receipt["state"] == "ACCEPTED"
+        adapter._run(execution_id, "verify-localization", artifact, invocation)
+        assert adapter.status(execution_id)["state"] == "CANCELLED"
+        assert adapter.cancel(execution_id)["state"] == "CANCELLED"
+    finally:
+        adapter.close()
 
 
 def _create_map(directory: Path, marker: str) -> None:

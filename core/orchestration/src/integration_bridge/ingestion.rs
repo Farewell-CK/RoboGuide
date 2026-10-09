@@ -49,12 +49,23 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
         if !matches!(
             checkpoint.schema.as_str(),
-            CONTROLLER_CHECKPOINT_SCHEMA | PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA
+            CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_GROUP_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA
+                | PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA
+                | LEGACY_CONTROLLER_CHECKPOINT_SCHEMA
         ) {
             return Err(IntegrationRuntimeError::Checkpoint(format!(
                 "unsupported controller checkpoint schema {}",
                 checkpoint.schema
             )));
+        }
+        if checkpoint.schema != CONTROLLER_CHECKPOINT_SCHEMA
+            && checkpoint.runtime.has_group_recovery_history()
+        {
+            return Err(IntegrationRuntimeError::Checkpoint(
+                "pre-Group checkpoint contains Group recovery permission".into(),
+            ));
         }
         let control = ControlPlane::restore(checkpoint.control)?;
         let state = InMemorySharedNodeState::restore(checkpoint.nodes, restored_at)
@@ -107,6 +118,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     &mut self.events,
                 )?;
                 self.runtime.fence_peer_channels_for_node(&node_id);
+                self.runtime.fence_progress_for_node(&node_id);
             }
             GrpcNodeEvent::NodeMessage {
                 node_id,
@@ -185,6 +197,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                         // snapshot instead of retaining readiness admitted under the old one.
                         let node_id = NodeId::new(&node_id)?;
                         self.runtime.fence_peer_channels_for_node(&node_id);
+                        self.runtime.fence_progress_for_node(&node_id);
                     }
                     Some(NodePayload::StateObservationBatch(batch)) => {
                         self.consume_state_observations(

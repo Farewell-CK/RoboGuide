@@ -67,6 +67,8 @@ bound, not a new provenance field. Durable per-draft policy snapshots across ser
 remain future work; historical configuration/model-input evidence is needed to audit the original
 source. No claim is made that final MissionRequest records alone contain that full policy history.
 
-Generic verifier evidence production/ingress remains deferred. Semantic admission with a satisfiable
-policy does not prove evidence will arrive; such Tasks can remain `AwaitingSatisfaction` in deployment.
-State freshness is not automatic truth fusion, and Local EAIOS retains Local How.
+At the time of this decision, generic verifier evidence production/ingress was deferred.
+ADR-0048 adds an optional deployment-owned final-verdict profile; semantic admission with a
+satisfiable policy still does not prove evidence will arrive, and unsupported or missing sources
+can leave a Task `AwaitingSatisfaction`. State freshness is not automatic truth fusion, and Local
+EAIOS retains Local How.

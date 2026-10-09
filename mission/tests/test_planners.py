@@ -24,6 +24,7 @@ from mission.grounding_reader import EmptyMissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.planners import FixturePlanner
+from mission.provider_errors import MissionIdentityError, MissionProviderError
 from mission.provider_mission_plan import (
     ProviderMissionPlanError,
     normalize_mission_plan_provider_output,
@@ -167,11 +168,71 @@ def test_v0_8_planner_and_repairer_use_same_closed_provider_boundary() -> None:
     assert plan.to_json() == plan_json
     assert repaired == plan
     for _, _, payload, _ in transport.requests:
+        sent_input = json.loads(cast(str, payload["input"]))
+        assert sent_input["mission_id"] == mission_id
         output = cast(JSONObject, cast(JSONObject, payload["text"])["format"])
         schema = cast(JSONObject, output["schema"])
+        mission_schema = cast(JSONObject, cast(JSONObject, schema["properties"])["mission"])
+        mission_properties = cast(JSONObject, mission_schema["properties"])
+        assert mission_properties["id"] == {"type": "string", "enum": [mission_id]}
         _assert_strict_provider_objects(schema)
         context_schema = cast(JSONObject, cast(JSONObject, schema["$defs"])["context"])
         assert "executor_constraints" in cast(JSONObject, context_schema["properties"])
+
+
+@pytest.mark.parametrize("writer", ["planner", "repairer"])
+@pytest.mark.parametrize("unadmitted_entity", [False, True])
+def test_model_identity_violation_preserves_raw_draft_without_admission(
+    writer: str, unadmitted_entity: bool
+) -> None:
+    """Wrong identity wins over later contract faults and retains the raw candidate."""
+    plan_json = _v0_8_plan()
+    mission = cast(JSONObject, plan_json["mission"])
+    expected_id = cast(str, mission["id"])
+    bad_json = deepcopy(plan_json)
+    cast(JSONObject, bad_json["mission"])["id"] = "mission-unrequested"
+    if unadmitted_entity:
+        actors = cast(list[JSONObject], cast(JSONObject, bad_json["mission"])["actors"])
+        actors[0]["physical_entity"] = "unadmitted-robot"
+    raw = _provider_plan(bad_json)
+    transport = FakeTransport([_response(raw)])
+    settings = _local_settings()
+    intent = GroundedIntent(cast(str, mission["objective"]), (), ())
+    catalog = _current_catalog()
+    grounding = _grounding()
+    with pytest.raises(
+        MissionIdentityError, match="model changed the requested mission id"
+    ) as caught:
+        if writer == "planner":
+            ResponsesMissionPlanner(settings, {"OPENAI_API_KEY": "test-only-key"}, transport).plan(
+                expected_id, intent, catalog, grounding
+            )
+        else:
+            ResponsesMissionRepairer(
+                settings, {"OPENAI_API_KEY": "test-only-key"}, transport
+            ).repair(
+                expected_id,
+                intent,
+                MissionPlan.from_json(plan_json),
+                MissionPlanReview.from_json(_review_output()),
+                catalog,
+                grounding,
+            )
+    error = caught.value
+    assert isinstance(error, MissionProviderError)
+    assert error.provider_output == raw
+    assert cast(JSONObject, error.normalized_output["mission"])["id"] == "mission-unrequested"
+    assert error.stage == "identity_validation"
+    assert len(transport.requests) == 1
+    payload = transport.requests[0][2]
+    schema = cast(
+        JSONObject, cast(JSONObject, cast(JSONObject, payload["text"])["format"])["schema"]
+    )
+    mission_schema = cast(JSONObject, cast(JSONObject, schema["properties"])["mission"])
+    assert cast(JSONObject, mission_schema["properties"])["id"] == {
+        "type": "string",
+        "enum": [expected_id],
+    }
 
 
 def test_v0_8_provider_output_cannot_invent_physical_grounding() -> None:

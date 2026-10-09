@@ -57,7 +57,15 @@ def fault_verdict(output: Path, profile: str, inject_after: int | None) -> dict[
     else:
         recovery_valid = all(
             item in events
-            for item in ("fault_triggered", "primary_exited", "standby_registered")
+            for item in (
+                "fault_triggered",
+                "local_handle_confirmed",
+                "primary_exited",
+                "recovery_required",
+                "recovery_authorized",
+                "same_owner_registered",
+                "rebind_completed",
+            )
         ) and bool(pre_fault and pre_fault.get("primitive_steps") == inject_after)
     return {
         "schema": "roboguide.e2-node-failure-verdict/v0.1",
@@ -74,9 +82,10 @@ def fault_verdict(output: Path, profile: str, inject_after: int | None) -> dict[
         "controller_attempts": attempts.get("attempts", []),
         "pre_fault_graph": pre_fault,
         "interpretation": (
-            "F1 blocks primitive k+1 before the COHERENT adapter, terminates its bound primary "
-            "Node, and registers a distinct standby advertising the same operation. The unchanged "
-            "Controller must recover; the harness never executes or edits an action."
+            "F1 observes the accepted k+1 local handle while the generic bridge holds it before "
+            "any graph effect, terminates Dog-A, authorizes explicit same-owner recovery, restarts "
+            "the original Node identity, and requires a fresh Controller attempt. The harness "
+            "never executes or edits a primitive action."
         ),
     }
 

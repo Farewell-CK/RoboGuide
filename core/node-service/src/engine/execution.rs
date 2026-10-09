@@ -18,7 +18,8 @@ impl LocalIntegrationEngine {
     ) {
         let engine = self.clone();
         tokio::spawn(async move {
-            let mut context = WorkflowContext::new(invocation.clone());
+            let mut context =
+                WorkflowContext::with_attempt_id(invocation.clone(), execution_id.clone());
             let prepared_input = match engine
                 .prepare_artifacts(&invocation, &capability, &mut context)
                 .await

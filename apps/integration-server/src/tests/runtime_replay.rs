@@ -3,11 +3,17 @@
 use super::*;
 use domain::{CorrelationId, ExecutionGroupId, TaskExecutionLifecycle, TimestampMs};
 use integration::grpc::v0_4::{ExecutionPhase, NodeMessage, node_message::Message as NodePayload};
+use sha2::{Digest, Sha256};
 
 /// Decodes a canonical v0.7 Mission so production checkpoint normalization is also exercised.
 fn parallel_plan() -> domain::MissionPlan {
+    parallel_plan_with_verifier(false)
+}
+
+/// Builds the same physical topology with an optional independent final verifier.
+fn parallel_plan_with_verifier(verifier_first_task: bool) -> domain::MissionPlan {
     let operation = serde_json::json!({"namespace": "compute", "name": "work", "version": "v1"});
-    let tasks = ["a", "b"].map(|id| serde_json::json!({
+    let mut tasks = ["a", "b"].map(|id| serde_json::json!({
         "id": id, "description": "independent work", "depends_on": [],
         "context_id": "parallel-context", "coupling_mode": "independent",
         "timing": {"earliest_start_offset_ms": 0, "latest_start_offset_ms": null, "completion_deadline_offset_ms": null},
@@ -21,6 +27,15 @@ fn parallel_plan() -> domain::MissionPlan {
             "execution_intent": {"operation": operation, "objective": "independent work", "parameters": {}}
         }]
     }));
+    if verifier_first_task {
+        tasks[0]["satisfaction"] = serde_json::json!({
+            "expected_effect": "goal-predicate", "basis": "verifier-evidence",
+            "verifier": {
+                "contract": {"namespace": "observation", "name": "verify", "version": "v1"},
+                "predicate": "goal-predicate", "max_evidence_age_ms": 5000
+            }
+        });
+    }
     orchestration::decode_mission_plan(&serde_json::json!({
         "schema_version": "roboguide.mission-plan/v0.7",
         "mission": {"id": "parallel-mission", "objective": "parallel work", "actors": [{"id": "a"}, {"id": "b"}]},
@@ -49,12 +64,21 @@ struct ParallelMission {
 impl ParallelMission {
     /// Runs Submit -> Match -> Schedule -> Proposal -> Commit -> Bind -> Runtime preparation.
     fn new() -> Self {
+        Self::new_with_verifier(false)
+    }
+
+    /// Runs the same real application path with one Task awaiting external evidence.
+    fn new_with_verifier(verifier_first_task: bool) -> Self {
         let directory = tempfile::tempdir().expect("isolated controller directory");
         let events = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
             .expect("event log opens");
         let correlation = CorrelationId::new("parallel-replay").expect("correlation");
         let group_id = ExecutionGroupId::new("parallel-group").expect("Group");
-        let plan = parallel_plan();
+        let plan = if verifier_first_task {
+            parallel_plan_with_verifier(true)
+        } else {
+            parallel_plan()
+        };
         let mut control = control::ControlPlane::new();
         let mut state = state::InMemorySharedNodeState::new();
         for (node, resource) in [("node-a", "cpu-a"), ("node-b", "cpu-b")] {
@@ -88,6 +112,9 @@ impl ParallelMission {
                 integration::GrpcNodeRouter::default(),
             ),
             orchestrator,
+            mission_admissions: BTreeMap::new(),
+            verifier_seen: BTreeSet::new(),
+            verifier_source_digest: None,
         };
         drive_ready_tasks(
             &mut controller,
@@ -174,6 +201,27 @@ impl ParallelMission {
             .expect("outcome transaction commits");
     }
 
+    /// Constructs a legacy unbound recovery checkpoint to test retained outcome fences.
+    ///
+    /// Production no longer releases on Unknown; this deliberately invokes the low-level Control
+    /// transition to retain regression coverage for historical already-unbound checkpoints.
+    fn legacy_unbound(&mut self, index: usize) {
+        let command = self.attempts[index].command();
+        self.controller
+            .bridge
+            .control_mut()
+            .begin_execution_recovery(
+                command.group_id(),
+                command.task_ref(),
+                command.role_id(),
+                command.node_id(),
+                TimestampMs::new(10),
+                &self.correlation,
+                &mut self.events.clone(),
+            )
+            .expect("legacy Control transition");
+    }
+
     /// Returns the authoritative Task lifecycle for one original logical slot.
     fn task_lifecycle(&self, index: usize) -> TaskExecutionLifecycle {
         self.controller
@@ -185,6 +233,288 @@ impl ParallelMission {
             .expect("Task exists")
             .lifecycle()
     }
+}
+
+/// Signs one finite JSON document using the configured verifier codec.
+fn signed_verifier(mut body: serde_json::Value) -> serde_json::Value {
+    let encoded = serde_json::to_vec(&body).expect("verifier fixture serializes");
+    body["digest"] = format!("sha256:{:x}", Sha256::digest(encoded)).into();
+    body
+}
+
+/// Publishes source and verdict fixtures with the exact Runtime attempt identities.
+fn verifier_feed_for(
+    fixture: &mut ParallelMission,
+    satisfied: bool,
+    stale_attempt: bool,
+) -> TaskVerifierFeed {
+    let source = signed_verifier(serde_json::json!({
+        "schema_version": "roboguide.task-verifier-source/v0.1",
+        "source_id": "test-official-goal",
+        "source_revision": format!("sha256:{}", "a".repeat(64)),
+        "identity": {"run_id": "run-1", "episode_id": "episode-1", "scene_id": "scene-1",
+            "dataset_revision": "dataset-1", "dataset_sha256": "b".repeat(64)},
+        "verifier": {"namespace": "observation", "name": "verify", "version": "v1"},
+        "supported_predicates": ["goal-predicate"],
+        "verdict_finality": "terminal"
+    }));
+    let source_path = fixture._directory.path().join("source.json");
+    let verdict_path = fixture._directory.path().join("verdict.json");
+    std::fs::write(&source_path, source.to_string()).expect("source written");
+    let tasks = fixture
+        .attempts
+        .iter()
+        .map(|attempt| {
+            serde_json::json!({
+                "mission_id": attempt.command().mission_id().as_str(),
+                "task_id": attempt.command().task_id().as_str(),
+                "attempts": [{
+                    "role_id": attempt.command().role_id().as_str(),
+                    "attempt_id": if stale_attempt && attempt.command().task_id().as_str() == "a" {
+                        "old-attempt"
+                    } else {attempt.execution_id()}
+                }]
+            })
+        })
+        .collect::<Vec<_>>();
+    let verdict = signed_verifier(serde_json::json!({
+        "schema_version": "roboguide.task-verifier-verdict/v0.1",
+        "source_digest": source["digest"],
+        "source_id": "test-official-goal",
+        "verifier": source["verifier"],
+        "predicate": "goal-predicate", "source_observed_at_ms": 9,
+        "satisfied": satisfied,
+        "tasks": tasks
+    }));
+    std::fs::write(&verdict_path, verdict.to_string()).expect("verdict written");
+    let feed = TaskVerifierFeed::load(&source_path, verdict_path).expect("source loads");
+    fixture.controller.verifier_source_digest = Some(feed.source_digest().to_string());
+    feed
+}
+
+/// A real Runtime completion remains AwaitingSatisfaction until current-attempt evidence arrives.
+#[test]
+fn current_positive_verifier_verdict_completes_mission_durably() {
+    let mut fixture = ParallelMission::new_with_verifier(true);
+    for index in 0..2 {
+        fixture.fact(index, 1, ExecutionPhase::Accepted);
+        fixture.fact(index, 2, ExecutionPhase::Completed);
+    }
+    let verified_index = fixture
+        .attempts
+        .iter()
+        .position(|attempt| attempt.command().task_id().as_str() == "a")
+        .expect("verified Task has an attempt");
+    assert_eq!(
+        fixture.task_lifecycle(verified_index),
+        TaskExecutionLifecycle::AwaitingSatisfaction
+    );
+    let feed = verifier_feed_for(&mut fixture, true, false);
+    let verdict = feed
+        .read_verdict()
+        .expect("verdict parses")
+        .expect("verdict exists");
+    validate_task_verifier(&fixture.controller, &feed, &verdict)
+        .expect("both current physical attempts match");
+    fixture.events.begin_batch().expect("transaction opens");
+    apply_task_verifier(
+        &mut fixture.controller,
+        &feed,
+        &verdict,
+        TimestampMs::new(12),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .expect("positive verifier closes Task");
+    let checkpoint = server_checkpoint_json(&fixture.controller).expect("checkpoint serializes");
+    fixture
+        .events
+        .save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint)
+        .expect("checkpoint persists");
+    fixture.events.commit_batch().expect("transaction commits");
+    assert_eq!(
+        fixture.task_lifecycle(verified_index),
+        TaskExecutionLifecycle::Completed
+    );
+    assert_eq!(fixture.controller.verifier_seen.len(), 1);
+    assert_eq!(
+        fixture
+            .controller
+            .orchestrator
+            .execution(fixture.attempts[verified_index].command().mission_id())
+            .expect("Mission")
+            .lifecycle(),
+        orchestration::MissionExecutionLifecycle::Completed
+    );
+    let restored: ServerCheckpoint = serde_json::from_str(&checkpoint).expect("checkpoint decodes");
+    assert_eq!(restored.verifier_seen, fixture.controller.verifier_seen);
+    assert_eq!(
+        restored.verifier_source_digest,
+        fixture.controller.verifier_source_digest
+    );
+    let events = fixture
+        .events
+        .events_page(None, 500)
+        .expect("events readable");
+    assert!(
+        events
+            .iter()
+            .any(|event| event.payload_json.contains("TaskVerifierVerdictObserved"))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event.payload_json.contains("TaskSatisfied"))
+    );
+    let prior_sequence = fixture.events.latest_sequence().expect("sequence readable");
+    validate_task_verifier(&fixture.controller, &feed, &verdict)
+        .expect("durably consumed verdict is an idempotent replay");
+    fixture
+        .events
+        .begin_batch()
+        .expect("replay transaction opens");
+    apply_task_verifier(
+        &mut fixture.controller,
+        &feed,
+        &verdict,
+        TimestampMs::new(13),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .expect("replay is a no-op");
+    fixture
+        .events
+        .commit_batch()
+        .expect("replay transaction commits");
+    assert_eq!(
+        fixture.events.latest_sequence().expect("sequence readable"),
+        prior_sequence
+    );
+}
+
+/// A final negative official verdict fails the Task without claiming benchmark success.
+#[test]
+fn current_negative_verifier_verdict_fails_mission() {
+    let mut fixture = ParallelMission::new_with_verifier(true);
+    for index in 0..2 {
+        fixture.fact(index, 1, ExecutionPhase::Accepted);
+        fixture.fact(index, 2, ExecutionPhase::Completed);
+    }
+    let feed = verifier_feed_for(&mut fixture, false, false);
+    let verdict = feed
+        .read_verdict()
+        .expect("verdict parses")
+        .expect("verdict exists");
+    validate_task_verifier(&fixture.controller, &feed, &verdict).expect("current attempts match");
+    fixture.events.begin_batch().expect("transaction opens");
+    apply_task_verifier(
+        &mut fixture.controller,
+        &feed,
+        &verdict,
+        TimestampMs::new(12),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .expect("final negative verifier fails Task");
+    fixture.events.commit_batch().expect("transaction commits");
+    assert_eq!(
+        fixture
+            .controller
+            .orchestrator
+            .execution(fixture.attempts[0].command().mission_id())
+            .expect("Mission")
+            .lifecycle(),
+        orchestration::MissionExecutionLifecycle::Failed
+    );
+    assert!(
+        !fixture
+            .events
+            .events_page(None, 500)
+            .expect("events readable")
+            .iter()
+            .any(|event| event.payload_json.contains("TaskSatisfied")
+                && event.payload_json.contains("\"task_id\":\"a\""))
+    );
+}
+
+/// A late final-world verdict cannot reopen a Group released after physical failure.
+#[test]
+fn late_verifier_after_runtime_failure_keeps_timer_alive() {
+    for satisfied in [false, true] {
+        let mut fixture = ParallelMission::new_with_verifier(true);
+        for index in 0..2 {
+            fixture.fact(index, 1, ExecutionPhase::Accepted);
+        }
+        let verified_index = fixture
+            .attempts
+            .iter()
+            .position(|attempt| attempt.command().task_id().as_str() == "a")
+            .expect("verified Task has an attempt");
+        fixture.fact(verified_index, 2, ExecutionPhase::Completed);
+        fixture.fact(1 - verified_index, 2, ExecutionPhase::Failed);
+        assert_eq!(
+            fixture
+                .controller
+                .bridge
+                .control()
+                .group(&fixture.group_id)
+                .expect("Group remains inspectable")
+                .lifecycle(),
+            control::GroupLifecycle::Released
+        );
+        let feed = verifier_feed_for(&mut fixture, satisfied, false);
+        let sequence_before = fixture.events.latest_sequence().expect("events readable");
+        let controller = Arc::new(Mutex::new(fixture.controller.clone()));
+        let gate = Arc::new(Mutex::new(()));
+        drive_application_timer(
+            &controller,
+            &fixture.events,
+            &gate,
+            TimestampMs::new(12),
+            Some(&feed),
+        )
+        .expect("late verdict is irrelevant to a terminal Mission");
+        let observed = controller.lock().expect("Controller remains live");
+        assert_eq!(
+            observed
+                .orchestrator
+                .execution(fixture.attempts[verified_index].command().mission_id())
+                .expect("Mission remains inspectable")
+                .lifecycle(),
+            orchestration::MissionExecutionLifecycle::Failed
+        );
+        assert!(observed.verifier_seen.is_empty());
+        assert_eq!(
+            fixture.events.latest_sequence().expect("events readable"),
+            sequence_before
+        );
+    }
+}
+
+/// A signed artifact from a superseded physical attempt remains invalid.
+#[test]
+fn stale_physical_attempt_verdict_is_rejected_before_mutation() {
+    let mut fixture = ParallelMission::new_with_verifier(true);
+    for index in 0..2 {
+        fixture.fact(index, 1, ExecutionPhase::Accepted);
+        fixture.fact(index, 2, ExecutionPhase::Completed);
+    }
+    let feed = verifier_feed_for(&mut fixture, true, true);
+    let verdict = feed
+        .read_verdict()
+        .expect("verdict parses")
+        .expect("verdict exists");
+    assert!(validate_task_verifier(&fixture.controller, &feed, &verdict).is_err());
+    assert!(fixture.controller.verifier_seen.is_empty());
+    assert!(fixture.attempts.iter().any(|attempt| {
+        fixture
+            .controller
+            .bridge
+            .control()
+            .group(&fixture.group_id)
+            .and_then(|group| group.task_execution(attempt.command().task_ref()))
+            .is_some_and(|task| task.lifecycle() == TaskExecutionLifecycle::AwaitingSatisfaction)
+    }));
 }
 
 /// Two independent Nodes finish normally through production outcome and satisfaction handling.
@@ -223,6 +553,7 @@ fn blocked_parallel_group_retains_late_completion_without_fatal_transition() {
     fixture.fact(0, 1, ExecutionPhase::Accepted);
     fixture.fact(1, 1, ExecutionPhase::Accepted);
     fixture.fact(0, 2, ExecutionPhase::Unknown);
+    fixture.legacy_unbound(0);
     let control_before =
         serde_json::to_value(fixture.controller.bridge.control().checkpoint()).expect("checkpoint");
     fixture.fact(0, 3, ExecutionPhase::Completed);
@@ -265,6 +596,7 @@ fn blocked_parallel_group_retains_late_completion_without_fatal_transition() {
 fn late_first_terminal_fact_does_not_activate_unbound_task() {
     let mut fixture = ParallelMission::new();
     fixture.fact(0, 1, ExecutionPhase::Unknown);
+    fixture.legacy_unbound(0);
     let control_before =
         serde_json::to_value(fixture.controller.bridge.control().checkpoint()).expect("checkpoint");
     drive_ready_tasks(
@@ -293,6 +625,72 @@ fn late_first_terminal_fact_does_not_activate_unbound_task() {
     );
 }
 
+/// Recovery releases only the stopped Task while an independent sibling keeps its binding.
+#[test]
+fn stopped_task_recovery_preserves_sibling_and_actor_ownership() {
+    let mut fixture = ParallelMission::new();
+    fixture.fact(0, 1, ExecutionPhase::Started);
+    fixture.fact(1, 1, ExecutionPhase::Started);
+    let command = fixture.attempts[0].command().clone();
+    let other = fixture.attempts[1].command().clone();
+    fixture
+        .controller
+        .bridge
+        .request_execution_recovery(
+            fixture.attempts[0].execution_id(),
+            command.node_id(),
+            TimestampMs::new(10),
+            100,
+            2,
+        )
+        .expect("explicit authorization");
+    fixture.fact(0, 2, ExecutionPhase::Cancelled);
+    begin_current_ambiguity_recoveries(
+        &mut fixture.controller,
+        TimestampMs::new(11),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .expect("safe partial release");
+    let task = fixture
+        .controller
+        .bridge
+        .control()
+        .group(&fixture.group_id)
+        .expect("Group")
+        .task_execution(other.task_ref())
+        .expect("unaffected Task");
+    assert_eq!(task.assignments()[0].node_id(), other.node_id());
+    assert_eq!(fixture.task_lifecycle(1), TaskExecutionLifecycle::Active);
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .execution_status(fixture.attempts[1].execution_id()),
+        Some(orchestration::RemoteExecutionStatus::Running)
+    );
+    resume_pending_recoveries(
+        &mut fixture.controller,
+        TimestampMs::new(12),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .expect("owner retry does not migrate an Actor");
+    drive_rebound_attempts(
+        &mut fixture.controller,
+        TimestampMs::new(12),
+        &fixture.correlation,
+    )
+    .expect("new attempt");
+    assert_eq!(fixture.controller.bridge.attempt_history().len(), 3);
+    assert!(fixture.controller.bridge.attempt_history().iter().any(
+        |attempt| attempt.execution_id() != fixture.attempts[0].execution_id()
+            && attempt.command().task_ref() == command.task_ref()
+            && attempt.command().node_id() == command.node_id()
+    ));
+    assert_eq!(fixture.task_lifecycle(1), TaskExecutionLifecycle::Active);
+}
+
 /// A failed sibling fact is retained without converting a Blocked Group through an illegal path.
 #[test]
 fn blocked_parallel_group_defers_sibling_failure() {
@@ -300,6 +698,7 @@ fn blocked_parallel_group_defers_sibling_failure() {
     fixture.fact(0, 1, ExecutionPhase::Accepted);
     fixture.fact(1, 1, ExecutionPhase::Accepted);
     fixture.fact(0, 2, ExecutionPhase::Unknown);
+    fixture.legacy_unbound(0);
     fixture.fact(1, 2, ExecutionPhase::Failed);
     assert_eq!(fixture.task_lifecycle(1), TaskExecutionLifecycle::Active);
     assert_eq!(

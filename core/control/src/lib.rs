@@ -8,6 +8,7 @@ mod allocation;
 mod calendar;
 mod coordination;
 mod group;
+mod initial_preferences;
 mod matching;
 mod node;
 mod proposal;
@@ -18,8 +19,12 @@ mod scheduler;
 pub use allocation::AllocationProjectionError;
 pub use calendar::{ScheduledTaskReservation, SchedulingReservationPhase};
 pub use coordination::CommittedPlan;
+pub use group::{CommittedGroupContinuation, GroupContinuationProposal};
 pub use group::{ContextBinding, ExecutionGroup, GroupLifecycle, RoleRequirementView};
+pub use initial_preferences::{InitialCandidatePreferences, MAX_INITIAL_PREFERENCE_AGE_MS};
+pub use matching::RoleCandidateDiagnostics;
 pub use matching::{CandidateSet, RoleCandidates};
+pub use node::CandidateExclusionReason;
 pub use proposal::AssignmentProposal;
 pub use reconciliation::{
     CommittedRecoveryAssignment, ReconciliationAssessment, RecoveryAssignmentProposal,
@@ -385,6 +390,8 @@ pub struct ControlPlane {
     /// Deployment candidate restrictions persisted with Control authority.
     pub(crate) actor_candidate_restrictions:
         BTreeMap<(MissionId, ActorId), ActorCandidateRestriction>,
+    /// Transient initial search hints, fenced by first Bind and absent from checkpoints.
+    pub(crate) initial_candidate_preferences: BTreeMap<TaskRef, InitialCandidatePreferences>,
     /// Current deployment topology, deliberately reacquired rather than checkpointed.
     pub(crate) physical_entity_registry: Option<domain::PhysicalEntityRegistrySnapshot>,
     /// Durable revision/digest watermark that survives separately from current topology.
@@ -424,6 +431,7 @@ impl ControlPlane {
             actor_bindings: BTreeMap::new(),
             actor_node_constraints: BTreeMap::new(),
             actor_candidate_restrictions: BTreeMap::new(),
+            initial_candidate_preferences: BTreeMap::new(),
             physical_entity_registry: None,
             registry_provenance: None,
             mission_binding_semantics: BTreeMap::new(),
@@ -649,6 +657,7 @@ impl ControlPlane {
             actor_bindings,
             actor_node_constraints,
             actor_candidate_restrictions,
+            initial_candidate_preferences: BTreeMap::new(),
             physical_entity_registry: None,
             registry_provenance: checkpoint.registry_provenance,
             mission_binding_semantics,

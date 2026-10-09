@@ -10,6 +10,13 @@ impl RuntimeExecutionManager {
         command: &ExecutionCommand,
         resource_ids: &[ResourceId],
     ) -> Result<DispatchDecision, ExecutionRuntimeError> {
+        if command.recovery_support().is_some_and(|declaration| {
+            declaration.support.operation != *command.intent().operation()
+        }) {
+            return Err(ExecutionRuntimeError::ExecutionConflict(
+                "recovery declaration belongs to a different operation".into(),
+            ));
+        }
         if self.restored_executions.contains(execution_id) {
             return Err(ExecutionRuntimeError::ReconciliationRequired(
                 "execution was restored after controller restart; reconciliation is required before routing"
@@ -311,6 +318,13 @@ impl RuntimeExecutionManager {
             .map(|execution| execution.resource_ids.clone())
     }
 
+    /// Borrows exact immutable invocation evidence without copying the complete attempt history.
+    pub fn execution_command(&self, execution_id: &str) -> Option<&ExecutionCommand> {
+        self.executions
+            .get(execution_id)
+            .map(|context| &context.command)
+    }
+
     /// Returns the latest accepted Runtime status for one execution identity.
     pub fn execution_status(&self, execution_id: &str) -> Option<ExecutionStatus> {
         self.execution_status.get(execution_id).copied()
@@ -396,6 +410,10 @@ impl RuntimeExecutionManager {
                 "unknown cancellation attempt".to_string(),
             ));
         }
+        if let Some(intent) = self.recovery_stops.get_mut(execution_id) {
+            intent.aborted = true;
+        }
+        self.abort_group_recovery_for_attempt(execution_id);
         self.cancellation_intents.insert(execution_id.to_string());
         Ok(())
     }
@@ -408,6 +426,22 @@ impl RuntimeExecutionManager {
                 !self
                     .execution_status(id)
                     .is_some_and(ExecutionStatus::is_terminal)
+            })
+            .filter(|id| {
+                !self
+                    .recovery_stops
+                    .get(id.as_str())
+                    .is_some_and(|intent| !intent.aborted)
+                    || self.executions.get(id.as_str()).is_some_and(|context| {
+                        context
+                            .command
+                            .recovery_support()
+                            .is_some_and(|declaration| {
+                                declaration.support.operation
+                                    == *context.command.intent().operation()
+                                    && declaration.support.supports_role_retry()
+                            })
+                    })
             })
             .filter_map(|id| {
                 self.cancellation_node(id)

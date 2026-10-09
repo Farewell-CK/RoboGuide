@@ -7,6 +7,8 @@ import copy
 import hashlib
 import importlib
 import json
+import logging
+import queue
 import re
 import sqlite3
 import sys
@@ -20,6 +22,7 @@ from typing import Any, cast
 from .bridge import TERMINAL_STATES, IntegrationError
 
 OPERATION_PATTERN = re.compile(r"coherent\.agent-(\d+)-primitive@v1\Z")
+LOG = logging.getLogger("roboguide.coherent_generic_eaios")
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,7 @@ class PrimitiveInvocation:
     objective: str
     parameters: dict[str, object]
     resource_ids: tuple[str, ...]
+    attempt_id: str | None = None
 
     @classmethod
     def from_request(cls, request: object) -> PrimitiveInvocation:
@@ -52,7 +56,7 @@ class PrimitiveInvocation:
             "parameters",
             "resource_ids",
         }
-        if set(raw) != expected:
+        if not expected.issubset(raw) or set(raw) - expected - {"attempt_id"}:
             raise IntegrationError("canonical invocation fields do not match the generic contract")
         operation = _string(raw["operation"], "operation")
         match = OPERATION_PATTERN.fullmatch(operation)
@@ -95,11 +99,14 @@ class PrimitiveInvocation:
             objective=_string(raw["objective"], "objective"),
             parameters=normalized,
             resource_ids=resources,
+            attempt_id=(
+                _string(raw["attempt_id"], "attempt_id") if "attempt_id" in raw else None
+            ),
         )
 
     def as_dict(self) -> dict[str, object]:
         """Return the stable JSON form used for idempotency and evidence."""
-        return {
+        result: dict[str, object] = {
             "mission_id": self.mission_id,
             "task_id": self.task_id,
             "group_id": self.group_id,
@@ -109,6 +116,9 @@ class PrimitiveInvocation:
             "parameters": dict(self.parameters),
             "resource_ids": list(self.resource_ids),
         }
+        if self.attempt_id is not None:
+            result["attempt_id"] = self.attempt_id
+        return result
 
     def request_key(self) -> str:
         """Return a stable idempotency digest for this exact invocation."""
@@ -322,6 +332,8 @@ class GenericBackendConfig:
     pefa_root: Path
     evidence_dir: Path
     task_data: dict[str, object]
+    pre_effect_hold_step: int | None = None
+    pre_effect_hold_seconds: float = 0.0
 
 
 class CoherentPrimitiveAdapter:
@@ -332,9 +344,24 @@ class CoherentPrimitiveAdapter:
         self.store = store
         self.config = config
         self.lock = threading.RLock()
+        self.jobs: queue.Queue[str | None] = queue.Queue()
+        self.stop = threading.Event()
+        self.scheduled_execution_ids: set[str] = set()
+        self.held_steps: set[int] = set()
+        self.worker = threading.Thread(
+            target=self._run_worker,
+            name="coherent-generic-eaios",
+            daemon=True,
+        )
+        self.worker.start()
 
     def close(self) -> None:
-        """Close the synchronous adapter; it owns no worker threads."""
+        """Stop the primitive worker after preserving every durable local fact."""
+        if not self.stop.is_set():
+            self.stop.set()
+            self.jobs.put(None)
+        if self.worker is not threading.current_thread():
+            self.worker.join(timeout=30.0)
 
     def health(self) -> dict[str, object]:
         """Report process health separately from operation readiness."""
@@ -345,22 +372,22 @@ class CoherentPrimitiveAdapter:
         return {"state": "READY", "detail": "current official primitive actions are available"}
 
     def accept(self, request: object) -> dict[str, object]:
-        """Execute a newly accepted primitive exactly once."""
+        """Durably accept a primitive without claiming that its effect has happened."""
         invocation = PrimitiveInvocation.from_request(request)
         with self.lock:
-            execution, created = self.store.create_or_get(invocation)
-            if created:
-                self._execute(cast(str, execution["execution_id"]), invocation)
-                updated = self.store.get(cast(str, execution["execution_id"]))
-                if updated is None:
-                    raise IntegrationError("primitive disappeared after execution")
-                execution = updated
+            execution, _ = self.store.create_or_get(invocation)
             return self._response(execution)
 
     def dispatch(self, execution_id: str) -> None:
-        """Honor the shared server contract after synchronous execution."""
-        if self.store.get(execution_id) is None:
-            raise IntegrationError(f"unknown primitive execution {execution_id!r}")
+        """Idempotently schedule one accepted primitive on the serialized graph worker."""
+        with self.lock:
+            execution = self.store.get(execution_id)
+            if execution is None:
+                raise IntegrationError(f"unknown primitive execution {execution_id!r}")
+            if execution["state"] != "ACCEPTED" or execution_id in self.scheduled_execution_ids:
+                return
+            self.scheduled_execution_ids.add(execution_id)
+            self.jobs.put(execution_id)
 
     def status(self, request: object) -> dict[str, object]:
         """Return one durable primitive execution state."""
@@ -371,11 +398,76 @@ class CoherentPrimitiveAdapter:
         return self._response(execution)
 
     def cancel(self, request: object) -> dict[str, object]:
-        """Reject cancellation because a primitive commits synchronously."""
-        response = self.status(request)
-        response["accepted"] = False
-        response["detail"] = "cancellation is unsupported for a committed graph primitive"
-        return response
+        """Confirm cancellation only while no COHERENT graph effect has started."""
+        execution_id = _execution_id(request)
+        with self.lock:
+            execution = self.store.get(execution_id)
+            if execution is None:
+                raise IntegrationError(f"unknown primitive execution {execution_id!r}")
+            accepted = execution["state"] == "ACCEPTED"
+            if accepted:
+                self.store.cancel_before_execution(
+                    execution_id,
+                    "cancelled before the COHERENT primitive produced any graph effect",
+                    {
+                        "primitive_executed": False,
+                        "stop_scope": "execution",
+                        "continuation": "repeat-after-stop",
+                    },
+                )
+                execution = self.store.get(execution_id)
+                if execution is None:
+                    raise IntegrationError("cancelled primitive disappeared from durable state")
+            response = self._response(execution)
+            response["accepted"] = accepted
+            if not accepted:
+                response["detail"] = (
+                    "cancellation cannot claim a stop after the primitive entered RUNNING or a "
+                    "terminal state"
+                )
+            return response
+
+    def _run_worker(self) -> None:
+        """Serialize graph effects and leave an accepted item cancellable before execution."""
+        while not self.stop.is_set():
+            execution_id = self.jobs.get()
+            if execution_id is None:
+                return
+            try:
+                execution = self.store.get(execution_id)
+                if execution is None or execution["state"] != "ACCEPTED":
+                    continue
+                self._hold_before_effect_if_configured(execution_id)
+                execution = self.store.get(execution_id)
+                if execution is None or execution["state"] != "ACCEPTED":
+                    continue
+                self._execute(execution_id, cast(PrimitiveInvocation, execution["invocation"]))
+            finally:
+                with self.lock:
+                    self.scheduled_execution_ids.discard(execution_id)
+
+    def _hold_before_effect_if_configured(self, execution_id: str) -> None:
+        """Open one deterministic pre-effect recovery window for a selected graph step."""
+        selected = self.config.pre_effect_hold_step
+        if selected is None or self.config.pre_effect_hold_seconds <= 0:
+            return
+        _, completed_steps = self.store.graph_state()
+        next_step = completed_steps + 1
+        with self.lock:
+            if next_step != selected or next_step in self.held_steps:
+                return
+            self.held_steps.add(next_step)
+        deadline = time.monotonic() + self.config.pre_effect_hold_seconds
+        LOG.info(
+            "holding local execution %s before graph step %s for at most %.3fs",
+            execution_id,
+            next_step,
+            self.config.pre_effect_hold_seconds,
+        )
+        while time.monotonic() < deadline and not self.stop.wait(0.05):
+            execution = self.store.get(execution_id)
+            if execution is None or execution["state"] != "ACCEPTED":
+                return
 
     def _execute(self, execution_id: str, invocation: PrimitiveInvocation) -> None:
         """Validate one current official action, apply it, and save raw evidence."""

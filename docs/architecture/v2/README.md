@@ -83,9 +83,11 @@ B1 中与实际适配器文件及冻结 workload identity 交叉校验。Habitat
 在该部署中，唯一一次 Habitat reset 发生在 endpoint ONLINE 和 Mission 提交之前；子进程
 冻结实际起点、候选 endpoint 对精确 mobility intent 的负向可行性证据，并将同一份
 observations 交给后续 Stage2。Control 在应用层将该部署证据与实时注册及资源事实取交集，
-仅收窄候选，不向 MI 提供 live Node Inventory，也不提前选择或绑定物理执行器。明确的
-跨楼层冲突可在匹配前排除；未知仍保留，原本的本地执行检查继续生效，正向结果不代表
-路线可达。详见 ADR-0044、ADR-0046 与 ADR-0047。
+仅收窄候选，不向 MI 提供 live Node Inventory，也不提前选择或绑定物理执行器。跨楼层
+位置本身不证明距离型官方目标不可满足：例如 `any_at` 允许机器人在相邻楼层的容差内
+满足目标。当前精确实体目的地的部署负向筛选，对不在官方目标中的目的地保留原有
+楼层规则；距离型目标保留 `unknown`，由实际导航和 Habitat 官方谓词裁决。本地执行检查
+使用相同规则，正向结果不代表路线可达。详见 ADR-0044、ADR-0046、ADR-0047 与 ADR-0050。
 
 Mission semantic contract 的长期模型将 Capability、Operation 和 ExecutionIntent 分开：
 Capability Contract 是可匹配的 provider-independent 能力语言，Role 可以要求多个 capability
@@ -102,6 +104,14 @@ Mission Plan Review 是 Mission Intelligence 的独立语义检查，不是 Plan
 持久化每次 review evidence，并在确定性校验后执行有界 Repair。需要新用户事实的问题回到
 `NeedsClarification`，不能由 Repairer 猜测；只有通过确定性校验与 Review 的草案才能进入审批
 或提交。Dialogue 与内部 Draft/Review/Repair trace 是不同 evidence。详见 ADR-0032。
+
+Request Engine 使用 digest-bound typed recovery evidence 区分未提交草案和已发出的
+Controller submission。POST 前原子保存 submission fence；缺失回执、进程中断或不明
+响应只能只读查询原 Mission，不重新 POST，不用 Dialogue 覆盖可能已接纳的计划。
+明确拒绝后的显式 retry 重交同一原稿。新版 Controller `/admission` 在同一接纳事务中
+保存完整 HTTP body 摘要、Mission/Group 和接纳时间；只在与原发送指纹及当前原稿一致时
+恢复 Accepted。旧 status 查询不足以证明接纳；原 POST 错误、immutable review history
+和 B1 的注册/验证要求保留。见 ADR-0054、ADR-0055。
 
 Mission Actor、ContextRole 和 TaskRole 表达三个不同层级：Actor 是 Mission 范围的逻辑参与者，
 ContextRole 将 Actor 放入持续协作上下文，TaskRole 只引用 ContextRole 并声明该 Task 的执行槽。
@@ -150,7 +160,15 @@ Planner、Reviewer、Repairer 消费同一不可变 policy 和 digest，不能�
 该 policy 只规定已接收 verdict 在 satisfaction 判定时允许的年龄，不证明物理真值、source
 采样新鲜度或 verifier 当前可用性。Verification operation 的执行完成能否被接受，取决于其
 明确承诺与 requested effect，而不是 `verify` 名称；独立 positive-verdict 要求仍保留。
-MissionPlan shape、Runtime/Control authority 和 generic verifier ingress 均不改变，见 ADR-0039。
+MissionPlan shape、Runtime/Control authority 均不改变。当前可选的 deployment-owned terminal
+verifier ingress 只接纳与启动时冻结的 source、精确 predicate、当前物理 attempt 相符的证据；
+缺失或无效证据不会被 local Completed 替代，见 ADR-0039 与 ADR-0048。
+部署可显式要求环境权威联合终态由独立 verifier 确认。该策略仅在冻结的权威目标存在时
+生效：MI 草案校验要求每个 Task DAG 末端引用同一完整目标的精确 verifier contract、predicate
+与 receive-age bound；前置 Task 仍可在其自身操作契约下使用 `execution-report`。没有此策略时，
+`execution-report` 仅接受 Local EAIOS 已承诺的操作完成语义，不能因 Task 描述声称联合
+物理终态就被解释为独立真值。策略不凭谓词数推断 Actor 数，不修改 MissionPlan 或 Control
+authority；目标语法不受当前 verifier 支持时暴露部署能力缺口，不能弱化目标。见 ADR-0049。
 
 ## 3. 核心抽象
 
@@ -472,7 +490,8 @@ completion envelope 等待 Controller composition 使用既有 authority 接受�
 Controller dispatch 采用 durable intent/outbox：Runtime 保存 logical slot 与每次 physical
 attempt，应用先提交 checkpoint 再路由命令。Node Protocol v0.4 的 identified command receipt
 只证明 Node journal 已持久接受 Execute/Cancel；生命周期仍由 execution facts 证明。restart 或
-route loss 后非终态 attempt 进入 `Unknown` 与既有 Control recovery pipeline，绝不依据消息发送
+route loss 后非终态 attempt 进入 `Unknown` 对账 fence；显式替代须等待 ADR-0057 的真实停止。
+绝不依据消息发送
 结果盲目重放物理动作。Mission cancellation 先进入 durable `Cancelling` 并保留 Group ownership，
 直到各 attempt 有 terminal evidence 才释放。完整边界见
 [`ADR-0028`](../../decisions/0028-durable-command-recovery-and-attempts.md)。
@@ -493,9 +512,180 @@ Controller 与 Node，避免拓扑证据被
 静默丢弃。详见
 [`ADR-0045`](../../decisions/0045-shared-world-execution-session.md)。
 
+单 Actor 执行段中，只有 Control 已分配的 endpoint 调用原始 EMOS `CrabAgent` 模型并受
+canonical action guard 约束。共用 Habitat world 的其他 endpoint 仍由原始
+`MultiLLMPolicy`/`HierarchicalPolicy` 推进，但以部署层临时的无模型 idle policy 选择
+EMOS 已有的 `WaitSkillPolicy`；执行段结束后恢复原始 agent 实例。它不创建 Task、修改
+模型所选动作、下发导航命令或改写官方 PDDL 判定。双 Actor 双 assignment 路径仍各自调用
+原始 Stage2；idle policy 的激活和调用次数必须独立归档。该策略与原生 EMOS 允许未分配
+agent 自行调用模型选择 `wait` 的路径不同，比较实验应显式记录这一 arm 差异。
+
+Controlled Stage2 还通过 Local EAIOS 的执行期反馈桥接读取原始技能的实际终止结果，
+将模型客户端提前生成的 `Success` receipt 替换为精确 tool call/agent/invocation 绑定的
+完成、预算耗尽、策略中断或未知观测。原始完成方法只调用一次，已有 post-step 本地
+terminal measure 可以更新此前的 policy-input 观测；它不新增动作、仿真 step、模型调用、
+控制预算或官方谓词查询。模型下一次决策使用该反馈，所选动作仍须经过独立 Contract
+Guard。此环只属于 Local How，不能证明 Task/Mission satisfaction、改变 Control ownership
+或触发 MI 重规划；与原生 EMOS 的 synthetic receipt 路径不同，须在 arm 配置与证据中
+披露。详见 [`ADR-0069`](../../decisions/0069-observed-local-skill-feedback.md)。
+
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、
 Hardware Control 和 Safety。
+
+对于部署明示的距离型导航目标，Local EAIOS 可以在不改变 canonical destination、
+Stage2 所选实体工具调用和官方目标的前提下，将该实体解析为目标容差内、当前机器人
+导航网格上有路径的物理导航点。此解析只属于该 deployment 的 Local How，必须记录
+所用官方目标谓词、阈值、候选点、路径查询和适配器版本；无可证路径时明确失败，不能
+把到达局部导航点或静态路径当作官方谓词成立。未经明示的目标类型保持原有执行方式。
+部署启用该行为后与原生 EMOS 的 Local How 不同，对照实验必须记录这一差异。详见
+[`ADR-0051`](../../decisions/0051-goal-region-local-navigation.md)。
+
+当前解析器在原始点和投影点之外，有界检查 NavMesh 顶点、三角形内部最近点及重心，
+避免只检查顶点而遗漏内部可达落点。动作证据 v0.5 记录几何工作、路径预算与截断状态；
+所有候选仍须通过原有三维目标及停止范围检查。有限搜索未命中不证明物理任务不可能，
+也不改变 Control 的承诺、MI 的任务语义或官方成功判定。
+
+部署还可独立启用默认关闭的 reset route-support 观测。它在同一次实际 reset 后，用
+复制后的导航参数与隔离的 PathFinder 查询原始点和投影中心点，记录 `supported`、
+`not_found` 或 `unavailable`，并绑定 workload、起点、Local How 与实际模块/原生库摘要。
+该预检不运行顶点扫描，不提前填充原始 action cache，不调用随机采样或物理 step。
+`not_found` 只表示这两个候选未提供静态路径证据，不能作为 Actor 后续 Task 的永久
+Node 排除。观测本身用于归档与独立诊断，不进入 MI 输入或 Control 硬候选规则。
+B1 明确启用时，归档缺失/身份不一致作为 harness 失败在提交前暴露；正常的未知证据
+不改变 Formal admission。详见
+[`ADR-0052`](../../decisions/0052-reset-route-support-observations.md)。
+
+独立的默认关闭初次调度 consumer（[ADR-0053](../../decisions/0053-initial-candidate-preferences.md)）
+可将正向静态路径证据投影为 canonical operation/parameters 对应的候选成本。
+Controller 在当前双 endpoint 容量约束下比较初次并发任务的候选组合，Control/Scheduler
+只调整已有 CandidateSet 的搜索顺序，不扩大候选、不创建 binding 或资源承诺。
+未知和有限搜索未找到仍可参与调度；资源不足保留现有可恢复 deferral。
+偏好有 receive-time 时限，首次成功 Bind 后失效，恢复不重新激活；MI、任务语义、
+Local How、官方 benchmark authority 和 Formal admission 均保持各自权威。
+
+独立的默认关闭几何扩展（[ADR-0062](../../decisions/0062-scoped-static-navigation-region-evidence.md)）
+可在同一隔离网格上检查完整起点连通区域与目标容差的三角面关系，记录静态相交、
+静态不相交或未知。它不增加路径查询和物理 step；预算耗尽、参考点旋转或边界不确定
+不能伪装成完整负证据。B1 检查 source/profile/identity 与新版本归档。初次 consumer
+可将其转成中性的 exact-operation support grade，优先减少静态不相交组合，再比较
+正向路径覆盖和成本；只改变现有候选搜索顺序，包括静态不相交在内的候选仍可使用。
+完整静态网格观测没有动态物理不可达、永久 Actor 排除或全局不可解的权威。
+
+独立、默认关闭的初始支持度反馈
+（[ADR-0066](../../decisions/0066-initial-operation-support-feedback.md)）
+在正常 MI 规划、审查与批准之后、唯一 Controller submit 之前运行。Controller 查询
+使用当前 Control Matching 的私有副本和不落盘的 query sink，只投影精确逻辑 slot、
+支持分类、源摘要及原始 receive-time 有效期，不输出 Node/Resource 标识。仅限新
+Controller 首个 admission 前的初始世界，后续 Task、restore 和 recovery 不重用起点。
+全部部署组合均含完整 scoped disjoint 才返回 blocked；有限 miss 与 unknown 保留可能性。
+
+Request Engine 在显式配置要求下，将 blocked/unavailable 保存为部署就绪 hold。
+默认零次模型恢复时，显式 retry 只重新检查同一计划。assessment v0.2 还投影当次查询
+真实 Control eligibility 的首个排除原因计数，区分健康、状态过期、lease、operation、
+Role contract 与部署候选条件；不输出 Node/Resource 标识，不从之后的健康快照猜原因。
+query 中断不会成为模糊提交。not_blocked 也不是 route 或资源承诺。
+
+独立、默认关闭的部署重检 agent（[ADR-0067](../../decisions/0067-bounded-mi-deployment-reconsideration.md)）
+复用 Responses Repairer 的新 request mode，基于相同冻结任务输入和精确计划反馈提议
+重查、完整修订草案或保持等待。原 Request 的次数/时限在调用前持久化；相同反馈、
+过期或变更的来源、重启、错误输出与提交不明均不能暗中增加重试预算。修订必须重新通过
+确定性校验、Reviewer、必要风险批准和 Control 预检；真实协作与完整目标仍保留。
+模型提议不选择执行器，也不执行物理恢复。正式提交后只走已有接纳对账与执行权威。
+新 observations v0.4 保存独立 session，公共 Request v0.4 和 MissionPlan 不变。
+Formal population 与官方 benchmark authority 保持独立。
+
+```mermaid
+flowchart LR
+    MI[生产 MI 规划与审查及必要批准] --> Q[可选 Controller 只读预检]
+    E[冻结 reset 来源与当前 Control eligibility] --> Q
+    Q -->|blocked / unavailable| H[Request durable hold]
+    H -->|显式 retry 同一计划| Q
+    H -->|单独启用并持久化预算| R[MI Repairer 部署重检 agent]
+    R -->|recheck 同一计划| Q
+    R -->|revise_plan 完整草案| V[完整校验与新 Reviewer及必要批准]
+    V --> Q
+    R -->|wait 或预算来源不足| H
+    Q -->|not_blocked| S[唯一 Mission submit]
+    S --> C[Control Match Schedule Commit Bind]
+    C --> X[Runtime Node Local EAIOS]
+    X --> B[独立官方 benchmark 判定]
+```
+
+这是已实现且默认关闭的路径图；离线测试不证明模型未来遵循契约、物理缺口可修复或
+真实 Episode3 已成功。提交不明只查询原接纳证据，不返回模型改写或另一次 POST。
+
+默认关闭的 step-aware Local How（[ADR-0063](../../decisions/0063-step-aware-local-navmesh-resolution.md)）
+让执行动作与 reset observer 共用复制后的导航配置。只细化垂直体素，保留已声明的正台阶
+高度，而不扩大机器人能力。它属于本地执行策略，会影响实际路线；不是只读诊断，也
+不是 Control 的路线证明。Local How v0.4 与实际动作网格证据明确记录启用状态，官方
+PDDL 仍独立裁决物理终态。
+
+空间到达 Local How（[ADR-0064](../../decisions/0064-spatial-route-arrival-local-navigation.md)）
+是另一个明确声明、默认关闭的本地控制分支：三维接近选定导航点前继续跟随路径，
+之后才朝向原实体并报告本地完成。它保留原阈值、速度和执行预算，单次原 base action
+下发、无额外模型或 Gym step；找不到路径不伪造直线。Local How v0.6 与 action evidence
+v0.4 明示与原生控制的区别，未改变官方谓词、Control 资源权威或 Orchestration 满足边界。
+
+启用该 profile 时，Local EAIOS 在联合 Gym step 前按厂商实际动作顺序准备导航目标、
+路径和控制指令（[ADR-0065](../../decisions/0065-joint-navigation-preparation.md)）。全部
+成功才进入一次原 step；预期的有界路径失败成为带 endpoint 和当前 attempt 的本地失败，
+不会让同一联合 step 的其他导航动作先移动。既有 Completed 事实保留。第一次物理 step
+前失败的官方执行结果保持 unavailable，reset 真值仅是诊断。准备初始化执行缓存，
+不是只读观察；它不新增 Control 路线权威，也不保证任意物理异常的原子回滚。
+
+另一个默认关闭的目标感知到达 profile
+（[ADR-0068](../../decisions/0068-live-reference-goal-region-arrival.md)）允许选择有真实路径的
+目标区域内落点，保留原停止范围估计作为证据。该控制分支必须读取机器人当前实际参考
+位置，只有其完整三维距离进入既有局部余量且原导航点/朝向条件均满足，才报告本地完成；
+否则继续沿路线接近。它不增加动作、模型或 Gym step，不改变原速度及技能/episode 预算。
+Local How v0.7 与动作证据 v0.6 明示该执行臂差异；reset observer 仍用明确披露的保守停止
+范围探测，未命中不排除 Node。官方联合 PDDL、Control 和 Orchestration 的权威保持不变。
+
+```text
+one Habitat reset -> original prepared observations -> assigned Stage2 execution
+                                                        |
+                                           active agent NavMesh
+                                      (original / opt-in step-aware copy)
+                                                        |
+                           original Oracle / opt-in spatial or live-goal arrival
+                                                        |
+                                   opt-in selected joint navigation preparation
+                                      (failure -> attributed local outcome)
+                                                        |
+                                             one original Gym step
+                                                        |---- optional v0.6 motion taps
+                                                        |     (original request / filter return /
+                                                        |      actual before-after base positions)
+                                                        |     -> bounded diagnostic archive only
+                                                        |
+                                               official PDDL outcome
+        |
+        +-> isolated bounded route queries -> reset-route-support.json
+                     ^                            ^
+                     |                            |
+             copied agent NavMesh -> optional bounded complete-component geometry
+                                                  |
+                                  B1 identity/source/geometry check
+                                                  |
+                                      diagnostic archive only
+                                                  |
+                               optional neutral cost/support projection
+                                                  |
+                              initial eligible-candidate ordering
+                              (first Bind / expiry / restore fence)
+
+existing floor matrix -> Control Match -> Scheduler -> Proposal -> Commit -> Bind
+                                             ^
+                                  optional initial search order
+```
+
+上述 motion taps 默认关闭，只包装已有的本地 step_filter/update_base 调用。
+原方法仍执行一次，观测不增加 PathFinder、碰撞、Gym 或模型调用。真实请求、过滤返回、
+更新前后位姿及失败step的pending记录独立保存；返回端点差异仅是诊断比较，不证明碰撞、
+到达或官方成功。数据绑定已有canonical Task/Role/attempt，顺序复用时不继承旧Task记录；
+读取到的action/mesh能力数值只说明部署导航模型，不能替代真实硬件能力认证。
+详见[本地导航证据指导](../../development/local-navigation-evidence.md)。
 
 ## 7. 对账与恢复
 
@@ -512,6 +702,90 @@ Detect → Reconcile → Adapt
 | L2 | Execution Group | 替换成员、重新绑定或调整 Group |
 | L3 | Scheduler / Coordination | 重新 Propose、Coordinate 和 Commit |
 | L4 | Mission Intelligence | Task Graph 已无法满足 Mission 时重新规划 |
+
+该分级是长期职责模型。当前实现的下发前流程见
+[ADR-0054](../../decisions/0054-mission-recovery-boundary.md)：类型分类、草案有界修复、
+提交 fence 和权威接纳核对（ADR-0055）。当前 operation-progress v0.1（ADR-0056）通过
+注册 State export 记录操作量度和源身份，使用原 receive time/TTL，区分 Working、Waiting、
+Blocked、Unknown。仅明确给出的量度与 stall interval 参与 Stalled 判断，观测不改变执行。
+Habitat 可选 observer（ADR-0058）把既定目标的几何改善量投影为该通用 State payload，
+保留原始技能、producer freshness 与准确 attempt identity；wait 没有工作 counter。
+
+显式执行恢复（ADR-0057）记录当前 attempt/owner、重复操作授权及持久化时间/次数预算。
+真实 Cancelled 终态到达后才允许 Control partial release，随后复用 Match -> Schedule ->
+Propose -> Commit -> Rebind。确认停止的原 owner 可以作为独立 opt-in policy 参与匹配，
+以保留 Actor 物理绑定；普通替代 Matching 仍排除原节点。新 attempt 在原节点上重试也
+获得新 identity，旧 release 不会再执行一次。Stop timeout 保留旧资源，候选不足保持
+pending，已 Commit 但未 Rebind 的替代在预算过期时由 Control Abort。未受影响任务不释放。
+
+部署停止/continuation 契约（[ADR-0059](../../decisions/0059-deployment-stop-continuation-contract.md)）
+沿用 operation-owner LocalSystem 注册 metadata，在 dispatch 冻结。独立 Role 恢复必须
+同时声明 isolated execution stop 与 context-preserving repeat，当前注册仍相同；否则在
+发出 recovery Cancel 之前拒绝。replacement Matching/Commit/stateful Rebind 与 Execute
+outbox delivery 再检查能力。默认 Habitat shared-world 声明联合停止和不支持中断续跑；
+其正常顺序 Task 能力独立。部署支持不是停止证明或重复授权，不进入 MI 任务语义。
+
+部署侧 retained-world continuation 依 [ADR-0060](../../decisions/0060-retained-shared-world-continuation.md)
+已实现本地路径：显式 opt-in 后，联合 Cancelled 可保留原世界并等待同一 session、原 intent 的新
+attempt；已 Completed 端不重执行，步数不重置，重启不重建旧世界。Controller Group
+recovery 依 ADR-0061 独立提供；单 Role 恢复仍拒绝联合停止。该本地机制不释放资源、不创建 attempt，
+不修改 MI、任务语义或官方成功判断。
+
+```mermaid
+flowchart LR
+  L[Local EAIOS operation-specific progress] --> S[Registered State export]
+  S --> O[Runtime readonly observation]
+  D[Exact operation-owner deployment declaration] --> G{Frozen/current support matches?}
+  U[Explicit bounded recovery command] --> G
+  G -->|isolated stop + context-preserving repeat| C[Durable Cancel]
+  G -->|missing / coupled / changed / unsupported| B[Reject Role recovery before Cancel]
+  C --> P[Current owner reports Cancelled]
+  P --> R[Control partial release]
+  R --> M[Match / Schedule / Propose / Commit / Rebind]
+  M --> V[Recheck replacement support before Execute delivery]
+  V --> N[New physical attempt]
+  X[Unknown / Cancel receipt] --> F[Retain ownership and reconcile]
+  subgraph H[Local shared-world continuation - default off]
+    HS[Actual joint Cancelled / retained Completed] --> HG{Same world / intent / fresh attempts / budget?}
+    HG -->|all stopped slots assigned| HR[Original Stage2 in same Habitat world]
+    HG -->|changed / expired / restart / missing slot| HF[Close or reject without reset]
+    HR --> HE[Retain segment history and official final metrics]
+  end
+```
+
+自动进度触发取消、自动重写计划与执行期 MI replacement revision 尚未实现。
+
+整组原绑定恢复已依 [ADR-0061](../../decisions/0061-confirmed-stop-group-continuation.md)
+实现并离线验证：显式冻结全部 current attempts 与重复授权，取得完整停止证明后由 Control 重新
+验证原资源承诺，再准备完整的新 attempts。暂停保留 ownership；不能逐 Role 释放、
+迁移 endpoint 或续时间/步数预算。完整新 outbox checkpoint Commit 后重新读取时钟，
+再次核对原 owner/注册、当前完整集合及资源。默认仍关闭；已有单 Actor 原世界物理续跑
+验证与实际 Controller/Node 进程验收，多 Actor 的物理联合停机与续跑仍未验证。
+部署 opt-in 在注册前冻结运行目录 Node 配置摘要，并核对两个 Adapter 的固定只读能力声明；
+此检查不发送恢复命令，也不改变资源、任务或官方判定。
+现有单 Role 恢复与本地续跑边界保持独立。
+
+```mermaid
+flowchart LR
+  U[Explicit complete-set repeat authorization] --> R[Runtime frozen members and durable budgets]
+  D[Frozen and current exact deployment support] --> R
+  R --> C[Durable whole-set Cancel outbox]
+  C --> S{Actual stop facts for every affected attempt?}
+  S -->|missing / Unknown / expired| F[Retain original commitments and expose fence]
+  S -->|Cancelled or natural Completed| P[Control retained-binding Proposal]
+  P --> K[Control rechecks current eligibility, physical identity and resource ownership]
+  K --> A[Atomic new attempts only for Cancelled slots]
+  A --> Q[Persist checkpoint and events]
+  Q --> V[Fresh clock and unchanged complete-set check]
+  V --> E[New Execute outbox to original endpoints]
+  E --> L[Local EAIOS same-world admission and remaining budget]
+  X[Already Completed peer] --> W[Preserved outcome and passive original wait]
+  W --> L
+  M[Ordinary Mission Cancel] --> B[Abort continuation and await physical stopping]
+```
+
+`Unknown`、Cancel receipt 或心跳都不是物理停止证明。没有配置 progress observer 的部署
+返回 Unknown；operation-specific 误报率及真实硬件停止保证须另行受控验证。
 
 ## 8. 已冻结不变量
 

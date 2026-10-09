@@ -8,11 +8,16 @@ import threading
 from dataclasses import replace
 from pathlib import Path
 
+from mission.deployment_recovery import DeploymentRecoverySession
 from mission.grounding_context import GroundingContextSnapshot
+from mission.recovery import RequestRecoveryEvidence
 from mission.rejected_draft import RejectedDraftEvidence
 from mission.request_record import MissionRequestError, MissionRequestRecord, _json_object
 from mission.submission_evidence import (
+    COMPATIBLE_OBSERVATIONS_SCHEMAS,
+    DEPLOYMENT_OBSERVATIONS_SCHEMA,
     OBSERVATIONS_SCHEMA,
+    ControllerAdmissionEvidence,
     ControllerSubmissionEvidence,
     canonical_plan_digest,
 )
@@ -28,8 +33,10 @@ def _restore_record(document: object) -> MissionRequestRecord:
     request = _json_object(value["request"], "request")
     record = MissionRequestRecord.from_json(request)
     observations = _json_object(value["observations"], "observations")
+    schema = observations.get("schema_version")
     if (
-        observations.get("schema_version") != OBSERVATIONS_SCHEMA
+        not isinstance(schema, str)
+        or schema not in COMPATIBLE_OBSERVATIONS_SCHEMAS
         or observations.get("request_id") != record.request_id
         or observations.get("mission_id") != record.mission_id
         or observations.get("request_record_digest") != canonical_plan_digest(request)
@@ -37,6 +44,31 @@ def _restore_record(document: object) -> MissionRequestRecord:
         raise MissionRequestError("request observations are detached from durable request")
     submission = observations.get("submission_evidence")
     failure = observations.get("failure_evidence")
+    recovery = observations.get("recovery_evidence")
+    admission = observations.get("admission_evidence")
+    if (
+        observations.get("schema_version") != "roboguide.mission-request-observations/v0.1"
+        and "recovery_evidence" not in observations
+    ):
+        raise MissionRequestError("v0.2 observations must declare recovery evidence availability")
+    if (
+        schema in {OBSERVATIONS_SCHEMA, DEPLOYMENT_OBSERVATIONS_SCHEMA}
+        and "admission_evidence" not in observations
+    ):
+        raise MissionRequestError("v0.3 observations must declare admission evidence availability")
+    if (schema == DEPLOYMENT_OBSERVATIONS_SCHEMA) != ("deployment_recovery" in observations):
+        raise MissionRequestError("deployment recovery observations must declare their schema")
+    try:
+        recovery_evidence = (
+            RequestRecoveryEvidence.from_json(recovery) if recovery is not None else None
+        )
+        deployment_recovery = (
+            DeploymentRecoverySession.from_json(observations["deployment_recovery"])
+            if schema == DEPLOYMENT_OBSERVATIONS_SCHEMA
+            else None
+        )
+    except (ValueError, TypeError, KeyError) as error:
+        raise MissionRequestError("invalid durable recovery evidence") from error
     drafts_value = observations.get("rejected_drafts", [])
     if not isinstance(drafts_value, list):
         raise MissionRequestError("rejected draft evidence must be a list")
@@ -58,6 +90,11 @@ def _restore_record(document: object) -> MissionRequestRecord:
         ),
         failure_evidence=(_json_object(failure, "failure evidence") if failure else None),
         rejected_drafts=rejected_drafts,
+        recovery_evidence=recovery_evidence,
+        admission_evidence=ControllerAdmissionEvidence.from_json(admission)
+        if admission is not None
+        else None,
+        deployment_recovery=deployment_recovery,
     )
 
 
@@ -97,6 +134,16 @@ class MissionRequestStore:
                 ON mission_grounding_contexts(request_id, captured_at_ms, context_digest)
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mission_request_history (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT NOT NULL,
+                    document_digest TEXT NOT NULL UNIQUE,
+                    document_json TEXT NOT NULL
+                )
+                """
+            )
 
     def _connect(self) -> sqlite3.Connection:
         """Open one short-lived SQLite connection with bounded lock waiting."""
@@ -115,6 +162,25 @@ class MissionRequestStore:
             separators=(",", ":"),
         )
         with self._lock, self._connect() as connection:
+            prior = connection.execute(
+                "SELECT document_json FROM mission_requests WHERE request_id = ?",
+                (record.request_id,),
+            ).fetchone()
+            if prior is not None and str(prior[0]) != document:
+                previous = json.loads(str(prior[0]))
+                if previous.get("request", previous)["lifecycle"] in {
+                    "Failed",
+                    "Blocked",
+                    "NeedsClarification",
+                    "AwaitingApproval",
+                }:
+                    # Preserve the complete prior review/failure/POST boundary
+                    # in the same transaction before an explicit command replaces it.
+                    connection.execute(
+                        """INSERT OR IGNORE INTO mission_request_history
+                        (request_id, document_digest, document_json) VALUES (?, ?, ?)""",
+                        (record.request_id, canonical_plan_digest(previous), str(prior[0])),
+                    )
             if record.grounding_context is not None:
                 self._save_grounding_context(connection, record.grounding_context)
             connection.execute(
@@ -199,5 +265,15 @@ class MissionRequestStore:
         with self._lock, self._connect() as connection:
             rows = connection.execute(
                 "SELECT document_json FROM mission_requests ORDER BY request_id"
+            ).fetchall()
+        return tuple(_restore_record(json.loads(str(row[0]))) for row in rows)
+
+    def history(self, request_id: str) -> tuple[MissionRequestRecord, ...]:
+        """Read immutable replaced command-boundary records in durable insertion order."""
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """SELECT document_json FROM mission_request_history
+                WHERE request_id = ? ORDER BY sequence""",
+                (request_id,),
             ).fetchall()
         return tuple(_restore_record(json.loads(str(row[0]))) for row in rows)

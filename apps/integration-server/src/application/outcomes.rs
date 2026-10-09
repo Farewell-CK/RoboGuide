@@ -29,6 +29,7 @@ pub(crate) fn apply_runtime_outcomes(
         let ControllerState {
             bridge,
             orchestrator,
+            ..
         } = controller;
         match outcome.result() {
             ObservedTaskExecutionResult::ExecutionCompleted => {
@@ -97,6 +98,7 @@ pub(crate) fn apply_pending_cancellations(
         let ControllerState {
             bridge,
             orchestrator,
+            ..
         } = controller;
         orchestrator.finalize_cancel(
             &mission_id,

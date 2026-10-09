@@ -8,6 +8,30 @@ use domain::{
 };
 use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter};
 
+/// The first failed Control eligibility check, without exposing an executor identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidateExclusionReason {
+    /// There is no registration in the supplied State view.
+    RegistrationMissing,
+    /// Reported health does not permit scheduling.
+    HealthUnschedulable,
+    /// Reported health has expired at the decision's receive-relative time.
+    StatusStale,
+    /// Controller-observed liveness is not reachable.
+    LivenessUnreachable,
+    /// There is no current Control lease.
+    LeaseInactive,
+    /// Capability readiness, attributes or declared resource capacity do not satisfy the Role.
+    RoleContractUnavailable,
+    /// The exact canonical operation is not declared.
+    OperationUnsupported,
+    /// A deployment-owned Actor constraint excludes this candidate.
+    DeploymentRestriction,
+    /// This first-use candidate cannot meet the Actor's other capability requirements.
+    ActorContractUnavailable,
+}
+
 impl ControlPlane {
     /// Registers one node with a generated lease and records its visibility.
     pub fn register_node<S: SharedNodeStateReader + SharedNodeStateWriter, E: EventSink>(
@@ -233,20 +257,42 @@ impl ControlPlane {
         role: &RoleRequirement,
         timestamp: TimestampMs,
     ) -> bool {
-        state.node(node_id).is_some_and(|snapshot| {
-            snapshot.reported_status().health().is_schedulable()
-                && is_fresh_at(
-                    snapshot.reported_status_received_at(),
-                    timestamp,
-                    self.max_status_age_ms,
-                )
-                && snapshot.liveness().liveness() == NodeLiveness::Reachable
-                && self
-                    .leases
-                    .get(node_id)
-                    .is_some_and(|lease| lease.is_active_at(timestamp))
-                && snapshot.registration().supports_role(role)
-        })
+        self.node_role_exclusion(state, node_id, role, timestamp)
+            .is_none()
+    }
+
+    /// Explains the same predicate used by Matching, Commit and reconciliation, without mutation.
+    pub(crate) fn node_role_exclusion<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        node_id: &NodeId,
+        role: &RoleRequirement,
+        timestamp: TimestampMs,
+    ) -> Option<CandidateExclusionReason> {
+        let Some(snapshot) = state.node(node_id) else {
+            return Some(CandidateExclusionReason::RegistrationMissing);
+        };
+        if !snapshot.reported_status().health().is_schedulable() {
+            Some(CandidateExclusionReason::HealthUnschedulable)
+        } else if !is_fresh_at(
+            snapshot.reported_status_received_at(),
+            timestamp,
+            self.max_status_age_ms,
+        ) {
+            Some(CandidateExclusionReason::StatusStale)
+        } else if snapshot.liveness().liveness() != NodeLiveness::Reachable {
+            Some(CandidateExclusionReason::LivenessUnreachable)
+        } else if !self
+            .leases
+            .get(node_id)
+            .is_some_and(|lease| lease.is_active_at(timestamp))
+        {
+            Some(CandidateExclusionReason::LeaseInactive)
+        } else if !snapshot.registration().supports_role(role) {
+            Some(CandidateExclusionReason::RoleContractUnavailable)
+        } else {
+            None
+        }
     }
 
     /// Applies the shared role policy plus exact canonical operation support.

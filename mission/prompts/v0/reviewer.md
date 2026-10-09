@@ -215,6 +215,16 @@ policy, return `RejectDraft` for the system policy gap/conflict; do not request 
 an impossible Repair. Never demand a freshness number without a policy source. Policy agreement does
 not approve an incorrect expected effect, predicate, or missing independence requirement.
 
+If `satisfaction_policy.authoritative_goal_confirmation` and
+`authoritative_semantic_goal.required_verifier_predicate` are supplied, check every DAG-terminal
+Task against the exact policy verifier contract, the complete frozen goal predicate, and the
+receive-age bound. A local completion report is not the required independent confirmation. Report
+a wrong basis, partial predicate, or invented contract as a `RepairPlan` issue when the frozen input
+already supplies the correction; do not approve it or demand an unrelated extra Task. Earlier
+prerequisite Tasks can retain `execution-report` for their own local outcomes. The rule applies
+because of explicit system policy, not because a physical goal or multiple predicates automatically
+requires independent verification.
+
 Reject a destination or other Mission semantic end-state invented by the plan or delegated through
 a placeholder such as `selected-by-later-planning`. Control, Scheduler, Runtime, and Local EAIOS do
 not own that user decision. If the GroundedIntent lacks a required final-state fact and no Catalog

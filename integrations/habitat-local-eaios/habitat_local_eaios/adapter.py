@@ -6,8 +6,11 @@ import logging
 import queue
 import threading
 from collections.abc import Callable
+from pathlib import Path
 
 from .backend import MobilityBackend
+from .execution_progress import read_execution_progress
+from .execution_recovery import execution_recovery_profile
 from .model import SUPPORTED_OPERATION, CanonicalMobilityInvocation, IntegrationError
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 
@@ -22,11 +25,16 @@ class HabitatLocalAdapter:
         store: ExecutionStore,
         backend_factory: Callable[[], MobilityBackend],
         initialization_timeout_s: float,
+        *,
+        progress_directory: Path | None = None,
+        agent_id: int = 0,
     ) -> None:
         """Start the simulator-owning worker and wait for truthful readiness evidence."""
         if initialization_timeout_s <= 0:
             raise IntegrationError("initialization_timeout_s must be positive")
         self._store = store
+        self._progress_directory = progress_directory
+        self._agent_id = agent_id
         self._backend_factory = backend_factory
         self._jobs: queue.Queue[str | None] = queue.Queue()
         self._stop = threading.Event()
@@ -132,6 +140,16 @@ class HabitatLocalAdapter:
         response = self._execution_response(execution)
         response["accepted"] = before["state"] not in TERMINAL_STATES
         return response
+
+    def progress(self) -> dict[str, object]:
+        """Observe one active exact attempt without calling or controlling the backend."""
+        return read_execution_progress(
+            self._progress_directory, self._agent_id, self._store.active_execution()
+        )
+
+    def recovery_support(self) -> dict[str, object]:
+        """Expose actual stop scope; a reset-on-new-invocation backend cannot resume its world."""
+        return execution_recovery_profile(shared_world=False)
 
     def _run_worker(self) -> None:
         """Own all Habitat initialization, stepping, cancellation, and shutdown on one thread."""

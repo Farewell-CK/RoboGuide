@@ -103,22 +103,69 @@ def mission_executions(rows: list[dict[str, Any]], mission_id: str) -> list[dict
 
 
 def planner_feedback(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Bound replanning context to structured facts instead of concatenated log text."""
-    fields = (
-        "segment",
-        "mission_id",
-        "steps_before",
-        "steps_after",
-        "controller_status",
-        "planned_actions",
-        "goal",
-        "execution_outcomes",
-        "controller_execution_attempts",
-        "controller_attempt_read_error",
-        "recovery_decision",
-        "failure",
-    )
-    return [{key: row[key] for key in fields if key in row} for row in records]
+    """Return bounded semantic feedback without internal identities or evidence paths."""
+    feedback: list[dict[str, Any]] = []
+    for row in records[-3:]:
+        compact: dict[str, Any] = {
+            key: row[key]
+            for key in (
+                "segment",
+                "steps_before",
+                "steps_after",
+                "controller_status",
+                "goal",
+                "failure",
+            )
+            if key in row
+        }
+        planned = row.get("planned_actions")
+        if isinstance(planned, list):
+            compact["recent_planned_actions"] = planned[-8:]
+        outcomes = row.get("execution_outcomes")
+        if isinstance(outcomes, list):
+            semantic_outcomes = []
+            for outcome in outcomes[-8:]:
+                if not isinstance(outcome, dict):
+                    continue
+                local = outcome.get("local_outcome")
+                local_summary = (
+                    {
+                        key: local[key]
+                        for key in (
+                            "guard",
+                            "primitive_executed",
+                            "step_count_unchanged",
+                            "step_before",
+                            "transition",
+                            "error_type",
+                            "error",
+                        )
+                        if key in local
+                    }
+                    if isinstance(local, dict)
+                    else None
+                )
+                semantic_outcomes.append(
+                    {
+                        key: value
+                        for key, value in {
+                            "operation": outcome.get("operation"),
+                            "parameters": outcome.get("parameters"),
+                            "state": outcome.get("state"),
+                            "detail": outcome.get("detail"),
+                            "local_outcome": local_summary,
+                        }.items()
+                        if value is not None
+                    }
+                )
+            compact["recent_execution_outcomes"] = semantic_outcomes
+        decision = row.get("recovery_decision")
+        if isinstance(decision, dict):
+            compact["recovery_decision"] = {
+                key: decision[key] for key in ("eligible", "reason") if key in decision
+            }
+        feedback.append(compact)
+    return feedback
 
 
 def controller_diagnostics(api: str) -> dict[str, Any]:

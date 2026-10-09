@@ -75,7 +75,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   resource authority. The Habitat shared-world deployment admits either two independent
   Actors on two endpoints or one independent Actor whose Tasks reuse one endpoint and one
   reset world after each Control-owned Task release. Other topologies fail closed; benchmark
-  success still comes only from Habitat's official metric. See ADR-0045.
+  success still comes only from Habitat's official metric. In a one-Actor segment, only the
+  assigned endpoint calls its original Stage2 model. Unassigned endpoints use a scoped,
+  model-free policy selecting the original EMOS wait skill and restore their CrabAgent after
+  the segment; two-Actor assignments retain both original model paths. See ADR-0045.
 - Execution Relation endpoints are exact logical `(TaskId, RoleId)` slots inside one Context,
   never NodeId or adapter handles. Runtime resolves them to current attempts, persists live
   relation state/fences, and emits evidence; Control retains commitment and recovery decisions.
@@ -172,14 +175,108 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   exhaustion remains explicit physical ambiguity. The Controlled backend injects the
   Control-owned assignment at the EMOS Stage1-to-Stage2 boundary and binds its one navigation
   target in the execution-scoped Provider tool schema. It runs the original EMOS
-  `MultiLLMPolicy`, `CrabAgent`, `HierarchicalPolicy`, and skill stack without rewriting a
-  model-selected action; the independent Contract Guard still rejects wrong targets. Local skill
+  `MultiLLMPolicy`, `HierarchicalPolicy`, and skill stack, with original `CrabAgent` for assigned
+  endpoints, without rewriting a model-selected action; the independent Contract Guard still
+  rejects wrong targets. Local skill
   completion,
   benchmark PDDL success, episode termination, and RoboGuide Mission outcome remain distinct facts.
+  Controlled Stage2 uses deployment-owned observed local skill feedback (ADR-0069):
+  exact call/agent/invocation-bound receipts distinguish completion, budget expiry,
+  interruption and unknown rather than returning synthetic success before execution.
+  Original termination methods execute once; existing post-step local terminal facts
+  may supersede earlier policy-input evidence. This changes local model input, not
+  selected actions, robot abilities, simulator/model budgets or official truth.
+  It grants no Control, Task satisfaction or MI replanning authority and must be
+  disclosed separately from the original native EMOS feedback path.
   The shared-world adapter freezes the exact Node-config floor-transition facts in a digest-bound
   deployment snapshot and checks actual reset-state semantic regions before Stage2 acts. Only an
   explicit incompatible assignment fails locally; unresolved region evidence remains unknown and
   does not prove route feasibility or authorize adapter-side reassignment. See ADR-0046.
+- Optional goal-region navigation is a deployment-owned Local How variant for direct
+  conjunctive official `any_at` goals (ADR-0051). It preserves the exact model-selected
+  entity and original Oracle control loop, but may select a different physical target
+  point on the agent-specific navmesh after bounded route checks. It never changes
+  canonical intent or official PDDL truth. The mode is off by default and must be
+  disclosed as a RoboGuide-versus-native-EMOS arm difference when enabled.
+- A separate default-off reset-route-support observer (ADR-0052) uses copied
+  NavMeshSettings and a detached PathFinder after the existing reset. It queries
+  only original/projected-center candidates, with at most 128 records and 256
+  path queries, and never primes action caches, samples RNG, or scans mesh vertices.
+  The digest-bound artifact distinguishes static witnesses, bounded misses, and
+  unavailable evidence. It is diagnostic-only: no MI input, Actor-wide exclusion,
+  Control authority, Formal admission, or benchmark change. Opted-in B1 preflight
+  checks identity/source/geometry and attributes archival failures to the harness.
+- An independently enabled initial-operation preference consumer (ADR-0053)
+  projects positive reset witnesses into exact-intent costs. The Controller
+  compares bounded initial endpoint combinations; Control admits transient
+  Task/Role ordinals and Scheduler only reorders current eligible candidates.
+  Unknown costs never exclude a Node. The first successful Bind discards the
+  Mission's preferences, expiry restores stable order, and recovery/restore
+  never renew reset evidence. This is an opt-in initial policy, not MI input,
+  resource authority, route feasibility proof or automatic terminal replanning.
+- Optional reset-route geometry (ADR-0062) reads only the detached starting
+  component under explicit retained-array, triangle-work and processing limits.
+  Full triangle interiors, reference-offset rotation and boundary uncertainty
+  distinguish static intersections, scoped disjoint geometry and unknown.
+  Opted-in B1 requires identity/source/budget consistency and the v0.2 archive;
+  the separate initial preference consumer may rank scoped misses after exact
+  source checks but never exclude a Node. MI inputs, operation intent, physical
+  navigation parameters, Core contracts and Formal admission stay unchanged.
+- Optional initial-support feedback (ADR-0066) is a read-only Controller
+  projection for the first fresh-world admission. It binds the exact generated
+  plan and source/Local How/lifetime, inspects existing Control eligibility on
+  a private copy and returns neutral logical-slot support counts without Node
+  inventory. Complete scoped disjoint combinations may hold the reviewed
+  Request under an explicitly enabled deployment readiness policy; bounded
+  misses and unknowns never independently block. Explicit retry rechecks the
+  same plan by default, with no model regeneration, reservation or automatic reassignment.
+  Recovery evidence v0.2 durably fences interrupted queries. Attributable holds
+  remain Formal system failures with benchmark unavailable. The neutral schema
+  lives in `contracts/mission/initial-operation-assessment-v0.2/` (v0.1 archives remain readable); public Request,
+  MissionPlan and Core authority are unchanged, and defaults remain off.
+- Optional pre-submission MI deployment reconsideration (ADR-0067) uses exact-plan
+  assessment v0.2 with bounded query-time exclusion counters, never live inventory.
+  The configured Responses Repairer proposes recheck, complete draft revision or
+  wait under durable, nonrenewable count/time bounds. Revisions re-enter full
+  validation, Reviewer, risk approval and Control preflight. Identical feedback,
+  source/context change, expiry and restart cannot renew calls; ambiguous submission
+  permits existing read-only reconciliation only. Immutable session v0.1 is carried
+  by observations v0.4 while public Request/MissionPlan stay unchanged; zero attempts
+  keeps the unchanged-plan path. This is not execution-time replanning or proof of
+  model semantic fidelity, physical feasibility or benchmark success.
+- Optional step-aware NavMesh resolution (ADR-0063) is a default-off Local How
+  profile, separate from diagnostic observation. Active navigation and reset
+  observation use identical copied settings; vertical cells may be refined to
+  preserve declared positive climb, with explicit minimum-resolution/refinement
+  limits. Robot dimensions/climb/slope, canonical target, original Oracle control
+  and official PDDL remain unchanged. Local How v0.4 and action evidence v0.3
+  disclose the arm difference from original EMOS; paths never prove success.
+- Optional spatial route arrival (ADR-0064) is a separate default-off Local How
+  controller for the existing differential-base motion profiles. It preserves the
+  exact entity, copied mesh/ability and original thresholds, velocities and budgets,
+  but follows the route until 3D proximity before facing the entity. Missing or
+  unusable routes fail explicitly; there is one original base dispatch per action,
+  no extra model/action/Gym step and no external EMOS edit. Local How v0.5 and action
+  evidence v0.4 disclose this change. Reset observation retains identical copied
+  settings; bounded pre-motion decision diagnostics never become official truth.
+- Optional live-reference goal-region arrival (ADR-0068) is a separate default-off
+  Local How controller requiring the goal-region, step-aware and spatial profiles.
+  It admits an actual routed point inside the unchanged goal region and permits
+  local completion only when the actual PDDL reference is inside the existing local
+  margin plus original point/heading conditions. Original speeds, abilities and
+  budgets remain intact; missing/changed geometry fails before motion. Local How
+  v0.7 and selection v0.6 disclose the arm difference. Reset observation retains an
+  explicitly declared conservative stop-envelope probe; its bounded miss is never
+  an exclusion. Official PDDL and Orchestration satisfaction keep their authorities.
+- Enabled spatial route arrival now uses Local How v0.6 joint navigation preparation
+  (ADR-0065): the vendor-decoded selected navigation actions prepare target/path/command
+  before the original Gym step. Expected bounded preparation failure prevents that step,
+  preserves Completed peers and retains exact canonical attempt attribution. Failure before
+  the first physical step has no official benchmark execution result; reset truth remains
+  diagnostic. Preparation initializes execution caches and may use the original target
+  helper; it is not a read-only or RNG-neutral observer, a global impossibility proof,
+  Control route authority or arbitrary simulator rollback. Disabled profiles retain their
+  legacy paths; historical Local How archives remain supported.
 - The shared-world child now performs its one Habitat reset before endpoint readiness, freezes
   a digest-bound, run-local negative feasibility matrix from actual agent starts, PDDL entities,
   and the exact Node-config floor facts, then reuses those observations for Stage2. The optional
@@ -188,40 +285,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   matrix against the frozen workload and source digests before Controller startup. The current
   paired endpoint profile requires one exclusive `space:1` slot per Role and one capacity-one
   slot per endpoint; unsupported topology or known candidate shortage fails before submission.
-  Unknown geometry remains unknown, and local post-assignment admission still applies. See
-  ADR-0047.
-- The E2-S0 COHERENT bridge under `integrations/coherent-local-eaios/` is an experimental
-  deployment-owned Local EAIOS adapter. It maps only the startup-approved
-  `coherent.execute-official-task@v1` canonical operation to the existing COHERENT physical runner,
-  persists an idempotent local handle, and reports terminal completion only when both the COHERENT
-  run summary and final goal check pass. The companion fixed-plan scenario lives under
-  `scenarios/e2-coherent-minimal/`. This slice proves the formal Controller-to-Node execution path;
-  it does not yet prove per-robot RoboGuide allocation, autonomous Mission Intelligence, or a
-  generic COHERENT action contract. Unsupported cancellation must remain explicit and must never be
-  reported as successful cancellation.
-- The E2-S1 graph-controlled scenario under `scenarios/e2-coherent-graph/` uses public
-  COHERENT `env4/task17` and three formal nodes. Its four dependency-gated tasks call the original
-  `Get_env_info.step`, keep one SQLite-backed shared graph, and record one evidence artifact per
-  phase. Fixed preconditions fail closed before graph mutation. This controlled 13-step GT-length
-  slice proves per-embodiment matching and ordered execution, but remains a hand-authored plan; it
-  must not be reported as PEFA, autonomous Mission Intelligence, or physical execution.
-- The E2 generic rolling-horizon experiment under `tools/e2-generic/` dynamically exposes one
-  agent-identity-specific primitive operation per official task agent. Mission Intelligence selects
-  exactly one action per decision from the current official action list; Controller Matching,
-  Commit, Bind, and a real Node workflow precede the original `Get_env_info.step` transition.
-  The adapter contains no task route or multi-action macro. Only the official `task_goal` relation
-  check establishes benchmark success, and invalid plans or exhausted budgets remain failures.
-- `tools/e2-generic/run_dag.py` is the optional multi-task experiment runner. Its default serial
-  profile submits whole unedited model-generated plans to the unchanged Controller and retains the
-  same per-action adapter boundary; a separate partial-order profile is for controlled scheduler
-  studies only. Fresh planning is allowed after a completed observation segment or a failed Mission
-  only when both Controller and local attempts are terminal. Ambiguous execution terminates the
-  run. Official-goal
-  early termination uses the Controller Mission-cancel route, with a non-mutating adapter goal guard
-  as a race-safe backstop. The runner owns experiment budgets and evidence, not Core recovery.
-- The generic E2 prompt defaults to `fair`, which may state public task-independent PEFA action and
-  embodiment rules but must not expose simulator-internal relation mutations. `informed` is a
-  development-only profile and its evidence must remain labeled separately.
+  A floor mismatch does not exclude a distance-based `any_at` goal that may be satisfied from an
+  adjacent floor. Such reachability stays unknown until actual execution; the local post-assignment
+  gate uses the same semantics. See ADR-0047 and ADR-0050.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.
@@ -279,11 +345,80 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   automatic repair, and routes missing user facts back to clarification instead of letting Repair
   invent them. Structured DialogueTurn history remains separate from internal review evidence, and
   context-aware approval rules persist the exact reasons bound to an immutable draft.
+  Planner and Repairer strict provider schemas bind `mission.id` to the current Request;
+  local identity validation remains authoritative. A violating raw/normalized draft is
+  persisted as bounded rejected-draft v0.3 evidence and fails without regeneration or
+  Controller submission; transport/authentication faults have no invented draft evidence.
+- MI recovery observations v0.3 preserve typed, digest-bound recovery decisions outside the
+  unchanged Mission Request v0.4. The Request Engine durably fences Controller submission before
+  POST; ambiguous results allow only one read-only lookup per explicit retry, never another POST
+  or dialogue replacement. Exact transmitted-body fingerprints and the durable Controller
+  admission endpoint may reconcile acceptance; identity/status alone never proves it. The original
+  POST fault stays intact. Only definitive 400/409/422 rejection permits unchanged resubmission.
+  Unchanged-dialogue retries retain one frozen context; new dialogues archive the old review cycle.
+  These observations do not grant physical-stop, resource, Runtime or execution-replanning authority.
+  See ADR-0054 and ADR-0055.
+- Optional operation progress uses the existing registered, operation-owned Node State export
+  (`roboguide.execution-progress/v0.1`). Runtime retains bounded attribution/counters, original
+  receive times and TTL; working, intentional waiting, blocked and unknown remain separate.
+  A supplied stall interval interprets measured work only and never initiates recovery. See ADR-0056.
+  The default-off Habitat navigation observer (ADR-0058) publishes bounded exact-attempt,
+  operation-specific best-distance improvement via a fixed read-only HTTP workflow. Producer
+  freshness is checked before State projection; wait has no counter, geometry gaps stay unknown.
+  No progress observation proves arrival, official PDDL truth or safe independent Role stopping.
+- Execution recovery is explicitly repeat-authorized with exact current owner and durable time/count
+  bounds. Actual current-attempt Cancelled evidence precedes Control partial release and the normal
+  Match -> Schedule -> Propose -> Commit -> Rebind path; Unknown and Cancel receipts retain ownership.
+  Stopped-owner matching may retry the original eligible Node while preserving Actor authority;
+  ordinary replacement matching still excludes it. Same-owner Rebind creates a new attempt once.
+  Expired pending recovery Commit is aborted by Control; unavailable candidates remain observable
+  pending. No automatic stall cancellation or execution-time MI plan rewrite is provided. See ADR-0057.
+- Individual Role recovery additionally requires dispatch-frozen exact operation/LocalSystem support
+  for isolated execution stopping and context-preserving repetition, unchanged in current registration.
+  The bounded, closed LocalSystem metadata contract `roboguide.local-execution-recovery/v0.1`
+  uses existing Node Protocol/Contract transport; legacy absence never grants support. Recovery Cancel,
+  partial release, replacement Matching/Commit/stateful Rebind and Execute delivery recheck support.
+  Default Habitat shared-world declares `execution-group` / `unsupported` and fails Role recovery
+  before Cancel; normal dual endpoints and single-Actor next-Task execution remain supported.
+  Recovery support is neither repeat permission nor physical-stop/resource authority. See ADR-0059.
+  Optional default-off shared-world continuation retains the same world after actual joint
+  cancellation (ADR-0060). Exact session/intent/new-attempt admission, unchanged simulator budget,
+  a world-wide 16-continuation ceiling, completed-peer passive wait and restart-before-reset fencing
+  belong to the Local EAIOS. Stop snapshots remain separate from final official benchmark evidence.
+  Group continuation is separate from the existing isolated Role recovery API;
+  neither local admission nor a continuation declaration authorizes
+  repetition, resource release, reassignment or a new simulator world.
+  Explicit Group recovery (ADR-0061) freezes the complete current attempt set and per-operation
+  repeat permission with immutable time/count limits. Actual full-set stopping precedes Control
+  revalidation of the retained original bindings, Actor identity, operation support and exclusive
+  resources. No ownership is partially released; fresh attempts are prepared atomically and only
+  delivered after checkpoint Commit and a fresh clock/support/current-set check. Completed peers
+  remain Completed. The first profile requires one immutable independent Execution Session;
+  migration and coupled semantic recovery remain unsupported. Ordinary Mission cancellation
+  overrides the recovery round. Controller checkpoint v18 preserves the purpose and accepts
+  older checkpoints with no hidden Group permission. Single-Actor retained-world continuation has
+  real physical coverage; multi-Actor physical continuation remains unproven. Actual Controller/
+  Node process conformance covers both all-live members and preservation of a Completed peer.
+  The B1 launcher default-off `ROBOGUIDE_B1_RETAIN_STOPPED_SESSION` derives only run-local recovery
+  metadata, validates actual Node configs, and freezes/compares byte identities against both
+  adapters' bounded read-only support before registration. It never requests recovery by itself.
+  `tools/quality/check_group_continuation_processes.py` owns optional zero-Provider, zero-simulator
+  actual Controller/Node process conformance with synthetic Local EAIOS outcomes and fresh local
+  logs/journals/checkpoints; its authored fixture plans are never B1 experiment results.
 - Mission Responses adapters share a startup-frozen, configuration-owned satisfaction policy with
   reference/digest provenance. Generated verifier freshness must match that policy; absent policy
   supplies no numeric default. Verification names do not prove affirmative outcomes, and policy
-  admission never proves generic verifier evidence will arrive. See ADR-0039; MissionPlan v0.7,
-  Grounding, Control, and Runtime remain unchanged.
+  admission never proves generic verifier evidence will arrive. An optional, deployment-owned
+  terminal verifier source now feeds exact Task/Role/physical-attempt evidence into the existing
+  Orchestration satisfaction boundary; its official Habitat projection lives only in the Local
+  EAIOS adapter, while Controller and B1 provenance validate the neutral source/verdict contract.
+  Missing evidence never becomes local completion or benchmark success. See ADR-0039 and ADR-0048;
+  MissionPlan, Grounding, and Control commitment authority remain unchanged.
+- The B1 shared-world Mission config opts into authoritative-goal confirmation (ADR-0049):
+  every DAG-terminal Task in a generated plan must use the exact full frozen goal and configured
+  verifier contract with `verifier-evidence`. Prerequisites may retain `execution-report` for their
+  own local effects. This is a Mission policy, not an Actor count, Node selection, or benchmark
+  admission rule; unsupported goal syntax fails before a Provider call.
 - `evaluation/` contains the RoboGuide Eval Harness, an independent evaluation infrastructure
   outside Core, Runtime, Control Plane, State & Memory Plane, and Local EAIOS. It owns
   ExperimentSpec contracts, external-process orchestration, run manifests/metrics/trace
@@ -294,6 +429,39 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Proposal/Commit/Binding/Runtime semantics, and never commits real experiment results. The
   RoboGuide system runner drives the real Controller/Node/Runtime/Local-EAIOS path and reduces
   persisted evidence; it never bypasses RoboGuide to call a simulator skill.
+  Its process-only `e1-batch` supervisor runs frozen external pair commands. Exclusive
+  lifetime-bound worker receipts forbid outcome retries after restart; SUT failures continue,
+  while source/evidence drift and three consecutive infrastructure pairs pause new dispatch.
+  The first measured pair gates optional two-worker capacity. Port isolation is deployment
+  configuration, never a Core or Mission semantic change. See `evaluation/docs/e1-batch.md`.
+  Explicit driver-owned HTTP continuation policies retain all Provider incidents and never add
+  client retries or prove success. Ordered owned-session termination lets B1 archive before
+  services stop; bounded accounting draining must precede final evidence sealing.
+- Optional B1 goal-geometry diagnostics read the terminal Habitat snapshot and its actual
+  `robot_at_thresh` to compare the deployed 3D `any_at` result with a world-X/Z-only
+  counterfactual. They require matching provenance and official terminal evidence, remain
+  unavailable on missing/mismatched inputs, and never enter Formal admission, Mission
+  satisfaction, or benchmark success. The Local EAIOS records the threshold read-only;
+  evaluation owns the offline calculation and sidecar.
+- Opt-in Habitat physical diagnostics v0.5 observe the original Oracle target and
+  pathfinder calls once, record their actual selected navigation point and path
+  query result, and use exact read-only semantic-region containment for bases and goal entities.
+  They never issue a second path query, choose a route, or alter official success;
+  ambiguous or unsupported observations remain unavailable. Evaluation accepts
+  archived v0.4/v0.5 and current v0.6 terminal geometry evidence. Diagnostics v0.6
+  additionally copy original step-filter requests/returns and base-update positions
+  through single-call, exception-isolated instance taps. Bounded per-step call
+  records retain exact supplied canonical attempt identity, explicit unavailable
+  fields/loss and pending failed-step evidence; they never prove collision,
+  arrival, route feasibility or benchmark success. Action/mesh scalars describe
+  the observed deployment navigation model, not hardware certification.
+- The opt-in `habitat_local_eaios.native_reset_observer` entry point decorates the original
+  EMOS environment factory inside its workers, preserving the first returned reset with the
+  existing bounded diagnostic reader. It never edits the external source, invokes another
+  reset/action/step, changes multiprocessing mode or fabricates simulator RNG state. Evaluation
+  still reaches vendor code only across the external-process boundary. The harness accounting
+  proxy observes returned model identity independently of the requested model; a missing identity,
+  dropped log or unclosed/in-flight observer cannot prove complete pairing evidence.
 - `console/` contains the experimental read-only Mission Journey visualizer
   (early development; layout and features are still evolving): a zero-dependency
   static frontend (`index.html`, `js/`, `css/`) plus `serve.py`, a stdlib static
@@ -381,20 +549,6 @@ For documentation site changes, run:
 cd website
 uv run python sync_docs.py
 uvx --from mkdocs --with-requirements requirements.txt mkdocs build --strict
-```
-
-For E2-S0 COHERENT adapter changes, run:
-
-```bash
-uv run ruff format --check integrations/coherent-local-eaios
-uv run ruff check integrations/coherent-local-eaios
-uv run mypy --strict integrations/coherent-local-eaios/coherent_local_eaios
-uv run python tools/quality/check_python_function_docs.py integrations/coherent-local-eaios
-bash -n scenarios/e2-coherent-minimal/run-controlled.sh
-bash -n scenarios/e2-coherent-graph/run-controlled.sh
-python -m json.tool scenarios/e2-coherent-graph/mission-plan.json >/dev/null
-python scenarios/e2-coherent-minimal/verify-autonomous-readiness.py --expect blocked
-git diff --check
 ```
 
 ## Coding Style & Naming Conventions

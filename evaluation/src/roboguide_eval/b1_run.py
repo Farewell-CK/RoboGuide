@@ -12,6 +12,7 @@ from roboguide_eval.b1_provenance import (
     PROVENANCE_SCHEMA_VERSION,
     RUN_FAILURE_SCHEMA,
     B1ProvenanceRecord,
+    controller_submission_group,
     digest,
     load_document,
     observed_request,
@@ -74,14 +75,13 @@ def scoped_run_failure(run: Path, raw: Any, request: dict[str, Any]) -> dict[str
             )
             else {}
         )
-    sent = _object(request.get("submission_evidence"))
     if (
         owner not in {FailureOwner.SUT_SYSTEM.value, FailureOwner.MODEL.value}
         or doc.get("component")
         not in {"controller", "node", "mission_service", "local_eaios", "model"}
         or doc.get("request_id") != request.get("request_id")
         or doc.get("mission_id") != request.get("mission_id")
-        or doc.get("group_id") != sent.get("controller_group_id")
+        or doc.get("group_id") != (controller_submission_group(request) or None)
     ):
         return {}
     return doc
@@ -90,6 +90,11 @@ def scoped_run_failure(run: Path, raw: Any, request: dict[str, Any]) -> dict[str
 def assess_b1_directory(run: Path) -> dict[str, Any]:
     """Verify archived execution evidence, then apply the one admission authority."""
     documents = {name: load_document(run / name) for name in B1_FILES}
+    verifier_source = load_document(run / "evidence/task-verifier-source.json")
+    verifier_verdict = load_document(run / "evidence/task-verifier-verdict.json")
+    if verifier_source is not None or verifier_verdict is not None:
+        documents["evidence/task-verifier-source.json"] = verifier_source
+        documents["evidence/task-verifier-verdict.json"] = verifier_verdict
     archive_status = load_document(run / ARCHIVE_FILE)
     if (run / ARCHIVE_FILE).exists():
         documents[ARCHIVE_FILE] = archive_status
@@ -106,10 +111,9 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
     ):
         planning_world = load_document(run / planning_world_key)
         documents[planning_world_key] = planning_world
-    sent = _object(request.get("submission_evidence"))
     scoped = scoped_execution_evidence(
         str(request.get("mission_id") or ""),
-        str(sent.get("controller_group_id") or ""),
+        controller_submission_group(request),
         documents["mission.json"],
         documents["events.json"],
         documents["execution-attempts.json"],
@@ -129,6 +133,11 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
         semantic_evidence=documents["evidence/authoritative-semantic-evidence.json"],
         planning_world_evidence=planning_world,
         planning_source=documents["planning-world-source.json"],
+        controller_events=documents["events.json"],
+        execution_attempts=documents["execution-attempts.json"],
+        verifier_source=verifier_source,
+        verifier_verdict=verifier_verdict,
+        shared_world_summary=documents["evidence/shared-world-summary.json"],
     )
     failures = [item.value for item in provenance.failures]
     archive_error = archive_evidence_error(run, archive_status, documents["events.json"], request)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -56,11 +57,17 @@ class GoalGuardTests(unittest.TestCase):
                     }
                 }
             )
+            adapter.dispatch(str(response["execution_id"]))
+            deadline = time.monotonic() + 2.0
+            while response["state"] == "ACCEPTED" and time.monotonic() < deadline:
+                time.sleep(0.01)
+                response = adapter.status({"execution_id": response["execution_id"]})
             retained_graph, step_count = store.graph_state()
             self.assertEqual(response["state"], "CANCELLED")
             self.assertFalse(response["local_outcome"]["primitive_executed"])
             self.assertEqual(step_count, 0)
             self.assertEqual(retained_graph, graph)
+            adapter.close()
 
 
 if __name__ == "__main__":

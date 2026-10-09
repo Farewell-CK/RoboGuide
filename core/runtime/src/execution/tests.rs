@@ -5,6 +5,12 @@ use domain::{
     CapabilityContractRef, CorrelationId, ExecutionIntent, ExecutionRelationId,
     ExecutionRelationKind, ExecutionRelationSpec, MissionId, PlannedExecutionRef, TaskId,
 };
+#[path = "tests/group_recovery.rs"]
+mod group_recovery;
+#[path = "tests/progress.rs"]
+mod progress;
+#[path = "tests/recovery_stop.rs"]
+mod recovery_stop;
 
 /// Builds one deterministic command for Runtime registry tests.
 fn command() -> ExecutionCommand {
@@ -26,6 +32,14 @@ fn command_for(task_id: &str, role_id: &str, node_id: &str) -> ExecutionCommand 
         .expect("intent valid"),
         CorrelationId::new("runtime-test").expect("correlation valid"),
     )
+    .with_recovery_support(domain::ExecutionRecoverySupport {
+        local_system_id: domain::LocalSystemId::new("motion").expect("owner"),
+        support: domain::OperationRecoverySupport {
+            operation: domain::OperationRef::new("mobility", "move", "v1").expect("operation"),
+            stop_scope: domain::ExecutionStopScope::Execution,
+            continuation: domain::ExecutionContinuation::RepeatAfterStop,
+        },
+    })
 }
 
 /// Persists dispatch intent and fences automatic replay after Controller restart.

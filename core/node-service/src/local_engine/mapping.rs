@@ -122,6 +122,13 @@ impl WorkflowContext {
         }
     }
 
+    /// Exposes the durable Node attempt identity to deployment-owned workflow mappings.
+    pub fn with_attempt_id(invocation: Value, attempt_id: impl Into<String>) -> Self {
+        let mut context = Self::new(invocation);
+        context.value["attempt_id"] = Value::String(attempt_id.into());
+        context
+    }
+
     /// Records one complete driver response for later JSON Pointer references.
     pub fn record_step(&mut self, step_id: &str, response: Value) -> Result<(), MappingError> {
         let steps = self
@@ -451,6 +458,43 @@ mod tests {
                 .pointer("/goal/orientation/w")
                 .and_then(Value::as_f64),
             Some(1.0)
+        );
+    }
+
+    /// The exact Runtime attempt can be mapped without changing the canonical intent.
+    #[test]
+    fn maps_physical_attempt_identity_into_deployment_request() {
+        let mapping = CompiledRequestMapping::compile(RequestMappingConfig {
+            base: serde_json::json!({"invocation": {}}),
+            bindings: vec![
+                RequestBindingConfig {
+                    target: "/invocation".to_string(),
+                    value: ValueExpressionConfig::Pointer {
+                        pointer: "/invocation".to_string(),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/invocation/attempt_id".to_string(),
+                    value: ValueExpressionConfig::Pointer {
+                        pointer: "/attempt_id".to_string(),
+                    },
+                },
+            ],
+        })
+        .expect("mapping compiles");
+        let context = WorkflowContext::with_attempt_id(
+            serde_json::json!({"mission_id": "mission-a"}),
+            "physical-attempt-2",
+        );
+        assert_eq!(
+            mapping.render(&context).expect("mapping renders"),
+            serde_json::json!({"invocation": {
+                "mission_id": "mission-a", "attempt_id": "physical-attempt-2"
+            }})
+        );
+        assert_eq!(
+            context.as_json().pointer("/invocation/mission_id"),
+            Some(&serde_json::json!("mission-a"))
         );
     }
 

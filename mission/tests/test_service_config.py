@@ -14,6 +14,8 @@ def test_repository_service_configuration_is_local_and_nonsecret() -> None:
     settings = load_service_settings(path, repository_root=Path.cwd())
     assert settings.listen_port == 8070
     assert settings.controller_endpoint == "http://127.0.0.1:8080"
+    assert settings.controller_preflight_enabled is False
+    assert settings.max_deployment_recovery_attempts == 0
     assert settings.artifact_endpoint == "http://127.0.0.1:8090"
     assert settings.grounding_acquisition_attempts == 2
     assert settings.max_grounding_state_evidence == 64
@@ -48,6 +50,53 @@ def test_shared_world_service_configuration_selects_deployment_execution_profile
         == (Path.cwd() / "PLANNING_WORLD_EVIDENCE_PLACEHOLDER").resolve()
     )
     assert settings.grounding_planning_world_evidence_required is True
+
+
+@pytest.mark.parametrize("raw", ["true", "false", '"true"', "1"])
+def test_controller_preflight_is_explicit_and_strictly_boolean(tmp_path: Path, raw: str) -> None:
+    """Optional readiness cannot be silently enabled by truthy configuration values."""
+    text = Path("config/mission-service.toml").read_text(encoding="utf-8")
+    path = tmp_path / "service.toml"
+    path.write_text(
+        text.replace(
+            "controller_preflight_enabled = false", f"controller_preflight_enabled = {raw}"
+        )
+    )
+    if raw in {"true", "false"}:
+        assert load_service_settings(
+            path, repository_root=tmp_path
+        ).controller_preflight_enabled is (raw == "true")
+    else:
+        with pytest.raises(MissionServiceConfigError, match="Boolean"):
+            load_service_settings(path, repository_root=tmp_path)
+
+
+@pytest.mark.parametrize("count", ["0", "2", "4", "-1", "true", '"2"'])
+def test_deployment_agent_budget_is_explicit_bounded_and_requires_preflight(
+    tmp_path: Path, count: str
+) -> None:
+    """Configuration cannot introduce unbounded model retries or silently skip Control feedback."""
+    text = Path("config/mission-service.toml").read_text()
+    path = tmp_path / "service.toml"
+    path.write_text(
+        text.replace(
+            "controller_preflight_enabled = false", "controller_preflight_enabled = true"
+        ).replace(
+            "max_deployment_recovery_attempts = 0", f"max_deployment_recovery_attempts = {count}"
+        )
+    )
+    if count in {"0", "2"}:
+        assert load_service_settings(
+            path, repository_root=tmp_path
+        ).max_deployment_recovery_attempts == int(count)
+    else:
+        with pytest.raises(MissionServiceConfigError, match="between 0 and 3"):
+            load_service_settings(path, repository_root=tmp_path)
+    path.write_text(
+        text.replace("max_deployment_recovery_attempts = 0", "max_deployment_recovery_attempts = 1")
+    )
+    with pytest.raises(MissionServiceConfigError, match="requires Controller preflight"):
+        load_service_settings(path, repository_root=tmp_path)
 
 
 @pytest.mark.parametrize("raw", ["true", '"yes"'])

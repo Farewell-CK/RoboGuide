@@ -211,6 +211,7 @@ def render_node(template: str, output: Path, run: Path, agent_id: int) -> tuple[
         "STATE_DIRECTORY_PLACEHOLDER": str(run / f"node-state-{node_id}"),
         "LOCAL_SYSTEM_PLACEHOLDER": f"coherent-agent-{agent_id}-local",
         "CONTRACT_PLACEHOLDER": contract,
+        "RECOVERY_OPERATION_PLACEHOLDER": f"agent-{agent_id}-primitive",
         "READINESS_PLACEHOLDER": f"agent-{agent_id}-primitive",
         "RESOURCE_PLACEHOLDER": f"coherent-agent-{agent_id}-slot",
         "LOCK_PLACEHOLDER": f"coherent-agent-{agent_id}-world",

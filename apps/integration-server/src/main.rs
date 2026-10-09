@@ -18,7 +18,7 @@ use orchestration::{
 use orchestration::{MissionOrchestrator, OrchestrationError, decode_mission_plan};
 use ports::{Clock, SharedNodeStateReader, StateRecordReader};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -27,10 +27,18 @@ use std::time::Duration;
 ///
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v21";
+/// Previous wrapper has progress/stop intents but no immutable stop/continuation declarations.
+const PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v20";
+/// Wrapper with exact HTTP admission records but no operation progress monitor.
+const ADMISSION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v19";
 
 /// Immediately previous wrapper accepted with no deployment candidate restrictions.
-const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
+const PREVIOUS_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v18";
+/// Historical wrapper with verifier source identity but no HTTP admission digests.
+const VERIFIER_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
+/// Historical wrapper before deployment candidate restrictions.
+const LEGACY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v16";
 
 /// Version marker for the optional deployment-owned actor placement file.
 const ACTOR_PLACEMENT_SCHEMA: &str = "roboguide.actor-placement/v0.1";
@@ -60,10 +68,16 @@ struct ControlHttpRequest {
 /// Live process state sharing one Control authority with Mission orchestration.
 #[derive(Clone)]
 struct ControllerState {
+    /// Immutable HTTP receipts; Orchestration still owns complete plan and Mission lifecycle.
+    mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
     /// Integration, Runtime, Control, and horizontal State projections.
     bridge: IntegrationRuntimeBridge<state::SqliteEventLog>,
     /// Complete MissionPlan and explicit Mission lifecycle authority.
     orchestrator: MissionOrchestrator,
+    /// Durable exact verdict/Task receipts preventing replay after restart.
+    verifier_seen: BTreeSet<(String, String, String)>,
+    /// Startup-frozen verifier source identity, fenced across checkpoint restore.
+    verifier_source_digest: Option<String>,
 }
 
 /// Read-only admission adapter from Artifact HTTP into current Controller registration facts.
@@ -264,12 +278,21 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
 /// Durable Phase 1 process checkpoint saved in the same event-log transaction.
 #[derive(Serialize, Deserialize)]
 struct ServerCheckpoint {
+    /// Actual accepted body digests; old checkpoints retain unavailable receipt evidence.
+    #[serde(default)]
+    mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
     /// Exact wrapper schema marker.
     schema: String,
     /// Existing Integration/Control/State/Runtime checkpoint JSON.
     integration_json: String,
     /// Complete Mission orchestration checkpoint JSON.
     orchestration_json: String,
+    /// Verdict receipts already processed, including negative final verdicts.
+    #[serde(default)]
+    verifier_seen: BTreeSet<(String, String, String)>,
+    /// Source digest used by this database; a restart cannot silently change it.
+    #[serde(default)]
+    verifier_source_digest: Option<String>,
 }
 
 /// Explicit deployment policy for constraining logical actors to physical nodes.
@@ -334,12 +357,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?;
     let deployment_feasibility_path =
         std::env::var_os("ROBOGUIDE_DEPLOYMENT_FEASIBILITY_PATH").map(PathBuf::from);
-    let deployment_feasibility = deployment_feasibility_path
+    let mut deployment_feasibility = deployment_feasibility_path
         .as_deref()
         .map(DeploymentFeasibility::load)
         .transpose()
-        .map_err(|error| format!("deployment feasibility startup failed: {error}"))?
-        .map(Arc::new);
+        .map_err(|error| format!("deployment feasibility startup failed: {error}"))?;
+    let verifier_feed = match (
+        std::env::var_os("ROBOGUIDE_TASK_VERIFIER_SOURCE_PATH"),
+        std::env::var_os("ROBOGUIDE_TASK_VERIFIER_VERDICT_PATH"),
+    ) {
+        (Some(source), Some(verdict)) => Some(Arc::new(TaskVerifierFeed::load(
+            Path::new(&source),
+            PathBuf::from(verdict),
+        )?)),
+        (None, None) => None,
+        _ => {
+            return Err(
+                "task verifier source and verdict paths must be configured together".into(),
+            );
+        }
+    };
     let _event_log_writer_lock = acquire_event_log_writer_lock(Path::new(&event_path))?;
     let event_log = state::SqliteEventLog::open(&event_path)?;
     let event_write_gate = Arc::new(Mutex::new(()));
@@ -354,6 +391,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let latest_sequence = event_log.latest_sequence()?;
     let checkpoint = event_log.load_checkpoint()?;
     let initialize_checkpoint = checkpoint.is_none() && latest_sequence == 0;
+    let initial_preference_path = std::env::var_os("ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_PATH")
+        .filter(|path| !path.is_empty());
+    let initial_preference_source =
+        std::env::var_os("ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_SOURCE_PATH")
+            .filter(|path| !path.is_empty());
+    if initial_preference_path.is_some() != initial_preference_source.is_some() {
+        return Err(
+            "initial operation preferences require both projection and original source paths"
+                .into(),
+        );
+    }
+    if let (Some(path), Some(source)) = (initial_preference_path, initial_preference_source) {
+        deployment_feasibility
+            .as_mut()
+            .ok_or("initial operation preferences require deployment feasibility")?
+            .configure_initial_preferences(
+                Path::new(&path),
+                Path::new(&source),
+                process_clock.now(),
+                initialize_checkpoint,
+            )
+            .map_err(|error| format!("initial operation preference startup failed: {error}"))?;
+        if !initialize_checkpoint {
+            eprintln!("initial operation preferences disabled after Controller restore");
+        }
+    }
+    match std::env::var("ROBOGUIDE_INITIAL_OPERATION_ASSESSMENT").as_deref() {
+        Ok("1") => deployment_feasibility
+            .as_mut()
+            .ok_or("initial support assessment requires deployment feasibility")?
+            .configure_initial_assessment()?,
+        Ok("0") | Err(std::env::VarError::NotPresent) => {}
+        _ => return Err("ROBOGUIDE_INITIAL_OPERATION_ASSESSMENT must be 0 or 1".into()),
+    }
+    let deployment_feasibility = deployment_feasibility.map(Arc::new);
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let (service, router) = GrpcIntegrationService::new(events);
     let receiver_router = router.clone();
@@ -362,7 +434,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(checkpoint) => {
             if !matches!(
                 checkpoint.schema.as_str(),
-                SERVER_CHECKPOINT_SCHEMA | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+                SERVER_CHECKPOINT_SCHEMA
+                    | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
+                    | ADMISSION_SERVER_CHECKPOINT_SCHEMA
+                    | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+                    | VERIFIER_SERVER_CHECKPOINT_SCHEMA
+                    | LEGACY_SERVER_CHECKPOINT_SCHEMA
             ) {
                 return Err(format!(
                     "controller database {event_path} uses unsupported checkpoint schema {}",
@@ -380,7 +457,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let saved: ServerCheckpoint = serde_json::from_str(&checkpoint.checkpoint_json)?;
             if !matches!(
                 saved.schema.as_str(),
-                SERVER_CHECKPOINT_SCHEMA | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+                SERVER_CHECKPOINT_SCHEMA
+                    | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
+                    | ADMISSION_SERVER_CHECKPOINT_SCHEMA
+                    | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
+                    | VERIFIER_SERVER_CHECKPOINT_SCHEMA
+                    | LEGACY_SERVER_CHECKPOINT_SCHEMA
             ) {
                 return Err(format!(
                     "controller checkpoint body uses unsupported schema {}",
@@ -388,7 +470,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .into());
             }
+            let configured_verifier_digest = verifier_feed
+                .as_ref()
+                .map(|feed| feed.source_digest().to_string());
+            validate_restored_verifier_source(&saved, configured_verifier_digest.as_deref())?;
             ControllerState {
+                mission_admissions: saved.mission_admissions,
                 bridge: IntegrationRuntimeBridge::restore_from_checkpoint(
                     &saved.integration_json,
                     event_log.clone(),
@@ -396,6 +483,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     process_clock.now(),
                 )?,
                 orchestrator: MissionOrchestrator::restore_json(&saved.orchestration_json)?,
+                verifier_seen: saved.verifier_seen,
+                verifier_source_digest: configured_verifier_digest,
             }
         }
         None if latest_sequence > 0 => {
@@ -405,6 +494,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .into());
         }
         None => ControllerState {
+            mission_admissions: BTreeMap::new(),
             bridge: IntegrationRuntimeBridge::new(
                 control::ControlPlane::new(),
                 state::InMemorySharedNodeState::new(),
@@ -412,8 +502,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 router,
             ),
             orchestrator: MissionOrchestrator::new(),
+            verifier_seen: BTreeSet::new(),
+            verifier_source_digest: verifier_feed
+                .as_ref()
+                .map(|feed| feed.source_digest().to_string()),
         },
     };
+    for (mission_id, admission) in &controller.mission_admissions {
+        admission.validate(&controller, mission_id)?;
+    }
     let mut restored_localization_evidence = false;
     for (evidence, received_at) in artifact_catalog
         .localization_evidence()
@@ -495,12 +592,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_event_log = event_log.clone();
     let http_controller = controller.clone();
     let http_deployment_feasibility = deployment_feasibility.clone();
+    let http_verifier_feed = verifier_feed.clone();
     let http_event_write_gate = event_write_gate.clone();
     let http_clock = process_clock.clone();
     let receiver_event_log = event_log.clone();
     let receiver_event_write_gate = event_write_gate.clone();
     let receiver_clock = process_clock.clone();
     let timer_controller = Arc::clone(&controller);
+    let timer_verifier_feed = verifier_feed.clone();
     let timer_event_log = event_log.clone();
     let timer_event_write_gate = event_write_gate.clone();
     let timer_clock = process_clock.clone();
@@ -527,6 +626,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             http_event_write_gate,
             http_clock,
             http_deployment_feasibility,
+            http_verifier_feed,
         )
         .await
         {
@@ -551,11 +651,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
-            if let Err(error) = drive_application_timer(
+            if let Err(error) = drive_application_timer_with_clock(
                 &timer_controller,
                 &timer_event_log,
                 &timer_event_write_gate,
-                timer_clock.now(),
+                timer_clock.as_ref(),
+                timer_verifier_feed.as_deref(),
             ) {
                 let reason = format!("application timer stopped: {error}");
                 let _ = timer_fatal_sender.send(reason);
@@ -777,7 +878,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // Cancel receipts are nonterminal: retrying Cancel in response to its
                             // own receipt/snapshot would form an unbounded feedback loop. The
                             // application timer owns those retries until terminal evidence.
-                            if let Err(error) = live.bridge.flush_dispatch_outbox() {
+                            if let Err(error) = live
+                                .bridge
+                                .flush_dispatch_outbox_with_clock(receiver_clock.as_ref())
+                            {
                                 eprintln!("durable command outbox delivery deferred: {error}");
                             }
                         }

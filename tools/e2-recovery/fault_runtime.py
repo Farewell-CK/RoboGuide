@@ -7,7 +7,6 @@ import json
 import re
 import shutil
 import signal
-import socket
 import subprocess
 import threading
 import time
@@ -70,11 +69,11 @@ class _ProxyServer(ThreadingHTTPServer):
         self,
         address: tuple[str, int],
         upstream_port: int,
-        intercept: Callable[[str, bytes], bool],
+        observe: Callable[[str, bytes, int, bytes], None],
     ) -> None:
         """Configure the loopback reverse proxy and its intercept callback."""
         self.upstream_port = upstream_port
-        self.intercept = intercept
+        self.observe = observe
         super().__init__(address, _ProxyHandler)
 
 
@@ -86,17 +85,9 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         self._forward(b"")
 
     def do_POST(self) -> None:
-        """Forward workflow calls except the single injected dispatch."""
+        """Forward workflow calls and observe accepted dispatches after their response."""
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
-        if self.server.intercept(self.path, body):
-            self.close_connection = True
-            try:
-                self.connection.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            self.connection.close()
-            return
         self._forward(body)
 
     def _forward(self, body: bytes) -> None:
@@ -112,6 +103,8 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(payload)
+            self.wfile.flush()
+            self.server.observe(self.path, body, response.status, payload)
         except OSError as error:
             payload = json.dumps({"error": f"upstream unavailable: {error}"}).encode()
             self.send_response(502)
@@ -127,7 +120,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
 
 class FaultRuntime:
-    """Wrap process launch and inject one crash before primitive ``k + 1``."""
+    """Inject one crash after local acceptance but before primitive ``k + 1`` takes effect."""
 
     def __init__(
         self,
@@ -152,7 +145,7 @@ class FaultRuntime:
         self.node_configs: dict[int, Path] = {}
         self.node_environments: dict[int, dict[str, str]] = {}
         self.node_binary: Path | None = None
-        self.standby: subprocess.Popen[bytes] | None = None
+        self.restarted_primary: subprocess.Popen[bytes] | None = None
         self.proxy: _ProxyServer | None = None
         self.proxy_thread: threading.Thread | None = None
         self.injection_thread: threading.Thread | None = None
@@ -177,6 +170,15 @@ class FaultRuntime:
             if int(rewritten[index]) != self.expected_bridge_port:
                 raise RuntimeError("unexpected generic bridge port")
             rewritten[index] = str(self.actual_bridge_port)
+            if self.inject_after_steps is not None:
+                rewritten.extend(
+                    [
+                        "--pre-effect-hold-step",
+                        str(self.inject_after_steps + 1),
+                        "--pre-effect-hold-seconds",
+                        "120",
+                    ]
+                )
             process = self.original_start(rewritten, log_path, environment)
             self._start_proxy()
             self.event(
@@ -206,65 +208,115 @@ class FaultRuntime:
         self.proxy = _ProxyServer(
             ("127.0.0.1", self.expected_bridge_port),
             self.actual_bridge_port,
-            self._intercept,
+            self._observe,
         )
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
         self.proxy_thread.start()
 
-    def _intercept(self, path: str, body: bytes) -> bool:
-        if path != "/v1/executions":
-            return False
+    def _observe(self, path: str, body: bytes, status: int, payload: bytes) -> None:
+        """Trigger only after the target local handle was accepted and returned to its Node."""
+        if path != "/v1/executions" or status != 200:
+            return
         with self._lock:
             self._request_count += 1
             request_number = self._request_count
         if self.inject_after_steps is None or request_number != self.inject_after_steps + 1:
-            return False
+            return
         try:
             request = json.loads(body)
             invocation = request["invocation"]
             agent_id = int(invocation["parameters"]["agent_id"])
+            local_execution_id = str(json.loads(payload)["execution_id"])
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
             self.event("injection_request_invalid", error=f"{type(error).__name__}: {error}")
-            return False
+            return
         with self._lock:
             if self._fault_started:
-                return False
+                return
             self._fault_started = True
         self.event(
             "fault_triggered",
             request_number=request_number,
             completed_steps=request_number - 1,
             target_agent_id=agent_id,
-            blocked_invocation=invocation,
+            accepted_invocation=invocation,
+            local_execution_id=local_execution_id,
         )
         self.injection_thread = threading.Thread(
-            target=self._inject, args=(agent_id,), daemon=True
+            target=self._inject,
+            args=(agent_id, invocation, local_execution_id),
+            daemon=True,
         )
         self.injection_thread.start()
-        self._fault_finished.wait(timeout=30)
-        return True
 
-    def _inject(self, agent_id: int) -> None:
+    def _inject(
+        self, agent_id: int, invocation: dict[str, Any], local_execution_id: str
+    ) -> None:
+        """Crash Dog-A, authorize bounded recovery, and restart the same logical Node."""
         try:
             process = self.node_processes[agent_id]
             process.suppress_exit = True
+            settings = tomllib.loads(self.node_configs[agent_id].read_text(encoding="utf-8"))
+            node_id = str(settings["node_id"])
+            controller_execution_id = self._wait_attempt(
+                invocation, node_id, {"Accepted", "Running"}, timeout=20.0
+            )
+            self.event(
+                "local_handle_confirmed",
+                agent_id=agent_id,
+                node_id=node_id,
+                controller_execution_id=controller_execution_id,
+                local_execution_id=local_execution_id,
+            )
             self._snapshot_graph("pre-fault-graph.json")
-            self.event("primary_sigterm_sent", agent_id=agent_id, pid=process.pid)
-            process.process.send_signal(signal.SIGTERM)
+            self.event("primary_crash_sent", agent_id=agent_id, pid=process.pid)
+            process.process.kill()
             return_code = process.process.wait(timeout=10)
             self.event("primary_exited", agent_id=agent_id, return_code=return_code)
-            self._fault_finished.set()
-            time.sleep(2)
-            standby_config = self._standby_config(agent_id)
+            observed_unknown = self._wait_attempt(
+                invocation, node_id, {"Unknown"}, timeout=30.0
+            )
+            if observed_unknown != controller_execution_id:
+                raise RuntimeError("a different execution became Unknown during fault injection")
+            self.event(
+                "recovery_required",
+                controller_execution_id=controller_execution_id,
+                node_id=node_id,
+            )
+            recovery_status, recovery_body = self._controller_json(
+                "POST",
+                f"/v1/executions/{controller_execution_id}/recover",
+                {
+                    "schema_version": "roboguide.execution-recovery-command/v0.1",
+                    "expected_node_id": node_id,
+                    "repeat_authorized": True,
+                    "timeout_ms": 120000,
+                    "max_replacements": 1,
+                },
+            )
+            self.event(
+                "recovery_authorized",
+                controller_execution_id=controller_execution_id,
+                http_status=recovery_status,
+                response=recovery_body,
+            )
+            if recovery_status != 202:
+                raise RuntimeError(f"Controller rejected recovery authorization: {recovery_body}")
             if self.node_binary is None:
                 raise RuntimeError("Node binary was not captured")
-            self.standby = self.original_start(
-                [str(self.node_binary), str(standby_config)],
-                self.output / f"node-{agent_id}-standby.log",
+            self.restarted_primary = self.original_start(
+                [str(self.node_binary), str(self.node_configs[agent_id])],
+                self.output / f"node-{agent_id}-restarted-primary.log",
                 self.node_environments[agent_id],
             )
-            self.event("standby_started", agent_id=agent_id, pid=self.standby.pid)
-            self._wait_standby_registration(agent_id, standby_config)
+            self.event(
+                "same_owner_restarted",
+                agent_id=agent_id,
+                node_id=node_id,
+                pid=self.restarted_primary.pid,
+            )
+            self._wait_node_registration(agent_id, node_id)
+            self._wait_rebind(invocation, node_id, controller_execution_id)
         except (
             KeyError,
             OSError,
@@ -274,50 +326,104 @@ class FaultRuntime:
             ValueError,
         ) as error:
             self.event("injection_failed", error=f"{type(error).__name__}: {error}")
+        finally:
             self._fault_finished.set()
 
-    def _standby_config(self, agent_id: int) -> Path:
-        source = self.node_configs[agent_id]
-        text = source.read_text(encoding="utf-8")
-        settings = tomllib.loads(text)
-        old_node = str(settings["node_id"])
-        old_system = str(settings["local_systems"][0]["id"])
-        old_resource = str(settings["resources"][0]["id"])
-        old_lock = str(settings["operations"][0]["local_locks"][0])
-        replacements = {
-            old_node: f"{old_node}-standby-f1",
-            old_system: f"{old_system}-standby-f1",
-            old_resource: f"{old_resource}-standby-f1",
-            old_lock: f"{old_lock}-standby-f1",
-            str(settings["state_directory"]): str(
-                self.output / f"node-state-{old_node}-standby-f1"
-            ),
-        }
-        for old, new in replacements.items():
-            text = text.replace(old, new)
-        path = self.output / f"agent-{agent_id}-node-standby.toml"
-        path.write_text(text, encoding="utf-8")
-        return path
-
-    def _wait_standby_registration(self, agent_id: int, config_path: Path) -> None:
-        standby_id = str(tomllib.loads(config_path.read_text(encoding="utf-8"))["node_id"])
+    def _wait_node_registration(self, agent_id: int, node_id: str) -> None:
+        """Wait until the restarted same-owner Node is visible to Controller inventory."""
         for _ in range(60):
             try:
-                connection = http.client.HTTPConnection(
-                    "127.0.0.1", int(self.controller_api.rsplit(":", 1)[1]), timeout=2
-                )
-                connection.request("GET", "/v1/inventory")
-                response = connection.getresponse()
-                body = json.loads(response.read())
-                connection.close()
+                _, body = self._controller_json("GET", "/v1/inventory")
                 nodes = body.get("nodes", []) if isinstance(body, dict) else []
-                if any(node.get("node_id") == standby_id for node in nodes):
-                    self.event("standby_registered", agent_id=agent_id, node_id=standby_id)
+                if any(node.get("node_id") == node_id for node in nodes):
+                    self.event("same_owner_registered", agent_id=agent_id, node_id=node_id)
                     return
             except (OSError, ValueError, json.JSONDecodeError):
                 pass
             time.sleep(0.5)
-        raise TimeoutError(f"standby Node {standby_id} did not register")
+        raise TimeoutError(f"restarted Node {node_id} did not register")
+
+    def _wait_attempt(
+        self,
+        invocation: dict[str, Any],
+        node_id: str,
+        statuses: set[str],
+        *,
+        timeout: float,
+    ) -> str:
+        """Return the exact Controller attempt once its lifecycle reaches a target status."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status, body = self._controller_json("GET", "/v1/execution-attempts")
+            attempts = body.get("attempts", []) if status == 200 and isinstance(body, dict) else []
+            for attempt in reversed(attempts):
+                if (
+                    attempt.get("mission_id") == invocation.get("mission_id")
+                    and attempt.get("task_id") == invocation.get("task_id")
+                    and attempt.get("role_id") == invocation.get("role_id")
+                    and attempt.get("node_id") == node_id
+                    and attempt.get("status") in statuses
+                ):
+                    return str(attempt["execution_id"])
+            time.sleep(0.1)
+        raise TimeoutError(f"Controller attempt did not reach {sorted(statuses)}")
+
+    def _wait_rebind(
+        self, invocation: dict[str, Any], node_id: str, original_execution_id: str
+    ) -> None:
+        """Record recovery phases until a fresh same-owner attempt is admitted."""
+        deadline = time.monotonic() + 120.0
+        last_disposition: object = None
+        while time.monotonic() < deadline:
+            status, view = self._controller_json(
+                "GET", f"/v1/executions/{original_execution_id}/recovery"
+            )
+            if status == 200 and isinstance(view, dict):
+                disposition = view.get("disposition")
+                if disposition != last_disposition:
+                    self.event(
+                        "recovery_phase",
+                        controller_execution_id=original_execution_id,
+                        disposition=disposition,
+                        recovery_view=view,
+                    )
+                    last_disposition = disposition
+            try:
+                replacement = self._wait_attempt(
+                    invocation,
+                    node_id,
+                    {"Accepted", "Running", "Completed"},
+                    timeout=0.25,
+                )
+            except TimeoutError:
+                replacement = original_execution_id
+            if replacement != original_execution_id:
+                self.event(
+                    "rebind_completed",
+                    original_execution_id=original_execution_id,
+                    replacement_execution_id=replacement,
+                    node_id=node_id,
+                )
+                return
+            time.sleep(0.2)
+        raise TimeoutError("Controller did not rebind a fresh same-owner execution")
+
+    def _controller_json(
+        self, method: str, path: str, body: dict[str, object] | None = None
+    ) -> tuple[int, Any]:
+        """Call one loopback Controller endpoint with bounded JSON framing."""
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", int(self.controller_api.rsplit(":", 1)[1]), timeout=5
+        )
+        payload = None if body is None else json.dumps(body).encode("utf-8")
+        headers = {} if payload is None else {"Content-Type": "application/json"}
+        try:
+            connection.request(method, path, body=payload, headers=headers)
+            response = connection.getresponse()
+            raw = response.read()
+            return response.status, json.loads(raw) if raw else None
+        finally:
+            connection.close()
 
     def _snapshot_graph(self, filename: str) -> None:
         database = self.output / "coherent-generic.sqlite3"
@@ -336,7 +442,7 @@ class FaultRuntime:
             )
 
     def finish(self) -> None:
-        """Stop the in-process proxy and separately owned standby."""
+        """Stop the in-process proxy and separately owned restarted primary."""
         if self.injection_thread is not None:
             self.injection_thread.join(timeout=20)
         self._snapshot_graph("post-recovery-graph.json")
@@ -345,15 +451,15 @@ class FaultRuntime:
             self.proxy.server_close()
         if self.proxy_thread is not None:
             self.proxy_thread.join(timeout=5)
-        if self.standby is not None:
-            if self.standby.poll() is None:
-                self.standby.send_signal(signal.SIGTERM)
+        if self.restarted_primary is not None:
+            if self.restarted_primary.poll() is None:
+                self.restarted_primary.send_signal(signal.SIGTERM)
             try:
-                self.standby.wait(timeout=10)
+                self.restarted_primary.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                self.standby.kill()
-                self.standby.wait(timeout=5)
-            stream = getattr(self.standby, "_evidence_stream", None)
+                self.restarted_primary.kill()
+                self.restarted_primary.wait(timeout=5)
+            stream = getattr(self.restarted_primary, "_evidence_stream", None)
             if stream is not None:
                 stream.close()
         self.event("fault_runtime_finished", injected=self._fault_started)

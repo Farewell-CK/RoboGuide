@@ -17,23 +17,28 @@ explicitly labeled as inferred and never presented as observed Stage2 events.
 
 from __future__ import annotations
 
+import importlib
 import json
+import math
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import is_dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
 from .evidence_io import write_text_atomic
+from .model import CanonicalMobilityInvocation
+from .motion_diagnostics import MotionDiagnostics
 
-DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.2"
+DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.6"
 DIAGNOSTICS_ENV_FLAG = "ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS"
 DIAGNOSTICS_MAX_RECORD_BYTES = 65_536
 DIAGNOSTICS_WRITE_BATCH_RECORDS = 32
 
 _UNAVAILABLE = "unavailable"
 _READ_ONLY_OFFICIAL_PREDICATES = frozenset({"any_at"})
+_NO_INSTANCE_OVERRIDE = object()
 
 
 class BufferedJsonlWriter:
@@ -127,6 +132,82 @@ def _position(sim: Any, agent_id: int) -> Any:
     return [
         float(component) for component in sim.get_agent_data(agent_id).articulated_agent.base_pos
     ]
+
+
+def _pddl_reference_position(sim: Any, agent_id: int) -> list[float]:
+    """Read the transform origin used by Habitat's official any-at predicate."""
+    agent = sim.get_agent_data(agent_id).articulated_agent
+    return [float(component) for component in agent.base_transformation.translation]
+
+
+def _robot_at_threshold(problem: Any) -> float:
+    """Read the active PDDL any-at tolerance without choosing a new threshold."""
+    value = problem.sim_info.robot_at_thresh
+    # Habitat's separate Python 3.9 worker cannot evaluate ``int | float`` at runtime.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):  # noqa: UP038
+        raise ValueError("PDDL robot-at threshold is not numeric")
+    threshold = float(value)
+    if not math.isfinite(threshold) or threshold <= 0:
+        raise ValueError("PDDL robot-at threshold must be finite and positive")
+    return threshold
+
+
+def _semantic_location(sim: Any, position: Any) -> dict[str, Any]:
+    """Read exact loaded-region containment without snapping or querying a path."""
+    point = [float(component) for component in position]
+    if len(point) != 3 or not all(math.isfinite(component) for component in point):
+        raise ValueError("semantic location requires a finite 3-D point")
+    regions = getattr(getattr(sim, "semantic_scene", None), "regions", None)
+    if regions is None:
+        return {"_status": _UNAVAILABLE, "reason": "semantic regions unavailable"}
+    vector = importlib.import_module("magnum").Vector3(*point)
+    matches: list[tuple[str, str]] = []
+    for region in regions:
+        region_id = getattr(region, "id", None)
+        floor_id = getattr(getattr(region, "level", None), "id", None)
+        contains = getattr(region, "contains", None)
+        if region_id is None or floor_id is None or not callable(contains):
+            return {"_status": _UNAVAILABLE, "reason": "region containment unavailable"}
+        if contains(vector):
+            matches.append((str(region_id), str(floor_id)))
+    floors = {floor_id for _, floor_id in matches}
+    if len(floors) != 1:
+        return {"_status": _UNAVAILABLE, "reason": "no unique contained semantic floor"}
+    return {
+        "floor_id": next(iter(floors)),
+        "region_id": matches[0][0] if len(matches) == 1 else None,
+        "method": "habitat_semantic_region_contains",
+    }
+
+
+class _PathfinderObserver:
+    """Forward one original path query and retain its actual boolean result."""
+
+    def __init__(self, delegate: Any, observe: Callable[[Any, Any], None]) -> None:
+        """Keep the original pathfinder and a fail-soft observation callback."""
+        self._delegate = delegate
+        self._observe = observe
+
+    def __getattr__(self, name: str) -> Any:
+        """Forward any non-observed operation unchanged to the original object."""
+        return getattr(self._delegate, name)
+
+    def find_path(self, path: Any) -> Any:
+        """Call the original exactly once and return its unmodified result."""
+        result = self._delegate.find_path(path)
+        try:
+            self._observe(result, path)
+        except Exception:  # noqa: BLE001 - diagnostics never alter navigation
+            pass
+        return result
+
+
+def _restore_instance_attribute(instance: Any, name: str, original: Any) -> None:
+    """Restore an instance override or remove a temporary override of a class method."""
+    if original is _NO_INSTANCE_OVERRIDE:
+        delattr(instance, name)
+    else:
+        setattr(instance, name, original)
 
 
 def _rotation(sim: Any, agent_id: int) -> dict[str, Any]:
@@ -348,6 +429,10 @@ class PhysicalDiagnostics:
         self._step_samples_dropped = 0
         self._capture_seconds = 0.0
         self._capture_max_seconds = 0.0
+        self._nav_current: dict[int, dict[str, Any]] = {}
+        self._nav_last: dict[int, dict[str, Any]] = {}
+        self._nav_restores: list[Callable[[], None]] = []
+        self._motion = MotionDiagnostics()
         self._step_writer = BufferedJsonlWriter(
             self._dir / "diagnostics-steps.jsonl",
             batch_records=write_batch_records,
@@ -419,10 +504,17 @@ class PhysicalDiagnostics:
             "step_observations": self._step_observations,
             "step_records_accepted": self._step_records_written,
             "writer": writer,
+            "motion_observation": self._motion.stats(),
         }
 
     def _write_unavailable_snapshot(
-        self, name: str, phase: str, error: Exception, step: int | None = None
+        self,
+        name: str,
+        phase: str,
+        error: Exception,
+        step: int | None = None,
+        *,
+        termination_reason: str | None = None,
     ) -> None:
         """Best-effort one unavailable snapshot after a top-level read failure."""
         try:
@@ -433,9 +525,15 @@ class PhysicalDiagnostics:
                 "schema_version": DIAGNOSTICS_SCHEMA,
                 "simulator_step": step,
             }
-            if phase == "terminal_world_state":
+            if phase in {"terminal_world_state", "stopped_world_state"}:
+                document["simulator_steps"] = step
+                document["termination_reason"] = termination_reason
                 document["collection_stats"] = self._collection_stats()
                 document["dropped_diagnostic_records"] = self._dropped_records
+                document["agents"] = {
+                    str(agent_id): {"local_motion": self._motion.boundary(agent_id)}
+                    for agent_id in self._agent_ids
+                }
             self._write_json(
                 name,
                 document,
@@ -484,6 +582,190 @@ class PhysicalDiagnostics:
     def _metrics(self, habitat_env: Any) -> dict[str, Any]:
         """Read the official measure cache without recomputation side effects."""
         return _read(lambda: dict(habitat_env.get_metrics())) or {}
+
+    def _goal_entity_positions(self, problem: Any) -> dict[str, Any]:
+        """Read current positions of exact goal entities without changing the world.
+
+        Each failed entity read remains unavailable independently, so one
+        missing target cannot hide the other target's observed position.
+        """
+        if not self._predicates:
+            self._load_predicates(problem)
+        if not self._predicates:
+            return {"_status": _UNAVAILABLE, "reason": "goal conjuncts unavailable"}
+        sim_info = getattr(problem, "sim_info", None)
+        positions: dict[str, Any] = {}
+        for _label, predicate in self._predicates:
+            for argument in getattr(predicate, "_arg_values", None) or ():
+                name = getattr(argument, "name", None)
+                if isinstance(name, str) and name not in positions:
+                    positions[name] = (
+                        _read(_entity_position, sim_info, problem, name)
+                        if sim_info is not None
+                        else {"_status": _UNAVAILABLE, "reason": "sim_info unbound"}
+                    )
+        return positions
+
+    def _goal_entity_locations(self, sim: Any, positions: dict[str, Any]) -> dict[str, Any]:
+        """Locate observed goal entities in loaded regions, retaining unknowns."""
+        return {
+            name: _read(_semantic_location, sim, position)
+            if isinstance(position, list)
+            else {"_status": _UNAVAILABLE, "reason": "goal position unavailable"}
+            for name, position in positions.items()
+            if name != "_status"
+        }
+
+    def _agent_location(self, sim: Any, agent_id: int) -> Any:
+        """Locate the physical base position, not the offset PDDL reference."""
+        return _semantic_location(sim, _position(sim, agent_id))
+
+    def install_nav_probes(self, habitat_env: Any) -> None:
+        """Observe original Oracle calls once, preserving their values and errors.
+
+        The hook exists only while optional diagnostics are enabled. It never
+        calls target selection or pathfinding independently. Unsupported action
+        layouts remain unavailable rather than changing the physical loop.
+        """
+        if not self._enabled or self._nav_restores:
+            return
+        actions = _read(lambda: habitat_env.task.actions)
+        if not isinstance(actions, dict):
+            return
+        for agent_id in self._agent_ids:
+            action = actions.get(f"agent_{agent_id}_oracle_nav_action")
+            if action is None:
+                continue
+            original_target = _read(lambda observed=action: observed._get_target_for_idx)
+            original_path = _read(lambda observed=action: observed._path_to_point)
+            if not callable(original_target) or not callable(original_path):
+                continue
+            try:
+                instance_attributes = vars(action)
+            except TypeError:
+                continue
+            target_override = instance_attributes.get("_get_target_for_idx", _NO_INSTANCE_OVERRIDE)
+            path_override = instance_attributes.get("_path_to_point", _NO_INSTANCE_OVERRIDE)
+
+            def observed_target(
+                index: Any, *, _original: Any = original_target, _agent: int = agent_id
+            ) -> Any:
+                """Record the selected target after the original target call."""
+                result = _original(index)
+                try:
+                    nav_point, object_point = result
+                    current = self._nav_current.setdefault(_agent, {})
+                    current["target_selection_count"] = current.get("target_selection_count", 0) + 1
+                    current["selected_target_index"] = int(index)
+                    current["final_navigation_target"] = [float(v) for v in nav_point]
+                    current["pddl_entity_target"] = [float(v) for v in object_point]
+                except Exception:  # noqa: BLE001 - observation cannot change selection
+                    pass
+                return result
+
+            def observed_path(
+                *args: Any,
+                _original: Any = original_path,
+                _agent: int = agent_id,
+                _action: Any = action,
+                **kwargs: Any,
+            ) -> Any:
+                """Forward the original path query with one transparent result tap."""
+                pathfinder = getattr(_action, "pathfinder", None)
+                if pathfinder is None or kwargs.get("pathfinder") is not None or len(args) > 1:
+                    return _original(*args, **kwargs)
+
+                def observe(result: Any, path: Any) -> None:
+                    """Copy only the original path query result and endpoints."""
+                    current = self._nav_current.setdefault(_agent, {})
+                    current["path_query_count"] = current.get("path_query_count", 0) + 1
+                    current["pathfinder_success"] = bool(result)
+                    current["original_two_point_fallback"] = not bool(result)
+                    current["pathfinder_requested_start"] = [float(v) for v in path.requested_start]
+                    current["pathfinder_requested_end"] = [float(v) for v in path.requested_end]
+
+                try:
+                    _action.pathfinder = _PathfinderObserver(pathfinder, observe)
+                except Exception:  # noqa: BLE001 - unsupported instance remains unprobed
+                    return _original(*args, **kwargs)
+                try:
+                    result = _original(*args, **kwargs)
+                    try:
+                        current = self._nav_current.setdefault(_agent, {})
+                        current["returned_path_points"] = len(result)
+                    except Exception:  # noqa: BLE001 - path observation is optional
+                        pass
+                    return result
+                finally:
+                    try:
+                        _action.pathfinder = pathfinder
+                    except Exception:  # noqa: BLE001 - preserve the original navigation result
+                        pass
+
+            try:
+                action._get_target_for_idx = observed_target
+                action._path_to_point = observed_path
+            except Exception:  # noqa: BLE001 - unsupported action remains unmodified
+                try:
+                    _restore_instance_attribute(action, "_get_target_for_idx", target_override)
+                    _restore_instance_attribute(action, "_path_to_point", path_override)
+                except Exception:  # noqa: BLE001 - best-effort restoration
+                    pass
+                continue
+
+            def restore(
+                *,
+                _action: Any = action,
+                _target: Any = target_override,
+                _path: Any = path_override,
+            ) -> None:
+                """Restore original Oracle instance methods after the episode."""
+                _restore_instance_attribute(_action, "_get_target_for_idx", _target)
+                _restore_instance_attribute(_action, "_path_to_point", _path)
+
+            self._nav_restores.append(restore)
+            self._nav_restores.extend(self._motion.install(action, agent_id))
+
+    def bind_navigation_invocations(
+        self, invocations: Mapping[int, CanonicalMobilityInvocation]
+    ) -> None:
+        """Bind optional motion evidence to the supplied current canonical attempts."""
+        if not self._enabled:
+            return
+        try:
+            self._nav_current.clear()
+            self._nav_last.clear()
+            self._motion.bind(invocations)
+        except Exception:  # noqa: BLE001 - attribution is not dispatch authority
+            self._record_failure()
+
+    def _navigation_observation(self, agent_id: int, step: int) -> dict[str, Any]:
+        """Consume only calls made since the previous post-step sample."""
+        current = self._nav_current.pop(agent_id, None)
+        if not current:
+            return {"_status": _UNAVAILABLE, "reason": "no observed Oracle query this step"}
+        result = {**current, "simulator_step": step}
+        self._nav_last[agent_id] = result
+        return result
+
+    def _terminal_nav_location(self, sim: Any, agent_id: int) -> Any:
+        """Resolve only the last observed Oracle destination against loaded regions."""
+        observation = self._nav_last.get(agent_id) or self._nav_current.get(agent_id)
+        if not isinstance(observation, dict):
+            return {"_status": _UNAVAILABLE, "reason": "no Oracle destination observed"}
+        position = observation.get("final_navigation_target")
+        if position is None:
+            return {"_status": _UNAVAILABLE, "reason": "Oracle destination unavailable"}
+        return _semantic_location(sim, position)
+
+    def _restore_nav_probes(self) -> None:
+        """Best-effort restore every observed Oracle instance method."""
+        for restore in reversed(self._nav_restores):
+            try:
+                restore()
+            except Exception:  # noqa: BLE001 - diagnostic cleanup cannot mask outcome
+                pass
+        self._nav_restores.clear()
 
     def _agent_skill_state(self, actor: Any, agent_id: int) -> dict[str, Any]:
         """Read one agent's live skill bookkeeping through read-only attributes."""
@@ -559,6 +841,12 @@ class PhysicalDiagnostics:
             "oracle_skill_done": _read(lambda: bool(action.skill_done))
             if action
             else {"_status": _UNAVAILABLE, "reason": "oracle action unavailable"},
+            **(
+                {"spatial_arrival_decision": _read(action.navigation_arrival_evidence)}
+                if action is not None
+                and callable(getattr(action, "navigation_arrival_evidence", None))
+                else {}
+            ),
         }
 
     def _annotate_skill_transition(self, agent_id: int, state: Any) -> Any:
@@ -594,6 +882,7 @@ class PhysicalDiagnostics:
             problem = getattr(getattr(habitat_env, "task", None), "pddl_problem", None)
             self._load_predicates(problem)
             sim = habitat_env.sim
+            goal_positions = self._goal_entity_positions(problem)
             document: dict[str, Any] = {
                 "schema_version": DIAGNOSTICS_SCHEMA,
                 "phase": "initial_world_state",
@@ -604,7 +893,9 @@ class PhysicalDiagnostics:
                 "agents": {
                     str(agent_id): {
                         "position": _read(_position, sim, agent_id),
+                        "pddl_reference_position": _read(_pddl_reference_position, sim, agent_id),
                         "rotation": _read(_rotation, sim, agent_id),
+                        "semantic_location": _read(self._agent_location, sim, agent_id),
                     }
                     for agent_id in self._agent_ids
                 },
@@ -612,7 +903,9 @@ class PhysicalDiagnostics:
                     _read(lambda p=predicate: repr(p)) for _, predicate in self._predicates
                 ],
                 "goal_conjunct_values": self._official_conjunct_values(problem),
-                "goal_entity_positions": {},
+                "goal_entity_positions": goal_positions,
+                "goal_entity_locations": self._goal_entity_locations(sim, goal_positions),
+                "robot_at_threshold_m": _read(_robot_at_threshold, problem),
                 "official_pddl_success": self._metrics(habitat_env).get("pddl_success"),
                 "collection_configuration": {
                     "max_step_records": self._max_step_records,
@@ -620,17 +913,6 @@ class PhysicalDiagnostics:
                     "write_batch_records": self._step_writer.stats()["batch_capacity_records"],
                 },
             }
-            sim_info = getattr(problem, "sim_info", None)
-            if sim_info is not None:
-                entity_positions: dict[str, Any] = {}
-                for _label, predicate in self._predicates:
-                    for argument in getattr(predicate, "_arg_values", None) or ():
-                        name = getattr(argument, "name", None)
-                        if isinstance(name, str):
-                            entity_positions[name] = _read(
-                                _entity_position, sim_info, problem, name
-                            )
-                document["goal_entity_positions"] = entity_positions
             self._write_json("diagnostics-initial.json", document)
         except Exception as error:  # noqa: BLE001 - diagnostics must never break execution
             self._record_failure()
@@ -695,7 +977,10 @@ class PhysicalDiagnostics:
                 )
                 agent_records[str(agent_id)] = {
                     "position": _read(_position, sim, agent_id),
+                    "pddl_reference_position": _read(_pddl_reference_position, sim, agent_id),
                     "rotation": _read(_rotation, sim, agent_id),
+                    "oracle_navigation": self._navigation_observation(agent_id, step),
+                    "local_motion": self._motion.sample(agent_id, step),
                     "skill_state": skill_state,
                     "skill_exit_reason": self._skill_exit_reason(
                         skill_state, policy_input_finished
@@ -719,35 +1004,79 @@ class PhysicalDiagnostics:
 
     def record_terminal(self, habitat_env: Any, steps: int, reason: str) -> None:
         """Record the true final world state at episode termination."""
+        self._record_boundary(
+            habitat_env, steps, reason, "diagnostics-terminal.json", "terminal_world_state", True
+        )
+
+    def record_stop(self, habitat_env: Any, steps: int, reason: str, segment: int) -> None:
+        """Snapshot an actual local stop without declaring the physical episode terminal."""
+        self._record_boundary(
+            habitat_env,
+            steps,
+            reason,
+            f"diagnostics-stop-{segment}.json",
+            "stopped_world_state",
+            False,
+        )
+
+    def _record_boundary(
+        self,
+        habitat_env: Any,
+        steps: int,
+        reason: str,
+        name: str,
+        phase: str,
+        terminal: bool,
+    ) -> None:
+        """Read a bounded boundary snapshot; only final termination restores probes."""
         if not self._enabled:
             return
         self.flush_boundary()
         try:
+            episode = getattr(habitat_env, "current_episode", None)
             problem = getattr(getattr(habitat_env, "task", None), "pddl_problem", None)
             sim = habitat_env.sim
+            goal_positions = self._goal_entity_positions(problem)
             document: dict[str, Any] = {
                 "schema_version": DIAGNOSTICS_SCHEMA,
-                "phase": "terminal_world_state",
+                "phase": phase,
+                "episode_id": _read(lambda: str(episode.episode_id)) if episode else _UNAVAILABLE,
+                "scene_id": _read(lambda: str(episode.scene_id)) if episode else _UNAVAILABLE,
                 "termination_reason": reason,
                 "simulator_steps": steps,
                 "agents": {
                     str(agent_id): {
                         "position": _read(_position, sim, agent_id),
+                        "pddl_reference_position": _read(_pddl_reference_position, sim, agent_id),
                         "rotation": _read(_rotation, sim, agent_id),
+                        "semantic_location": _read(self._agent_location, sim, agent_id),
+                        "last_navigation_target_location": _read(
+                            self._terminal_nav_location, sim, agent_id
+                        ),
+                        "last_oracle_navigation": self._nav_last.get(
+                            agent_id,
+                            {"_status": _UNAVAILABLE, "reason": "no Oracle query observed"},
+                        ),
+                        "pending_oracle_navigation": self._nav_current.get(agent_id),
+                        "local_motion": self._motion.boundary(agent_id),
                     }
                     for agent_id in self._agent_ids
                 },
                 "goal_conjunct_values": self._official_conjunct_values(problem),
+                "goal_entity_positions": goal_positions,
+                "goal_entity_locations": self._goal_entity_locations(sim, goal_positions),
+                "robot_at_threshold_m": _read(_robot_at_threshold, problem),
                 "official_metrics": self._metrics(habitat_env),
                 "dropped_diagnostic_records": self._dropped_records,
                 "collection_stats": self._collection_stats(),
             }
-            self._write_json("diagnostics-terminal.json", document)
+            self._write_json(name, document)
         except Exception as error:  # noqa: BLE001 - diagnostics must never break execution
             self._record_failure()
-            self._write_unavailable_snapshot(
-                "diagnostics-terminal.json", "terminal_world_state", error, steps
-            )
+            self._write_unavailable_snapshot(name, phase, error, steps, termination_reason=reason)
+        finally:
+            if terminal:
+                self._restore_nav_probes()
 
     def flush_boundary(self) -> None:
         """Persist a segment's buffered steps without declaring official episode termination."""
@@ -792,6 +1121,10 @@ class UnavailablePhysicalDiagnostics:
         """Record that initial diagnostics are unavailable, when storage permits."""
         self._write("diagnostics-initial.json", "initial_world_state")
 
+    def install_nav_probes(self, habitat_env: Any) -> None:
+        """Leave original actions untouched when diagnostics cannot initialize."""
+        del habitat_env
+
     def record_step(
         self,
         step: int,
@@ -812,6 +1145,11 @@ class UnavailablePhysicalDiagnostics:
     def record_terminal(self, habitat_env: Any, steps: int, reason: str) -> None:
         """Record that terminal diagnostics are unavailable, when storage permits."""
         self._write("diagnostics-terminal.json", "terminal_world_state", steps)
+
+    def record_stop(self, habitat_env: Any, steps: int, reason: str, segment: int) -> None:
+        """Record unavailable stop evidence without implying terminal state or doing control."""
+        del habitat_env, reason
+        self._write(f"diagnostics-stop-{segment}.json", "stopped_world_state", steps)
 
     def flush_boundary(self) -> None:
         """Keep unavailable diagnostics side-effect-free at a local Task boundary."""

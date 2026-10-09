@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -12,16 +13,79 @@ from typing import Any
 from .backend import LocalExecutionOutcome, _observation_true, habitat_config_overrides
 from .diagnostics import BufferedJsonlWriter
 from .evidence_io import write_text_atomic
+from .execution_progress import NavigationProgressPublisher
+from .idle_endpoint import PassiveIdleAgent, PassiveIdleBinding, install_passive_idle_agents
 from .model import CanonicalMobilityInvocation, IntegrationError
+from .navigation_preparation import (
+    NAVIGATION_PREPARATION_PROFILE,
+    NavigationPreparationFailure,
+    prepare_navigation_actions,
+)
+from .navmesh_profile import STEP_AWARE_PROFILE
 from .source_provenance import build_runtime_source_manifest
+from .spatial_navigation import (
+    GOAL_AWARE_ARRIVAL_PROFILE,
+    GOAL_AWARE_POINT_RESOLVER,
+    SPATIAL_ARRIVAL_PROFILE,
+)
 from .stage2_contract import (
     Stage2ActionAudit,
     Stage2ContractViolation,
     Stage2ExecutionContract,
     install_stage2_contract_guard,
 )
+from .stage2_feedback import FEEDBACK_PROFILE, Stage2ExecutionFeedback
 
 _LOG = logging.getLogger(__name__)
+
+
+def _configure_goal_region_navigation(
+    config: Any,
+    read_write: Callable[[Any], Any],
+    *,
+    step_aware: bool = False,
+    spatial_arrival: bool = False,
+    goal_aware_arrival: bool = False,
+) -> None:
+    """Select the adapter-owned Oracle subclass before constructing Habitat.
+
+    Only the configured original differential-base navigation action is
+    supported. A different vendor action fails closed instead of silently
+    changing an unrelated skill or running an undisclosed Local How profile.
+    """
+    from .goal_region_action import GoalRegionOracleNavDiffBaseAction
+
+    if goal_aware_arrival:
+        if not spatial_arrival or not step_aware:
+            raise IntegrationError(
+                "goal-aware navigation arrival requires spatial navigation arrival"
+            )
+        from .spatial_navigation_action import LiveGoalArrivalGoalRegionOracleNavDiffBaseAction
+
+        action_name = LiveGoalArrivalGoalRegionOracleNavDiffBaseAction.__name__
+    elif spatial_arrival:
+        if not step_aware:
+            raise IntegrationError("spatial navigation arrival requires step-aware navmesh")
+        from .spatial_navigation_action import SpatialArrivalGoalRegionOracleNavDiffBaseAction
+
+        action_name = SpatialArrivalGoalRegionOracleNavDiffBaseAction.__name__
+    elif step_aware:
+        from .goal_region_action import StepAwareGoalRegionOracleNavDiffBaseAction
+
+        action_name = StepAwareGoalRegionOracleNavDiffBaseAction.__name__
+    else:
+        action_name = GoalRegionOracleNavDiffBaseAction.__name__
+    actions = config.habitat.task.actions
+    agent_count = len(config.habitat.simulator.agents_order)
+    keys = [f"agent_{agent_id}_oracle_nav_action" for agent_id in range(agent_count)]
+    for key in keys:
+        if key not in actions or actions[key].type != "OracleNavDiffBaseAction":
+            raise IntegrationError(
+                f"goal-region navigation requires original OracleNavDiffBaseAction at {key}"
+            )
+    with read_write(config):
+        for key in keys:
+            actions[key].type = action_name
 
 
 def format_stage2_subtask(invocation: CanonicalMobilityInvocation, mode: str) -> str:
@@ -128,6 +192,8 @@ class EmosStage2Runtime:
         self._actor: Any | None = None
         self._agent_access: Any | None = None
         self._runtime: dict[str, Any] = {}
+        self._stage2_feedback: Stage2ExecutionFeedback | None = None
+        self._last_navigation_preparation_failure: dict[str, Any] | None = None
         self._action_trace_writer = BufferedJsonlWriter(self._evidence_dir() / "action_trace.jsonl")
 
     def initialize(self) -> None:
@@ -165,6 +231,26 @@ class EmosStage2Runtime:
                 str(self._config.config_path),
                 overrides=habitat_config_overrides(self._config.seed),
             )
+            goal_region_enabled = bool(getattr(self._config, "goal_region_navigation", False))
+            step_aware_enabled = bool(getattr(self._config, "step_aware_navmesh", False))
+            spatial_arrival_enabled = bool(
+                getattr(self._config, "spatial_navigation_arrival", False)
+            )
+            goal_aware_arrival_enabled = bool(
+                getattr(self._config, "goal_aware_navigation_arrival", False)
+            )
+            if goal_region_enabled:
+                _configure_goal_region_navigation(
+                    config,
+                    read_write,
+                    step_aware=step_aware_enabled,
+                    spatial_arrival=spatial_arrival_enabled,
+                    goal_aware_arrival=goal_aware_arrival_enabled,
+                )
+            if spatial_arrival_enabled:
+                from habitat.gym.gym_wrapper import (  # type: ignore[import-not-found]
+                    continuous_vector_action_to_hab_dict,
+                )
             if self._config.video_path is not None or self._config.live_preview_path is not None:
                 _add_operator_view_sensors(config, get_agent_config, read_write)
             gym_env, habitat_env, episode = _make_episode_gym_environment(
@@ -210,15 +296,97 @@ class EmosStage2Runtime:
                 "transforms": transforms,
                 "habitat_config": config,
             }
+            if spatial_arrival_enabled:
+                self._runtime["decode_navigation_action"] = continuous_vector_action_to_hab_dict
+            self._write_json(
+                "local-how-profile.json",
+                {
+                    "schema_version": (
+                        "roboguide.habitat-local-how-profile/v0.7"
+                        if goal_aware_arrival_enabled
+                        else "roboguide.habitat-local-how-profile/v0.6"
+                        if spatial_arrival_enabled
+                        else "roboguide.habitat-local-how-profile/v0.4"
+                        if step_aware_enabled
+                        else "roboguide.habitat-local-how-profile/v0.3"
+                        if getattr(self._config, "reset_route_geometry", False)
+                        else "roboguide.habitat-local-how-profile/v0.2"
+                    ),
+                    "navigation_point_resolver": (
+                        GOAL_AWARE_POINT_RESOLVER
+                        if goal_aware_arrival_enabled
+                        else "official-any-at-agent-navmesh/v0.1"
+                        if goal_region_enabled
+                        else "original-emos-oracle"
+                    ),
+                    "official_success_authority": "habitat-pddl",
+                    "stage2_execution_feedback_profile": FEEDBACK_PROFILE,
+                    "reset_route_support_enabled": bool(
+                        getattr(self._config, "reset_route_support", False)
+                    ),
+                    **(
+                        {"reset_route_geometry_enabled": True}
+                        if getattr(self._config, "reset_route_geometry", False)
+                        else {}
+                    ),
+                    **(
+                        {"navmesh_resolution_profile": STEP_AWARE_PROFILE}
+                        if step_aware_enabled
+                        else {}
+                    ),
+                    **(
+                        {
+                            "navigation_arrival_profile": (
+                                GOAL_AWARE_ARRIVAL_PROFILE
+                                if goal_aware_arrival_enabled
+                                else SPATIAL_ARRIVAL_PROFILE
+                            ),
+                            "navigation_preparation_profile": NAVIGATION_PREPARATION_PROFILE,
+                        }
+                        if spatial_arrival_enabled
+                        else {}
+                    ),
+                    **(
+                        {"reset_route_probe_policy": "conservative-stop-envelope/v0.1"}
+                        if goal_aware_arrival_enabled
+                        else {}
+                    ),
+                },
+            )
             self._write_json(
                 "runtime-source-manifest.json",
                 build_runtime_source_manifest(
                     (
                         "habitat.tasks.rearrange.actions.habitat_mas_actions",
+                        "habitat.tasks.rearrange.actions.oracle_nav_action",
+                        "habitat_sim",
+                        "habitat_baselines.rl.hrl.hl.llm_policy",
+                        "habitat_baselines.rl.hrl.skills.wait",
                         "habitat_baselines.rl.multi_agent.multi_agent_access_mgr",
+                        "habitat_baselines.rl.multi_agent.multi_llm_policy",
+                        "habitat_mas.agents.crab_agent",
                         "habitat_mas.utils.models",
+                        "habitat_local_eaios.stage2_feedback",
+                        "habitat_local_eaios.emos_stage2",
+                        "habitat_local_eaios.goal_region_action",
+                        "habitat_local_eaios.goal_region_navigation",
+                        "habitat_local_eaios.navmesh_profile",
+                        "habitat_local_eaios.reset_route_support",
+                        "habitat_local_eaios.navmesh_region",
+                        "habitat_local_eaios.idle_endpoint",
                         "habitat_local_eaios.shared_world",
                         "habitat_local_eaios.stage2_contract",
+                        *(
+                            (
+                                "habitat.tasks.rearrange.actions.actions",
+                                "habitat_local_eaios.spatial_navigation",
+                                "habitat_local_eaios.spatial_navigation_action",
+                                "habitat.gym.gym_wrapper",
+                                "habitat_local_eaios.navigation_preparation",
+                            )
+                            if spatial_arrival_enabled
+                            else ()
+                        ),
                     )
                 ),
             )
@@ -234,7 +402,7 @@ class EmosStage2Runtime:
         cancellation_requested: Callable[[], bool],
         running: Callable[[str], None],
     ) -> LocalExecutionOutcome:
-        """Run an assigned subtask using the unmodified EMOS Stage2 decision path."""
+        """Run the assigned agent's original Stage2 path and keep peers passive."""
         gym_env, habitat_env, actor, access = self._require_initialized()
         try:
             habitat_env.episodes = [self._episode]
@@ -305,6 +473,7 @@ class EmosStage2Runtime:
         cancellation_requested: Callable[[], bool],
     ) -> LocalExecutionOutcome:
         """Mirror the EMOS evaluator loop while preserving RoboGuide cancellation."""
+        self._last_navigation_preparation_failure = None
         self._last_policy_observations = observations
         torch = self._runtime["torch"]
         device = self._runtime["device"]
@@ -322,13 +491,21 @@ class EmosStage2Runtime:
         action_lengths = actor.policy_action_space_shape_lens
         steps = 0
         step_offset = self._policy_step_offset()
+        progress = NavigationProgressPublisher(
+            getattr(self._config, "progress_directory", None), invocation, self._config.agent_id
+        )
         skill_sequence: list[str] = []
         chat_history_root = self._evidence_dir() / "chat-history"
         (chat_history_root / str(text_context["episode_id"])).mkdir(parents=True, exist_ok=True)
         module, original_group_discussion = self._install_assignment(assignment)
+        idle_binding: PassiveIdleBinding | None = None
         contract_restore: Callable[[], None] | None = None
         contract_failure: Stage2ContractViolation | None = None
+        navigation_failure: NavigationPreparationFailure | None = None
         try:
+            idle_binding = install_passive_idle_agents(
+                actor, assignment, f"agent_{self._config.agent_id}"
+            )
             contract_restore = self._install_execution_contract(
                 self._single_execution_contracts(assignment, invocation),
                 lambda: step_offset + steps,
@@ -362,10 +539,22 @@ class EmosStage2Runtime:
                 current_skills = self._current_skills(actor)
                 self._extend_skill_sequence(skill_sequence, current_skills)
                 env_action = action_data.env_actions.detach().cpu()[0].numpy()
-                step_result = gym_env.step(env_action)
+                discard = self._prepare_navigation_step(
+                    env_action,
+                    gym_env,
+                    habitat_env,
+                    {self._config.agent_id: invocation},
+                    step_offset + steps,
+                )
+                try:
+                    step_result = gym_env.step(env_action)
+                finally:
+                    discard()
                 observations, done, info = self._gym_step_result(step_result)
                 self._last_policy_observations = observations
                 steps += 1
+                self._record_completed_physical_step()
+                progress.observe(habitat_env, current_skills[self._config.agent_id])
                 if action_data.should_inserts is None:
                     hidden = action_data.rnn_hidden_states
                     previous.copy_(action_data.actions)
@@ -396,6 +585,7 @@ class EmosStage2Runtime:
                 } and (
                     _observation_true(observations, finished_key) or self._oracle_nav_finished()
                 ):
+                    self._record_local_skill_completion(self._config.agent_id)
                     return self._outcome(
                         "COMPLETED",
                         "original EMOS OracleNavPolicy reached its skill terminal measure",
@@ -438,13 +628,36 @@ class EmosStage2Runtime:
                     time.sleep(self._config.step_period_ms / 1_000)
         except Stage2ContractViolation as error:
             contract_failure = error
+        except NavigationPreparationFailure as error:
+            navigation_failure = error
         finally:
             try:
                 if contract_restore is not None:
                     contract_restore()
             finally:
-                module.group_discussion = original_group_discussion
-                self._best_effort_flush_action_trace("Stage2 termination")
+                try:
+                    if idle_binding is not None:
+                        self._best_effort_write_json(
+                            f"idle-endpoint-{invocation.request_key()[:16]}.json",
+                            idle_binding.evidence(),
+                            "Stage2 termination",
+                        )
+                        idle_binding.restore()
+                finally:
+                    module.group_discussion = original_group_discussion
+                    self._best_effort_flush_action_trace("Stage2 termination")
+        if navigation_failure is not None:
+            return self._outcome(
+                "FAILED",
+                str(navigation_failure),
+                invocation,
+                scene_id,
+                steps,
+                initial,
+                skill_sequence,
+                local_skill_completed=False,
+                terminal_basis="local-navigation-preparation-failure",
+            )
         if contract_failure is not None:
             return self._outcome(
                 "FAILED",
@@ -468,6 +681,62 @@ class EmosStage2Runtime:
             local_skill_completed=False,
             terminal_basis="step-budget-exhausted",
         )
+
+    def _prepare_navigation_step(
+        self,
+        env_action: Any,
+        gym_env: Any,
+        habitat_env: Any,
+        invocations: dict[int, CanonicalMobilityInvocation],
+        steps: int,
+    ) -> Callable[[], None]:
+        """Prepare actual selected Local How commands before the one original Gym step.
+
+        The default-off profile leaves the legacy path untouched. Expected
+        bounded path failures retain exact attempt attribution and cause; other
+        exceptions propagate unchanged. Evidence I/O cannot authorize movement
+        or replace a preparation failure. Target/mesh preparation is execution,
+        not a read-only observer or a route-feasibility authority.
+        """
+        if not getattr(self._config, "spatial_navigation_arrival", False):
+            return lambda: None
+        decoded = self._runtime["decode_navigation_action"](
+            gym_env.original_action_space, gym_env.action_space, env_action
+        )
+        agent_count = len(self._runtime["habitat_config"].habitat.simulator.agents_order)
+        try:
+            return prepare_navigation_actions(
+                habitat_env.task.actions, decoded, agent_ids=tuple(range(agent_count))
+            )
+        except NavigationPreparationFailure as error:
+            document = {
+                "schema_version": "roboguide.habitat-navigation-preparation-failure/v0.1",
+                "profile": NAVIGATION_PREPARATION_PROFILE,
+                "episode_id": str(habitat_env.current_episode.episode_id),
+                "scene_id": str(habitat_env.current_episode.scene_id),
+                "simulator_steps": steps,
+                "failed_before_gym_step": True,
+                "failure": error.as_dict(),
+                "invocations": {
+                    str(agent_id): invocation.as_dict()
+                    for agent_id, invocation in invocations.items()
+                },
+            }
+            document["digest"] = (
+                "sha256:"
+                + hashlib.sha256(
+                    json.dumps(
+                        document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                    ).encode("utf-8")
+                ).hexdigest()
+            )
+            self._last_navigation_preparation_failure = document
+            self._best_effort_write_json(
+                f"navigation-preparation-failure-{steps}.json",
+                document,
+                "pre-motion navigation failure",
+            )
+            raise
 
     def _observe_policy_step(
         self,
@@ -548,16 +817,11 @@ class EmosStage2Runtime:
         assignment: dict[str, Any],
         invocation: CanonicalMobilityInvocation,
     ) -> dict[str, Stage2ExecutionContract]:
-        """Build contracts for the assigned agent and idle sibling agents."""
+        """Guard the only agent authorized to request a physical Stage2 action."""
         target = f"agent_{self._config.agent_id}"
-        contracts: dict[str, Stage2ExecutionContract] = {}
-        for agent_name in assignment:
-            contracts[agent_name] = (
-                Stage2ExecutionContract.for_invocation(invocation)
-                if agent_name == target
-                else Stage2ExecutionContract.idle()
-            )
-        return contracts
+        if target not in assignment:
+            raise IntegrationError(f"assigned EMOS agent {target!r} is unavailable")
+        return {target: Stage2ExecutionContract.for_invocation(invocation)}
 
     def _install_execution_contract(
         self,
@@ -567,8 +831,22 @@ class EmosStage2Runtime:
         """Install one scoped guard around the original EMOS action boundary."""
         if self._actor is None:
             raise IntegrationError("Stage2 contract requires an initialized actor")
+        all_agents = [
+            policy._high_level_policy.llm_agent for policy in self._actor._active_policies
+        ]
+        agents = [agent for agent in all_agents if not isinstance(agent, PassiveIdleAgent)]
+        if {agent.name for agent in agents} != set(contracts) or any(
+            agent.name in contracts or agent.llm_model is not None
+            for agent in all_agents
+            if isinstance(agent, PassiveIdleAgent)
+        ):
+            raise IntegrationError("active Stage2 models must match committed execution contracts")
         audit = Stage2ActionAudit(self._evidence_dir(), self._previous_action_audit())
-        agents = [policy._high_level_policy.llm_agent for policy in self._actor._active_policies]
+        feedback_audit = Stage2ActionAudit(
+            self._evidence_dir(),
+            getattr(self, "_feedback_audit_summary", None),
+            execution_feedback=True,
+        )
 
         def record(document: dict[str, Any]) -> None:
             """Bind the action decision to the last completed simulator step and local time."""
@@ -578,17 +856,54 @@ class EmosStage2Runtime:
                 )
             )
 
-        restore_guard = install_stage2_contract_guard(agents, contracts, record)
+        def record_feedback(document: dict[str, Any]) -> None:
+            """Archive local observations separately from model-selected action admission."""
+            feedback_audit.record(
+                dict(
+                    document, completed_simulator_steps=completed_steps(), observed_unix=time.time()
+                )
+            )
+
+        feedback = Stage2ExecutionFeedback(contracts, record_feedback)
+        try:
+            feedback.install(self._actor._active_policies)
+            restore_guard = install_stage2_contract_guard(
+                agents, contracts, record, feedback=feedback
+            )
+        except BaseException:
+            feedback.close()
+            feedback_audit.close()
+            audit.close()
+            raise
+        self._stage2_feedback = feedback
 
         def restore() -> None:
             """Close per-call evidence and restore instance hooks on every exit."""
             try:
                 restore_guard()
             finally:
-                audit.close()
-                self._retain_action_audit(audit.summary)
+                try:
+                    feedback.close()
+                finally:
+                    self._stage2_feedback = None
+                    feedback_audit.close()
+                    self._feedback_audit_summary = feedback_audit.summary
+                    audit.close()
+                    self._retain_action_audit(audit.summary)
 
         return restore
+
+    def _record_local_skill_completion(self, agent_id: int) -> None:
+        """Forward an already-observed local completion without rereading sensors or truth."""
+        feedback = getattr(self, "_stage2_feedback", None)
+        if feedback is not None:
+            feedback.local_completion(f"agent_{agent_id}")
+
+    def _record_completed_physical_step(self) -> None:
+        """Advance only local feedback attribution after the existing successful Gym step."""
+        feedback = getattr(self, "_stage2_feedback", None)
+        if feedback is not None:
+            feedback.physical_step()
 
     def _previous_action_audit(self) -> dict[str, Any] | None:
         """Return prior segment accounting when the local world is intentionally retained."""

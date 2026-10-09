@@ -47,6 +47,12 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=1000)
     parser.add_argument("--step-period-ms", type=int, default=20)
     parser.add_argument(
+        "--progress-directory",
+        type=Path,
+        default=None,
+        help="opt-in bounded read-only navigation progress; absent keeps sampling disabled",
+    )
+    parser.add_argument(
         "--video-path",
         type=Path,
         default=None,
@@ -118,6 +124,41 @@ def _arguments() -> argparse.Namespace:
         default=None,
         help="shared backend: digest-bound Node capability snapshot",
     )
+    parser.add_argument(
+        "--goal-aware-navigation-arrival",
+        action="store_true",
+        help="shared backend: require the actual reference inside the exact goal region to finish",
+    )
+    parser.add_argument(
+        "--spatial-navigation-arrival",
+        action="store_true",
+        help="shared backend: require spatial arrival before facing the assigned entity",
+    )
+    parser.add_argument(
+        "--step-aware-navmesh",
+        action="store_true",
+        help="shared backend: preserve declared climb in copied vertical NavMesh resolution",
+    )
+    parser.add_argument(
+        "--goal-region-navigation",
+        action="store_true",
+        help="shared backend: opt in to agent-navmesh target selection for official any_at goals",
+    )
+    parser.add_argument(
+        "--reset-route-support",
+        action="store_true",
+        help="shared backend: observe bounded reset routes without excluding Node candidates",
+    )
+    parser.add_argument(
+        "--reset-route-geometry",
+        action="store_true",
+        help="shared backend: add bounded static component geometry to reset route evidence",
+    )
+    parser.add_argument(
+        "--retain-stopped-session",
+        action="store_true",
+        help="shared backend: retain cancelled Group worlds for coordinated exact attempts",
+    )
     return parser.parse_args()
 
 
@@ -149,14 +190,38 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         run_id=arguments.run_id,
         spatial_capabilities=load_spatial_profile_snapshot(arguments.spatial_profile),
         spatial_profile_path=arguments.spatial_profile,
+        goal_region_navigation=arguments.goal_region_navigation,
+        step_aware_navmesh=arguments.step_aware_navmesh,
+        spatial_navigation_arrival=arguments.spatial_navigation_arrival,
+        goal_aware_navigation_arrival=arguments.goal_aware_navigation_arrival,
+        reset_route_support=arguments.reset_route_support,
+        reset_route_geometry=arguments.reset_route_geometry,
+        retain_stopped_session=arguments.retain_stopped_session,
+        progress_directory=arguments.progress_directory,
     )
     world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
-    coordinator = SharedWorldCoordinator(world, arguments.pair_wait_s, arguments.evidence_dir)
+    coordinator = SharedWorldCoordinator(
+        world,
+        arguments.pair_wait_s,
+        arguments.evidence_dir,
+        retain_stopped_session=arguments.retain_stopped_session,
+        max_steps=arguments.max_steps,
+    )
     endpoint_a = NodeEndpoint(
-        "node-a", arguments.agent_id, ExecutionStore(arguments.state_db), coordinator
+        "node-a",
+        arguments.agent_id,
+        ExecutionStore(arguments.state_db),
+        coordinator,
+        progress_directory=arguments.progress_directory,
+        retain_stopped_session=arguments.retain_stopped_session,
     )
     endpoint_b = NodeEndpoint(
-        "node-b", arguments.agent_b_id, ExecutionStore(arguments.state_db_b), coordinator
+        "node-b",
+        arguments.agent_b_id,
+        ExecutionStore(arguments.state_db_b),
+        coordinator,
+        progress_directory=arguments.progress_directory,
+        retain_stopped_session=arguments.retain_stopped_session,
     )
     server_a = HabitatBridgeServer((arguments.host, arguments.port), endpoint_a)
     server_b = HabitatBridgeServer((arguments.host, arguments.port_b), endpoint_b)
@@ -178,6 +243,24 @@ def main() -> None:
         raise SystemExit("Habitat Local EAIOS must bind a loopback host")
     if arguments.backend == "emos-crabagent" and arguments.evidence_dir is None:
         raise SystemExit("the emos-crabagent backend requires --evidence-dir")
+    if arguments.goal_region_navigation and arguments.backend != "shared-emos-stage2":
+        raise SystemExit("goal-region navigation requires the shared EMOS Stage2 backend")
+    if arguments.step_aware_navmesh and not arguments.goal_region_navigation:
+        raise SystemExit("step-aware navmesh requires goal-region navigation")
+    if arguments.spatial_navigation_arrival and not arguments.step_aware_navmesh:
+        raise SystemExit("spatial navigation arrival requires step-aware navmesh")
+    if arguments.goal_aware_navigation_arrival and not arguments.spatial_navigation_arrival:
+        raise SystemExit("goal-aware navigation arrival requires spatial navigation arrival")
+    if arguments.retain_stopped_session and arguments.backend != "shared-emos-stage2":
+        raise SystemExit("retained stopped sessions require the shared EMOS Stage2 backend")
+    if arguments.reset_route_support and (
+        arguments.backend != "shared-emos-stage2" or not arguments.goal_region_navigation
+    ):
+        raise SystemExit(
+            "reset route support requires shared EMOS Stage2 and goal-region navigation"
+        )
+    if arguments.reset_route_geometry and not arguments.reset_route_support:
+        raise SystemExit("reset route geometry requires reset route support")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if arguments.backend == "shared-emos-stage2":
         _run_shared_world(arguments)
@@ -193,6 +276,7 @@ def main() -> None:
         "video_fps": arguments.video_fps,
         "live_preview_path": arguments.live_preview_path,
         "live_preview_period_steps": arguments.live_preview_period_steps,
+        "progress_directory": arguments.progress_directory,
     }
     if arguments.backend == "emos-crabagent":
         config: HabitatBackendConfig = CrabAgentBackendConfig(
@@ -200,6 +284,7 @@ def main() -> None:
             subtask_mode=arguments.subtask_mode,
             evidence_dir=arguments.evidence_dir,
             run_id=arguments.run_id,
+            goal_region_navigation=arguments.goal_region_navigation,
         )
         backend_class: type = CrabAgentMobilityBackend
     else:
@@ -210,6 +295,8 @@ def main() -> None:
         store,
         lambda: HabitatProcessBackend(config, arguments.initialization_timeout_s, backend_class),
         arguments.initialization_timeout_s,
+        progress_directory=arguments.progress_directory,
+        agent_id=arguments.agent_id,
     )
     server = HabitatBridgeServer((arguments.host, arguments.port), adapter)
     try:

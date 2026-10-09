@@ -1,10 +1,9 @@
 """Read-only spatial feasibility checks at the Habitat execution boundary.
 
-The check deliberately proves only a negative fact: a deployment capability
-that cannot cross floors must not be assigned a destination on another floor.
-It never computes a route, changes a task, chooses another agent, or claims
-that a positive result proves navigability.  Unknown observations remain
-explicit in the run evidence and retain the existing Local EAIOS behaviour.
+The check records floor-transition constraints without treating a different
+semantic floor as proof that a distance-based goal cannot be satisfied. It
+never computes a route, changes a task, chooses another agent, or claims that
+a positive result proves navigability. Unknown observations remain explicit.
 """
 
 from __future__ import annotations
@@ -20,8 +19,9 @@ from typing import Any, cast
 from .evidence_io import write_text_atomic
 from .model import SUPPORTED_OPERATIONS, CanonicalMobilityInvocation, IntegrationError
 from .planning_world_evidence import _floor_location
+from .semantic_evidence import _expression
 
-SPATIAL_FEASIBILITY_SCHEMA = "roboguide.habitat-spatial-feasibility/v0.1"
+SPATIAL_FEASIBILITY_SCHEMA = "roboguide.habitat-spatial-feasibility/v0.2"
 SPATIAL_PROFILE_SCHEMA = "roboguide.habitat-node-spatial-profile/v0.1"
 
 
@@ -224,10 +224,11 @@ def assess_spatial_feasibility(
     AABBs. Same-floor region overlaps retain a known floor without inventing
     one region identity. If either position has no unique floor, the result is
     ``unknown``.
-    A different floor is a deterministic incompatibility only when the
-    deployment registration explicitly says that this agent cannot transition
-    floors.  A capable agent receives ``compatible`` as an admission result,
-    while the evidence still states that route reachability was not proven.
+    A different floor is incompatible for a non-goal exact destination when
+    the registration forbids floor transitions. An official distance-based
+    goal can still be met from another floor, so that case remains unknown.
+    A capable agent receives ``compatible`` as an admission result, while the
+    evidence still states that route reachability was not proven.
     """
     return assess_destination_floor_compatibility(
         habitat_env, agent_id, invocation.operation, invocation.destination, profile
@@ -248,6 +249,8 @@ def assess_destination_floor_compatibility(
         "destination": destination,
         "operation": operation,
         "profile": profile.as_dict() if profile is not None else None,
+        "goal_occupancy": "unavailable",
+        "goal_tolerance_m": None,
         "status": "unknown",
         "reason": "spatial evidence unavailable",
         "start": {"position": None, "region_id": None, "floor_id": None},
@@ -276,6 +279,9 @@ def assess_destination_floor_compatibility(
         destination_position = _vector(sim_info.get_entity_pos(entity))
         destination_location = _floor_location(destination_position, regions)
         record["destination_entity"] = _location_record(destination_position, destination_location)
+        goal_occupancy, tolerance = _goal_occupancy(problem, destination)
+        record["goal_occupancy"] = goal_occupancy
+        record["goal_tolerance_m"] = tolerance
         if start_location is None or destination_location is None:
             record["reason"] = "start or destination has no unique semantic floor"
             return record
@@ -287,8 +293,14 @@ def assess_destination_floor_compatibility(
             return record
         supports_transition = profile.support_for(operation)
         if supports_transition is False:
-            record["status"] = "incompatible"
-            record["reason"] = "registered agent cannot transition between semantic floors"
+            if goal_occupancy == "none":
+                record["status"] = "incompatible"
+                record["reason"] = "registered agent cannot enter the destination semantic floor"
+            else:
+                record["reason"] = (
+                    "different floors do not rule out satisfying an official goal "
+                    "without a floor transition"
+                )
             return record
         if supports_transition is True:
             record["status"] = "compatible"
@@ -299,6 +311,42 @@ def assess_destination_floor_compatibility(
     except Exception as error:  # noqa: BLE001 - unknown evidence must be explicit
         record["reason"] = f"spatial evidence read failed: {type(error).__name__}: {error}"
         return record
+
+
+def _goal_occupancy(problem: Any, destination: str) -> tuple[str, float | None]:
+    """Identify an exact official goal target and its distance tolerance.
+
+    An unreadable or non-distance goal stays unknown rather than authorizing a
+    floor-based negative conclusion. The lookup reads PDDL metadata only.
+    """
+    try:
+        expression = _expression(problem.goal)
+        matching: list[dict[str, Any]] = []
+
+        def collect(value: dict[str, Any]) -> None:
+            """Collect concrete predicates naming the destination without changing the goal."""
+            if value.get("kind") == "predicate":
+                if destination in value.get("arguments", []):
+                    matching.append(value)
+                return
+            for operand in value.get("operands", []):
+                if isinstance(operand, dict):
+                    collect(operand)
+
+        collect(expression)
+        if not matching:
+            return "none", None
+        if any(
+            item.get("name") != "any_at" or item.get("arguments") != [destination]
+            for item in matching
+        ):
+            return "other", None
+        tolerance = float(problem.sim_info.robot_at_thresh)
+        if not math.isfinite(tolerance) or tolerance <= 0:
+            return "unavailable", None
+        return "any_at", tolerance
+    except (AttributeError, TypeError, ValueError):
+        return "unavailable", None
 
 
 def _location_record(

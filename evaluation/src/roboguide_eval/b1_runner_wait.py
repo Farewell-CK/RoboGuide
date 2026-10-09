@@ -91,7 +91,8 @@ class WaitBudget:
             "derivation": (
                 "grounding 2*attempts*timeout + interpreter timeout + "
                 "planner (1+prevalidation)*timeout + reviewer (max_repair+1)*timeout "
-                "+ repairer max_repair*timeout + controller timeout + margin"
+                "+ repairer max_repair*timeout + controller timeout "
+                "+ optional bounded deployment reconsideration, new reviews and preflight + margin"
             ),
         }
 
@@ -126,6 +127,21 @@ def derive_wait_budget(mission_config_path: Path, service_config_path: Path) -> 
     controller_timeout = _positive(
         svc, "controller_timeout_seconds", "service.controller_timeout_seconds"
     )
+    preflight = svc.get("controller_preflight_enabled", False)
+    if not isinstance(preflight, bool):
+        raise WaitConfigurationError("service.controller_preflight_enabled must be Boolean")
+    recovery_attempts = svc.get("max_deployment_recovery_attempts", 0)
+    recovery_timeout = svc.get("deployment_recovery_timeout_ms", 900000)
+    if type(recovery_attempts) is not int or not 0 <= recovery_attempts <= 3:
+        raise WaitConfigurationError(
+            "service.max_deployment_recovery_attempts must be between 0 and 3"
+        )
+    if type(recovery_timeout) is not int or not 0 < recovery_timeout <= 900000:
+        raise WaitConfigurationError(
+            "service.deployment_recovery_timeout_ms must be between 1 and 900000"
+        )
+    if recovery_attempts and not preflight:
+        raise WaitConfigurationError("deployment recovery requires Controller preflight")
     components = {
         "grounding_capture": 2 * grounding_attempts * grounding_timeout,
         "interpreter": timeout,
@@ -135,6 +151,13 @@ def derive_wait_budget(mission_config_path: Path, service_config_path: Path) -> 
         "controller_submission": controller_timeout,
         "scheduling_margin": SCHEDULING_MARGIN_SECONDS,
     }
+    if preflight:
+        components["controller_preflight"] = (1 + recovery_attempts) * controller_timeout
+    if recovery_attempts:
+        components["deployment_reconsideration"] = min(
+            recovery_attempts * timeout, recovery_timeout / 1000
+        )
+        components["deployment_rereview"] = recovery_attempts * timeout
     # A slow-drip provider can hold one socket-level call open far past
     # timeout_seconds; two nominal call ceilings bound any legitimate gap
     # between observable lifecycle transitions.

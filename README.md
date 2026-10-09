@@ -62,8 +62,19 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   `execution-report` 或 `verifier-evidence` satisfaction policy；
 - Planner/Reviewer/Repairer 共用 `config/mission.toml` 中显式的 satisfaction policy；其 ref/digest
   随模型输入保留，生成的 verifier receive-age bound 必须匹配配置。当前五秒窗口是系统接受
-  策略，不是模型猜测、Task duration 或物理真值保证。Generic verifier ingress 仍 deferred，见
-  [ADR-0039](docs/decisions/0039-mission-satisfaction-freshness-policy.md)；
+  策略，不是模型猜测、Task duration 或物理真值保证。可选的 deployment-owned terminal verifier
+  ingress 只接纳启动时冻结的 source、精确 Task predicate 和当前物理 attempt；无证据时拒绝
+  verifier-backed 计划，见 [ADR-0039](docs/decisions/0039-mission-satisfaction-freshness-policy.md)
+  与 [ADR-0048](docs/decisions/0048-deployment-task-verifier-ingress.md)；
+- B1 shared-world runner 默认使用 `scenarios/e1-shared-world-episode-51/mission-config-b1.toml`
+  的显式权威终态确认策略：MI 的每个 DAG 末端 Task 必须绑定完整冻结目标的 verifier
+  contract/predicate。普通 `config/mission.toml` 保留原有可选 basis；此策略不改变
+  MissionPlan、节点选择或 Habitat 官方判定，见
+  [ADR-0049](docs/decisions/0049-authoritative-goal-satisfaction-policy.md)；
+- B1 自动归档另外生成可选的终态几何诊断，分别记录 Habitat 官方 `pddl_success`、按同一
+  阈值重建的三维 `any_at` 和忽略高度后的 X/Z 反事实结果；诊断缺失或与官方终态矛盾时
+  标记 unavailable，绝不改变 benchmark success 或 Formal admission。见
+  [Eval Harness](evaluation/README.md)；
 - 当前实现从模块化单体和确定性 Fake Nodes 起步；
 - `core/state` 已实现 Shared Node State、Allocation State v0.1、source-aware State record、
   通用/Spatial Memory catalog 和 SQLite WAL evidence envelope；Control 通过
@@ -185,6 +196,40 @@ Control Plane 负责全局决策与协调：
 4. `Execution Group Manager` 管理 Create、Bind、Activate、Adapt、Complete、Release 生命周期；
 5. `Reconciliation & Recovery` 检测现实与计划偏差，并选择最小必要恢复层级。
 
+当前下发前恢复流程使用 typed reason/action 与 digest-bound evidence，POST 前持久化
+submission fence。提交结果不明时只核对原 Mission，不重复提交或改写计划；Controller
+明确拒绝后可显式重交原稿。独立 observations v0.3 保持 Request v0.4 和 MissionPlan
+不变；新增完整 HTTP body 绑定的权威接纳对账见 [ADR-0055](docs/decisions/0055-controller-admission-reconciliation.md)。
+旧 status 查询或缺少原请求指纹时继续保留不确定性。操作进度通过已注册的只读 State export
+区分工作、正常等待、阻塞及未知，只有明确提供的量度与策略才报告停滞，见
+[ADR-0056](docs/decisions/0056-execution-progress-observation.md)。显式执行恢复先确认当前
+实例真实停止，再由 Control 部分释放、重新匹配和 Commit/Rebind，生成新的执行实例。
+次数与时间预算不因重启或重复命令重置；Actor 保持原权威绑定。见
+[ADR-0057](docs/decisions/0057-confirmed-stop-role-recovery.md)。自动停滞恢复和执行期 MI
+重规划仍未实现；没有 progress observer 的部署明确返回 Unknown。
+Habitat 的可选导航 observer 已接入同一 State export（
+[ADR-0058](docs/decisions/0058-local-navigation-progress-observer.md)），区分真实 wait 和
+既定目标的几何进展。观测不授权停止或重试；shared-world 取消仍影响整个联合执行。
+单 Role 恢复还要求部署明确声明独立停止和原上下文重执行能力，dispatch 冻结且当前
+注册不变，见 [ADR-0059](docs/decisions/0059-deployment-stop-continuation-contract.md)。缺失或
+耦合声明会在 Cancel 前拒绝；Control 和 outbox 继续检查后续动作。当前 Habitat 如实声明
+默认联合停止、不支持中断后重试；正常双 endpoint 和单 Actor 顺序 Task 不受此限制。
+
+部署侧 retained-world continuation 已依
+[ADR-0060](docs/decisions/0060-retained-shared-world-continuation.md) 实现默认关闭的本地路径：
+联合取消后的新 attempts 复用原世界、观察与剩余步数，已完成端不再次调用模型。
+有界的精确 session/intent/new-attempt 检查与重启 fencing 属于 Local EAIOS。
+[ADR-0061](docs/decisions/0061-confirmed-stop-group-continuation.md) 增加独立的整组恢复命令：
+冻结全部 current attempts 与逐操作重复授权，取得完整实际停止证明后，由 Control 重新
+验证原绑定、物理身份和资源承诺；暂停不释放资源，完整新 attempts 持久化后才下发。
+初版只支持同一 Execution Session 的 independent 原绑定续跑，默认部署仍关闭。
+原世界续跑已有单 Actor 的真实物理验证；多 Actor 联合物理停机与续跑仍未验证。
+现有单 Role 恢复仍拒绝联合停止，不存在自动停滞重试。
+生产 B1 启动脚本通过 `ROBOGUIDE_B1_RETAIN_STOPPED_SESSION=1` 显式启用，默认关闭。
+仅派生运行目录中的恢复声明，冻结 Node 配置摘要，并在注册前核对 Adapter 实际只读
+能力。实际 Controller/Node 进程的零 Provider/Simulator 检查入口为
+`tools/quality/check_group_continuation_processes.py`；该入口的合成结果不构成物理实验成绩。
+
 Scheduler 的 Proposal 不是已生效分配。只有协调成功并 Commit 后，资源占用才成为系统认可的有效承诺。
 
 当前实现 **Control Plane — Embodied Scheduler v0.2: Bounded Joint Scheduling & Future
@@ -271,7 +316,7 @@ commitments 及所有指向该 Group 的 reservations，确保 Released Group �
 Pending commitment 不是 Execution Group lifecycle state，也不写入 Shared Node State。
 Abort 不表示 recovery exhausted；它允许后续重新 Match/Propose/Commit。
 
-本切片未实现 background reconciliation loop、multi-role joint recovery、
+本切片未实现 background reconciliation loop、跨 Node 的整组重匹配、
 spatial/task-timeout recovery、Mission replanning、自动 Runtime re-execution 或 recovery
 exhaustion policy。
 
@@ -513,20 +558,40 @@ facade 持续响应 Node workflow，将既有
 action，并通过稳定 local handle 上报 `ACCEPTED → RUNNING → terminal`。Habitat/EMOS 依赖、
 PDDL entity、agent selection、path 与 pose control 均不进入 RoboGuide Core。
 Controlled deployment 只在 EMOS Stage1→Stage2 边界注入 Control 已 Commit 的 assignment，
-之后直接运行原始 `MultiLLMPolicy`、`CrabAgent`、`HierarchicalPolicy` 和 Oracle skill stack；
-它不再维护 RoboGuide-specific 的 prompt、invalid-output retry 或 skill dispatcher 副本。
+运行原始 `MultiLLMPolicy`、`HierarchicalPolicy` 和 Oracle skill stack；已分配 endpoint
+使用原始 `CrabAgent` 及模型决策。单 Actor 执行时，未分配 endpoint 临时使用无模型
+idle policy 选择 EMOS 已有的 `WaitSkillPolicy`，执行段结束后恢复原始 agent；双 Actor
+分配仍各自使用原始 Stage2。适配器不改写模型已选动作，也不维护 prompt、重试或 skill
+dispatcher 副本。单 Actor 的 idle 策略与原生 EMOS 的模型决策路径不同，配对比较须归档。
+Controlled Stage2 的本地结果反馈由部署侧
+[`stage2_feedback.py`](integrations/habitat-local-eaios/habitat_local_eaios/stage2_feedback.py)
+提供：它将厂商模型提前写入的 `Success` receipt 替换为精确调用绑定的真实技能观测，区分
+完成、预算耗尽、策略中断和未知；不改写模型所选动作、不额外调用模型或仿真 step。
+下一次模型请求读取该反馈，替代无条件的完成声明；与原生 EMOS 的输入差异须归档。
+该 Local EAIOS 内部反馈不构成 Task satisfaction 或官方成功，见
+[`ADR-0069`](docs/decisions/0069-observed-local-skill-feedback.md)。
 Habitat `pddl_success`、Local skill completion、episode termination 与 RoboGuide Mission outcome
 作为四类独立证据记录，彼此不得推导。
+独立原生 EMOS 对照可显式使用
+`python -m habitat_local_eaios.native_reset_observer --evidence-dir <new-dir>
+--run-id <id> --episode-id <id> -- <原生 evaluator 参数>`，从原厂 environment factory
+进入 worker 后观察其第一个真实 `Env.reset` 返回状态。它复用只读的 physical diagnostics
+初态 reader，不修改原生源码、seed、动作或 multiprocessing mode；后续自动 reset
+不能覆盖首次快照。缺失字段与未暴露的 simulator RNG 状态仍为 unavailable，不能因此
+声称完整世界状态或 RNG 相同。默认原生入口不加载此观察器。
 当前 shared-world deployment 根据 Controller 已接受计划的版本化 Execution Session 选择
 双 Actor 双 endpoint 并发执行，或单 Actor 在同一 endpoint 上逐 Task 复用一次 Habitat reset。
 Task readiness、资源释放与下一次 dispatch 仍由 Control 决定；适配器不按官方目标数量
 虚构 Actor、assignment 或 benchmark success。边界见
 [`ADR-0045`](docs/decisions/0045-shared-world-execution-session.md)。
 该部署还在 run-local、digest-bound 的 Node 配置快照中保留跨楼层能力声明，并在 Habitat
-reset 后、Stage2 动作前读取起点与 PDDL 目标的空间证据。只有明确定位到不同语义楼层且
-注册能力明确不支持跨楼层时才拒绝本地执行；位置未能唯一归属语义区域时记录 `unknown`，
+reset 后、Stage2 动作前读取起点与 PDDL 目标的空间证据。对于不在官方目标中的精确
+实体目的地，现有部署保留“不同楼层且注册能力明确不支持跨楼层”的拒绝规则；
+官方 `any_at` 这样的三维距离目标即使跨楼层也保留 `unknown`。位置未能唯一归属语义
+区域时也记录 `unknown`，
 不宣称可达，也不代替 Control 重新分配。见
-[`ADR-0046`](docs/decisions/0046-reset-state-spatial-admission.md)。
+[`ADR-0046`](docs/decisions/0046-reset-state-spatial-admission.md) 与
+[`ADR-0050`](docs/decisions/0050-distance-goal-spatial-feasibility.md)。
 当前 shared-world B1 部署在 endpoint 就绪前完成唯一一次 reset，冻结实际起点与精确
 operation/destination/Node 的负向候选证据，并为后续 Stage2 保留同一份 observations。
 `integrations/habitat-local-eaios/habitat_local_eaios/preassignment_feasibility.py` 生成
@@ -534,47 +599,93 @@ operation/destination/Node 的负向候选证据，并为后续 Stage2 保留同
 及来源 digest 交叉绑定；`apps/integration-server/src/application/deployment_feasibility.rs`
 在部署可选启用时核对证据并收窄 Control 候选。Control 仍独占实时匹配、调度和 Commit，
 未知空间证据不冒充可达性，官方成败仍由 Habitat 判定。见
-[`ADR-0047`](docs/decisions/0047-reset-state-deployment-candidates.md)。
+[`ADR-0047`](docs/decisions/0047-reset-state-deployment-candidates.md) 与
+[`ADR-0050`](docs/decisions/0050-distance-goal-spatial-feasibility.md)。
 它不拥有 Mission、Execution Group、State Catalog、Artifact publication 或 Node Protocol
 生命周期。节点机器仍只运行一个 [`roboguide-node`](apps/roboguide-node/)，适配器是其本地
 配置声明的 Local EAIOS endpoint。
 
-[`integrations/coherent-local-eaios/`](integrations/coherent-local-eaios/) 与
-[`scenarios/e2-coherent-minimal/`](scenarios/e2-coherent-minimal/) 构成 E2-S0C 受控实验切片。
-固定 MissionPlan 仍经过正式 Controller 的 Match / Schedule / Commit / Bind、Node Protocol 与
-`roboguide-node`，再由部署侧 bridge 把 startup-approved
-`coherent.execute-official-task@v1` 映射到既有 COHERENT physical runner。Bridge 使用 SQLite
-local handle 去重，并且只有 COHERENT 原始进程成功、物理技能全部结束、最终 goal check 通过时
-才上报 `COMPLETED`；命令接收、技能结束与任务目标成立保持为三类不同证据。当前切片把一份已知
-正确的 Trio 文本计划作为单个 canonical operation 执行，用于证明控制链路和证据链，不代表
-Dog / Drone / Arm 已分别由 RoboGuide 调度，也不代表 PEFA 或 Mission Intelligence 对比已经完成。
-取消尚不受支持时，adapter 明确拒绝而不伪报成功。物理自主切片 E2-S0A 仍被机器可读的
-readiness gate 标记为 `BLOCKED`：需要逐机器语义操作、实时观测、逐操作终态证据、
-取消语义和反馈重规划全部就绪，否则固定脚本不得冒充自主规划。
+可选的 `--goal-region-navigation` deployment mode 只替换 Habitat Oracle 的
+目标导航点解析：对于官方合取目标中明示的距离型 `any_at` 实体，优先保留原始导航点；
+若它不在目标区域内或当前机器人专用导航网格无法到达，则在有界候选集中选取区域内
+有路径的点。模型仍选择原实体工具调用，原始控制与官方 PDDL 判定不变。
+模式、原始/选中点与路径查询另行归档；启用时的 Local How 与原生 EMOS 不同，
+对照时须明确记录。见 [`ADR-0051`](docs/decisions/0051-goal-region-local-navigation.md)。
 
-[`scenarios/e2-coherent-graph/`](scenarios/e2-coherent-graph/) 是后续 E2-S1 图级受控切片：
-它选用论文公开 `env4/task17`，将 13 步正确计划拆为 Arm 装载、Drone 降低、Dog 装载、
-Drone 交付四个依赖任务，并分别由 `coherent-arm-e2-s1`、`coherent-drone-e2-s1` 与
-`coherent-dog-e2-s1` 三个正式 Node Protocol 客户端承接。Adapter 直接调用原始
-`Get_env_info.step` 与原始 goal result，额外在每步前检查 embodiment/action 前置条件，使用
-SQLite 原子保存共享图、阶段游标和本地句柄，并输出逐阶段证据。该切片证明每类机器人可被
-RoboGuide 独立 Match / Schedule / Commit / Bind 且跨机器人依赖由 Controller 释放；它仍是
-hand-authored controlled plan，不是 PEFA、自主 Mission Intelligence 或物理执行结果。
-冻结的任务身份、观测、动作、完成语义、预算、证据和比较边界见
-[`docs/experiments/e2-protocol.md`](docs/experiments/e2-protocol.md)。
+另有默认关闭的 `--reset-route-support` 观测（B1 环境变量
+`ROBOGUIDE_B1_RESET_ROUTE_SUPPORT=1`，需同时启用 goal-region navigation）。它在同一次
+实际 reset 后，用隔离导航网格查询两个轻量候选，输出带源码/Local How/起点绑定的
+`evidence/reset-route-support.json`。找到静态路径、有限搜索未找到、证据不可用分别记录，
+不会更改 MI 输入、Control 候选、物理执行或 benchmark 判定。启动前由
+`evaluation/src/roboguide_eval/b1_reset_route_support.py` 校验证据一致性。
+实现与限制见 [`ADR-0052`](docs/decisions/0052-reset-route-support-observations.md)。
 
-[`tools/e2-generic/`](tools/e2-generic/) 提供任务无关的滚动规划实验。它从任意官方
-`envX/taskY` 当前图中读取各机器人局部观测和可执行动作，由 Mission Intelligence 每轮
-生成一个未经改写的单原子动作 MissionPlan，再经过 Controller、按 agent ID 唯一路由的
-Node 和原始 `Get_env_info.step`。adapter 不包含 task17 路线或正确动作宏，最终成功仅由
-官方 `task_goal` 图关系判定。固定随机十任务清单和顺序批运行器也保存在该目录。
+可另行启用 `ROBOGUIDE_B1_INITIAL_CANDIDATE_PREFERENCES=1`（要求上述 route observer 已启用），
+将正向静态路径证据转为 `evidence/initial-operation-preferences.json`。
+Controller 对当前可行的初次并发候选组合优先比较正向证据覆盖，再比较成本；
+Scheduler 仅调整搜索顺序，未知候选、资源约束和 Actor 绑定规则保持不变。
+偏好只用于新 Controller 的首个 Mission，启动后十分钟或首次 Bind 即失效，
+不进入 checkpoint、不用于后续顺序任务或恢复。它是显式的部署调度策略，
+不是可达性或 benchmark 成功证明；对照实验应记录开关与源摘要。
+见 [`ADR-0053`](docs/decisions/0053-initial-candidate-preferences.md)。
 
-同目录的 `run_dag.py` 支持一次生成多步依赖计划，再由现有 Controller 连续调度。
-完成探索段或所有本地 attempt 已终态的失败段后，可把结构化执行结果交给新一轮
-Planner / Reviewer / Repairer；状态不明时仍停止。官方目标中途成立时，运行器请求
-Controller 取消剩余 Mission，adapter 在每个 primitive 执行前再做一次非修改性 goal guard。
-该模式使用独立端口，保持 Core 与 Mission Intelligence 源码不变。主对比默认用
-`fair + serial`；`informed` 提示和 `partial-order` 调度是分开的开发/受控条件。
+另行启用 `ROBOGUIDE_B1_RESET_ROUTE_GEOMETRY=1` 可在上述 reset observer 中增加有界的
+完整起点连通区域检查（[ADR-0062](docs/decisions/0062-scoped-static-navigation-region-evidence.md)）。
+它检查三角面内部及参考点偏移，输出 reset-route-support v0.2；读取失败、预算耗尽、
+阈值接触保持 unknown。初次偏好 consumer 可优先减少静态不相交组合，再比较正向路径
+覆盖与成本，仍保留所有原有候选。静态不相交不等于物理任务不可解，不能用于永久
+Actor 排除、MI 输入、任务成功或 Formal admission。此开关默认关闭，不修改导航参数。
+
+`ROBOGUIDE_B1_STEP_AWARE_NAVMESH=1` 是另一个默认关闭的 Local How 选项，要求启用
+goal-region navigation。它细化独立导航网格的垂直分辨率，避免已声明的正台阶高度被
+粗体素向下取整为零；机器人尺寸、爬阶/爬坡能力、目标、动作控制和官方成功规则保持
+原有值。执行与 reset observer 共用复制配置，Local How v0.4 和实际网格证据记录该差异。
+它会改变本地路线和移动可能性，对照原生 EMOS 时必须明示；静态路径仍不等于任务成功。
+见 [ADR-0063](docs/decisions/0063-step-aware-local-navmesh-resolution.md)。
+
+`ROBOGUIDE_B1_SPATIAL_NAVIGATION_ARRIVAL=1` 单独启用默认关闭的空间到达 Local How，
+要求前两个执行 profile 已明确启用。它在三维接近选定导航点前继续沿 waypoint 移动，
+接近后才朝向原实体并报告本地完成；不因 X/Z 重合就在不同楼层提前停止。保留原实体、
+能力、速度、阈值与技能/仿真预算，每次调用只下发一次原 base action，路径失败不伪造
+直线或成功。不编辑外部 EMOS；Local How v0.6 与 action evidence v0.4 明示控制差异，
+官方 PDDL 与 Mission satisfaction 仍独立判定。见
+[ADR-0064](docs/decisions/0064-spatial-route-arrival-local-navigation.md)。
+
+该 profile 在联合 Gym step 前，按实际动作顺序准备全部导航目标、路径和控制指令。
+有界路径失败时不进入该 step，保留具体 endpoint、Task/Role/attempt、搜索原因和已有
+完成记录；第一次物理 step 前失败的官方执行结果为 unavailable，reset 指标另作诊断。
+成功准备后仍只有一次原 Gym step 和每个动作一次原 base dispatch。准备会初始化原有
+目标/网格缓存，并非只读观察；不保证任意仿真异常可以回滚，也不证明路径全局不可达。
+版本与限制见 [ADR-0065](docs/decisions/0065-joint-navigation-preparation.md)。
+
+可独立启用 `ROBOGUIDE_B1_INITIAL_SUPPORT_ASSESSMENT=1`，要求上述 geometry、initial
+preferences 和 spatial-arrival profile 已启用。生产 MI 生成并审查计划后，Request Engine
+通过 Controller 的只读 `POST /v1/missions/assess-initial-support` 查询初始支持度。
+Controller 用现有 Control Matching 的私有副本检查受支持的初始组合，不提交 Mission，
+不创建资源承诺，返回精确计划/来源/有效期绑定的中性 Task/Role 反馈。所有组合都含
+完整的静态不相交证据时，或所要求的预检不可用时，Request 显式 Blocked；有限搜索
+未找到与 unknown 本身不阻塞。该 hold 是声明的部署就绪策略，不是物理不可解证明。
+
+默认零次模型恢复时，显式 retry 只重查同一份已审查计划和冻结 context；通过后才走原来的
+唯一提交路径。中途重启恢复为可观察的 hold，不能偷偷重规划。真实预检失败仍计入
+Formal population 的系统失败，官方物理结果 unavailable。默认关闭，不改 Prompt、
+机器人能力、官方任务或控制动作；初次证据不用于后续顺序 Task、恢复或新的 world。
+Schema、开关、时限及未验证边界见
+[ADR-0066](docs/decisions/0066-initial-operation-support-feedback.md) 和
+[反馈契约 v0.2](contracts/mission/initial-operation-assessment-v0.2/README.md)。新反馈记录当次
+查询的首个 Control 排除原因计数，不暴露 Node/Resource inventory；之后健康不改写之前原因。
+
+`ROBOGUIDE_B1_DEPLOYMENT_RECOVERY_ATTEMPTS=1..3` 可另外启用有界 MI 部署重检 agent，
+默认 `0`，要求上述 initial-support preflight 已开启。复用生产 Responses Repairer，在
+同一冻结任务/context/catalog/policy/profile 下，提议 `recheck`、`revise_plan` 或
+`wait_for_evidence`。调用前持久化原始次数和不续期的时限；相同反馈、来源变化、
+过期和重启不导致重复调用。修订必须重新通过完整校验、Reviewer、必要风险审批与
+Control 预检。不能删目标、伪造能力、降低真实合作需求或直接选择物理执行器。
+发生提交不明后只能接纳对账，不能返回模型重规划。Session 归档进入 observations v0.4，
+公共 Request/Plan 与 Formal/benchmark 规则不变。理论调用预算单独归档，不自动增加
+实验的 observation deadline。实现、版本及模型验证限制见
+[ADR-0067](docs/decisions/0067-bounded-mi-deployment-reconsideration.md) 和
+[恢复证据契约](contracts/mission/deployment-recovery-session-v0.1/README.md)。
 
 ## 三条核心语义链
 
@@ -736,11 +847,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   └── testkit/
 ├── integrations/
 │   ├── robonix-map-service/ # Robonix-specific Local EAIOS adapter, outside the core authority
-│   ├── habitat-local-eaios/ # C1-S0 real Habitat/EMOS local execution bridge
-│   └── coherent-local-eaios/# E2-S0 controlled COHERENT physical execution bridge
-├── scenarios/
-│   ├── e2-coherent-minimal/ # fixed-plan E2-S0 launch, node config, and evidence verifier
-│   └── e2-coherent-graph/   # E2-S1 public graph task across Arm, Drone, and Dog nodes
+│   └── habitat-local-eaios/ # C1-S0 real Habitat/EMOS local execution bridge
 ├── apps/
 │   ├── controller/
 │   ├── integration-server/
@@ -816,6 +923,11 @@ projection、跨 Controller 复制）和 MVP Definition 均未完成；
 它要求 per-capability readiness 与强 localization evidence，不把旧的 process health 或
 `has_map=true` 当作稳定成功证据。
 
+Habitat shared-world 的可选物理诊断 v0.5 记录原始 Oracle 实际选中的导航点、
+一次原始寻路调用的成败，以及通过 Habitat 语义区域包含关系可唯一确定的机器人和目标楼层；缺失或歧义明确标为
+unavailable。它不重新寻路、不改变运动或官方 PDDL 成绩。旧 v0.4 终态证据仍可用于
+独立的 B1 三维与 X/Z 反事实诊断。
+
 ## Mission Intelligence 开发
 
 Mission 配置位于 [`config/mission.toml`](config/mission.toml)，版本化 Prompt 位于
@@ -846,6 +958,11 @@ uv run pytest -q
 ## Eval Harness（实验驱动开发）
 
 仓库进入实验驱动阶段后，[`evaluation/`](evaluation/) 提供独立的 Eval Harness：
+
+[`e1-batch`](evaluation/docs/e1-batch.md) 在冻结配置下监督独立的对照进程，支持后台启动、
+状态读取、暂停派发与恢复观察。它保留正式判定及 unavailable，普通任务失败不会停止队列；
+重启不会重跑已认领的任务。B1 的 HTTP/gRPC 端口可按运行隔离，默认端口保持兼容。
+允许继续的 Provider HTTP 错误仍逐次留证；受控停止先归档，再清理服务并等待采集器落盘。
 它不属于 Core、Runtime、Control Plane、State & Memory Plane 或 Local EAIOS，
 不修改 Proposal / Commit / Binding / Runtime 语义，也不 import 或复制
 EMOS/Habitat-MAS；外部系统只通过进程边界访问。第一版提供 ExperimentSpec 合同、

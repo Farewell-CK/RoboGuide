@@ -20,7 +20,7 @@ from .spatial_feasibility import (
     assess_destination_floor_compatibility,
 )
 
-PREASSIGNMENT_FEASIBILITY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.2"
+PREASSIGNMENT_FEASIBILITY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.3"
 
 
 def canonical_digest_value(value: Any) -> Any:
@@ -37,7 +37,7 @@ def canonical_digest_value(value: Any) -> Any:
 
 
 def preassignment_digest(body: dict[str, Any]) -> str:
-    """Hash one v0.2 evidence body with language-neutral float representation."""
+    """Hash one v0.3 evidence body with language-neutral float representation."""
     encoded = json.dumps(
         canonical_digest_value(body),
         sort_keys=True,
@@ -58,10 +58,10 @@ def build_preassignment_feasibility(
 ) -> dict[str, Any]:
     """Read one reset world and record every configured Node/intent compatibility.
 
-    Unknown geometry stays unknown and may be admitted by a later deployment
-    policy; only an explicit registered false capability plus distinct known
-    floors is an incompatibility. This function never resets, steps, or calls
-    Stage2, and every position comes from the already reset environment.
+    Unknown geometry stays unknown. A cross-floor destination is incompatible
+    only when the registered false capability and goal semantics prove the
+    floor transition is required. This function never resets, steps, or calls
+    Stage2; every position comes from the already reset environment.
     """
     identity = semantic_document.get("identity")
     world = semantic_document.get("world_context")

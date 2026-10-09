@@ -6,14 +6,16 @@ import json
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from http.client import HTTPException, HTTPMessage
+from math import isfinite
 from typing import Any, Protocol, cast
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
+from mission.deployment_assessment import InitialOperationAssessment
 from mission.models import JSONObject, MissionPlan
-from mission.submission_evidence import ControllerSubmissionEvidence
+from mission.submission_evidence import ControllerAdmissionEvidence, ControllerSubmissionEvidence
 
 MAX_CONTROLLER_RESPONSE_BYTES = 2 * 1024 * 1024
 INVENTORY_SCHEMA = "roboguide.inventory/v0.1"
@@ -309,8 +311,8 @@ class HttpMissionController:
             or parsed.fragment
         ):
             raise MissionControllerError("Controller endpoint must be a fixed HTTP(S) origin")
-        if timeout_seconds <= 0:
-            raise MissionControllerError("Controller timeout must be positive")
+        if not isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise MissionControllerError("Controller timeout must be finite and positive")
         self._endpoint = endpoint.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._opener = urllib.request.build_opener(_NoRedirectHandler())
@@ -324,7 +326,38 @@ class HttpMissionController:
 
     def submit_plan(self, plan: MissionPlan) -> SubmissionReceipt:
         """Submit a strict MissionPlan and classify accepted versus rejected responses."""
-        status, decoded, evidence = self._request("POST", "/v1/missions", plan.to_json())
+        return self.submit_plan_observed(plan, None)
+
+    def assess_initial_support(self, plan: MissionPlan) -> InitialOperationAssessment:
+        """Query support once without submitting a Mission or exposing inventory to a model."""
+        status, decoded, _ = self._request(
+            "POST", "/v1/missions/assess-initial-support", plan.to_json()
+        )
+        try:
+            assessment = InitialOperationAssessment.from_json(decoded)
+        except (TypeError, ValueError, KeyError) as error:
+            raise MissionControllerError("Controller initial assessment is invalid") from error
+        if status != 200 or not assessment.matches_plan(plan):
+            raise MissionControllerError("Controller initial assessment is unavailable or detached")
+        return assessment
+
+    def submit_plan_observed(
+        self,
+        plan: MissionPlan,
+        before_send: Callable[[ControllerSubmissionEvidence], None] | None,
+    ) -> SubmissionReceipt:
+        """Persist the exact prepared body before the transport can cause admission or dispatch."""
+        status, decoded, evidence = self._request(
+            "POST", "/v1/missions", plan.to_json(), before_send
+        )
+        if status in {200, 202} and (
+            decoded.get("mission_id") != plan.mission.mission_id
+            or not isinstance(decoded.get("group_id"), str)
+            or not str(decoded["group_id"]).strip()
+        ):
+            failure = MissionControllerError("Controller acceptance identity is invalid")
+            failure.submission_evidence = evidence
+            raise failure
         detail_value = decoded.get("error", decoded.get("status", "Controller response"))
         detail = str(detail_value)
         return SubmissionReceipt(
@@ -334,8 +367,70 @@ class HttpMissionController:
             evidence=evidence,
         )
 
+    def observe_admission(self, mission_id: str) -> ControllerAdmissionEvidence | None:
+        """Read one digest-bound authority receipt; absent legacy receipts remain unavailable."""
+        status, decoded, _ = self._request(
+            "GET", f"/v1/missions/{quote(mission_id, safe='')}/admission", None
+        )
+        if status == 404:
+            return None
+        try:
+            evidence = ControllerAdmissionEvidence.from_json(decoded)
+        except (TypeError, ValueError) as error:
+            raise MissionControllerError("Controller admission receipt is invalid") from error
+        if status != 200 or evidence.mission_id != mission_id:
+            raise MissionControllerError(
+                "Controller admission receipt is unavailable or mismatched"
+            )
+        return evidence
+
+    def observe_mission(self, mission_id: str) -> JSONObject:
+        """Read the original Mission identity once without resubmitting or proving plan content.
+
+        Even a 404 cannot prove that an earlier in-flight POST will never be
+        accepted. This observation therefore never grants retry authority.
+        """
+        status, decoded, _ = self._request(
+            "GET", f"/v1/missions/{quote(mission_id, safe='')}", None
+        )
+        if status == 404:
+            return {
+                "schema_version": "roboguide.controller-mission-observation/v0.1",
+                "mission_id": mission_id,
+                "lookup_result": "not_found",
+                "status_code": status,
+                "group_id": None,
+                "mission_status": None,
+            }
+        group_id, mission_status = decoded.get("group_id"), decoded.get("status")
+        if (
+            status != 200
+            or decoded.get("mission_id") != mission_id
+            or not isinstance(group_id, str)
+            or not group_id.strip()
+            or len(group_id) > 256
+            or not isinstance(mission_status, str)
+            or not mission_status.strip()
+            or len(mission_status) > 64
+        ):
+            raise MissionControllerError(
+                "Controller Mission observation is unavailable or mismatched"
+            )
+        return {
+            "schema_version": "roboguide.controller-mission-observation/v0.1",
+            "mission_id": mission_id,
+            "lookup_result": "found",
+            "status_code": status,
+            "group_id": group_id,
+            "mission_status": mission_status,
+        }
+
     def _request(
-        self, method: str, path: str, body: Mapping[str, object] | None
+        self,
+        method: str,
+        path: str,
+        body: Mapping[str, object] | None,
+        before_send: Callable[[ControllerSubmissionEvidence], None] | None = None,
     ) -> tuple[int, JSONObject, ControllerSubmissionEvidence | None]:
         """Issue one bounded JSON request and return error responses without retrying."""
         payload = None
@@ -351,6 +446,8 @@ class HttpMissionController:
             if method == "POST" and path == "/v1/missions" and isinstance(request.data, bytes)
             else None
         )
+        if evidence is not None and before_send is not None:
+            before_send(evidence)
         try:
             with self._opener.open(request, timeout=self._timeout_seconds) as response:
                 status = response.status

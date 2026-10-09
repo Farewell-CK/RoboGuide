@@ -3,6 +3,30 @@
 use super::*;
 
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
+    /// Returns bounded raw sample attribution, never a newly stamped or inferred fact.
+    pub fn execution_progress_evidence(
+        &self,
+        execution_id: &str,
+    ) -> Option<&runtime::ProgressObservation> {
+        self.runtime.progress_evidence(execution_id)
+    }
+    /// Copies bounded local progress without claiming that an old or stale sample is current.
+    pub fn execution_progress_sample(
+        &self,
+        execution_id: &str,
+    ) -> Option<runtime::OperationProgressSample> {
+        self.runtime.progress_sample(execution_id).cloned()
+    }
+    /// Reads progress without changing eligibility, physical work or Task satisfaction.
+    pub fn execution_progress(
+        &self,
+        execution_id: &str,
+        now: TimestampMs,
+        stall_after_ms: Option<u64>,
+    ) -> runtime::ProgressDisposition {
+        self.runtime
+            .progress_disposition(execution_id, now, stall_after_ms)
+    }
     /// Converts execution facts into Runtime evidence and terminal NodeEvent values.
     pub(super) fn consume_execution(
         &mut self,
@@ -22,6 +46,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             ExecutionPhase::Cancelled => ExecutionStatus::Cancelled,
             ExecutionPhase::Unknown | ExecutionPhase::Unspecified => ExecutionStatus::Unknown,
         };
+        let previous_status = self.runtime.execution_status(fact.execution_id);
         let runtime_events = self
             .runtime
             .observe_execution(
@@ -32,6 +57,22 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 fact.reason,
             )
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        if phase == ExecutionPhase::Cancelled && !runtime_events.is_empty() {
+            self.runtime
+                .confirm_recovery_stop(fact.execution_id, received_at);
+        }
+        if matches!(phase, ExecutionPhase::Cancelled | ExecutionPhase::Completed)
+            && !runtime_events.is_empty()
+        {
+            self.runtime
+                .confirm_group_recovery_stop(fact.execution_id, received_at);
+        }
+        if previous_status != Some(runtime_status)
+            && self.runtime.execution_status(fact.execution_id) == Some(runtime_status)
+        {
+            self.runtime
+                .confirm_group_continuation_admission(fact.execution_id, received_at);
+        }
         for event in runtime_events {
             append_runtime_evidence(&mut self.events, &event, received_at, correlation_id);
             self.runtime_events.push_back(event);
@@ -184,6 +225,50 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         }
         self.state_records = candidate;
         for record in records {
+            if record.payload_schema() == runtime::EXECUTION_PROGRESS_SCHEMA
+                && self
+                    .state_records
+                    .records()
+                    .iter()
+                    .any(|current| current == &record)
+                && record.key().object().class() == domain::StateObjectClass::Node
+                && record.key().object().object_id() == node_id.as_str()
+                && let Ok(batch) = serde_json::from_value::<runtime::OperationProgressBatch>(
+                    record.value().clone(),
+                )
+                && batch.schema_version == runtime::EXECUTION_PROGRESS_SCHEMA
+                && batch.executions.len() <= 128
+                && batch
+                    .executions
+                    .iter()
+                    .map(|sample| &sample.execution_id)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    == batch.executions.len()
+            {
+                for sample in batch.executions {
+                    let owner = self
+                        .state
+                        .node(&node_id)
+                        .and_then(|node| node.registration().operation_owner(&sample.operation));
+                    if owner.is_some()
+                        && owner == record.key().source().local_system_id()
+                        && self.state.node(&node_id).is_some_and(|node| {
+                            node.registration()
+                                .state_exports()
+                                .iter()
+                                .filter(|export| {
+                                    export.payload_schema() == runtime::EXECUTION_PROGRESS_SCHEMA
+                                        && Some(export.local_system_id()) == owner
+                                })
+                                .count()
+                                == 1
+                        })
+                    {
+                        self.runtime.observe_progress(&record, sample);
+                    }
+                }
+            }
             self.events.append(
                 received_at,
                 correlation_id,

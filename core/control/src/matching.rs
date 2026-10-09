@@ -8,6 +8,19 @@ use domain::{
 use ports::{EventSink, SharedNodeStateReader};
 use std::collections::BTreeMap;
 
+/// Bounded logical-Role counts from one immutable first-use Control decision.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RoleCandidateDiagnostics {
+    /// Logical Role examined, never a physical executor selector.
+    pub role_id: RoleId,
+    /// Registrations considered in the same supplied State view.
+    pub considered_count: usize,
+    /// Candidates passing every first-use predicate.
+    pub eligible_count: usize,
+    /// Disjoint counts of the first failed predicate, in stable order.
+    pub exclusions: BTreeMap<crate::CandidateExclusionReason, usize>,
+}
+
 /// Candidate node identifiers for one task role.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoleCandidates {
@@ -49,6 +62,8 @@ pub struct CandidateSet {
     distinct_actor_groups: Vec<std::collections::BTreeSet<domain::ActorId>>,
     /// Current physical entity routed by each candidate Node.
     candidate_entities: BTreeMap<NodeId, domain::PhysicalEntityId>,
+    /// Optional transient search ordering; never a candidate exclusion or binding.
+    initial_preferences: Option<crate::InitialCandidatePreferences>,
 }
 
 impl CandidateSet {
@@ -61,6 +76,7 @@ impl CandidateSet {
             role_actors: BTreeMap::new(),
             distinct_actor_groups: Vec::new(),
             candidate_entities: BTreeMap::new(),
+            initial_preferences: None,
         }
     }
 
@@ -68,6 +84,23 @@ impl CandidateSet {
     fn with_role_operations(mut self, role_operations: BTreeMap<RoleId, OperationRef>) -> Self {
         self.role_operations = role_operations;
         self
+    }
+
+    /// Carries Control-admitted initial ordering without changing eligible Nodes.
+    pub(crate) fn with_initial_preferences(
+        mut self,
+        preferences: Option<crate::InitialCandidatePreferences>,
+    ) -> Self {
+        self.initial_preferences = preferences;
+        self
+    }
+
+    /// Returns a soft ordinal only for this exact Task at a valid decision time.
+    pub(crate) fn initial_priority(&self, role: &RoleId, node: &NodeId, at: TimestampMs) -> u32 {
+        self.initial_preferences
+            .as_ref()
+            .filter(|preferences| &self.task_ref == preferences.task_ref())
+            .map_or(u32::MAX, |preferences| preferences.priority(role, node, at))
     }
 
     /// Attaches mission actor binding metadata for scheduler cardinality.
@@ -130,6 +163,130 @@ impl CandidateSet {
 }
 
 impl ControlPlane {
+    /// Explains first-use eligibility using the same predicates as Mission Matching.
+    ///
+    /// This read-only profile excludes bound/grounded/distinct-entity Missions: their
+    /// reconciliation and registry evidence cannot be summarized as initial placement.
+    /// It reports no Node identities and allocates at most one counter per reason.
+    pub fn first_use_candidate_diagnostics<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        mission: &MissionPlan,
+        requirement: &TaskRequirement,
+        timestamp: TimestampMs,
+    ) -> Result<Vec<RoleCandidateDiagnostics>, ControlError> {
+        if mission.goal().mission_id() != requirement.mission_id()
+            || mission.binding_semantics().requires_physical_entities()
+            || self
+                .mission_binding_semantics(requirement.mission_id())
+                .is_some()
+            || requirement.roles().iter().any(|role| {
+                role.actor_id().is_some_and(|actor| {
+                    self.actor_binding(requirement.mission_id(), actor)
+                        .is_some()
+                })
+            })
+        {
+            return Err(ControlError::InvalidProposal(
+                "diagnostics require unbound initial Mission roles".into(),
+            ));
+        }
+        let task = mission
+            .task_graph()
+            .tasks()
+            .iter()
+            .find(|task| task.requirement().task_ref() == requirement.task_ref())
+            .ok_or_else(|| {
+                ControlError::InvalidProposal("diagnostic Task is absent from MissionPlan".into())
+            })?;
+        let nodes = state.nodes();
+        if nodes.len() > 128 {
+            return Err(ControlError::InvalidProposal(
+                "initial candidate diagnostics exceed budget".into(),
+            ));
+        }
+        let actor_requirements = mission.actor_requirements();
+        requirement
+            .roles()
+            .iter()
+            .map(|role| {
+                let operation = task
+                    .execution_intent(role.role_id())
+                    .ok_or_else(|| {
+                        ControlError::InvalidProposal(
+                            "diagnostic Role lacks ExecutionIntent".into(),
+                        )
+                    })?
+                    .operation();
+                let mut result = RoleCandidateDiagnostics {
+                    role_id: role.role_id().clone(),
+                    considered_count: nodes.len(),
+                    eligible_count: 0,
+                    exclusions: BTreeMap::new(),
+                };
+                for node in &nodes {
+                    match self.first_use_node_exclusion(
+                        state,
+                        requirement,
+                        role,
+                        operation,
+                        &actor_requirements,
+                        node.node_id(),
+                        timestamp,
+                    ) {
+                        Some(reason) => *result.exclusions.entry(reason).or_default() += 1,
+                        None => result.eligible_count += 1,
+                    }
+                }
+                Ok(result)
+            })
+            .collect()
+    }
+
+    /// Applies exact first-use predicates shared by Matching and neutral diagnostics.
+    #[allow(clippy::too_many_arguments)]
+    fn first_use_node_exclusion<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        task: &TaskRequirement,
+        role: &domain::RoleRequirement,
+        operation: &OperationRef,
+        actor_requirements: &BTreeMap<domain::ActorId, Vec<CapabilityRequirement>>,
+        node: &NodeId,
+        timestamp: TimestampMs,
+    ) -> Option<crate::CandidateExclusionReason> {
+        if let Some(reason) = self.node_role_exclusion(state, node, role, timestamp) {
+            return Some(reason);
+        }
+        if let Some(actor) = role.actor_id()
+            && (self
+                .actor_candidate_restriction(task.mission_id(), actor)
+                .is_some_and(|restriction| !restriction.allowed_nodes().contains(node))
+                || self
+                    .actor_node_constraint(task.mission_id(), actor)
+                    .is_some_and(|constraint| constraint.node_id() != node))
+        {
+            return Some(crate::CandidateExclusionReason::DeploymentRestriction);
+        }
+        let registration = state
+            .node(node)
+            .expect("role eligibility checked registration")
+            .registration();
+        if !registration.supports_operation(operation) {
+            return Some(crate::CandidateExclusionReason::OperationUnsupported);
+        }
+        if role.actor_id().is_some_and(|actor| {
+            actor_requirements.get(actor).is_none_or(|requirements| {
+                !requirements
+                    .iter()
+                    .all(|required| node_supports_requirement(registration, required))
+            })
+        }) {
+            return Some(crate::CandidateExclusionReason::ActorContractUnavailable);
+        }
+        None
+    }
+
     /// Matches a task while reusing an existing mission actor binding as a singleton candidate.
     pub fn match_capabilities_with_actor_bindings<S: SharedNodeStateReader, E: EventSink>(
         &self,
@@ -311,7 +468,7 @@ impl ControlPlane {
                 continue;
             }
             let actor = role.actor_id().expect("checked");
-            let requirements = actor_requirements.get(actor).ok_or_else(|| {
+            actor_requirements.get(actor).ok_or_else(|| {
                 ControlError::InvalidProposal(format!("actor {actor} is absent from MissionPlan"))
             })?;
             let role_candidates = candidates
@@ -320,11 +477,16 @@ impl ControlPlane {
                 .find(|candidate| candidate.role_id() == role.role_id())
                 .expect("candidate exists");
             role_candidates.node_ids.retain(|node_id| {
-                state.node(node_id).is_some_and(|snapshot| {
-                    requirements.iter().all(|requirement| {
-                        node_supports_requirement(snapshot.registration(), requirement)
-                    })
-                })
+                self.first_use_node_exclusion(
+                    state,
+                    requirement,
+                    role,
+                    operation,
+                    &actor_requirements,
+                    node_id,
+                    timestamp,
+                )
+                .is_none()
             });
             if role_candidates.node_ids.is_empty() {
                 return Err(ControlError::NoCandidate(role.role_id().clone()));
@@ -374,7 +536,12 @@ impl ControlPlane {
         }
         Ok(candidates
             .with_role_operations(role_operations)
-            .with_actor_binding_metadata(role_actors, distinct_actor_groups, candidate_entities))
+            .with_actor_binding_metadata(role_actors, distinct_actor_groups, candidate_entities)
+            .with_initial_preferences(
+                self.initial_candidate_preferences
+                    .get(requirement.task_ref())
+                    .cloned(),
+            ))
     }
 
     /// Matches every task role against currently eligible node facts.

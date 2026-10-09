@@ -45,6 +45,9 @@ class MissionServiceSettings:
     planning_profile_path: Path | None
     max_request_bytes: int
     approval_policy: ApprovalPolicy
+    controller_preflight_enabled: bool = False
+    max_deployment_recovery_attempts: int = 0
+    deployment_recovery_timeout_ms: int = 900_000
 
     @property
     def approval_required_contracts(self) -> frozenset[str]:
@@ -85,6 +88,21 @@ def load_service_settings(
         )
     if planning_world_required and planning_world_path is None:
         raise MissionServiceConfigError("required planning world evidence needs a configured path")
+    preflight = service.get("controller_preflight_enabled", False)
+    if not isinstance(preflight, bool):
+        raise MissionServiceConfigError("service.controller_preflight_enabled must be a Boolean")
+    recovery_attempts = service.get("max_deployment_recovery_attempts", 0)
+    recovery_timeout = service.get("deployment_recovery_timeout_ms", 900_000)
+    if type(recovery_attempts) is not int or not 0 <= recovery_attempts <= 3:
+        raise MissionServiceConfigError(
+            "service.max_deployment_recovery_attempts must be between 0 and 3"
+        )
+    if type(recovery_timeout) is not int or not 0 < recovery_timeout <= 900_000:
+        raise MissionServiceConfigError(
+            "service.deployment_recovery_timeout_ms must be between 1 and 900000"
+        )
+    if recovery_attempts and not preflight:
+        raise MissionServiceConfigError("deployment recovery requires Controller preflight")
     return MissionServiceSettings(
         listen_host=host,
         listen_port=port,
@@ -121,6 +139,9 @@ def load_service_settings(
         planning_profile_path=_optional_path(service, "planning_profile_path", root),
         max_request_bytes=_positive_integer(service, "max_request_bytes"),
         approval_policy=approval_policy,
+        controller_preflight_enabled=preflight,
+        max_deployment_recovery_attempts=recovery_attempts,
+        deployment_recovery_timeout_ms=recovery_timeout,
     )
 
 

@@ -539,13 +539,15 @@ coupling evidence；v7 为 generic Memory replica 补充 consumer provider ident
 该字段的 v6 历史 evidence 保守归入 reserved legacy bucket；v6 增加 source-aware State 与 generic
 Memory catalog/replica evidence，v5 增加 Execution Coordination Relation evidence。该切片已验证跨进程
 重开保留事件信封和 payload。当前 controller 另在同一 SQLite batch 中保存版本化
-外层 `roboguide.controller-checkpoint/v17` 包含内层 v15
+外层 `roboguide.controller-checkpoint/v21` 包含内层 v17
 Control/Shared Node/State records/Runtime projection；
 启动时要求 checkpoint 序号与事件末尾严格
 一致。恢复会清空旧进程租约、将节点 liveness rebased 为 `Unreachable`，将非终态 execution
 置为 `Unknown`，绝不自动重放物理命令。缺少 checkpoint、schema 不支持或序号不一致时
-fail-closed；outer v17 接受 v16、inner v15 接受其前一版本做一步迁移。外层升级阻止旧版
-Controller 忽略新的 deployment candidate restriction；恢复时还必须提供相同 digest 的
+fail-closed；当前外层兼容 v16..v20，内层兼容 v14..v16。新版本阻止旧版 Controller
+忽略 operation-owner stop/continuation 检查（ADR-0059）；旧 attempt 缺少 frozen support
+不授权 Role 恢复，原 budget/history 保留。已有 deployment candidate restriction
+仍在恢复时要求相同 digest 的
 reset-state 部署证据。物理 ActorBinding 的历史
 checkpoint 若缺 registry anti-rollback watermark，必须进行有可信部署历史支持的显式迁移；
 新 watermark 只保留 registry identity/revision/digest，不恢复 live topology。见 ADR-0043。
@@ -605,3 +607,8 @@ Bootstrap 以及之后的每次实现变更都必须包含：
 [`../decisions/0001-rust-core-python-edges.md`](../decisions/0001-rust-core-python-edges.md)。
 DEAIOS 与本地运行时的边界记录在
 [`../decisions/0002-deaios-node-contract.md`](../decisions/0002-deaios-node-contract.md)。
+
+下发前计划修复与执行期分层恢复的后续方案见
+[`recovery-improvement-plan.md`](recovery-improvement-plan.md)。下发前 typed 分类、durable
+submission fence 和只读核对已实现，见 [ADR-0054](../decisions/0054-mission-recovery-boundary.md)。
+后续执行期阶段仍为 Proposed，不能据此声称通用停滞检测或执行期 MI 重新规划已经实现。

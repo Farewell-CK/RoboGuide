@@ -3,6 +3,10 @@
 - Status: Proposed for review
 - Date: 2026-09-27
 
+ADR-0050 narrows the cross-floor negative-candidate rule below for
+distance-based official goals. This record remains the history of the
+original pre-assignment matrix.
+
 ## Context
 
 ADR-0046 rejects a known cross-floor assignment after Control has committed it.

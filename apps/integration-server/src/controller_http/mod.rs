@@ -1,9 +1,12 @@
 //! Controller HTTP composition by transport and projection responsibility.
 
+mod admission;
 mod protocol;
+mod recovery;
 mod server;
 mod view;
 
+pub(crate) use admission::MissionAdmission;
 pub(crate) use server::serve_http;
 
 #[cfg(test)]

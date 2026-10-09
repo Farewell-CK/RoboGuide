@@ -29,6 +29,7 @@ RUN="$1" REPO="$2" REQUEST_ID=request MISSION_ID=mission LIFECYCLE=Accepted MI_O
 FAILURE_OWNER=SUT_SYSTEM FAILURE_COMPONENT=mission_service FAILURE_REASON=mission_ingress_failed
 PIDS=(123) COMPONENTS=(controller)
 DEAD_CONTROLLER="$3"
+CONTROLLER_PORT=28060 MISSION_PORT=8070 MISSION_OBSERVATION_BUDGET_SECONDS=1800
 curl() { return 0; }
 sleep() { return 0; }
 seq() { printf '1\n'; }
