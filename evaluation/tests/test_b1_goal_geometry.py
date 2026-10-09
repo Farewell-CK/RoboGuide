@@ -93,14 +93,16 @@ def test_two_agents_can_jointly_satisfy_distinct_goal_locations() -> None:
     assert result["horizontal_goal_counterfactual"] is True
 
 
-def test_motion_observation_never_replaces_official_goal_truth() -> None:
+@pytest.mark.parametrize("version", ["v0.6", "v0.7"])
+def test_motion_observation_never_replaces_official_goal_truth(version: str) -> None:
     """New or unavailable motion data cannot turn an official failure into success."""
     semantic, terminal, summary, verdict = _evidence()
-    terminal["schema_version"] = "roboguide.e1.physical-diagnostics/v0.6"
+    terminal["schema_version"] = f"roboguide.e1.physical-diagnostics/{version}"
     terminal["agents"]["0"]["local_motion"] = {
         "last_post_step": {"success": True, "returned_end": [0.0, 2.3, 0.0]},
         "pending_since_last_post_step": {"_status": "unavailable"},
     }
+    terminal["agents"]["0"]["local_manipulation"] = {"is_grasped": True}
     result = assess_goal_geometry(semantic, terminal, summary, verdict)
     assert result["status"] == "available"
     assert result["official_pddl_success"] is False

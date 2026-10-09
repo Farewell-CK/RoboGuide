@@ -471,7 +471,7 @@ not a model correctness or navigation-convergence guarantee. It adds no global
 RoboGuide authority, MissionPlan fields or new Habitat success rules.
 
 When `ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS=1`, `diagnostics-steps.jsonl` and
-`diagnostics-terminal.json` use `roboguide.e1.physical-diagnostics/v0.6`. The
+`diagnostics-terminal.json` use `roboguide.e1.physical-diagnostics/v0.7`. The
 initial and terminal snapshots include `goal_entity_positions`, read through
 Habitat's authoritative PDDL entity mapping at the corresponding world state.
 Each target is recorded independently; an unreadable target is marked
@@ -517,7 +517,27 @@ since that sample. A failed Gym step is not assigned an invented simulator step;
 pending motion remains available even when final world reads fail, storage permitting.
 Final cleanup restores the original instance overrides.
 
-The optional B1 geometry sidecar accepts v0.4, v0.5 and v0.6 terminal snapshots.
+The v0.7 observer also records `agents[agent_id].local_manipulation` as
+`roboguide.local-manipulation-observation/v0.1`. Only an actually dispatched
+pick/place arm action opens a scope. Taps copy the original decoded target index
+and entity, coordinate lookup, workspace clipping before/after, actual FK/IK
+inputs and returns, original gripper call and configured grasp threshold, and
+base/EE/joint/motor/grasp state before/after the outer action. The shared IK helper
+is wrapped once; diagnostics never call FK/IK, change joint state, query contact
+physics, step the simulator or consume a lazy return themselves. Solver vectors
+keep their original vendor frame; world positions and matrix columns are labeled
+separately. These observations do not prove reachability, contact, successful
+grasp, Task satisfaction or official PDDL success.
+
+Arm observations share the existing default-off diagnostics switch, buffered
+step writer, step budget and 64 KiB document limit. At most 16 calls per agent
+and post-step interval and 64 components per joint vector are retained. Dropped
+calls, unavailable fields and capture cost are explicit. Unsupported actions
+remain untouched; original argument/return identity and exceptions are preserved.
+Terminal snapshots retain pending calls when a Gym step fails and restore the
+original instance methods. New Task binding clears stale attempt attribution.
+
+The optional B1 geometry sidecar accepts v0.4 through v0.7 terminal snapshots.
 Motion observations have no benchmark or admission authority.
 
 The shared-world deployment also accepts `roboguide.execution-session/v0.1`

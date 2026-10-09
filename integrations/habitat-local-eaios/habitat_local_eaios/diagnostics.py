@@ -28,10 +28,11 @@ from pathlib import Path
 from typing import Any, cast
 
 from .evidence_io import write_text_atomic
-from .model import CanonicalMobilityInvocation
+from .manipulation_diagnostics import ManipulationDiagnostics
+from .model import CanonicalInvocation, CanonicalMobilityInvocation
 from .motion_diagnostics import MotionDiagnostics
 
-DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.6"
+DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.7"
 DIAGNOSTICS_ENV_FLAG = "ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS"
 DIAGNOSTICS_MAX_RECORD_BYTES = 65_536
 DIAGNOSTICS_WRITE_BATCH_RECORDS = 32
@@ -433,6 +434,7 @@ class PhysicalDiagnostics:
         self._nav_last: dict[int, dict[str, Any]] = {}
         self._nav_restores: list[Callable[[], None]] = []
         self._motion = MotionDiagnostics()
+        self._manipulation = ManipulationDiagnostics()
         self._step_writer = BufferedJsonlWriter(
             self._dir / "diagnostics-steps.jsonl",
             batch_records=write_batch_records,
@@ -505,6 +507,7 @@ class PhysicalDiagnostics:
             "step_records_accepted": self._step_records_written,
             "writer": writer,
             "motion_observation": self._motion.stats(),
+            "manipulation_observation": self._manipulation.stats(),
         }
 
     def _write_unavailable_snapshot(
@@ -531,7 +534,10 @@ class PhysicalDiagnostics:
                 document["collection_stats"] = self._collection_stats()
                 document["dropped_diagnostic_records"] = self._dropped_records
                 document["agents"] = {
-                    str(agent_id): {"local_motion": self._motion.boundary(agent_id)}
+                    str(agent_id): {
+                        "local_motion": self._motion.boundary(agent_id),
+                        "local_manipulation": self._manipulation.boundary(agent_id),
+                    }
                     for agent_id in self._agent_ids
                 }
             self._write_json(
@@ -633,6 +639,7 @@ class PhysicalDiagnostics:
         if not isinstance(actions, dict):
             return
         for agent_id in self._agent_ids:
+            self._nav_restores.extend(self._manipulation.install(actions, agent_id))
             action = actions.get(f"agent_{agent_id}_oracle_nav_action")
             if action is None:
                 continue
@@ -747,6 +754,15 @@ class PhysicalDiagnostics:
         result = {**current, "simulator_step": step}
         self._nav_last[agent_id] = result
         return result
+
+    def bind_manipulation_invocations(self, invocations: Mapping[int, CanonicalInvocation]) -> None:
+        """Bind read-only arm call evidence to supplied current relocation attempts."""
+        if not self._enabled:
+            return
+        try:
+            self._manipulation.bind(invocations)
+        except Exception:  # noqa: BLE001 - attribution cannot block physical execution
+            self._record_failure()
 
     def _terminal_nav_location(self, sim: Any, agent_id: int) -> Any:
         """Resolve only the last observed Oracle destination against loaded regions."""
@@ -981,6 +997,7 @@ class PhysicalDiagnostics:
                     "rotation": _read(_rotation, sim, agent_id),
                     "oracle_navigation": self._navigation_observation(agent_id, step),
                     "local_motion": self._motion.sample(agent_id, step),
+                    "local_manipulation": self._manipulation.sample(agent_id, step),
                     "skill_state": skill_state,
                     "skill_exit_reason": self._skill_exit_reason(
                         skill_state, policy_input_finished
@@ -1059,6 +1076,7 @@ class PhysicalDiagnostics:
                         ),
                         "pending_oracle_navigation": self._nav_current.get(agent_id),
                         "local_motion": self._motion.boundary(agent_id),
+                        "local_manipulation": self._manipulation.boundary(agent_id),
                     }
                     for agent_id in self._agent_ids
                 },

@@ -195,6 +195,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   disabled binding retain their previous inputs and tool contracts.
   It grants no Control, Task satisfaction or MI replanning authority and must be
   disclosed separately from the original native EMOS feedback path.
+  Optional physical diagnostics v0.7 additionally tap the original pick/place arm,
+  workspace-clipping, FK/IK and gripper calls once with unchanged arguments/results
+  and exceptions. They add no solver, simulator, grasp, contact or RNG call, retain
+  bounded vectors/calls and pending failed-step evidence, and remain diagnostic-only.
   The shared-world adapter freezes the exact Node-config floor-transition facts in a digest-bound
   deployment snapshot and checks actual reset-state semantic regions before Stage2 acts. Only an
   explicit incompatible assignment fails locally; unresolved region evidence remains unknown and

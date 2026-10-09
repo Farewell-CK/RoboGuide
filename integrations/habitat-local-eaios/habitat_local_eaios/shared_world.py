@@ -827,6 +827,9 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                         if isinstance(invocation, CanonicalMobilityInvocation)
                     }
                 )
+            bind_manipulation = getattr(self._diagnostics, "bind_manipulation_invocations", None)
+            if callable(bind_manipulation):
+                bind_manipulation(invocations)
         except Exception:  # noqa: BLE001 - diagnostic attribution cannot block execution
             _LOG.exception("optional motion diagnostic attribution unavailable")
 

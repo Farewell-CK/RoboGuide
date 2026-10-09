@@ -19,7 +19,8 @@ from typing import Any
 from roboguide_eval.b1_provenance import load_document, plan_digest
 
 GEOMETRY_SCHEMA = "roboguide.e1.b1-goal-geometry-diagnostic/v0.1"
-TERMINAL_SCHEMA = "roboguide.e1.physical-diagnostics/v0.6"
+TERMINAL_SCHEMA = "roboguide.e1.physical-diagnostics/v0.7"
+MOTION_TERMINAL_SCHEMA = "roboguide.e1.physical-diagnostics/v0.6"
 ORACLE_TERMINAL_SCHEMA = "roboguide.e1.physical-diagnostics/v0.5"
 PREVIOUS_TERMINAL_SCHEMA = "roboguide.e1.physical-diagnostics/v0.4"
 SEMANTIC_SCHEMA = "roboguide.authoritative-semantic-evidence/v0.2"
@@ -120,7 +121,12 @@ def assess_goal_geometry(
         snapshot = _object(terminal, "terminal_diagnostics")
         if (
             snapshot.get("schema_version")
-            not in {TERMINAL_SCHEMA, ORACLE_TERMINAL_SCHEMA, PREVIOUS_TERMINAL_SCHEMA}
+            not in {
+                TERMINAL_SCHEMA,
+                MOTION_TERMINAL_SCHEMA,
+                ORACLE_TERMINAL_SCHEMA,
+                PREVIOUS_TERMINAL_SCHEMA,
+            }
             or snapshot.get("phase") != "terminal_world_state"
         ):
             raise GoalGeometryUnavailable("terminal_diagnostics_schema_unsupported")
