@@ -54,9 +54,22 @@ def fault_verdict(
     )
     injected = "fault_triggered" in events
     infrastructure_ok = "injection_failed" not in events
+    trigger = next(
+        (item for item in timeline if item.get("event") == "fault_triggered"), None
+    )
     if profile == "f0-clean":
         recovery_valid = not injected
     else:
+        expected_trigger = (
+            bool(
+                trigger
+                and trigger.get("trigger_mode") == "agent_id"
+                and trigger.get("target_agent_id") == target_agent_id
+                and pre_fault is not None
+            )
+            if target_agent_id is not None
+            else bool(pre_fault and pre_fault.get("primitive_steps") == inject_after)
+        )
         recovery_valid = all(
             item in events
             for item in (
@@ -68,7 +81,7 @@ def fault_verdict(
                 "same_owner_registered",
                 "rebind_completed",
             )
-        ) and bool(pre_fault and pre_fault.get("primitive_steps") == inject_after)
+        ) and expected_trigger
     return {
         "schema": "roboguide.e2-node-failure-verdict/v0.1",
         "fault_profile": profile,
@@ -85,8 +98,9 @@ def fault_verdict(
         "controller_attempts": attempts.get("attempts", []),
         "pre_fault_graph": pre_fault,
         "interpretation": (
-            "F1 observes the accepted k+1 local handle while the generic bridge holds it before "
-            "any graph effect, terminates Dog-A, authorizes explicit same-owner recovery, restarts "
+            "F1 observes the accepted target local handle while the generic bridge holds it before "
+            "any graph effect, terminates the selected Node, authorizes explicit same-owner "
+            "recovery, restarts "
             "the original Node identity, and requires a fresh Controller attempt. The harness "
             "never executes or edits a primitive action."
         ),
