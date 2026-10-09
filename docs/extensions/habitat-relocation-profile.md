@@ -1,8 +1,8 @@
 # Habitat Local EAIOS 搬运操作执行 Profile
 
 本页记录已实现并经过离线验证的 adapter 路径。Task3 部署注册和实际初始物体来源证据
-与通用 B1 runner 接线已经实现并通过 deterministic tests；真实物理预检尚待完成，不能将本页或测试当作批量
-实验已就绪的证明。
+与通用 B1 runner 接线已经实现并通过 deterministic tests。既有受控物理预检和工程批量已经运行，
+但不能将本页、离线测试或某次成功当作正式配对实验已就绪的证明。
 
 ## Canonical What 与本地 How
 
@@ -62,12 +62,36 @@ unknown/不发布，不能把到 destination 的距离当作整个搬运过程�
 官方成功终止路径，才允许该 endpoint 返回 `COMPLETED`。本地 place 完成以
 `terminal_basis=relocation-place-skill` 记录；这不是官方 `at(object, destination)` 真值。
 原始 place 的完成条件、技能预算、速度、路径、PDDL 定义及 `pddl_success` 全部保持原有权威。
+这描述未开启下述独立 completion profile 的兼容路径；开启后本地观测与完成判断明确不同。
 切入 wait 只表示不再下发新的模型动作，不能证明机器人或物体持续驻留；实际位姿与目标
 真值仍需由已有诊断和官方 metric 观测。
 
 局部完成和官方联合目标可以不一致。Verifier 继续只使用真实、严格 bool 的官方 metric，
 绑定实际 Task/Role/attempt；无 metric 时不合成结果。Formal population 和 Mission satisfaction
 规则没有因搬运 adapter 的接入而放宽。
+
+## 可选的精确对象放置完成核验
+
+`--relocation-completion-binding` 默认关闭，且只允许与 shared relocation 同时开启。
+通用 B1 launcher 通过 `HABITAT_RELOCATION_COMPLETION_BINDING=1` 显式传递。
+该 profile 不修改原始 EMOS 文件或 MI Prompt，但确实改变受控臂的本地观测/完成判断，
+必须以 Local How v0.8 和 Stage2 feedback v0.2 披露，不能宣称与原生 EMOS 相同。
+
+原始 place 读取的共享 `targ_idx` 距离没有绑定本次搬运对象。新 profile 用 canonical
+attempt、invocation digest、精确 object/destination 和该 agent 的实际 grasp 绑定观测，
+保留原始严格 0.02m 条件，让原始 action 自己产生松手命令。技能完成另外要求物体已经
+实际释放；“到达但仍在手里”不能完成。原有 Gym step 之后可核验最后预算一步的真实
+释放，并保留该步之前的预算退出记录。没有新增 action、模型调用、Gym step、RNG 采样
+或官方 predicate 查询。缺失、矛盾、跨 call/attempt/world 证据不能推进阶段。
+
+启用时 reset_arm 可在前一个技能实际结束后、仍持有 canonical object 时执行；它不被
+当作放置完成。模型可选择局部恢复，但 Guard 不主动补动作。导航工具 schema 与已观察
+阶段一致：拾取前 object，持物时 destination；原始返回不被改写。关闭时保留旧路径。
+
+新 `relocation-completion-readiness.json` 保存实际加载接口检查。稀疏 feedback 保存绑定、
+distance、grasp、release eligibility、qualified completion 和可读时的 native sensor 对照。
+只保留每 agent 的当前记录，沿用有界流式 audit，不新增每步序列化或磁盘写入。
+见 [ADR-0073](../decisions/0073-bound-relocation-place-completion.md)。
 
 ```mermaid
 flowchart LR
@@ -82,7 +106,11 @@ flowchart LR
   G --> M[原始 Stage2 模型选择]
   M --> V[Guard 校验原始选择]
   V --> S[原始 nav/pick/place 技能与唯一 Gym step]
-  S --> F[原始技能终态观测]
+  S --> F[技能终态反馈：原始路径或显式对象绑定 profile]
+  E --> Q[可选 canonical 对象/抓持绑定]
+  Q -->|精确距离，原始动作释放| S
+  S -->|原有 step 后的位置与释放| Q
+  Q --> F
   F --> G
   F -->|place 本地完成| W[原始 wait / 完成 endpoint 无模型 idle]
   F --> L[Node local outcome]
@@ -90,7 +118,8 @@ flowchart LR
   H --> B[官方 benchmark 结果 / 既有 verifier]
 ```
 
-这是当前 adapter 的可选实现图；它不表示 Task3 真实实验已经执行。
+这是当前 adapter 的实现图。对象绑定 profile 的新物理回归必须单独记录代码与启用配置，
+不能将旧臂结果当作新臂的实验验证。
 
 ## 证据与限制
 

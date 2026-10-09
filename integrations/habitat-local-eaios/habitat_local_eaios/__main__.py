@@ -95,6 +95,11 @@ def _arguments() -> argparse.Namespace:
         help="opt in only when loaded EMOS action/skill readiness proves object relocation support",
     )
     parser.add_argument(
+        "--relocation-completion-binding",
+        action="store_true",
+        help="opt in to exact-object distance and observed release for original place completion",
+    )
+    parser.add_argument(
         "--evidence-dir",
         type=Path,
         default=None,
@@ -214,6 +219,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         retain_stopped_session=arguments.retain_stopped_session,
         enable_relocation=arguments.enable_relocation,
         relocation_profile_path=arguments.relocation_profile,
+        relocation_completion_binding=arguments.relocation_completion_binding,
         progress_directory=arguments.progress_directory,
     )
     world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
@@ -272,6 +278,10 @@ def main() -> None:
         raise SystemExit("spatial navigation arrival requires step-aware navmesh")
     if arguments.goal_aware_navigation_arrival and not arguments.spatial_navigation_arrival:
         raise SystemExit("goal-aware navigation arrival requires spatial navigation arrival")
+    if arguments.relocation_completion_binding and (
+        not arguments.enable_relocation or arguments.backend != "shared-emos-stage2"
+    ):
+        raise SystemExit("relocation completion binding requires shared relocation")
     if arguments.retain_stopped_session and arguments.backend != "shared-emos-stage2":
         raise SystemExit("retained stopped sessions require the shared EMOS Stage2 backend")
     if arguments.reset_route_support and (

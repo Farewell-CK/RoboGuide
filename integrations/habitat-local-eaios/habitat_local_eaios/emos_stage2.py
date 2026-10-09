@@ -34,6 +34,7 @@ from .navigation_preparation import (
 )
 from .navmesh_profile import STEP_AWARE_PROFILE
 from .relocation_capability import inspect_relocation_capability
+from .relocation_completion import COMPLETION_PROFILE, RelocationCompletionBinding
 from .source_provenance import build_runtime_source_manifest
 from .spatial_navigation import (
     GOAL_AWARE_ARRIVAL_PROFILE,
@@ -47,7 +48,7 @@ from .stage2_contract import (
     Stage2ExecutionContract,
     install_stage2_contract_guard,
 )
-from .stage2_feedback import FEEDBACK_PROFILE, Stage2ExecutionFeedback
+from .stage2_feedback import BOUND_FEEDBACK_PROFILE, FEEDBACK_PROFILE, Stage2ExecutionFeedback
 
 _LOG = logging.getLogger(__name__)
 
@@ -347,7 +348,9 @@ class EmosStage2Runtime:
                 "local-how-profile.json",
                 {
                     "schema_version": (
-                        "roboguide.habitat-local-how-profile/v0.7"
+                        "roboguide.habitat-local-how-profile/v0.8"
+                        if getattr(self._config, "relocation_completion_binding", False)
+                        else "roboguide.habitat-local-how-profile/v0.7"
                         if goal_aware_arrival_enabled
                         else "roboguide.habitat-local-how-profile/v0.6"
                         if spatial_arrival_enabled
@@ -365,7 +368,16 @@ class EmosStage2Runtime:
                         else "original-emos-oracle"
                     ),
                     "official_success_authority": "habitat-pddl",
-                    "stage2_execution_feedback_profile": FEEDBACK_PROFILE,
+                    "stage2_execution_feedback_profile": (
+                        BOUND_FEEDBACK_PROFILE
+                        if getattr(self._config, "relocation_completion_binding", False)
+                        else FEEDBACK_PROFILE
+                    ),
+                    **(
+                        {"relocation_completion_profile": COMPLETION_PROFILE}
+                        if getattr(self._config, "relocation_completion_binding", False)
+                        else {}
+                    ),
                     "reset_route_support_enabled": bool(
                         getattr(self._config, "reset_route_support", False)
                     ),
@@ -412,6 +424,11 @@ class EmosStage2Runtime:
                         "habitat_mas.agents.crab_agent",
                         "habitat_mas.utils.models",
                         "habitat_local_eaios.stage2_feedback",
+                        *(
+                            ("habitat_local_eaios.relocation_completion",)
+                            if getattr(self._config, "relocation_completion_binding", False)
+                            else ()
+                        ),
                         "habitat_local_eaios.idle_endpoint",
                         "habitat_local_eaios.relocation_capability",
                         "habitat_local_eaios.stage2_contract",
@@ -980,7 +997,11 @@ class EmosStage2Runtime:
             )
 
         relocation_states = {
-            name: RelocationExecutionState()
+            name: RelocationExecutionState(
+                allow_holding_reset=bool(
+                    getattr(self._config, "relocation_completion_binding", False)
+                )
+            )
             for name, contract in contracts.items()
             if contract.is_relocation
         }
@@ -997,8 +1018,21 @@ class EmosStage2Runtime:
                     completed_idle_bindings[agent_name].activate()
                     activated_idle_names.add(agent_name)
 
+        try:
+            completion_binding = (
+                RelocationCompletionBinding(self._habitat_env, contracts)
+                if getattr(self._config, "relocation_completion_binding", False)
+                else None
+            )
+        except BaseException:
+            feedback_audit.close()
+            audit.close()
+            raise
         feedback = Stage2ExecutionFeedback(
-            contracts, record_feedback, completion=complete_relocation_action
+            contracts,
+            record_feedback,
+            completion=complete_relocation_action,
+            completion_binding=completion_binding,
         )
         try:
             completed_idle_bindings = {

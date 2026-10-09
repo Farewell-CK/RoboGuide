@@ -218,6 +218,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Controlled shared relocation obtains Stage2 robot types from that frozen profile only
   after actual loaded-class verification; contradictory native resume identities reject.
   Missing resumes remain explicit gaps, never synthesized capabilities (ADR-0072).
+  The separate default-off exact-object place completion profile (ADR-0073) binds
+  canonical attempt/object/destination and actual grasp release through instance-local
+  observation/termination hooks, with the original release action, 0.02m threshold and
+  budgets. Local How v0.8 / feedback v0.2 disclose this controlled-arm difference.
+  The enabled guard admits holding reset after observed skill exit and offers phase-bound
+  navigation targets; it never fabricates placement, rewrites actions or changes official truth.
+  `relocation_completion.py` owns these local bindings, never Control or Task satisfaction.
 - Optional goal-region navigation is a deployment-owned Local How variant for direct
   conjunctive official `any_at` goals (ADR-0051). It preserves the exact model-selected
   entity and original Oracle control loop, but may select a different physical target

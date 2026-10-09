@@ -18,11 +18,13 @@ from typing import TYPE_CHECKING, Any
 from .model import IntegrationError
 
 if TYPE_CHECKING:
+    from .relocation_completion import RelocationCompletionBinding
     from .stage2_contract import Stage2ExecutionContract
 
 _LOG = logging.getLogger(__name__)
 _MISSING = object()
 FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.1"
+BOUND_FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.2"
 _SCHEMA = "roboguide.stage2-execution-feedback/v0.1"
 _COMPLETED_PREFIX = "You have completed your previous action. "
 
@@ -129,6 +131,7 @@ class _PendingAction:
     document: dict[str, Any]
     action: dict[str, Any]
     physical_steps: int = 0
+    place_physical_steps: int = 0
     deferred_completion: bool = False
 
 
@@ -141,11 +144,13 @@ class Stage2ExecutionFeedback:
         record: Callable[[dict[str, Any]], None],
         *,
         completion: Callable[[str, str, bool], None] | None = None,
+        completion_binding: RelocationCompletionBinding | None = None,
     ) -> None:
         """Freeze contracts while retaining no simulator or control authority."""
         self._contracts = dict(contracts)
         self._record = record
         self._completion = completion
+        self._completion_binding = completion_binding
         self._pending: dict[str, _PendingAction] = {}
         self._sequences: dict[str, int] = {}
         self._operation_completed: dict[str, bool] = {}
@@ -176,8 +181,10 @@ class Stage2ExecutionFeedback:
         sequence = self._sequences.get(agent_name, 0) + 1
         self._sequences[agent_name] = sequence
         document = {
-            "schema_version": _SCHEMA,
-            "profile": FEEDBACK_PROFILE,
+            "schema_version": (
+                "roboguide.stage2-execution-feedback/v0.2" if self._completion_binding else _SCHEMA
+            ),
+            "profile": BOUND_FEEDBACK_PROFILE if self._completion_binding else FEEDBACK_PROFILE,
             "agent_name": agent_name,
             "contract": self._contracts[agent_name].as_dict(),
             "action_sequence": sequence,
@@ -203,6 +210,9 @@ class Stage2ExecutionFeedback:
             document["retry_of_action_sequence"] = previous.document["action_sequence"]
             document["prior_call_physical_steps"] = previous.physical_steps
         self._pending[agent_name] = _PendingAction(model, receipt, document, exact_action)
+        if self._completion_binding is not None and action["name"] == "place":
+            self._completion_binding.bind_call(agent_name, receipt["tool_call_id"], sequence)
+            document["place_binding"] = self._completion_binding.observe(agent_name)
         original_content = receipt["content"]
         receipt["content"] = json.dumps(document, allow_nan=False, sort_keys=True)
         self._emit("admitted", dict(document, original_vendor_receipt=original_content))
@@ -246,6 +256,9 @@ class Stage2ExecutionFeedback:
         """
         for agent_name, pending in self._pending.items():
             pending.physical_steps += 1
+            if self._completion_binding is not None and pending.document["tool_name"] == "place":
+                self._post_step_place(agent_name, pending)
+                continue
             if not pending.deferred_completion:
                 continue
             pending.deferred_completion = False
@@ -265,10 +278,66 @@ class Stage2ExecutionFeedback:
             self._emit("retry-terminal-confirmed", pending.document)
             self._notify_completion(agent_name, pending)
 
+    def action_failure(self, agent_name: str, action: Mapping[str, Any]) -> str | None:
+        """Reject contradictory grasp bindings before dispatch under the explicit new profile."""
+        if self._completion_binding is None or not self._contracts[agent_name].is_relocation:
+            return None
+        observation = self._completion_binding.observe(agent_name)
+        if observation["status"] == "contradictory":
+            return "actual grasp does not match the canonical relocation object"
+        if action["name"] in {"place", "reset_arm"} and observation["status"] != "observed":
+            return "actual relocation object/grasp observation is unavailable"
+        if action["name"] == "place" and observation["object_released"] is True:
+            return "place requires an actually held canonical object"
+        return None
+
+    @property
+    def has_bound_relocation_completion(self) -> bool:
+        """Identify the explicit new local profile without changing historical default behavior."""
+        return self._completion_binding is not None
+
+    def _post_step_place(self, agent_name: str, pending: _PendingAction) -> None:
+        """Confirm actual release after the existing step, retaining earlier termination causes."""
+        binding = self._completion_binding
+        if binding is None or pending.document.get("local_skill_completed") is True:
+            return
+        if not binding.consume_action(
+            agent_name, pending.document["tool_call_id"], pending.document["action_sequence"]
+        ):
+            return
+        pending.place_physical_steps += 1
+        observation = binding.observe(agent_name)
+        pending.document = dict(
+            pending.document,
+            place_binding=observation,
+            place_physical_steps=pending.place_physical_steps,
+        )
+        if (
+            observation.get("tool_call_id") != pending.document["tool_call_id"]
+            or observation.get("action_sequence") != pending.document["action_sequence"]
+            or observation["qualified_local_completion"] is not True
+            or pending.document.get("termination", {}).get("bad_terminate") is True
+        ):
+            return
+        pending.deferred_completion = False
+        pending.document = dict(
+            pending.document,
+            status="local-skill-completed",
+            local_skill_completed=True,
+            source="post-step-bound-object-release",
+            source_timing="after-completed-gym-step",
+            physical_steps_since_call=pending.physical_steps,
+        )
+        self._write_observed_receipt(pending)
+        self._emit("bound-place-completed", pending.document)
+        self._notify_completion(agent_name, pending)
+
     def install(self, policies: Sequence[Any]) -> None:
         """Observe supported skill instances; unavailable interfaces never imply success."""
         owners: dict[int, str] = {}
         try:
+            if self._completion_binding is not None:
+                self._completion_binding.install(policies)
             for policy in policies:
                 agent_name = policy._high_level_policy.llm_agent.name
                 if agent_name not in self._contracts:
@@ -420,6 +489,19 @@ class Stage2ExecutionFeedback:
                 **budget,
             },
         )
+        if self._completion_binding is not None and expected_skill == "place":
+            pending.document["place_binding"] = self._completion_binding.last_check(agent_name)
+            # A fresh released-object read is required even when the original geometric
+            # result is true. Unknown observations must not clear a guard phase.
+            observation = pending.document["place_binding"]
+            if observation is None or observation.get("qualified_local_completion") is None:
+                pending.document.update(
+                    status="termination-result-unavailable", local_skill_completed=None
+                )
+            elif base_done is True and pending.place_physical_steps == 0:
+                pending.document.update(
+                    status="completion-evidence-unavailable", local_skill_completed=None
+                )
         self._write_observed_receipt(pending)
         self._emit("skill-terminated", pending.document)
         self._notify_completion(agent_name, pending)
@@ -479,6 +561,8 @@ class Stage2ExecutionFeedback:
         for restore in reversed(self._restores):
             restore()
         self._restores.clear()
+        if self._completion_binding is not None:
+            self._completion_binding.close()
         for pending in self._pending.values():
             if pending.document["status"] == "accepted-awaiting-observation":
                 pending.document = dict(

@@ -50,6 +50,7 @@ from .navigation_preparation import NavigationPreparationFailure
 from .operation_admission import attach_relocation_admission
 from .planning_world_evidence import build_authoritative_planning_world_evidence
 from .preassignment_feasibility import build_preassignment_feasibility
+from .relocation_completion import COMPLETION_PROFILE, inspect_completion_interfaces
 from .relocation_deployment import load_relocation_profile, verify_loaded_robots
 from .relocation_start import (
     admit_relocation_source,
@@ -174,6 +175,34 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     },
                 }
             self._prepare_reset()
+            if getattr(self._config, "relocation_completion_binding", False):
+                try:
+                    if self._actor is None:
+                        raise IntegrationError(
+                            "relocation completion requires a loaded Stage2 actor"
+                        )
+                    inspect_completion_interfaces(self._actor._active_policies, habitat_env)
+                except Exception as error:
+                    self._write_json(
+                        "relocation-completion-readiness.json",
+                        {
+                            "schema_version": "roboguide.relocation-completion-readiness/v0.1",
+                            "profile": COMPLETION_PROFILE,
+                            "ready": False,
+                            "error_type": type(error).__name__,
+                            "source": "loaded-place-skills-and-reset-world-readers",
+                        },
+                    )
+                    raise
+                self._write_json(
+                    "relocation-completion-readiness.json",
+                    {
+                        "schema_version": "roboguide.relocation-completion-readiness/v0.1",
+                        "profile": COMPLETION_PROFILE,
+                        "ready": True,
+                        "source": "loaded-place-skills-and-reset-world-readers",
+                    },
+                )
             document = build_authoritative_semantic_evidence(
                 habitat_env,
                 run_id=getattr(self._config, "run_id", ""),

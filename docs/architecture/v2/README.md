@@ -534,7 +534,12 @@ Guard。此环只属于 Local How，不能证明 Task/Mission satisfaction、改
 工具受精确契约与已观察阶段约束。局部导航完成不能结束搬运；原始 place 完成后以原始
 wait 保持已完成 endpoint，让同伴继续。单 Actor 顺序复用和双 Actor 不同物体并发共用原有
 拓扑；同一物体并发、取消后搬运续跑及 `any_at` 专用 Local How 组合明确拒绝。它不增加
-Core 资源语义，不放宽官方成功或 Formal admission，Task3 部署和真实物理验证尚未完成。
+Core 资源语义，不放宽官方成功或 Formal admission。Task3 受控物理预检已经运行，
+正式配对公平性与批量就绪仍需独立验证。默认关闭的精确对象完成 profile
+（[ADR-0073](../../decisions/0073-bound-relocation-place-completion.md)）用本次 canonical
+对象距离驱动原始 place 释放，并以实际 grasp release 核验本地完成。它允许技能退出后的
+持物 reset，模型仍自行选择动作；Local How v0.8 / feedback v0.2 明示受控臂差异，
+不会改动原生文件或官方评测。
 [当前实现图和边界](../../extensions/habitat-relocation-profile.md)单独记录该可选路径。
 
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied

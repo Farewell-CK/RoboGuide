@@ -24,6 +24,16 @@ termination path) produces the local terminal result. A completed relocation end
 uses the original wait skill without further model calls while its peer continues.
 Local place completion never proves official PDDL success.
 
+The separate default-off `--relocation-completion-binding` option is available
+only for shared relocation (`HABITAT_RELOCATION_COMPLETION_BINDING=1` in B1).
+It binds the original place skill's distance to the exact canonical object and
+destination, preserves its original release action and 0.02m threshold, and
+qualifies completion with actual agent grasp release. It permits original arm
+reset after an observed skill exit while holding, without declaring placement.
+Local How v0.8 / feedback v0.2 disclose this controlled-arm difference; original
+vendor files, selected tools, speeds, budgets and official truth remain intact.
+See [ADR-0073](../../docs/decisions/0073-bound-relocation-place-completion.md).
+
 The shared world supports distinct-object dual Actors or single-Actor sequential Tasks
 in one reset world. Concurrent relocation of one object fails before Stage2. Manipulation
 continuation and the navigation-only `any_at` goal-region profile remain unsupported.

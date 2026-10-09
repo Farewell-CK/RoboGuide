@@ -580,7 +580,11 @@ Habitat `pddl_success`、Local skill completion、episode termination 与 RoboGu
 episode-start source evidence 与通用 B1 runner 接线已实现并通过离线验证。搬运入口为
 `scenarios/e1-shared-world-relocation/run-b1-roboguide.sh`，要求显式 frozen input；
 `ROBOGUIDE_B1_PREPARE_ONLY=1` 只准备部署文件，不启动服务或仿真。真实物理预检仍待完成。见[当前搬运
-Profile 与实现图](docs/extensions/habitat-relocation-profile.md)。
+Profile 与实现图](docs/extensions/habitat-relocation-profile.md)。默认关闭的
+`HABITAT_RELOCATION_COMPLETION_BINDING=1` 配置进一步启用 adapter 所有的
+`relocation_completion.py`：把原始 place 的距离绑定到 canonical 对象，并以实际释放
+核验本地完成。该 Local How v0.8 / feedback v0.2 差异保留原始动作、0.02m 条件和预算，
+不修改官方 PDDL；详见 [ADR-0073](docs/decisions/0073-bound-relocation-place-completion.md)。
 搬运部署采用版本化 operation admission，绑定实际 reset 的物体来源、目的地与配置 endpoint；
 导航负面候选检查仍保留，不能用它替代搬运可达性判断。共享拓扑与资源保护继续生效，
 当前节点能力、资源承诺和 Task 满足权威保持不变，见

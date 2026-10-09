@@ -49,6 +49,7 @@ class RelocationExecutionState:
     phase: str = "before_pick"
     pending_action: str | None = None
     last_completed_action: str | None = None
+    allow_holding_reset: bool = False
 
     def admit(self, action_name: str) -> None:
         """Fence the next semantic transition until its local skill is observed."""
@@ -57,7 +58,12 @@ class RelocationExecutionState:
 
     def complete(self, action_name: str, succeeded: bool) -> None:
         """Apply a phase transition only from definite local skill evidence."""
-        if self.pending_action != action_name:
+        if self.pending_action != action_name and not (
+            self.allow_holding_reset
+            and self.pending_action is None
+            and self.last_completed_action == action_name
+            and succeeded
+        ):
             return
         self.pending_action = None
         self.last_completed_action = action_name
@@ -78,6 +84,7 @@ class Stage2ExecutionContract:
     invocation_digest: str | None
     expected_object: str | None = None
     expected_source: str | None = None
+    attempt_id: str | None = None
 
     @classmethod
     def for_invocation(
@@ -97,6 +104,7 @@ class Stage2ExecutionContract:
                 invocation.request_key(),
                 invocation.object_ref,
                 invocation.source,
+                invocation.attempt_id,
             )
         raise IntegrationError(f"no Stage2 execution profile for {invocation.operation!r}")
 
@@ -200,7 +208,7 @@ class Stage2ExecutionContract:
         if name == "reset_arm":
             if arguments:
                 self._fail(agent_name, action, "reset_arm accepts no tool arguments")
-            if state.phase == "holding":
+            if state.phase == "holding" and not state.allow_holding_reset:
                 self._fail(agent_name, action, "reset_arm is not allowed while holding the object")
             return
         if name == "nav_to_obj":
@@ -450,7 +458,7 @@ def _bound_navigation_tools(actions: object, destination: str) -> list[dict[str,
 
 
 def _bound_relocation_tools(
-    actions: object, object_ref: str, destination: str
+    actions: object, object_ref: str, destination: str, *, navigation_target: str | None = None
 ) -> list[dict[str, Any]]:
     """Bind the original EMOS relocation arguments to exact semantic identities."""
     if not isinstance(actions, list) or not all(isinstance(action, dict) for action in actions):
@@ -485,7 +493,9 @@ def _bound_relocation_tools(
             raise IntegrationError(f"Stage2 relocation {name} schema cannot bind committed {field}")
         target["enum"] = [value]
 
-    bind_string_enum("nav_to_obj", "target_obj", object_ref)
+    if navigation_target is not None and navigation_target not in {object_ref, destination}:
+        raise IntegrationError("Stage2 relocation schema cannot invent a navigation target")
+    bind_string_enum("nav_to_obj", "target_obj", navigation_target or object_ref)
     bind_string_enum("pick", "target_obj", object_ref)
     bind_string_enum("place", "target_obj", object_ref)
     bind_string_enum("place", "target_location", destination)
@@ -535,7 +545,17 @@ def _guard_agent(
                     if contract.expected_object is None or contract.expected_destination is None:
                         raise IntegrationError("relocation contract is missing semantic bindings")
                     model.actions = _bound_relocation_tools(
-                        original_actions, contract.expected_object, contract.expected_destination
+                        original_actions,
+                        contract.expected_object,
+                        contract.expected_destination,
+                        navigation_target=(
+                            contract.expected_destination
+                            if feedback is not None
+                            and feedback.has_bound_relocation_completion
+                            and relocation_state is not None
+                            and relocation_state.phase == "holding"
+                            else None
+                        ),
                     )
                 else:
                     destination = contract.expected_destination
@@ -573,6 +593,10 @@ def _guard_agent(
                         agent_name, action, "execution model must return an action tuple"
                     )
                 contract.validate(agent_name, action, peer_names, relocation_state)
+                if feedback is not None:
+                    reason = feedback.action_failure(agent_name, action)
+                    if reason is not None:
+                        raise Stage2ContractViolation(agent_name, action, reason)
             except Stage2ContractViolation as violation:
                 error = violation
             document = {
@@ -585,6 +609,8 @@ def _guard_agent(
                 "reason": error.reason if error else None,
                 "boundary": "before-crab-agent-dispatch",
             }
+            if feedback is not None and feedback.has_bound_relocation_completion:
+                document["relocation_guard_profile"] = "observed-object-relocation/v0.2"
             try:
                 record(document)
             except Exception:  # noqa: BLE001 - failed evidence never authorizes a tool

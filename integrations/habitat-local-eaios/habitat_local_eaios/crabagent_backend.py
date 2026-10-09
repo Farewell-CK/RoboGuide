@@ -47,6 +47,7 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
     retain_stopped_session: bool = False
     enable_relocation: bool = False
     relocation_profile_path: Path | None = None
+    relocation_completion_binding: bool = False
 
     def __post_init__(self) -> None:
         """Reject assignment modes that would silently change local semantics."""
@@ -73,6 +74,8 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
             raise IntegrationError(
                 "goal-aware navigation arrival requires spatial navigation arrival"
             )
+        if self.relocation_completion_binding and not self.enable_relocation:
+            raise IntegrationError("relocation completion binding requires relocation support")
 
     def spatial_capability_for(self, agent_id: int) -> FloorTransitionProfile | None:
         """Return the startup-frozen spatial profile for one Habitat agent."""
