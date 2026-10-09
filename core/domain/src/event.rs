@@ -294,6 +294,27 @@ pub enum EventPayload {
         /// Group bind that established the authority.
         group_id: ExecutionGroupId,
     },
+    /// Control atomically moved one ungrounded Mission Actor to an authorized standby entity.
+    MissionActorTakenOver {
+        /// Mission namespace retaining logical Actor continuity.
+        mission_id: MissionId,
+        /// Logical Actor whose physical executor changed.
+        actor_id: ActorId,
+        /// Exact Task whose blocked role consumed the authorization.
+        task_ref: TaskRef,
+        /// Exact role rebound during takeover.
+        role_id: RoleId,
+        /// Previously authoritative Node.
+        previous_node_id: NodeId,
+        /// Previously authoritative physical entity.
+        previous_entity_id: PhysicalEntityId,
+        /// Newly authoritative standby Node.
+        replacement_node_id: NodeId,
+        /// Newly authoritative standby physical entity.
+        replacement_entity_id: PhysicalEntityId,
+        /// Deployment evidence digest authorizing this cross-entity change.
+        evidence_digest: String,
+    },
     /// An execution group began executing its bound roles.
     ExecutionGroupActivated {
         /// Activated group identity.

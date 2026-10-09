@@ -1,11 +1,11 @@
 //! Reconciliation assessment and recovery authority transitions.
 
 use super::model::{
-    CommittedRecoveryAssignment, ReconciliationAssessment, RecoveryAssignmentProposal,
-    RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed, recovery_commitment_key,
-    recovery_role, validate_recovery_resources,
+    ActorTakeoverAuthorization, CommittedRecoveryAssignment, ReconciliationAssessment,
+    RecoveryAssignmentProposal, RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,
+    recovery_commitment_key, recovery_role, validate_recovery_resources,
 };
-use crate::{ControlError, ControlPlane, GroupLifecycle, coordination::Reservation};
+use crate::{ControlError, ControlPlane, GroupLifecycle, coordination::Reservation, valid_evidence_digest};
 use domain::{
     CorrelationId, EventPayload, ExecutionGroupId, MissionPlan, NodeId, OperationRef, ResourceId,
     RoleId, TaskRequirement, TimestampMs,
@@ -14,6 +14,169 @@ use ports::{EventSink, SharedNodeStateReader};
 use std::collections::BTreeMap;
 
 impl ControlPlane {
+    /// Validates a one-shot cross-entity takeover for one already unbound Actor role.
+    ///
+    /// This does not match, reserve or rebind anything. A grounded Mission Actor cannot migrate,
+    /// and a deployment placement constraint remains authoritative. The caller must separately
+    /// retain current-attempt stop proof through the stopped-recovery path.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorize_actor_takeover(
+        &self,
+        need: &RoleRecoveryNeed,
+        requirement: &TaskRequirement,
+        previous_entity_id: domain::PhysicalEntityId,
+        replacement_entity_id: domain::PhysicalEntityId,
+        evidence_digest: String,
+    ) -> Result<ActorTakeoverAuthorization, ControlError> {
+        if previous_entity_id == replacement_entity_id || !valid_evidence_digest(&evidence_digest) {
+            return Err(ControlError::InvalidProposal(
+                "Actor takeover requires distinct entities and a canonical evidence digest".into(),
+            ));
+        }
+        let group = self
+            .groups
+            .get(need.group_id())
+            .ok_or_else(|| ControlError::UnknownGroup(need.group_id().clone()))?;
+        let role = recovery_role(group, requirement, need.task_ref(), need.role_id())?;
+        if group.lifecycle != GroupLifecycle::Blocked
+            || !group.is_task_role_unbound(need.task_ref(), need.role_id())
+                && !group.is_role_unbound(need.role_id())
+        {
+            return Err(ControlError::InvalidProposal(
+                "Actor takeover requires the exact blocked unbound role".into(),
+            ));
+        }
+        let actor_id = role.actor_id().ok_or_else(|| {
+            ControlError::InvalidProposal("Actor takeover requires an Actor-bound role".into())
+        })?;
+        let binding = self.actor_binding(requirement.mission_id(), actor_id).ok_or_else(|| {
+            ControlError::InvalidProposal("Actor takeover requires an existing ActorBinding".into())
+        })?;
+        if binding.node_id() != need.current_node_id() {
+            return Err(ControlError::InvalidProposal(
+                "Actor takeover source differs from the current ActorBinding".into(),
+            ));
+        }
+        if self
+            .mission_binding_semantics
+            .get(requirement.mission_id())
+            .and_then(|semantics| semantics.grounding(actor_id))
+            .is_some()
+        {
+            return Err(ControlError::InvalidProposal(
+                "a Mission Actor grounded to one entity cannot migrate".into(),
+            ));
+        }
+        let registry = self.physical_entity_registry.as_ref().ok_or_else(|| {
+            ControlError::InvalidProposal("Actor takeover requires a current physical registry".into())
+        })?;
+        let previous = registry.entity(&previous_entity_id).ok_or_else(|| {
+            ControlError::InvalidProposal("takeover source entity is not registered".into())
+        })?;
+        let replacement = registry.entity(&replacement_entity_id).ok_or_else(|| {
+            ControlError::InvalidProposal("takeover replacement entity is not registered".into())
+        })?;
+        if previous.node_id() != need.current_node_id()
+            || binding.physical_entity_id().is_some_and(|entity| entity != &previous_entity_id)
+        {
+            return Err(ControlError::InvalidProposal(
+                "takeover source entity does not match Actor authority".into(),
+            ));
+        }
+        if self.actor_node_constraint(requirement.mission_id(), actor_id).is_some() {
+            return Err(ControlError::InvalidProposal(
+                "fixed Actor placement must be replaced by an explicit candidate restriction before takeover".into(),
+            ));
+        }
+        if self
+            .actor_candidate_restriction(requirement.mission_id(), actor_id)
+            .is_some_and(|restriction| !restriction.allowed_nodes().contains(replacement.node_id()))
+        {
+            return Err(ControlError::InvalidProposal(
+                "takeover replacement violates the admitted Actor candidate restriction".into(),
+            ));
+        }
+        if self.actor_bindings.iter().any(|((mission_id, other_actor), other)| {
+            mission_id == requirement.mission_id()
+                && other_actor != actor_id
+                && (other.physical_entity_id() == Some(&replacement_entity_id)
+                    || other.node_id() == replacement.node_id())
+        }) {
+            return Err(ControlError::InvalidProposal(
+                "takeover replacement is already authoritative for another Mission Actor".into(),
+            ));
+        }
+        Ok(ActorTakeoverAuthorization {
+            group_id: need.group_id().clone(),
+            task_ref: need.task_ref().clone(),
+            role_id: need.role_id().clone(),
+            actor_id: actor_id.clone(),
+            previous_node_id: need.current_node_id().clone(),
+            previous_entity_id,
+            replacement_node_id: replacement.node_id().clone(),
+            replacement_entity_id,
+            registry_id: registry.registry_id().clone(),
+            registry_revision: registry.revision(),
+            evidence_digest,
+        })
+    }
+
+    /// Revalidates one takeover against current Control and deployment authority.
+    fn validate_actor_takeover(
+        &self,
+        need: &RoleRecoveryNeed,
+        requirement: &TaskRequirement,
+        authorization: &ActorTakeoverAuthorization,
+    ) -> Result<(), ControlError> {
+        if authorization.group_id() != need.group_id()
+            || authorization.task_ref() != need.task_ref()
+            || authorization.role_id() != need.role_id()
+            || authorization.previous_node_id() != need.current_node_id()
+        {
+            return Err(ControlError::InvalidProposal(
+                "Actor takeover authorization belongs to another recovery need".into(),
+            ));
+        }
+        let group = self
+            .groups
+            .get(need.group_id())
+            .ok_or_else(|| ControlError::UnknownGroup(need.group_id().clone()))?;
+        let role = recovery_role(group, requirement, need.task_ref(), need.role_id())?;
+        if role.actor_id() != Some(authorization.actor_id()) {
+            return Err(ControlError::InvalidProposal(
+                "Actor takeover authorization names another Actor".into(),
+            ));
+        }
+        let binding = self
+            .actor_binding(requirement.mission_id(), authorization.actor_id())
+            .ok_or_else(|| ControlError::InvalidProposal("ActorBinding disappeared".into()))?;
+        if binding.node_id() != authorization.previous_node_id()
+            || binding.physical_entity_id().is_some_and(|entity| {
+                entity != authorization.previous_entity_id()
+            })
+        {
+            return Err(ControlError::InvalidProposal(
+                "Actor authority changed after takeover authorization".into(),
+            ));
+        }
+        let registry = self.physical_entity_registry.as_ref().ok_or_else(|| {
+            ControlError::InvalidProposal("physical registry disappeared".into())
+        })?;
+        if registry.registry_id() != authorization.registry_id()
+            || registry.revision() != authorization.registry_revision()
+            || registry
+                .entity(authorization.previous_entity_id())
+                .is_none_or(|entity| entity.node_id() != authorization.previous_node_id())
+            || registry
+                .entity(authorization.replacement_entity_id())
+                .is_none_or(|entity| entity.node_id() != authorization.replacement_node_id())
+        {
+            return Err(ControlError::InvalidProposal(
+                "physical registry changed after takeover authorization".into(),
+            ));
+        }
+        Ok(())
+    }
     /// Returns every Control-owned unbound recovery need in deterministic Group/Task/Role order.
     pub fn pending_role_recoveries(&self) -> Vec<RoleRecoveryNeed> {
         let mut pending = Vec::new();
@@ -382,6 +545,7 @@ impl ControlPlane {
             requirement,
             None,
             false,
+            None,
             timestamp,
             correlation_id,
             events,
@@ -406,6 +570,7 @@ impl ControlPlane {
             requirement,
             Some(operation),
             false,
+            None,
             timestamp,
             correlation_id,
             events,
@@ -437,6 +602,37 @@ impl ControlPlane {
             requirement,
             Some(operation),
             true,
+            None,
+            timestamp,
+            correlation_id,
+            events,
+        )
+    }
+
+    /// Matches only the explicitly authorized standby entity after confirmed stop.
+    #[allow(clippy::too_many_arguments)]
+    pub fn match_stopped_actor_takeover_candidates_for_operation<
+        S: SharedNodeStateReader,
+        E: EventSink,
+    >(
+        &self,
+        state: &S,
+        need: &RoleRecoveryNeed,
+        requirement: &TaskRequirement,
+        operation: &OperationRef,
+        authorization: &ActorTakeoverAuthorization,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<RecoveryCandidateSet, ControlError> {
+        self.validate_actor_takeover(need, requirement, authorization)?;
+        self.match_recovery_candidates_with_operation(
+            state,
+            need,
+            requirement,
+            Some(operation),
+            true,
+            Some(authorization),
             timestamp,
             correlation_id,
             events,
@@ -452,6 +648,7 @@ impl ControlPlane {
         requirement: &TaskRequirement,
         operation: Option<&OperationRef>,
         stopped_owner_allowed: bool,
+        actor_takeover: Option<&ActorTakeoverAuthorization>,
         timestamp: TimestampMs,
         correlation_id: &CorrelationId,
         events: &mut E,
@@ -484,9 +681,11 @@ impl ControlPlane {
             ));
         }
 
-        let actor_authority_node = role
-            .actor_id()
-            .and_then(|actor_id| self.actor_authority_node(requirement.mission_id(), actor_id));
+        let actor_authority_node = actor_takeover
+            .map(|authorization| authorization.replacement_node_id().clone())
+            .or_else(|| role.actor_id().and_then(|actor_id| {
+                self.actor_authority_node(requirement.mission_id(), actor_id)
+            }));
         let actor_candidate_restriction = role.actor_id().and_then(|actor_id| {
             self.actor_candidate_restriction(requirement.mission_id(), actor_id)
         });
@@ -553,6 +752,7 @@ impl ControlPlane {
             },
         );
         candidates.stopped_owner_allowed = stopped_owner_allowed;
+        candidates.actor_takeover = actor_takeover.cloned();
         events.append(
             timestamp,
             correlation_id,
@@ -631,6 +831,7 @@ impl ControlPlane {
             candidates.operation().cloned(),
         );
         proposal.stopped_owner_allowed = candidates.stopped_owner_allowed;
+        proposal.actor_takeover = candidates.actor_takeover.clone();
         events.append(
             timestamp,
             correlation_id,
@@ -688,7 +889,20 @@ impl ControlPlane {
                 "recovery proposal no longer matches the blocked group role".to_string(),
             ));
         }
-        if let Some(actor_id) = role.actor_id()
+        if let Some(authorization) = proposal.actor_takeover() {
+            let need = RoleRecoveryNeed::new(
+                proposal.group_id().clone(),
+                proposal.task_ref().clone(),
+                proposal.role_id().clone(),
+                proposal.previous_node_id().clone(),
+            );
+            self.validate_actor_takeover(&need, requirement, authorization)?;
+            if proposal.replacement_node_id() != authorization.replacement_node_id() {
+                return Err(ControlError::InvalidProposal(
+                    "takeover proposal differs from its authorized standby".into(),
+                ));
+            }
+        } else if let Some(actor_id) = role.actor_id()
             && let Some(authority_node) =
                 self.actor_authority_node(requirement.mission_id(), actor_id)
             && proposal.replacement_node_id() != &authority_node
@@ -771,6 +985,7 @@ impl ControlPlane {
             proposal.operation().cloned(),
         );
         committed.stopped_owner_allowed = proposal.stopped_owner_allowed;
+        committed.actor_takeover = proposal.actor_takeover.clone();
         for resource_id in proposal.replacement_resource_ids() {
             self.reservations.insert(
                 resource_id.clone(),

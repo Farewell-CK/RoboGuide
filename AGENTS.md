@@ -112,6 +112,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Recovery reassignment follows role-scoped Match -> Propose -> Commit -> Rebind:
   candidate matching may be empty, proposal creates no reservation, commit uses
   the single Control reservation authority, and rebind requires commitment.
+- Explicit cross-entity Actor takeover is a separate Control authorization (ADR-0070), never an
+  ordinary recovery side effect. It binds exact blocked Group/Task/Role, source and standby physical
+  entities, registry revision and evidence digest; Match/Schedule/Proposal/Commit remain mandatory,
+  and Rebind atomically updates ActorBinding only after current-attempt stop proof is retained by the
+  application. Grounded Actors and fixed placement do not migrate.
 - Committed-but-not-bound recovery assignments are Control-owned pending
   commitments keyed by Group/Role; Rebind consumes, Abort releases replacement
   resources, and terminal Group release removes all related ownership.

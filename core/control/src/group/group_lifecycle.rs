@@ -455,6 +455,66 @@ impl ControlPlane {
             ));
         }
         self.validate_recovery_commitment_reservations(committed)?;
+        let takeover = if let Some(authorization) = committed.actor_takeover().cloned() {
+            let role = group
+                .role_requirement(committed.task_ref(), committed.role_id())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(
+                        "takeover commitment lacks authoritative role metadata".into(),
+                    )
+                })?;
+            if authorization.group_id() != committed.group_id()
+                || authorization.task_ref() != committed.task_ref()
+                || authorization.role_id() != committed.role_id()
+                || authorization.previous_node_id() != committed.previous_node_id()
+                || authorization.replacement_node_id() != committed.replacement_node_id()
+                || role.actor_id() != Some(authorization.actor_id())
+            {
+                return Err(ControlError::InvalidProposal(
+                    "takeover commitment differs from its Actor authorization".into(),
+                ));
+            }
+            let key = (
+                committed.task_ref().mission_id().clone(),
+                authorization.actor_id().clone(),
+            );
+            let binding = self.actor_bindings.get(&key).ok_or_else(|| {
+                ControlError::InvalidProposal("takeover ActorBinding disappeared".into())
+            })?;
+            if binding.node_id() != authorization.previous_node_id()
+                || binding.physical_entity_id().is_some_and(|entity| {
+                    entity != authorization.previous_entity_id()
+                })
+            {
+                return Err(ControlError::InvalidProposal(
+                    "takeover source no longer owns Actor authority".into(),
+                ));
+            }
+            let registry = self.physical_entity_registry.as_ref().ok_or_else(|| {
+                ControlError::InvalidProposal("takeover requires current deployment topology".into())
+            })?;
+            if registry.registry_id() != authorization.registry_id()
+                || registry.revision() != authorization.registry_revision()
+                || registry
+                    .entity(authorization.replacement_entity_id())
+                    .is_none_or(|entry| entry.node_id() != authorization.replacement_node_id())
+            {
+                return Err(ControlError::InvalidProposal(
+                    "takeover deployment topology changed before Rebind".into(),
+                ));
+            }
+            let replacement_binding = domain::ActorBinding::new_physical(
+                committed.task_ref().mission_id().clone(),
+                authorization.actor_id().clone(),
+                authorization.replacement_node_id().clone(),
+                authorization.replacement_entity_id().clone(),
+                authorization.registry_id().clone(),
+                authorization.registry_revision(),
+            );
+            Some((key, replacement_binding, authorization))
+        } else {
+            None
+        };
         let replacement_assignment = RoleAssignment::new(
             committed.role_id().clone(),
             committed.replacement_node_id().clone(),
@@ -484,6 +544,25 @@ impl ControlPlane {
             group.unbound_roles.remove(committed.role_id());
         }
         group.lifecycle = GroupLifecycle::Adapted;
+        if let Some((key, binding, authorization)) = takeover {
+            self.actor_bindings.insert(key, binding);
+            events.append(
+                timestamp,
+                correlation_id,
+                None,
+                EventPayload::MissionActorTakenOver {
+                    mission_id: committed.task_ref().mission_id().clone(),
+                    actor_id: authorization.actor_id().clone(),
+                    task_ref: committed.task_ref().clone(),
+                    role_id: committed.role_id().clone(),
+                    previous_node_id: authorization.previous_node_id().clone(),
+                    previous_entity_id: authorization.previous_entity_id().clone(),
+                    replacement_node_id: authorization.replacement_node_id().clone(),
+                    replacement_entity_id: authorization.replacement_entity_id().clone(),
+                    evidence_digest: authorization.evidence_digest().to_string(),
+                },
+            );
+        }
         self.pending_recovery_commitments.remove(&(
             committed.group_id().clone(),
             committed.task_ref().clone(),

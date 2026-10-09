@@ -12,6 +12,61 @@ use domain::{
 };
 use std::collections::BTreeSet;
 
+/// Explicit operator authority for replacing one failed Mission Actor with another physical entity.
+///
+/// Ordinary role recovery never creates this value. Control issues it only after validating the
+/// exact blocked role, existing Actor binding, current deployment registry and bounded evidence.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ActorTakeoverAuthorization {
+    /// Existing blocked Group whose role may consume this one-shot authority.
+    pub(super) group_id: ExecutionGroupId,
+    /// Exact Task containing the unbound Actor role.
+    pub(super) task_ref: TaskRef,
+    /// Exact role whose assignment may move.
+    pub(super) role_id: RoleId,
+    /// Logical Actor retaining Mission semantics across the physical takeover.
+    pub(super) actor_id: domain::ActorId,
+    /// Previously authoritative routing Node.
+    pub(super) previous_node_id: NodeId,
+    /// Previously authoritative physical entity.
+    pub(super) previous_entity_id: domain::PhysicalEntityId,
+    /// Operator-selected standby routing Node.
+    pub(super) replacement_node_id: NodeId,
+    /// Operator-selected standby physical entity.
+    pub(super) replacement_entity_id: domain::PhysicalEntityId,
+    /// Deployment registry identity used for both entities.
+    pub(super) registry_id: domain::PhysicalEntityRegistryId,
+    /// Exact current registry revision used to authorize the takeover.
+    pub(super) registry_revision: u64,
+    /// Digest of external stop/takeover evidence; bytes remain outside Control.
+    pub(super) evidence_digest: String,
+}
+
+impl ActorTakeoverAuthorization {
+    /// Returns the blocked Group covered by this authorization.
+    pub const fn group_id(&self) -> &ExecutionGroupId { &self.group_id }
+    /// Returns the exact Task covered by this authorization.
+    pub const fn task_ref(&self) -> &TaskRef { &self.task_ref }
+    /// Returns the exact role covered by this authorization.
+    pub const fn role_id(&self) -> &RoleId { &self.role_id }
+    /// Returns the logical Actor whose physical executor may change.
+    pub const fn actor_id(&self) -> &domain::ActorId { &self.actor_id }
+    /// Returns the old authoritative Node.
+    pub const fn previous_node_id(&self) -> &NodeId { &self.previous_node_id }
+    /// Returns the old physical entity.
+    pub const fn previous_entity_id(&self) -> &domain::PhysicalEntityId { &self.previous_entity_id }
+    /// Returns the selected standby Node.
+    pub const fn replacement_node_id(&self) -> &NodeId { &self.replacement_node_id }
+    /// Returns the selected standby physical entity.
+    pub const fn replacement_entity_id(&self) -> &domain::PhysicalEntityId { &self.replacement_entity_id }
+    /// Returns the deployment registry identity.
+    pub const fn registry_id(&self) -> &domain::PhysicalEntityRegistryId { &self.registry_id }
+    /// Returns the exact deployment registry revision.
+    pub const fn registry_revision(&self) -> u64 { self.registry_revision }
+    /// Returns the external evidence digest.
+    pub fn evidence_digest(&self) -> &str { &self.evidence_digest }
+}
+
 /// One assigned role whose current node can no longer satisfy Control eligibility.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoleRecoveryNeed {
@@ -88,6 +143,8 @@ pub struct RecoveryCandidateSet {
     candidate_node_ids: Vec<NodeId>,
     /// Exact semantic operation constrained by normalized Mission recovery, when available.
     operation: Option<OperationRef>,
+    /// Explicit cross-entity authority carried from Match to Proposal.
+    pub(super) actor_takeover: Option<ActorTakeoverAuthorization>,
 }
 
 impl RecoveryCandidateSet {
@@ -106,6 +163,7 @@ impl RecoveryCandidateSet {
             previous_node_id,
             candidate_node_ids,
             operation: None,
+            actor_takeover: None,
             stopped_owner_allowed: false,
         }
     }
@@ -126,6 +184,7 @@ impl RecoveryCandidateSet {
             previous_node_id,
             candidate_node_ids,
             operation: Some(operation),
+            actor_takeover: None,
             stopped_owner_allowed: false,
         }
     }
@@ -164,6 +223,11 @@ impl RecoveryCandidateSet {
     pub const fn operation(&self) -> Option<&OperationRef> {
         self.operation.as_ref()
     }
+
+    /// Returns explicit cross-entity authority when matching was takeover-scoped.
+    pub const fn actor_takeover(&self) -> Option<&ActorTakeoverAuthorization> {
+        self.actor_takeover.as_ref()
+    }
 }
 
 /// Replacement assignment supplied by an external scheduler/coordination boundary.
@@ -185,6 +249,8 @@ pub struct RecoveryAssignmentProposal {
     replacement_resource_ids: Vec<ResourceId>,
     /// Exact semantic operation checked during Match and Proposal, when available.
     operation: Option<OperationRef>,
+    /// Explicit cross-entity authority, absent for ordinary and same-owner recovery.
+    pub(super) actor_takeover: Option<ActorTakeoverAuthorization>,
 }
 
 impl RecoveryAssignmentProposal {
@@ -206,6 +272,7 @@ impl RecoveryAssignmentProposal {
             replacement_node_id,
             replacement_resource_ids,
             operation,
+            actor_takeover: None,
             stopped_owner_allowed: false,
         }
     }
@@ -244,6 +311,11 @@ impl RecoveryAssignmentProposal {
     pub const fn operation(&self) -> Option<&OperationRef> {
         self.operation.as_ref()
     }
+
+    /// Returns explicit cross-entity authority when this proposal is a takeover.
+    pub const fn actor_takeover(&self) -> Option<&ActorTakeoverAuthorization> {
+        self.actor_takeover.as_ref()
+    }
 }
 
 /// Replacement assignment whose resources are committed to the existing Group.
@@ -267,6 +339,9 @@ pub struct CommittedRecoveryAssignment {
     /// Exact semantic operation covered by this commitment, when available.
     #[serde(default)]
     operation: Option<OperationRef>,
+    /// Durable cross-entity authority consumed atomically by Rebind.
+    #[serde(default)]
+    pub(super) actor_takeover: Option<ActorTakeoverAuthorization>,
 }
 
 impl CommittedRecoveryAssignment {
@@ -288,6 +363,7 @@ impl CommittedRecoveryAssignment {
             replacement_node_id,
             committed_resource_ids,
             operation: None,
+            actor_takeover: None,
             stopped_owner_allowed: false,
         }
     }
@@ -311,6 +387,7 @@ impl CommittedRecoveryAssignment {
             replacement_node_id,
             committed_resource_ids,
             operation,
+            actor_takeover: None,
             stopped_owner_allowed: false,
         }
     }
@@ -353,6 +430,11 @@ impl CommittedRecoveryAssignment {
     /// Returns the semantic operation covered by this commitment, when available.
     pub const fn operation(&self) -> Option<&OperationRef> {
         self.operation.as_ref()
+    }
+
+    /// Returns durable cross-entity authority when this commitment is a takeover.
+    pub const fn actor_takeover(&self) -> Option<&ActorTakeoverAuthorization> {
+        self.actor_takeover.as_ref()
     }
 }
 

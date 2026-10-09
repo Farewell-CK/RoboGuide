@@ -5,6 +5,6 @@ mod pipeline;
 pub(crate) use model::validate_recovery_resources;
 
 pub use model::{
-    CommittedRecoveryAssignment, ReconciliationAssessment, RecoveryAssignmentProposal,
-    RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,
+    ActorTakeoverAuthorization, CommittedRecoveryAssignment, ReconciliationAssessment,
+    RecoveryAssignmentProposal, RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,
 };
