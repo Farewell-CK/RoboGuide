@@ -429,9 +429,14 @@ peer delivery. Unavailable evidence stays unknown, and original exceptions
 propagate. The next original model request references that feedback instead of
 unconditionally saying the previous action completed. No action is rewritten,
 model call added, or skill/episode budget renewed.
-Completion inputs preceding the selected action's first actual Gym step remain
-unknown for that action. Actual completed steps update only a counter, without
-per-step JSON or I/O. The current model input also contains the feedback object
+Completion inputs preceding a first action's actual Gym work remain unknown.
+For an exact model-selected retry after definite, non-aborting incomplete
+physical work, original completion at the fresh first-step counter is confirmed
+only after the existing Gym step succeeds. Attribution includes the previous
+call/sequence, same model, agent, invocation, tool and all raw arguments. Changed
+targets, new attempts, unknown predecessors and failed steps cannot inherit it.
+Regular completed steps update only a counter; confirmation emits one sparse
+boundary without extra skill, sensor or Gym calls. The current model input also contains the feedback object
 so vendor history-window settings cannot hide it.
 
 `stage2-execution-feedback.jsonl` and `stage2-execution-feedback-audit.json`

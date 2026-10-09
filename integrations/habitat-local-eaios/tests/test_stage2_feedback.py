@@ -318,8 +318,221 @@ def test_pre_execution_sensor_cannot_complete_a_new_action() -> None:
         assert receipt["local_skill_completed"] is None
         assert receipt["termination"]["base_is_skill_done"] is True
         assert receipt["physical_steps_since_call"] == 0
+        harness.feedback.physical_step()
+        assert harness.receipt()["local_skill_completed"] is None
     finally:
         harness.close()
+
+
+@pytest.mark.parametrize("prior_exit", ["budget", "high_level"])
+def test_exact_retry_completion_is_confirmed_only_after_existing_gym_step(prior_exit: str) -> None:
+    """Fresh counter completion after an exact budget retry cannot remain permanently unknown."""
+    harness = BoundaryHarness()
+    try:
+        harness.agent.chat("first action")
+        harness.feedback.physical_step()
+        harness.skill._cur_skill_step = [1000 if prior_exit == "budget" else 20]
+        harness.terminate(high_level=prior_exit == "high_level")
+        old_receipt = harness.receipt()
+        harness.agent.chat("retry selected by original model")
+        harness.skill._cur_skill_step = [1]
+        harness.skill.base_done = True
+        harness.terminate()
+        assert harness.receipt()["local_skill_completed"] is None
+        harness.feedback.physical_step()
+        receipt = harness.receipt()
+        assert receipt["status"] == "local-skill-completed"
+        assert receipt["source"] == "completed-gym-step-after-exact-retry-terminal"
+        assert receipt["termination"]["current_skill_steps"] == 1
+        assert receipt["termination"]["base_is_skill_done"] is True
+        assert receipt["physical_steps_since_call"] == 1
+        assert receipt["retry_of_tool_call_id"] == old_receipt["tool_call_id"]
+        assert receipt["benchmark_goal_satisfied"] is None
+        assert old_receipt["status"] == (
+            "skill-budget-exhausted" if prior_exit == "budget" else "high-level-interrupted"
+        )
+        assert harness.skill.base_calls == harness.skill.termination_calls == 2
+        assert len(harness.agent.llm_model.requests) == len(harness.agent.dispatches) == 2
+        harness.feedback.physical_step()
+        assert sum(row["event"] == "retry-terminal-confirmed" for row in harness.rows) == 1
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("failure", ["serialization", "storage", "callback"])
+def test_retry_boundary_observation_fault_preserves_original_physical_result(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """Sparse post-step feedback remains fail-soft, including its new exact-retry boundary."""
+    harness = BoundaryHarness()
+    try:
+        harness.agent.chat("original action")
+        harness.feedback.physical_step()
+        harness.skill._cur_skill_step = [1000]
+        harness.terminate()
+        harness.agent.chat("exact retry")
+        harness.skill._cur_skill_step = [1]
+        harness.skill.base_done = True
+        original_result = harness.terminate()
+
+        def unavailable(*args: Any, **kwargs: Any) -> Any:
+            """Fail only the selected observer interface after original action and termination."""
+            del args, kwargs
+            raise OSError("local observation unavailable")
+
+        with monkeypatch.context() as context:
+            if failure == "serialization":
+                context.setattr("habitat_local_eaios.stage2_feedback.json.dumps", unavailable)
+            elif failure == "storage":
+                context.setattr(harness.feedback, "_record", unavailable)
+            else:
+                context.setattr(harness.feedback, "_completion", unavailable)
+            harness.feedback.physical_step()
+        assert harness.skill.last_result is original_result
+        assert harness.skill.base_calls == harness.skill.termination_calls == 2
+        assert len(harness.agent.dispatches) == len(harness.agent.llm_model.requests) == 2
+        if failure != "serialization":
+            assert harness.receipt()["local_skill_completed"] is True
+        else:
+            assert harness.rows[-1]["receipt_update_status"] == "unavailable"
+            assert harness.rows[-1]["local_skill_completed"] is True
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("change", ["target", "arguments", "model", "tool"])
+def test_retry_evidence_requires_exact_original_call_and_model(change: str) -> None:
+    """A previous physical action cannot complete a changed raw call or a new model instance."""
+    harness = BoundaryHarness()
+    try:
+        harness.agent.chat("original action")
+        harness.feedback.physical_step()
+        harness.skill._cur_skill_step = [1000]
+        harness.terminate()
+        model = harness.agent.llm_model if change != "model" else VendorModel()
+        name = "wait" if change == "tool" else "nav_to_obj"
+        arguments: dict[str, Any] = {"target_obj": "entrance:north"}
+        if change == "target":
+            arguments["target_obj"] = "entrance:south"
+        elif change == "arguments":
+            arguments["options"] = {"approach": "alternative"}
+        elif change == "tool":
+            arguments = {}
+        # Exercise feedback attribution alone; wrong targets still fail the separate guard.
+        model.next_action = name, arguments
+        model.chat("changed raw call")
+        harness.feedback.admit(harness.agent.name, model, {"name": name, "arguments": arguments})
+        harness.skill._cur_skill_step = [1]
+        harness.skill.base_done = True
+        harness.terminate(name)
+        harness.feedback.physical_step()
+        receipt = json.loads(model.chat_history[-1][-1]["content"])
+        assert "retry_of_tool_call_id" not in receipt
+        assert receipt["status"] == "completion-evidence-unavailable"
+        assert receipt["local_skill_completed"] is None
+        assert len(harness.agent.dispatches) == 1
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("prior", ["no_step", "abort", "unknown", "completed"])
+def test_retry_cannot_inherit_missing_aborted_or_completed_prior_work(prior: str) -> None:
+    """A matching tool name is insufficient without a definite physical incomplete predecessor."""
+    harness = BoundaryHarness()
+    try:
+        harness.agent.chat("original action")
+        if prior != "no_step":
+            harness.feedback.physical_step()
+        harness.skill._cur_skill_step = [1000]
+        harness.skill._force_end_on_timeout = prior == "abort"
+        harness.skill.base_done = (
+            True if prior == "completed" else "unknown" if prior == "unknown" else False
+        )
+        harness.terminate()
+        harness.agent.chat("same model-selected action")
+        harness.skill._cur_skill_step = [1]
+        harness.skill.base_done = True
+        harness.skill._force_end_on_timeout = False
+        harness.terminate()
+        harness.feedback.physical_step()
+        assert "retry_of_tool_call_id" not in harness.receipt()
+        assert harness.receipt()["local_skill_completed"] is None
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("current", ["incomplete", "stale_counter", "exception", "new_query"])
+def test_exact_retry_requires_current_unambiguous_terminal_evidence(current: str) -> None:
+    """Lineage cannot manufacture completion from a budget exit, stale input or later exception."""
+    harness = BoundaryHarness()
+    try:
+        harness.agent.chat("original action")
+        harness.feedback.physical_step()
+        harness.skill._cur_skill_step = [1000]
+        harness.terminate()
+        harness.agent.chat("exact retry")
+        harness.skill._cur_skill_step = [
+            1000 if current == "incomplete" else 2 if current == "stale_counter" else 1
+        ]
+        harness.skill.base_done = current != "incomplete"
+        harness.terminate()
+        if current == "exception":
+            harness.skill.error = RuntimeError("original retry failure")
+            with pytest.raises(RuntimeError, match="original retry failure"):
+                harness.terminate()
+        elif current == "new_query":
+            harness.skill.base_done = False
+            harness.terminate()
+        harness.feedback.physical_step()
+        assert harness.receipt()["local_skill_completed"] is not True
+        assert not any(row["event"] == "retry-terminal-confirmed" for row in harness.rows)
+    finally:
+        harness.close()
+
+
+def test_exact_retry_lineage_does_not_cross_agent_call_ids() -> None:
+    """A peer with the same raw ID and target cannot inherit the first agent's retry witness."""
+    harness = BoundaryHarness()
+    peer = VendorAgent("peer")
+    peer_skill = VendorSkill()
+    feedback = Stage2ExecutionFeedback(
+        {harness.agent.name: harness.contract, peer.name: _contract("peer-attempt")},
+        harness.rows.append,
+    )
+    harness.close()
+    feedback.install(
+        [
+            harness.policy,
+            SimpleNamespace(
+                _high_level_policy=SimpleNamespace(llm_agent=peer), _skills={0: peer_skill}
+            ),
+        ]
+    )
+    restore = install_stage2_contract_guard(
+        [harness.agent, peer], feedback._contracts, lambda row: None, feedback=feedback
+    )
+    try:
+        harness.agent.chat("first action")
+        feedback.physical_step()
+        harness.skill._cur_skill_step = [1000]
+        harness.terminate()
+        harness.agent.chat("exact retry")
+        peer.chat("peer first action")
+        for skill in (harness.skill, peer_skill):
+            skill.base_done = True
+            skill._cur_skill_step = [1]
+            skill.should_terminate(
+                skill_name=["nav_to_obj"], batch_idx=[0], hl_wants_skill_term=[False]
+            )
+        feedback.physical_step()
+        assert harness.receipt()["local_skill_completed"] is True
+        assert (
+            json.loads(peer.llm_model.chat_history[-1][-1]["content"])["local_skill_completed"]
+            is None
+        )
+    finally:
+        restore()
+        feedback.close()
 
 
 def test_actual_feedback_is_in_current_input_even_if_vendor_history_is_not_used() -> None:
@@ -547,13 +760,22 @@ def test_incompatible_receipt_fails_before_physical_dispatch() -> None:
         harness.close()
 
 
-def test_new_attempt_does_not_receive_stale_completion_feedback() -> None:
+@pytest.mark.parametrize("prior_budget_exit", [False, True])
+def test_new_attempt_does_not_receive_stale_completion_feedback(prior_budget_exit: bool) -> None:
     """Execution hooks close old pending work and bind new feedback to a fresh invocation digest."""
     harness = BoundaryHarness()
     harness.agent.chat("first attempt")
+    if prior_budget_exit:
+        harness.feedback.physical_step()
+        harness.skill._cur_skill_step = [1000]
+        harness.terminate()
     harness.close()
     old_receipt = harness.receipt()
-    assert old_receipt["status"] == "segment-ended-without-observed-skill-termination"
+    assert old_receipt["status"] == (
+        "skill-budget-exhausted"
+        if prior_budget_exit
+        else "segment-ended-without-observed-skill-termination"
+    )
     next_contract = _contract("attempt-next")
     next_feedback = Stage2ExecutionFeedback(
         {harness.agent.name: next_contract}, harness.rows.append
@@ -572,7 +794,11 @@ def test_new_attempt_does_not_receive_stale_completion_feedback() -> None:
         assert harness.receipt()["contract"]["invocation_digest"] == next_contract.invocation_digest
         assert next_contract.invocation_digest != old_receipt["contract"]["invocation_digest"]
         harness.skill.base_done = True
+        harness.skill._cur_skill_step = [1]
         harness.terminate()
+        next_feedback.physical_step()
+        assert harness.receipt()["local_skill_completed"] is None
+        assert "retry_of_tool_call_id" not in harness.receipt()
         assert json.loads(harness.agent.llm_model.chat_history[0][-1]["content"]) == old_receipt
     finally:
         restore()

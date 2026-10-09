@@ -11,6 +11,7 @@ import json
 import logging
 import math
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -126,7 +127,9 @@ class _PendingAction:
     model: Any
     receipt: dict[str, Any]
     document: dict[str, Any]
+    action: dict[str, Any]
     physical_steps: int = 0
+    deferred_completion: bool = False
 
 
 class Stage2ExecutionFeedback:
@@ -169,6 +172,7 @@ class Stage2ExecutionFeedback:
     def admit(self, agent_name: str, model: Any, action: Mapping[str, Any]) -> None:
         """Replace an optimistic receipt only after the independent guard admits the call."""
         receipt = _receipt(model, action)
+        previous = self._pending.get(agent_name)
         sequence = self._sequences.get(agent_name, 0) + 1
         self._sequences[agent_name] = sequence
         document = {
@@ -184,7 +188,21 @@ class Stage2ExecutionFeedback:
             "benchmark_goal_satisfied": None,
             "source": "before-crab-agent-dispatch",
         }
-        self._pending[agent_name] = _PendingAction(model, receipt, document)
+        exact_action = deepcopy(dict(action))
+        if (
+            previous is not None
+            and previous.model is model
+            and previous.action == exact_action
+            and previous.physical_steps > 0
+            and previous.document["contract"] == document["contract"]
+            and previous.document["status"] in {"skill-budget-exhausted", "high-level-interrupted"}
+            and previous.document.get("local_skill_completed") is False
+            and previous.document.get("termination", {}).get("bad_terminate") is False
+        ):
+            document["retry_of_tool_call_id"] = previous.document["tool_call_id"]
+            document["retry_of_action_sequence"] = previous.document["action_sequence"]
+            document["prior_call_physical_steps"] = previous.physical_steps
+        self._pending[agent_name] = _PendingAction(model, receipt, document, exact_action)
         original_content = receipt["content"]
         receipt["content"] = json.dumps(document, allow_nan=False, sort_keys=True)
         self._emit("admitted", dict(document, original_vendor_receipt=original_content))
@@ -220,9 +238,32 @@ class Stage2ExecutionFeedback:
         return content
 
     def physical_step(self) -> None:
-        """Count only existing completed Gym steps, performing no per-step JSON or I/O."""
-        for pending in self._pending.values():
+        """Count existing Gym steps and confirm only an exact retry's deferred terminal fact.
+
+        This runs after the existing Gym call succeeds. Ordinary steps only
+        increment counters; an attributed retry boundary emits one receipt.
+        No skill, sensor, action, model, or Gym method is called here.
+        """
+        for agent_name, pending in self._pending.items():
             pending.physical_steps += 1
+            if not pending.deferred_completion:
+                continue
+            pending.deferred_completion = False
+            pending.document = dict(
+                pending.document,
+                status=(
+                    "wait-finished"
+                    if pending.document["tool_name"] in {"wait", "send_request"}
+                    else "local-skill-completed"
+                ),
+                local_skill_completed=True,
+                source="completed-gym-step-after-exact-retry-terminal",
+                source_timing="after-completed-gym-step-with-prior-policy-input-evidence",
+                physical_steps_since_call=pending.physical_steps,
+            )
+            self._write_observed_receipt(pending)
+            self._emit("retry-terminal-confirmed", pending.document)
+            self._notify_completion(agent_name, pending)
 
     def install(self, policies: Sequence[Any]) -> None:
         """Observe supported skill instances; unavailable interfaces never imply success."""
@@ -277,6 +318,7 @@ class Stage2ExecutionFeedback:
             except BaseException as error:
                 pending = self._pending.get(agent_name)
                 if pending is not None:
+                    pending.deferred_completion = False
                     pending.document = dict(
                         pending.document,
                         status="original-skill-exception",
@@ -326,6 +368,7 @@ class Stage2ExecutionFeedback:
         }.get(str(pending.document["tool_name"]))
         if expected_skill is None or names[0] != expected_skill:
             return
+        pending.deferred_completion = False
         if not isinstance(result, tuple) or len(result) != 3:
             return
         returned_control = _boolean(result[0])
@@ -336,6 +379,13 @@ class Stage2ExecutionFeedback:
         high_level = _boolean(inputs.get("hl_wants_skill_term"))
         base_done = base_done if base_count == 1 else None
         if base_done is True and bad_terminate is False:
+            pending.deferred_completion = (
+                pending.physical_steps == 0
+                and "retry_of_tool_call_id" in pending.document
+                and returned_control is True
+                and budget["current_skill_steps"] == 1
+                and budget["over_max_len"] is False
+            )
             status = (
                 "completion-evidence-unavailable"
                 if pending.physical_steps == 0
@@ -372,6 +422,11 @@ class Stage2ExecutionFeedback:
         )
         self._write_observed_receipt(pending)
         self._emit("skill-terminated", pending.document)
+        self._notify_completion(agent_name, pending)
+
+    def _notify_completion(self, agent_name: str, pending: _PendingAction) -> None:
+        """Advance local guard state only from definite original skill outcome evidence."""
+        status = pending.document["status"]
         completed = status in {"local-skill-completed", "wait-finished"}
         if completed and pending.document["tool_name"] == "place":
             contract = self._contracts.get(agent_name)
@@ -402,6 +457,7 @@ class Stage2ExecutionFeedback:
         pending = self._pending.get(agent_name)
         if pending is None or pending.document["tool_name"] != "nav_to_obj":
             return
+        pending.deferred_completion = False
         pending.document = dict(
             pending.document,
             status="local-skill-completed",

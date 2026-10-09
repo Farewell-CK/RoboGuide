@@ -381,6 +381,75 @@ def test_place_budget_exit_is_failure_not_relocation_completion(tmp_path: Path) 
     assert summary["final_info"]["pddl_success"] is False
 
 
+@pytest.mark.parametrize("gym_failure", [False, True])
+def test_exact_place_retry_terminal_waits_for_original_gym_completion(
+    tmp_path: Path, gym_failure: bool
+) -> None:
+    """A first-step retry result advances the guard only after the existing Gym succeeds."""
+
+    class RetryingActor(RelocationActor):
+        """Expose the vendor's selected retry and first-input termination in one act call."""
+
+        def __init__(self) -> None:
+            """Keep one sibling executing while the first model retries an exhausted place."""
+            super().__init__()
+            self.originals[0].llm_model.choices.append(_choices(0)[-1])
+            self._active_policies[0]._skills[2].required = 3
+            self._active_policies[0]._skills[2]._max_skill_steps = 2
+            self._active_policies[1]._skills[1].required = 4
+
+        def act(self, *args: object, **kwargs: object) -> object:
+            """Observe the retry's reset counter without another physical step."""
+            result = super().act(*args, **kwargs)
+            if self.originals[0].llm_model.calls == 5 and self.current[0] == "place":
+                skill = self._active_policies[0]._skills[2]
+                skill.required = 1
+                skill.should_terminate(
+                    batch_idx=[0], skill_name=["place"], hl_wants_skill_term=[False]
+                )
+            return result
+
+    actor, gym = RetryingActor(), RelocationGym(fail_at=6 if gym_failure else None)
+    runtime = RelocationRuntime(tmp_path, actor, gym)
+    if gym_failure:
+        with pytest.raises(IntegrationError, match="original Gym failure"):
+            runtime.execute_pair(_pair_invocations(), lambda: False, lambda *_: None)
+        assert gym.steps == 5
+    else:
+        outcomes, summary = runtime.execute_pair(
+            _pair_invocations(), lambda: False, lambda *_: None
+        )
+        assert outcomes[0].state == outcomes[1].state == "COMPLETED"
+        assert outcomes[0].simulator_steps == 6 < outcomes[1].simulator_steps == 8
+        assert summary["final_info"]["pddl_success"] is False
+        assert gym.steps == 20 and actor.calls == 8
+    records = [
+        json.loads(line)
+        for line in (runtime._evidence_dir() / "stage2-execution-feedback.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    confirmed = [row for row in records if row["event"] == "retry-terminal-confirmed"]
+    assert len(confirmed) == (0 if gym_failure else 1)
+    if confirmed:
+        assert confirmed[0]["tool_name"] == "place"
+        assert confirmed[0]["tool_call_id"] == "call-5"
+        assert confirmed[0]["retry_of_tool_call_id"] == "call-4"
+        assert confirmed[0]["termination"]["current_skill_steps"] == 1
+        assert confirmed[0]["benchmark_goal_satisfied"] is None
+    assert [agent.llm_model.calls for agent in actor.originals] == [5, 3 if gym_failure else 4]
+    assert actor.calls == (6 if gym_failure else 8)
+    assert actor._active_policies[0]._skills[2]._max_skill_steps == 2
+    assert all(
+        skill.termination_calls == skill.predicate_calls
+        for policy in actor._active_policies
+        for skill in policy._skills.values()
+    )
+    assert [
+        policy._high_level_policy.llm_agent for policy in actor._active_policies
+    ] == actor.originals
+
+
 def test_exception_retains_trace_and_restores_original_agents(tmp_path: Path) -> None:
     """A post-place sibling Gym exception keeps original failure and optional terminal evidence."""
     actor, gym = RelocationActor(), RelocationGym(fail_at=6)

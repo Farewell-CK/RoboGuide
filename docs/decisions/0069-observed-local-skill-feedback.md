@@ -45,9 +45,22 @@ The feedback distinguishes these observations:
 | `skill-budget-exhausted` | Original completion was false and the original counter reached its existing bound |
 | `high-level-interrupted` | Original completion was false and the original high-level termination flag was true |
 | `termination-result-unavailable` | Original skill returned control/abort but its completion or cause was not fully readable |
-| `completion-evidence-unavailable` | The original completion input predates every actual Gym step of this selected action |
+| `completion-evidence-unavailable` | The original completion input predates every actual Gym step of this selected action and has not been confirmed by an exact retry boundary |
 | `original-skill-exception` | Original termination method raised; the same exception continues to propagate |
 | `segment-ended-without-observed-skill-termination` | Segment closed without an attributed termination observation |
+
+An exact, model-selected retry may observe original completion on its first
+policy input after earlier physical work already changed the world. That result
+stays unknown until the existing Gym step returns successfully. Confirmation
+requires the same model instance, agent, invocation, tool and complete raw
+arguments; a predecessor with actual Gym work and a definite non-aborting budget
+or high-level exit; and the retry's original completion at a fresh first-step
+counter below its budget. The receipt retains the predecessor call/sequence and
+physical-step count, the original termination fields and both observation times.
+No completion calculation or Gym call is repeated. Changed calls, new attempts,
+first actions, unknown exits and failed Gym steps cannot inherit this evidence.
+Confirmation emits one sparse `retry-terminal-confirmed` boundary, including
+for navigation; it never asserts official goal satisfaction or initiates a retry.
 
 Simultaneous termination flags remain in the record. A budget decision reads the
 policy-input state before the following physical Gym step. If that final step
