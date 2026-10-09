@@ -130,3 +130,33 @@ cargo test -p integration-server recovery
 - 下一步计划。
 
 结果必须来自 Git、自动 verdict 或原始实验日志。不得根据聊天记忆推测完成状态，也不得把凭据、私有路径、API 地址或完整聊天记录写入仓库。
+
+## 2026-10-09 双 AI 同步协议基础
+
+本阶段在独立工作树和分支 `codex/dual-ai-sync-foundation` 中实施，基础代码父提交为 `61ba5b8ae11c8f7701f06ec931505949d970ef61`。包含本段文档的最终提交 SHA 以 Git 中本文件所在提交为准，避免在提交内写入自引用哈希。
+
+本阶段只新增或更新：
+
+- `docs/codex-sync/EXPERIMENT_CONTEXT.md`；
+- `docs/codex-sync/TASK_QUEUE.md`；
+- `docs/codex-sync/REVIEW.md`；
+- `docs/codex-sync/SYNC_PROTOCOL.md`；
+- `docs/codex-sync/LIVE_STATUS.md`，从既有独立同步分支原样保留；
+- `docs/codex-sync/STATUS.md`，追加本阶段状态；
+- `AGENTS.md`，只追加简短的双 AI 协作规范。
+
+没有修改 RoboGuide Core、Recovery harness、实验配置或任何历史结果；没有记录或推测尚未产生最终 verdict 的运行结论。此变更不包含会话导出、hook、watcher、timer、Issue 轮询或自动 Git 发布脚本。自动化必须等待人工审核本阶段后再获得新的明确授权。
+
+当前同步系统状态为 `FOUNDATION_READY_FOR_REVIEW`：文件职责、任务状态机、人工审核门禁、Git 并发规则、实验计时隔离和公开信息边界已定义；自动执行能力为 `DISABLED_PENDING_HUMAN_CONFIRMATION`。
+
+提交前的实际检查结果：
+
+- `git diff --cached --check`：通过；
+- 变更路径白名单：通过，仅包含 `AGENTS.md` 和 6 个 `docs/codex-sync/*.md` 文件；
+- 凭据形态、私有绝对路径、原始产物扩展名与 Git 冲突标记扫描：通过；
+- `LIVE_STATUS.md` 与既有同步分支版本的 SHA-256 一致；
+- `AGENTS.md` 协作规范位于文件第 3 行，避免因项目指令默认字节上限而被截断；
+- 同步工作树没有未暂存或额外未跟踪变更；
+- 实验主工作树仍只有原有的 3 个未跟踪 TOML，本阶段未修改它们。
+
+本阶段是纯文档与指令变更，为避免占用 Recovery 实验资源，没有启动 Core、模型、仿真或实验测试。下一步是提交并发布独立候选分支，然后等待人工审核；在获得新的明确确认前不实现任何自动化脚本。

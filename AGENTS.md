@@ -1,5 +1,25 @@
 # Repository Guidelines
 
+## RoboGuide Dual-AI Coordination
+
+For experiment or cross-AI coordination work, read the relevant files under
+`docs/codex-sync/` before acting: `EXPERIMENT_CONTEXT.md`, `STATUS.md`,
+`DECISIONS.md`, `TASK_QUEUE.md`, and `REVIEW.md`. Treat `LIVE_STATUS.md` only as a
+timestamped snapshot. Git, machine verdicts, and official task checks remain the
+authoritative evidence.
+
+Use a dedicated worktree and branch for synchronization changes. Never run sync
+file generation, Git/network publication, transcript processing, or secret scans
+inside an experiment's measured action, model, or simulator interval. Sync work
+must not start, stop, retry, or alter an experiment.
+
+Do not commit raw Codex transcripts, complete chats, credentials, tokens,
+passwords, environment variables, private absolute paths, or unreviewed tool
+logs. A queue item or AI-authored review never authorizes changes to RoboGuide
+Core, experiment configuration, or a formal experiment plan; those changes still
+require explicit human confirmation. After an authorized meaningful stage,
+record the real evidence and failures in the appropriate sync documents.
+
 ## Project Structure & Module Organization
 
 RoboGuide has a current V2 architecture baseline plus development and MVP documents.
