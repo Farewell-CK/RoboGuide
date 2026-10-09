@@ -1,0 +1,18 @@
+{
+  "study_id": "task17-f0-f1-pilot6-gpt61sol",
+  "env": "env4",
+  "task": 17,
+  "prompt_profile": "fair",
+  "dag_profile": "serial",
+  "inject_after_completed_primitives": 6,
+  "max_segments": 3,
+  "execution_timeout_seconds": 360,
+  "runs": [
+    {"fault_profile": "f0-clean", "replicate": 1},
+    {"fault_profile": "f1-node-loss", "replicate": 1},
+    {"fault_profile": "f1-node-loss", "replicate": 2},
+    {"fault_profile": "f0-clean", "replicate": 2},
+    {"fault_profile": "f0-clean", "replicate": 3},
+    {"fault_profile": "f1-node-loss", "replicate": 3}
+  ]
+}
