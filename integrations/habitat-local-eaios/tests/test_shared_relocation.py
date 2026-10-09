@@ -36,6 +36,7 @@ from habitat_local_eaios.task_verifier import (  # noqa: E402
     build_task_verifier_source,
     build_task_verifier_verdict,
 )
+from test_relocation_completion import DistanceTensor, OriginalPlace  # noqa: E402
 from test_relocation_contract import _FakeModel  # noqa: E402
 from test_relocation_start import relocation_snapshot, relocation_world, source_for  # noqa: E402
 from test_shared_world import (  # noqa: E402
@@ -309,6 +310,120 @@ class RelocationRuntime(ContractLoopHarness):
             )
             for index in self._agent_ids
         }
+
+
+class BoundRelocationActor(RelocationActor):
+    """Exercise production binding hooks with separate actual-shaped object and grasp reads."""
+
+    def __init__(self) -> None:
+        """Retain the existing scripted model and replace only fake place surfaces."""
+        super().__init__()
+        self.observations = {"object_to_goal_distance_sensor": DistanceTensor(0.0)}
+        self.place_actions: dict[int, dict[str, Any]] = {}
+        for policy in self._active_policies:
+            policy._skills[self.names.index("place")] = OriginalPlace()
+
+    def act(self, *args: object, **kwargs: object) -> object:
+        """Run each skill/action once while preserving the fake world's single Gym step."""
+        del args, kwargs
+        self.calls += 1
+        for index, policy in enumerate(self._active_policies):
+            current = self.current[index]
+            if current is not None:
+                skill = policy._skills[self.names.index(current)]
+                returned, _, _ = skill.should_terminate(
+                    observations=self.observations,
+                    batch_idx=[0],
+                    skill_name=[current],
+                    hl_wants_skill_term=[False],
+                )
+                if returned[0]:
+                    self.current[index] = None
+            if self.current[index] is None:
+                agent = policy._high_level_policy.llm_agent
+                if isinstance(agent, PassiveIdleAgent) and not agent.initialized:
+                    agent.init_agent("test robot", "mission", "Nothing to do")
+                selected = agent.chat("actual unchanged policy observation")
+                current = selected["name"] if isinstance(selected, dict) else selected[0]
+                self.current[index] = current
+                policy._skills[self.names.index(current)]._cur_skill_step[0] = 0
+            current = self.current[index]
+            assert current is not None
+            skill = policy._skills[self.names.index(current)]
+            skill._cur_skill_step[0] += 1
+            if current == "place":
+                self.place_actions[index] = skill._internal_act(self.observations)
+        self.selected.append([str(value) for value in self.current])
+        return SimpleNamespace(
+            actions=FakeTensor(),
+            env_actions=FakeTensor(),
+            rnn_hidden_states=FakeTensor(),
+            should_inserts=None,
+        )
+
+
+class BoundRelocationGym(RelocationGym):
+    """Expose synthetic post-step release state separately from unchanged official false truth."""
+
+    def __init__(self, actor: BoundRelocationActor) -> None:
+        """Keep actual-shaped fake state to be attached after the one reset."""
+        super().__init__()
+        self.actor = actor
+        self.environment: Any = None
+
+    def step(self, action: object) -> tuple[dict[str, Any], float, bool, dict[str, bool]]:
+        """Advance one existing fake step; pickups and placements change only synthetic state."""
+        result = super().step(action)
+        for index, current in enumerate(self.actor.current):
+            manager = self.environment.sim.get_agent_data(index).grasp_mgr
+            if current == "pick":
+                manager.is_grasped, manager.snap_idx = True, 700 + index
+            elif current == "place":
+                info = self.environment.task.pddl_problem.sim_info
+                info.positions[f"object:{index}"] = list(info.positions[f"destination:{index}"])
+                if self.actor.place_actions[index]["grip_action"] == -1.0:
+                    manager.is_grasped, manager.snap_idx = False, None
+        return result
+
+
+def test_bound_completion_in_production_pair_loop_keeps_one_reset_and_official_false(
+    tmp_path: Path,
+) -> None:
+    """The enabled pair loop completes each own object without extra act, step or truth calls."""
+    actor = BoundRelocationActor()
+    gym = BoundRelocationGym(actor)
+    runtime = RelocationRuntime(tmp_path, actor, gym)
+    runtime._config = replace(runtime._config, relocation_completion_binding=True)
+    environment = runtime._habitat_env
+    assert environment is not None
+    environment.task.pddl_problem.sim_info.obj_ids = {
+        f"object:{index}": index for index in range(2)
+    }
+    environment.sim.scene_obj_ids = [700, 701]
+    for index in range(2):
+        data = environment.sim.get_agent_data(index)
+        data.grasp_mgr = data.grasp_mgrs[0]
+        data.grasp_mgr.snap_idx = None
+    gym.environment = environment
+    outcomes, summary = runtime.execute_pair(_pair_invocations(), lambda: False, lambda *_: None)
+    assert [value.state for value in outcomes.values()] == ["COMPLETED", "COMPLETED"]
+    assert [agent.llm_model.calls for agent in actor.originals] == [4, 4]
+    assert gym.resets == 1
+    assert gym.steps == summary["identity"]["simulator_steps"] == 20
+    assert actor.calls == max(outcome.simulator_steps for outcome in outcomes.values())
+    assert outcomes[0].simulator_steps < outcomes[1].simulator_steps
+    assert summary["final_info"]["pddl_success"] is False
+    assert all("_is_skill_done" not in vars(policy._skills[2]) for policy in actor._active_policies)
+    rows = [
+        json.loads(line)
+        for line in (runtime._evidence_dir() / "stage2-execution-feedback.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    completed = [row for row in rows if row["event"] == "bound-place-completed"]
+    assert {row["agent_name"] for row in completed} == {"agent_0", "agent_1"}
+    assert all(row["benchmark_goal_satisfied"] is None for row in completed)
+    assert all(row["place_binding"]["object_released"] is True for row in completed)
 
 
 @pytest.fixture(autouse=True)
