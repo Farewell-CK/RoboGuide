@@ -115,18 +115,17 @@ class FakeGripper:
 class FakeParent:
     """Represent the outer Habitat action that runs arm then gripper."""
 
-    def __init__(self, arm: FakeArm) -> None:
+    def __init__(self, arm: FakeArm, action_key: str = "agent_0_arm_pick_action") -> None:
         """Bind one arm and original gripper without changing their ownership."""
         self.arm_ctrlr = arm
         self.grip_ctrlr = FakeGripper(arm)
         self.calls = 0
+        self.action_key = action_key
 
     def step(self, *args: Any, **kwargs: Any) -> Any:
         """Pass the exact decoded arm selection through the existing local pipeline."""
         self.calls += 1
-        result = self.arm_ctrlr.step(
-            next(value for key, value in kwargs.items() if key.endswith("_action"))
-        )
+        result = self.arm_ctrlr.step(kwargs[self.action_key])
         self.grip_ctrlr.step(1)
         return result
 
@@ -149,7 +148,10 @@ def make_invocation(attempt: str = "attempt-1") -> CanonicalRelocationInvocation
 def make_actions() -> tuple[dict[str, Any], FakeParent, FakeParent, FakeIK]:
     """Build pick/place actions sharing one original helper, as the deployed agent does."""
     helper = FakeIK()
-    pick, place = FakeParent(FakeArm(helper)), FakeParent(FakeArm(helper))
+    pick, place = (
+        FakeParent(FakeArm(helper)),
+        FakeParent(FakeArm(helper), "agent_0_arm_place_action"),
+    )
     return {"agent_0_arm_pick_action": pick, "agent_0_arm_place_action": place}, pick, place, helper
 
 
@@ -183,6 +185,52 @@ def test_arm_taps_preserve_original_counts_results_and_capture_clipping() -> Non
         restore()
     assert not {"step", "apply_ee_constraints"}.intersection(vars(pick.arm_ctrlr))
     assert "calc_ik" not in vars(helper)
+
+
+@pytest.mark.parametrize("active", [(True, False), (False, True), (True, True)])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_joint_action_kwargs_are_bound_to_exact_agent_not_first_matching_suffix(
+    active: tuple[bool, bool], reverse: bool
+) -> None:
+    """Habitat's all-agent keyword dispatch preserves separate arm attribution in any order."""
+    helpers = [FakeIK(), FakeIK()]
+    parents = [
+        FakeParent(FakeArm(helpers[agent]), f"agent_{agent}_arm_pick_action") for agent in range(2)
+    ]
+    actions = {parent.action_key: parent for parent in parents}
+    observer = ManipulationDiagnostics()
+    for agent in range(2):
+        observer.install(actions, agent)
+    keys = list(reversed(list(actions))) if reverse else list(actions)
+    kwargs = {key: [0, int(active[int(key[6])])] for key in keys}
+    for parent in parents:
+        parent.step(**kwargs)
+    for agent, parent in enumerate(parents):
+        sample = observer.sample(agent, 1)
+        assert (
+            helpers[agent].calls["calc_ik"] == parent.arm_ctrlr.physics_steps == int(active[agent])
+        )
+        if active[agent]:
+            assert sample["call_records_complete"] is True
+            assert sample["calls"][0]["action_argument_key"] == parent.action_key
+            assert sample["calls"][0]["selected_action"] == [0.0, 1.0]
+            assert len([call for call in sample["calls"] if call["method"] == "calc_ik"]) == 1
+        else:
+            assert sample["_status"] == "unavailable"
+
+
+def test_pick_and_place_kwargs_keep_their_own_scope_with_one_shared_helper() -> None:
+    """A place selection cannot open an inactive pick scope or double-tap the helper."""
+    actions, pick, place, helper = make_actions()
+    observer = ManipulationDiagnostics()
+    observer.install(actions, 0)
+    kwargs = {"agent_0_arm_pick_action": [0, 0], "agent_0_arm_place_action": [0, 2]}
+    pick.step(**kwargs)
+    place.step(**kwargs)
+    record = observer.sample(0, 1)
+    assert record["calls"][0]["method"] == "arm_place_action.step"
+    assert record["calls"][0]["selected_action"] == [0.0, 2.0]
+    assert helper.calls["calc_ik"] == 1
 
 
 @pytest.mark.parametrize("error", [RuntimeError("original"), KeyboardInterrupt()])

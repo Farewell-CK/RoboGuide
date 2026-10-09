@@ -520,7 +520,10 @@ Final cleanup restores the original instance overrides.
 The v0.7 observer also records `agents[agent_id].local_manipulation` as
 `roboguide.local-manipulation-observation/v0.1`. Only an actually dispatched
 pick/place arm action opens a scope. Taps copy the original decoded target index
-and entity, coordinate lookup, workspace clipping before/after, actual FK/IK
+from its exact configured agent/action argument key, even when Habitat forwards
+all agents' arguments to every action. Inactive peers never inherit that scope.
+Taps retain the selected entity,
+coordinate lookup, workspace clipping before/after, actual FK/IK
 inputs and returns, original gripper call and configured grasp threshold, and
 base/EE/joint/motor/grasp state before/after the outer action. The shared IK helper
 is wrapped once; diagnostics never call FK/IK, change joint state, query contact

@@ -136,7 +136,9 @@ class ManipulationDiagnostics:
             if isinstance(invocation, CanonicalRelocationInvocation)
         }
 
-    def _begin(self, agent: int, name: str, args: Any, kwargs: Any) -> dict[str, Any]:
+    def _begin(
+        self, agent: int, name: str, args: Any, kwargs: Any, action_key: str | None
+    ) -> dict[str, Any]:
         """Copy inputs only for original calls inside the dispatched arm scope."""
         current = self._current.setdefault(
             agent, {"call_count": 0, "calls": [], "dropped_calls": 0}
@@ -152,12 +154,9 @@ class ManipulationDiagnostics:
         controller = self._active[agent]
         if name.endswith(".step") and name.startswith("arm_"):
             record["gripper_configuration"] = self._gripper_profiles.get((agent, name))
+            record["action_argument_key"] = action_key
             record["state_before"] = _read(lambda: _state(controller))
-            record["selected_action"] = _read(
-                lambda: _vector(
-                    next(value for key, value in kwargs.items() if key.endswith(name[:-5])), 2
-                )
-            )
+            record["selected_action"] = _read(lambda: _vector(kwargs[action_key], 2))
             record["ee_constraints_vendor_ik_frame"] = _read(
                 lambda: [
                     _vector(
@@ -215,7 +214,12 @@ class ManipulationDiagnostics:
             self._capture_seconds += time.perf_counter() - started
 
     def _wrapper(
-        self, agent: int, name: str, original: Any, controller: Any = None
+        self,
+        agent: int,
+        name: str,
+        original: Any,
+        controller: Any = None,
+        action_key: str | None = None,
     ) -> Callable[..., Any]:
         """Keep metadata in closures and pass every positional/keyword argument intact."""
 
@@ -223,10 +227,10 @@ class ManipulationDiagnostics:
             """Invoke one original call under optional active arm attribution."""
             previous = self._active.get(agent)
             if controller is not None:
+                if action_key is None:
+                    return original(*args, **kwargs)
                 try:
-                    selected = next(
-                        value for key, value in kwargs.items() if key.endswith(name[:-5])
-                    )
+                    selected = kwargs[action_key]
                     active = len(selected) == 2 and float(selected[1]) != 0
                 except Exception:  # noqa: BLE001 - unsupported layout remains untouched
                     active = False
@@ -238,7 +242,7 @@ class ManipulationDiagnostics:
             record: dict[str, Any] = {"_status": "unavailable"}
             try:
                 started = time.perf_counter()
-                record = self._begin(agent, name, args, kwargs)
+                record = self._begin(agent, name, args, kwargs, action_key)
                 self._capture_seconds += time.perf_counter() - started
             except Exception:  # noqa: BLE001 - read failure cannot block manipulation
                 self._failures += 1
@@ -263,7 +267,8 @@ class ManipulationDiagnostics:
         """Tap configured original arm instances, avoiding double-wrapped shared helpers."""
         restores: list[Callable[[], None]] = []
         for kind in ("pick", "place"):
-            parent = actions.get(f"agent_{agent}_arm_{kind}_action")
+            action_key = f"agent_{agent}_arm_{kind}_action"
+            parent = actions.get(action_key)
             if parent is None:
                 continue
             try:
@@ -291,7 +296,17 @@ class ManipulationDiagnostics:
                     if key in self._installed or not callable(original):
                         continue
                     override = vars(owner).get(attribute, _MISSING)
-                    setattr(owner, attribute, self._wrapper(agent, name, original, context))
+                    setattr(
+                        owner,
+                        attribute,
+                        self._wrapper(
+                            agent,
+                            name,
+                            original,
+                            context,
+                            action_key if context is not None else None,
+                        ),
+                    )
                     self._installed.add(key)
                     restores.append(self._restorer(owner, attribute, override))
             except Exception:  # noqa: BLE001 - unsupported action remains diagnostic only
