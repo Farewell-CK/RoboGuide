@@ -102,10 +102,14 @@ def install_workload(
     return restore
 
 
-def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], None]:
-    """Observe the first episode's real reset, steps and terminal cached official metrics."""
+def install_execution_observer(
+    env_type: Any, directory: Path, *, rl_env_type: Any = None
+) -> Callable[[], None]:
+    """Observe original Env steps and returned RLEnv done before native automatic reset."""
     original_reset, original_step, original_close = env_type.reset, env_type.step, env_type.close
+    original_rl_step: Any = rl_env_type.step if rl_env_type is not None else None
     diagnostics: PhysicalDiagnostics | None = None
+    observed_env: Any = None
     reset_count = 0
     steps = 0
     finished = False
@@ -129,7 +133,7 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
         except Exception:  # noqa: BLE001 - unavailable observation never changes execution
             return
 
-    def boundary(env: Any, reason: str, terminal: bool) -> None:
+    def boundary(env: Any, reason: str, terminal: bool, returned_metrics: Any = None) -> None:
         """Record available state without publishing a metric from an unexecuted episode."""
         nonlocal finished
         if finished or reset_count != 1:
@@ -137,7 +141,9 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
         checkpoint(env)
         try:
             try:
-                metrics = env.get_metrics()
+                metrics = env.get_metrics() if returned_metrics is None else returned_metrics
+                if not isinstance(metrics, dict):
+                    metrics = {}
             except Exception:  # noqa: BLE001 - retain execution evidence without official truth
                 metrics = {}
             value = metrics.get("pddl_success")
@@ -171,7 +177,11 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
                     "episode_terminal": terminal,
                     "termination_reason": reason,
                     "official_pddl_success": official,
-                    "official_metric_source": "original Env.get_metrics after original Env.step",
+                    "official_metric_source": (
+                        "original RLEnv.step returned info before native automatic reset"
+                        if returned_metrics is not None
+                        else "original Env.get_metrics after original Env.step"
+                    ),
                     "official_metrics": {"pddl_success": official},
                     "full_metric_archive": "native-official-metrics.json",
                 },
@@ -182,10 +192,11 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
 
     def reset(env: Any, *args: Any, **kwargs: Any) -> Any:
         """Preserve original reset calls and observe only the first real returned world."""
-        nonlocal reset_count, diagnostics
+        nonlocal reset_count, diagnostics, observed_env
         result = original_reset(env, *args, **kwargs)
         reset_count += 1
         if reset_count == 1:
+            observed_env = env
             checkpoint(env)
             try:
                 diagnostics = PhysicalDiagnostics(
@@ -234,7 +245,35 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
         boundary(env, "original-close-before-episode-terminal", False)
         return original_close(env, *args, **kwargs)
 
+    def rl_step(env: Any, *args: Any, **kwargs: Any) -> Any:
+        """Preserve one original RL step and observe its already computed done/info tuple."""
+        try:
+            result = original_rl_step(env, *args, **kwargs)
+        except BaseException as error:
+            try:
+                if getattr(env, "_env", None) is observed_env:
+                    boundary(
+                        observed_env, "original-rl-step-exception:" + type(error).__name__, False
+                    )
+            except Exception:  # noqa: BLE001 - retain the exact original exception
+                pass
+            raise
+        try:
+            if (
+                getattr(env, "_env", None) is observed_env
+                and isinstance(result, tuple)
+                and len(result) == 4
+            ):
+                done = result[2] if type(result[2]) is bool else _json_scalar(result[2])
+                if done is True:
+                    boundary(observed_env, "original-rl-done", True, result[3])
+        except Exception:  # noqa: BLE001 - observation cannot alter the original RL return
+            pass
+        return result
+
     env_type.reset, env_type.step, env_type.close = reset, step, close
+    if rl_env_type is not None:
+        rl_env_type.step = rl_step
 
     def restore() -> None:
         """Restore only the hooks installed by this observer."""
@@ -245,6 +284,8 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
         ):
             if getattr(env_type, name) is wrapper:
                 setattr(env_type, name, previous)
+        if rl_env_type is not None and rl_env_type.step is rl_step:
+            rl_env_type.step = original_rl_step
 
     return restore
 
@@ -285,7 +326,7 @@ class SelectedEnvFactory:
             scene_id=self.scene_id,
         )
         install_reset_observer(module.Env, directory, self.run_id, self.episode_id)
-        install_execution_observer(module.Env, directory)
+        install_execution_observer(module.Env, directory, rl_env_type=module.RLEnv)
         return self.original(*args, **kwargs)
 
 

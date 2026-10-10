@@ -72,6 +72,153 @@ class Env:
         return {"pddl_success": self.success}
 
 
+class ContinuingEnv(Env):
+    """Keep base episode_over false while the RL wrapper may finish on official success."""
+
+    def step(self, action: Any) -> dict[str, bool]:
+        """Return one original physical step without applying RL terminal semantics."""
+        result = super().step(action)
+        self.episode_over = False
+        return result
+
+
+class RLEnv:
+    """Mirror the original four-tuple RL boundary, including its one done computation."""
+
+    def __init__(self, env: Env, done: Any) -> None:
+        """Hold the exact base environment and a precomputed local done value."""
+        self._env = env
+        self.done = done
+        self.done_calls = 0
+        self.result: Any = None
+        self.error: BaseException | None = None
+
+    def step(self, action: Any) -> Any:
+        """Return the original tuple after exactly one physical and done call."""
+        observation = self._env.step(action)
+        self.done_calls += 1
+        if self.error is not None:
+            raise self.error
+        self.result = (observation, 0.0, self.done, self._env.get_metrics())
+        return self.result
+
+
+@pytest.mark.parametrize("success", [False, True])
+@pytest.mark.parametrize("array_scalar", [False, True])
+def test_rl_terminal_is_archived_before_native_auto_reset(
+    tmp_path: Path, success: bool, array_scalar: bool
+) -> None:
+    """A returned done captures true or false before reset clears the first episode cache."""
+
+    class DoneScalar:
+        """Expose the original array scalar conversion without importing Habitat or NumPy."""
+
+        def item(self) -> bool:
+            """Return an already computed boolean; no second done computation occurs."""
+            return True
+
+    restore = install_execution_observer(ContinuingEnv, tmp_path, rl_env_type=RLEnv)
+    try:
+        env = ContinuingEnv(
+            SimpleNamespace(seed=40), Dataset([SimpleNamespace(episode_id="7", scene_id="scene")])
+        )
+        env.reset()
+        env.success = success
+        rl = RLEnv(env, DoneScalar() if array_scalar else True)
+        result = rl.step("unchanged action")
+        assert result is rl.result and result[0] is env.result
+        assert env.episode_over is False
+        outcome = json.loads((tmp_path / "native-outcome.json").read_text())
+        assert outcome["termination_reason"] == "original-rl-done"
+        assert outcome["episode_terminal"] is True and outcome["simulator_steps"] == 1
+        assert outcome["official_pddl_success"] is success
+        assert outcome["official_metric_source"].startswith("original RLEnv.step returned info")
+        env.success = False
+        env.current_episode = SimpleNamespace(episode_id="next", scene_id="other")
+        env.reset()
+        env.close()
+        assert json.loads((tmp_path / "native-outcome.json").read_text()) == outcome
+        assert (env.resets, env.steps, env.closes, rl.done_calls) == (2, 1, 1, 1)
+    finally:
+        restore()
+
+
+def test_cached_success_without_returned_done_is_not_a_terminal_result(tmp_path: Path) -> None:
+    """The observer cannot infer termination from a cached metric or alter native done."""
+    restore = install_execution_observer(ContinuingEnv, tmp_path, rl_env_type=RLEnv)
+    try:
+        env = ContinuingEnv(
+            SimpleNamespace(seed=40), Dataset([SimpleNamespace(episode_id="7", scene_id="scene")])
+        )
+        env.reset()
+        env.success = True
+        rl = RLEnv(env, False)
+        assert rl.step("unchanged action") is rl.result
+        assert not (tmp_path / "native-outcome.json").exists()
+        env.close()
+        outcome = json.loads((tmp_path / "native-outcome.json").read_text())
+        assert outcome["episode_terminal"] is False and outcome["official_pddl_success"] is None
+        assert (env.resets, env.steps, env.closes, rl.done_calls) == (1, 1, 1, 1)
+    finally:
+        restore()
+
+
+def test_rl_exception_after_physical_step_is_preserved_exactly(tmp_path: Path) -> None:
+    """A done/reward failure retains executed progress but cannot manufacture official truth."""
+    restore = install_execution_observer(ContinuingEnv, tmp_path, rl_env_type=RLEnv)
+    try:
+        env = ContinuingEnv(
+            SimpleNamespace(seed=40), Dataset([SimpleNamespace(episode_id="7", scene_id="scene")])
+        )
+        env.reset()
+        rl = RLEnv(env, True)
+        error = RuntimeError("original reward failure")
+        rl.error = error
+        with pytest.raises(RuntimeError) as caught:
+            rl.step("unchanged action")
+        assert caught.value is error
+        outcome = json.loads((tmp_path / "native-outcome.json").read_text())
+        assert outcome["termination_reason"] == "original-rl-step-exception:RuntimeError"
+        assert outcome["simulator_steps"] == 1 and outcome["official_pddl_success"] is None
+        assert (env.resets, env.steps, rl.done_calls) == (1, 1, 1)
+    finally:
+        restore()
+
+
+def test_rl_diagnostic_failure_and_foreign_environment_do_not_change_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failing observer and an unrelated RL environment retain their exact original tuples."""
+    from habitat_local_eaios.diagnostics import PhysicalDiagnostics
+
+    def broken(*args: Any, **kwargs: Any) -> None:
+        """Simulate unavailable terminal diagnostics without touching the original execution."""
+        raise RuntimeError("diagnostic terminal failure")
+
+    monkeypatch.setattr(PhysicalDiagnostics, "record_terminal", broken)
+    restore = install_execution_observer(ContinuingEnv, tmp_path, rl_env_type=RLEnv)
+    try:
+        env = ContinuingEnv(
+            SimpleNamespace(seed=40), Dataset([SimpleNamespace(episode_id="7", scene_id="scene")])
+        )
+        env.reset()
+        foreign = Env(
+            SimpleNamespace(seed=40),
+            Dataset([SimpleNamespace(episode_id="other", scene_id="else")]),
+        )
+        foreign_rl = RLEnv(foreign, True)
+        assert foreign_rl.step("foreign action") is foreign_rl.result
+        assert not (tmp_path / "native-outcome.json").exists()
+        env.success = True
+        rl = RLEnv(env, True)
+        assert rl.step("original action") is rl.result
+        outcome = json.loads((tmp_path / "native-outcome.json").read_text())
+        assert outcome["episode_id"] == "7" and outcome["official_pddl_success"] is True
+        assert (env.steps, rl.done_calls, foreign.steps, foreign_rl.done_calls) == (1, 1, 1, 1)
+    finally:
+        restore()
+
+
 @pytest.mark.parametrize("rows", [[], [("7", "wrong")], [("7", "scene"), ("7", "other")]])
 def test_selection_rejects_missing_duplicate_and_wrong_scene(rows: list[tuple[str, str]]) -> None:
     """An episode label or matching seed alone never establishes the selected workload."""
