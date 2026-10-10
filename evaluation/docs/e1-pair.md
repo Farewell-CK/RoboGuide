@@ -37,7 +37,7 @@ body archive 和结果目录。每臂复制冻结的三个 vendor 代码目录�
 | `native_config` | 原生 `habitat-baselines/.../config/` 下相对配置路径 |
 | `b1_runner`, `mission_config` | RoboGuide 代码视图内的相对路径 |
 | `b1_deployment`（可选） | 代码视图内显式部署声明的相对路径；必须冻结摘要，且选中的 Habitat config 必须与 `native_config` 相同 |
-| `gpu_device`, `ports` | GPU 编号；七个不同端口：proxy/grpc/controller/artifact/endpoint_a/endpoint_b/mission |
+| `gpu_device`, `ports` | GPU 编号；旧双 endpoint 为七个不同端口；v0.3 按 endpoint 数配置 endpoint_a 至 endpoint_d，再加 proxy/grpc/controller/artifact/mission |
 | `provider_upstream` | 无凭据、query、fragment 的原授权 Provider base URL |
 | `arm_timeout_seconds` | 单 arm 墙钟预算；到限后尽力归档并清理拥有的进程 |
 | `mi_observation_seconds`, `mission_observation_seconds` | Runner 既有单请求观察和 Mission 观察预算 |
@@ -59,6 +59,13 @@ MI 和 canonical operation 配置，只冻结该声明中的原始 Habitat confi
 [`b1-deployment-dist-man.json`](../../scenarios/e1-shared-world-relocation/b1-deployment-dist-man.json)，
 使用同一 `object.relocate` 链路。声明合法与 prepare-only 通过都不能证明物理可执行、
 reset 可比或官方成功；正式派发仍须完整 release 门禁。
+显式 B1 deployment v0.3 支持 1–4 个 endpoint，并要求 worker 的端口集合精确匹配
+声明，不允许少配、重复或额外 endpoint。每个 Node 文件及所选 planning、execution、
+mission-service profiles 都必须纳入 source gates。启动 child 后进一步交叉校验实际
+endpoint registry、Node 字节、Local How v0.9 和 sensor/relocation readiness；配置声明
+本身不能替代真实 loaded evidence。新 profile 的 physical release 状态见
+[独立 live deployment](../../docs/extensions/habitat-independent-live-profile.md)。
+
 显式选择还要求 Population 的 `benchmark_authority.parameters.max_episode_steps`
 为与声明相同的整数；未知或冲突预算不能作为配对实验启动条件。
 

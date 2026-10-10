@@ -585,6 +585,14 @@ completion binding 由搬运部署声明 v0.2 显式选择 `true`，进一步启
 `relocation_completion.py`：把原始 place 的距离绑定到 canonical 对象，并以实际释放
 核验本地完成。该 Local How v0.8 / feedback v0.4 差异保留原始动作、0.02m 条件和预算，
 不修改官方 PDDL；详见 [ADR-0073](docs/decisions/0073-bound-relocation-place-completion.md)。
+另有显式 `independent-live/v0.1` profile 支持 1–4 个 endpoint 的稀疏调度与逐 Task 复用，
+不要求所有机器人都收到任务才开始。各 endpoint 仅暴露实际声明且运行时就绪的操作；
+Drone 不声明搬运。Perception 通过已有检测传感器缓存提供只读 condition observation，
+阴性观测只表示采集完成。新 profile、Local How v0.9 和原生初始化输出隔离详见
+[ADR-0074](docs/decisions/0074-independent-live-endpoint-profile.md) 与
+[实现图和运行门禁](docs/extensions/habitat-independent-live-profile.md)。新人口的真实配对
+预检尚待执行；三机器人 Rearrangement 的原生 Task4 映射仍需核实。
+
 Runner 冻结该选择与 run/input/deployment 字节摘要，在 Controller/MI 前核对子进程实际
 Local How 和 loaded-interface/reset-reader readiness。缺失、冲突或 unavailable 时保留
 证据并报 harness 失败，不能仅凭父进程开关宣称启用。导航及 v0.1 部署兼容路径不变；

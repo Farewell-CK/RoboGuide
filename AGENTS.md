@@ -208,6 +208,18 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   deployment snapshot and checks actual reset-state semantic regions before Stage2 acts. Only an
   explicit incompatible assignment fails locally; unresolved region evidence remains unknown and
   does not prove route feasibility or authorize adapter-side reassignment. See ADR-0046.
+- The explicit independent-live/v0.1 Habitat deployment supports one to four source-bound
+  endpoints and at most 32 independent single-role Tasks with sparse dispatch and Task reuse.
+  Only actual Control dispatch activates an original Stage2 attempt; unassigned/completed
+  endpoints use original model-free wait. Same-attempt native zero-action reinitialization
+  is fenced by an instance hook, a disclosed Local How change. Relocation readiness may be
+  a typed subset of the full world; no Drone manipulation is synthesized. Optional canonical
+  observation.verify@v1 reads only existing detected(entity-ref) sensor caches: negative
+  acquisition is not affirmative satisfaction and unavailable evidence is never invented.
+  B1 deployment v0.3, feasibility v0.5 and Local How v0.9 carry exact source identity; legacy
+  profiles, Core authority, common MI Prompts and official/Formal rules remain unchanged.
+  New populations require physical/reset/archive release gates; the three-agent Task4
+  native mapping remains unresolved. See ADR-0074 and the live deployment guide.
 - The default-off Habitat relocation profile reuses canonical `object.relocate@v1` and
   exact object/source/destination through durable endpoints and shared-world IPC. Readiness
   requires loaded, observable original skills; the guard advances only on observed pick/place

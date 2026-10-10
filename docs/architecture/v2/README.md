@@ -545,6 +545,18 @@ Core 资源语义，不放宽官方成功或 Formal admission。Task3 受控物�
 不会改动原生文件或官方评测。
 [当前实现图和边界](../../extensions/habitat-relocation-profile.md)单独记录该可选路径。
 
+显式 `independent-live/v0.1` deployment profile 进一步允许 1–4 个 endpoint、最多 32 个
+independent 单 Role Task 的稀疏调度和后续复用。Control 仍独占资源和 Actor binding 权威；
+Local EAIOS 只在原有物理步边界接收实际 dispatch，保留运行中同伴，未分配及本地完成的
+endpoint 使用原始 model-free wait。新 Task 的原始模型初始化按 attempt 执行一次；
+相同 attempt 的原生零动作重初始化被隔离，属于明确披露的 Local How 差异。
+可选 `observation.verify@v1` 的 `detected(entity-ref)` profile 只读取已有检测缓存，
+不调用模型、激活传感器或改变状态；全局 sensor 结果保持全局 scope。阴性 observation
+不能证明肯定目标成立，官方判定仍来自原始 Habitat。三 endpoint 的搬运 readiness
+仅覆盖实际有搬运操作的子集；Drone 不被合成机械臂能力。
+见 [ADR-0074](../../decisions/0074-independent-live-endpoint-profile.md) 和
+[当前实现图及未通过的物理 release 门禁](../../extensions/habitat-independent-live-profile.md)。
+
 Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
 Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、
 Hardware Control 和 Safety。
