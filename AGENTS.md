@@ -236,6 +236,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   The enabled guard admits holding reset after observed skill exit and offers phase-bound
   navigation targets; it never fabricates placement, rewrites actions or changes official truth.
   `relocation_completion.py` owns these local bindings, never Control or Task satisfaction.
+  B1 relocation deployment v0.2 explicitly selects completion binding while the generic
+  adapter remains default-off. The runner freezes a run/input/deployment-bound requirement
+  and checks actual child Local How v0.8 / feedback v0.4 plus loaded completion readiness
+  before Controller/MI startup. Missing or contradictory evidence is a preserved harness
+  failure, never invented benchmark truth. Legacy v0.1 and navigation retain compatibility.
 - Optional goal-region navigation is a deployment-owned Local How variant for direct
   conjunctive official `any_at` goals (ADR-0051). It preserves the exact model-selected
   entity and original Oracle control loop, but may select a different physical target

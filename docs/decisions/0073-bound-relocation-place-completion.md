@@ -22,8 +22,9 @@ successful placement.
 ## Decision
 
 `--relocation-completion-binding` is a separate default-off option requiring
-shared relocation. The generic B1 launcher forwards it only with explicit
-`HABITAT_RELOCATION_COMPLETION_BINDING=1`. Existing disabled and navigation paths
+shared relocation. The generic B1 launcher originally forwarded it only with explicit
+`HABITAT_RELOCATION_COMPLETION_BINDING=1`. The versioned deployment selection
+below now makes that choice explicit before launch. Existing disabled and navigation paths
 retain their earlier behavior. Enabled execution discloses Local How v0.8,
 feedback v0.3 and `exact-object-released-place/v0.1`.
 The follow-up sparse-state and communication scope described below emits
@@ -112,6 +113,27 @@ computed, edited or replaced here. A completed local place can still drift or
 fail the official joint final goal.
 
 ## Validation limits
+
+### Deployment selection and actual startup evidence
+
+B1 deployment declaration v0.2 requires an explicit boolean
+`relocation_completion_binding`. The relocation deployment chooses `true`;
+the generic adapter remains default-off. Conflicting environment overrides fail
+before launch. Legacy v0.1 declarations retain their default-off and explicit
+environment opt-in compatibility, and navigation remains unchanged. An original
+path comparison must freeze a separately declared `false` deployment.
+
+The runner freezes the final choice in deployment-used v0.2 and a separate
+local-execution-profile-required v0.1, binding the run and original input/
+deployment bytes. Before Controller or MI startup, relocation preflight v0.3
+checks the actual child Local How and loaded-interface/reset-reader completion
+readiness. Enabled execution requires Local How v0.8 and feedback v0.4. Missing,
+contradictory or unavailable evidence stops startup and preserves raw files as
+a harness evidence failure. The check does not call a model or simulator, alter
+completion, or change Formal/benchmark admission. Preflight archives the exact
+evidence digests; an environment flag alone is insufficient proof of activation.
+
+### Deterministic and physical validation
 
 Deterministic regressions cover opposite-object sensor contamination, actual
 release, budget boundaries, call/attempt fences, unknown reads, holding reset,

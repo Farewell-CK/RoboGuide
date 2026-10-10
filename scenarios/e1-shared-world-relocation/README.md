@@ -7,7 +7,14 @@ capacity-one `space` resource, local simulator lock, readiness route, and explic
 Habitat robot type. The planning profile exposes only abstract capability facts;
 the execution profile exposes operation resource needs.
 
-The common B1 runner now selects this deployment through `b1-deployment.json`.
+The common B1 runner selects this deployment through `b1-deployment.json` v0.2.
+Its mandatory `relocation_completion_binding: true` explicitly opts this
+deployment into exact-object released-place completion, Local How v0.8 and
+observed feedback v0.4. The generic adapter remains default-off. A conflicting
+`HABITAT_RELOCATION_COMPLETION_BINDING` value stops preparation; omitting the
+environment variable uses the declaration. A separately frozen comparison
+deployment may explicitly declare `false`. Legacy v0.1 declarations retain
+their default-off/environment-opt-in behavior; navigation is unchanged.
 It uses the original `llm_height_man.yaml` configuration and its 4,000-step
 budget, run-local Node/MI configuration, and production Interpreter -> Planner
 -> Reviewer/Repairer -> Controller -> Node -> original Stage2. The committed
@@ -44,10 +51,16 @@ ports and the execution protocol, the same command without `PREPARE_ONLY=1` is
 the controlled B1 entry. Use a new directory; the runner performs exactly one MI
 submission. Normal B1 port environment variables work for this deployment too.
 
-Before starting MI or Controller, it verifies the actual loaded skills, one reset
+Each new run freezes `b1-local-execution-profile-required.json`, bound to its
+run ID and the byte digests of the consumed input and deployment. Before
+starting MI or Controller, it compares that requirement with the child's actual
+`local-how-profile.json` and `relocation-completion-readiness.json`, then verifies
+the actual loaded skills, one reset
 at step zero, exact Node snapshot, frozen workload identity and the exact initial
 object sources published to planning evidence v0.3. Failure retains the original
-files and writes `relocation-preflight.json`; it does not invent PDDL truth or
+files and writes `relocation-preflight.json` v0.3 with exact evidence digests.
+A missing, contradictory or unavailable profile is a harness evidence failure,
+even if an enabling environment variable existed in the parent. It does not invent PDDL truth or
 change Formal admission. Relocation recovery declarations include all three
 supported operations, with group stop and unsupported continuation. Retained
 cancellation and navigation-specific goal-region profiles are rejected.

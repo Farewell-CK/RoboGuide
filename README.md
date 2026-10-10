@@ -580,11 +580,15 @@ Habitat `pddl_success`、Local skill completion、episode termination 与 RoboGu
 episode-start source evidence 与通用 B1 runner 接线已实现并通过离线验证。搬运入口为
 `scenarios/e1-shared-world-relocation/run-b1-roboguide.sh`，要求显式 frozen input；
 `ROBOGUIDE_B1_PREPARE_ONLY=1` 只准备部署文件，不启动服务或仿真。真实物理预检仍待完成。见[当前搬运
-Profile 与实现图](docs/extensions/habitat-relocation-profile.md)。默认关闭的
-`HABITAT_RELOCATION_COMPLETION_BINDING=1` 配置进一步启用 adapter 所有的
+Profile 与实现图](docs/extensions/habitat-relocation-profile.md)。通用 adapter 默认关闭的
+completion binding 由搬运部署声明 v0.2 显式选择 `true`，进一步启用 adapter 所有的
 `relocation_completion.py`：把原始 place 的距离绑定到 canonical 对象，并以实际释放
 核验本地完成。该 Local How v0.8 / feedback v0.4 差异保留原始动作、0.02m 条件和预算，
 不修改官方 PDDL；详见 [ADR-0073](docs/decisions/0073-bound-relocation-place-completion.md)。
+Runner 冻结该选择与 run/input/deployment 字节摘要，在 Controller/MI 前核对子进程实际
+Local How 和 loaded-interface/reset-reader readiness。缺失、冲突或 unavailable 时保留
+证据并报 harness 失败，不能仅凭父进程开关宣称启用。导航及 v0.1 部署兼容路径不变；
+声明 v0.2 与环境 override 冲突时拒绝，原始路径对照必须独立声明 `false`。
 启用时稀疏反馈还保存实际机械臂/物体状态，缺失值保持 unknown；peer 通信只在既有
 canonical scope 内进行。完成后无模型 idle 的 endpoint 不再作为请求收件人，wait 不证明
 任务已经转交或同伴完成帮助。Guard 保留并拒绝越界原始调用，不替模型选择恢复动作。

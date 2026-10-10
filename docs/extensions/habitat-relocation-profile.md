@@ -121,7 +121,10 @@ peer 可以接收消息，但消息递送、接管或完成不能由一次 wait 
 flowchart LR
   D[Frozen B1 input 与显式部署声明] --> R[一次真实 reset 与技能 readiness]
   R --> P[新 run 的 neutral 来源与官方语义证据]
-  P --> I[生产 Interpreter / Planner / Reviewer / Repairer]
+  D --> X[冻结的 Local How 选择与输入字节摘要]
+  R --> X
+  X -->|实际 child profile 与 completion readiness 一致| I[生产 Interpreter / Planner / Reviewer / Repairer]
+  P --> I
   I --> C
   P --> A[版本化 operation admission：精确来源 / 配置容量 / route unknown]
   A --> C
@@ -191,16 +194,30 @@ destination 和配置 endpoint 身份，不将导航楼层判断当作搬运可�
 搬运开关。导航部署仍使用原始 Spot/Fetch 配置和 3,000 steps；没有按 episode 硬编码分工。
 配置的 Node ID 用于等待真实注册，不能从其他 Node 的诊断文本中误认注册完成。
 
+搬运部署声明 v0.2 必须显式选择 `relocation_completion_binding`；本目录选择 `true`，
+启用 Local How v0.8 / feedback v0.4 的精确对象与实际释放核验。通用 adapter 开关仍默认
+关闭。省略环境变量时使用声明；与声明冲突的环境值在启动前拒绝。独立对照部署可明确
+声明 `false`；v0.1 仍保留原有默认关闭和显式环境 opt-in，导航部署不变。
+
 新 run 保存 `b1-deployment-used.json`、`mission-config-used.toml`、run-local execution/planning
 profile、registration snapshot 和现有 planning-source requirement。`PREPARE_ONLY=1` 在这些
 文件准备完成后退出，早于端口访问、Conda、任何服务、reset 或 Provider 调用。它不是正式
 运行，不生成 admission 或 benchmark 成绩，也不能复用该目录启动后续执行。
+
+`b1-deployment-used.json` v0.2 保留原始声明版本和最终选择；新的
+`b1-local-execution-profile-required.json` v0.1 绑定 run ID、该部署文件和 frozen input 的
+原始字节 SHA256。正常执行必须将它与子进程实际生成的 Local How 和 completion readiness
+交叉核验；启用时要求 v0.8 / feedback v0.4、精确对象 completion profile 和已加载接口/
+实际 reset reader 的明确 readiness。仅父进程存在开关不能证明这些条件。
 
 正常执行在实际 ONLINE 后、Controller/MI 前检查 `relocation-preflight.json`：精确
 run/episode/scene/dataset/seed、一次 reset 的 step-zero 状态、真实技能 readiness、实际使用
 的 Node snapshot 与发给 MI 的初始来源引用必须一致。检查失败保留原始证据，以 harness
 证据检查失败明确归档；启动过程自身失败仍沿用既有 SUT failure 归因。两者均不伪造
 `pddl_success` 或改动 Formal population 规则。
+preflight v0.3 另外保留 requirement、deployment、实际 Local How 和 completion readiness
+的字节摘要，便于定位“声明开启但实际走旧路径”。它只核验启动证据，不调用模型、
+动作或仿真，不改动 B1 provenance verifier 或 admission 规则。
 
 共享 endpoint 的只读恢复声明现覆盖导航和搬运三个操作，与真实部署文件一致；搬运保持
 `execution-group` / `unsupported`。声明读取不调用世界、模型或 RNG，开启 cancelled-world
