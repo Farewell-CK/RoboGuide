@@ -46,16 +46,18 @@ def invocation(expected: str = "detected(object-a)") -> CanonicalObservationInvo
 def environment() -> Any:
     """Expose existing sensor metadata and entity mapping, with no active sensor API."""
     sensor = type("DetectedObjectsSensor", (), {"pixel_threshold": 10})()
+    simulator = SimpleNamespace(
+        _sensors={"agent_0_head_semantic": object(), "agent_1_semantic": object()},
+        habitat_config=SimpleNamespace(object_ids_start=100),
+        scene_obj_ids=list(range(8)),
+    )
     return SimpleNamespace(
-        sim=SimpleNamespace(
-            _sensors={"agent_0_head_semantic": object(), "agent_1_semantic": object()},
-            habitat_config=SimpleNamespace(object_ids_start=100),
-        ),
+        sim=simulator,
         task=SimpleNamespace(
             sensor_suite=SimpleNamespace(sensors={"detected_objects": sensor}),
             pddl_problem=SimpleNamespace(
                 get_ordered_entities_list=lambda: [SimpleNamespace(name="object-a")],
-                sim_info=SimpleNamespace(search_for_entity=lambda entity: 7),
+                sim_info=SimpleNamespace(search_for_entity=lambda entity: 7, sim=simulator),
             ),
         ),
     )
@@ -83,6 +85,43 @@ def test_visual_observation_does_not_fabricate_affirmative_completion(seen: bool
     assert request.as_dict()["parameters"] == {"expected": "detected(object-a)"}
 
 
+@pytest.mark.parametrize("detected,expected", [([142], True), ([107], False), ([], False)])
+def test_entity_index_is_resolved_through_original_simulator_mapping(
+    detected: list[int], expected: bool
+) -> None:
+    """A PDDL index cannot impersonate another object's actual semantic sensor ID."""
+    env = environment()
+    env.sim.scene_obj_ids[7] = 42
+    result = observe_detection(
+        invocation(), env, {"detected_objects": detected}, 0, "detected_objects", 12, "sha256:goal"
+    )
+    assert result["status"] == "observed" and result["condition_holds"] is expected
+    assert result["simulator_semantic_object_id"] == 142
+
+
+@pytest.mark.parametrize("mapped_id", [True, -1, 42.5, "42", None])
+def test_invalid_simulator_mapping_cannot_fabricate_detection(mapped_id: object) -> None:
+    """Unreadable or malformed existing object mappings yield unknown without sensor calls."""
+    env = environment()
+    env.sim.scene_obj_ids[7] = mapped_id
+    result = observe_detection(
+        invocation(), env, {"detected_objects": [107, 142]}, 0, "detected_objects", 0, "sha256:goal"
+    )
+    assert result["status"] == "unavailable" and result["condition_holds"] is None
+
+
+def test_missing_simulator_mapping_remains_unavailable() -> None:
+    """A missing or truncated scene mapping is never replaced with an identity mapping."""
+    env = environment()
+    mappings: tuple[list[int] | None, ...] = ([], None)
+    for mapping in mappings:
+        env.sim.scene_obj_ids = mapping
+        result = observe_detection(
+            invocation(), env, {"detected_objects": [107]}, 0, "detected_objects", 0, "sha256:goal"
+        )
+        assert result["status"] == "unavailable" and result["condition_holds"] is None
+
+
 @pytest.mark.parametrize(
     "observations", [{}, {"detected_objects": [True]}, {"detected_objects": list(range(4097))}]
 )
@@ -94,7 +133,7 @@ def test_missing_or_invalid_visual_read_remains_unknown(observations: object) ->
     assert result["status"] == "unavailable" and result["condition_holds"] is None
 
 
-@pytest.mark.parametrize("identity", [7.5, True, -101, "7"])
+@pytest.mark.parametrize("identity", [7.5, True, -101, -1, 8, "7"])
 def test_nonintegral_entity_identity_cannot_be_truncated(identity: object) -> None:
     """An invalid original entity lookup cannot fabricate a matching cached semantic ID."""
     env = environment()

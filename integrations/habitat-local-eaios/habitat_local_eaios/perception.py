@@ -110,15 +110,22 @@ def observe_detection(
             raise ValueError("entity is not in the admitted world")
         sim_info = problem.sim_info
         local_id = sim_info.search_for_entity(entities[0])
-        offset = environment.sim.habitat_config.object_ids_start
-        if any(
-            isinstance(value, bool) or not isinstance(value, Integral)
-            for value in (local_id, offset)
+        offset = sim_info.sim.habitat_config.object_ids_start
+        if (
+            any(
+                isinstance(value, bool) or not isinstance(value, Integral)
+                for value in (local_id, offset)
+            )
+            or local_id < 0
+            or offset < 0
         ):
-            raise ValueError("semantic object identity is not an integer")
-        object_id = local_id + offset
-        if object_id < 0:
+            raise ValueError("semantic object index or offset is not a nonnegative integer")
+        # Habitat's PDDL lookup returns a scene index, not the simulator's
+        # object ID. Read the original mapping without refreshing any sensor.
+        mapped_id = sim_info.sim.scene_obj_ids[int(local_id)]
+        if isinstance(mapped_id, bool) or not isinstance(mapped_id, Integral) or mapped_id < 0:
             raise ValueError("semantic object identity is not a nonnegative integer")
+        object_id = int(mapped_id) + int(offset)
         if not isinstance(observations, Mapping) or sensor_uuid not in observations:
             raise ValueError("cached detection observation is missing")
         value = observations[sensor_uuid]

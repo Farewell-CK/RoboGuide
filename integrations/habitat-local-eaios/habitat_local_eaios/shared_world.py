@@ -1360,12 +1360,13 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
         return self._actor is not None
 
     def readiness_detail(self) -> str:
-        """Describe the shared world serving both Habitat agents."""
+        """Describe every configured endpoint without assuming a second Habitat agent."""
         if self._actor is None:
             return "EMOS Stage2 policy is not initialized"
+        label = "agent" if len(self._agent_ids) == 1 else "agents"
         return (
             f"original EMOS Stage2 episode {self._config.episode_id} is shared by "
-            f"agents {self._agent_ids[0]} and {self._agent_ids[1]}"
+            f"{label} {' and '.join(str(agent) for agent in self._agent_ids)}"
         )
 
     def _pair_arguments(

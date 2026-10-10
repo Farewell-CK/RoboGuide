@@ -446,8 +446,9 @@ def test_successful_live_initialization_is_idempotent(
     assert calls == ["world", "profile"]
 
 
+@pytest.mark.parametrize("count", [1, 2, 3, 4])
 def test_live_pipe_relays_later_assignments_and_early_terminal_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int
 ) -> None:
     """Exercise real parent/child IPC with one reset and two sequential Control dispatches."""
     import multiprocessing
@@ -456,26 +457,28 @@ def test_live_pipe_relays_later_assignments_and_early_terminal_once(
     from habitat_local_eaios import live_world, shared_world
     from habitat_local_eaios.crabagent_backend import CrabAgentBackendConfig
 
-    actor, gym = Actor(3), Gym({0: 1})
-    runtime = Runtime(tmp_path, 3, gym, actor)
+    actor, gym = Actor(count), Gym({0: 1})
+    runtime = Runtime(tmp_path, count, gym, actor)
     runtime._config.endpoint_registry_path = tmp_path / "registry.json"
     starts: list[bool] = []
     monkeypatch.setattr(runtime, "initialize", lambda: starts.append(True))
     monkeypatch.setattr(runtime, "supported_operations", lambda: ("mobility.move@v1",))
-    monkeypatch.setattr(runtime, "readiness_detail", lambda: "actual test world")
     monkeypatch.setattr(runtime, "close", lambda: None)
     monkeypatch.setattr(runtime, "final_metrics", lambda: {"pddl_success": False})
     monkeypatch.setattr(live_world, "LiveEmosStage2Runtime", lambda config, ids: runtime)
     parent, child = multiprocessing.Pipe()
     thread = threading.Thread(
         target=shared_world._child_world_process,
-        args=(child, runtime._config, (0, 1, 2)),
+        args=(child, runtime._config, tuple(range(count))),
         daemon=True,
     )
     thread.start()
-    assert parent.poll(2) and parent.recv()[0] == "READY"
+    assert parent.poll(2)
+    ready = parent.recv()
+    assert ready[0] == "READY", ready
+    assert "original EMOS Stage2 episode episode" in ready[1]["detail"]
     world = shared_world.ProcessWorldService(
-        cast(CrabAgentBackendConfig, runtime._config), (0, 1, 2)
+        cast(CrabAgentBackendConfig, runtime._config), tuple(range(count))
     )
     world._connection, world._process, world._ready = parent, thread, True
     first, second = invocation(0, ("one", "one")), invocation(1, ("one", "one"))
@@ -502,7 +505,7 @@ def test_live_pipe_relays_later_assignments_and_early_terminal_once(
         assert starts == [True]
         assert observed == ["task-0", "task-1"]
         assert gym.steps == actor.calls == 2
-        assert [agent.initializations for agent in actor.originals] == [2, 0, 0]
+        assert [agent.initializations for agent in actor.originals] == [2] + [0] * (count - 1)
         assert summary["official_metrics"]["pddl_success"] is False
     finally:
         parent.send(("CLOSE", None))
@@ -564,11 +567,14 @@ def test_perception_negative_read_completes_only_observation(tmp_path: Path) -> 
     actor, gym = Actor(2), Gym({})
     runtime = Runtime(tmp_path, 2, gym, actor)
     assert runtime._habitat_env is not None
+    simulator = SimpleNamespace(
+        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=list(range(8))
+    )
     runtime._habitat_env.task.pddl_problem = SimpleNamespace(
         get_ordered_entities_list=lambda: [SimpleNamespace(name="object-a")],
-        sim_info=SimpleNamespace(search_for_entity=lambda entity: 7),
+        sim_info=SimpleNamespace(search_for_entity=lambda entity: 7, sim=simulator),
     )
-    runtime._habitat_env.sim = SimpleNamespace(habitat_config=SimpleNamespace(object_ids_start=100))
+    runtime._habitat_env.sim = simulator
 
     def forbidden_context() -> Any:
         """Original text acquisition can sample RNG and is forbidden for a cached read."""
