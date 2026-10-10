@@ -5,6 +5,10 @@ Habitat-MAS / EMOS 等外部系统与 RoboGuide 之间进行可复现、可追�
 当前是第一版骨架：**实验编排 + 进程边界 + 可复现结果基础设施**，并以
 E1（Habitat-MAS Mobility，EMOS vs RoboGuide）作为第一条 workload。
 
+E1 的收尾条件、配置记录、已实现启动门禁与待核验项见
+[E1 收尾计划与配置核验](docs/e1-closure-plan.md)。各类别冻结真实 config/dataset
+与代码身份；普通任务失败纳入结果，配置或证据漂移才暂停批量。
+
 Formal B1 的 provenance、failure owner 和 population 规则见
 [Evaluation Evidence Validity](docs/evaluation-evidence-validity.md)。Formal population
 只由有效 provenance 与显式 external-infrastructure failure 决定；benchmark population
