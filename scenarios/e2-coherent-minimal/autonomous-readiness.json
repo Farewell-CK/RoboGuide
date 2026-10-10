@@ -1,0 +1,47 @@
+{
+  "schema": "roboguide.e2-physical-autonomy-readiness/v0.1",
+  "slice": "E2-S0A",
+  "status": "BLOCKED",
+  "controlled_slice": "E2-S0C",
+  "current_operation": "coherent.execute-plan@v1",
+  "fixed_plan_macro": true,
+  "requirements": [
+    {
+      "id": "robot-semantic-operations",
+      "ready": false,
+      "evidence": null,
+      "blocker": "The backend exposes one whole-plan macro, not per-robot semantic operations."
+    },
+    {
+      "id": "live-observations",
+      "ready": false,
+      "evidence": null,
+      "blocker": "No planner-facing physical observation/state endpoint is frozen."
+    },
+    {
+      "id": "per-operation-terminal-evidence",
+      "ready": false,
+      "evidence": null,
+      "blocker": "Physical skills are recorded inside the fixed runner, not as Controller-visible operations."
+    },
+    {
+      "id": "operation-cancellation",
+      "ready": false,
+      "evidence": null,
+      "blocker": "The current committed physical macro explicitly rejects cancellation."
+    },
+    {
+      "id": "independent-goal-checker",
+      "ready": true,
+      "evidence": "verify-controlled.py",
+      "blocker": null
+    },
+    {
+      "id": "feedback-driven-replanning",
+      "ready": false,
+      "evidence": null,
+      "blocker": "Mission Intelligence cannot yet replan from physical per-operation feedback."
+    }
+  ],
+  "claim_policy": "Only E2-S0C controlled physical execution may be claimed while status is BLOCKED."
+}

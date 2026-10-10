@@ -39,6 +39,66 @@ fn physical_node(node_id: &str) -> NodeRegistration {
     )
 }
 
+/// Builds one physical Node that explicitly supports isolated repeat-after-stop recovery.
+fn physical_recovery_node(node_id: &str) -> NodeRegistration {
+    let owner = domain::LocalSystemId::new("physical-runtime").expect("owner valid");
+    let contract =
+        CapabilityContractRef::new("mobility", "move", "v1").expect("contract valid");
+    let operation = domain::OperationRef::from(contract.clone());
+    let metadata = BTreeMap::from([(
+        domain::EXECUTION_RECOVERY_METADATA_KEY.to_string(),
+        serde_json::json!({
+            "schema_version": domain::EXECUTION_RECOVERY_PROFILE_SCHEMA,
+            "operations": [{
+                "operation": operation,
+                "stop_scope": "execution",
+                "continuation": "repeat-after-stop"
+            }]
+        })
+        .to_string(),
+    )]);
+    NodeRegistration::new_with_local_systems(
+        NodeId::new(node_id).expect("node valid"),
+        vec![domain::LocalSystemDescriptor::new(
+            owner.clone(),
+            domain::LocalRuntime::new("physical-test", "1").expect("runtime valid"),
+            metadata,
+        )],
+        domain::NodeContractVersion::v0_6(),
+        vec![Capability::new(CapabilityKind::Mobility, true)],
+        BTreeMap::from([(contract, owner.clone())]),
+        Vec::new(),
+        Vec::new(),
+        BTreeMap::new(),
+    )
+    .expect("registration valid")
+    .with_operation_support(vec![domain::OperationSupport::new(operation, owner)])
+    .expect("operation ownership valid")
+}
+
+/// Registers recovery-capable physical Nodes in both Control and Shared State.
+fn register_physical_recovery_nodes(
+    control: &mut ControlPlane,
+    state: &mut InMemorySharedNodeState,
+    node_ids: &[&str],
+) {
+    let mut events = TestEvents;
+    let correlation = CorrelationId::new("physical-recovery-registration")
+        .expect("correlation valid");
+    for node_id in node_ids {
+        control
+            .register_node(
+                state,
+                physical_recovery_node(node_id),
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)),
+                TimestampMs::new(0),
+                &correlation,
+                &mut events,
+            )
+            .expect("recovery Node registration succeeds");
+    }
+}
+
 /// Registers healthy deterministic Nodes in both Control and Shared Node State.
 fn register_physical_nodes(
     control: &mut ControlPlane,
@@ -959,6 +1019,196 @@ fn recovery_preserves_bound_physical_entity_and_remains_pending() {
             .and_then(domain::ActorBinding::physical_entity_id),
         Some(&PhysicalEntityId::new("entity-a").unwrap())
     );
+}
+
+/// Explicit takeover moves an ungrounded Actor only through Match, Schedule, Commit and Rebind.
+#[test]
+fn authorized_actor_takeover_rebinds_distinct_standby_entity() {
+    let (plan, requirement) = physical_binding_plan("mission-actor-takeover", None, None, true);
+    let group_id = ExecutionGroupId::new("group-actor-takeover").expect("group id valid");
+    let mut control = ControlPlane::new();
+    let mut state = InMemorySharedNodeState::new();
+    let mut events = RecordingEvents::default();
+    register_physical_recovery_nodes(
+        &mut control,
+        &mut state,
+        &["node-a", "node-b", "node-c"],
+    );
+    let alpha = domain::ActorId::new("alpha").expect("actor valid");
+    let beta = domain::ActorId::new("beta").expect("actor valid");
+    let digest = format!("sha256:{}", "a".repeat(64));
+    control
+        .set_actor_candidate_restriction(
+            plan.goal().mission_id().clone(),
+            alpha.clone(),
+            std::collections::BTreeSet::from([
+                NodeId::new("node-a").unwrap(),
+                NodeId::new("node-b").unwrap(),
+            ]),
+            digest.clone(),
+        )
+        .expect("primary and standby restriction installs");
+    control
+        .set_actor_candidate_restriction(
+            plan.goal().mission_id().clone(),
+            beta,
+            std::collections::BTreeSet::from([NodeId::new("node-c").unwrap()]),
+            digest,
+        )
+        .expect("peer restriction installs");
+    control
+        .install_physical_entity_registry(physical_registry(
+            1,
+            &[
+                ("dog-a", "node-a"),
+                ("dog-b", "node-b"),
+                ("peer-c", "node-c"),
+            ],
+        ))
+        .expect("registry installs");
+    create_ready_physical_group(&mut control, &plan, &requirement, &group_id, &mut events);
+    let committed = commit_physical_task(
+        &mut control,
+        &state,
+        &plan,
+        &requirement,
+        &group_id,
+        &mut events,
+    );
+    bind_physical_task(
+        &mut control,
+        &group_id,
+        &requirement,
+        &committed,
+        &mut events,
+    )
+    .expect("initial binding succeeds");
+    control
+        .activate_task_execution(
+            &group_id,
+            requirement.task_ref(),
+            TimestampMs::new(1),
+            &CorrelationId::new("takeover").unwrap(),
+            &mut events,
+        )
+        .expect("Task activates");
+    assert_eq!(
+        control
+            .actor_binding(plan.goal().mission_id(), &alpha)
+            .and_then(domain::ActorBinding::physical_entity_id),
+        Some(&PhysicalEntityId::new("dog-a").unwrap())
+    );
+    state
+        .record_node_health(NodeHealthObservation::new(
+            NodeId::new("node-a").unwrap(),
+            NodeStatus::new(NodeHealth::Offline, TimestampMs::new(2)),
+            TimestampMs::new(2),
+        ))
+        .expect("failure observation records");
+    let correlation = CorrelationId::new("takeover").unwrap();
+    let need = match control
+        .assess_group(
+            &state,
+            &group_id,
+            &requirement,
+            TimestampMs::new(2),
+            &correlation,
+            &mut events,
+        )
+        .expect("assessment succeeds")
+    {
+        ReconciliationAssessment::RoleRecoveryRequired(need) => need,
+        ReconciliationAssessment::NoAction => panic!("offline Actor must require recovery"),
+    };
+    control
+        .begin_role_recovery(
+            &need,
+            TimestampMs::new(3),
+            &correlation,
+            &mut events,
+        )
+        .expect("role becomes unbound");
+    let operation = domain::OperationRef::new("mobility", "move", "v1").unwrap();
+    let authorization = control
+        .authorize_actor_takeover(
+            &need,
+            &requirement,
+            PhysicalEntityId::new("dog-a").unwrap(),
+            PhysicalEntityId::new("dog-b").unwrap(),
+            format!("sha256:{}", "b".repeat(64)),
+        )
+        .expect("exact standby takeover is authorized");
+    let candidates = control
+        .match_stopped_actor_takeover_candidates_for_operation(
+            &state,
+            &need,
+            &requirement,
+            &operation,
+            &authorization,
+            TimestampMs::new(4),
+            &correlation,
+            &mut events,
+        )
+        .expect("takeover matching succeeds");
+    assert_eq!(candidates.candidate_node_ids(), &[NodeId::new("node-b").unwrap()]);
+    let selection = BoundedJointScheduler::new()
+        .schedule_recovery(
+            &state,
+            &requirement,
+            &candidates,
+            &control.scheduling_snapshot(TimestampMs::new(4)),
+            TimestampMs::new(4),
+            &correlation,
+            &mut events,
+        )
+        .expect("takeover scheduling succeeds");
+    let RecoverySchedulingOutcome::Selected(selection) = selection else {
+        panic!("standby must be selected");
+    };
+    let proposal = control
+        .propose_role_recovery(
+            &state,
+            &candidates,
+            &requirement,
+            selection.replacement_node_id().clone(),
+            selection.resource_ids().to_vec(),
+            TimestampMs::new(5),
+            &correlation,
+            &mut events,
+        )
+        .expect("takeover proposal validates");
+    let committed = control
+        .commit_role_recovery(
+            &state,
+            &requirement,
+            &proposal,
+            TimestampMs::new(6),
+            &correlation,
+            &mut events,
+        )
+        .expect("takeover commitment succeeds");
+    control
+        .rebind_role_with_state(
+            &state,
+            &committed,
+            TimestampMs::new(7),
+            &correlation,
+            &mut events,
+        )
+        .expect("takeover Rebind succeeds");
+    let binding = control
+        .actor_binding(plan.goal().mission_id(), &alpha)
+        .expect("Actor remains bound");
+    assert_eq!(binding.node_id(), &NodeId::new("node-b").unwrap());
+    assert_eq!(
+        binding.physical_entity_id(),
+        Some(&PhysicalEntityId::new("dog-b").unwrap())
+    );
+    assert!(events.records.iter().any(|(_, event)| matches!(
+        event,
+        EventPayload::MissionActorTakenOver { replacement_entity_id, .. }
+            if replacement_entity_id == &PhysicalEntityId::new("dog-b").unwrap()
+    )));
 }
 
 /// Restore rejects a checkpoint whose durable Actor bindings violate Context cardinality.

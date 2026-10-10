@@ -1,0 +1,52 @@
+{
+  "schema_version": "roboguide.capability-catalog/v0.3",
+  "capabilities": [
+    {
+      "contract": {"namespace": "coherent", "name": "arm-phase", "version": "v1"},
+      "description": "Use robot arm 23 for the task17 high-surface loading phase. Every Role requiring this capability must declare one exclusive resource demand with kind space and units 1, matching the deployed Node operation contract.",
+      "attributes": []
+    },
+    {
+      "contract": {"namespace": "coherent", "name": "drone-phase", "version": "v1"},
+      "description": "Use quadrotor 25 and its attached basket 29 for one task17 flight phase. Every Role requiring this capability must declare one exclusive resource demand with kind space and units 1, matching the deployed Node operation contract.",
+      "attributes": []
+    },
+    {
+      "contract": {"namespace": "coherent", "name": "dog-phase", "version": "v1"},
+      "description": "Use robot dog 24 for the task17 low-surface loading phase. Every Role requiring this capability must declare one exclusive resource demand with kind space and units 1, matching the deployed Node operation contract.",
+      "attributes": []
+    }
+  ],
+  "operations": [
+    {
+      "operation": {"namespace": "coherent", "name": "arm-phase", "version": "v1"},
+      "description": "In COHERENT env4/task17, load bottle of milk 35 from the high dining table into basket 29. The only supported phase value is arm-load-milk. Local grasp and placement actions remain Local How. Its Role must request the deployed exclusive resource kind space with units 1.",
+      "parameters": [
+        {"name": "env", "type": "string", "required": true, "description": "Must be env4."},
+        {"name": "task", "type": "integer", "required": true, "description": "Must be 17."},
+        {"name": "phase", "type": "string", "required": true, "description": "Must be arm-load-milk."}
+      ],
+      "required_capabilities": [{"namespace": "coherent", "name": "arm-phase", "version": "v1"}]
+    },
+    {
+      "operation": {"namespace": "coherent", "name": "drone-phase", "version": "v1"},
+      "description": "In COHERENT env4/task17, execute one quadrotor transport phase. Use phase drone-lower-basket to lower basket 29 from dining table 30 to low coffee table 10 before dog loading. Use phase drone-deliver only after both objects are in the basket, to carry them to garden 5 and land quadrotor 25 on swing table 16. Local flight actions remain Local How. Its Role must request the deployed exclusive resource kind space with units 1.",
+      "parameters": [
+        {"name": "env", "type": "string", "required": true, "description": "Must be env4."},
+        {"name": "task", "type": "integer", "required": true, "description": "Must be 17."},
+        {"name": "phase", "type": "string", "required": true, "description": "Either drone-lower-basket or drone-deliver, according to the intended outcome."}
+      ],
+      "required_capabilities": [{"namespace": "coherent", "name": "drone-phase", "version": "v1"}]
+    },
+    {
+      "operation": {"namespace": "coherent", "name": "dog-phase", "version": "v1"},
+      "description": "In COHERENT env4/task17, after basket 29 has been lowered, load book 34 from low coffee table 10 into basket 29 without losing milk 35. The only supported phase value is dog-load-book. Local navigation, grasp and placement actions remain Local How. Its Role must request the deployed exclusive resource kind space with units 1.",
+      "parameters": [
+        {"name": "env", "type": "string", "required": true, "description": "Must be env4."},
+        {"name": "task", "type": "integer", "required": true, "description": "Must be 17."},
+        {"name": "phase", "type": "string", "required": true, "description": "Must be dog-load-book."}
+      ],
+      "required_capabilities": [{"namespace": "coherent", "name": "dog-phase", "version": "v1"}]
+    }
+  ]
+}

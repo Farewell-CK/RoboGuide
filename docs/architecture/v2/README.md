@@ -313,10 +313,13 @@ Mission Intelligence 中的 Actor 只表达跨 Task 的逻辑参与者和语义�
 Node identity。若部署或实验必须指定某个 Actor 由某个 Node 实现，该关系作为独立的
 Control-owned placement constraint 输入：它只收窄首次 Matching 的 Candidate Set，仍需通过
 Schedule、Propose、Commit 和 Group Bind 才形成 authoritative `ActorBinding`。placement
-constraint 本身不预留资源，也不属于 MissionPlan、Runtime 或 State projection。当前 v0
+constraint 本身不预留资源，也不属于 MissionPlan、Runtime 或 State projection。普通
 recovery 不具备 Actor 迁移 authority：已绑定或有 placement 的 Actor 只能在其权威 Node
 上恢复；该 Node 不可用时 Candidate Set 为空，Group 保持 Blocked，不能借 Rebind 静默换狗。
-未来 Actor 迁移必须增加显式 Control decision、事件与独立架构决策。
+独立的显式 takeover 路径由 ADR-0070 定义：它只面向已经 Blocked/unbound 且有当前停止
+证明的 Role，要求精确 source/standby PhysicalEntity、registry revision、候选限制与外部证据
+摘要，并继续经过 Match、Schedule、Proposal、Commit、Rebind。普通 Role Rebind 不获得该
+authority；physical grounded Actor 和固定 placement 仍禁止迁移。
 
 Canonical capability identity 使用 `namespace.name@version`；按最后一个 `.` 分隔 name，
 因此 namespace 可以分层而 name 必须是单 segment。Node Config、Node Protocol 与结构化

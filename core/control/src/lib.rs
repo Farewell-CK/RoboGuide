@@ -27,8 +27,8 @@ pub use matching::{CandidateSet, RoleCandidates};
 pub use node::CandidateExclusionReason;
 pub use proposal::AssignmentProposal;
 pub use reconciliation::{
-    CommittedRecoveryAssignment, ReconciliationAssessment, RecoveryAssignmentProposal,
-    RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,
+    ActorTakeoverAuthorization, CommittedRecoveryAssignment, ReconciliationAssessment,
+    RecoveryAssignmentProposal, RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,
 };
 pub use scheduler::{
     BoundedJointScheduler, RecoverySchedulingDecision, RecoverySchedulingOutcome,
@@ -858,6 +858,27 @@ impl ControlPlane {
             return Err(ControlError::InvalidProposal(
                 "restored physical ActorBindings require a current deployment registry".to_string(),
             ));
+        }
+        if let Some(registry) = self.physical_entity_registry.as_ref() {
+            for commitment in self.pending_recovery_commitments.values() {
+                let Some(authorization) = commitment.actor_takeover() else {
+                    continue;
+                };
+                if registry.registry_id() != authorization.registry_id()
+                    || registry.revision() != authorization.registry_revision()
+                    || registry
+                        .entity(authorization.previous_entity_id())
+                        .is_none_or(|entry| entry.node_id() != authorization.previous_node_id())
+                    || registry
+                        .entity(authorization.replacement_entity_id())
+                        .is_none_or(|entry| entry.node_id() != authorization.replacement_node_id())
+                {
+                    return Err(ControlError::InvalidProposal(
+                        "restored Actor takeover commitment requires its exact deployment registry"
+                            .to_string(),
+                    ));
+                }
+            }
         }
         Ok(())
     }

@@ -30,6 +30,7 @@ impl ControlPlane {
                 ));
             }
             if let Some(actor_id) = role.and_then(RoleRequirement::actor_id)
+                && commitment.actor_takeover().is_none()
                 && self
                     .actor_authority_node(commitment.task_ref().mission_id(), actor_id)
                     .is_none_or(|node_id| node_id != *commitment.replacement_node_id())
@@ -37,6 +38,31 @@ impl ControlPlane {
                 return Err(ControlError::InvalidProposal(
                     "checkpoint recovery commitment violates Actor authority".to_string(),
                 ));
+            }
+            if let Some(authorization) = commitment.actor_takeover() {
+                let actor_id = role.and_then(RoleRequirement::actor_id).ok_or_else(|| {
+                    ControlError::InvalidProposal(
+                        "checkpoint takeover commitment has no Actor role".into(),
+                    )
+                })?;
+                let binding = self
+                    .actor_binding(commitment.task_ref().mission_id(), actor_id)
+                    .ok_or_else(|| {
+                        ControlError::InvalidProposal(
+                            "checkpoint takeover commitment has no ActorBinding".into(),
+                        )
+                    })?;
+                if authorization.actor_id() != actor_id
+                    || authorization.group_id() != commitment.group_id()
+                    || authorization.task_ref() != commitment.task_ref()
+                    || authorization.role_id() != commitment.role_id()
+                    || authorization.previous_node_id() != binding.node_id()
+                    || authorization.replacement_node_id() != commitment.replacement_node_id()
+                {
+                    return Err(ControlError::InvalidProposal(
+                        "checkpoint takeover commitment violates Actor authority".into(),
+                    ));
+                }
             }
         }
         Ok(())

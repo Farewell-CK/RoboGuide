@@ -1,0 +1,80 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-e2-s0-coherent-merom",
+    "objective": "Execute the validated COHERENT Dog-Drone-Arm apple handoff plan and establish its physical goal.",
+    "actors": [
+      {
+        "id": "coherent-team"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "coherent-merom-context",
+      "roles": [
+        {
+          "id": "coherent-team",
+          "actor": "coherent-team"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "execute-merom-trio-plan",
+      "description": "Run the fixed COHERENT Merom_1_int_Task1 physical plan.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "coherent-plan-role",
+          "context_role": "coherent-team",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "coherent",
+                  "name": "execute-plan",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "coherent",
+              "name": "execute-plan",
+              "version": "v1"
+            },
+            "objective": "Execute the validated COHERENT Dog-Drone-Arm apple handoff plan.",
+            "parameters": {
+              "task": "Merom_1_int_Task1"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "coherent-merom-context",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": 1200000
+      },
+      "satisfaction": {
+        "expected_effect": "COHERENT reports plan completion and its physical goal checker confirms the apple handoff target state.",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}

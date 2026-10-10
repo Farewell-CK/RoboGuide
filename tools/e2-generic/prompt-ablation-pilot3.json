@@ -1,0 +1,17 @@
+{
+  "schema": "roboguide.e2-prompt-ablation/v0.1",
+  "study_id": "prompt-profile-pilot3",
+  "purpose": "Development pilot; not a held-out main-result estimate.",
+  "task_selection": "Reuses the previously frozen seed-2026092903 three-task sample.",
+  "dag_profile": "serial",
+  "max_segments": 3,
+  "execution_timeout_seconds": 180,
+  "runs": [
+    {"env": "env1", "task": 14, "prompt_profile": "fair"},
+    {"env": "env1", "task": 14, "prompt_profile": "informed"},
+    {"env": "env2", "task": 12, "prompt_profile": "informed"},
+    {"env": "env2", "task": 12, "prompt_profile": "fair"},
+    {"env": "env1", "task": 16, "prompt_profile": "fair"},
+    {"env": "env1", "task": 16, "prompt_profile": "informed"}
+  ]
+}
