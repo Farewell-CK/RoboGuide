@@ -32,9 +32,10 @@ class B1Deployment:
     schema_version: str
 
 
-def load_deployment(scenario: Path) -> B1Deployment:
+def load_deployment(scenario: Path, *, declaration_path: Path | None = None) -> B1Deployment:
     """Reject unknown fields, unsafe paths and mistyped budgets before any component launches."""
-    with (scenario / "b1-deployment.json").open("rb") as source:
+    path = declaration_path if declaration_path is not None else scenario / "b1-deployment.json"
+    with path.open("rb") as source:
         raw = source.read(MAX_DECLARATION_BYTES + 1)
     if len(raw) > MAX_DECLARATION_BYTES:
         raise ValueError("B1 deployment declaration exceeds the byte budget")
@@ -76,6 +77,7 @@ def freeze_deployment(
     emos_root: Path,
     *,
     completion_binding_override: str | None = None,
+    declaration_path: Path | None = None,
 ) -> dict[str, str | int]:
     """Bind workload, original config bytes and configured Node identities in a new run.
 
@@ -84,7 +86,7 @@ def freeze_deployment(
     feasibility, a MissionPlan or a physical outcome has been verified.
     """
     extract_b1_workload(json.loads((run / "b1-input-used.json").read_bytes()))
-    declaration = load_deployment(scenario)
+    declaration = load_deployment(scenario, declaration_path=declaration_path)
     completion = declaration.relocation_completion_binding
     if completion_binding_override is not None:
         if completion_binding_override not in {"0", "1"}:
@@ -161,6 +163,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--run", type=Path, required=True)
     parser.add_argument("--scenario", type=Path, required=True)
     parser.add_argument("--emos-root", type=Path, required=True)
+    parser.add_argument("--declaration", type=Path)
     args = parser.parse_args(argv)
     try:
         assignments = freeze_deployment(
@@ -168,6 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.scenario,
             args.emos_root,
             completion_binding_override=os.environ.get("HABITAT_RELOCATION_COMPLETION_BINDING"),
+            declaration_path=args.declaration,
         )
     except (OSError, ValueError) as error:
         parser.exit(1, f"B1 deployment invalid: {error}\n")

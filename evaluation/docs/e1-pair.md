@@ -36,6 +36,7 @@ body archive 和结果目录。每臂复制冻结的三个 vendor 代码目录�
 | `dataset_path`, `input_directory` | 原始 dataset 文件和每个 `<pair_id>.json` 冻结 B1 input |
 | `native_config` | 原生 `habitat-baselines/.../config/` 下相对配置路径 |
 | `b1_runner`, `mission_config` | RoboGuide 代码视图内的相对路径 |
+| `b1_deployment`（可选） | 代码视图内显式部署声明的相对路径；必须冻结摘要，且选中的 Habitat config 必须与 `native_config` 相同 |
 | `gpu_device`, `ports` | GPU 编号；七个不同端口：proxy/grpc/controller/artifact/endpoint_a/endpoint_b/mission |
 | `provider_upstream` | 无凭据、query、fragment 的原授权 Provider base URL |
 | `arm_timeout_seconds` | 单 arm 墙钟预算；到限后尽力归档并清理拥有的进程 |
@@ -49,6 +50,17 @@ body archive 和结果目录。每臂复制冻结的三个 vendor 代码目录�
 发布者还应冻结全部 Python/Rust/Prompt/schema/部署配置及 vendor 依赖面。前三组
 identity 使用对应实际文件摘要映射的 canonical digest；Stage2 使用逐文件 digest。
 这些值必须与 Population Manifest 一致，不能把声明直接冒充运行观测。
+
+未指定 `b1_deployment` 时保留 Runner 的原部署。显式选择不存在、未冻结、越界或
+与原生臂配置不一致的声明会在启动前失败，不降级回默认配置。入口从该冻结字段
+生成 `ROBOGUIDE_B1_DEPLOYMENT`，清除父进程继承的同名变量；Runner 复用原节点、
+MI 和 canonical operation 配置，只冻结该声明中的原始 Habitat config、预算与开关。
+例如搬运的 distance 变体可选择
+[`b1-deployment-dist-man.json`](../../scenarios/e1-shared-world-relocation/b1-deployment-dist-man.json)，
+使用同一 `object.relocate` 链路。声明合法与 prepare-only 通过都不能证明物理可执行、
+reset 可比或官方成功；正式派发仍须完整 release 门禁。
+显式选择还要求 Population 的 `benchmark_authority.parameters.max_episode_steps`
+为与声明相同的整数；未知或冲突预算不能作为配对实验启动条件。
 
 凭据仅由已授权 `OPENAI_API_KEY` 环境传入。入口清除继承的 B1/Habitat/MI/OpenAI
 实验开关，再从冻结配置生成本轮环境。MI base URL 只替换为本轮原字节转发器，

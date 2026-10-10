@@ -272,8 +272,12 @@ WORKLOAD="$(uv run --project "$REPO" python -m roboguide_eval.b1_workload "$INPU
     || { FAILURE_REASON=invalid_b1_workload; exit 1; }
 EPISODE_ID="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^episode_id=//p')"
 SEED="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^seed=//p')"
+DEPLOYMENT_ARGS=()
+if [[ -n "${ROBOGUIDE_B1_DEPLOYMENT:-}" ]]; then
+    DEPLOYMENT_ARGS=(--declaration "$ROBOGUIDE_B1_DEPLOYMENT")
+fi
 DEPLOYMENT_ASSIGNMENTS="$(uv run --project "$REPO" python -m roboguide_eval.b1_deployment \
-    --run "$RUN" --scenario "$SCENARIO" --emos-root "$EMOS_ROOT")" \
+    --run "$RUN" --scenario "$SCENARIO" --emos-root "$EMOS_ROOT" "${DEPLOYMENT_ARGS[@]}")" \
     || { FAILURE_REASON=invalid_b1_deployment; exit 1; }
 eval "$DEPLOYMENT_ASSIGNMENTS"
 if [[ "$RELOCATION_ENABLED" == 1 && ( ${#GOAL_REGION_ARGS[@]} != 0 \

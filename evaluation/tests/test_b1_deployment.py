@@ -19,6 +19,7 @@ from roboguide_eval.b1_deployment import MAX_DECLARATION_BYTES, freeze_deploymen
 ROOT = Path(__file__).resolve().parents[2]
 NAVIGATION = ROOT / "scenarios/e1-shared-world-episode-51"
 RELOCATION = ROOT / "scenarios/e1-shared-world-relocation"
+DIST_MAN = RELOCATION / "b1-deployment-dist-man.json"
 
 
 def offline_environment(tmp_path: Path) -> dict[str, str]:
@@ -29,6 +30,9 @@ def offline_environment(tmp_path: Path) -> dict[str, str]:
         config = emos / declaration.habitat_config
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text("# Offline path fixture only; not an executable Habitat configuration.\n")
+    config = emos / load_deployment(RELOCATION, declaration_path=DIST_MAN).habitat_config
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("# Offline distance-manipulation config path fixture.\n")
     commands = tmp_path / "tripwires"
     commands.mkdir()
     for name in ("curl", "conda", "ss"):
@@ -122,6 +126,37 @@ def test_real_runner_prepares_the_selected_deployment(tmp_path: Path, scenario: 
         assert settings.review_enabled is True
     else:
         assert not (run / "relocation-registration-profile.json").exists()
+
+
+def test_real_runner_selects_an_explicit_declaration_before_startup(tmp_path: Path) -> None:
+    """The generic relocation runner freezes the selected variant without a service or model."""
+    selected = tmp_path / "explicit deployment.json"
+    selected.write_bytes(DIST_MAN.read_bytes())
+    result, run = prepare(tmp_path, RELOCATION, {"ROBOGUIDE_B1_DEPLOYMENT": str(selected)})
+    assert result.returncode == 0, result.stderr
+    used = json.loads((run / "b1-deployment-used.json").read_bytes())
+    declaration = load_deployment(RELOCATION, declaration_path=selected)
+    assert used["declaration"]["habitat_config"] == declaration.habitat_config
+    assert used["declaration"]["max_steps"] == 4000
+    assert used["relocation_completion_binding"] is True
+    assert (
+        used["habitat_config_sha256"]
+        == hashlib.sha256(Path(used["habitat_config_path"]).read_bytes()).hexdigest()
+    )
+    assert (run / "b1-input-used.json").read_bytes() == (tmp_path / "frozen.json").read_bytes()
+    assert not (run / "b1-request-record.json").exists()
+    assert not (run / "shared-bridge.log").exists()
+    assert not (run / "controller.sqlite3").exists()
+
+
+def test_invalid_explicit_declaration_cannot_fall_back(tmp_path: Path) -> None:
+    """A selected missing declaration fails rather than silently loading the height variant."""
+    result, run = prepare(
+        tmp_path, RELOCATION, {"ROBOGUIDE_B1_DEPLOYMENT": str(tmp_path / "missing.json")}
+    )
+    assert result.returncode != 0
+    assert not (run / "b1-deployment-used.json").exists()
+    assert not (run / "b1-request-record.json").exists()
 
 
 def test_relocation_custom_ports_reach_every_workflow(tmp_path: Path) -> None:

@@ -23,6 +23,15 @@ deployment environment settings and must be frozen separately before execution.
 No MissionPlan, task allocation, object source ID, or benchmark result is supplied
 by this directory.
 
+To select another original Fetch/Stretch manipulation configuration without
+duplicating the Node/MI template, set `ROBOGUIDE_B1_DEPLOYMENT` to an explicit
+deployment declaration. The maintained `b1-deployment-dist-man.json` selects
+original `llm_dist_man.yaml` and its unchanged 4,000-step budget. The input must
+identify that dataset; neither variant selects an episode or supplies a plan.
+The paired driver accepts a source-gated `b1_deployment` path and checks it
+against the native arm's configuration before launch. Preparation alone does not
+prove native deployment completeness, actual reset comparability or execution.
+
 An explicit frozen `roboguide.e1.b1-input/v0.1` workload is required. Its episode,
 scene, dataset revision/digest, seed and high-level instruction must come from the
 selected original workload. The official relocation goal concerns objects at
@@ -73,6 +82,7 @@ remain in effect; current operation support and resource authority stay in Contr
 The profile is not proof of a manipulation route or official success. See
 [ADR-0071](../../docs/decisions/0071-operation-aware-reset-admission.md).
 
-This wiring and its startup checks are offline-tested. A full production MI and
-physical relocation preflight remains pending; do not treat preparation or
-deterministic fixture plans as an experiment result or batch-readiness evidence.
+This wiring and its startup checks are offline-tested. Each selected population
+still needs its own frozen release, actual reset comparison and runtime evidence;
+do not treat preparation, a prior variant's execution or deterministic fixture
+plans as that population's experiment result or batch-readiness evidence.

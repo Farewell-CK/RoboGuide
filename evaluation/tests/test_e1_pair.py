@@ -85,7 +85,7 @@ def setup_pair(root: Path) -> tuple[Path, Path]:
             "habitat", "test", digest(hashes["task_spec"]), digest(hashes["habitat_config"])
         ),
         benchmark_authority=BenchmarkAuthorityIdentity(
-            "pddl_success", digest(hashes["benchmark_authority"]), {}
+            "pddl_success", digest(hashes["benchmark_authority"]), {"max_episode_steps": 4000}
         ),
         embodiment_profile=EmbodimentProfile(
             (EmbodimentAgent(0, "RobotA"), EmbodimentAgent(1, "RobotB"))
@@ -158,6 +158,114 @@ def setup_pair(root: Path) -> tuple[Path, Path]:
     config_path = root / "worker.json"
     write_json(config_path, config)
     return population_path, config_path
+
+
+def select_deployment(config_path: Path, *, native_config: str = "test.yaml") -> Path:
+    """Pin an explicit deployment in the test code view without changing workload or models."""
+    config = json.loads(config_path.read_text())
+    selected = Path(config["code_root"]) / "deployment.json"
+    write_json(
+        selected,
+        {
+            "schema_version": "roboguide.e1.b1-deployment/v0.2",
+            "habitat_config": "habitat-baselines/habitat_baselines/config/" + native_config,
+            "max_steps": 4000,
+            "enable_relocation": True,
+            "relocation_completion_binding": True,
+        },
+    )
+    config["b1_deployment"] = "deployment.json"
+    config["source_sha256"][str(selected)] = file_digest(selected)
+    write_json(config_path, config)
+    return selected
+
+
+def test_explicit_deployment_is_pinned_and_propagated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the frozen selection, never an inherited variant, reaches the B1 child environment."""
+    population, config = setup_pair(tmp_path)
+    selected = select_deployment(config)
+    spec = PairSpec.load(population, config, "pair-0")
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-test-credential")
+    monkeypatch.setenv("ROBOGUIDE_B1_DEPLOYMENT", "/wrong/inherited.json")
+    env = arm_environment(spec, tmp_path / "arm", spec.ports["proxy"])
+    assert env["ROBOGUIDE_B1_DEPLOYMENT"] == str(selected)
+    selected.write_text("changed after freeze")
+    with pytest.raises(ValueError, match="source"):
+        spec.verify_sources()
+
+
+def test_default_deployment_ignores_inherited_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Existing frozen batches retain their runner default when no variant was selected."""
+    population, config = setup_pair(tmp_path)
+    spec = PairSpec.load(population, config, "pair-0")
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-test-credential")
+    monkeypatch.setenv("ROBOGUIDE_B1_DEPLOYMENT", "/wrong/inherited.json")
+    env = arm_environment(spec, tmp_path / "arm", spec.ports["proxy"])
+    assert "ROBOGUIDE_B1_DEPLOYMENT" not in env
+
+
+def test_explicit_deployment_requires_a_source_gate(tmp_path: Path) -> None:
+    """A readable declaration alone cannot authorize an unpinned deployment variant."""
+    population, config_path = setup_pair(tmp_path)
+    selected = select_deployment(config_path)
+    config = json.loads(config_path.read_text())
+    del config["source_sha256"][str(selected)]
+    write_json(config_path, config)
+    with pytest.raises(ValueError, match="source gate missing"):
+        PairSpec.load(population, config_path, "pair-0")
+
+
+def test_explicit_deployment_must_match_the_native_arm(tmp_path: Path) -> None:
+    """A fully hashed wrong native config is still rejected before either arm starts."""
+    population, config = setup_pair(tmp_path)
+    select_deployment(config, native_config="another.yaml")
+    with pytest.raises(ValueError, match="Habitat configuration differ"):
+        PairSpec.load(population, config, "pair-0")
+
+
+@pytest.mark.parametrize("steps", [None, True, 5000])
+def test_explicit_deployment_must_match_the_frozen_budget(tmp_path: Path, steps: object) -> None:
+    """Correct config identity cannot hide a changed or unknown official step limit."""
+    population_path, config_path = setup_pair(tmp_path)
+    select_deployment(config_path)
+    document = json.loads(population_path.read_text())
+    document["benchmark_authority"]["parameters"]["max_episode_steps"] = steps
+    document.pop("digest")
+    document["digest"] = digest(document)
+    population = PopulationManifest.from_json(document)
+    write_json(population_path, population.to_json())
+    config = json.loads(config_path.read_text())
+    config["population_digest"] = population.digest
+    write_json(config_path, config)
+    with pytest.raises(ValueError, match="step budget differ"):
+        PairSpec.load(population_path, config_path, "pair-0")
+
+
+@pytest.mark.parametrize("relative", ["../outside.json", "/absolute.json", ""])
+def test_explicit_deployment_rejects_unsafe_paths(tmp_path: Path, relative: str) -> None:
+    """A declaration selector cannot leave the frozen code view or silently use the default."""
+    population, config_path = setup_pair(tmp_path)
+    config = json.loads(config_path.read_text())
+    config["b1_deployment"] = relative
+    write_json(config_path, config)
+    with pytest.raises(ValueError, match="B1 deployment|pair field"):
+        PairSpec.load(population, config_path, "pair-0")
+
+
+def test_explicit_deployment_rejects_an_escaping_symlink(tmp_path: Path) -> None:
+    """An apparently relative declaration cannot resolve to unrelated external files."""
+    population, config_path = setup_pair(tmp_path)
+    selected = select_deployment(config_path)
+    outside = tmp_path / "external.json"
+    outside.write_bytes(selected.read_bytes())
+    selected.unlink()
+    selected.symlink_to(outside)
+    with pytest.raises(ValueError, match="outside the frozen code view"):
+        PairSpec.load(population, config_path, "pair-0")
 
 
 def write_observations(

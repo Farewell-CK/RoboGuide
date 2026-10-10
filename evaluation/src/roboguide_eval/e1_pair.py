@@ -24,6 +24,7 @@ from typing import cast
 from xml.etree import ElementTree
 
 from roboguide_eval.accounting import AccountingProxyConfig, read_accounting_log
+from roboguide_eval.b1_deployment import load_deployment
 from roboguide_eval.b1_workload import load_b1_workload
 from roboguide_eval.e1_attempt import terminate_owned_session
 from roboguide_eval.e1_batch import _capture_log, file_digest, read_json, write_json
@@ -144,6 +145,14 @@ class PairSpec:
             Path(required_text(config, "habitat_python")),
         ]
         code = Path(required_text(config, "code_root"))
+        if "b1_deployment" in config:
+            relative = Path(required_text(config, "b1_deployment"))
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError("unsafe relative B1 deployment path")
+            selected = code / relative
+            if not selected.resolve(strict=True).is_relative_to(code.resolve()):
+                raise ValueError("B1 deployment resolves outside the frozen code view")
+            mandatory.append(selected)
         mandatory += [
             code / "target/debug" / name for name in ("integration-server", "roboguide-node")
         ]
@@ -192,6 +201,18 @@ class PairSpec:
             raise ValueError("frozen MI model or Provider configuration differs from population")
         spec = cls(population, row, ordinal, config, sources, ports)
         spec.verify_sources()
+        if "b1_deployment" in config:
+            declaration = load_deployment(
+                code, declaration_path=code / required_text(config, "b1_deployment")
+            )
+            if declaration.habitat_config != (
+                "habitat-baselines/habitat_baselines/config/"
+                + required_text(config, "native_config")
+            ):
+                raise ValueError("B1 deployment and native Habitat configuration differ")
+            steps = population.benchmark_authority.parameters.get("max_episode_steps")
+            if type(steps) is not int or steps != declaration.max_steps:
+                raise ValueError("B1 deployment and frozen benchmark step budget differ")
         spec.source_identities()
         return spec
 
@@ -399,6 +420,8 @@ def arm_environment(spec: PairSpec, directory: Path, proxy_port: int) -> dict[st
         HABITAT_SIM_LOG="quiet",
         MAGNUM_LOG="quiet",
     )
+    if "b1_deployment" in spec.config:
+        env["ROBOGUIDE_B1_DEPLOYMENT"] = str(code / required_text(spec.config, "b1_deployment"))
     for name, field in (
         ("CONTROLLER_GRPC", "grpc"),
         ("CONTROLLER", "controller"),
