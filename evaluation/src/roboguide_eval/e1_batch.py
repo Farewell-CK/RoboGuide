@@ -437,12 +437,13 @@ def summarize_batch(spec: BatchSpec, results: Mapping[str, JSONObject]) -> JSONO
     """Count tri-state outcomes without converting local completion or unavailable to success."""
     arms: dict[str, JSONValue] = {}
     for arm in ("native", "roboguide"):
+        labels = ("native", "emos") if arm == "native" else (arm,)
         rows: list[JSONObject] = []
         for result in results.values():
             values = result.get("arms", [])
             if isinstance(values, list):
                 rows.extend(
-                    row for row in values if isinstance(row, dict) and row.get("arm") == arm
+                    row for row in values if isinstance(row, dict) and row.get("arm") in labels
                 )
         formal = [
             row

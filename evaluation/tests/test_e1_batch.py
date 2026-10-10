@@ -330,12 +330,26 @@ def test_supervisor_attaches_to_live_worker_without_new_command(tmp_path: Path) 
         worker.wait(timeout=10)
 
 
-def test_summary_preserves_false_and_unknown(tmp_path: Path) -> None:
-    """Task completion never supplies missing official truth or strict fairness evidence."""
-    spec = BatchSpec.load(make_manifest(tmp_path, [outcome()]))
-    result = summarize_batch(spec, {"pair-0": outcome()})
+@pytest.mark.parametrize("native_label", ["native", "emos"])
+def test_summary_preserves_false_and_unknown(tmp_path: Path, native_label: str) -> None:
+    """Both native labels preserve tri-state official truth independently of local completion."""
+    outcomes = [outcome() for _ in range(3)]
+    for document, official in zip(outcomes, (True, False, None), strict=True):
+        native = cast(list[JSONObject], document["arms"])[0]
+        native["arm"] = native_label
+        native["official_pddl_success"] = official
+    spec = BatchSpec.load(make_manifest(tmp_path, outcomes))
+    result = summarize_batch(spec, {f"pair-{index}": row for index, row in enumerate(outcomes)})
     assert result["strict_fairness_claim"] is False
-    assert cast(JSONObject, cast(JSONObject, result["arms"])["native"])["official_false"] == 1
+    native_summary = cast(JSONObject, cast(JSONObject, result["arms"])["native"])
+    assert native_summary["finished"] == 3
+    assert native_summary["official_true"] == 1
+    assert native_summary["official_false"] == 1
+    assert native_summary["official_unavailable"] == 1
+    roboguide_summary = cast(JSONObject, cast(JSONObject, result["arms"])["roboguide"])
+    assert roboguide_summary["official_true"] == 0
+    assert roboguide_summary["official_unavailable"] == 3
+    assert roboguide_summary["formal_admitted"] == 3
 
 
 def test_measured_probe_enables_two_actual_workers(tmp_path: Path) -> None:
