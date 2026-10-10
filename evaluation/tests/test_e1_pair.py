@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,6 +27,7 @@ from roboguide_eval.e1_fairness import (
 )
 from roboguide_eval.e1_pair import (
     PairSpec,
+    ResourceSampler,
     arm_command,
     arm_environment,
     collect_arm,
@@ -567,6 +570,94 @@ def test_reset_comparison_requires_actual_pose_and_goal_evidence() -> None:
         == "mismatch"
     )
     assert compare_reset(initial, {"habitat_seed_config": 40})["status"] == "unavailable"
+
+
+@pytest.mark.parametrize(
+    ("records", "expected"),
+    [
+        ([(101, "G", "570 MiB")], 570.0),
+        ([(101, "C", "510 MiB"), (102, "G", "573 MiB")], 1083.0),
+        ([(101, "C+G", "570 MiB"), (101, "C+G", "570 MiB")], 570.0),
+        ([(999, "C", "N/A")], 0.0),
+        ([(103, "G", "100 MiB")], 0.0),
+        ([], 0.0),
+    ],
+)
+def test_gpu_sampling_includes_graphics_and_only_the_exact_owned_session(
+    monkeypatch: pytest.MonkeyPatch, records: list[tuple[int, str, str]], expected: float
+) -> None:
+    """Count graphics-only Habitat and mixed native processes without other owners or duplicates."""
+    sampler = ResourceSampler(1)
+
+    def query(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Return one real-shaped complete process list without invoking a GPU or simulator."""
+        assert argv == ["nvidia-smi", "--id=1", "--query", "--xml-format"]
+        sampler.stop.set()
+        content = "".join(
+            f"<process_info><pid>{pid}</pid><type>{kind}</type>"
+            f"<used_memory>{memory}</used_memory></process_info>"
+            for pid, kind, memory in records
+        )
+        return subprocess.CompletedProcess(
+            argv, 0, f"<nvidia_smi_log><gpu><processes>{content}</processes></gpu></nvidia_smi_log>"
+        )
+
+    def session(pid: int) -> int:
+        """Bind live observed descendants to this arm and ignore an exited PID."""
+        if pid == 103:
+            raise ProcessLookupError("process exited during observation")
+        return 100 if pid in (101, 102) else 999
+
+    monkeypatch.setattr(subprocess, "run", query)
+    monkeypatch.setattr(os, "getsid", session)
+    sampler.observe(100)
+    assert sampler.peak == expected and sampler.samples == 1 and sampler.unavailable == 0
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "not XML",
+        "<nvidia_smi_log><gpu/></nvidia_smi_log>",
+        "<nvidia_smi_log><gpu><processes/></gpu><gpu><processes/></gpu></nvidia_smi_log>",
+        "<nvidia_smi_log><gpu><processes><process_info><pid>101</pid>"
+        "<used_memory>N/A</used_memory></process_info></processes></gpu></nvidia_smi_log>",
+        "<nvidia_smi_log><gpu><processes><process_info><pid>101</pid>"
+        "<used_memory>nan MiB</used_memory></process_info></processes></gpu></nvidia_smi_log>",
+        "<nvidia_smi_log><gpu><processes><process_info><pid>101</pid>"
+        "<used_memory>-1 MiB</used_memory></process_info></processes></gpu></nvidia_smi_log>",
+        "<nvidia_smi_log><gpu><processes><process_info><pid>101</pid>"
+        "<used_memory>10 MiB</used_memory></process_info><process_info><pid>101</pid>"
+        "<used_memory>20 MiB</used_memory></process_info></processes></gpu></nvidia_smi_log>",
+        " " * (2 * 1024 * 1024 + 1),
+    ],
+    ids=[
+        "invalid",
+        "missing",
+        "multiple-gpu",
+        "unavailable",
+        "nan",
+        "negative",
+        "conflict",
+        "oversize",
+    ],
+)
+def test_gpu_sampling_failure_is_not_a_zero_usage_observation(
+    monkeypatch: pytest.MonkeyPatch, payload: str
+) -> None:
+    """An incomplete or contradictory GPU read keeps prior evidence and cannot open capacity."""
+    sampler = ResourceSampler(0)
+    sampler.peak = 123.0
+
+    def query(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Expose one failed observational response while retaining a previous peak."""
+        sampler.stop.set()
+        return subprocess.CompletedProcess(argv, 0, payload)
+
+    monkeypatch.setattr(subprocess, "run", query)
+    monkeypatch.setattr(os, "getsid", lambda pid: 100)
+    sampler.observe(100)
+    assert sampler.peak == 123.0 and sampler.samples == 0 and sampler.unavailable == 1
 
 
 def test_owned_process_logs_and_exit_are_preserved(

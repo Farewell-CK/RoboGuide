@@ -66,6 +66,10 @@ worker 中核对原始 dataset 文件、episode/scene 唯一性，使用原生 `
 但第一次真实返回的初始化和第一 episode 终态不可被后续 reset 覆盖。观察器不添加
 reset/action/step/RNG 调用。异常仍原样传播；提前关闭或未执行的 episode 官方结果
 保持 unavailable。终态值来自原 `Env.step` 后已计算的 `Env.get_metrics`。
+原生 RL wrapper 可以在 base `Env.episode_over` 仍为 false 时因官方成功返回 done。
+观察器同时读取原始 `RLEnv.step` 已返回的 done/info，在 VectorEnv 原有自动 reset
+之前保存首个 episode 终态；不再次调用 `get_done`、不追加 step/reset，也不把 metric
+为 true 单独当作 episode 已结束。后续 reset 不能覆盖首 episode 的证据。
 每 32 次成功返回的原始 step 保存一个小型 `native-progress.json`，reset/终态也保存。
 原生父进程异常可能直接终止 VectorEnv worker，不能假设其 `close` 必然调用。终态
 文件缺失时，进度只证明已执行步数下界；最终步数、终态和官方结果保持 unavailable。
@@ -99,7 +103,10 @@ Provider 或 harness 失败。真实 HTTP 失败和独立采集/身份错误仍�
 归为 infrastructure 并留证，由 batch 既定连续基础设施失败政策决定暂停。
 出口 `0` 仅表示 driver 已保留一次结果，不表示 SUT/benchmark 成功。
 
-GPU 采样每五秒读取本 arm session 内进程内存，仅作为 batch capacity 证据；它不
+GPU 采样每五秒读取所选 GPU 的计算和图形进程内存，只累计本 arm 的准确 session；
+Graphics-only Habitat 不能因为未出现在 compute-apps 列表中而被记作零。
+同 PID 的相同条目去重，未知、矛盾或超出响应预算的读取记录 unavailable。
+这些读数仅作为 batch capacity 证据；它不
 调度或终止其他 GPU owner。原生视频仍使用原 evaluator 的缓存和步数上界，其 CPU
 内存及时长需在首 pair 测量后评估。不能仅用显存充裕推断四个 worker 已安全。
 启动与重启互斥来自 `e1-batch` durable claim，不通过重新调用已消费 pair 获得成功。

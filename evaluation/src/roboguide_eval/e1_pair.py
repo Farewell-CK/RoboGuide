@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
+from xml.etree import ElementTree
 
 from roboguide_eval.accounting import AccountingProxyConfig, read_accounting_log
 from roboguide_eval.b1_workload import load_b1_workload
@@ -469,32 +470,50 @@ class ResourceSampler:
         self.unavailable = 0
 
     def observe(self, pid: int) -> None:
-        """Sum GPU processes in this exact child session, leaving other owners untouched."""
+        """Sum graphics and compute memory in this exact session, rejecting unknown reads."""
         while not self.stop.is_set():
             try:
                 result = subprocess.run(
                     [
                         "nvidia-smi",
                         f"--id={self.gpu}",
-                        "--query-compute-apps=pid,used_memory",
-                        "--format=csv,noheader,nounits",
+                        "--query",
+                        "--xml-format",
                     ],
                     check=True,
                     capture_output=True,
                     text=True,
                     timeout=5,
                 )
-                total = 0.0
-                for line in result.stdout.splitlines():
-                    raw_pid, memory = line.split(",", 1)
+                if len(result.stdout) > 2 * 1024 * 1024:
+                    raise ValueError("GPU response exceeds observation budget")
+                gpus = ElementTree.fromstring(result.stdout).findall("gpu")
+                if len(gpus) != 1 or gpus[0].find("processes") is None:
+                    raise ValueError("selected GPU process observation unavailable")
+                records = gpus[0].findall("processes/process_info")
+                if len(records) > 4096:
+                    raise ValueError("GPU process observation budget exhausted")
+                memory_by_pid: dict[int, float] = {}
+                for record in records:
+                    gpu_pid = int(record.findtext("pid", ""))
                     try:
-                        if os.getsid(int(raw_pid)) == pid:
-                            total += float(memory.strip())
+                        if os.getsid(gpu_pid) != pid:
+                            continue
                     except ProcessLookupError:
                         continue
+                    memory = record.findtext("used_memory", "").split()
+                    if len(memory) != 2 or memory[1] != "MiB":
+                        raise ValueError("owned GPU process memory unavailable")
+                    value = float(memory[0])
+                    if not math.isfinite(value) or value < 0:
+                        raise ValueError("invalid owned GPU memory observation")
+                    if gpu_pid in memory_by_pid and memory_by_pid[gpu_pid] != value:
+                        raise ValueError("conflicting owned GPU process observations")
+                    memory_by_pid[gpu_pid] = value
+                total = sum(memory_by_pid.values())
                 self.peak = max(self.peak, total)
                 self.samples += 1
-            except (OSError, ValueError, subprocess.SubprocessError):
+            except (OSError, ValueError, ElementTree.ParseError, subprocess.SubprocessError):
                 self.unavailable += 1
             self.stop.wait(5)
 
