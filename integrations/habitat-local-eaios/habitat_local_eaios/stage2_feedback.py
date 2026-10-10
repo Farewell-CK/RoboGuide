@@ -147,9 +147,11 @@ class Stage2ExecutionFeedback:
         *,
         completion: Callable[[str, str, bool], None] | None = None,
         completion_binding: RelocationCompletionBinding | None = None,
+        peer_contracts: Callable[[], Mapping[str, Stage2ExecutionContract]] | None = None,
     ) -> None:
-        """Freeze contracts while retaining no simulator or control authority."""
+        """Freeze own contracts, optionally reading a deployment-owned active-peer projection."""
         self._contracts = dict(contracts)
+        self._peer_contracts = peer_contracts
         self._record = record
         self._completion = completion
         self._completion_binding = completion_binding
@@ -263,7 +265,7 @@ class Stage2ExecutionFeedback:
             content += "\n\nLocal execution feedback:\n" + json.dumps(
                 pending.document, allow_nan=False, sort_keys=True
             )
-        if self._completion_binding is not None:
+        if self._completion_binding is not None or self.has_live_peer_contracts:
             content += "\n\nCommitted peer execution scope:\n" + json.dumps(
                 self.peer_execution_scope(agent_name), allow_nan=False, sort_keys=True
             )
@@ -292,11 +294,20 @@ class Stage2ExecutionFeedback:
         """Expose model-bearing peers only; completion-idle cannot receive original messages."""
         return frozenset(
             name
-            for name, contract in self._contracts.items()
+            for name, contract in self._peer_contract_snapshot().items()
             if name != agent_name
             and contract.operation != "unassigned"
             and not self.operation_completed(name)
         )
+
+    def _peer_contract_snapshot(self) -> Mapping[str, Stage2ExecutionContract]:
+        """Read peer metadata separately from immutable owner contracts and skill receipts."""
+        return dict(self._peer_contracts() if self._peer_contracts is not None else self._contracts)
+
+    @property
+    def has_live_peer_contracts(self) -> bool:
+        """Identify explicit dynamic endpoint bindings without changing legacy peer rules."""
+        return self._peer_contracts is not None
 
     def peer_execution_scope(self, agent_name: str) -> dict[str, Any]:
         """Describe existing local commitments without transferring Control's ownership."""
@@ -320,7 +331,7 @@ class Stage2ExecutionFeedback:
                     ),
                     "canonical_contract": dict(contract.as_dict(), attempt_id=contract.attempt_id),
                 }
-                for name, contract in sorted(self._contracts.items())
+                for name, contract in sorted(self._peer_contract_snapshot().items())
                 if name != agent_name
             ],
         }

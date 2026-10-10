@@ -39,6 +39,7 @@ from test_shared_world import (  # noqa: E402
     RecordingDiagnostics,
     WaitSkillPolicy,
 )
+from test_stage2_contract import FakeModel  # noqa: E402
 
 
 def invocation(
@@ -333,6 +334,174 @@ def vendor_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     module = ModuleType("habitat_mas.utils")
     module.AgentArguments = Arguments  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "habitat_mas.utils", module)
+
+
+def task_bindings(tmp_path: Path) -> tuple[live_bindings.LivePolicyBindings, Runtime, Actor]:
+    """Install production per-attempt hooks over four actual fake policies, without physics."""
+    actor, gym = Actor(4), Gym({})
+    runtime = Runtime(tmp_path, 4, gym, actor)
+    assignment = {
+        f"agent_{agent}": Arguments(f"agent_{agent}", "robot", "", "Nothing to do", [])
+        for agent in range(4)
+    }
+    bindings = live_bindings.LivePolicyBindings(runtime, actor, assignment, lambda: 0)
+    return bindings, runtime, actor
+
+
+def bind_task(
+    bindings: live_bindings.LivePolicyBindings, agent: int, task: int, *, relocation: bool = False
+) -> CanonicalInvocation:
+    """Deliver a valid fresh Task whose canonical target is never transferred to a peer."""
+    request = invocation(task, ("alpha", "beta", "beta"))
+    if relocation:
+        body = request.as_dict()
+        body["operation"] = "object.relocate@v1"
+        body["objective"] = f"Relocate object-{task} to target-{task}"
+        body["parameters"] = {
+            "object": f"object-{task}",
+            "source": f"initial-location:{task:064x}",
+            "destination": f"target-{task}",
+        }
+        request = parse_canonical_invocation({"invocation": body})
+    bindings.bind(
+        agent,
+        request,
+        Arguments(f"agent_{agent}", "robot", request.objective, "bound task", []),
+    )
+    return request
+
+
+class PeerModel(FakeModel):
+    """Retain complete original-shaped tool identity so production skill feedback runs unmocked."""
+
+    def chat(self, content: str, crab_planning: bool = False) -> Any:
+        """Return the selected raw message with an exact call-bound synthetic vendor receipt."""
+        result = super().chat(content, crab_planning=crab_planning)
+        if not crab_planning:
+            name, arguments = result
+            identity = f"call-{self.calls}"
+            self.chat_history[-1][1]["tool_calls"] = [
+                {"id": identity, "function": {"name": name, "arguments": json.dumps(arguments)}}
+            ]
+            self.chat_history[-1][2].update(tool_call_id=identity, name=name, content="Success")
+        return result
+
+
+def request_model(target: str, *, relocation: bool = False) -> FakeModel:
+    """Return one original-shaped raw message and retain the offered target schema."""
+    model = PeerModel(("send_request", {"target_agent": target, "request": "Report your progress"}))
+    if relocation:
+        for name, fields in (
+            ("pick", ["target_obj"]),
+            ("place", ["target_obj", "target_location"]),
+        ):
+            model.actions.append(
+                {
+                    "name": name,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {field: {"type": "string"} for field in fields},
+                        "required": fields,
+                    },
+                }
+            )
+    model.actions.append(
+        {
+            "name": "send_request",
+            "parameters": {
+                "type": "object",
+                "properties": {"target_agent": {"type": "string"}, "request": {"type": "string"}},
+                "required": ["target_agent", "request"],
+            },
+        }
+    )
+    return model
+
+
+def observe_wait_exit(bindings: live_bindings.LivePolicyBindings, agent: int) -> None:
+    """Supply definite original-shaped wait termination to the production feedback reducer."""
+    feedback = bindings.feedbacks[agent]
+    feedback.physical_step()
+    feedback._termination(
+        f"agent_{agent}",
+        SimpleNamespace(_cur_skill_step=[1], _max_skill_steps=500),
+        {"skill_name": ["wait"], "batch_idx": [0], "hl_wants_skill_term": [False]},
+        ([True], [False], [False]),
+        True,
+        1,
+    )
+
+
+@pytest.mark.parametrize("relocation", [False, True])
+def test_live_guard_accepts_only_current_model_bearing_peers(
+    tmp_path: Path, relocation: bool
+) -> None:
+    """Late activation, completion and reuse update communication without resetting a live peer."""
+    bindings, runtime, actor = task_bindings(tmp_path)
+    try:
+        own = bind_task(bindings, 0, 0, relocation=relocation)
+        first_model = request_model("agent_1", relocation=relocation)
+        cast(Any, actor.originals[0]).llm_model = first_model
+        with pytest.raises(IntegrationError, match="another active agent"):
+            actor.originals[0].chat("before peer activation")
+        bind_task(bindings, 1, 1, relocation=relocation)
+        assert actor.originals[0].chat("after peer activation")[0] == "send_request"
+        observe_wait_exit(bindings, 0)
+        assert actor.originals[0].dispatches == 1
+        assert first_model.offered_actions is not None
+        message = next(
+            tool for tool in first_model.offered_actions if tool["name"] == "send_request"
+        )
+        assert message["parameters"]["properties"]["target_agent"]["enum"] == ["agent_1"]
+        assert bindings.feedbacks[0].request_peer_names("agent_0") == frozenset({"agent_1"})
+        assert bindings.feedbacks[1].request_peer_names("agent_1") == frozenset({"agent_0"})
+        cast(Any, actor.originals[1]).llm_model = request_model("agent_0", relocation=relocation)
+        assert actor.originals[1].chat("reciprocal peer request")[0] == "send_request"
+        observe_wait_exit(bindings, 1)
+        assert (
+            bindings.feedbacks[0].peer_execution_scope("agent_0")["operation_delegation_supported"]
+            is False
+        )
+        bindings.finish(1)
+        with pytest.raises(IntegrationError, match="another active agent"):
+            actor.originals[0].chat("completed peers cannot receive requests")
+        assert bindings.feedbacks[0].peer_execution_scope("agent_0")["peers"] == []
+        later = bind_task(bindings, 1, 2, relocation=relocation)
+        scope = bindings.feedbacks[0].peer_execution_scope("agent_0")
+        assert scope["peers"][0]["canonical_contract"]["invocation_digest"] == later.request_key()
+        assert actor.originals[0].chat("new peer attempt")[0] == "send_request"
+        observe_wait_exit(bindings, 0)
+        assert actor.originals[0].initializations == 1
+        assert bindings.feedbacks[0]._contracts["agent_0"].invocation_digest == own.request_key()
+        assert runtime._gym_env is not None
+        assert actor.calls == runtime._gym_env.steps == 0
+        cast(Any, actor.originals[0]).llm_model = request_model("agent_2", relocation=relocation)
+        with pytest.raises(IntegrationError, match="another active agent"):
+            actor.originals[0].chat("registered but unassigned endpoint")
+    finally:
+        bindings.close()
+
+
+def test_failed_live_binding_does_not_advertise_a_peer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Failed native initialization rolls back its guard without changing current peer authority."""
+    bindings, _, actor = task_bindings(tmp_path)
+
+    def fail_init(*args: Any, **kwargs: Any) -> None:
+        """Fail before the attempted endpoint becomes a model-bearing peer."""
+        raise RuntimeError("native init sentinel")
+
+    try:
+        bind_task(bindings, 0, 0)
+        monkeypatch.setattr(actor.originals[1], "init_agent", fail_init)
+        with pytest.raises(RuntimeError, match="native init sentinel"):
+            bind_task(bindings, 1, 1)
+        assert bindings.feedbacks[0].request_peer_names("agent_0") == frozenset()
+        assert actor.originals[0].initializations == 1
+        assert actor.originals[0].chat("untouched own navigation")[1] == {"target_obj": "target-0"}
+    finally:
+        bindings.close()
 
 
 @pytest.mark.parametrize("count", [1, 2, 3, 4])

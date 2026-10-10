@@ -32,6 +32,7 @@ class LivePolicyBindings:
         self.originals: dict[int, Any] = {}
         self.restores: dict[int, Callable[[], None]] = {}
         self.feedbacks: dict[int, Stage2ExecutionFeedback] = {}
+        self.contracts: dict[int, Stage2ExecutionContract] = {}
         wait_type = _original_wait_skill_type()
         for agent, policy in enumerate(actor._active_policies):
             original = policy._high_level_policy.llm_agent
@@ -62,6 +63,14 @@ class LivePolicyBindings:
         self.feedback_audit.record(
             dict(document, completed_simulator_steps=self.step(), observed_unix=time.time())
         )
+
+    def peer_contracts(self) -> dict[str, Stage2ExecutionContract]:
+        """Project current model-bearing attempts without changing any endpoint's own contract."""
+        return {
+            self.originals[agent].name: contract
+            for agent, contract in self.contracts.items()
+            if not self.feedbacks[agent].operation_completed(self.originals[agent].name)
+        }
 
     def idle(self, agent: int) -> None:
         """Use original wait after local completion or before the first assignment."""
@@ -112,7 +121,11 @@ class LivePolicyBindings:
                 state.complete(action, succeeded)
 
         feedback = Stage2ExecutionFeedback(
-            contracts, self.record_feedback, completion=observed, completion_binding=completion
+            contracts,
+            self.record_feedback,
+            completion=observed,
+            completion_binding=completion,
+            peer_contracts=self.peer_contracts,
         )
         feedback.install([policy])
         try:
@@ -176,7 +189,6 @@ class LivePolicyBindings:
         original.init_agent = existing_attempt_init
         self.feedbacks[agent] = feedback
         self.runtime._stage2_accounting_agents[f"agent_{agent}"] = original
-        policy._cur_call_high_level.fill_(True)
 
         def restore() -> None:
             """Detach only this attempt's hooks; peers keep their model and termination taps."""
@@ -190,9 +202,12 @@ class LivePolicyBindings:
                 feedback.close()
 
         self.restores[agent] = restore
+        policy._cur_call_high_level.fill_(True)
+        self.contracts[agent] = contract
 
     def finish(self, agent: int) -> None:
         """Close one observed attempt and make the released local endpoint passive."""
+        self.contracts.pop(agent, None)
         restore = self.restores.pop(agent, None)
         if restore is not None:
             restore()

@@ -597,22 +597,25 @@ def _guard_agent(
                             else None
                         ),
                     )
-                    if feedback is not None and feedback.has_bound_relocation_completion:
-                        offered_actions = _bound_peer_request_tools(
-                            offered_actions, feedback.request_peer_names(agent_name)
-                        )
-                        offered_message_targets = frozenset(
-                            target
-                            for tool in offered_actions
-                            if tool.get("name") == "send_request"
-                            for target in tool["parameters"]["properties"]["target_agent"]["enum"]
-                        )
-                    model.actions = offered_actions
                 else:
                     destination = contract.expected_destination
                     if destination is None:
                         raise IntegrationError("navigation contract is missing destination")
-                    model.actions = _bound_navigation_tools(original_actions, destination)
+                    offered_actions = _bound_navigation_tools(original_actions, destination)
+                if feedback is not None and (
+                    feedback.has_live_peer_contracts
+                    or (contract.is_relocation and feedback.has_bound_relocation_completion)
+                ):
+                    offered_actions = _bound_peer_request_tools(
+                        offered_actions, feedback.request_peer_names(agent_name)
+                    )
+                    offered_message_targets = frozenset(
+                        target
+                        for tool in offered_actions
+                        if tool.get("name") == "send_request"
+                        for target in tool["parameters"]["properties"]["target_agent"]["enum"]
+                    )
+                model.actions = offered_actions
             try:
                 result = original_model_chat(content, crab_planning=crab_planning)
             finally:
@@ -645,9 +648,11 @@ def _guard_agent(
                     )
                 active_peers = (
                     feedback.request_peer_names(agent_name)
-                    if contract.is_relocation
-                    and feedback is not None
-                    and feedback.has_bound_relocation_completion
+                    if feedback is not None
+                    and (
+                        feedback.has_live_peer_contracts
+                        or (contract.is_relocation and feedback.has_bound_relocation_completion)
+                    )
                     else peer_names
                 )
                 contract.validate(agent_name, action, active_peers, relocation_state)
@@ -677,6 +682,9 @@ def _guard_agent(
             }
             if feedback is not None and feedback.has_bound_relocation_completion:
                 document["relocation_guard_profile"] = "observed-object-relocation/v0.3"
+            if feedback is not None and (
+                feedback.has_bound_relocation_completion or feedback.has_live_peer_contracts
+            ):
                 document["peer_execution_scope"] = feedback.peer_execution_scope(agent_name)
             try:
                 record(document)
