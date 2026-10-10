@@ -54,6 +54,17 @@ at most 32 independent Tasks may reuse the configured endpoints. Simultaneous
 local overlap and Actor migration reject, as do coupled Tasks and unsupported
 continuation. A missing next assignment waits without stepping or calling a model
 for the configured assignment-wait budget, then records an explicit failure.
+The Controller enforces the 32-Task bound for this live profile before accepting
+a plan, including a single Actor's serial Tasks. Legacy topology branches cannot
+bypass the live bound. Startup readiness and the first port check both use the
+declared one-to-four endpoint set; unused endpoints consume no ports.
+
+Guard and feedback peer metadata follow the currently initialized attempts.
+Successful binding exposes a peer, local completion removes it, and Task reuse
+exposes only its new canonical contract. Each endpoint's own contract and model
+history remain intact. Original `send_request` can address only another active,
+model-bearing endpoint; it neither delegates a Task nor establishes delivery or
+peer action success. Failed initialization never advertises a peer.
 
 Navigation retains its exact canonical destination and original chosen Local How.
 Relocation retains exact object/source/destination, Guard, observed feedback and
@@ -64,6 +75,15 @@ already observed condition holds. A negative observation cannot satisfy an
 affirmative detection goal. Missing/malformed data is unavailable. Global
 detector observations are not attributed to one camera/agent. No active search,
 camera motion or semantic goal rewrite is added.
+Detection resolves the admitted PDDL entity index through the original
+`scene_obj_ids` mapping before adding `object_ids_start`, matching the original
+Habitat identity convention. Missing or malformed mappings remain unavailable;
+the adapter never substitutes an identity mapping or refreshes a sensor.
+
+Live relocation admission accepts a source-bound subset of up to four actual
+manipulators. Legacy relocation remains bounded to two endpoints with full
+coverage. Current registration and loaded skills still decide actual support;
+the larger bound gives no other robot an arm.
 
 ## Native workload alignment
 

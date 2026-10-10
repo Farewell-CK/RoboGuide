@@ -168,7 +168,9 @@ PYEOF
 mkdir -p "$RUN"
 RUN="$(cd "$RUN" && pwd)"
 # All endpoints are startup-owned; separate runs may use disjoint port sets.
-PORT_ASSIGNMENTS="$(uv run --project "$REPO" python -m roboguide_eval.b1_ports)"
+DEPLOYMENT_DECLARATION="${ROBOGUIDE_B1_DEPLOYMENT:-$SCENARIO/b1-deployment.json}"
+PORT_ASSIGNMENTS="$(uv run --project "$REPO" python -m roboguide_eval.b1_ports \
+    --declaration "$DEPLOYMENT_DECLARATION")"
 eval "$PORT_ASSIGNMENTS"
 # Preserve existing archives and Harness-owned manifest/log files.
 if [[ -e "$RUN/b1-input-used.json" || -e "$RUN/controller.sqlite3" ]]; then
@@ -276,7 +278,6 @@ WORKLOAD="$(uv run --project "$REPO" python -m roboguide_eval.b1_workload "$INPU
     || { FAILURE_REASON=invalid_b1_workload; exit 1; }
 EPISODE_ID="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^episode_id=//p')"
 SEED="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^seed=//p')"
-DEPLOYMENT_DECLARATION="${ROBOGUIDE_B1_DEPLOYMENT:-$SCENARIO/b1-deployment.json}"
 DEPLOYMENT_ARGS=(--declaration "$DEPLOYMENT_DECLARATION")
 if [[ -n "${ROBOGUIDE_B1_DEPLOYMENT:-}" ]]; then
     DEPLOYMENT_ARGS=(--declaration "$ROBOGUIDE_B1_DEPLOYMENT")

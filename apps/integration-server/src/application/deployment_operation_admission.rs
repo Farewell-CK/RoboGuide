@@ -91,7 +91,8 @@ impl DeploymentOperationAdmission {
             .as_array()
             .ok_or("operation admission lacks endpoint profiles")?;
         let mut endpoints = BTreeSet::new();
-        if profiles.is_empty() || profiles.len() > 2 {
+        let max_endpoints = if allow_subset { 4 } else { 2 };
+        if profiles.is_empty() || profiles.len() > max_endpoints {
             return Err("operation admission endpoint coverage is invalid".into());
         }
         for profile in profiles {
@@ -177,6 +178,7 @@ impl DeploymentOperationAdmission {
 #[cfg(test)]
 mod tests {
     use super::super::deployment_feasibility::{DeploymentFeasibility, content_digest};
+    use super::DeploymentOperationAdmission;
     use crate::*;
     use domain::{NodeId, TimestampMs};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -700,5 +702,112 @@ mod tests {
             format!("sha256:{}", "c".repeat(64)).into();
         seal(&mut changed);
         assert_ne!(first.digest(), load(&changed).unwrap().digest());
+    }
+
+    /// Live operation coverage accepts at most four actual manipulators while legacy stays dual.
+    #[test]
+    fn live_manipulator_bound_matches_the_full_endpoint_registry() {
+        let node_agents = (0..5)
+            .map(|agent| (NodeId::new(format!("node-{agent}")).unwrap(), agent))
+            .collect::<BTreeMap<_, _>>();
+        let node_sources = node_agents
+            .keys()
+            .map(|node| (node.clone(), format!("sha256:{}", "a".repeat(64))))
+            .collect::<BTreeMap<_, _>>();
+        for count in 1..=5 {
+            let mut document = snapshot()["operation_admission"].clone();
+            document["endpoint_profiles"] = serde_json::Value::Array(
+                (0..count)
+                    .map(|agent| {
+                        serde_json::json!({
+                            "agent_id": agent, "node_id": format!("node-{agent}"),
+                            "node_config_digest": format!("sha256:{}", "a".repeat(64)),
+                            "resource_kind": "space", "resource_capacity": 1
+                        })
+                    })
+                    .collect(),
+            );
+            let result = DeploymentOperationAdmission::from_json(
+                &document,
+                &node_agents,
+                &node_sources,
+                true,
+            );
+            assert_eq!(result.is_ok(), count <= 4, "live count {count}");
+            let legacy_agents = node_agents
+                .iter()
+                .take(count)
+                .map(|(node, agent)| (node.clone(), *agent))
+                .collect();
+            assert_eq!(
+                DeploymentOperationAdmission::from_json(
+                    &document,
+                    &legacy_agents,
+                    &node_sources,
+                    false,
+                )
+                .is_ok(),
+                count <= 2,
+                "legacy count {count}"
+            );
+        }
+    }
+
+    /// Complete live sources reach the same startup reader used by the Controller application.
+    #[test]
+    fn live_startup_reader_accepts_three_and_four_source_bound_manipulators() {
+        for count in [3, 4] {
+            let mut document = snapshot();
+            document["schema_version"] = "roboguide.deployment-intent-feasibility/v0.5".into();
+            let initial = document["initial_agent_positions"]["0"].clone();
+            let original_records = document["records"].as_array().unwrap().clone();
+            let profile = document["operation_admission"]["endpoint_profiles"][0].clone();
+            for agent in 2..count {
+                let node = format!("node-{agent}");
+                document["initial_agent_positions"][agent.to_string()] = initial.clone();
+                for mut record in original_records
+                    .iter()
+                    .filter(|record| record["agent_id"] == 0)
+                    .cloned()
+                {
+                    record["agent_id"] = agent.into();
+                    record["node_id"] = node.clone().into();
+                    record["profile"]["agent_id"] = agent.into();
+                    record["profile"]["node_id"] = node.clone().into();
+                    document["records"].as_array_mut().unwrap().push(record);
+                }
+                let mut endpoint = profile.clone();
+                endpoint["agent_id"] = agent.into();
+                endpoint["node_id"] = node.into();
+                document["operation_admission"]["endpoint_profiles"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(endpoint);
+            }
+            document["execution_profile"] = serde_json::json!({
+                "mode": "independent-live/v0.1", "registry_digest": format!("sha256:{}", "a".repeat(64)),
+                "endpoints": document["operation_admission"]["endpoint_profiles"].as_array().unwrap()
+                    .iter().map(|endpoint| serde_json::json!({
+                        "agent_id": endpoint["agent_id"], "node_id": endpoint["node_id"],
+                        "operations": ["mobility.move@v1", "mobility.navigate@v1", "object.relocate@v1"]
+                    })).collect::<Vec<_>>()
+            });
+            seal(&mut document);
+            let evidence = load(&document).expect("complete live startup sources load");
+            let plan = decode_mission_plan(&plan(false).to_string()).unwrap();
+            let restrictions = evidence
+                .restrictions_for_plan(&plan, &domain::ExecutionGroupId::new("live-group").unwrap())
+                .unwrap();
+            assert!(restrictions.iter().all(|(_, nodes)| nodes.len() == count));
+            document["operation_admission"]["endpoint_profiles"]
+                .as_array_mut()
+                .unwrap()
+                .pop();
+            seal(&mut document);
+            assert!(
+                load(&document).is_ok(),
+                "a typed manipulator subset remains valid"
+            );
+        }
     }
 }

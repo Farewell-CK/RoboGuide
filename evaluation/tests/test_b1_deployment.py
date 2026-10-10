@@ -356,3 +356,43 @@ def test_live_runner_offline_preparation_freezes_actual_endpoint_set(
         profile = json.loads((run / "relocation-registration-profile.json").read_bytes())
         assert [record["agent_id"] for record in profile["agents"]] == [0, 1]
         assert "object.relocate@v1" not in registry["endpoints"][2]["operations"]
+
+
+@pytest.mark.parametrize("count,accepted", [(1, True), (2, False)])
+def test_first_launcher_port_gate_uses_declared_endpoint_count(
+    tmp_path: Path, count: int, accepted: bool
+) -> None:
+    """Unused B ports cannot block a one-endpoint run, while real collisions still fail early."""
+    scenario = ROOT / "scenarios/e1-shared-world-perception"
+    environment = offline_environment(tmp_path)
+    deployment = load_deployment(scenario)
+    native = Path(environment["ROBOGUIDE_EMOS_ROOT"]) / deployment.habitat_config
+    native.parent.mkdir(parents=True, exist_ok=True)
+    native.write_text("# Config-only offline fixture; no simulator.\n")
+    declaration = json.loads((scenario / "b1-deployment.json").read_bytes())
+    declaration["endpoints"] = declaration["endpoints"][:count]
+    selected = tmp_path / "declared-deployment.json"
+    selected.write_text(json.dumps(declaration))
+    environment.update(ROBOGUIDE_B1_DEPLOYMENT=str(selected), ROBOGUIDE_B1_ARTIFACT_PORT="28102")
+    frozen = tmp_path / "frozen.json"
+    frozen.write_bytes((NAVIGATION / "b1-input.json").read_bytes())
+    run = tmp_path / "run"
+    result = subprocess.run(
+        ["bash", str(scenario / "run-b1-roboguide.sh"), str(run), str(frozen)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=45,
+    )
+    assert (result.returncode == 0) is accepted, result.stderr
+    assert not (run / "shared-bridge.log").exists()
+    assert not (run / "b1-request-record.json").exists()
+    if accepted:
+        registry = json.loads((run / "endpoint-registry.json").read_bytes())
+        assert len(registry["endpoints"]) == 1
+        ports = (run / "deployment-ports.env").read_text()
+        assert "ARTIFACT_PORT=28102" in ports and "HABITAT_PORT_B=" not in ports
+        assert not (run / "node-b.toml").exists()
+    else:
+        assert not (run / "b1-input-used.json").exists()

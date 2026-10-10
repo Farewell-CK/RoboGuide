@@ -28,6 +28,8 @@ endpoint config files; endpoint-registry v0.1 binds their exact bytes, agent IDs
 Node identities, loaded robot classes, ports, durable stores, operation support
 and capacity-one `space` resources. The child verifies actual robot classes and
 readiness after its single original reset, before endpoints become ready.
+Readiness and initial port validation cover that actual endpoint set, including
+one endpoint; they never require a nonexistent second agent or port.
 
 Deployment feasibility v0.5 carries this profile. Application preflight admits
 at most 32 independent single-role Tasks, including sparse and sequential use,
@@ -39,6 +41,10 @@ Coupled Tasks, Actor migration, duplicate slots, overlapping local attempts,
 concurrent manipulation of one object and retained cancellation continuation are
 unsupported. A bounded wait for the next dispatch does not advance Habitat;
 expiry is explicit and creates no success fact.
+The live Task bound is enforced before Controller plan acceptance for every
+topology, including serial reuse. Legacy serial admission is not a fallback
+around live limits. The matching live operation reader accepts up to four
+source-bound manipulators; legacy full-coverage admission remains dual-endpoint.
 
 The original joint actor and Gym step run once per physical step. Unassigned or
 locally completed endpoints select the original model-free wait skill. Each real
@@ -47,6 +53,10 @@ hook accepts only the same initialization arguments when the original zero-actio
 heuristic repeats; changed arguments fail closed. Hook removal precedes the next
 Task's original initialization. Peer model history and skills are retained.
 This is a disclosed Local How change, not an unchanged native EMOS arm.
+Current peer contracts are a separate read-only projection refreshed at actual
+binding, completion and reuse. Guard tool targets and local feedback use it
+without changing the owner's immutable contract or resetting an active peer.
+Original messages cannot target passive endpoints or transfer Control Tasks.
 
 Relocation readiness covers only endpoints actually declaring relocation. Start
 evidence v0.2 explicitly permits that subset while full world/navigation evidence
@@ -62,6 +72,9 @@ loaded sensors/cameras are inspected before this capability is advertised.
 The receipt binds attempt, invocation, semantic evidence, step, entity and sensor
 scope. A global detector remains global. A negative observation completes data
 acquisition only; unavailable data fails locally and cannot become false or true.
+The entity lookup is a PDDL scene index: the existing `scene_obj_ids` mapping
+provides the simulator object ID before the semantic offset is added. A missing,
+invalid or out-of-range mapping remains unavailable without new sensor calls.
 Neither result substitutes for affirmative task satisfaction or official PDDL.
 Active perception/search is not implemented by this profile.
 

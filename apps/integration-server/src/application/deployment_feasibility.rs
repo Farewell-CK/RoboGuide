@@ -597,12 +597,12 @@ impl DeploymentFeasibility {
                         .any(|left| second.iter().any(|right| left != right))
                 })
             });
-        let supported_live = self.live_operations.is_some()
-            && session.slots.len() <= 32
-            && tasks.len() == session.slots.len();
-        if !session.slots.iter().all(|slot| slot.independent)
-            || (!supported_serial && !supported_pair && !supported_live)
-        {
+        let supported_topology = if self.live_operations.is_some() {
+            session.slots.len() <= 32 && tasks.len() == session.slots.len()
+        } else {
+            supported_serial || supported_pair
+        };
+        if !session.slots.iter().all(|slot| slot.independent) || !supported_topology {
             return Err(
                 "accepted-plan topology has no feasible shared-world endpoint assignment".into(),
             );
@@ -2312,12 +2312,21 @@ mod tests {
     /// The real HTTP submission path rejects a fixed-world shortage atomically.
     #[tokio::test]
     async fn http_submission_rejects_pair_shortage_without_committing_mission() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join("reset.json");
         snapshot(&path, false);
         let feasibility = DeploymentFeasibility::load(&path).expect("snapshot is valid");
+        assert_http_topology_rejection(&feasibility, plan_document(false, true)).await;
+    }
+
+    /// Check the actual HTTP admission boundary and its lack of durable acceptance mutations.
+    async fn assert_http_topology_rejection(
+        feasibility: &DeploymentFeasibility,
+        document: serde_json::Value,
+    ) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let directory = tempfile::tempdir().expect("temporary event directory");
         let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
             .expect("event log opens");
         let controller = Arc::new(Mutex::new(ControllerState {
@@ -2338,7 +2347,7 @@ mod tests {
             .await
             .expect("listener binds");
         let address = listener.local_addr().expect("listener has address");
-        let body = plan_document(false, true).to_string();
+        let body = document.to_string();
         let request = format!(
             "POST /v1/missions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
@@ -2351,7 +2360,7 @@ mod tests {
                 &event_log,
                 &gate,
                 &clock,
-                Some(&feasibility),
+                Some(feasibility),
                 None,
             )
             .await
@@ -2386,12 +2395,10 @@ mod tests {
                 .is_none()
         );
     }
-    /// Versioned opt-in topology keeps legacy barriers and supports sparse independent DAG work.
-    #[test]
-    fn live_profile_admits_sparse_tasks_without_changing_legacy_topology() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("live.json");
-        let mut document = snapshot(&path, false);
+
+    /// Freeze valid live endpoint evidence for topology bounds without live inventory or models.
+    fn live_snapshot(path: &Path) -> serde_json::Value {
+        let mut document = snapshot(path, false);
         document["schema_version"] =
             serde_json::json!("roboguide.deployment-intent-feasibility/v0.5");
         document["execution_profile"] = serde_json::json!({
@@ -2402,7 +2409,64 @@ mod tests {
             ]
         });
         seal(&mut document);
-        std::fs::write(&path, document.to_string()).unwrap();
+        std::fs::write(path, document.to_string()).unwrap();
+        document
+    }
+
+    /// Produce complete logical slots with either sequential reuse or independent Actors.
+    fn bounded_plan_document(count: usize, serial: bool) -> serde_json::Value {
+        let mut document = plan_document(serial, true);
+        let templates = document["tasks"].as_array().unwrap().clone();
+        document["tasks"] = serde_json::Value::Array(
+            (0..count)
+                .map(|index| {
+                    let mut task = templates[index % templates.len()].clone();
+                    task["id"] = serde_json::json!(format!("bounded-task-{index}"));
+                    task["depends_on"] = if serial && index > 0 {
+                        serde_json::json!([format!("bounded-task-{}", index - 1)])
+                    } else {
+                        serde_json::json!([])
+                    };
+                    task
+                })
+                .collect(),
+        );
+        document
+    }
+
+    /// A serial topology cannot bypass the live ledger's maximum immutable Task coverage.
+    #[tokio::test]
+    async fn live_task_limit_rejects_33_serial_slots_before_http_acceptance() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("live.json");
+        live_snapshot(&path);
+        let evidence = DeploymentFeasibility::load(&path).unwrap();
+        let group = domain::ExecutionGroupId::new("bounded-group").unwrap();
+        for serial in [true, false] {
+            let accepted =
+                orchestration::decode_mission_plan(&bounded_plan_document(32, serial).to_string())
+                    .unwrap();
+            assert!(evidence.restrictions_for_plan(&accepted, &group).is_ok());
+            let rejected =
+                orchestration::decode_mission_plan(&bounded_plan_document(33, serial).to_string())
+                    .unwrap();
+            assert!(evidence.restrictions_for_plan(&rejected, &group).is_err());
+        }
+        assert_http_topology_rejection(&evidence, bounded_plan_document(33, true)).await;
+        snapshot(&path, false);
+        let legacy = DeploymentFeasibility::load(&path).unwrap();
+        let legacy_serial =
+            orchestration::decode_mission_plan(&bounded_plan_document(33, true).to_string())
+                .unwrap();
+        assert!(legacy.restrictions_for_plan(&legacy_serial, &group).is_ok());
+    }
+
+    /// Versioned opt-in topology keeps legacy barriers and supports sparse independent DAG work.
+    #[test]
+    fn live_profile_admits_sparse_tasks_without_changing_legacy_topology() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("live.json");
+        live_snapshot(&path);
         let evidence = DeploymentFeasibility::load(&path).unwrap();
         let group = domain::ExecutionGroupId::new("group").unwrap();
         let pair = evidence
