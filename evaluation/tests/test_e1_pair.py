@@ -811,3 +811,49 @@ def test_actual_loaded_source_drift_is_not_declared_identity(tmp_path: Path) -> 
     assert isinstance(reasons, list)
     assert "runtime_module_identity_unconfirmed:original.stage2" in reasons
     assert result["official_pddl_success"] is True
+
+
+@pytest.mark.parametrize("existing", [True, False])
+def test_private_vendor_write_paths_do_not_modify_shared_assets(
+    tmp_path: Path, existing: bool
+) -> None:
+    """Native initialization writes only its arm's private JSON, preserving source and peers."""
+    source = tmp_path / "vendor"
+    for name in ("data", "habitat-lab", "habitat-baselines", "habitat-mas"):
+        (source / name).mkdir(parents=True)
+    target = "data/robots/robot_configs/initial.json"
+    original = source / target
+    original.parent.mkdir(parents=True)
+    if existing:
+        original.write_text('{"initial": true}')
+    shared = source / "data/scene.glb"
+    shared.write_bytes(b"immutable scene")
+    for arm in ("a", "b"):
+        private_vendor_view(source, tmp_path / arm, (target,))
+    (tmp_path / "a" / target).write_text('{"sampled": true}')
+    assert shared.read_bytes() == b"immutable scene"
+    assert (tmp_path / "a/data/scene.glb").resolve() == shared.resolve()
+    if existing:
+        assert original.read_text() == (tmp_path / "b" / target).read_text() == '{"initial": true}'
+    else:
+        assert not original.exists() and not (tmp_path / "b" / target).exists()
+
+
+@pytest.mark.parametrize("path", ["../x.json", "/data/x.json", "data/../x.json", "data/x.bin"])
+def test_private_vendor_rejects_unsafe_write_paths(tmp_path: Path, path: str) -> None:
+    """Unsafe output declarations fail before any private checkout is created."""
+    with pytest.raises(ValueError, match="writable assets"):
+        private_vendor_view(tmp_path / "source", tmp_path / "private", (path,))
+    assert not (tmp_path / "private").exists()
+
+
+def test_private_vendor_rejects_write_target_symlink_escape(tmp_path: Path) -> None:
+    """An existing asset symlink cannot redirect a declared write outside the source data root."""
+    source = tmp_path / "source"
+    (source / "data").mkdir(parents=True)
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}")
+    (source / "data/initial.json").symlink_to(outside)
+    with pytest.raises(ValueError, match="escapes"):
+        private_vendor_view(source, tmp_path / "private", ("data/initial.json",))
+    assert outside.read_text() == "{}"

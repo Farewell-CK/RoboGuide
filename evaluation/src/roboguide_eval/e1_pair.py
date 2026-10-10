@@ -49,6 +49,27 @@ _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}\Z")
 _VENDOR_CODE = ("habitat-lab", "habitat-baselines", "habitat-mas")
 
 
+def writable_asset_paths(config: JSONObject) -> tuple[str, ...]:
+    """Validate deployment-declared vendor output paths without probing credentials."""
+    raw = config.get("vendor_writable_assets", [])
+    if (
+        not isinstance(raw, list)
+        or len(raw) > 16
+        or any(
+            not isinstance(value, str)
+            or not value.startswith("data/")
+            or value.endswith("/")
+            or Path(value).is_absolute()
+            or any(part in {"", ".", ".."} for part in value.split("/"))
+            or Path(value).suffix != ".json"
+            for value in raw
+        )
+        or len(raw) != len(set(raw))
+    ):
+        raise ValueError("vendor writable assets must be distinct relative data JSON files")
+    return tuple(cast(str, value) for value in raw)
+
+
 def object_value(value: JSONValue) -> JSONObject:
     """Return an object or an explicit empty optional observation."""
     return value if isinstance(value, dict) else {}
@@ -164,6 +185,10 @@ class PairSpec:
             / "habitat-baselines/habitat_baselines/config"
             / required_text(config, "native_config")
         )
+        for relative_asset in writable_asset_paths(config):
+            asset = Path(required_text(config, "vendor_root")) / relative_asset
+            if asset.exists():
+                mandatory.append(asset)
         workload_path = Path(required_text(config, "input_directory")) / f"{pair_id}.json"
         if not all(path in sources for path in (*mandatory, workload_path)):
             raise ValueError("pair executable, configuration or workload source gate missing")
@@ -359,19 +384,67 @@ def wait_ports_closed(ports: Mapping[str, int], budget: float = 30) -> bool:
             time.sleep(0.5)
 
 
-def private_vendor_view(source: Path, directory: Path) -> None:
-    """Copy unchanged code into a real private checkout; share only read-only dataset assets."""
+def private_vendor_view(
+    source: Path, directory: Path, writable_assets: tuple[str, ...] = ()
+) -> None:
+    """Copy unchanged code and isolate declared vendor writes from shared dataset assets.
+
+    Only the ancestors of declared relative data files become private directories.
+    Existing write targets are byte-copied; other assets remain shared references.
+    This does not modify the original configuration or initialization RNG.
+    """
+    targets = tuple(Path(value) for value in writable_assets)
+    if len(targets) > 16 or any(
+        path.is_absolute()
+        or ".." in path.parts
+        or len(path.parts) < 2
+        or path.parts[0] != "data"
+        or path.suffix != ".json"
+        for path in targets
+    ):
+        raise ValueError("vendor writable assets must be bounded relative data JSON files")
+    for path in targets:
+        resolved = (source / path).resolve()
+        if not resolved.is_relative_to((source / "data").resolve()):
+            raise ValueError("vendor writable asset escapes the shared data root")
     directory.mkdir()
     for name in ("data", *_VENDOR_CODE):
         if not (source / name).is_dir():
             raise ValueError("required vendor directory unavailable")
         if name == "data":
-            (directory / name).symlink_to(source / name, target_is_directory=True)
+            if targets:
+                _private_asset_branch(source, directory, Path("data"), targets)
+            else:
+                (directory / name).symlink_to(source / name, target_is_directory=True)
         else:
             shutil.copytree(
                 source / name,
                 directory / name,
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+
+
+def _private_asset_branch(
+    source: Path, directory: Path, branch: Path, targets: tuple[Path, ...]
+) -> None:
+    """Materialize only write-path ancestors and preserve original target bytes privately."""
+    destination = directory / branch
+    destination.mkdir()
+    original = source / branch
+    names = {path.name for path in original.iterdir()} if original.is_dir() else set()
+    names.update(path.parts[len(branch.parts)] for path in targets if branch in path.parents)
+    for name in sorted(names):
+        child = branch / name
+        if child in targets:
+            if (source / child).exists():
+                if not (source / child).is_file():
+                    raise ValueError("vendor writable asset is not a file")
+                shutil.copyfile(source / child, directory / child)
+        elif any(child in path.parents for path in targets):
+            _private_asset_branch(source, directory, child, targets)
+        else:
+            (directory / child).symlink_to(
+                (source / child).resolve(), target_is_directory=(source / child).is_dir()
             )
 
 
@@ -545,7 +618,9 @@ def run_arm(spec: PairSpec, arm: ArmName, directory: Path) -> JSONObject:
     """Consume one isolated arm, drain observation and preserve original failure evidence."""
     spec.verify_sources()
     directory.mkdir()
-    private_vendor_view(spec.path("vendor_root"), directory / "vendor-cwd")
+    private_vendor_view(
+        spec.path("vendor_root"), directory / "vendor-cwd", writable_asset_paths(spec.config)
+    )
     spec.verify_vendor_view(directory / "vendor-cwd")
     credential = os.environ.get("OPENAI_API_KEY", "")
     capture = BodyCapture(directory / "provider-bodies", (credential,))

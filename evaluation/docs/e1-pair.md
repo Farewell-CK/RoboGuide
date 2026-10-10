@@ -122,3 +122,12 @@ Graphics-only Habitat 不能因为未出现在 compute-apps 列表中而被记�
 调度或终止其他 GPU owner。原生视频仍使用原 evaluator 的缓存和步数上界，其 CPU
 内存及时长需在首 pair 测量后评估。不能仅用显存充裕推断四个 worker 已安全。
 启动与重启互斥来自 `e1-batch` durable claim，不通过重新调用已消费 pair 获得成功。
+
+### 原生可写初态文件隔离
+
+可选冻结字段 `vendor_writable_assets` 是最多16个相对于 vendor checkout 的
+`data/**/*.json` 输出路径。配置若启用原生 `w2j`，必须声明实际 JSON 输出；两臂使用
+相同声明。Pair driver 将这些路径的祖先目录私有化，已有文件原样复制，其余资产
+仍共享引用。已存在的输出源文件也必须纳入 `source_sha256`。此隔离不修改原生
+配置、reset 或 RNG；实际 post-reset 配对仍须独立检查。路径逃逸及符号链接逃逸
+在创建 arm checkout 前被拒绝，默认未声明时保留既有只读数据路径。
