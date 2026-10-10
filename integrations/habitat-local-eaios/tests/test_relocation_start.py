@@ -520,6 +520,32 @@ def preflight_run(tmp_path: Path) -> Path:
         "instruction": "Put both declared objects at their declared destinations.",
     }
     (run / "b1-input-used.json").write_text(json.dumps(frozen))
+    frozen_digest = hashlib.sha256((run / "b1-input-used.json").read_bytes()).hexdigest()
+    used = {
+        "schema_version": "roboguide.e1.b1-deployment-used/v0.2",
+        "declaration": {
+            "schema_version": "roboguide.e1.b1-deployment/v0.1",
+            "enable_relocation": True,
+            "max_steps": 4000,
+            "habitat_config": "offline.yaml",
+        },
+        "frozen_input_sha256": frozen_digest,
+        "relocation_completion_binding": False,
+    }
+    (run / "b1-deployment-used.json").write_text(json.dumps(used))
+    (run / "b1-local-execution-profile-required.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "roboguide.e1.b1-local-execution-profile-required/v0.1",
+                "run_id": run.name,
+                "deployment_sha256": hashlib.sha256(
+                    (run / "b1-deployment-used.json").read_bytes()
+                ).hexdigest(),
+                "frozen_input_sha256": frozen_digest,
+                "relocation_completion_binding": False,
+            }
+        )
+    )
     for name, document in (
         ("authoritative-semantic-evidence.json", semantic),
         ("relocation-episode-start.json", start),
@@ -527,6 +553,16 @@ def preflight_run(tmp_path: Path) -> Path:
         ("relocation-readiness.json", RelocationCapabilityEvidence(True, "observed", 2).as_dict()),
         ("relocation-registration-profile-used.json", profile),
         ("preassignment-feasibility.json", matrix),
+        (
+            "local-how-profile.json",
+            {
+                "schema_version": "roboguide.habitat-local-how-profile/v0.2",
+                "navigation_point_resolver": "original-emos-oracle",
+                "official_success_authority": "habitat-pddl",
+                "stage2_execution_feedback_profile": "observed-local-skill-feedback/v0.1",
+                "reset_route_support_enabled": False,
+            },
+        ),
     ):
         (evidence / name).write_text(json.dumps(document))
     return run

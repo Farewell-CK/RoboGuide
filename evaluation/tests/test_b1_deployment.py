@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -13,7 +14,7 @@ from typing import Any
 import pytest
 from mission.config import load_settings
 from mission.service_config import load_service_settings
-from roboguide_eval.b1_deployment import MAX_DECLARATION_BYTES, load_deployment
+from roboguide_eval.b1_deployment import MAX_DECLARATION_BYTES, freeze_deployment, load_deployment
 
 ROOT = Path(__file__).resolve().parents[2]
 NAVIGATION = ROOT / "scenarios/e1-shared-world-episode-51"
@@ -36,7 +37,11 @@ def offline_environment(tmp_path: Path) -> dict[str, str]:
         command.chmod(0o755)
     environment = {key: value for key, value in os.environ.items() if key != "OPENAI_API_KEY"}
     for key in tuple(environment):
-        if key.startswith("ROBOGUIDE_B1_") or key.startswith("ROBOGUIDE_MISSION_"):
+        if (
+            key.startswith("ROBOGUIDE_B1_")
+            or key.startswith("ROBOGUIDE_MISSION_")
+            or key == "HABITAT_RELOCATION_COMPLETION_BINDING"
+        ):
             del environment[key]
     environment.update(
         ROBOGUIDE_EMOS_ROOT=str(emos),
@@ -76,6 +81,18 @@ def test_real_runner_prepares_the_selected_deployment(tmp_path: Path, scenario: 
     used = json.loads((run / "b1-deployment-used.json").read_bytes())
     assert used["declaration"]["max_steps"] == declaration.max_steps
     assert used["declaration"]["enable_relocation"] is declaration.enable_relocation
+    assert used["relocation_completion_binding"] is declaration.relocation_completion_binding
+    requirement = json.loads((run / "b1-local-execution-profile-required.json").read_bytes())
+    assert requirement["relocation_completion_binding"] is declaration.relocation_completion_binding
+    assert requirement["run_id"] == run.name
+    assert (
+        requirement["deployment_sha256"]
+        == hashlib.sha256((run / "b1-deployment-used.json").read_bytes()).hexdigest()
+    )
+    assert (
+        requirement["frozen_input_sha256"]
+        == hashlib.sha256((run / "b1-input-used.json").read_bytes()).hexdigest()
+    )
     assert used["habitat_config_path"].endswith(declaration.habitat_config)
     for suffix, port in (("a", 28100), ("b", 28102)):
         node = tomllib.loads((run / f"node-{suffix}.toml").read_text())
@@ -156,10 +173,13 @@ def test_existing_archive_is_preserved(tmp_path: Path) -> None:
     ("field", "value"),
     [
         ("schema_version", "wrong"),
+        ("schema_version", []),
         ("max_steps", True),
         ("max_steps", 0),
         ("max_steps", 100001),
         ("enable_relocation", "true"),
+        ("relocation_completion_binding", 1),
+        ("relocation_completion_binding", "true"),
         ("habitat_config", "../escape.yaml"),
         ("habitat_config", "/absolute.yaml"),
         ("habitat_config", "cmd\n.yaml"),
@@ -182,6 +202,67 @@ def test_declaration_read_is_bounded(tmp_path: Path) -> None:
     (tmp_path / "b1-deployment.json").write_bytes(b" " * (MAX_DECLARATION_BYTES + 1))
     with pytest.raises(ValueError, match="byte budget"):
         load_deployment(tmp_path)
+
+
+@pytest.mark.parametrize("flag", ["0", "true", "2", ""])
+def test_declared_completion_cannot_be_silently_overridden(tmp_path: Path, flag: str) -> None:
+    """An omitted shell flag uses the declaration; contradictory or invalid flags stop startup."""
+    result, run = prepare(tmp_path, RELOCATION, {"HABITAT_RELOCATION_COMPLETION_BINDING": flag})
+    assert result.returncode != 0
+    assert not (run / "b1-deployment-used.json").exists()
+    assert not (run / "shared-bridge.log").exists()
+    assert not (run / "b1-request-record.json").exists()
+
+
+def test_new_declaration_requires_an_explicit_completion_choice(tmp_path: Path) -> None:
+    """The new deployment version cannot fall back to the legacy default when a field is absent."""
+    document = json.loads((RELOCATION / "b1-deployment.json").read_bytes())
+    del document["relocation_completion_binding"]
+    (tmp_path / "b1-deployment.json").write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="schema"):
+        load_deployment(tmp_path)
+    document["relocation_completion_binding"] = True
+    document["enable_relocation"] = False
+    (tmp_path / "b1-deployment.json").write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="requires relocation"):
+        load_deployment(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("legacy", "override", "enabled"),
+    [(True, None, False), (True, "1", True), (False, None, False)],
+)
+def test_legacy_and_explicitly_unbound_deployments_remain_available(
+    tmp_path: Path, legacy: bool, override: str | None, enabled: bool
+) -> None:
+    """Legacy opt-in and a declared unbound comparison arm are frozen without modifying plans."""
+    environment = offline_environment(tmp_path)
+    scenario = tmp_path / "scenario"
+    scenario.mkdir()
+    declaration = json.loads((RELOCATION / "b1-deployment.json").read_bytes())
+    if legacy:
+        declaration["schema_version"] = "roboguide.e1.b1-deployment/v0.1"
+        del declaration["relocation_completion_binding"]
+    else:
+        declaration["relocation_completion_binding"] = False
+    (scenario / "b1-deployment.json").write_text(json.dumps(declaration))
+    for suffix in ("a", "b"):
+        (scenario / f"node-{suffix}.toml").write_bytes(
+            (RELOCATION / f"node-{suffix}.toml").read_bytes()
+        )
+    run = tmp_path / "frozen-run"
+    run.mkdir()
+    (run / "b1-input-used.json").write_bytes((NAVIGATION / "b1-input.json").read_bytes())
+    values = freeze_deployment(
+        run,
+        scenario,
+        Path(environment["ROBOGUIDE_EMOS_ROOT"]),
+        completion_binding_override=override,
+    )
+    assert values["RELOCATION_COMPLETION_BINDING"] == int(enabled)
+    used = json.loads((run / "b1-deployment-used.json").read_bytes())
+    assert used["declaration"] == declaration
+    assert used["relocation_completion_binding"] is enabled
 
 
 def test_node_wait_uses_actual_inventory_identity(tmp_path: Path) -> None:

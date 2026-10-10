@@ -276,17 +276,6 @@ DEPLOYMENT_ASSIGNMENTS="$(uv run --project "$REPO" python -m roboguide_eval.b1_d
     --run "$RUN" --scenario "$SCENARIO" --emos-root "$EMOS_ROOT")" \
     || { FAILURE_REASON=invalid_b1_deployment; exit 1; }
 eval "$DEPLOYMENT_ASSIGNMENTS"
-if [[ "${HABITAT_RELOCATION_COMPLETION_BINDING:-0}" != 0 && \
-      "${HABITAT_RELOCATION_COMPLETION_BINDING:-0}" != 1 ]]; then
-    FAILURE_REASON=invalid_relocation_completion_binding_flag
-    echo "$FAILURE_REASON" >&2
-    exit 1
-fi
-if [[ "${HABITAT_RELOCATION_COMPLETION_BINDING:-0}" == 1 && "$RELOCATION_ENABLED" != 1 ]]; then
-    FAILURE_REASON=relocation_completion_binding_requires_relocation
-    echo "$FAILURE_REASON" >&2
-    exit 1
-fi
 if [[ "$RELOCATION_ENABLED" == 1 && ( ${#GOAL_REGION_ARGS[@]} != 0 \
     || ${#RETENTION_ARGS[@]} != 0 ) ]]; then
     FAILURE_REASON=unsupported_relocation_profile_combination
@@ -315,7 +304,7 @@ if [[ "$RELOCATION_ENABLED" == 1 ]]; then
         --output "$RUN/relocation-registration-profile.json" \
         || { FAILURE_REASON=relocation_registration_invalid; exit 1; }
     RELOCATION_ARGS=(--enable-relocation --relocation-profile "$RUN/relocation-registration-profile.json")
-    if [[ "${HABITAT_RELOCATION_COMPLETION_BINDING:-0}" == 1 ]]; then
+    if [[ "$RELOCATION_COMPLETION_BINDING" == 1 ]]; then
         RELOCATION_ARGS+=(--relocation-completion-binding)
     fi
 fi

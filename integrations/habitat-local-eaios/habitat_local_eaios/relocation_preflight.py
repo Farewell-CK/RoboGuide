@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -11,12 +12,16 @@ from .model import IntegrationError
 from .operation_admission import OPERATION_FEASIBILITY_SCHEMA, attach_relocation_admission
 from .preassignment_feasibility import PREASSIGNMENT_FEASIBILITY_SCHEMA, preassignment_digest
 from .relocation_capability import RELOCATION_READINESS_PROFILE
+from .relocation_completion import COMPLETION_PROFILE
 from .relocation_deployment import load_relocation_profile, verify_relocation_profile_sources
 from .relocation_start import MAX_ARTIFACT_BYTES, planning_object_sources, validate_relocation_start
 from .semantic_evidence import _digest
+from .stage2_feedback import BOUND_FEEDBACK_PROFILE, FEEDBACK_PROFILE
+
+PREFLIGHT_SCHEMA = "roboguide.habitat-relocation-preflight/v0.3"
 
 
-def _read_object(path: Path) -> dict[str, Any]:
+def _read_artifact(path: Path) -> tuple[dict[str, Any], str]:
     """Read a bounded evidence object; missing, malformed and over-budget files fail closed."""
     try:
         with path.open("rb") as source:
@@ -28,7 +33,97 @@ def _read_object(path: Path) -> dict[str, Any]:
             raise ValueError("artifact is not an object")
     except (OSError, ValueError) as error:
         raise IntegrationError(f"relocation preflight cannot read {path.name}") from error
-    return document
+    return document, hashlib.sha256(raw).hexdigest()
+
+
+def _read_object(path: Path) -> dict[str, Any]:
+    """Read a bounded JSON object without changing the original evidence."""
+    return _read_artifact(path)[0]
+
+
+def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
+    """Check the frozen deployment choice against the actual loaded child profile.
+
+    Configuration presence alone does not prove that the child loaded the
+    selected implementation. Enabled completion requires both the versioned
+    Local How and successful loaded-interface/reset-reader checks. Legacy
+    declarations retain their explicit environment override compatibility.
+    """
+    required, requirement_digest = _read_artifact(run / "b1-local-execution-profile-required.json")
+    used, deployment_digest = _read_artifact(run / "b1-deployment-used.json")
+    enabled = required.get("relocation_completion_binding")
+    if (
+        set(required)
+        != {
+            "schema_version",
+            "run_id",
+            "deployment_sha256",
+            "frozen_input_sha256",
+            "relocation_completion_binding",
+        }
+        or required.get("schema_version") != "roboguide.e1.b1-local-execution-profile-required/v0.1"
+        or required.get("run_id") != run.name
+        or type(enabled) is not bool
+        or required.get("deployment_sha256") != deployment_digest
+        or required.get("frozen_input_sha256") != frozen_digest
+        or used.get("schema_version") != "roboguide.e1.b1-deployment-used/v0.2"
+        or used.get("frozen_input_sha256") != frozen_digest
+        or used.get("relocation_completion_binding") is not enabled
+    ):
+        raise IntegrationError("frozen local execution profile requirement is invalid")
+    declaration = used.get("declaration")
+    if (
+        not isinstance(declaration, dict)
+        or declaration.get("enable_relocation") is not True
+        or declaration.get("schema_version")
+        not in ("roboguide.e1.b1-deployment/v0.1", "roboguide.e1.b1-deployment/v0.2")
+        or (
+            declaration.get("schema_version") == "roboguide.e1.b1-deployment/v0.2"
+            and declaration.get("relocation_completion_binding") is not enabled
+        )
+    ):
+        raise IntegrationError("frozen deployment and local execution profile choice differ")
+    actual, actual_digest = _read_artifact(run / "evidence/local-how-profile.json")
+    expected = {
+        "schema_version": "roboguide.habitat-local-how-profile/v0.8"
+        if enabled
+        else "roboguide.habitat-local-how-profile/v0.2",
+        "navigation_point_resolver": "original-emos-oracle",
+        "official_success_authority": "habitat-pddl",
+        "stage2_execution_feedback_profile": BOUND_FEEDBACK_PROFILE
+        if enabled
+        else FEEDBACK_PROFILE,
+        "reset_route_support_enabled": False,
+    }
+    if enabled:
+        expected["relocation_completion_profile"] = COMPLETION_PROFILE
+    if actual != expected or actual.get("reset_route_support_enabled") is not False:
+        raise IntegrationError("actual loaded Local How differs from the frozen deployment choice")
+    proof: dict[str, Any] = {
+        "relocation_completion_binding": enabled,
+        "requirement_sha256": requirement_digest,
+        "deployment_sha256": deployment_digest,
+        "local_how_sha256": actual_digest,
+        "local_how_schema": actual["schema_version"],
+    }
+    readiness_path = run / "evidence/relocation-completion-readiness.json"
+    if enabled:
+        readiness, readiness_digest = _read_artifact(readiness_path)
+        if (
+            readiness
+            != {
+                "schema_version": "roboguide.relocation-completion-readiness/v0.1",
+                "profile": COMPLETION_PROFILE,
+                "ready": True,
+                "source": "loaded-place-skills-and-reset-world-readers",
+            }
+            or readiness.get("ready") is not True
+        ):
+            raise IntegrationError("actual relocation completion readiness is unavailable")
+        proof["completion_readiness_sha256"] = readiness_digest
+    elif readiness_path.exists():
+        raise IntegrationError("unexpected completion readiness in an unbound deployment")
+    return proof
 
 
 def preflight_relocation(run: Path) -> dict[str, Any]:
@@ -39,7 +134,8 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
     or Formal admission. It never loads Habitat, calls a model, mutates the
     original evidence or infers that manipulation will succeed.
     """
-    frozen = _read_object(run / "b1-input-used.json")
+    frozen, frozen_digest = _read_artifact(run / "b1-input-used.json")
+    execution_profile = _check_execution_profile(run, frozen_digest)
     profile_path = run / "relocation-registration-profile.json"
     verify_relocation_profile_sources(profile_path)
     profile = load_relocation_profile(profile_path)
@@ -107,7 +203,7 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
     if matrix != attach_relocation_admission(navigation, semantic, start, profile):
         raise IntegrationError("deployment operation admission differs from actual reset sources")
     return {
-        "schema_version": "roboguide.habitat-relocation-preflight/v0.2",
+        "schema_version": PREFLIGHT_SCHEMA,
         "valid": True,
         "identity": expected,
         "registration_profile_digest": profile["digest"],
@@ -117,6 +213,7 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
         "reset_count": start["reset_count"],
         "simulator_steps": start["simulator_steps"],
         "deployment_admission_digest": matrix["digest"],
+        "local_execution_profile": execution_profile,
     }
 
 
@@ -129,7 +226,7 @@ def main() -> None:
         result = preflight_relocation(args.run)
     except (IntegrationError, KeyError, TypeError, ValueError) as error:
         result = {
-            "schema_version": "roboguide.habitat-relocation-preflight/v0.2",
+            "schema_version": PREFLIGHT_SCHEMA,
             "valid": False,
             "reason": str(error),
         }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shlex
 import tomllib
 from collections.abc import Sequence
@@ -14,7 +15,9 @@ from typing import Any
 
 from roboguide_eval.b1_workload import extract_b1_workload
 
-DEPLOYMENT_SCHEMA = "roboguide.e1.b1-deployment/v0.1"
+DEPLOYMENT_SCHEMA = "roboguide.e1.b1-deployment/v0.2"
+LEGACY_DEPLOYMENT_SCHEMA = "roboguide.e1.b1-deployment/v0.1"
+LOCAL_PROFILE_REQUIREMENT_SCHEMA = "roboguide.e1.b1-local-execution-profile-required/v0.1"
 MAX_DECLARATION_BYTES = 65536
 
 
@@ -25,6 +28,8 @@ class B1Deployment:
     habitat_config: str
     max_steps: int
     enable_relocation: bool
+    relocation_completion_binding: bool
+    schema_version: str
 
 
 def load_deployment(scenario: Path) -> B1Deployment:
@@ -34,10 +39,13 @@ def load_deployment(scenario: Path) -> B1Deployment:
     if len(raw) > MAX_DECLARATION_BYTES:
         raise ValueError("B1 deployment declaration exceeds the byte budget")
     document = json.loads(raw)
+    fields = {"schema_version", "habitat_config", "max_steps", "enable_relocation"}
+    if isinstance(document, dict) and document.get("schema_version") == DEPLOYMENT_SCHEMA:
+        fields.add("relocation_completion_binding")
     if (
         not isinstance(document, dict)
-        or set(document) != {"schema_version", "habitat_config", "max_steps", "enable_relocation"}
-        or document["schema_version"] != DEPLOYMENT_SCHEMA
+        or set(document) != fields
+        or document["schema_version"] not in (DEPLOYMENT_SCHEMA, LEGACY_DEPLOYMENT_SCHEMA)
     ):
         raise ValueError("B1 deployment declaration schema is invalid")
     config = document["habitat_config"]
@@ -56,10 +64,19 @@ def load_deployment(scenario: Path) -> B1Deployment:
         raise ValueError("B1 deployment step budget is invalid")
     if not isinstance(relocation, bool):
         raise ValueError("B1 deployment relocation selection must be boolean")
-    return B1Deployment(config, steps, relocation)
+    completion = document.get("relocation_completion_binding", False)
+    if not isinstance(completion, bool) or (completion and not relocation):
+        raise ValueError("B1 deployment completion binding must be boolean and requires relocation")
+    return B1Deployment(config, steps, relocation, completion, document["schema_version"])
 
 
-def freeze_deployment(run: Path, scenario: Path, emos_root: Path) -> dict[str, str | int]:
+def freeze_deployment(
+    run: Path,
+    scenario: Path,
+    emos_root: Path,
+    *,
+    completion_binding_override: str | None = None,
+) -> dict[str, str | int]:
     """Bind workload, original config bytes and configured Node identities in a new run.
 
     The result is shell-quoted by the CLI, never supplied by a model. It
@@ -68,6 +85,16 @@ def freeze_deployment(run: Path, scenario: Path, emos_root: Path) -> dict[str, s
     """
     extract_b1_workload(json.loads((run / "b1-input-used.json").read_bytes()))
     declaration = load_deployment(scenario)
+    completion = declaration.relocation_completion_binding
+    if completion_binding_override is not None:
+        if completion_binding_override not in {"0", "1"}:
+            raise ValueError("invalid_relocation_completion_binding_flag")
+        selected = completion_binding_override == "1"
+        if declaration.schema_version == DEPLOYMENT_SCHEMA and selected != completion:
+            raise ValueError("completion binding override conflicts with deployment declaration")
+        completion = selected
+    if completion and not declaration.enable_relocation:
+        raise ValueError("relocation_completion_binding_requires_relocation")
     config = (emos_root / declaration.habitat_config).resolve(strict=True)
     if not config.is_relative_to(emos_root.resolve()):
         raise ValueError("Habitat configuration resolves outside the EMOS checkout")
@@ -81,12 +108,17 @@ def freeze_deployment(run: Path, scenario: Path, emos_root: Path) -> dict[str, s
     if len(set(node_ids)) != 2:
         raise ValueError("B1 deployment endpoints must have distinct Node identities")
     body: dict[str, Any] = {
-        "schema_version": "roboguide.e1.b1-deployment-used/v0.1",
+        "schema_version": "roboguide.e1.b1-deployment-used/v0.2",
         "declaration": {
-            "schema_version": DEPLOYMENT_SCHEMA,
+            "schema_version": declaration.schema_version,
             "habitat_config": declaration.habitat_config,
             "max_steps": declaration.max_steps,
             "enable_relocation": declaration.enable_relocation,
+            **(
+                {"relocation_completion_binding": declaration.relocation_completion_binding}
+                if declaration.schema_version == DEPLOYMENT_SCHEMA
+                else {}
+            ),
         },
         "scenario_path": str(scenario.resolve()),
         "habitat_config_path": str(config),
@@ -95,13 +127,29 @@ def freeze_deployment(run: Path, scenario: Path, emos_root: Path) -> dict[str, s
             (run / "b1-input-used.json").read_bytes()
         ).hexdigest(),
         "node_ids": node_ids,
+        "relocation_completion_binding": completion,
     }
+    requirement_path = run / "b1-local-execution-profile-required.json"
+    if requirement_path.exists():
+        raise ValueError("refusing to overwrite a frozen local execution profile requirement")
     with (run / "b1-deployment-used.json").open("x", encoding="utf-8") as output:
         output.write(json.dumps(body, indent=2, sort_keys=True) + "\n")
+    requirement = {
+        "schema_version": LOCAL_PROFILE_REQUIREMENT_SCHEMA,
+        "run_id": run.name,
+        "deployment_sha256": hashlib.sha256(
+            (run / "b1-deployment-used.json").read_bytes()
+        ).hexdigest(),
+        "frozen_input_sha256": body["frozen_input_sha256"],
+        "relocation_completion_binding": completion,
+    }
+    with requirement_path.open("x", encoding="utf-8") as output:
+        output.write(json.dumps(requirement, indent=2, sort_keys=True) + "\n")
     return {
         "HABITAT_CONFIG": str(config),
         "MAX_STEPS": declaration.max_steps,
         "RELOCATION_ENABLED": int(declaration.enable_relocation),
+        "RELOCATION_COMPLETION_BINDING": int(completion),
         "NODE_A_ID": node_ids[0],
         "NODE_B_ID": node_ids[1],
     }
@@ -115,7 +163,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--emos-root", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        assignments = freeze_deployment(args.run, args.scenario, args.emos_root)
+        assignments = freeze_deployment(
+            args.run,
+            args.scenario,
+            args.emos_root,
+            completion_binding_override=os.environ.get("HABITAT_RELOCATION_COMPLETION_BINDING"),
+        )
     except (OSError, ValueError) as error:
         parser.exit(1, f"B1 deployment invalid: {error}\n")
     for name, value in assignments.items():
