@@ -504,6 +504,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   fields/loss and pending failed-step evidence; they never prove collision,
   arrival, route feasibility or benchmark success. Action/mesh scalars describe
   the observed deployment navigation model, not hardware certification.
+- `evaluation::e1_pair` is a process-only paired-driver consumer, with bounded
+  credential-redacted Provider body evidence, frozen source/port/workload gates and actual-reset
+  comparison. Its separate `habitat_local_eaios.native_workload` entry point selects an exact
+  original dataset episode before environment construction, then observes original reset/step
+  results and cached official metrics without additional physical/RNG/model calls. It does not
+  change native Leader/Stage2 decisions, B1 admission or Pair Validator dimensions. See
+  `evaluation/docs/e1-pair.md`; experimental manifests/results remain local.
 - The opt-in `habitat_local_eaios.native_reset_observer` entry point decorates the original
   EMOS environment factory inside its workers, preserving the first returned reset with the
   existing bounded diagnostic reader. It never edits the external source, invokes another

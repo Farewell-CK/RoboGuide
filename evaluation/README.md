@@ -9,6 +9,10 @@ E1 的收尾条件、配置记录、已实现启动门禁与待核验项见
 [E1 收尾计划与配置核验](docs/e1-closure-plan.md)。各类别冻结真实 config/dataset
 与代码身份；普通任务失败纳入结果，配置或证据漂移才暂停批量。
 
+[`e1-pair`](docs/e1-pair.md) 为 `e1-batch` 提供通用的原生 EMOS／生产 B1 配对入口。
+准确 episode 在原生环境构造前选定；模型响应、真实 reset、源码和归档完整性独立核对。
+入口不注入历史计划、不修改原生策略或 benchmark，也不按结果筛选 population。
+
 Formal B1 的 provenance、failure owner 和 population 规则见
 [Evaluation Evidence Validity](docs/evaluation-evidence-validity.md)。Formal population
 只由有效 provenance 与显式 external-infrastructure failure 决定；benchmark population

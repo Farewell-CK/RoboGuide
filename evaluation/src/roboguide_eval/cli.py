@@ -108,6 +108,12 @@ def _parser() -> argparse.ArgumentParser:
     batch.add_argument("--manifest", type=Path, help="public frozen batch manifest for start")
     batch.add_argument("--output", type=Path, required=True, help="private batch state directory")
 
+    pair = subparsers.add_parser("e1-pair", help="consume one frozen native/B1 process pair")
+    pair.add_argument("--population", type=Path, required=True)
+    pair.add_argument("--config", type=Path, required=True)
+    pair.add_argument("--pair-id", required=True)
+    pair.add_argument("--output", type=Path, required=True)
+
     proxy = subparsers.add_parser(
         "proxy",
         help="run the local LLM accounting proxy (forwards to the real endpoint, records usage)",
@@ -538,7 +544,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _mission_front(arguments)
     if arguments.command == "e1-batch":
         return _batch(arguments)
+    if arguments.command == "e1-pair":
+        return _pair(arguments)
     return _summarize(arguments)
+
+
+def _pair(arguments: argparse.Namespace) -> int:
+    """Run an unused pair once; an ordinary SUT failure is a retained outcome."""
+    from roboguide_eval.e1_pair import run_pair
+
+    try:
+        result = run_pair(
+            arguments.population, arguments.config, arguments.pair_id, arguments.output
+        )
+    except (OSError, ValueError) as error:
+        print(f"Pair operation failed: {type(error).__name__}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                key: result.get(key)
+                for key in (
+                    "job_id",
+                    "fatal_failure",
+                    "infrastructure_failure",
+                    "comparison_eligible",
+                )
+            }
+        )
+    )
+    return 1 if result.get("fatal_failure") is True else 0
 
 
 def _batch(arguments: argparse.Namespace) -> int:
