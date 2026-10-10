@@ -45,7 +45,7 @@ def test_fault_verdict_requires_real_standby_registration(tmp_path: Path) -> Non
             ]
         )
     )
-    verdict = module.fault_verdict(tmp_path, "f1-node-loss", 6)
+    verdict = module.fault_verdict(tmp_path, "f1-node-loss", 6, None)
     assert verdict["task_success"] is True
     assert verdict["injection_valid"] is False
     assert verdict["full_fault_run_success"] is False
@@ -56,5 +56,5 @@ def test_clean_verdict_rejects_accidental_injection(tmp_path: Path) -> None:
     module = load("run_fault")
     (tmp_path / "verdict.json").write_text(json.dumps({"success": True}))
     (tmp_path / "fault-timeline.json").write_text(json.dumps([{"event": "fault_triggered"}]))
-    verdict = module.fault_verdict(tmp_path, "f0-clean", None)
+    verdict = module.fault_verdict(tmp_path, "f0-clean", None, None)
     assert verdict["injection_valid"] is False
