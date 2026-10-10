@@ -417,6 +417,7 @@ class EmosStage2Runtime:
                         "habitat.tasks.rearrange.actions.habitat_mas_actions",
                         "habitat.tasks.rearrange.actions.oracle_nav_action",
                         "habitat_sim",
+                        "habitat_sim._ext.habitat_sim_bindings",
                         "habitat_baselines.rl.hrl.hl.llm_policy",
                         "habitat_baselines.rl.hrl.skills.wait",
                         "habitat_baselines.rl.multi_agent.multi_agent_access_mgr",

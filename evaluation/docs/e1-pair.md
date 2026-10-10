@@ -18,6 +18,9 @@ body archive 和结果目录。每臂复制冻结的三个 vendor 代码目录�
 启动前后重算冻结源与私有代码副本摘要；runtime origin 必须指向该臂准确的副本路径
 并匹配冻结字节，外部库仍绑定原始解释器/路径。入口不提供操作系统沙箱或对外部
 程序的文件写权限隔离保证。
+受控 Stage2 的基础清单始终记录 Habitat-Sim 编译扩展的真实路径和文件摘要；
+导航与搬运均不依赖可选 reset-route diagnostics 才能获得这项身份。缺失或读取失败
+继续 fail closed，不能以包版本或父进程预检替代实际子进程证据。
 原生 CWD 下的日志、视频、Hydra/TensorBoard 输出与其他 worker 隔离。
 
 ## 冻结 worker 配置 v0.1
@@ -86,7 +89,8 @@ equal seed 不能证明 equal start。可选 semantic-region gaps 不会伪装�
 Protocol A 必须披露 RoboGuide Guard/tool binding、反馈、completion/idle 等差异。
 `local_execution_profile` 与 actual reset 额外事实进入 pair evidence；现有 validator
 不把额外 reset 自动升级成其正式维度。driver 的 `comparison_eligible` 要求 validator
-通过且 actual reset matched。它不修改 B1 provenance、Formal 或 benchmark admission。
+通过、actual reset matched，且不存在致命 source/配置/归档错误。它不修改 B1
+provenance、Formal 或 benchmark admission；配对不可比较不会擦除真实官方结果。
 
 MI 拒绝、技能失败、官方 false 都保留原始结果并继续。官方值缺失不会转换成 false。
 原生链路在已核实 reset 后的策略异常记为 SUT Failed；非零进程退出本身不能证明

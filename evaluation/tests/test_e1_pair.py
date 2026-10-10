@@ -335,6 +335,38 @@ def test_runtime_identity_binds_the_exact_private_copy(tmp_path: Path, problem: 
     )
 
 
+@pytest.mark.parametrize("problem", [None, "missing", "origin", "digest"])
+def test_compiled_simulator_identity_requires_actual_child_evidence(
+    tmp_path: Path, problem: str | None
+) -> None:
+    """A readable frozen extension alone cannot replace an exact child path and digest."""
+    population, config = setup_pair(tmp_path)
+    document = json.loads(config.read_text())
+    name = "habitat_sim._ext.habitat_sim_bindings"
+    source = tmp_path / "habitat_sim_bindings.so"
+    source.write_bytes(b"unchanged compiled simulator")
+    document["source_sha256"][str(source)] = file_digest(source)
+    document["runtime_modules"] = {name: str(source)}
+    write_json(config, document)
+    spec = PairSpec.load(population, config, "pair-0")
+    manifest: JSONObject = {
+        "python_executable": sys.executable,
+        "modules": (
+            {}
+            if problem == "missing"
+            else {
+                name: {
+                    "path": str(tmp_path / "other.so" if problem == "origin" else source),
+                    "sha256": "0" * 64 if problem == "digest" else file_digest(source),
+                }
+            }
+        ),
+    }
+    assert spec.runtime_failures(manifest, tmp_path / "private-vendor") == (
+        [] if problem is None else ["runtime_module_identity_unconfirmed:" + name]
+    )
+
+
 @pytest.mark.parametrize("problem", [None, "scene", "step-type", "schema"])
 def test_native_worker_interruption_preserves_observed_step_lower_bound(
     tmp_path: Path, problem: str | None
@@ -453,6 +485,37 @@ def test_real_tri_state_results_do_not_filter_population(
     with pytest.raises(FileExistsError):
         run_pair(population, config, "pair-0", output)
     assert seen == ["emos", "roboguide"]
+
+
+@pytest.mark.parametrize("official", [False, True])
+def test_matching_reset_cannot_hide_missing_runtime_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, official: bool
+) -> None:
+    """Keep real benchmark outcomes while excluding an identity-incomplete pair from comparison."""
+    from roboguide_eval import e1_pair
+
+    population, config = setup_pair(tmp_path)
+
+    def fake_arm(spec: PairSpec, arm: str, directory: Path) -> JSONObject:
+        """Record matched resets, then independently remove one child module observation."""
+        process = write_observations(spec, arm, directory, official=official)
+        if arm == "roboguide":
+            path = directory / "run/evidence/runtime-source-manifest.json"
+            manifest = json.loads(path.read_text())
+            del manifest["modules"]["original.stage2"]
+            write_json(path, manifest)
+        return process
+
+    monkeypatch.setattr(e1_pair, "run_arm", fake_arm)
+    result = run_pair(population, config, "pair-0", tmp_path / "pair")
+    assert result["fatal_failure"] is True
+    assert result["comparison_eligible"] is False
+    reset = result["reset_comparison"]
+    assert isinstance(reset, dict) and reset["status"] == "matched"
+    arms = result["arms"]
+    assert isinstance(arms, list) and len(arms) == 2
+    for arm in arms:
+        assert isinstance(arm, dict) and arm["official_pddl_success"] is official
 
 
 @pytest.mark.parametrize("problem", ["archive", "model", "http-502"])

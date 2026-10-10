@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import importlib.machinery
+import importlib.util
 import json
 import sys
 import types
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +18,7 @@ INTEGRATION_ROOT = Path(__file__).parents[1]
 if str(INTEGRATION_ROOT) not in sys.path:
     sys.path.insert(0, str(INTEGRATION_ROOT))
 
-from habitat_local_eaios import LocalExecutionOutcome  # noqa: E402
+from habitat_local_eaios import LocalExecutionOutcome, emos_stage2  # noqa: E402
 from habitat_local_eaios.crabagent_backend import (  # noqa: E402
     CrabAgentBackendConfig,
     CrabAgentMobilityBackend,
@@ -133,6 +137,114 @@ def _habitat_config() -> types.SimpleNamespace:
     """Build the dataset portion consumed by episode-first initialization."""
     dataset = types.SimpleNamespace(type="RearrangeDataset-v0")
     return types.SimpleNamespace(habitat=types.SimpleNamespace(dataset=dataset))
+
+
+@pytest.mark.parametrize("relocation", [False, True])
+@pytest.mark.parametrize("extension_failure", [None, "missing", "unreadable"])
+def test_initialization_records_compiled_simulator_without_route_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relocation: bool,
+    extension_failure: str | None,
+) -> None:
+    """Both operations archive exact extension bytes before execution, or fail closed.
+
+    The actual initializer runs against import-bound fake dependencies. No model,
+    reset, action or step is available, and reset-route diagnostics remain disabled.
+    """
+    extension_name = "habitat_sim._ext.habitat_sim_bindings"
+    extension = tmp_path / "habitat_sim_bindings.so"
+    extension.write_bytes(b"deterministic compiled simulator fixture")
+    ordinary = tmp_path / "runtime.py"
+    ordinary.write_text("# unchanged runtime source\n")
+    config = replace(
+        _config(tmp_path),
+        enable_relocation=relocation,
+        relocation_completion_binding=relocation,
+    )
+    assert config.reset_route_support is False
+    loaded_config = types.SimpleNamespace(
+        habitat=types.SimpleNamespace(simulator=types.SimpleNamespace(agents_order=["agent_0"]))
+    )
+    calls: list[str] = []
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        """Reject any physical or model action from the source-recording initializer."""
+        del args, kwargs
+        calls.append("physical_or_model_call")
+        raise AssertionError("source observation must not execute the episode")
+
+    gym = types.SimpleNamespace(
+        observation_space=object(),
+        action_space=object(),
+        original_action_space=object(),
+        reset=forbidden,
+        step=forbidden,
+        close=lambda: None,
+    )
+    access = types.SimpleNamespace(
+        actor_critic=types.SimpleNamespace(_active_policies=[], act=forbidden),
+        eval=lambda: None,
+    )
+    attributes: dict[str, dict[str, Any]] = {
+        "torch": {"device": lambda value: value},
+        "habitat": {"make_dataset": forbidden},
+        "habitat.config": {"read_write": forbidden},
+        "habitat.config.default": {"get_agent_config": forbidden},
+        "habitat.gym": {"make_gym_from_config": forbidden},
+        "habitat_baselines.common.env_spec": {"EnvironmentSpec": types.SimpleNamespace},
+        "habitat_baselines.common.obs_transformers": {
+            "apply_obs_transforms_batch": forbidden,
+            "apply_obs_transforms_obs_space": lambda space, transforms: space,
+            "get_active_obs_transforms": lambda configuration: [],
+        },
+        "habitat_baselines.config.default": {"get_config": lambda *a, **kw: loaded_config},
+        "habitat_baselines.rl.multi_agent.multi_agent_access_mgr": {
+            "MultiAgentAccessMgr": lambda *a, **kw: access,
+        },
+        "habitat_baselines.utils.common": {
+            "batch_obs": forbidden,
+            "get_action_space_info": forbidden,
+        },
+    }
+    for name, values in attributes.items():
+        module = types.ModuleType(name)
+        module.__dict__.update(values)
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(
+        emos_stage2,
+        "_make_episode_gym_environment",
+        lambda *a: (gym, object(), object()),
+    )
+    monkeypatch.setattr(
+        emos_stage2,
+        "inspect_relocation_capability",
+        lambda policies: types.SimpleNamespace(ready=True, as_dict=lambda: {"ready": True}),
+    )
+
+    def find_spec(name: str) -> importlib.machinery.ModuleSpec | None:
+        """Expose controlled file identities and independently fail the extension read."""
+        if name == extension_name and extension_failure == "missing":
+            return None
+        path = extension if name == extension_name else ordinary
+        if name == extension_name and extension_failure == "unreadable":
+            path = tmp_path / "missing-extension.so"
+        return importlib.machinery.ModuleSpec(name, loader=None, origin=str(path))
+
+    monkeypatch.setattr(importlib.util, "find_spec", find_spec)
+    runtime = EmosStage2Runtime(config)
+    if extension_failure is not None:
+        with pytest.raises(IntegrationError, match="runtime module .*habitat_sim_bindings"):
+            runtime.initialize()
+        assert not (config.evidence_dir / "runtime-source-manifest.json").exists()
+    else:
+        runtime.initialize()
+        manifest = json.loads((config.evidence_dir / "runtime-source-manifest.json").read_text())
+        assert manifest["modules"][extension_name] == {
+            "path": str(extension.resolve()),
+            "sha256": hashlib.sha256(extension.read_bytes()).hexdigest(),
+        }
+    assert calls == []
 
 
 def test_requested_episode_is_pinned_before_gym_construction() -> None:

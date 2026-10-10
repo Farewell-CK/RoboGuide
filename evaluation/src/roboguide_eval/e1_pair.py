@@ -968,7 +968,9 @@ def run_pair(population_path: Path, config_path: Path, pair_id: str, output: Pat
             )
             result.update(pair_comparability=pair.comparability.value, reset_comparison=reset)
             result["comparison_eligible"] = (
-                pair.comparability.value == "pair_comparable" and reset["status"] == "matched"
+                not result["fatal_failure"]
+                and pair.comparability.value == "pair_comparable"
+                and reset["status"] == "matched"
             )
             if reset["status"] == "mismatch":
                 result.update(
