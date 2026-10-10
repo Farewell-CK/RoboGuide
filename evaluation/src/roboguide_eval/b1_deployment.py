@@ -16,6 +16,7 @@ from typing import Any
 from roboguide_eval.b1_workload import extract_b1_workload
 
 DEPLOYMENT_SCHEMA = "roboguide.e1.b1-deployment/v0.2"
+LIVE_DEPLOYMENT_SCHEMA = "roboguide.e1.b1-deployment/v0.3"
 LEGACY_DEPLOYMENT_SCHEMA = "roboguide.e1.b1-deployment/v0.1"
 LOCAL_PROFILE_REQUIREMENT_SCHEMA = "roboguide.e1.b1-local-execution-profile-required/v0.1"
 MAX_DECLARATION_BYTES = 65536
@@ -30,6 +31,8 @@ class B1Deployment:
     enable_relocation: bool
     relocation_completion_binding: bool
     schema_version: str
+    endpoints: tuple[str, ...] = ()
+    enable_observation: bool = False
 
 
 def load_deployment(scenario: Path, *, declaration_path: Path | None = None) -> B1Deployment:
@@ -41,12 +44,18 @@ def load_deployment(scenario: Path, *, declaration_path: Path | None = None) -> 
         raise ValueError("B1 deployment declaration exceeds the byte budget")
     document = json.loads(raw)
     fields = {"schema_version", "habitat_config", "max_steps", "enable_relocation"}
-    if isinstance(document, dict) and document.get("schema_version") == DEPLOYMENT_SCHEMA:
+    if isinstance(document, dict) and document.get("schema_version") in (
+        DEPLOYMENT_SCHEMA,
+        LIVE_DEPLOYMENT_SCHEMA,
+    ):
         fields.add("relocation_completion_binding")
+    if isinstance(document, dict) and document.get("schema_version") == LIVE_DEPLOYMENT_SCHEMA:
+        fields.update({"endpoints", "enable_observation"})
     if (
         not isinstance(document, dict)
         or set(document) != fields
-        or document["schema_version"] not in (DEPLOYMENT_SCHEMA, LEGACY_DEPLOYMENT_SCHEMA)
+        or document["schema_version"]
+        not in (DEPLOYMENT_SCHEMA, LEGACY_DEPLOYMENT_SCHEMA, LIVE_DEPLOYMENT_SCHEMA)
     ):
         raise ValueError("B1 deployment declaration schema is invalid")
     config = document["habitat_config"]
@@ -68,7 +77,30 @@ def load_deployment(scenario: Path, *, declaration_path: Path | None = None) -> 
     completion = document.get("relocation_completion_binding", False)
     if not isinstance(completion, bool) or (completion and not relocation):
         raise ValueError("B1 deployment completion binding must be boolean and requires relocation")
-    return B1Deployment(config, steps, relocation, completion, document["schema_version"])
+    endpoints: tuple[str, ...] = ()
+    observation = document.get("enable_observation", False)
+    if not isinstance(observation, bool):
+        raise ValueError("B1 observation selection must be boolean")
+    if document["schema_version"] == LIVE_DEPLOYMENT_SCHEMA:
+        raw_endpoints = document["endpoints"]
+        if (
+            not isinstance(raw_endpoints, list)
+            or not 1 <= len(raw_endpoints) <= 4
+            or any(
+                not isinstance(value, str)
+                or not value
+                or Path(value).is_absolute()
+                or any(part in {"", ".", ".."} for part in value.split("/"))
+                or Path(value).suffix != ".toml"
+                for value in raw_endpoints
+            )
+            or len(set(raw_endpoints)) != len(raw_endpoints)
+        ):
+            raise ValueError("B1 live deployment needs one to four distinct relative Node configs")
+        endpoints = tuple(raw_endpoints)
+    return B1Deployment(
+        config, steps, relocation, completion, document["schema_version"], endpoints, observation
+    )
 
 
 def freeze_deployment(
@@ -92,7 +124,7 @@ def freeze_deployment(
         if completion_binding_override not in {"0", "1"}:
             raise ValueError("invalid_relocation_completion_binding_flag")
         selected = completion_binding_override == "1"
-        if declaration.schema_version == DEPLOYMENT_SCHEMA and selected != completion:
+        if declaration.schema_version != LEGACY_DEPLOYMENT_SCHEMA and selected != completion:
             raise ValueError("completion binding override conflicts with deployment declaration")
         completion = selected
     if completion and not declaration.enable_relocation:
@@ -101,16 +133,22 @@ def freeze_deployment(
     if not config.is_relative_to(emos_root.resolve()):
         raise ValueError("Habitat configuration resolves outside the EMOS checkout")
     node_ids = []
-    for name in ("node-a.toml", "node-b.toml"):
-        document = tomllib.loads((scenario / name).read_text(encoding="utf-8"))
+    names = declaration.endpoints or ("node-a.toml", "node-b.toml")
+    for name in names:
+        node_path = (scenario / name).resolve(strict=True)
+        if not node_path.is_relative_to(scenario.resolve()):
+            raise ValueError("B1 Node config resolves outside the scenario")
+        document = tomllib.loads(node_path.read_text(encoding="utf-8"))
         node_id = document.get("node_id")
         if not isinstance(node_id, str) or not node_id.strip():
             raise ValueError("B1 deployment needs a nonblank configured Node identity")
         node_ids.append(node_id)
-    if len(set(node_ids)) != 2:
+    if len(set(node_ids)) != len(names):
         raise ValueError("B1 deployment endpoints must have distinct Node identities")
     body: dict[str, Any] = {
-        "schema_version": "roboguide.e1.b1-deployment-used/v0.2",
+        "schema_version": "roboguide.e1.b1-deployment-used/v0.3"
+        if declaration.endpoints
+        else "roboguide.e1.b1-deployment-used/v0.2",
         "declaration": {
             "schema_version": declaration.schema_version,
             "habitat_config": declaration.habitat_config,
@@ -118,7 +156,15 @@ def freeze_deployment(
             "enable_relocation": declaration.enable_relocation,
             **(
                 {"relocation_completion_binding": declaration.relocation_completion_binding}
-                if declaration.schema_version == DEPLOYMENT_SCHEMA
+                if declaration.schema_version != LEGACY_DEPLOYMENT_SCHEMA
+                else {}
+            ),
+            **(
+                {
+                    "endpoints": list(declaration.endpoints),
+                    "enable_observation": declaration.enable_observation,
+                }
+                if declaration.endpoints
                 else {}
             ),
         },
@@ -147,14 +193,23 @@ def freeze_deployment(
     }
     with requirement_path.open("x", encoding="utf-8") as output:
         output.write(json.dumps(requirement, indent=2, sort_keys=True) + "\n")
-    return {
+    assignments: dict[str, str | int] = {
         "HABITAT_CONFIG": str(config),
         "MAX_STEPS": declaration.max_steps,
         "RELOCATION_ENABLED": int(declaration.enable_relocation),
         "RELOCATION_COMPLETION_BINDING": int(completion),
         "NODE_A_ID": node_ids[0],
-        "NODE_B_ID": node_ids[1],
+        "NODE_B_ID": node_ids[1] if len(node_ids) > 1 else "",
     }
+    if declaration.endpoints:
+        assignments.update(
+            LIVE_ENDPOINT_PROFILE=1,
+            OBSERVATION_ENABLED=int(declaration.enable_observation),
+            ENDPOINT_COUNT=len(names),
+        )
+        for index, node_id in enumerate(node_ids):
+            assignments[f"NODE_{chr(65 + index)}_ID"] = node_id
+    return assignments
 
 
 def main(argv: Sequence[str] | None = None) -> int:

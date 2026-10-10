@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import struct
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from roboguide_eval.b1_workload import extract_b1_workload
 
 _SCHEMA = "roboguide.deployment-intent-feasibility/v0.3"
 _OPERATION_SCHEMA = "roboguide.deployment-intent-feasibility/v0.4"
+_LIVE_SCHEMA = "roboguide.deployment-intent-feasibility/v0.5"
 
 
 def _check_reset_source(document: dict[str, Any], schema: str) -> None:
@@ -42,7 +44,12 @@ def _validate_operation_sources(run: Path, document: dict[str, Any]) -> None:
     assert isinstance(start, dict)
     assert isinstance(profile, dict)
     assert isinstance(admission, dict)
-    _check_reset_source(start, "roboguide.habitat-relocation-start/v0.1")
+    _check_reset_source(
+        start,
+        "roboguide.habitat-relocation-start/v0.2"
+        if document["schema_version"] == _LIVE_SCHEMA
+        else "roboguide.habitat-relocation-start/v0.1",
+    )
     _check_reset_source(profile, "roboguide.habitat-relocation-profile/v0.1")
     try:
         objects, destinations, agents = start["objects"], start["destinations"], profile["agents"]
@@ -112,6 +119,161 @@ def _validate_operation_sources(run: Path, document: dict[str, Any]) -> None:
         or start["simulator_steps"] != 0
     ):
         raise ValueError("deployment operation admission differs from its actual reset sources")
+
+
+def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
+    """Cross-bind opt-in topology and operations to actual run-local Node configuration.
+
+    Rehashed registry metadata cannot invent endpoint abilities. The child also
+    verifies loaded classes and sensors; those startup facts are not a guarantee
+    of motion, positive detection or official goal satisfaction.
+    """
+    registry = load_document(run / "endpoint-registry.json")
+    used = load_document(run / "evidence/endpoint-registry-used.json")
+    deployment = load_document(run / "b1-deployment-used.json")
+    requirement = load_document(run / "b1-local-execution-profile-required.json")
+    how = load_document(run / "evidence/local-how-profile.json")
+    if not all(isinstance(item, dict) for item in (registry, used, deployment, requirement, how)):
+        raise ValueError("live deployment sources are missing")
+    _check_reset_source(registry, "roboguide.habitat-endpoint-registry/v0.1")
+    records = registry.get("endpoints")
+    if (
+        registry != used
+        or registry.get("profile") != "independent-live/v0.1"
+        or not isinstance(records, list)
+        or not 1 <= len(records) <= 4
+        or deployment.get("schema_version") != "roboguide.e1.b1-deployment-used/v0.3"
+        or deployment.get("declaration", {}).get("schema_version")
+        != "roboguide.e1.b1-deployment/v0.3"
+    ):
+        raise ValueError("live deployment registry and declaration differ")
+    declared = deployment["declaration"]
+    expected_requirement = {
+        "schema_version": "roboguide.e1.b1-local-execution-profile-required/v0.1",
+        "run_id": run.name,
+        "deployment_sha256": hashlib.sha256(
+            (run / "b1-deployment-used.json").read_bytes()
+        ).hexdigest(),
+        "frozen_input_sha256": hashlib.sha256(
+            (run / "b1-input-used.json").read_bytes()
+        ).hexdigest(),
+        "relocation_completion_binding": declared["relocation_completion_binding"],
+    }
+    if (
+        requirement != expected_requirement
+        or deployment.get("frozen_input_sha256") != expected_requirement["frozen_input_sha256"]
+    ):
+        raise ValueError("live deployment is not bound to the frozen workload")
+    identities: dict[str, set[Any]] = {key: set() for key in ("node_id", "port", "resource_id")}
+    for agent, record in enumerate(records):
+        path = (run / f"node-{chr(97 + agent)}.toml").resolve()
+        config = tomllib.loads(path.read_text())
+        owners = config["local_systems"]
+        resources = config["resources"]
+        if len(owners) != 1 or len(resources) != 1:
+            raise ValueError("live endpoint has an ambiguous local owner/resource")
+        owner = owners[0]
+        resource = resources[0]
+        operations = config["operations"]
+        connections = [
+            item for item in config["connections"] if item["local_system"] == owner["id"]
+        ]
+        if len(connections) != 1 or not isinstance(record, dict):
+            raise ValueError("live endpoint has an ambiguous connection")
+        expected = {
+            "agent_id": agent,
+            "node_id": config["node_id"],
+            "robot_type": owner["metadata"]["roboguide.habitat-robot-type"],
+            "port": record["port"],
+            "state_db": str((run / f"bridge-{agent}.sqlite3").resolve()),
+            "node_config_path": str(path),
+            "node_config_digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+            "resource_id": resource["id"],
+            "operations": sorted(item["operation"] for item in operations),
+        }
+        if (
+            record != expected
+            or config.get("schema") != "roboguide.node-config/v0.7"
+            or resource.get("owner") != owner["id"]
+            or resource.get("kind") != "space"
+            or type(resource.get("capacity")) is not int
+            or resource["capacity"] != 1
+            or type(record["port"]) is not int
+            or not 1 <= record["port"] <= 65535
+            or connections[0].get("driver") != "http"
+            or connections[0].get("endpoint") != f"http://127.0.0.1:{record['port']}"
+            or owner["metadata"].get("roboguide.habitat-execution-profile") != registry["profile"]
+            or any(
+                item.get("owner") != owner["id"]
+                or item.get("required_resources") != [resource["id"]]
+                for item in operations
+            )
+        ):
+            raise ValueError("live registry differs from the actual Node declarations")
+        for key, seen in identities.items():
+            if record[key] in seen:
+                raise ValueError("live endpoint identities overlap")
+            seen.add(record[key])
+    if deployment.get("node_ids") != [record["node_id"] for record in records] or len(
+        declared.get("endpoints", [])
+    ) != len(records):
+        raise ValueError("live declaration endpoint coverage differs")
+    expected_profile = {
+        "mode": registry["profile"],
+        "registry_digest": registry["digest"],
+        "endpoints": [
+            {key: record[key] for key in ("node_id", "agent_id", "operations")}
+            for record in records
+        ],
+    }
+    if matrix.get("execution_profile") != expected_profile:
+        raise ValueError("live execution profile differs from frozen registry")
+    bound_relocation = declared["relocation_completion_binding"]
+    expected_base = {
+        "schema_version": "roboguide.habitat-local-how-profile/v0.8"
+        if bound_relocation
+        else "roboguide.habitat-local-how-profile/v0.2",
+        "navigation_point_resolver": "original-emos-oracle",
+        "official_success_authority": "habitat-pddl",
+        "stage2_execution_feedback_profile": "observed-local-skill-feedback/v0.4"
+        if bound_relocation
+        else "observed-local-skill-feedback/v0.1",
+        "reset_route_support_enabled": False,
+    }
+    if bound_relocation:
+        expected_base["relocation_completion_profile"] = "exact-object-released-place/v0.1"
+    if (
+        set(how)
+        != {
+            "schema_version",
+            "base_profile",
+            "execution_profile",
+            "endpoint_registry_digest",
+            "observation_enabled",
+            "unassigned_policy",
+            "official_success_authority",
+        }
+        or how["schema_version"] != "roboguide.habitat-local-how-profile/v0.9"
+        or how["execution_profile"] != registry["profile"]
+        or how["endpoint_registry_digest"] != registry["digest"]
+        or how["observation_enabled"] is not declared["enable_observation"]
+        or how["unassigned_policy"] != "original-wait-model-free"
+        or how["official_success_authority"] != "habitat-pddl"
+        or how["base_profile"] != expected_base
+    ):
+        raise ValueError("loaded Local How differs from live deployment")
+    if declared["enable_observation"]:
+        readiness = load_document(run / "evidence/perception-readiness.json")
+        if (
+            readiness.get("enabled") is not True
+            or readiness.get("source") != "loaded-original-sensors-and-cameras"
+            or set(readiness.get("sensors", {})) != {str(agent) for agent in range(len(records))}
+            or any(
+                key not in ("detected_objects", f"agent_{agent}_detected_objects")
+                for agent, key in readiness["sensors"].items()
+            )
+        ):
+            raise ValueError("loaded perception readiness is unavailable")
 
 
 def _canonical_digest_value(value: Any) -> Any:
@@ -184,9 +346,13 @@ def preflight_deployment_feasibility(run: Path) -> dict[str, Any]:
         "digest",
     }
     schema = document.get("schema_version")
-    if schema == _OPERATION_SCHEMA:
+    if schema == _OPERATION_SCHEMA or (
+        schema == _LIVE_SCHEMA and "operation_admission" in document
+    ):
         fields.add("operation_admission")
-    if set(document) != fields or schema not in {_SCHEMA, _OPERATION_SCHEMA}:
+    if schema == _LIVE_SCHEMA:
+        fields.add("execution_profile")
+    if set(document) != fields or schema not in {_SCHEMA, _OPERATION_SCHEMA, _LIVE_SCHEMA}:
         raise ValueError("preassignment feasibility schema is invalid")
     claimed = document["digest"]
     body = {key: value for key, value in document.items() if key != "digest"}
@@ -219,7 +385,9 @@ def preflight_deployment_feasibility(run: Path) -> dict[str, Any]:
     }
     if identity != expected:
         raise ValueError("preassignment feasibility differs from frozen B1 identity")
-    if schema == _OPERATION_SCHEMA:
+    if schema == _LIVE_SCHEMA:
+        _validate_live_sources(run, document)
+    if "operation_admission" in document:
         _validate_operation_sources(run, document)
     if not isinstance(document["records"], list) or not document["records"]:
         raise ValueError("preassignment feasibility has no candidate records")

@@ -1,0 +1,12 @@
+{
+  "schema_version": "roboguide.e1.b1-deployment/v0.3",
+  "habitat_config": "habitat-baselines/habitat_baselines/config/multi_rearrange/llm_height_per.yaml",
+  "max_steps": 4000,
+  "enable_relocation": false,
+  "relocation_completion_binding": false,
+  "enable_observation": true,
+  "endpoints": [
+    "node-a.toml",
+    "node-b.toml"
+  ]
+}

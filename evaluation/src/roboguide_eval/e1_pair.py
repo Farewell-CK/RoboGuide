@@ -45,6 +45,15 @@ from roboguide_eval.provider_capture import BodyCapture, CaptureProxyServer
 
 SCHEMA = "roboguide.e1.pair-worker/v0.1"
 _PORT_NAMES = ("proxy", "grpc", "controller", "artifact", "endpoint_a", "endpoint_b", "mission")
+
+
+def endpoint_port_names(count: int) -> set[str]:
+    """Keep fixed service ports and exactly the deployment's contiguous endpoint ports."""
+    return set(_PORT_NAMES) - {"endpoint_a", "endpoint_b"} | {
+        "endpoint_" + chr(97 + index) for index in range(count)
+    }
+
+
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}\Z")
 _VENDOR_CODE = ("habitat-lab", "habitat-baselines", "habitat-mas")
 
@@ -144,10 +153,10 @@ class PairSpec:
         if type(config.get("gpu_device")) is not int or cast(int, config["gpu_device"]) < 0:
             raise ValueError("invalid GPU device")
         raw_ports = object_value(config.get("ports"))
-        if set(raw_ports) != set(_PORT_NAMES) or any(
+        if set(raw_ports) not in tuple(endpoint_port_names(count) for count in range(1, 5)) or any(
             type(p) is not int or not 1 <= p <= 65535 for p in raw_ports.values()
         ):
-            raise ValueError("pair requires seven explicit ports")
+            raise ValueError("pair requires isolated service and contiguous endpoint ports")
         ports = {name: cast(int, value) for name, value in raw_ports.items()}
         if len(set(ports.values())) != len(ports):
             raise ValueError("pair ports overlap")
@@ -235,9 +244,26 @@ class PairSpec:
                 + required_text(config, "native_config")
             ):
                 raise ValueError("B1 deployment and native Habitat configuration differ")
+            if declaration.endpoints:
+                required_ports = endpoint_port_names(len(declaration.endpoints))
+                if set(ports) != required_ports:
+                    raise ValueError("pair ports differ from the explicit endpoint deployment")
+                scenario = selected.parent
+                for name in (
+                    *declaration.endpoints,
+                    "planning-profile.json",
+                    "execution-profile.json",
+                    "mission-service-b1.toml",
+                ):
+                    if scenario / name not in sources:
+                        raise ValueError("live deployment Node/planning source gate missing")
+            elif set(ports) != set(_PORT_NAMES):
+                raise ValueError("legacy B1 deployment requires two endpoint ports")
             steps = population.benchmark_authority.parameters.get("max_episode_steps")
             if type(steps) is not int or steps != declaration.max_steps:
                 raise ValueError("B1 deployment and frozen benchmark step budget differ")
+        elif set(ports) != set(_PORT_NAMES):
+            raise ValueError("default B1 deployment requires two endpoint ports")
         spec.source_identities()
         return spec
 
@@ -503,9 +529,14 @@ def arm_environment(spec: PairSpec, directory: Path, proxy_port: int) -> dict[st
         ("HABITAT_PORT_B", "endpoint_b"),
         ("MISSION", "mission"),
     ):
+        if field not in spec.ports:
+            continue
         env["ROBOGUIDE_B1_" + (name if name.endswith("PORT_B") else name + "_PORT")] = str(
             spec.ports[field]
         )
+    for field, suffix in (("endpoint_c", "C"), ("endpoint_d", "D")):
+        if field in spec.ports:
+            env["ROBOGUIDE_B1_HABITAT_PORT_" + suffix] = str(spec.ports[field])
     return env
 
 

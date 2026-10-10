@@ -24,6 +24,8 @@ pub(crate) struct DeploymentFeasibility {
     assessment_enabled: bool,
     /// Optional versioned exact-operation sources, independent of navigation decisions.
     operation_admission: Option<DeploymentOperationAdmission>,
+    /// Opt-in live endpoint support; never a reservation or physical binding.
+    live_operations: Option<BTreeMap<domain::NodeId, BTreeSet<String>>>,
 }
 
 impl DeploymentFeasibility {
@@ -54,14 +56,21 @@ impl DeploymentFeasibility {
             "initial_agent_positions",
             "records",
         ]);
-        if schema == "roboguide.deployment-intent-feasibility/v0.4" {
+        if schema == "roboguide.deployment-intent-feasibility/v0.4"
+            || (schema == "roboguide.deployment-intent-feasibility/v0.5"
+                && body.contains_key("operation_admission"))
+        {
             fields.insert("operation_admission");
+        }
+        if schema == "roboguide.deployment-intent-feasibility/v0.5" {
+            fields.insert("execution_profile");
         }
         if body.keys().map(String::as_str).collect::<BTreeSet<_>>() != fields
             || !matches!(
                 schema,
                 "roboguide.deployment-intent-feasibility/v0.3"
                     | "roboguide.deployment-intent-feasibility/v0.4"
+                    | "roboguide.deployment-intent-feasibility/v0.5"
             )
             || body["authority"] != "deployment-observed-reset-state"
         {
@@ -329,8 +338,17 @@ impl DeploymentFeasibility {
         let operation_admission = body
             .get("operation_admission")
             .map(|value| {
-                DeploymentOperationAdmission::from_json(value, &node_agents, &node_sources)
+                DeploymentOperationAdmission::from_json(
+                    value,
+                    &node_agents,
+                    &node_sources,
+                    schema == "roboguide.deployment-intent-feasibility/v0.5",
+                )
             })
+            .transpose()?;
+        let live_operations = body
+            .get("execution_profile")
+            .map(|profile| load_live_endpoints(profile, &node_agents))
             .transpose()?;
         Ok(Self {
             digest,
@@ -341,6 +359,7 @@ impl DeploymentFeasibility {
             initial_preferences: None,
             assessment_enabled: false,
             operation_admission,
+            live_operations,
         })
     }
 
@@ -444,12 +463,58 @@ impl DeploymentFeasibility {
                 let intent = task
                     .execution_intent(role.role_id())
                     .ok_or("deployment role lacks canonical intent")?;
+                if intent.operation().to_string() == "observation.verify@v1" {
+                    let profiles = self
+                        .live_operations
+                        .as_ref()
+                        .ok_or("observation requires explicit live deployment support")?;
+                    let condition = match (
+                        intent.parameters().len(),
+                        intent.parameters().get("expected"),
+                    ) {
+                        (1, Some(domain::ExecutionValue::String(value))) => value,
+                        _ => return Err("observation requires one exact expected condition".into()),
+                    };
+                    let entity = condition
+                        .strip_prefix("detected(")
+                        .and_then(|value| value.strip_suffix(')'))
+                        .filter(|value| {
+                            !value.trim().is_empty()
+                                && !value.contains(['(', ')', '\n', '\r'])
+                                && value.len() <= 502
+                        })
+                        .ok_or("observation condition is outside the local read-only profile")?;
+                    if !self
+                        .entries
+                        .keys()
+                        .any(|(_, destination)| destination == entity)
+                    {
+                        return Err("observation entity is not in the frozen world".into());
+                    }
+                    let allowed = profiles
+                        .iter()
+                        .filter(|(_, operations)| operations.contains("observation.verify@v1"))
+                        .map(|(node, _)| node.clone())
+                        .collect::<BTreeSet<_>>();
+                    candidates
+                        .entry(actor.clone())
+                        .and_modify(|existing| existing.retain(|node| allowed.contains(node)))
+                        .or_insert(allowed);
+                    continue;
+                }
                 if intent.operation().to_string() == "object.relocate@v1" {
                     let admitted = self
                         .operation_admission
                         .as_ref()
                         .ok_or("relocation requires reset-bound deployment operation admission")?;
-                    let allowed = admitted.candidates(intent)?;
+                    let mut allowed = admitted.candidates(intent)?;
+                    if let Some(profiles) = &self.live_operations {
+                        allowed.retain(|node| {
+                            profiles
+                                .get(node)
+                                .is_some_and(|operations| operations.contains("object.relocate@v1"))
+                        });
+                    }
                     let Some(domain::ExecutionValue::String(object)) =
                         intent.parameters().get("object")
                     else {
@@ -483,7 +548,14 @@ impl DeploymentFeasibility {
                     .ok_or("deployment feasibility has no record for an accepted intent")?;
                 let allowed = statuses
                     .iter()
-                    .filter(|(_, status)| status.as_str() != "incompatible")
+                    .filter(|(node, status)| {
+                        status.as_str() != "incompatible"
+                            && self.live_operations.as_ref().is_none_or(|profiles| {
+                                profiles.get(*node).is_some_and(|operations| {
+                                    operations.contains(&intent.operation().to_string())
+                                })
+                            })
+                    })
                     .map(|(node, _)| node.clone())
                     .collect::<BTreeSet<_>>();
                 candidates
@@ -525,8 +597,11 @@ impl DeploymentFeasibility {
                         .any(|left| second.iter().any(|right| left != right))
                 })
             });
+        let supported_live = self.live_operations.is_some()
+            && session.slots.len() <= 32
+            && tasks.len() == session.slots.len();
         if !session.slots.iter().all(|slot| slot.independent)
-            || (!supported_serial && !supported_pair)
+            || (!supported_serial && !supported_pair && !supported_live)
         {
             return Err(
                 "accepted-plan topology has no feasible shared-world endpoint assignment".into(),
@@ -603,6 +678,69 @@ pub(super) fn content_digest(body: &serde_json::Value) -> Result<String, String>
     canonical_digest_value(&mut canonical);
     let encoded = serde_json::to_vec(&canonical).map_err(|error| error.to_string())?;
     Ok(format!("sha256:{:x}", Sha256::digest(encoded)))
+}
+
+/// Validate one explicit endpoint profile against complete frozen source coverage.
+fn load_live_endpoints(
+    value: &serde_json::Value,
+    node_agents: &BTreeMap<domain::NodeId, i64>,
+) -> Result<BTreeMap<domain::NodeId, BTreeSet<String>>, String> {
+    let profile = value
+        .as_object()
+        .ok_or("live execution profile is not an object")?;
+    if profile.keys().map(String::as_str).collect::<BTreeSet<_>>()
+        != BTreeSet::from(["mode", "registry_digest", "endpoints"])
+        || profile["mode"] != "independent-live/v0.1"
+        || !valid_prefixed_sha256(profile["registry_digest"].as_str().unwrap_or_default())
+    {
+        return Err("live execution profile identity is invalid".into());
+    }
+    let endpoints = profile["endpoints"]
+        .as_array()
+        .ok_or("live endpoints must be an array")?;
+    if endpoints.is_empty() || endpoints.len() > 4 {
+        return Err("live endpoint count is unsupported".into());
+    }
+    let mut result = BTreeMap::new();
+    for endpoint in endpoints {
+        let record = endpoint
+            .as_object()
+            .ok_or("live endpoint is not an object")?;
+        if record.keys().map(String::as_str).collect::<BTreeSet<_>>()
+            != BTreeSet::from(["node_id", "agent_id", "operations"])
+        {
+            return Err("live endpoint fields are invalid".into());
+        }
+        let node = domain::NodeId::new(record["node_id"].as_str().unwrap_or_default())
+            .map_err(|error| error.to_string())?;
+        if record["agent_id"].as_i64() != node_agents.get(&node).copied() {
+            return Err("live endpoint differs from frozen Node source".into());
+        }
+        let declared = record["operations"]
+            .as_array()
+            .ok_or("live operations must be an array")?;
+        let mut operations = BTreeSet::new();
+        for operation in declared {
+            let name = operation.as_str().ok_or("live operation is not text")?;
+            if !matches!(
+                name,
+                "mobility.move@v1"
+                    | "mobility.navigate@v1"
+                    | "object.relocate@v1"
+                    | "observation.verify@v1"
+            ) || !operations.insert(name.to_owned())
+            {
+                return Err("live operation coverage is invalid".into());
+            }
+        }
+        if operations.is_empty() || result.insert(node, operations).is_some() {
+            return Err("live endpoint repeats an identity or lacks operations".into());
+        }
+    }
+    if result.keys().cloned().collect::<BTreeSet<_>>() != node_agents.keys().cloned().collect() {
+        return Err("live endpoints do not cover the frozen world".into());
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -2247,5 +2385,109 @@ mod tests {
                 .expect("checkpoint reads")
                 .is_none()
         );
+    }
+    /// Versioned opt-in topology keeps legacy barriers and supports sparse independent DAG work.
+    #[test]
+    fn live_profile_admits_sparse_tasks_without_changing_legacy_topology() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("live.json");
+        let mut document = snapshot(&path, false);
+        document["schema_version"] =
+            serde_json::json!("roboguide.deployment-intent-feasibility/v0.5");
+        document["execution_profile"] = serde_json::json!({
+            "mode": "independent-live/v0.1", "registry_digest": format!("sha256:{}", "a".repeat(64)),
+            "endpoints": [
+                {"node_id": "node-a", "agent_id": 0, "operations": ["mobility.navigate@v1", "observation.verify@v1"]},
+                {"node_id": "node-b", "agent_id": 1, "operations": ["mobility.navigate@v1"]}
+            ]
+        });
+        seal(&mut document);
+        std::fs::write(&path, document.to_string()).unwrap();
+        let evidence = DeploymentFeasibility::load(&path).unwrap();
+        let group = domain::ExecutionGroupId::new("group").unwrap();
+        let pair = evidence
+            .restrictions_for_plan(&plan(false, true), &group)
+            .unwrap();
+        assert_eq!(pair.len(), 2);
+        assert!(
+            pair.iter().all(
+                |(_, nodes)| nodes == &BTreeSet::from([domain::NodeId::new("node-a").unwrap()])
+            )
+        );
+        // This is candidate evidence only: actual resource scarcity remains Control-owned.
+        let mut submitted = plan_document(false, true);
+        let original = submitted["tasks"][1].clone();
+        submitted["tasks"].as_array_mut().unwrap().push(original);
+        submitted["tasks"][2]["id"] = serde_json::json!("followup-observation");
+        submitted["tasks"][2]["depends_on"] = serde_json::json!([submitted["tasks"][1]["id"]]);
+        let role = &mut submitted["tasks"][2]["roles"][0];
+        role["execution_intent"]["operation"] =
+            serde_json::json!({"namespace":"observation","name":"verify","version":"v1"});
+        role["execution_intent"]["parameters"] =
+            serde_json::json!({"expected":"detected(any_targets|0)"});
+        role["requirements"]["capabilities"] = serde_json::json!([{"contract":{"namespace":"observation","name":"verify","version":"v1"},"constraints":[]}]);
+        let decoded = orchestration::decode_mission_plan(&submitted.to_string()).unwrap();
+        assert_eq!(
+            evidence
+                .restrictions_for_plan(&decoded, &group)
+                .unwrap()
+                .len(),
+            2
+        );
+        submitted["tasks"][2]["roles"][0]["execution_intent"]["parameters"]["expected"] =
+            serde_json::json!("detected(invented-object)");
+        let decoded = orchestration::decode_mission_plan(&submitted.to_string()).unwrap();
+        assert!(
+            evidence
+                .restrictions_for_plan(&decoded, &group)
+                .unwrap_err()
+                .contains("frozen world")
+        );
+        submitted["tasks"][2]["roles"][0]["execution_intent"]["parameters"]["expected"] =
+            serde_json::json!("is_detected(any_targets|0)");
+        let decoded = orchestration::decode_mission_plan(&submitted.to_string()).unwrap();
+        assert!(
+            evidence
+                .restrictions_for_plan(&decoded, &group)
+                .unwrap_err()
+                .contains("read-only profile")
+        );
+    }
+
+    /// Rehashing cannot invent registered operation shapes or incomplete endpoint coverage.
+    #[test]
+    fn live_profile_rejects_invalid_endpoint_coverage() {
+        let nodes = BTreeMap::from([
+            (domain::NodeId::new("node-a").unwrap(), 0),
+            (domain::NodeId::new("node-b").unwrap(), 1),
+        ]);
+        let valid = serde_json::json!({"mode":"independent-live/v0.1", "registry_digest":format!("sha256:{}", "a".repeat(64)), "endpoints":[
+            {"node_id":"node-a", "agent_id":0,"operations":["mobility.move@v1"]},
+            {"node_id":"node-b", "agent_id":1,"operations":["mobility.move@v1"]}
+        ]});
+        assert!(load_live_endpoints(&valid, &nodes).is_ok());
+        for field in [
+            "missing",
+            "wrong-agent",
+            "duplicate-operation",
+            "unsupported",
+        ] {
+            let mut value = valid.clone();
+            match field {
+                "missing" => {
+                    value["endpoints"].as_array_mut().unwrap().pop();
+                }
+                "wrong-agent" => value["endpoints"][1]["agent_id"] = serde_json::json!(0),
+                "duplicate-operation" => {
+                    value["endpoints"][1]["operations"] =
+                        serde_json::json!(["mobility.move@v1", "mobility.move@v1"])
+                }
+                _ => {
+                    value["endpoints"][1]["operations"] =
+                        serde_json::json!(["invented.operation@v1"])
+                }
+            }
+            assert!(load_live_endpoints(&value, &nodes).is_err(), "{field}");
+        }
     }
 }

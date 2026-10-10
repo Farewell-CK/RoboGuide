@@ -1,0 +1,27 @@
+# Controlled relocation B1: fresh run-local grounding and frozen deployment profiles.
+[service]
+listen_host = "127.0.0.1"
+listen_port = 8070
+state_db = "STATE_DB_PLACEHOLDER"
+controller_endpoint = "http://127.0.0.1:28060"
+controller_timeout_seconds = 30
+controller_preflight_enabled = false
+max_deployment_recovery_attempts = 0
+deployment_recovery_timeout_ms = 900000
+artifact_endpoint = "http://127.0.0.1:28090"
+grounding_timeout_seconds = 5
+grounding_acquisition_attempts = 2
+max_grounding_state_evidence = 64
+max_grounding_memory_evidence = 32
+max_grounding_gaps = 32
+grounding_world_payload_schemas = []
+grounding_semantic_evidence_path = "SEMANTIC_EVIDENCE_PLACEHOLDER"
+grounding_planning_world_evidence_path = "PLANNING_WORLD_EVIDENCE_PLACEHOLDER"
+grounding_planning_world_evidence_required = true
+execution_profile_path = "EXECUTION_PROFILE_PLACEHOLDER"
+planning_profile_path = "PLANNING_PROFILE_PLACEHOLDER"
+max_request_bytes = 1048576
+
+# Deployment decision for controlled simulation-only relocation: no approval risk gate;
+# accepted MissionPlans submit to Control automatically.
+approval_required_contracts = []

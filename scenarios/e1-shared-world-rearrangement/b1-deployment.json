@@ -1,0 +1,13 @@
+{
+  "schema_version": "roboguide.e1.b1-deployment/v0.3",
+  "habitat_config": "habitat-baselines/habitat_baselines/config/multi_rearrange/llm_multi_agent_mobility.yaml",
+  "max_steps": 5000,
+  "enable_relocation": true,
+  "relocation_completion_binding": true,
+  "enable_observation": false,
+  "endpoints": [
+    "node-a.toml",
+    "node-b.toml",
+    "node-c.toml"
+  ]
+}

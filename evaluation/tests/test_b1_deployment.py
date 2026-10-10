@@ -307,7 +307,7 @@ def test_node_wait_uses_actual_inventory_identity(tmp_path: Path) -> None:
     inventory = tmp_path / "inventory.json"
     # Use shell function substitution to feed a deterministic HTTP response into the real barrier.
     fixture = (
-        "CONTROLLER_PORT=1 NODE_A_ID=a NODE_B_ID=b\ncurl() { cat "
+        "CONTROLLER_PORT=1 NODE_A_ID=a NODE_B_ID=b\nNODE_IDS=(a b)\ncurl() { cat "
         + shlex.quote(str(inventory))
         + "; }\n"
     )
@@ -319,3 +319,40 @@ def test_node_wait_uses_actual_inventory_identity(tmp_path: Path) -> None:
         inventory.write_text(json.dumps({"nodes": nodes}))
         result = subprocess.run(["bash", "-c", fixture], capture_output=True, check=False)
         assert (result.returncode == 0) is accepted
+
+
+@pytest.mark.parametrize("name,count", [("perception", 2), ("rearrangement", 3)])
+def test_live_runner_offline_preparation_freezes_actual_endpoint_set(
+    tmp_path: Path, name: str, count: int
+) -> None:
+    """The real launcher derives all resources/sources while tripwires forbid physical startup."""
+    scenario = ROOT / ("scenarios/e1-shared-world-" + name)
+    environment = offline_environment(tmp_path)
+    deployment = load_deployment(scenario)
+    native = Path(environment["ROBOGUIDE_EMOS_ROOT"]) / deployment.habitat_config
+    native.parent.mkdir(parents=True, exist_ok=True)
+    native.write_text("# Config-only offline fixture, never executable Habitat.\n")
+    frozen = tmp_path / "frozen.json"
+    frozen.write_bytes((NAVIGATION / "b1-input.json").read_bytes())
+    run = tmp_path / "run"
+    result = subprocess.run(
+        ["bash", str(scenario / "run-b1-roboguide.sh"), str(run), str(frozen)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=45,
+    )
+    assert result.returncode == 0, result.stderr
+    registry = json.loads((run / "endpoint-registry.json").read_bytes())
+    used = json.loads((run / "b1-deployment-used.json").read_bytes())
+    assert len(registry["endpoints"]) == count
+    assert used["node_ids"] == [record["node_id"] for record in registry["endpoints"]]
+    assert used["declaration"]["enable_observation"] is (name == "perception")
+    assert len({record["port"] for record in registry["endpoints"]}) == count
+    assert not (run / "b1-request-record.json").exists()
+    assert not (run / "shared-bridge.log").exists()
+    if name == "rearrangement":
+        profile = json.loads((run / "relocation-registration-profile.json").read_bytes())
+        assert [record["agent_id"] for record in profile["agents"]] == [0, 1]
+        assert "object.relocate@v1" not in registry["endpoints"][2]["operations"]

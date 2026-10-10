@@ -180,6 +180,57 @@ def select_deployment(config_path: Path, *, native_config: str = "test.yaml") ->
     return selected
 
 
+@pytest.mark.parametrize("count", [1, 2, 3, 4])
+def test_live_pair_ports_and_sources_match_exact_endpoint_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int
+) -> None:
+    """Actual worker parsing propagates only configured ports and rejects source/coverage drift."""
+    population, config_path = setup_pair(tmp_path)
+    selected = select_deployment(config_path)
+    config = json.loads(config_path.read_bytes())
+    declaration = json.loads(selected.read_bytes())
+    endpoints = [f"node-{chr(97 + agent)}.toml" for agent in range(count)]
+    declaration.update(
+        schema_version="roboguide.e1.b1-deployment/v0.3",
+        endpoints=endpoints,
+        enable_observation=False,
+    )
+    write_json(selected, declaration)
+    config["source_sha256"][str(selected)] = file_digest(selected)
+    for name in (
+        *endpoints,
+        "planning-profile.json",
+        "execution-profile.json",
+        "mission-service-b1.toml",
+    ):
+        path = selected.parent / name
+        path.write_text("# source gate fixture; no service is started\n")
+        config["source_sha256"][str(path)] = file_digest(path)
+    config["ports"] = {
+        name: value for name, value in config["ports"].items() if not name.startswith("endpoint_")
+    }
+    for agent in range(count):
+        port = 60000 + agent
+        while port in config["ports"].values():
+            port += 10
+        config["ports"]["endpoint_" + chr(97 + agent)] = port
+    write_json(config_path, config)
+    spec = PairSpec.load(population, config_path, "pair-0")
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-test-credential")
+    env = arm_environment(spec, tmp_path / "arm", spec.ports["proxy"])
+    assert env["ROBOGUIDE_B1_HABITAT_PORT"] == str(spec.ports["endpoint_a"])
+    for agent in range(1, 4):
+        key = "ROBOGUIDE_B1_HABITAT_PORT_" + chr(65 + agent)
+        assert (key in env) is (agent < count)
+        if agent < count:
+            assert env[key] == str(spec.ports["endpoint_" + chr(97 + agent)])
+    source = str(selected.parent / endpoints[-1])
+    config["source_sha256"].pop(source)
+    write_json(config_path, config)
+    with pytest.raises(ValueError, match="source gate"):
+        PairSpec.load(population, config_path, "pair-0")
+
+
 def test_explicit_deployment_is_pinned_and_propagated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -20,6 +20,7 @@ impl DeploymentOperationAdmission {
         document: &serde_json::Value,
         node_agents: &BTreeMap<domain::NodeId, i64>,
         node_sources: &BTreeMap<domain::NodeId, String>,
+        allow_subset: bool,
     ) -> Result<Self, String> {
         let body = document
             .as_object()
@@ -122,7 +123,7 @@ impl DeploymentOperationAdmission {
                 );
             }
         }
-        if endpoints != node_agents.keys().cloned().collect() {
+        if !allow_subset && endpoints != node_agents.keys().cloned().collect() {
             return Err("operation admission endpoint coverage is incomplete".into());
         }
         Ok(Self {

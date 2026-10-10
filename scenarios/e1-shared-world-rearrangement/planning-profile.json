@@ -1,0 +1,106 @@
+{
+  "schema_version": "roboguide.deployment-planning-profile/v0.1",
+  "authority": "deployment-owned",
+  "identity": {
+    "profile_id": "e1-shared-world-rearrangement",
+    "revision": "v1",
+    "source": "deployment://e1-shared-world-rearrangement"
+  },
+  "capability_classes": [
+    {
+      "id": "capability-class-0",
+      "description": "Deployment-declared legged mobility with integrated relocation. Loaded class and exact support are independently checked before registration.",
+      "capabilities": [
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "move",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": true
+          }
+        },
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "navigate",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": true
+          }
+        },
+        {
+          "contract": {
+            "namespace": "object",
+            "name": "relocate",
+            "version": "v1"
+          },
+          "attributes": {}
+        }
+      ]
+    },
+    {
+      "id": "capability-class-1",
+      "description": "Deployment-declared wheeled mobility with integrated relocation. Loaded class and exact support are independently checked before registration.",
+      "capabilities": [
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "move",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": false
+          }
+        },
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "navigate",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": false
+          }
+        },
+        {
+          "contract": {
+            "namespace": "object",
+            "name": "relocate",
+            "version": "v1"
+          },
+          "attributes": {}
+        }
+      ]
+    },
+    {
+      "id": "capability-class-2",
+      "description": "Deployment-declared flying mobility. Loaded class and exact support are independently checked before registration.",
+      "capabilities": [
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "move",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": true
+          }
+        },
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "navigate",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": true
+          }
+        }
+      ]
+    }
+  ],
+  "digest": "sha256:071e09eaa4cb418784dd4f27739084aa3187656afb1c377f0999257737b1ec58"
+}

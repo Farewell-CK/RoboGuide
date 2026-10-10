@@ -31,6 +31,10 @@ ROUTE_SUPPORT_CHECK_ARGS=()
 PROGRESS_ARGS=()
 RETENTION_ARGS=()
 RELOCATION_ARGS=()
+ENDPOINT_ARGS=()
+LIVE_ENDPOINT_PROFILE=0
+OBSERVATION_ENABLED=0
+ENDPOINT_COUNT=2
 PREPARE_ONLY="${ROBOGUIDE_B1_PREPARE_ONLY:-0}"
 case "$PREPARE_ONLY" in
     0|1) ;;
@@ -121,14 +125,14 @@ raise SystemExit(0 if isinstance(value, dict) and value.get("state") == sys.argv
 }
 
 wait_nodes() {
-    # Observe both exact configured Node identities, independent of the deployment's robot types.
+    # Observe every exact startup-configured identity, never infer nodes from Actor count.
     for _ in $(seq 1 120); do
         if curl -sf http://127.0.0.1:${CONTROLLER_PORT}/v1/inventory \
             | python3 -c '
 import json, sys
 nodes = json.load(sys.stdin)["nodes"]
-raise SystemExit(0 if {sys.argv[1], sys.argv[2]} <= {n["node_id"] for n in nodes} else 1)
-' "$NODE_A_ID" "$NODE_B_ID"; then
+raise SystemExit(0 if bool(sys.argv[1:]) and set(sys.argv[1:]) <= {n["node_id"] for n in nodes} else 1)
+' "${NODE_IDS[@]}"; then
             return 0
         fi
         sleep 1
@@ -272,7 +276,8 @@ WORKLOAD="$(uv run --project "$REPO" python -m roboguide_eval.b1_workload "$INPU
     || { FAILURE_REASON=invalid_b1_workload; exit 1; }
 EPISODE_ID="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^episode_id=//p')"
 SEED="$(printf '%s\n' "$WORKLOAD" | sed -n 's/^seed=//p')"
-DEPLOYMENT_ARGS=()
+DEPLOYMENT_DECLARATION="${ROBOGUIDE_B1_DEPLOYMENT:-$SCENARIO/b1-deployment.json}"
+DEPLOYMENT_ARGS=(--declaration "$DEPLOYMENT_DECLARATION")
 if [[ -n "${ROBOGUIDE_B1_DEPLOYMENT:-}" ]]; then
     DEPLOYMENT_ARGS=(--declaration "$ROBOGUIDE_B1_DEPLOYMENT")
 fi
@@ -280,6 +285,21 @@ DEPLOYMENT_ASSIGNMENTS="$(uv run --project "$REPO" python -m roboguide_eval.b1_d
     --run "$RUN" --scenario "$SCENARIO" --emos-root "$EMOS_ROOT" "${DEPLOYMENT_ARGS[@]}")" \
     || { FAILURE_REASON=invalid_b1_deployment; exit 1; }
 eval "$DEPLOYMENT_ASSIGNMENTS"
+NODE_LETTERS=()
+NODE_IDS=()
+RECOVERY_NODE_ARGS=()
+ALL_NODE_LETTERS=(a b c d)
+NODE_LETTERS=("${ALL_NODE_LETTERS[@]:0:ENDPOINT_COUNT}")
+for letter in "${NODE_LETTERS[@]}"; do
+    upper="${letter^^}"
+    identity="NODE_${upper}_ID"
+    NODE_IDS+=("${!identity}")
+    RECOVERY_NODE_ARGS+=(--node "$RUN/node-$letter.toml")
+done
+if [[ "$LIVE_ENDPOINT_PROFILE" == 1 && ${#RETENTION_ARGS[@]} != 0 ]]; then
+    FAILURE_REASON=unsupported_live_endpoint_recovery
+    exit 1
+fi
 if [[ "$RELOCATION_ENABLED" == 1 && ( ${#GOAL_REGION_ARGS[@]} != 0 \
     || ${#RETENTION_ARGS[@]} != 0 ) ]]; then
     FAILURE_REASON=unsupported_relocation_profile_combination
@@ -291,22 +311,39 @@ uv run --project "$REPO" python -m roboguide_eval.b1_planning_source "$RUN" \
 cp "$MISSION_CONFIG" "$RUN/mission-config-used.toml"
 MISSION_CONFIG="$RUN/mission-config-used.toml"
 uv run --project "$REPO" python -m roboguide_eval.b1_ports \
-    --run "$RUN" --scenario "$SCENARIO" > "$RUN/deployment-ports.env"
+    --run "$RUN" --scenario "$SCENARIO" --declaration "$DEPLOYMENT_DECLARATION" > "$RUN/deployment-ports.env"
+eval "$(cat "$RUN/deployment-ports.env")"
+ENDPOINT_PORTS=("$HABITAT_PORT")
+for letter in "${NODE_LETTERS[@]:1}"; do
+    name="HABITAT_PORT_${letter^^}"
+    ENDPOINT_PORTS+=("${!name}")
+done
 PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
     habitat_local_eaios.recovery_deployment \
-    --node "$RUN/node-a.toml" --node "$RUN/node-b.toml" \
+    "${RECOVERY_NODE_ARGS[@]}" \
     --snapshot "$RUN/recovery-deployment.json" "${RETENTION_ARGS[@]}" \
     || { FAILURE_REASON=recovery_deployment_configuration_invalid; exit 1; }
-PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
-    habitat_local_eaios.spatial_feasibility \
-    --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
-    --output "$RUN/spatial-profile.json"
+if [[ "$LIVE_ENDPOINT_PROFILE" == 1 ]]; then
+    PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
+        habitat_local_eaios.endpoint_registry --run "$RUN" --count "$ENDPOINT_COUNT" \
+        || { FAILURE_REASON=endpoint_registry_invalid; exit 1; }
+    ENDPOINT_ARGS=(--endpoint-registry "$RUN/endpoint-registry.json")
+    if [[ "$OBSERVATION_ENABLED" == 1 ]]; then ENDPOINT_ARGS+=(--enable-observation); fi
+else
+    ENDPOINT_ARGS=(--port-b "$HABITAT_PORT_B" --state-db-b "$RUN/bridge-b.sqlite3" --agent-b-id 1)
+    PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
+        habitat_local_eaios.spatial_feasibility \
+        --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
+        --output "$RUN/spatial-profile.json"
+fi
 if [[ "$RELOCATION_ENABLED" == 1 ]]; then
+    if [[ "$LIVE_ENDPOINT_PROFILE" != 1 ]]; then
     PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
         habitat_local_eaios.relocation_deployment \
         --node "0=$RUN/node-a.toml" --node "1=$RUN/node-b.toml" \
         --output "$RUN/relocation-registration-profile.json" \
         || { FAILURE_REASON=relocation_registration_invalid; exit 1; }
+    fi
     RELOCATION_ARGS=(--enable-relocation --relocation-profile "$RUN/relocation-registration-profile.json")
     if [[ "$RELOCATION_COMPLETION_BINDING" == 1 ]]; then
         RELOCATION_ARGS+=(--relocation-completion-binding)
@@ -329,7 +366,7 @@ if [[ ! -x "$SERVER" || ! -x "$NODE" ]]; then
     FAILURE_REASON=required_sut_binary_missing
     exit 1
 fi
-for n in a b; do
+for n in "${NODE_LETTERS[@]}"; do
     "$NODE" --validate "$RUN/node-$n.toml" > "$RUN/node-conformance-$n.json" \
         || { FAILURE_REASON=node_configuration_invalid; exit 1; }
 done
@@ -337,8 +374,7 @@ done
 clean_port "${CONTROLLER_GRPC_PORT}"
 clean_port "${CONTROLLER_PORT}"
 clean_port "${ARTIFACT_PORT}"
-clean_port "${HABITAT_PORT}"
-clean_port "${HABITAT_PORT_B}"
+for port in "${ENDPOINT_PORTS[@]}"; do clean_port "$port"; done
 clean_port "${MISSION_PORT}"
 if [[ "${ROBOGUIDE_B1_LIVE_VIEW:-0}" == 1 ]]; then
     LIVE_VIEW_PORT="${ROBOGUIDE_B1_LIVE_VIEW_PORT:-28110}"
@@ -364,11 +400,9 @@ HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
         "${RETENTION_ARGS[@]}" \
         "${RELOCATION_ARGS[@]}" \
         --subtask-mode natural-objective \
-        --port-b "${HABITAT_PORT_B}" \
+        "${ENDPOINT_ARGS[@]}" \
         --state-db "$RUN/bridge-a.sqlite3" \
-        --state-db-b "$RUN/bridge-b.sqlite3" \
         --agent-id 0 \
-        --agent-b-id 1 \
         --pair-wait-s 1200 \
         --evidence-dir "$RUN/evidence" \
         --spatial-profile "$RUN/spatial-profile.json" \
@@ -389,7 +423,9 @@ FAILURE_REASON=local_eaios_startup_failed
 # ONLINE is published only after the child writes authoritative semantic evidence.
 # Wait before MI freezes its one immutable grounding snapshot.
 wait_http http://127.0.0.1:${HABITAT_PORT}/v1/health 240 ONLINE
-wait_http http://127.0.0.1:${HABITAT_PORT_B}/v1/health 30 ONLINE
+for port in "${ENDPOINT_PORTS[@]:1}"; do
+    wait_http "http://127.0.0.1:$port/v1/health" 30 ONLINE
+done
 PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
     habitat_local_eaios.recovery_deployment \
     --snapshot "$RUN/recovery-deployment.json" --verify-live \
@@ -398,11 +434,17 @@ PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" pyt
 uv run --project "$REPO" python -m roboguide_eval.b1_planning_source \
     "$RUN" --check-artifact \
     || { FAILURE_REASON=planning_world_evidence_unavailable; exit 1; }
+if [[ "$LIVE_ENDPOINT_PROFILE" == 1 ]]; then
+    PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
+        habitat_local_eaios.endpoint_registry --run "$RUN" --verify-sources \
+        || { FAILURE_REASON=endpoint_source_mismatch; exit 1; }
+else
 PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
     habitat_local_eaios.spatial_feasibility \
     --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
     --output "$RUN/spatial-profile.json" --verify-sources \
     || { FAILURE_REASON=spatial_profile_source_mismatch; exit 1; }
+fi
 if [[ "$RELOCATION_ENABLED" == 1 ]]; then
     PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
         habitat_local_eaios.relocation_preflight --run "$RUN" \
@@ -444,12 +486,11 @@ FAILURE_COMPONENT=controller
 FAILURE_REASON=controller_startup_failed
 wait_http http://127.0.0.1:${CONTROLLER_PORT}/healthz 30
 
-"$NODE" "$RUN/node-a.toml" >"$RUN/node-a.log" 2>&1 &
-PIDS+=($!)
-COMPONENTS+=(node)
-"$NODE" "$RUN/node-b.toml" >"$RUN/node-b.log" 2>&1 &
-PIDS+=($!)
-COMPONENTS+=(node)
+for n in "${NODE_LETTERS[@]}"; do
+    "$NODE" "$RUN/node-$n.toml" >"$RUN/node-$n.log" 2>&1 &
+    PIDS+=($!)
+    COMPONENTS+=(node)
+done
 FAILURE_COMPONENT=node
 FAILURE_REASON=node_registration_failed
 wait_nodes

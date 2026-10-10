@@ -1,0 +1,80 @@
+{
+  "schema_version": "roboguide.deployment-planning-profile/v0.1",
+  "authority": "deployment-owned",
+  "identity": {
+    "profile_id": "e1-shared-world-perception",
+    "revision": "v1",
+    "source": "deployment://e1-shared-world-perception"
+  },
+  "capability_classes": [
+    {
+      "id": "capability-class-0",
+      "description": "Deployment-declared legged mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes acquisition only; it does not establish the condition or move the observer.",
+      "capabilities": [
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "move",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": true
+          }
+        },
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "navigate",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": true
+          }
+        },
+        {
+          "contract": {
+            "namespace": "observation",
+            "name": "verify",
+            "version": "v1"
+          },
+          "attributes": {}
+        }
+      ]
+    },
+    {
+      "id": "capability-class-1",
+      "description": "Deployment-declared flying mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes acquisition only; it does not establish the condition or move the observer.",
+      "capabilities": [
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "move",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": true
+          }
+        },
+        {
+          "contract": {
+            "namespace": "mobility",
+            "name": "navigate",
+            "version": "v1"
+          },
+          "attributes": {
+            "supports-floor-transition": true
+          }
+        },
+        {
+          "contract": {
+            "namespace": "observation",
+            "name": "verify",
+            "version": "v1"
+          },
+          "attributes": {}
+        }
+      ]
+    }
+  ],
+  "digest": "sha256:40ea69aafae584144df1b2455f62453aa8bfd45a0dab39b1a4dc5353f30a29e9"
+}

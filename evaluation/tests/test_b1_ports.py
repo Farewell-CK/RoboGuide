@@ -21,6 +21,23 @@ def test_legacy_ports_remain_default() -> None:
     assert deployment_ports({}) == PORT_DEFAULTS
 
 
+@pytest.mark.parametrize("count", [1, 2, 3, 4])
+def test_live_ports_include_only_configured_endpoints(count: int) -> None:
+    """A sparse live deployment never reserves or rejects an unused endpoint's port."""
+    ports = deployment_ports({}, count)
+    names = {"HABITAT_PORT"} | {"HABITAT_PORT_" + chr(65 + agent) for agent in range(1, count)}
+    assert {name for name in ports if name.startswith("HABITAT_PORT")} == names
+    if count == 1:
+        assert deployment_ports({"ROBOGUIDE_B1_HABITAT_PORT_B": "not-used"}, 1) == ports
+
+
+@pytest.mark.parametrize("count", [0, 5, True])
+def test_invalid_endpoint_count_cannot_start_services(count: int) -> None:
+    """A malformed declared endpoint count fails before transport or process startup."""
+    with pytest.raises(ValueError):
+        deployment_ports({}, count)
+
+
 @pytest.mark.parametrize("value", ["0", "65536", "-1", "x", "1;exit", "１２"])
 def test_malformed_ports_fail_closed(value: str) -> None:
     """Bad ports cannot become shell text or start a conflicting deployment."""
