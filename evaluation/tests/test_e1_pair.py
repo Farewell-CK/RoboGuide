@@ -260,6 +260,32 @@ def test_contract_freezes_selection_order_ports_and_model_environment(
     assert env["ROBOGUIDE_B1_HABITAT_PORT_B"] == str(a.ports["endpoint_b"])
 
 
+@pytest.mark.parametrize("provider_failure", [False, True])
+def test_native_failure_after_reset_keeps_its_failure_owner(
+    tmp_path: Path, provider_failure: bool
+) -> None:
+    """A native policy exception is a SUT failure; actual Provider failure stays infrastructure."""
+    population, config = setup_pair(tmp_path)
+    spec = PairSpec.load(population, config, "pair-0")
+    directory = tmp_path / "arm"
+    process = write_observations(spec, "emos", directory, official=None)
+    process["exit_code"] = 1
+    write_json(
+        directory / "native-evidence/worker-1/native-outcome.json",
+        {"official_pddl_success": None, "simulator_steps": 0, "episode_terminal": False},
+    )
+    if provider_failure:
+        path = directory / "provider-accounting.jsonl"
+        call = json.loads(path.read_text())
+        call.update(status=502, response_model=None)
+        path.write_text(json.dumps(call) + "\n")
+    result, _ = collect_arm(spec, "emos", directory, process)
+    assert result["system_outcome"] == "Failed"
+    assert result["official_pddl_success"] is None
+    assert result["infrastructure_failure"] is provider_failure
+    assert result["fatal_reasons"] == []
+
+
 @pytest.mark.parametrize("field", ["workload", "binary", "port", "source-group"])
 def test_invalid_configuration_stops_before_processes(tmp_path: Path, field: str) -> None:
     """Missing binary gates, source drift, port aliasing and workload identity all fail closed."""

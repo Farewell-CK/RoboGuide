@@ -605,7 +605,13 @@ def collect_arm(
         identity = optional_document(run / "workload-selection.json")
         world = optional_document(run / "native-outcome.json")
         official, steps = world.get("official_pddl_success"), world.get("simulator_steps")
-        status = "Completed" if world.get("episode_terminal") is True else "Unavailable"
+        status = (
+            "Failed"
+            if process.get("exit_code") not in (None, 0)
+            else "Completed"
+            if world.get("episode_terminal") is True
+            else "Unavailable"
+        )
     calls = (
         cast(list[JSONObject], read_accounting_log(directory / "provider-accounting.jsonl"))
         if (directory / "provider-accounting.jsonl").exists()
@@ -681,7 +687,6 @@ def collect_arm(
     infra = (
         process.get("harness_error") is not None
         or bool(fatal)
-        or (arm == "emos" and process.get("exit_code") != 0)
         or object_value(verdict.get("admission")).get("failure_owner") == "EXTERNAL_INFRA"
         or (bool(incidents) and official_value is None)
     )

@@ -81,6 +81,8 @@ Protocol A 必须披露 RoboGuide Guard/tool binding、反馈、completion/idle 
 通过且 actual reset matched。它不修改 B1 provenance、Formal 或 benchmark admission。
 
 MI 拒绝、技能失败、官方 false 都保留原始结果并继续。官方值缺失不会转换成 false。
+原生链路在已核实 reset 后的策略异常记为 SUT Failed；非零进程退出本身不能证明
+Provider 或 harness 失败。真实 HTTP 失败和独立采集/身份错误仍按各自证据归因。
 配置/模型/source 漂移、归档损坏、listener 清理失败暂停；单个 502/transport failure
 归为 infrastructure 并留证，由 batch 既定连续基础设施失败政策决定暂停。
 出口 `0` 仅表示 driver 已保留一次结果，不表示 SUT/benchmark 成功。
