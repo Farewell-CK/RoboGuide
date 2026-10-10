@@ -48,6 +48,8 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
     enable_relocation: bool = False
     relocation_profile_path: Path | None = None
     relocation_completion_binding: bool = False
+    endpoint_registry_path: Path | None = None
+    enable_observation: bool = False
 
     def __post_init__(self) -> None:
         """Reject assignment modes that would silently change local semantics."""
@@ -76,6 +78,14 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
             )
         if self.relocation_completion_binding and not self.enable_relocation:
             raise IntegrationError("relocation completion binding requires relocation support")
+        if self.enable_observation and self.endpoint_registry_path is None:
+            raise IntegrationError(
+                "read-only observation requires the explicit live endpoint profile"
+            )
+        if self.endpoint_registry_path is not None and self.retain_stopped_session:
+            raise IntegrationError(
+                "live endpoint profile does not support cancellation continuation"
+            )
 
     def spatial_capability_for(self, agent_id: int) -> FloorTransitionProfile | None:
         """Return the startup-frozen spatial profile for one Habitat agent."""

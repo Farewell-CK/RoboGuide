@@ -319,7 +319,7 @@ class EmosStage2Runtime:
             self._actor = actor
             self._agent_access = access
             if bool(getattr(self._config, "enable_relocation", False)):
-                capability = inspect_relocation_capability(actor._active_policies)
+                capability = inspect_relocation_capability(self._relocation_policies(actor))
                 self._relocation_capability = capability.as_dict()
                 self._write_json("relocation-readiness.json", self._relocation_capability)
                 if not capability.ready:
@@ -515,6 +515,20 @@ class EmosStage2Runtime:
                 raise IntegrationError("relocation capability readiness is unavailable")
             operations.append(RELOCATION_OPERATION)
         return tuple(operations)
+
+    def _relocation_policies(self, actor: Any) -> list[Any]:
+        """Inspect only explicitly relocation-capable endpoints in the opt-in live profile."""
+        path = getattr(self._config, "endpoint_registry_path", None)
+        if path is None:
+            return list(actor._active_policies)
+        from .endpoint_registry import load_endpoint_registry
+
+        registry = load_endpoint_registry(path)
+        return [
+            actor._active_policies[record["agent_id"]]
+            for record in registry["endpoints"]
+            if RELOCATION_OPERATION in record["operations"]
+        ]
 
     def _require_operation_support(self, invocation: CanonicalInvocation) -> None:
         """Fence direct runtime entry as well as endpoint ingress on actual readiness."""

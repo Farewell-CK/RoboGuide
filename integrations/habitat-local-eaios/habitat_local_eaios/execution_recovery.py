@@ -8,7 +8,11 @@ RECOVERY_PROFILE_SCHEMA = "roboguide.local-execution-recovery/v0.1"
 
 
 def execution_recovery_profile(
-    *, shared_world: bool, retain_stopped_session: bool = False, enable_relocation: bool = False
+    *,
+    shared_world: bool,
+    retain_stopped_session: bool = False,
+    enable_relocation: bool = False,
+    supported_operations: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
     """Declare actual joint stop and explicitly enabled retained-world continuation.
 
@@ -23,7 +27,13 @@ def execution_recovery_profile(
         raise ValueError("relocation does not support retained cancellation continuation")
     operations: list[dict[str, object]] = []
     supported = (
-        (*SUPPORTED_OPERATIONS, RELOCATION_OPERATION) if enable_relocation else SUPPORTED_OPERATIONS
+        supported_operations
+        if supported_operations is not None
+        else (
+            (*SUPPORTED_OPERATIONS, RELOCATION_OPERATION)
+            if enable_relocation
+            else SUPPORTED_OPERATIONS
+        )
     )
     for canonical in supported:
         namespace_name, version = canonical.rsplit("@", 1)

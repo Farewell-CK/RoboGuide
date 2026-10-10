@@ -103,6 +103,7 @@ def build_relocation_start(
     seed: int | None,
     registration_digest: str,
     agent_ids: tuple[int, ...],
+    allow_agent_subset: bool = False,
 ) -> dict[str, Any]:
     """Read the existing reset world once; never reset, step, compute predicates or sample RNG.
 
@@ -166,18 +167,24 @@ def build_relocation_start(
             gaps.append({"entity_id": name, "reason": type(error).__name__})
     if (
         not agent_ids
-        or len(agent_ids) > 2
+        or len(agent_ids) > 4
         or any(
             not isinstance(agent_id, int) or isinstance(agent_id, bool) or agent_id < 0
             for agent_id in agent_ids
         )
         or len(set(agent_ids)) != len(agent_ids)
-        or sorted(agent_ids) != semantic["world_context"]["agent_ids"]
+        or (
+            not set(agent_ids).issubset(semantic["world_context"]["agent_ids"])
+            if allow_agent_subset
+            else sorted(agent_ids) != semantic["world_context"]["agent_ids"]
+        )
     ):
         raise IntegrationError("relocation start agent coverage is invalid")
     agents = [_agent(environment, agent_id) for agent_id in sorted(agent_ids)]
     body = {
-        "schema_version": RELOCATION_START_SCHEMA,
+        "schema_version": "roboguide.habitat-relocation-start/v0.2"
+        if allow_agent_subset
+        else RELOCATION_START_SCHEMA,
         "authority": "environment-authoritative",
         "identity": identity,
         "reset_count": 1,
@@ -198,25 +205,24 @@ def build_relocation_start(
 
 def validate_relocation_start(document: Mapping[str, Any], semantic: Mapping[str, Any]) -> None:
     """Reject tampering, wrong-world sources and rehashed aliases before MI or execution."""
-    if (
-        set(document)
-        != {
-            "schema_version",
-            "authority",
-            "identity",
-            "reset_count",
-            "simulator_steps",
-            "semantic_evidence_digest",
-            "registration_profile_digest",
-            "source_basis",
-            "agents",
-            "objects",
-            "destinations",
-            "gaps",
-            "complete",
-            "digest",
-        }
-        or document["schema_version"] != RELOCATION_START_SCHEMA
+    if set(document) != {
+        "schema_version",
+        "authority",
+        "identity",
+        "reset_count",
+        "simulator_steps",
+        "semantic_evidence_digest",
+        "registration_profile_digest",
+        "source_basis",
+        "agents",
+        "objects",
+        "destinations",
+        "gaps",
+        "complete",
+        "digest",
+    } or document["schema_version"] not in (
+        RELOCATION_START_SCHEMA,
+        "roboguide.habitat-relocation-start/v0.2",
     ):
         raise IntegrationError("relocation start schema is invalid")
     if document["digest"] != _digest(
@@ -283,6 +289,18 @@ def validate_relocation_start(document: Mapping[str, Any], semantic: Mapping[str
                 source_ids.add(source)
     agents = document["agents"]
     expected_agents = semantic["world_context"]["agent_ids"]
+    if document["schema_version"] == "roboguide.habitat-relocation-start/v0.2":
+        if (
+            not isinstance(agents, list)
+            or not agents
+            or not all(isinstance(item, dict) for item in agents)
+        ):
+            raise IntegrationError("relocation start agent subset is invalid")
+        expected_agents = [record.get("agent_id") for record in agents]
+        if expected_agents != sorted(set(expected_agents)) or not set(expected_agents).issubset(
+            semantic["world_context"]["agent_ids"]
+        ):
+            raise IntegrationError("relocation start agent subset differs from the world")
     if (
         not isinstance(agents, list)
         or len(agents) != len(expected_agents)

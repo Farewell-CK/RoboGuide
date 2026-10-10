@@ -10,6 +10,7 @@ from pathlib import Path
 from .adapter import HabitatLocalAdapter
 from .backend import HabitatBackendConfig, HabitatMobilityBackend
 from .crabagent_backend import SUBTASK_MODES, CrabAgentBackendConfig, CrabAgentMobilityBackend
+from .endpoint_registry import load_endpoint_registry
 from .http_service import HabitatBridgeServer
 from .process_backend import HabitatProcessBackend
 from .shared_world import (
@@ -27,6 +28,17 @@ def _arguments() -> argparse.Namespace:
     """Parse fixed deployment choices without accepting per-request Local How."""
     parser = argparse.ArgumentParser(description="RoboGuide Habitat Local EAIOS bridge")
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--endpoint-registry",
+        type=Path,
+        default=None,
+        help="explicit independent-live registry; legacy dual endpoint remains default",
+    )
+    parser.add_argument(
+        "--enable-observation",
+        action="store_true",
+        help="live profile only: read existing detected(entity) observations",
+    )
     parser.add_argument("--port", type=int, default=28100)
     parser.add_argument("--state-db", type=Path, required=True)
     parser.add_argument(
@@ -180,7 +192,9 @@ def _arguments() -> argparse.Namespace:
 
 def _run_shared_world(arguments: argparse.Namespace) -> None:
     """Serve two Node endpoints over exactly one shared Habitat world."""
-    if arguments.port_b is None or arguments.state_db_b is None or arguments.agent_b_id is None:
+    if arguments.endpoint_registry is None and (
+        arguments.port_b is None or arguments.state_db_b is None or arguments.agent_b_id is None
+    ):
         raise SystemExit(
             "the shared-emos-stage2 backend requires --port-b, --state-db-b, --agent-b-id"
         )
@@ -192,7 +206,7 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         raise SystemExit("shared relocation requires --relocation-profile from actual Node configs")
     if not arguments.enable_relocation and arguments.relocation_profile is not None:
         raise SystemExit("--relocation-profile requires --enable-relocation")
-    if arguments.agent_id == arguments.agent_b_id:
+    if arguments.endpoint_registry is None and arguments.agent_id == arguments.agent_b_id:
         raise SystemExit("shared-world endpoints must map to distinct Habitat agents")
     config = CrabAgentBackendConfig(
         config_path=arguments.habitat_config,
@@ -221,7 +235,12 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         relocation_profile_path=arguments.relocation_profile,
         relocation_completion_binding=arguments.relocation_completion_binding,
         progress_directory=arguments.progress_directory,
+        endpoint_registry_path=arguments.endpoint_registry,
+        enable_observation=arguments.enable_observation,
     )
+    if arguments.endpoint_registry is not None:
+        _run_live_world(arguments, config)
+        return
     world = ProcessWorldService(config, (arguments.agent_id, arguments.agent_b_id))
     coordinator = SharedWorldCoordinator(
         world,
@@ -261,11 +280,46 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         coordinator.shutdown()
 
 
+def _run_live_world(arguments: argparse.Namespace, config: CrabAgentBackendConfig) -> None:
+    """Serve explicit configured endpoints without inferring participants from benchmark goals."""
+    from .live_world import LiveWorldCoordinator
+
+    registry = load_endpoint_registry(arguments.endpoint_registry)
+    agent_ids = tuple(record["agent_id"] for record in registry["endpoints"])
+    world = ProcessWorldService(config, agent_ids)
+    coordinator = LiveWorldCoordinator(
+        world, arguments.endpoint_registry, arguments.pair_wait_s, arguments.evidence_dir
+    )
+    servers = []
+    try:
+        for record in registry["endpoints"]:
+            endpoint = NodeEndpoint(
+                record["node_id"],
+                record["agent_id"],
+                ExecutionStore(Path(record["state_db"])),
+                coordinator,
+                progress_directory=arguments.progress_directory,
+                enable_relocation=arguments.enable_relocation,
+            )
+            server = HabitatBridgeServer((arguments.host, record["port"]), endpoint)
+            servers.append(server)
+            threading.Thread(target=server.serve_forever, args=(0.2,), daemon=True).start()
+        threading.Event().wait()
+    finally:
+        for server in servers:
+            server.server_close()
+        coordinator.shutdown()
+
+
 def main() -> None:
     """Initialize the configured Habitat backend before exposing workflow routes."""
     arguments = _arguments()
     if arguments.host not in {"127.0.0.1", "localhost"}:
         raise SystemExit("Habitat Local EAIOS must bind a loopback host")
+    if (
+        arguments.endpoint_registry is not None or arguments.enable_observation
+    ) and arguments.backend != "shared-emos-stage2":
+        raise SystemExit("live endpoint/observation profile requires shared EMOS Stage2")
     if arguments.backend == "emos-crabagent" and arguments.evidence_dir is None:
         raise SystemExit("the emos-crabagent backend requires --evidence-dir")
     if arguments.enable_relocation and arguments.backend != "shared-emos-stage2":

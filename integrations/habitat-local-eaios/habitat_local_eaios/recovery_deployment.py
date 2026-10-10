@@ -20,7 +20,12 @@ from urllib.parse import urlsplit
 
 from .evidence_io import write_text_atomic
 from .execution_recovery import execution_recovery_profile
-from .model import RELOCATION_OPERATION, SUPPORTED_OPERATIONS, IntegrationError
+from .model import (
+    OBSERVATION_OPERATION,
+    RELOCATION_OPERATION,
+    SUPPORTED_OPERATIONS,
+    IntegrationError,
+)
 
 SCHEMA = "roboguide.habitat-recovery-deployment/v0.1"
 METADATA_KEY = "roboguide.execution-recovery"
@@ -35,6 +40,8 @@ def _owner(config: dict[str, Any]) -> dict[str, Any]:
     supported = set(SUPPORTED_OPERATIONS)
     if any(item.get("operation") == RELOCATION_OPERATION for item in operations):
         supported.add(RELOCATION_OPERATION)
+    if any(item.get("operation") == OBSERVATION_OPERATION for item in operations):
+        supported.add(OBSERVATION_OPERATION)
     selected = [item for item in operations if item.get("operation") in supported]
     if len(selected) != len(supported) or {item.get("operation") for item in selected} != supported:
         raise IntegrationError("recovery deployment needs exact supported operation coverage")
@@ -75,9 +82,17 @@ def render_node_config(text: str, retain_stopped_session: bool) -> str:
     relocation = any(item.get("operation") == RELOCATION_OPERATION for item in config["operations"])
     if relocation and retain_stopped_session:
         raise IntegrationError("relocation does not support retained cancellation continuation")
-    defaults = execution_recovery_profile(shared_world=True, enable_relocation=relocation)
+    live = metadata.get("roboguide.habitat-execution-profile") == "independent-live/v0.1"
+    if live and retain_stopped_session:
+        raise IntegrationError("live endpoints do not support retained recovery")
+    declared = tuple(sorted(item["operation"] for item in config["operations"])) if live else None
+    defaults = execution_recovery_profile(
+        shared_world=True, enable_relocation=relocation, supported_operations=declared
+    )
     retained = (
-        execution_recovery_profile(shared_world=True, retain_stopped_session=True)
+        execution_recovery_profile(
+            shared_world=True, retain_stopped_session=True, supported_operations=declared
+        )
         if not relocation
         else defaults
     )

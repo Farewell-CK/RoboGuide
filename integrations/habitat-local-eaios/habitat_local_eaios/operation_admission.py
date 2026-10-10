@@ -48,8 +48,16 @@ def relocation_operation_admission(
         or identity.get("semantic_evidence_digest") != start["semantic_evidence_digest"]
         or identity.get("episode_reset_count") != 1
         or type(identity.get("episode_reset_count")) is not int
-        or navigation.get("initial_agent_positions")
-        != {str(agent["agent_id"]): agent["position"] for agent in start["agents"]}
+        or not isinstance(navigation.get("initial_agent_positions"), dict)
+        or any(
+            navigation["initial_agent_positions"].get(str(agent["agent_id"])) != agent["position"]
+            for agent in start["agents"]
+        )
+        or (
+            start["schema_version"] != "roboguide.habitat-relocation-start/v0.2"
+            and set(navigation["initial_agent_positions"])
+            != {str(agent["agent_id"]) for agent in start["agents"]}
+        )
     ):
         raise IntegrationError("operation admission differs from the navigation reset identity")
     endpoints = []
@@ -79,9 +87,13 @@ def relocation_operation_admission(
                 "resource_capacity": 1,
             }
         )
-    if {record["node_id"] for record in navigation["records"]} != {
-        endpoint["node_id"] for endpoint in endpoints
-    } or [endpoint["agent_id"] for endpoint in endpoints] != [
+    covered_nodes = {record["node_id"] for record in navigation["records"]}
+    endpoint_nodes = {endpoint["node_id"] for endpoint in endpoints}
+    if (
+        not endpoint_nodes.issubset(covered_nodes)
+        if start["schema_version"] == "roboguide.habitat-relocation-start/v0.2"
+        else covered_nodes != endpoint_nodes
+    ) or [endpoint["agent_id"] for endpoint in endpoints] != [
         agent["agent_id"] for agent in start["agents"]
     ]:
         raise IntegrationError("operation admission endpoint coverage is invalid")

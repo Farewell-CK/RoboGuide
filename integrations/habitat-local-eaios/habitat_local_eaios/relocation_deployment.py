@@ -53,8 +53,8 @@ def build_relocation_profile(node_configs: tuple[tuple[int, Path], ...]) -> dict
     """
     import tomllib
 
-    if not node_configs or len(node_configs) > 2:
-        raise IntegrationError("relocation profile requires one or two configured endpoints")
+    if not node_configs or len(node_configs) > 4:
+        raise IntegrationError("relocation profile requires one to four configured endpoints")
     if len({agent_id for agent_id, _ in node_configs}) != len(node_configs):
         raise IntegrationError("relocation profile agent ids must be distinct")
     records: list[dict[str, Any]] = []
@@ -153,7 +153,7 @@ def load_relocation_profile(path: Path) -> dict[str, Any]:
     ):
         raise IntegrationError("relocation profile schema or digest is invalid")
     records = document["agents"]
-    if not isinstance(records, list) or not records or len(records) > 2:
+    if not isinstance(records, list) or not records or len(records) > 4:
         raise IntegrationError("relocation profile endpoint coverage is invalid")
     previous = -1
     nodes: set[str] = set()

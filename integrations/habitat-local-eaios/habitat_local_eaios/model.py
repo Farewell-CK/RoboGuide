@@ -15,6 +15,7 @@ SUPPORTED_OPERATION = "mobility.navigate@v1"
 # same original EMOS Stage2 stack; the MI organization may emit either one.
 SUPPORTED_OPERATIONS = ("mobility.navigate@v1", "mobility.move@v1")
 RELOCATION_OPERATION = "object.relocate@v1"
+OBSERVATION_OPERATION = "observation.verify@v1"
 EXECUTION_SESSION_SCHEMA = "roboguide.execution-session/v0.1"
 
 
@@ -379,8 +380,59 @@ class CanonicalRelocationInvocation:
         return hashlib.sha256(encoded).hexdigest()
 
 
-# This alias is evaluated at import, including inside the Python 3.9 Habitat worker.
-CanonicalInvocation = Union[CanonicalMobilityInvocation, CanonicalRelocationInvocation]  # noqa: UP007
+@dataclass(frozen=True)
+class CanonicalObservationInvocation(CanonicalMobilityInvocation):
+    """Request a read-only condition observation, never an affirmative world effect.
+
+    This local profile accepts the neutral condition ``detected(entity-ref)``.
+    No navigation, sensor creation, rendering or simulator step is authorized.
+    The inherited durable identity methods retain the exact canonical request.
+    """
+
+    @classmethod
+    def from_request(cls, request: object) -> CanonicalObservationInvocation:
+        """Validate the existing Catalog operation under a closed local condition profile."""
+        body = _parse_invocation(request, {OBSERVATION_OPERATION}, {"expected"})
+        parameters = body["parameters"]
+        assert isinstance(parameters, dict)
+        expected = parameters["expected"]
+        if (
+            not isinstance(expected, str)
+            or not expected.startswith("detected(")
+            or not expected.endswith(")")
+            or not expected[9:-1].strip()
+            or any(character in expected[9:-1] for character in "()\n\r")
+            or len(expected) > 512
+        ):
+            raise IntegrationError("observation profile requires detected(entity-ref)")
+        return cls(
+            mission_id=str(body["mission_id"]),
+            task_id=str(body["task_id"]),
+            group_id=str(body["group_id"]),
+            role_id=str(body["role_id"]),
+            operation=str(body["operation"]),
+            objective=str(body["objective"]),
+            parameters=parameters,
+            resource_ids=body["resource_ids"],  # type: ignore[arg-type]
+            execution_session=body["execution_session"],  # type: ignore[arg-type]
+            attempt_id=body["attempt_id"],  # type: ignore[arg-type]
+        )
+
+    @property
+    def object_ref(self) -> str:
+        """Return the named entity whose existing visual observation is requested."""
+        return str(self.parameters["expected"])[9:-1]
+
+    @property
+    def destination(self) -> str:
+        """Expose the bound entity for legacy outcome identity, without motion authority."""
+        return self.object_ref
+
+
+# Evaluated at import, including inside the Python 3.9 Habitat worker.
+CanonicalInvocation = Union[  # noqa: UP007
+    CanonicalMobilityInvocation, CanonicalRelocationInvocation, CanonicalObservationInvocation
+]
 
 
 def parse_canonical_invocation(request: object) -> CanonicalInvocation:
@@ -390,6 +442,8 @@ def parse_canonical_invocation(request: object) -> CanonicalInvocation:
     operation = invocation.get("operation")
     if operation in SUPPORTED_OPERATIONS:
         return CanonicalMobilityInvocation.from_request(request)
+    if operation == OBSERVATION_OPERATION:
+        return CanonicalObservationInvocation.from_request(request)
     if operation == RELOCATION_OPERATION:
         return CanonicalRelocationInvocation.from_request(request)
     if isinstance(operation, str):

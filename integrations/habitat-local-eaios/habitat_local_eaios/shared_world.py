@@ -75,7 +75,7 @@ _START_ADMISSION_SCHEMA = "roboguide.e1.shared-world-start-admission/v0.2"
 class SharedEmosStage2Runtime(EmosStage2Runtime):
     """One Habitat world and one original EMOS Stage2 policy for two agents."""
 
-    def __init__(self, config: HabitatBackendConfig, agent_ids: tuple[int, int]) -> None:
+    def __init__(self, config: HabitatBackendConfig, agent_ids: tuple[int, ...]) -> None:
         """Retain both Habitat agent identities served by the shared world."""
         super().__init__(config)
         self._agent_ids = agent_ids
@@ -166,7 +166,17 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     },
                 )
             if relocation_profile is not None:
-                verify_loaded_robots(relocation_profile, habitat_env, self._agent_ids)
+                relocation_agents = tuple(
+                    record["agent_id"] for record in relocation_profile["agents"]
+                )
+                verify_loaded_robots(relocation_profile, habitat_env, relocation_agents)
+                if (
+                    getattr(config, "endpoint_registry_path", None) is None
+                    and relocation_agents != self._agent_ids
+                ):
+                    raise IntegrationError(
+                        "legacy relocation profile needs complete endpoint coverage"
+                    )
                 self._relocation_agent_identity = {
                     "registration_profile_digest": relocation_profile["digest"],
                     "robot_types": {
@@ -181,7 +191,9 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                         raise IntegrationError(
                             "relocation completion requires a loaded Stage2 actor"
                         )
-                    inspect_completion_interfaces(self._actor._active_policies, habitat_env)
+                    inspect_completion_interfaces(
+                        self._relocation_policies(self._actor), habitat_env
+                    )
                 except Exception as error:
                     self._write_json(
                         "relocation-completion-readiness.json",
@@ -223,7 +235,8 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                     document,
                     seed=self._config.seed,
                     registration_digest=relocation_profile["digest"],
-                    agent_ids=self._agent_ids,
+                    agent_ids=relocation_agents,
+                    allow_agent_subset=getattr(config, "endpoint_registry_path", None) is not None,
                 )
                 # Preserve incomplete observations before failing readiness.
                 self._write_json("relocation-episode-start.json", source_snapshot)
@@ -825,6 +838,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                         agent: invocation
                         for agent, invocation in invocations.items()
                         if isinstance(invocation, CanonicalMobilityInvocation)
+                        and invocation.operation in SUPPORTED_OPERATIONS
                     }
                 )
             bind_manipulation = getattr(self._diagnostics, "bind_manipulation_invocations", None)
@@ -1538,7 +1552,12 @@ class NodeEndpoint:
     def readiness(self, operation: str | None = None) -> dict[str, object]:
         """Report exact operation readiness for this endpoint."""
         healthy = self._coordinator.runtime_ready()
-        operations = self._coordinator.supported_operations()
+        operations_for = getattr(self._coordinator, "operations_for", None)
+        operations = (
+            operations_for(self.agent_id)
+            if callable(operations_for)
+            else self._coordinator.supported_operations()
+        )
         requested = (
             canonical_operation_from_route(operation, operations) if operation is not None else None
         )
@@ -1558,7 +1577,12 @@ class NodeEndpoint:
     def accept(self, request: object) -> dict[str, object]:
         """Durably accept one exact invocation without starting simulator work."""
         invocation = parse_canonical_invocation(request)
-        supported_operations = self._coordinator.supported_operations()
+        operations_for = getattr(self._coordinator, "operations_for", None)
+        supported_operations = (
+            operations_for(self.agent_id)
+            if callable(operations_for)
+            else self._coordinator.supported_operations()
+        )
         if invocation.operation not in supported_operations:
             supported = ", ".join(supported_operations) or "none"
             raise IntegrationError(
@@ -1639,10 +1663,18 @@ class NodeEndpoint:
 
     def recovery_support(self) -> dict[str, object]:
         """Return frozen deployment facts; joint continuation never implies isolated stopping."""
+        # Read stored configuration only. Attribute forwarding could query a
+        # world/health dependency and must not be part of this read-only route.
+        registry = vars(self._coordinator).get("registry")
         return execution_recovery_profile(
             shared_world=True,
             retain_stopped_session=self._retain_stopped_session,
             enable_relocation=self._enable_relocation,
+            supported_operations=(
+                tuple(registry["endpoints"][self.agent_id]["operations"])
+                if isinstance(registry, dict)
+                else None
+            ),
         )
 
     @staticmethod
@@ -1676,6 +1708,14 @@ def _archive_official_metrics(runtime: Any, summary: dict[str, Any]) -> None:
     """
     failure = summary.get("navigation_preparation_failure")
     if (
+        summary.get("execution_profile") == "independent-live/v0.1"
+        and summary.get("identity", {}).get("simulator_steps") == 0
+    ):
+        summary["official_metrics"] = {}
+        summary["official_pddl_success_unavailable_reason"] = (
+            "live session ended without a completed physical Gym step"
+        )
+    elif (
         isinstance(failure, dict)
         and failure.get("failed_before_gym_step") is True
         and failure.get("simulator_steps") == 0
@@ -1761,6 +1801,22 @@ class InProcessWorldService:
         _archive_official_metrics(self._runtime, summary)
         return outcomes, summary
 
+    def run_live(
+        self,
+        initial: Mapping[int, CanonicalInvocation],
+        arrivals: Callable[[], Mapping[int, CanonicalInvocation]],
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+        completed: Callable[[int, CanonicalInvocation, LocalExecutionOutcome], None],
+        wait_seconds: float,
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
+        """Exercise the exact live callback boundary without a simulator child in tests."""
+        outcomes, summary = self._runtime.execute_live(
+            initial, arrivals, cancellation_requested, running, completed, wait_seconds
+        )
+        _archive_official_metrics(self._runtime, summary)
+        return outcomes, summary
+
     def shutdown(self) -> None:
         """Release the in-process world."""
         closer = getattr(self._runtime, "close", None)
@@ -1771,14 +1827,20 @@ class InProcessWorldService:
 def _child_world_process(
     connection: Any,
     config: CrabAgentBackendConfig,
-    agent_ids: tuple[int, int],
+    agent_ids: tuple[int, ...],
 ) -> None:
     """Own the shared Habitat world in one child process.
 
     Habitat-sim's GL context and the busy simulator loop must stay off the
     HTTP-serving parent so bridge health observations never starve.
     """
-    runtime = SharedEmosStage2Runtime(config, agent_ids)
+    runtime: Any
+    if config.endpoint_registry_path is not None:
+        from .live_world import LiveEmosStage2Runtime
+
+        runtime = LiveEmosStage2Runtime(config, agent_ids)
+    else:
+        runtime = SharedEmosStage2Runtime(config, agent_ids)
     try:
         try:
             runtime.initialize()
@@ -1801,7 +1863,7 @@ def _child_world_process(
                 return
             if kind == "CLOSE":
                 return
-            if kind not in {"EXECUTE_PAIR", "EXECUTE_SERIAL", "RESUME_PAIR"}:
+            if kind not in {"EXECUTE_PAIR", "EXECUTE_SERIAL", "RESUME_PAIR", "EXECUTE_LIVE"}:
                 connection.send(("WORLD_ERROR", "invalid world process command"))
                 continue
             closing = False
@@ -1821,8 +1883,52 @@ def _child_world_process(
                 """Relay one agent's RUNNING fact to the parent."""
                 connection.send(("RUNNING", (agent_id, detail)))
 
+            live_cancelled = False
+
+            def live_arrivals() -> Mapping[int, CanonicalInvocation]:
+                """Drain only real parent commands between original physical steps."""
+                nonlocal closing, live_cancelled
+                pending: dict[int, CanonicalInvocation] = {}
+                while connection.poll():
+                    nested_kind, nested_payload = _receive_message(connection)
+                    if nested_kind in {"CANCEL", "CLOSE"}:
+                        live_cancelled = True
+                        closing = nested_kind == "CLOSE"
+                    elif nested_kind == "LIVE_ASSIGNMENTS" and isinstance(nested_payload, dict):
+                        if set(pending) & set(nested_payload):
+                            raise IntegrationError("duplicate live IPC endpoint assignment")
+                        pending.update(nested_payload)
+                    else:
+                        raise IntegrationError("invalid live IPC command")
+                return pending
+
+            def live_cancellation() -> bool:
+                """Observe cancellation without discarding a queued real assignment."""
+                return live_cancelled  # noqa: B023 - synchronous callbacks finish before next command
+
+            def live_completed(
+                agent_id: int, invocation: CanonicalInvocation, outcome: LocalExecutionOutcome
+            ) -> None:
+                """Return exact early terminal evidence so Control may advance prerequisites."""
+                connection.send(("LOCAL_TERMINAL", (agent_id, invocation, outcome)))
+
             try:
-                if kind in {"EXECUTE_PAIR", "RESUME_PAIR"}:
+                if kind == "EXECUTE_LIVE":
+                    if (
+                        not isinstance(payload, tuple)
+                        or len(payload) != 2
+                        or not isinstance(payload[0], dict)
+                    ):
+                        raise IntegrationError("live command requires assignments and wait budget")
+                    outcomes, summary = runtime.execute_live(
+                        payload[0],
+                        live_arrivals,
+                        live_cancellation,
+                        running,
+                        live_completed,
+                        payload[1],
+                    )
+                elif kind in {"EXECUTE_PAIR", "RESUME_PAIR"}:
                     if not isinstance(payload, dict):
                         raise IntegrationError("pair command requires invocation mapping")
                     executor = (
@@ -1859,7 +1965,7 @@ def _child_world_process(
 class ProcessWorldService:
     """World service that keeps the shared Habitat world in one child process."""
 
-    def __init__(self, config: CrabAgentBackendConfig, agent_ids: tuple[int, int]) -> None:
+    def __init__(self, config: CrabAgentBackendConfig, agent_ids: tuple[int, ...]) -> None:
         """Retain deployment config; the world starts on demand."""
         import multiprocessing
 
@@ -1927,6 +2033,42 @@ class ProcessWorldService:
     ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
         """Execute one shared episode in the child and relay lifecycle evidence."""
         return self._run_pair_command("EXECUTE_PAIR", invocations, cancellation_requested, running)
+
+    def run_live(
+        self,
+        initial: Mapping[int, CanonicalInvocation],
+        arrivals: Callable[[], Mapping[int, CanonicalInvocation]],
+        cancellation_requested: Callable[[], bool],
+        running: Callable[[int, str], None],
+        completed: Callable[[int, CanonicalInvocation, LocalExecutionOutcome], None],
+        wait_seconds: float,
+    ) -> tuple[dict[int, LocalExecutionOutcome], dict[str, Any]]:
+        """Own one IPC reader and relay real assignments, including early local outcomes."""
+        connection, process = self._require_live()
+        connection.send(("EXECUTE_LIVE", (dict(initial), wait_seconds)))
+        cancel_sent = False
+        while True:
+            if cancellation_requested() and not cancel_sent:
+                connection.send(("CANCEL", None))
+                cancel_sent = True
+            incoming = arrivals()
+            if incoming:
+                connection.send(("LIVE_ASSIGNMENTS", dict(incoming)))
+            if connection.poll(0.05):
+                kind, payload = _receive_message(connection)
+                if kind == "RUNNING":
+                    running(*payload)
+                elif kind == "LOCAL_TERMINAL":
+                    completed(*payload)
+                elif kind == "TERMINAL":
+                    outcomes, summary = payload
+                    return outcomes, summary
+                elif kind == "WORLD_ERROR":
+                    raise IntegrationError(f"shared live world execution failed: {payload}")
+                else:
+                    raise IntegrationError(f"unexpected live world message {kind!r}")
+            if not process.is_alive():
+                raise IntegrationError("shared world process exited during live execution")
 
     def resume_pair(
         self,
@@ -2753,6 +2895,9 @@ class SharedWorldCoordinator:
         }
         if serial_task_outcomes is not None:
             summary_document["serial_task_outcomes"] = serial_task_outcomes
+        if summary.get("execution_profile") == "independent-live/v0.1":
+            summary_document["execution_profile"] = summary["execution_profile"]
+            summary_document["termination_reason"] = summary.get("termination_reason", "unknown")
         if "navigation_preparation_failure" in summary:
             summary_document["navigation_preparation_failure"] = summary[
                 "navigation_preparation_failure"

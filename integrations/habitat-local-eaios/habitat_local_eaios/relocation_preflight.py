@@ -66,7 +66,8 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
         or type(enabled) is not bool
         or required.get("deployment_sha256") != deployment_digest
         or required.get("frozen_input_sha256") != frozen_digest
-        or used.get("schema_version") != "roboguide.e1.b1-deployment-used/v0.2"
+        or used.get("schema_version")
+        not in ("roboguide.e1.b1-deployment-used/v0.2", "roboguide.e1.b1-deployment-used/v0.3")
         or used.get("frozen_input_sha256") != frozen_digest
         or used.get("relocation_completion_binding") is not enabled
     ):
@@ -76,14 +77,34 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
         not isinstance(declaration, dict)
         or declaration.get("enable_relocation") is not True
         or declaration.get("schema_version")
-        not in ("roboguide.e1.b1-deployment/v0.1", "roboguide.e1.b1-deployment/v0.2")
+        not in (
+            "roboguide.e1.b1-deployment/v0.1",
+            "roboguide.e1.b1-deployment/v0.2",
+            "roboguide.e1.b1-deployment/v0.3",
+        )
         or (
-            declaration.get("schema_version") == "roboguide.e1.b1-deployment/v0.2"
+            declaration.get("schema_version") != "roboguide.e1.b1-deployment/v0.1"
             and declaration.get("relocation_completion_binding") is not enabled
         )
     ):
         raise IntegrationError("frozen deployment and local execution profile choice differ")
     actual, actual_digest = _read_artifact(run / "evidence/local-how-profile.json")
+    actual_schema = actual.get("schema_version")
+    live = declaration["schema_version"] == "roboguide.e1.b1-deployment/v0.3"
+    if live:
+        from .endpoint_registry import LIVE_PROFILE, verify_endpoint_sources
+
+        registry = verify_endpoint_sources(run / "endpoint-registry.json")
+        if (
+            used["schema_version"] != "roboguide.e1.b1-deployment-used/v0.3"
+            or actual_schema != "roboguide.habitat-local-how-profile/v0.9"
+            or actual.get("execution_profile") != LIVE_PROFILE
+            or actual.get("endpoint_registry_digest") != registry["digest"]
+            or actual.get("observation_enabled") is not declaration.get("enable_observation")
+            or _read_object(run / "evidence/endpoint-registry-used.json") != registry
+        ):
+            raise IntegrationError("actual live Local How differs from frozen endpoint sources")
+        actual = actual.get("base_profile", {})
     expected = {
         "schema_version": "roboguide.habitat-local-how-profile/v0.8"
         if enabled
@@ -104,7 +125,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
         "requirement_sha256": requirement_digest,
         "deployment_sha256": deployment_digest,
         "local_how_sha256": actual_digest,
-        "local_how_schema": actual["schema_version"],
+        "local_how_schema": actual_schema,
     }
     readiness_path = run / "evidence/relocation-completion-readiness.json"
     if enabled:
@@ -193,14 +214,24 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
     ):
         raise IntegrationError("actual relocation skill readiness is unavailable")
     matrix = _read_object(evidence / "preassignment-feasibility.json")
-    if matrix.get("schema_version") != OPERATION_FEASIBILITY_SCHEMA:
+    live = matrix.get("schema_version") == "roboguide.deployment-intent-feasibility/v0.5"
+    if not live and matrix.get("schema_version") != OPERATION_FEASIBILITY_SCHEMA:
         raise IntegrationError("relocation requires versioned deployment operation admission")
     navigation = {
-        key: value for key, value in matrix.items() if key not in {"digest", "operation_admission"}
+        key: value
+        for key, value in matrix.items()
+        if key not in {"digest", "operation_admission", "execution_profile"}
     }
     navigation["schema_version"] = PREASSIGNMENT_FEASIBILITY_SCHEMA
     navigation["digest"] = preassignment_digest(navigation)
-    if matrix != attach_relocation_admission(navigation, semantic, start, profile):
+    expected_matrix = attach_relocation_admission(navigation, semantic, start, profile)
+    if live:
+        expected_matrix["schema_version"] = matrix["schema_version"]
+        expected_matrix["execution_profile"] = matrix["execution_profile"]
+        expected_matrix["digest"] = preassignment_digest(
+            {key: value for key, value in expected_matrix.items() if key != "digest"}
+        )
+    if matrix != expected_matrix:
         raise IntegrationError("deployment operation admission differs from actual reset sources")
     return {
         "schema_version": PREFLIGHT_SCHEMA,
