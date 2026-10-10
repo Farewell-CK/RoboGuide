@@ -29,6 +29,7 @@ from roboguide_eval.e1_pair import (
     arm_environment,
     collect_arm,
     compare_reset,
+    private_vendor_view,
     run_pair,
 )
 from roboguide_eval.models import JSONObject
@@ -258,6 +259,115 @@ def test_contract_freezes_selection_order_ports_and_model_environment(
     assert "ROBOGUIDE_B1_GOAL_REGION_NAVIGATION" not in env
     assert env["EMOS_LLM_MODEL"] == "test-model" and env["CUDA_VISIBLE_DEVICES"] == "1"
     assert env["ROBOGUIDE_B1_HABITAT_PORT_B"] == str(a.ports["endpoint_b"])
+
+
+def test_private_checkout_passes_production_containment_and_isolates_writes(tmp_path: Path) -> None:
+    """A real private config survives B1 deployment admission and never mutates shared code."""
+    from roboguide_eval.b1_deployment import freeze_deployment
+
+    population, config = setup_pair(tmp_path)
+    spec = PairSpec.load(population, config, "pair-0")
+    view = tmp_path / "private-vendor"
+    private_vendor_view(spec.path("vendor_root"), view)
+    scenario, run = tmp_path / "scenario", tmp_path / "run"
+    scenario.mkdir()
+    run.mkdir()
+    relative = "habitat-baselines/habitat_baselines/config/test.yaml"
+    write_json(
+        scenario / "b1-deployment.json",
+        {
+            "schema_version": "roboguide.e1.b1-deployment/v0.1",
+            "habitat_config": relative,
+            "max_steps": 4000,
+            "enable_relocation": False,
+        },
+    )
+    for name in ("node-a", "node-b"):
+        (scenario / f"{name}.toml").write_text(f'node_id = "{name}"\n')
+    (run / "b1-input-used.json").write_bytes(
+        (spec.path("input_directory") / "pair-0.json").read_bytes()
+    )
+    spec.verify_vendor_view(view)
+    result = freeze_deployment(run, scenario, view)
+    assert Path(str(result["HABITAT_CONFIG"])).is_relative_to(view.resolve())
+    original = spec.path("vendor_root") / relative
+    assert (view / relative).read_bytes() == original.read_bytes()
+    assert not (view / "habitat-baselines").is_symlink()
+    (view / relative).write_text("local changed config")
+    assert original.read_text() == "unchanged native config"
+    with pytest.raises(ValueError, match="private vendor source"):
+        spec.verify_vendor_view(view)
+
+
+@pytest.mark.parametrize(
+    "problem", [None, "origin", "reported-digest", "copied-bytes", "external-link"]
+)
+def test_runtime_identity_binds_the_exact_private_copy(tmp_path: Path, problem: str | None) -> None:
+    """Only the owned private path and unchanged frozen bytes prove a runtime source match."""
+    population, config = setup_pair(tmp_path)
+    document = json.loads(config.read_text())
+    source = tmp_path / "vendor/habitat-mas/stage2.py"
+    source.write_text("original stage2 source")
+    document["source_sha256"][str(source)] = file_digest(source)
+    document["runtime_modules"] = {"original.stage2": str(source)}
+    write_json(config, document)
+    spec = PairSpec.load(population, config, "pair-0")
+    view = tmp_path / "private-vendor"
+    private_vendor_view(spec.path("vendor_root"), view)
+    private = view / "habitat-mas/stage2.py"
+    manifest: JSONObject = {
+        "python_executable": sys.executable,
+        "modules": {
+            "original.stage2": {
+                "path": str(source if problem == "origin" else private),
+                "sha256": "0" * 64 if problem == "reported-digest" else file_digest(source),
+            }
+        },
+    }
+    if problem == "copied-bytes":
+        private.write_text("mutated after import")
+    if problem == "external-link":
+        private.unlink()
+        private.symlink_to(source)
+    failures = spec.runtime_failures(manifest, view)
+    assert failures == (
+        [] if problem is None else ["runtime_module_identity_unconfirmed:original.stage2"]
+    )
+
+
+@pytest.mark.parametrize("problem", [None, "scene", "step-type", "schema"])
+def test_native_worker_interruption_preserves_observed_step_lower_bound(
+    tmp_path: Path, problem: str | None
+) -> None:
+    """Partial progress proves execution, never terminal truth; invalid progress remains unknown."""
+    population, config = setup_pair(tmp_path)
+    spec = PairSpec.load(population, config, "pair-0")
+    directory = tmp_path / "arm"
+    process = write_observations(spec, "emos", directory, official=None)
+    process["exit_code"] = 1
+    run = directory / "native-evidence/worker-1"
+    (run / "native-outcome.json").unlink()
+    write_json(
+        run / "native-progress.json",
+        {
+            "schema_version": "bad"
+            if problem == "schema"
+            else "roboguide.native-execution-progress/v0.1",
+            "basis": "last_durable_successful_step_lower_bound",
+            "episode_id": spec.row.expected_episode_id,
+            "scene_id": "wrong" if problem == "scene" else spec.row.expected_scene_id,
+            "simulator_steps": True if problem == "step-type" else 992,
+            "official_pddl_success": True,
+        },
+    )
+    result, _ = collect_arm(spec, "emos", directory, process)
+    assert result["official_pddl_success"] is None
+    assert result["system_outcome"] == "Failed"
+    assert result["simulator_steps"] == (992 if problem is None else None)
+    assert result["physical_episode_executed"] is (True if problem is None else None)
+    assert result["simulator_steps_basis"] == (
+        "last_durable_successful_step_lower_bound" if problem is None else "unavailable"
+    )
 
 
 @pytest.mark.parametrize("provider_failure", [False, True])

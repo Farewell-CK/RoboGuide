@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -43,6 +44,7 @@ from roboguide_eval.provider_capture import BodyCapture, CaptureProxyServer
 SCHEMA = "roboguide.e1.pair-worker/v0.1"
 _PORT_NAMES = ("proxy", "grpc", "controller", "artifact", "endpoint_a", "endpoint_b", "mission")
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}\Z")
+_VENDOR_CODE = ("habitat-lab", "habitat-baselines", "habitat-mas")
 
 
 def object_value(value: JSONValue) -> JSONObject:
@@ -192,7 +194,7 @@ class PairSpec:
         spec.source_identities()
         return spec
 
-    def runtime_failures(self, manifest: JSONObject) -> list[str]:
+    def runtime_failures(self, manifest: JSONObject, vendor_view: Path) -> list[str]:
         """Check the actual interpreter/module origins against the exact frozen public files."""
         failures: list[str] = []
         executable = manifest.get("python_executable")
@@ -204,15 +206,49 @@ class PairSpec:
         actual_modules = object_value(manifest.get("modules"))
         for name, path_value in object_value(self.config.get("runtime_modules")).items():
             expected = Path(cast(str, path_value))
+            relative = (
+                expected.relative_to(self.path("vendor_root"))
+                if expected.is_relative_to(self.path("vendor_root"))
+                else None
+            )
+            origin = (
+                vendor_view / relative
+                if relative is not None and relative.parts[0] in _VENDOR_CODE
+                else expected
+            )
             actual = object_value(actual_modules.get(name))
             path = actual.get("path")
             if (
                 not isinstance(path, str)
-                or Path(path).resolve() != expected.resolve()
+                or Path(path).resolve() != origin.resolve()
+                or (
+                    relative is not None
+                    and relative.parts[0] in _VENDOR_CODE
+                    and not origin.resolve().is_relative_to(vendor_view.resolve())
+                )
                 or actual.get("sha256") != self.sources[expected]
+                or not origin.is_file()
+                or file_digest(origin) != self.sources[expected]
             ):
                 failures.append("runtime_module_identity_unconfirmed:" + name)
         return failures
+
+    def verify_vendor_view(self, directory: Path) -> None:
+        """Fence each private code copy against frozen bytes before and after execution."""
+        source = self.path("vendor_root")
+        for path, expected in self.sources.items():
+            if not path.is_relative_to(source):
+                continue
+            relative = path.relative_to(source)
+            if relative.parts[0] not in _VENDOR_CODE:
+                continue
+            actual = directory / relative
+            if (
+                not actual.is_file()
+                or not actual.resolve().is_relative_to(directory.resolve())
+                or file_digest(actual) != expected
+            ):
+                raise ValueError("private vendor source differs from frozen pair source")
 
     def path(self, name: str) -> Path:
         """Resolve one already validated public absolute path."""
@@ -302,12 +338,19 @@ def wait_ports_closed(ports: Mapping[str, int], budget: float = 30) -> bool:
 
 
 def private_vendor_view(source: Path, directory: Path) -> None:
-    """Isolate writable native CWD while keeping unchanged source/data references separate."""
+    """Copy unchanged code into a real private checkout; share only read-only dataset assets."""
     directory.mkdir()
-    for name in ("data", "habitat-lab", "habitat-baselines", "habitat-mas"):
+    for name in ("data", *_VENDOR_CODE):
         if not (source / name).is_dir():
             raise ValueError("required vendor directory unavailable")
-        (directory / name).symlink_to(source / name, target_is_directory=True)
+        if name == "data":
+            (directory / name).symlink_to(source / name, target_is_directory=True)
+        else:
+            shutil.copytree(
+                source / name,
+                directory / name,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
 
 
 def arm_environment(spec: PairSpec, directory: Path, proxy_port: int) -> dict[str, str]:
@@ -461,6 +504,7 @@ def run_arm(spec: PairSpec, arm: ArmName, directory: Path) -> JSONObject:
     spec.verify_sources()
     directory.mkdir()
     private_vendor_view(spec.path("vendor_root"), directory / "vendor-cwd")
+    spec.verify_vendor_view(directory / "vendor-cwd")
     credential = os.environ.get("OPENAI_API_KEY", "")
     capture = BodyCapture(directory / "provider-bodies", (credential,))
     proxy = CaptureProxyServer(
@@ -571,6 +615,7 @@ def run_arm(spec: PairSpec, arm: ArmName, directory: Path) -> JSONObject:
         )
         write_json(directory / "arm-process-result.json", result)
     spec.verify_sources()
+    spec.verify_vendor_view(directory / "vendor-cwd")
     return result
 
 
@@ -586,6 +631,7 @@ def collect_arm(
 ) -> tuple[JSONObject, RunPairingEvidence]:
     """Project immutable original evidence, retaining separate SUT, benchmark and archive facts."""
     verdict: JSONObject = {}
+    steps_basis: str = "terminal_execution_evidence"
     if arm == "roboguide":
         run = directory / "run"
         initial = optional_document(run / "evidence/diagnostics-initial.json")
@@ -605,6 +651,20 @@ def collect_arm(
         identity = optional_document(run / "workload-selection.json")
         world = optional_document(run / "native-outcome.json")
         official, steps = world.get("official_pddl_success"), world.get("simulator_steps")
+        if not world:
+            progress = optional_document(run / "native-progress.json")
+            if (
+                progress.get("schema_version") == "roboguide.native-execution-progress/v0.1"
+                and progress.get("basis") == "last_durable_successful_step_lower_bound"
+                and progress.get("episode_id") == spec.row.expected_episode_id
+                and progress.get("scene_id") == spec.row.expected_scene_id
+                and type(progress.get("simulator_steps")) is int
+                and cast(int, progress["simulator_steps"]) >= 0
+            ):
+                steps = progress["simulator_steps"]
+                steps_basis = "last_durable_successful_step_lower_bound"
+            else:
+                steps_basis = "unavailable"
         status = (
             "Failed"
             if process.get("exit_code") not in (None, 0)
@@ -667,7 +727,7 @@ def collect_arm(
     )
     runtime = optional_document(runtime_path)
     if successful or (type(steps) is int and steps > 0):
-        fatal.extend(spec.runtime_failures(runtime))
+        fatal.extend(spec.runtime_failures(runtime, directory / "vendor-cwd"))
     if type(steps) is int and steps > 0 and not initial:
         fatal.append("physical_initial_archive_missing")
     if initial and (
@@ -700,7 +760,8 @@ def collect_arm(
         if official_value
         else "false",
         "simulator_steps": steps,
-        "physical_episode_executed": type(steps) is int and steps > 0,
+        "simulator_steps_basis": steps_basis,
+        "physical_episode_executed": steps > 0 if type(steps) is int else None,
         "admission": verdict.get("admission"),
         "semantic_goal_diagnostic": object_value(verdict.get("context")).get(
             "semantic_goal_diagnostic"

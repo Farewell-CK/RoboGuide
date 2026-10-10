@@ -992,8 +992,8 @@ uv run pytest -q
 顺序运行隔离的原生 EMOS 与生产 B1，保存脱敏的真实模型调用、实际 reset 与配对证据。
 允许继续的 Provider HTTP 错误仍逐次留证；受控停止先归档，再清理服务并等待采集器落盘。
 它不属于 Core、Runtime、Control Plane、State & Memory Plane 或 Local EAIOS，
-不修改 Proposal / Commit / Binding / Runtime 语义，也不 import 或复制
-EMOS/Habitat-MAS；外部系统只通过进程边界访问。第一版提供 ExperimentSpec 合同、
+不修改 Proposal / Commit / Binding / Runtime 语义，也不 import 外部决策或仿真模块。
+EMOS/Habitat-MAS 通过进程边界在摘要验证的私有代码副本中运行。第一版提供 ExperimentSpec 合同、
 进程编排（超时/终止/日志持久化）、canonical metric schema、RunManifest 可复现
 身份和 `roboguide-eval` CLI（doctor / run / summarize），并以
 [`evaluation/specs/e1/mobility-smoke.yaml`](evaluation/specs/e1/mobility-smoke.yaml)

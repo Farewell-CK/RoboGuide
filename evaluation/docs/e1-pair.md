@@ -13,8 +13,11 @@ uv run roboguide-eval e1-pair \
 
 输出目录必须不存在。偶数 population ordinal 先 EMOS，奇数先 RoboGuide；顺序在
 调用前确定。两个 arm 在一个 pair 内串行，分别拥有 `vendor-cwd`、日志、Provider
-body archive 和结果目录。共享源代码和资产仅作为读取来源；入口不会修改它们。
-启动前后重算冻结源文件摘要，不提供操作系统沙箱或对外部程序的文件写权限隔离保证。
+body archive 和结果目录。每臂复制冻结的三个 vendor 代码目录，不使用指向外部配置的
+目录符号链接，因而遵守生产 B1 的 checkout 内配置约束。dataset/资产保持读取引用。
+启动前后重算冻结源与私有代码副本摘要；runtime origin 必须指向该臂准确的副本路径
+并匹配冻结字节，外部库仍绑定原始解释器/路径。入口不提供操作系统沙箱或对外部
+程序的文件写权限隔离保证。
 原生 CWD 下的日志、视频、Hydra/TensorBoard 输出与其他 worker 隔离。
 
 ## 冻结 worker 配置 v0.1
@@ -60,6 +63,11 @@ worker 中核对原始 dataset 文件、episode/scene 唯一性，使用原生 `
 但第一次真实返回的初始化和第一 episode 终态不可被后续 reset 覆盖。观察器不添加
 reset/action/step/RNG 调用。异常仍原样传播；提前关闭或未执行的 episode 官方结果
 保持 unavailable。终态值来自原 `Env.step` 后已计算的 `Env.get_metrics`。
+每 32 次成功返回的原始 step 保存一个小型 `native-progress.json`，reset/终态也保存。
+原生父进程异常可能直接终止 VectorEnv worker，不能假设其 `close` 必然调用。终态
+文件缺失时，进度只证明已执行步数下界；最终步数、终态和官方结果保持 unavailable。
+缺失或身份不匹配的进度不会被解释成“从未执行”。诊断/metric 读取异常分别隔离，
+不会阻止保存其他可获得的边界事实或改变原始异常与物理执行结果。
 物理 reader 没有批准的逐谓词读取能力时仍 unavailable；不能用该缺口替代官方 metric。
 
 ## 证据与结果

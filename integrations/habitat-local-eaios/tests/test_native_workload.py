@@ -181,3 +181,66 @@ def test_read_and_storage_failures_do_not_change_original_step(
         assert (env.resets, env.steps, env.closes) == (1, 1, 1)
     finally:
         restore()
+
+
+def test_successful_step_checkpoints_survive_parent_interruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Durable progress is a bounded lower bound, never an invented terminal metric."""
+    original_step = Env.step
+
+    def continuing_step(env: Env, action: Any) -> dict[str, bool]:
+        """Keep the original action/result/counter while simulating a continuing episode."""
+        result = original_step(env, action)
+        env.episode_over = False
+        return result
+
+    monkeypatch.setattr(Env, "step", continuing_step)
+    restore = install_execution_observer(Env, tmp_path)
+    try:
+        env = Env(
+            SimpleNamespace(seed=40), Dataset([SimpleNamespace(episode_id="7", scene_id="scene")])
+        )
+        env.reset()
+        for _ in range(65):
+            assert env.step("unchanged action") is env.result
+        progress = json.loads((tmp_path / "native-progress.json").read_text())
+        assert progress["simulator_steps"] == 64
+        assert progress["checkpoint_period_steps"] == 32
+        assert progress["official_outcome_available"] is False
+        assert (env.resets, env.steps, env.closes) == (1, 65, 0)
+        assert not (tmp_path / "native-outcome.json").exists()
+        env.close()
+        outcome = json.loads((tmp_path / "native-outcome.json").read_text())
+        assert outcome["simulator_steps"] == 65 and outcome["official_pddl_success"] is None
+    finally:
+        restore()
+
+
+def test_metric_and_terminal_diagnostic_failure_preserve_execution_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Independent observer failures cannot hide an original terminal step or close call."""
+    from habitat_local_eaios.diagnostics import PhysicalDiagnostics
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        """Simulate missing metrics or terminal serialization without physical effects."""
+        raise RuntimeError("diagnostic read failed")
+
+    monkeypatch.setattr(Env, "get_metrics", broken)
+    monkeypatch.setattr(PhysicalDiagnostics, "record_terminal", broken)
+    restore = install_execution_observer(Env, tmp_path)
+    try:
+        env = Env(
+            SimpleNamespace(seed=40), Dataset([SimpleNamespace(episode_id="7", scene_id="scene")])
+        )
+        env.reset()
+        assert env.step("original action") is env.result
+        outcome = json.loads((tmp_path / "native-outcome.json").read_text())
+        assert outcome["episode_terminal"] is True and outcome["simulator_steps"] == 1
+        assert outcome["official_pddl_success"] is None
+        assert json.loads((tmp_path / "native-progress.json").read_text())["simulator_steps"] == 1
+        env.close()
+        assert (env.resets, env.steps, env.closes) == (1, 1, 1)
+    finally:
+        restore()

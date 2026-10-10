@@ -110,13 +110,36 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
     steps = 0
     finished = False
 
+    def checkpoint(env: Any) -> None:
+        """Persist a bounded successful-step lower bound even if the parent kills its worker."""
+        try:
+            _save(
+                directory,
+                "native-progress.json",
+                {
+                    "schema_version": "roboguide.native-execution-progress/v0.1",
+                    "episode_id": str(env.current_episode.episode_id),
+                    "scene_id": str(env.current_episode.scene_id),
+                    "simulator_steps": steps,
+                    "basis": "last_durable_successful_step_lower_bound",
+                    "checkpoint_period_steps": 32,
+                    "official_outcome_available": False,
+                },
+            )
+        except Exception:  # noqa: BLE001 - unavailable observation never changes execution
+            return
+
     def boundary(env: Any, reason: str, terminal: bool) -> None:
         """Record available state without publishing a metric from an unexecuted episode."""
         nonlocal finished
         if finished or reset_count != 1:
             return
+        checkpoint(env)
         try:
-            metrics = env.get_metrics()
+            try:
+                metrics = env.get_metrics()
+            except Exception:  # noqa: BLE001 - retain execution evidence without official truth
+                metrics = {}
             value = metrics.get("pddl_success")
             try:
                 scalar = (
@@ -129,10 +152,13 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
             official = bool(scalar) if terminal and steps > 0 and scalar in (False, True) else None
             _save(directory, "native-official-metrics.json", metrics)
             if diagnostics is not None:
-                if terminal:
-                    diagnostics.record_terminal(env, steps, reason)
-                else:
-                    diagnostics.record_stop(env, steps, reason, 0)
+                try:
+                    if terminal:
+                        diagnostics.record_terminal(env, steps, reason)
+                    else:
+                        diagnostics.record_stop(env, steps, reason, 0)
+                except Exception:  # noqa: BLE001 - terminal persistence is independently isolated
+                    pass
             _save(
                 directory,
                 "native-outcome.json",
@@ -160,6 +186,7 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
         result = original_reset(env, *args, **kwargs)
         reset_count += 1
         if reset_count == 1:
+            checkpoint(env)
             try:
                 diagnostics = PhysicalDiagnostics(
                     directory / "physical", tuple(range(env.sim.num_articulated_agents)), True, 5000
@@ -179,6 +206,8 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
             raise
         if reset_count == 1 and not finished:
             steps += 1
+            if steps % 32 == 0:
+                checkpoint(env)
             try:
                 if diagnostics is not None:
                     diagnostics.record_step(
@@ -191,9 +220,12 @@ def install_execution_observer(env_type: Any, directory: Path) -> Callable[[], N
                         env.get_metrics(),
                         result,
                     )
+            except Exception:  # noqa: BLE001 - reads cannot change physical execution
+                pass
+            try:
                 if env.episode_over:
                     boundary(env, "original-episode-over", True)
-            except Exception:  # noqa: BLE001 - reads cannot change physical execution
+            except Exception:  # noqa: BLE001 - a failed diagnostic read cannot suppress this boundary
                 pass
         return result
 

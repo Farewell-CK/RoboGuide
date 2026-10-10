@@ -515,7 +515,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   original dataset episode before environment construction, then observes original reset/step
   results and cached official metrics without additional physical/RNG/model calls. It does not
   change native Leader/Stage2 decisions, B1 admission or Pair Validator dimensions. See
-  `evaluation/docs/e1-pair.md`; experimental manifests/results remain local.
+  `evaluation/docs/e1-pair.md`; experimental manifests/results remain local. Each arm uses
+  byte-verified private vendor code copies, preserving production checkout containment and
+  exact child-module origin checks. Bounded native progress proves only successful-step lower
+  bounds after abrupt worker death, never official terminal truth or non-execution.
 - The opt-in `habitat_local_eaios.native_reset_observer` entry point decorates the original
   EMOS environment factory inside its workers, preserving the first returned reset with the
   existing bounded diagnostic reader. It never edits the external source, invokes another
