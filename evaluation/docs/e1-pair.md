@@ -104,6 +104,16 @@ launch、process result、run pairing evidence 和 arm summary。body observer �
 headers。关闭、请求响应数量、drop/write failure、in-flight 一起决定归档完整性。
 原生/受控日志流式脱敏；缺失或损坏的已有 JSON 不会作为成功证据。
 
+RoboGuide 的 dataset identity 从所有 B1 workload 共有的
+`authoritative-semantic-evidence.json` v0.2 投影，校验原始 digest、authority、
+run/episode/scene，以及 dataset revision/digest 与冻结 population 的一致性，
+再记录准确来源路径。
+仅有历史搬运 start 时，兼容 digest-bound relocation-start v0.1/v0.2；多个实际
+来源同时存在时必须全部有效且与冻结 population 一致，不以优先级隐藏损坏或冲突。
+未取得实际环境证据时为 unavailable，已有证据损坏或身份冲突为 invalid 并记录
+harness fatal reason。请求配置或 population 声明不能代替观测。这项投影不修改
+B1 provenance、Formal admission、Mission outcome 或官方 benchmark 值。
+
 `pair-manifest.json` 复用现有 Pair Validator。`reset_comparison` 另核对两个实际
 post-reset episode/scene/seed、机器人 position/rotation、目标位置与 goal 标识；
 equal seed 不能证明 equal start。可选 semantic-region gaps 不会伪装成 pose，也不

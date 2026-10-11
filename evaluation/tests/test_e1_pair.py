@@ -8,14 +8,17 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
+from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticExpression
 from roboguide_eval.e1_batch import file_digest, write_json
 from roboguide_eval.e1_fairness import (
     BenchmarkAuthorityIdentity,
     DatasetIdentity,
     EmbodimentAgent,
     EmbodimentProfile,
+    EvidenceStatus,
     ModelConfigurationIdentity,
     PopulationManifest,
     PopulationRow,
@@ -33,6 +36,7 @@ from roboguide_eval.e1_pair import (
     collect_arm,
     compare_reset,
     private_vendor_view,
+    roboguide_dataset_observation,
     run_pair,
 )
 from roboguide_eval.models import JSONObject
@@ -347,7 +351,7 @@ def write_observations(
         (run / "evidence").mkdir()
         write_json(run / "evidence/runtime-source-manifest.json", runtime)
         write_json(run / "evidence/diagnostics-initial.json", initial)
-        write_json(run / "evidence/relocation-episode-start.json", {"identity": identity})
+        write_dataset_observations(spec, run)
         write_json(
             run / "evidence/shared-world-summary.json",
             {
@@ -401,6 +405,197 @@ def write_observations(
         },
         "log_capture": [{"closed": True}],
         "resource_usage": {"samples": 3, "peak_gpu_mib": 200},
+    }
+
+
+def write_dataset_observations(spec: PairSpec, run: Path) -> None:
+    """Archive production-shaped, digest-bound environment identities without a simulator."""
+    (run / "evidence").mkdir(parents=True, exist_ok=True)
+    semantic = AuthoritativeSemanticEvidence.create(
+        run_id=run.name,
+        episode_id=str(spec.row.expected_episode_id),
+        revision="goal-revision",
+        dataset_revision=spec.population.dataset.revision,
+        dataset_sha256=spec.population.dataset.file_sha256.removeprefix("sha256:"),
+        goal=SemanticExpression.predicate("is_detected", ("object",)),
+        world_context={"scene_id": spec.row.expected_scene_id},
+    ).to_json()
+    write_json(run / "evidence/authoritative-semantic-evidence.json", semantic)
+    body: JSONObject = {
+        "schema_version": "roboguide.habitat-relocation-start/v0.1",
+        "authority": "environment-authoritative",
+        "identity": {
+            **{
+                key: value
+                for key, value in cast(JSONObject, semantic["identity"]).items()
+                if key != "revision"
+            },
+            "scene_id": spec.row.expected_scene_id,
+            "habitat_seed": spec.row.seed,
+        },
+        "semantic_evidence_digest": semantic["digest"],
+    }
+    write_json(run / "evidence/relocation-episode-start.json", {**body, "digest": digest(body)})
+
+
+@pytest.mark.parametrize("pair_id", ["pair-0", "pair-1"])
+def test_common_semantic_source_supplies_actual_dataset_for_perception(
+    tmp_path: Path, pair_id: str
+) -> None:
+    """Different episodes use the actual semantic source and preserve the official false result."""
+    population, config = setup_pair(tmp_path)
+    spec = PairSpec.load(population, config, pair_id)
+    directory = tmp_path / "arm"
+    process = write_observations(spec, "roboguide", directory, official=False)
+    (directory / "run/evidence/relocation-episode-start.json").unlink()
+    result, evidence = collect_arm(spec, "roboguide", directory, process)
+    observed = evidence.observed["dataset_identity"]
+    assert observed.status is EvidenceStatus.AVAILABLE
+    assert observed.value == spec.population.dataset.file_sha256
+    assert (
+        observed.source
+        == str(directory / "run/evidence/authoritative-semantic-evidence.json")
+        + "#/identity/dataset_sha256"
+    )
+    assert result["fatal_reasons"] == []
+    assert result["official_pddl_success"] is False
+    assert result["admission"] == {
+        "provenance_valid": True,
+        "valid_for_formal_population": True,
+        "valid_for_benchmark_population": True,
+    }
+
+
+@pytest.mark.parametrize("version", ["v0.1", "v0.2"])
+def test_relocation_identity_compatibility_without_semantic_source(
+    tmp_path: Path, version: str
+) -> None:
+    """Retain archived relocation identity after checking its digest and workload binding."""
+    population, config = setup_pair(tmp_path)
+    spec = PairSpec.load(population, config, "pair-0")
+    run = tmp_path / "run"
+    write_dataset_observations(spec, run)
+    (run / "evidence/authoritative-semantic-evidence.json").unlink()
+    path = run / "evidence/relocation-episode-start.json"
+    body = json.loads(path.read_text())
+    body.pop("digest")
+    body["schema_version"] = "roboguide.habitat-relocation-start/" + version
+    write_json(path, {**body, "digest": digest(body)})
+    observed, failures = roboguide_dataset_observation(spec, run)
+    assert observed.status is EvidenceStatus.AVAILABLE
+    assert observed.value == spec.population.dataset.file_sha256
+    assert observed.source == str(path) + "#/identity/dataset_sha256"
+    assert failures == []
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "schema",
+        "authority",
+        "digest",
+        "missing-dataset",
+        "invalid-sha",
+        "run",
+        "episode",
+        "scene",
+        "revision",
+        "dataset",
+        "json",
+        "goal",
+    ],
+)
+def test_invalid_semantic_dataset_source_never_falls_back_to_valid_relocation(
+    tmp_path: Path, problem: str
+) -> None:
+    """Wrong identity cannot pass by rehashing or falling back to a valid companion."""
+    population, config = setup_pair(tmp_path)
+    spec = PairSpec.load(population, config, "pair-0")
+    directory = tmp_path / "arm"
+    process = write_observations(spec, "roboguide", directory, official=False)
+    path = directory / "run/evidence/authoritative-semantic-evidence.json"
+    body = json.loads(path.read_text())
+    body.pop("digest")
+    if problem in {"schema", "authority", "goal"}:
+        body[{"schema": "schema_version", "authority": "authority", "goal": "goal"}[problem]] = (
+            "invalid"
+        )
+    elif problem == "scene":
+        body["world_context"]["scene_id"] = "another-scene"
+    elif problem == "missing-dataset":
+        body["identity"].pop("dataset_sha256")
+    elif problem not in {"digest", "json"}:
+        field = {
+            "run": "run_id",
+            "episode": "episode_id",
+            "revision": "dataset_revision",
+            "dataset": "dataset_sha256",
+            "invalid-sha": "dataset_sha256",
+        }[problem]
+        body["identity"][field] = "0" * 64 if problem == "dataset" else "other"
+    write_json(
+        path, {**body, "digest": "sha256:" + "0" * 64 if problem == "digest" else digest(body)}
+    )
+    if problem == "json":
+        path.write_text("{invalid-json")
+    result, evidence = collect_arm(spec, "roboguide", directory, process)
+    assert evidence.observed["dataset_identity"].status is EvidenceStatus.INVALID
+    assert result["fatal_reasons"]
+    assert result["infrastructure_failure"] is True
+    assert result["official_pddl_success"] is False
+    assert result["admission"] == {
+        "provenance_valid": True,
+        "valid_for_formal_population": True,
+        "valid_for_benchmark_population": True,
+    }
+
+
+@pytest.mark.parametrize("problem", ["conflicting-identity", "digest", "json"])
+def test_invalid_relocation_companion_cannot_be_hidden_by_semantic_source(
+    tmp_path: Path, problem: str
+) -> None:
+    """All present observed sources must agree; priority never hides a corrupt companion."""
+    population, config = setup_pair(tmp_path)
+    spec = PairSpec.load(population, config, "pair-0")
+    run = tmp_path / "run"
+    write_dataset_observations(spec, run)
+    path = run / "evidence/relocation-episode-start.json"
+    body = json.loads(path.read_text())
+    body.pop("digest")
+    if problem == "conflicting-identity":
+        body["identity"]["dataset_sha256"] = "0" * 64
+    write_json(path, {**body, "digest": "invalid" if problem == "digest" else digest(body)})
+    if problem == "json":
+        path.write_text("not-json")
+    observed, failures = roboguide_dataset_observation(spec, run)
+    assert observed.status is EvidenceStatus.INVALID
+    assert failures
+
+
+@pytest.mark.parametrize("reset_observed", [False, True])
+def test_early_mi_failure_keeps_missing_and_actually_observed_dataset_distinct(
+    tmp_path: Path, reset_observed: bool
+) -> None:
+    """Use actual reset evidence before MI; requested files never establish observed identity."""
+    population, config = setup_pair(tmp_path)
+    spec = PairSpec.load(population, config, "pair-0")
+    directory = tmp_path / "arm"
+    process = write_observations(spec, "roboguide", directory, official=None, mi_failed=True)
+    (directory / "run/evidence/relocation-episode-start.json").unlink()
+    if not reset_observed:
+        (directory / "run/evidence/authoritative-semantic-evidence.json").unlink()
+    result, evidence = collect_arm(spec, "roboguide", directory, process)
+    observed = evidence.observed["dataset_identity"]
+    assert observed.status is (
+        EvidenceStatus.AVAILABLE if reset_observed else EvidenceStatus.UNAVAILABLE
+    )
+    assert observed.value == (spec.population.dataset.file_sha256 if reset_observed else None)
+    assert result["fatal_reasons"] == []
+    assert result["official_pddl_success"] is None
+    assert result["admission"] == {
+        "provenance_valid": True,
+        "valid_for_formal_population": True,
+        "valid_for_benchmark_population": False,
     }
 
 

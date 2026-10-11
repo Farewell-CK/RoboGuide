@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import cast
 from xml.etree import ElementTree
 
+from mission.semantic_evidence import AuthoritativeSemanticEvidence
+
 from roboguide_eval.accounting import AccountingProxyConfig, read_accounting_log
 from roboguide_eval.b1_deployment import load_deployment
 from roboguide_eval.b1_workload import load_b1_workload
@@ -774,6 +776,66 @@ def _observed(value: JSONValue, source: str) -> ObservedField:
     )
 
 
+def roboguide_dataset_observation(spec: PairSpec, run: Path) -> tuple[ObservedField, list[str]]:
+    """Read actual environment identity without substituting the requested dataset.
+
+    Semantic evidence is common to all B1 workloads. Retain digest-checked
+    relocation-start compatibility, but reject every present malformed or
+    conflicting source. This read-only projection grants no admission authority.
+    """
+    semantic_path = run / "evidence/authoritative-semantic-evidence.json"
+    relocation_path = run / "evidence/relocation-episode-start.json"
+    sources = [path for path in (semantic_path, relocation_path) if path.is_file()]
+    if not sources:
+        return _observed(None, str(semantic_path)), []
+    expected: JSONObject = {
+        "run_id": run.name,
+        "episode_id": spec.row.expected_episode_id,
+        "scene_id": spec.row.expected_scene_id,
+        "dataset_revision": spec.population.dataset.revision,
+        "dataset_sha256": spec.population.dataset.file_sha256.removeprefix("sha256:"),
+    }
+    failures: list[str] = []
+    actual_dataset: str | None = None
+    for path in sources:
+        try:
+            document = read_json(path)
+            if path == semantic_path:
+                semantic = AuthoritativeSemanticEvidence.from_json(document)
+                identity: JSONObject = {
+                    **object_value(document["identity"]),
+                    "scene_id": semantic.world_context["scene_id"],
+                }
+            else:
+                identity = object_value(document.get("identity"))
+                body = {key: value for key, value in document.items() if key != "digest"}
+                if (
+                    document.get("schema_version")
+                    not in {
+                        "roboguide.habitat-relocation-start/v0.1",
+                        "roboguide.habitat-relocation-start/v0.2",
+                    }
+                    or document.get("authority") != "environment-authoritative"
+                    or document.get("digest") != digest(body)
+                ):
+                    raise ValueError("invalid relocation identity source")
+            if any(identity.get(key) != value for key, value in expected.items()):
+                failures.append("observed_dataset_identity_mismatch:" + path.name)
+            else:
+                actual_dataset = cast(str, identity["dataset_sha256"])
+        except (OSError, ValueError, TypeError):
+            failures.append("observed_dataset_source_invalid:" + path.name)
+    if failures:
+        return ObservedField(
+            {"reasons": list(failures)},
+            ";".join(str(path) for path in sources),
+            EvidenceStatus.INVALID,
+        ), failures
+    return _observed(
+        "sha256:" + cast(str, actual_dataset), str(sources[0]) + "#/identity/dataset_sha256"
+    ), []
+
+
 def collect_arm(
     spec: PairSpec, arm: ArmName, directory: Path, process: JSONObject
 ) -> tuple[JSONObject, RunPairingEvidence]:
@@ -784,8 +846,7 @@ def collect_arm(
         run = directory / "run"
         initial = optional_document(run / "evidence/diagnostics-initial.json")
         world = optional_document(run / "evidence/shared-world-summary.json")
-        start = optional_document(run / "evidence/relocation-episode-start.json")
-        identity = object_value(start.get("identity"))
+        identity: JSONObject = {}
         verdict = optional_document(run / "b1-verdict.json")
         record = optional_document(run / "b1-request-record.json")
         mission = optional_document(run / "mission.json")
@@ -884,12 +945,20 @@ def collect_arm(
         initial.get("habitat_seed_config"),
     ) != (spec.row.expected_episode_id, spec.row.expected_scene_id, spec.row.seed):
         fatal.append("observed_reset_identity_mismatch")
-    actual_dataset = identity.get("dataset_sha256")
-    if (
-        actual_dataset is not None
-        and actual_dataset != spec.population.dataset.file_sha256.removeprefix("sha256:")
-    ):
-        fatal.append("observed_dataset_mismatch")
+    if arm == "roboguide":
+        dataset_observation, dataset_failures = roboguide_dataset_observation(spec, run)
+        fatal.extend(dataset_failures)
+    else:
+        actual_dataset = identity.get("dataset_sha256")
+        if (
+            actual_dataset is not None
+            and actual_dataset != spec.population.dataset.file_sha256.removeprefix("sha256:")
+        ):
+            fatal.append("observed_dataset_mismatch")
+        dataset_observation = _observed(
+            "sha256:" + actual_dataset if isinstance(actual_dataset, str) else None,
+            str(run / "workload-selection.json") + "#/dataset_sha256",
+        )
     official_value = official if type(official) is bool else None
     incidents = [call for call in calls if call.get("status") != 200]
     infra = (
@@ -924,9 +993,7 @@ def collect_arm(
         "evidence_directory": str(run),
     }
     observed: dict[str, ObservedField] = {
-        "dataset_identity": _observed(
-            "sha256:" + actual_dataset if isinstance(actual_dataset, str) else None, str(run)
-        ),
+        "dataset_identity": dataset_observation,
         "episode_identity": _observed(
             initial.get("episode_id"), str(run / "diagnostics-initial.json")
         ),
