@@ -209,7 +209,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   explicit incompatible assignment fails locally; unresolved region evidence remains unknown and
   does not prove route feasibility or authorize adapter-side reassignment. See ADR-0046.
 - The explicit independent-live/v0.1 Habitat deployment supports one to four source-bound
-  endpoints and at most 32 independent single-role Tasks with sparse dispatch and Task reuse.
+  endpoints and at most 32 independent Task/Role slots with sparse dispatch and Task reuse.
+  Roles in one Task use distinct logical Actors and capacity-one endpoints; Control alone
+  makes their atomic resource commitment. Different Tasks may reuse an Actor's endpoint.
   Only actual Control dispatch activates an original Stage2 attempt; unassigned/completed
   endpoints use original model-free wait. Same-attempt native zero-action reinitialization
   is fenced by an instance hook, a disclosed Local How change. Relocation readiness may be

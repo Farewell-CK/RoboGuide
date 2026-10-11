@@ -35,6 +35,15 @@ class LiveSlotLedger:
             )
         if self.session is not None and session != self.session:
             raise IntegrationError("live assignment belongs to a different immutable session")
+        actors_by_task: dict[str, set[str]] = {}
+        for value in session.slots:
+            actors = actors_by_task.setdefault(str(value["task_id"]), set())
+            actor_id = str(value["actor_id"])
+            if actor_id in actors:
+                raise IntegrationError("live Task roles must use distinct logical Actors")
+            actors.add(actor_id)
+            if len(actors) > len(self.agent_ids):
+                raise IntegrationError("live Task role count exceeds configured endpoints")
         slot = (invocation.task_id, invocation.role_id)
         actor = next(
             (
@@ -48,6 +57,11 @@ class LiveSlotLedger:
             raise IntegrationError("live assignment is not an exact session slot")
         if slot in self.seen or agent in self.active:
             raise IntegrationError("live assignment repeats a slot or overlaps an active endpoint")
+        if any(
+            task == invocation.task_id and owner == agent
+            for (task, _), (owner, _) in self.seen.items()
+        ):
+            raise IntegrationError("live Task roles cannot reuse one endpoint")
         if actor in self.actor_owners and self.actor_owners[actor] != agent:
             raise IntegrationError("live profile cannot migrate a Control-bound Actor")
         if isinstance(invocation, CanonicalRelocationInvocation) and any(

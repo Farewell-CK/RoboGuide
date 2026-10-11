@@ -52,7 +52,12 @@ the Mission-declared Task satisfaction basis. There is no distinct-executor
 constraint inferred from the number of goals. A Task may contain multiple
 concurrent Roles when each Role names a distinct logical Actor and the frozen
 deployment candidate sets provide distinct endpoints; at most 32 independent
-Task/Role slots may reuse the configured endpoints. Simultaneous local overlap
+Task/Role slots may reuse the configured endpoints. The adapter also rejects
+repeated Actors or more Roles than endpoints within one Task, and never reuses
+one endpoint for that Task's distinct Roles even after an instantaneous observation
+finishes. An early Role completion leaves its peer running; Task satisfaction and
+successor dispatch still wait on the accepted Control/Orchestration policy.
+Simultaneous local overlap
 and Actor migration reject, as do coupled Tasks and unsupported continuation.
 A missing next assignment waits without stepping or calling a model
 for the configured assignment-wait budget, then records an explicit failure.

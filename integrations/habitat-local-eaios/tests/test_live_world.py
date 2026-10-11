@@ -61,6 +61,7 @@ def invocation(
             for i, actor in enumerate(actors)
         ],
     }
+    body["slots"].sort(key=lambda slot: (slot["task_id"], slot["role_id"]))
     body["digest"] = (
         "sha256:"
         + hashlib.sha256(
@@ -87,23 +88,30 @@ def invocation(
     )
 
 
-def multi_role_invocation(agent: int) -> CanonicalInvocation:
-    """Build one accepted Task with two independent logical Actor Roles."""
+def multi_role_invocation(
+    agent: int, *, observation: bool = False, with_followup: bool = False
+) -> CanonicalInvocation:
+    """Build concurrent Roles and an optional Control-dispatched observation successor."""
+    tasks: list[tuple[str, list[str]]] = [("shared-task", [])]
+    if observation or with_followup:
+        tasks.append(("observe-task", ["shared-task"]))
     body: dict[str, Any] = {
         "schema_version": "roboguide.execution-session/v0.1",
         "mission_id": "mission",
         "group_id": "group",
         "slots": [
             {
-                "task_id": "shared-task",
+                "task_id": task,
                 "role_id": f"role-{slot_agent}",
                 "actor_id": f"actor-{slot_agent}",
-                "dependencies": [],
+                "dependencies": dependencies,
                 "independent": True,
             }
+            for task, dependencies in tasks
             for slot_agent in range(2)
         ],
     }
+    body["slots"].sort(key=lambda slot: (slot["task_id"], slot["role_id"]))
     body["digest"] = (
         "sha256:"
         + hashlib.sha256(
@@ -115,12 +123,16 @@ def multi_role_invocation(agent: int) -> CanonicalInvocation:
             "invocation": {
                 "mission_id": "mission",
                 "group_id": "group",
-                "task_id": "shared-task",
+                "task_id": "observe-task" if observation else "shared-task",
                 "role_id": f"role-{agent}",
-                "attempt_id": f"shared-attempt-{agent}",
-                "operation": "mobility.move@v1",
-                "objective": f"Navigate Actor {agent} to its assigned target",
-                "parameters": {"destination": f"target-{agent}"},
+                "attempt_id": f"{'observe' if observation else 'shared'}-attempt-{agent}",
+                "operation": "observation.verify@v1" if observation else "mobility.move@v1",
+                "objective": f"Observe target-{agent}"
+                if observation
+                else f"Navigate to target-{agent}",
+                "parameters": {"expected": f"detected(target-{agent})"}
+                if observation
+                else {"destination": f"target-{agent}"},
                 "resource_ids": [f"slot-{agent}"],
                 "execution_session": body,
             }
@@ -782,6 +794,108 @@ def test_ledger_accepts_multiple_roles_of_one_task_on_distinct_endpoints() -> No
     ledger.finish(0)
     ledger.finish(1)
     assert ledger.complete()
+
+
+def test_ledger_rejects_invalid_multi_role_topology_before_mutation() -> None:
+    """Direct dispatch cannot bypass task cardinality, Actor identity or endpoint exclusion."""
+    first, second = multi_role_invocation(0), multi_role_invocation(1)
+    single = LiveSlotLedger((0,))
+    with pytest.raises(IntegrationError, match="role count"):
+        single.admit(0, first)
+    assert single.session is None and not single.seen
+
+    body = first.as_dict()
+    session = cast(dict[str, Any], body["execution_session"])
+    session["slots"][1]["actor_id"] = "actor-0"
+    session.pop("digest")
+    session["digest"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(session, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+    duplicate = parse_canonical_invocation({"invocation": body})
+    ledger = LiveSlotLedger((0, 1))
+    with pytest.raises(IntegrationError, match="distinct logical Actors"):
+        ledger.admit(0, duplicate)
+    assert ledger.session is None and not ledger.seen
+
+    ledger.admit(0, first)
+    ledger.finish(0)
+    with pytest.raises(IntegrationError, match="reuse one endpoint"):
+        ledger.admit(0, second)
+    assert len(ledger.seen) == 1 and not ledger.active
+    ledger.admit(1, second)
+    ledger.finish(1)
+    assert ledger.complete()
+
+
+@pytest.mark.parametrize("count", [32, 33])
+def test_ledger_slot_budget_counts_roles(count: int) -> None:
+    """The immutable session budget is exact slot coverage, independent of Task grouping."""
+    ledger = LiveSlotLedger((0,))
+    request = invocation(0, ("one",) * count)
+    if count == 32:
+        ledger.admit(0, request)
+        assert len(ledger.session.slots) == 32
+    else:
+        with pytest.raises(IntegrationError, match="bounded independent"):
+            ledger.admit(0, request)
+        assert ledger.session is None
+
+
+def test_multi_role_loop_waits_for_control_followup_without_restarting_peers(
+    tmp_path: Path,
+) -> None:
+    """Early Role completion preserves its peer; only explicit dispatch activates cached reads."""
+    actor, gym = Actor(2), Gym({0: 1, 1: 3})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    simulator = SimpleNamespace(
+        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=[42, 43]
+    )
+    assert runtime._habitat_env is not None
+    runtime._habitat_env.task.pddl_problem = SimpleNamespace(
+        get_ordered_entities_list=lambda: [SimpleNamespace(name=f"target-{i}") for i in range(2)],
+        sim_info=SimpleNamespace(
+            search_for_entity=lambda entity: int(entity.name[-1]), sim=simulator
+        ),
+    )
+    gym._last_obs = {"detected_objects": [142, 143]}
+    navigation = {agent: multi_role_invocation(agent, with_followup=True) for agent in range(2)}
+    results: dict[tuple[str, int], int] = {}
+    sent = False
+
+    def arrivals() -> Mapping[int, CanonicalInvocation]:
+        """Represent a later Control dispatch after both prerequisite Role terminal facts."""
+        nonlocal sent
+        if len(results) == 2 and not sent:
+            assert gym.steps == 3
+            sent = True
+            return {agent: multi_role_invocation(agent, observation=True) for agent in range(2)}
+        return {}
+
+    def completed(agent: int, request: CanonicalInvocation, outcome: LocalExecutionOutcome) -> None:
+        """Bind each terminal fact to its actual Role without asserting official success."""
+        assert outcome.state == "COMPLETED" and not outcome.benchmark_task_achieved
+        results[(request.task_id, agent)] = outcome.simulator_steps
+
+    _, summary = runtime.execute_live(
+        navigation, arrivals, lambda: False, lambda *args: None, completed, 0.1
+    )
+    assert results == {
+        ("shared-task", 0): 1,
+        ("shared-task", 1): 3,
+        ("observe-task", 0): 3,
+        ("observe-task", 1): 3,
+    }
+    assert actor.calls == gym.steps == 3
+    assert [agent.initializations for agent in actor.originals] == [1, 1]
+    assert [agent.llm_model.calls for agent in actor.originals] == [1, 3]
+    reads = [json.loads(path.read_bytes()) for path in tmp_path.glob("observation-*.json")]
+    assert len(reads) == 2
+    assert all(read["condition_holds"] is True and read["simulator_steps"] == 3 for read in reads)
+    assert summary["identity"]["episode_reset_count"] == 1
+    assert runtime.test_diagnostics.terminals == [(3, "all_local_slots_finished")]
 
 
 def test_perception_negative_read_completes_only_observation(tmp_path: Path) -> None:

@@ -120,3 +120,11 @@ tests distinguish positive, negative, malformed and missing observations without
 active sensors. Legacy execution and all existing admission/provenance tests
 remain part of the release gates. These tests prove local code behavior, not
 future model compliance or physical benchmark performance.
+
+Multi-role regressions additionally exercise real HTTP admission, capacity-one
+Control commitments, retained Actor bindings and a two-role observation successor
+that waits for both navigation prerequisites. One Role's local completion does not
+complete its Task or stop its peer. Direct adapter admission rejects repeated
+Actors, excessive per-Task Role cardinality and reuse of one endpoint by Roles of
+the same Task, including instantaneous cached observations. Different Tasks may
+still reuse one Actor's endpoint. The 32-slot bound counts Roles, not Tasks.

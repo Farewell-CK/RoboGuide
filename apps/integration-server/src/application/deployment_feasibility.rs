@@ -40,6 +40,7 @@ fn has_distinct_endpoint_assignment(
     let mut ordered = actors.to_vec();
     ordered.sort_by_key(|actor| candidates.get(actor).map_or(usize::MAX, BTreeSet::len));
 
+    /// Try bounded endpoint combinations without selecting or reserving any Node.
     fn search(
         index: usize,
         actors: &[domain::ActorId],
@@ -611,20 +612,24 @@ impl DeploymentFeasibility {
                     .into(),
             );
         }
-        let mut actors_by_task = BTreeMap::<domain::TaskId, Vec<domain::ActorId>>::new();
-        for slot in &session.slots {
-            let actors = actors_by_task.entry(slot.task_id.clone()).or_default();
-            if actors.contains(&slot.actor_id) {
-                return Err("live shared-world Task roles must use distinct logical Actors".into());
+        if self.live_operations.is_some() {
+            let mut actors_by_task = BTreeMap::<domain::TaskId, Vec<domain::ActorId>>::new();
+            for slot in &session.slots {
+                let actors = actors_by_task.entry(slot.task_id.clone()).or_default();
+                if actors.contains(&slot.actor_id) {
+                    return Err(
+                        "live shared-world Task roles must use distinct logical Actors".into(),
+                    );
+                }
+                actors.push(slot.actor_id.clone());
             }
-            actors.push(slot.actor_id.clone());
-        }
-        if self.live_operations.is_some()
-            && actors_by_task.values().any(|actors| {
+            if actors_by_task.values().any(|actors| {
                 actors.len() > 1 && !has_distinct_endpoint_assignment(actors, &candidates)
-            })
-        {
-            return Err("live shared-world Task roles have no distinct endpoint assignment".into());
+            }) {
+                return Err(
+                    "live shared-world Task roles have no distinct endpoint assignment".into(),
+                );
+            }
         }
         let actors = session
             .slots
@@ -2303,6 +2308,26 @@ mod tests {
             .restrictions_for_plan(&decoded, &group)
             .expect("distinct endpoint candidates are available");
         assert_eq!(restrictions.len(), 2);
+        for count in [16, 17] {
+            let mut bounded = document.clone();
+            let template = bounded["tasks"][0].clone();
+            bounded["tasks"] = serde_json::Value::Array(
+                (0..count)
+                    .map(|index| {
+                        let mut task = template.clone();
+                        task["id"] = serde_json::json!(format!("multi-role-{index}"));
+                        task
+                    })
+                    .collect(),
+            );
+            let plan = orchestration::decode_mission_plan(&bounded.to_string()).unwrap();
+            assert_eq!(
+                evidence.restrictions_for_plan(&plan, &group).is_ok(),
+                count == 16,
+                "the bound counts {} Roles across {count} Tasks",
+                count * 2
+            );
+        }
 
         live_snapshot(&path, false);
         let shortage = DeploymentFeasibility::load(&path).expect("valid source");
@@ -2324,6 +2349,189 @@ mod tests {
                 .expect_err("one Actor cannot own concurrent Roles")
                 .contains("distinct logical Actors")
         );
+    }
+
+    /// Real HTTP dispatch and ordered Runtime facts retain multi-role DAG and resource authority.
+    #[tokio::test]
+    async fn live_multi_role_followup_uses_control_bindings_and_waits_for_all_roles() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("live.json");
+        let mut source = live_snapshot(&path, true);
+        source["execution_profile"]["endpoints"][1]["operations"] =
+            serde_json::json!(["mobility.navigate@v1", "observation.verify@v1"]);
+        seal(&mut source);
+        std::fs::write(&path, source.to_string()).unwrap();
+        let feasibility = DeploymentFeasibility::load(&path).unwrap();
+        let multi = multi_role_plan_document();
+        let mut document = plan_document(false, true);
+        document["contexts"] = multi["contexts"].clone();
+        document["tasks"][1]["context_id"] = document["tasks"][0]["context_id"].clone();
+        let mut followup = multi["tasks"][0].clone();
+        followup["id"] = "observe-both".into();
+        followup["depends_on"] =
+            serde_json::json!([document["tasks"][0]["id"], document["tasks"][1]["id"]]);
+        for role in followup["roles"].as_array_mut().unwrap() {
+            let destination = role["execution_intent"]["parameters"]["destination"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let operation =
+                serde_json::json!({"namespace":"observation", "name":"verify", "version":"v1"});
+            role["execution_intent"]["operation"] = operation.clone();
+            role["execution_intent"]["parameters"] =
+                serde_json::json!({"expected": format!("detected({destination})")});
+            role["requirements"]["capabilities"][0]["contract"] = operation;
+        }
+        // Synthetic execution-report satisfaction exercises Control, not official benchmark truth.
+        document["tasks"].as_array_mut().unwrap().push(followup);
+        let plan = orchestration::decode_mission_plan(&document.to_string()).unwrap();
+        let events = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+        let mut control = control::ControlPlane::new();
+        let state = initial_cost_nodes(&mut control, &plan, &mut events.clone());
+        let controller = Arc::new(Mutex::new(ControllerState {
+            bridge: IntegrationRuntimeBridge::new(
+                control,
+                state,
+                events.clone(),
+                integration::GrpcNodeRouter::default(),
+            ),
+            orchestrator: MissionOrchestrator::new(),
+            mission_admissions: BTreeMap::new(),
+            verifier_seen: BTreeSet::new(),
+            verifier_source_digest: None,
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let gate = Arc::new(Mutex::new(()));
+        let clock = runtime::FixedClock::new(domain::TimestampMs::new(1));
+        let body = document.to_string();
+        let request = format!(
+            "POST /v1/missions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let server = async {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            handle_http_connection(
+                &mut stream,
+                &controller,
+                &events,
+                &gate,
+                &clock,
+                Some(&feasibility),
+                None,
+            )
+            .await
+            .unwrap();
+        };
+        let client = async {
+            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+            stream.write_all(request.as_bytes()).await.unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).await.unwrap();
+            response
+        };
+        let response = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(server, client)
+        })
+        .await
+        .unwrap()
+        .1;
+        assert!(response.starts_with("HTTP/1.1 202"), "{response}");
+        let mut controller = controller.lock().unwrap();
+        let roots = controller.bridge.attempt_history();
+        assert_eq!(roots.len(), 2);
+        assert_ne!(roots[0].command().node_id(), roots[1].command().node_id());
+        for index in 0..4 {
+            let attempts = controller.bridge.attempt_history();
+            let attempt = if index < 2 {
+                &roots[index]
+            } else {
+                attempts
+                    .iter()
+                    .find(|attempt| {
+                        attempt.command().task_ref().task_id().as_str() == "observe-both"
+                            && attempt.command().role_id() == roots[index - 2].command().role_id()
+                    })
+                    .unwrap()
+            };
+            let command = attempt.command();
+            let resources = controller
+                .bridge
+                .control()
+                .group(command.group_id())
+                .unwrap()
+                .task_execution(command.task_ref())
+                .unwrap()
+                .assignments()
+                .iter()
+                .find(|assignment| assignment.role_id() == command.role_id())
+                .unwrap()
+                .resource_ids();
+            assert_eq!(resources.len(), 1);
+            assert_eq!(
+                resources[0].to_string(),
+                command.node_id().to_string().replace("node-", "space-")
+            );
+            if index >= 2 {
+                let previous = roots
+                    .iter()
+                    .find(|root| root.command().role_id() == command.role_id())
+                    .unwrap();
+                assert_eq!(previous.command().node_id(), command.node_id());
+                assert_eq!(command.task_ref().task_id().as_str(), "observe-both");
+            }
+            let now = domain::TimestampMs::new(2 + index as u64);
+            let correlation = domain::CorrelationId::new("synthetic-live-multi-role").unwrap();
+            for (sequence, phase) in [
+                (1, integration::grpc::v0_4::ExecutionPhase::Started),
+                (2, integration::grpc::v0_4::ExecutionPhase::Completed),
+            ] {
+                controller
+                    .bridge
+                    .consume(
+                        integration::GrpcNodeEvent::NodeMessage {
+                            node_id: command.node_id().to_string(),
+                            session_id: "synthetic-session".into(),
+                            message: integration::grpc::v0_4::NodeMessage {
+                                message: Some(integration::grpc::v0_4::node_message::Message::ExecutionSnapshot(
+                                    integration::grpc::v0_4::ExecutionSnapshot {
+                                        session_id: "synthetic-session".into(),
+                                        execution_id: attempt.execution_id().into(),
+                                        last_sequence: sequence,
+                                        phase: phase as i32,
+                                        reason: "synthetic observed local outcome".into(),
+                                    },
+                                )),
+                            },
+                        },
+                        now,
+                        &correlation,
+                    )
+                    .unwrap();
+                apply_runtime_events(&mut controller, now, &correlation, &mut events.clone())
+                    .unwrap();
+                apply_runtime_outcomes(&mut controller, now, &correlation, &mut events.clone())
+                    .unwrap();
+                drive_ready_tasks(&mut controller, now, &correlation, &mut events.clone()).unwrap();
+            }
+            assert_eq!(
+                controller.bridge.attempt_history().len(),
+                if index == 0 { 2 } else { 4 }
+            );
+            let trace = format!("{:?}", events.decoded_events().unwrap());
+            assert_eq!(trace.matches("TaskSatisfied").count(), [1, 2, 2, 3][index]);
+            assert_eq!(
+                controller
+                    .orchestrator
+                    .execution(plan.goal().mission_id())
+                    .unwrap()
+                    .lifecycle()
+                    == orchestration::MissionExecutionLifecycle::Completed,
+                index == 3
+            );
+        }
     }
 
     /// A distance goal across floors leaves a second endpoint eligible without promising a route.
