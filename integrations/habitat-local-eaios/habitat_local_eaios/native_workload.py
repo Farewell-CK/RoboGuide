@@ -36,14 +36,15 @@ def select_episode(dataset: Any, episode_id: str, scene_id: str) -> Any:
     return result
 
 
-def _save(directory: Path, name: str, document: dict[str, Any]) -> None:
+def _save(directory: Path, name: str, document: dict[str, Any]) -> bool:
     """Isolate observational storage errors; absence never establishes a paired fact."""
     try:
         write_text_atomic(
             directory / name, json.dumps(document, allow_nan=False, default=_json_scalar)
         )
     except Exception:  # noqa: BLE001 - never change the original reset/step result
-        return
+        return False
+    return True
 
 
 def install_workload(
@@ -72,23 +73,44 @@ def install_workload(
             dataset = module.make_dataset(id_dataset=habitat.dataset.type, config=habitat.dataset)
         selected = select_episode(dataset, episode_id, scene_id)
         original(env, config, selected)
+        # Selection and the original constructor are authoritative. Everything
+        # below only observes their result, including argument evaluation.
+        try:
+            count = env.sim.num_articulated_agents
+            if type(count) is not int or not 0 <= count <= 128:
+                raise ValueError("loaded agent count is unavailable or out of bounds")
+            saved = _save(
+                directory,
+                "workload-selection.json",
+                {
+                    "schema_version": "roboguide.native-workload-selection/v0.1",
+                    "dataset_path": str(source.resolve()),
+                    "dataset_sha256": actual_digest,
+                    "episode_id": str(env.current_episode.episode_id),
+                    "scene_id": str(env.current_episode.scene_id),
+                    "selection_boundary": "original dataset filtered before Env.__init__",
+                    "episode_pose_mutated": False,
+                    "seed": habitat.seed,
+                    "max_episode_steps": habitat.environment.max_episode_steps,
+                    "loaded_robot_types": {
+                        f"agent_{index}": type(
+                            env.sim.get_agent_data(index).articulated_agent
+                        ).__name__
+                        for index in range(count)
+                    },
+                },
+            )
+            reason = None if saved else "serialization-or-storage-unavailable"
+        except Exception as error:  # noqa: BLE001 - reads must not change construction
+            saved, reason = False, type(error).__name__
         _save(
             directory,
-            "workload-selection.json",
+            "workload-selection-observer.json",
             {
-                "schema_version": "roboguide.native-workload-selection/v0.1",
-                "dataset_path": str(source.resolve()),
-                "dataset_sha256": actual_digest,
-                "episode_id": str(env.current_episode.episode_id),
-                "scene_id": str(env.current_episode.scene_id),
-                "selection_boundary": "original dataset filtered before Env.__init__",
-                "episode_pose_mutated": False,
-                "seed": habitat.seed,
-                "max_episode_steps": habitat.environment.max_episode_steps,
-                "loaded_robot_types": {
-                    f"agent_{index}": type(env.sim.get_agent_data(index).articulated_agent).__name__
-                    for index in range(env.sim.num_articulated_agents)
-                },
+                "schema_version": "roboguide.native-workload-observation/v0.1",
+                "status": "available" if saved else "unavailable",
+                "reason": reason,
+                "source": "workload-selection.json" if saved else None,
             },
         )
 

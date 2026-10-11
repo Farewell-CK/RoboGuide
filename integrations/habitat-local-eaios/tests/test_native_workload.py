@@ -265,6 +265,132 @@ def test_selected_episode_reaches_first_constructor_without_mutation(tmp_path: P
         restore()
 
 
+@pytest.mark.parametrize("fault", ["robot-read", "identity-read", "agent-count", "json", "write"])
+def test_constructor_observation_failure_preserves_selected_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    """Added read/JSON/write failures retain the one constructed world and mark missing evidence."""
+    from habitat_local_eaios import native_workload
+    from habitat_local_eaios.evidence_io import write_text_atomic
+
+    source = tmp_path / "dataset.json.gz"
+    source.write_bytes(b"original dataset")
+    wanted = SimpleNamespace(episode_id="7", scene_id="scene", start_position=[1, 2, 3])
+    dataset = Dataset([wanted])
+    config = SimpleNamespace(
+        dataset=SimpleNamespace(data_path=str(source), split="val", type="original"),
+        seed=40,
+        environment=SimpleNamespace(max_episode_steps=4000),
+    )
+    reads: list[int] = []
+
+    def read_robot(index: int) -> Any:
+        """Fail only an added observation; never perform simulation or randomness."""
+        reads.append(index)
+        raise OSError("private diagnostic detail must not enter evidence")
+
+    class UnreadableEpisode:
+        """Simulate an unavailable diagnostic accessor after a valid original construction."""
+
+        @property
+        def episode_id(self) -> str:
+            """Raise only when the observer reads identity, without mutating the selected object."""
+            raise OSError("identity unavailable")
+
+    class ConstructedEnv(Env):
+        """Return the original environment before any fault in its observation."""
+
+        def __init__(self, config: Any, dataset: Dataset) -> None:
+            """Keep original construction and introduce only the requested diagnostic failure."""
+            super().__init__(config, dataset)
+            if fault == "robot-read":
+                self.sim = SimpleNamespace(num_articulated_agents=1, get_agent_data=read_robot)
+            elif fault == "identity-read":
+                self.current_episode = UnreadableEpisode()
+            elif fault == "agent-count":
+                self.sim = SimpleNamespace(num_articulated_agents=129, get_agent_data=read_robot)
+
+    original_dumps = json.dumps
+    original_write = write_text_atomic
+
+    def serialize(document: Any, *args: Any, **kwargs: Any) -> str:
+        """Fail the evidence body while allowing the independent status sidecar to serialize."""
+        if fault == "json" and document.get("schema_version") == (
+            "roboguide.native-workload-selection/v0.1"
+        ):
+            raise TypeError("unserializable observation")
+        return original_dumps(document, *args, **kwargs)
+
+    def write(path: Path, value: str) -> None:
+        """Fail the selection file without preventing the unavailable status sidecar."""
+        if fault == "write" and path.name == "workload-selection.json":
+            raise OSError("selection storage unavailable")
+        original_write(path, value)
+
+    monkeypatch.setattr(json, "dumps", serialize)
+    monkeypatch.setattr(native_workload, "write_text_atomic", write)
+    restore = install_workload(
+        SimpleNamespace(Env=ConstructedEnv),
+        directory=tmp_path,
+        dataset_path=source,
+        dataset_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        episode_id="7",
+        scene_id="scene",
+    )
+    before = ConstructedEnv.constructions
+    try:
+        env = ConstructedEnv(config, dataset)
+        assert ConstructedEnv.constructions == before + 1
+        assert (env.resets, env.steps, env.closes) == (0, 0, 0)
+        assert wanted.start_position == [1, 2, 3] and dataset.episodes[0] is wanted
+        assert not (tmp_path / "workload-selection.json").exists()
+        status = json.loads((tmp_path / "workload-selection-observer.json").read_text())
+        assert status["status"] == "unavailable" and status["source"] is None
+        assert status["reason"] in {"OSError", "ValueError", "serialization-or-storage-unavailable"}
+        assert "private diagnostic detail" not in json.dumps(status)
+        assert reads == ([0] if fault == "robot-read" else [])
+        assert env.reset() is env.result and env.step("original action") is env.result
+    finally:
+        restore()
+
+
+def test_original_constructor_exception_is_not_reclassified(tmp_path: Path) -> None:
+    """Selection observation never catches, masks or replays the original constructor fault."""
+    source = tmp_path / "dataset.json.gz"
+    source.write_bytes(b"original dataset")
+    dataset = Dataset([SimpleNamespace(episode_id="7", scene_id="scene")])
+    config = SimpleNamespace(dataset=SimpleNamespace(data_path=str(source), split="val"))
+    error = RuntimeError("original constructor failure")
+    calls: list[Dataset] = []
+
+    class FailingEnv:
+        """Fail in the real construction boundary before observation can begin."""
+
+        def __init__(self, config: Any, dataset: Dataset) -> None:
+            """Raise the exact original exception after recording one original call."""
+            calls.append(dataset)
+            raise error
+
+    original = FailingEnv.__init__
+    restore = install_workload(
+        SimpleNamespace(Env=FailingEnv),
+        directory=tmp_path,
+        dataset_path=source,
+        dataset_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        episode_id="7",
+        scene_id="scene",
+    )
+    try:
+        with pytest.raises(RuntimeError) as caught:
+            FailingEnv(config, dataset)
+        assert caught.value is error
+        assert len(calls) == 1 and calls[0].episodes[0] is dataset.episodes[0]
+        assert not (tmp_path / "workload-selection-observer.json").exists()
+    finally:
+        restore()
+    assert FailingEnv.__init__ is original
+
+
 @pytest.mark.parametrize("success", [False, True])
 def test_observer_preserves_terminal_metric_and_auto_reset(tmp_path: Path, success: bool) -> None:
     """Preserve the original terminal result through a later automatic reset."""
