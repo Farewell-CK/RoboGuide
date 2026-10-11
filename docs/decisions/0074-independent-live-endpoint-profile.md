@@ -32,8 +32,10 @@ Readiness and initial port validation cover that actual endpoint set, including
 one endpoint; they never require a nonexistent second agent or port.
 
 Deployment feasibility v0.5 carries this profile. Application preflight admits
-at most 32 independent single-role Tasks, including sparse and sequential use,
-without requiring all endpoints to be assigned. Current registration, Matching,
+at most 32 independent Task/Role slots, including sparse and sequential use,
+without requiring all endpoints to be assigned. A Task may contain multiple
+concurrent Roles when those Roles name distinct logical Actors and the frozen
+endpoint candidate sets have a one-to-one assignment. Current registration, Matching,
 Scheduler, Commit, Actor binding, Task satisfaction and resource release remain
 Control/Orchestration authorities. The adapter never evaluates the DAG to author
 dispatches. Only delivered immutable Execution Session attempts activate it.
@@ -41,7 +43,7 @@ Coupled Tasks, Actor migration, duplicate slots, overlapping local attempts,
 concurrent manipulation of one object and retained cancellation continuation are
 unsupported. A bounded wait for the next dispatch does not advance Habitat;
 expiry is explicit and creates no success fact.
-The live Task bound is enforced before Controller plan acceptance for every
+The live slot bound is enforced before Controller plan acceptance for every
 topology, including serial reuse. Legacy serial admission is not a fallback
 around live limits. The matching live operation reader accepts up to four
 source-bound manipulators; legacy full-coverage admission remains dual-endpoint.

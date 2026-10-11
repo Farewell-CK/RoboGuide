@@ -28,6 +28,44 @@ pub(crate) struct DeploymentFeasibility {
     live_operations: Option<BTreeMap<domain::NodeId, BTreeSet<String>>>,
 }
 
+/// Check whether concurrent Roles of one Task can use distinct configured endpoints.
+///
+/// The matching is deployment evidence only. Control still owns the actual
+/// proposal, reservation and commit, while this guard prevents a live shared
+/// world from accepting a topology that its capacity-one endpoints cannot run.
+fn has_distinct_endpoint_assignment(
+    actors: &[domain::ActorId],
+    candidates: &BTreeMap<domain::ActorId, BTreeSet<domain::NodeId>>,
+) -> bool {
+    let mut ordered = actors.to_vec();
+    ordered.sort_by_key(|actor| candidates.get(actor).map_or(usize::MAX, BTreeSet::len));
+
+    fn search(
+        index: usize,
+        actors: &[domain::ActorId],
+        candidates: &BTreeMap<domain::ActorId, BTreeSet<domain::NodeId>>,
+        used: &mut BTreeSet<domain::NodeId>,
+    ) -> bool {
+        if index == actors.len() {
+            return true;
+        }
+        let Some(nodes) = candidates.get(&actors[index]) else {
+            return false;
+        };
+        for node in nodes {
+            if used.insert(node.clone()) {
+                if search(index + 1, actors, candidates, used) {
+                    return true;
+                }
+                used.remove(node);
+            }
+        }
+        false
+    }
+
+    search(0, &ordered, candidates, &mut BTreeSet::new())
+}
+
 impl DeploymentFeasibility {
     /// Loads a bounded reset snapshot and checks its shape, digest, and decisions.
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
@@ -573,6 +611,21 @@ impl DeploymentFeasibility {
                     .into(),
             );
         }
+        let mut actors_by_task = BTreeMap::<domain::TaskId, Vec<domain::ActorId>>::new();
+        for slot in &session.slots {
+            let actors = actors_by_task.entry(slot.task_id.clone()).or_default();
+            if actors.contains(&slot.actor_id) {
+                return Err("live shared-world Task roles must use distinct logical Actors".into());
+            }
+            actors.push(slot.actor_id.clone());
+        }
+        if self.live_operations.is_some()
+            && actors_by_task.values().any(|actors| {
+                actors.len() > 1 && !has_distinct_endpoint_assignment(actors, &candidates)
+            })
+        {
+            return Err("live shared-world Task roles have no distinct endpoint assignment".into());
+        }
         let actors = session
             .slots
             .iter()
@@ -598,7 +651,7 @@ impl DeploymentFeasibility {
                 })
             });
         let supported_topology = if self.live_operations.is_some() {
-            session.slots.len() <= 32 && tasks.len() == session.slots.len()
+            session.slots.len() <= 32
         } else {
             supported_serial || supported_pair
         };
@@ -2088,6 +2141,33 @@ mod tests {
             .expect("plan decodes")
     }
 
+    /// Combine two independent role intents into one concurrently dispatched Task.
+    fn multi_role_plan_document() -> serde_json::Value {
+        let mut document = plan_document(false, true);
+        let second_context_role = document["contexts"][1]["roles"][0].clone();
+        document["contexts"][0]
+            .get_mut("roles")
+            .expect("context roles")
+            .as_array_mut()
+            .expect("context roles array")
+            .push(second_context_role);
+        let second_role = document["tasks"][1]["roles"][0].clone();
+        document["tasks"][0]
+            .get_mut("roles")
+            .expect("task roles")
+            .as_array_mut()
+            .expect("task roles array")
+            .push(second_role);
+        document["tasks"].as_array_mut().expect("tasks").remove(1);
+        document["contexts"]
+            .as_array_mut()
+            .expect("contexts")
+            .remove(1);
+        document["tasks"][0]["description"] =
+            serde_json::json!("Navigate two independent Actors to the two semantic targets.");
+        document
+    }
+
     /// Write a complete reset observation with one or two feasible endpoint choices.
     fn snapshot(path: &Path, second_goal_on_b: bool) -> serde_json::Value {
         let mut records = Vec::new();
@@ -2205,6 +2285,44 @@ mod tests {
                 .restrictions_for_plan(&plan(false, false), &group)
                 .expect_err("a pair without endpoint exclusion can deadlock")
                 .contains("space:1")
+        );
+    }
+
+    /// One independent Task may carry two concurrent Roles when each has a distinct Actor.
+    #[test]
+    fn live_profile_admits_multi_role_task_with_distinct_endpoints() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("reset.json");
+        live_snapshot(&path, true);
+        let evidence = DeploymentFeasibility::load(&path).expect("valid source");
+        let group = domain::ExecutionGroupId::new("group").expect("group id valid");
+        let document = multi_role_plan_document();
+        let decoded = orchestration::decode_mission_plan(&document.to_string())
+            .expect("multi-role plan decodes");
+        let restrictions = evidence
+            .restrictions_for_plan(&decoded, &group)
+            .expect("distinct endpoint candidates are available");
+        assert_eq!(restrictions.len(), 2);
+
+        live_snapshot(&path, false);
+        let shortage = DeploymentFeasibility::load(&path).expect("valid source");
+        assert!(
+            shortage
+                .restrictions_for_plan(&decoded, &group)
+                .expect_err("one endpoint cannot satisfy concurrent Roles")
+                .contains("distinct endpoint assignment")
+        );
+
+        let mut same_actor = multi_role_plan_document();
+        same_actor["contexts"][0]["roles"][1]["actor"] = serde_json::json!("shared-robot-a");
+        let same_actor_plan = orchestration::decode_mission_plan(&same_actor.to_string())
+            .expect("same-Actor multi-role plan decodes");
+        let evidence = DeploymentFeasibility::load(&path).expect("valid source");
+        assert!(
+            evidence
+                .restrictions_for_plan(&same_actor_plan, &group)
+                .expect_err("one Actor cannot own concurrent Roles")
+                .contains("distinct logical Actors")
         );
     }
 
@@ -2397,8 +2515,8 @@ mod tests {
     }
 
     /// Freeze valid live endpoint evidence for topology bounds without live inventory or models.
-    fn live_snapshot(path: &Path) -> serde_json::Value {
-        let mut document = snapshot(path, false);
+    fn live_snapshot(path: &Path, second_goal_on_b: bool) -> serde_json::Value {
+        let mut document = snapshot(path, second_goal_on_b);
         document["schema_version"] =
             serde_json::json!("roboguide.deployment-intent-feasibility/v0.5");
         document["execution_profile"] = serde_json::json!({
@@ -2439,7 +2557,7 @@ mod tests {
     async fn live_task_limit_rejects_33_serial_slots_before_http_acceptance() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("live.json");
-        live_snapshot(&path);
+        live_snapshot(&path, false);
         let evidence = DeploymentFeasibility::load(&path).unwrap();
         let group = domain::ExecutionGroupId::new("bounded-group").unwrap();
         for serial in [true, false] {
@@ -2466,7 +2584,7 @@ mod tests {
     fn live_profile_admits_sparse_tasks_without_changing_legacy_topology() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("live.json");
-        live_snapshot(&path);
+        live_snapshot(&path, false);
         let evidence = DeploymentFeasibility::load(&path).unwrap();
         let group = domain::ExecutionGroupId::new("group").unwrap();
         let pair = evidence

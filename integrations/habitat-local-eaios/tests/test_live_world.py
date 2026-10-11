@@ -87,6 +87,47 @@ def invocation(
     )
 
 
+def multi_role_invocation(agent: int) -> CanonicalInvocation:
+    """Build one accepted Task with two independent logical Actor Roles."""
+    body: dict[str, Any] = {
+        "schema_version": "roboguide.execution-session/v0.1",
+        "mission_id": "mission",
+        "group_id": "group",
+        "slots": [
+            {
+                "task_id": "shared-task",
+                "role_id": f"role-{slot_agent}",
+                "actor_id": f"actor-{slot_agent}",
+                "dependencies": [],
+                "independent": True,
+            }
+            for slot_agent in range(2)
+        ],
+    }
+    body["digest"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+    return parse_canonical_invocation(
+        {
+            "invocation": {
+                "mission_id": "mission",
+                "group_id": "group",
+                "task_id": "shared-task",
+                "role_id": f"role-{agent}",
+                "attempt_id": f"shared-attempt-{agent}",
+                "operation": "mobility.move@v1",
+                "objective": f"Navigate Actor {agent} to its assigned target",
+                "parameters": {"destination": f"target-{agent}"},
+                "resource_ids": [f"slot-{agent}"],
+                "execution_session": body,
+            }
+        }
+    )
+
+
 @dataclass
 class Arguments:
     """Match original AgentArguments fields without importing the vendor runtime."""
@@ -728,6 +769,18 @@ def test_ledger_rejects_duplicate_overlap_migration_and_coupled_tasks() -> None:
         LiveSlotLedger((0,)).admit(0, invocation(0, ("one",), coupled=True))
     ledger.admit(0, second)
     ledger.finish(0)
+    assert ledger.complete()
+
+
+def test_ledger_accepts_multiple_roles_of_one_task_on_distinct_endpoints() -> None:
+    """A concurrent multi-role Task uses one endpoint per logical Actor Role."""
+    ledger = LiveSlotLedger((0, 1))
+    first, second = multi_role_invocation(0), multi_role_invocation(1)
+    ledger.admit(0, first)
+    ledger.admit(1, second)
+    assert not ledger.complete()
+    ledger.finish(0)
+    ledger.finish(1)
     assert ledger.complete()
 
 

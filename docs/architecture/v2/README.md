@@ -546,7 +546,8 @@ Core 资源语义，不放宽官方成功或 Formal admission。Task3 受控物�
 [当前实现图和边界](../../extensions/habitat-relocation-profile.md)单独记录该可选路径。
 
 显式 `independent-live/v0.1` deployment profile 进一步允许 1–4 个 endpoint、最多 32 个
-independent 单 Role Task 的稀疏调度和后续复用。Control 仍独占资源和 Actor binding 权威；
+independent Task/Role slot 的稀疏调度和后续复用；同一 Task 的并发 Role 必须引用不同逻辑
+Actor，并有冻结候选 endpoint 的一对一匹配。Control 仍独占资源和 Actor binding 权威；
 Local EAIOS 只在原有物理步边界接收实际 dispatch，保留运行中同伴，未分配及本地完成的
 endpoint 使用原始 model-free wait。新 Task 的原始模型初始化按 attempt 执行一次；
 相同 attempt 的原生零动作重初始化被隔离，属于明确披露的 Local How 差异。

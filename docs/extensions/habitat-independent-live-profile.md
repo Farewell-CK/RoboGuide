@@ -49,12 +49,14 @@ prove Task/Mission satisfaction. Official outcome comes only from Habitat.
 Each operation requires the same endpoint's one capacity-one `space` slot and
 local simulator lock. Control decides placement and releases ownership after
 the Mission-declared Task satisfaction basis. There is no distinct-executor
-constraint inferred from the number of goals. A Task has one Role in this profile;
-at most 32 independent Tasks may reuse the configured endpoints. Simultaneous
-local overlap and Actor migration reject, as do coupled Tasks and unsupported
-continuation. A missing next assignment waits without stepping or calling a model
+constraint inferred from the number of goals. A Task may contain multiple
+concurrent Roles when each Role names a distinct logical Actor and the frozen
+deployment candidate sets provide distinct endpoints; at most 32 independent
+Task/Role slots may reuse the configured endpoints. Simultaneous local overlap
+and Actor migration reject, as do coupled Tasks and unsupported continuation.
+A missing next assignment waits without stepping or calling a model
 for the configured assignment-wait budget, then records an explicit failure.
-The Controller enforces the 32-Task bound for this live profile before accepting
+The Controller enforces the 32-slot bound for this live profile before accepting
 a plan, including a single Actor's serial Tasks. Legacy topology branches cannot
 bypass the live bound. Startup readiness and the first port check both use the
 declared one-to-four endpoint set; unused endpoints consume no ports.

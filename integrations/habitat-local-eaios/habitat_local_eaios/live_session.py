@@ -29,10 +29,9 @@ class LiveSlotLedger:
             or not invocation.attempt_id
             or not 1 <= len(session.slots) <= MAX_SLOTS
             or any(slot["independent"] is not True for slot in session.slots)
-            or len({str(slot["task_id"]) for slot in session.slots}) != len(session.slots)
         ):
             raise IntegrationError(
-                "live profile needs bounded independent single-role Tasks and attempts"
+                "live profile needs bounded independent Task/Role slots and attempts"
             )
         if self.session is not None and session != self.session:
             raise IntegrationError("live assignment belongs to a different immutable session")
