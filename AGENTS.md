@@ -533,6 +533,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   byte-verified private vendor code copies, preserving production checkout containment and
   exact child-module origin checks. Bounded native progress proves only successful-step lower
   bounds after abrupt worker death, never official terminal truth or non-execution.
+  Post-construction workload observation isolates argument reads as well as JSON/storage;
+  source selection and the original constructor still fail closed. The adapter-owned
+  `native_usage_observer` isolates only the previously added usage-detail callback in explicit
+  native observers and controlled Stage2, with original required token accounting outside the
+  diagnostic boundary. It never edits vendor sources or changes requests, decisions, skills,
+  original history persistence or official metrics. Bounded loss sidecars are best-effort,
+  never proof of complete Provider accounting; absent original callbacks stay unchanged.
 - The opt-in `habitat_local_eaios.native_reset_observer` entry point decorates the original
   EMOS environment factory inside its workers, preserving the first returned reset with the
   existing bounded diagnostic reader. It never edits the external source, invokes another

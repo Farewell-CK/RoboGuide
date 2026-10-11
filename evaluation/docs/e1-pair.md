@@ -80,6 +80,20 @@ endpoint registry、Node 字节、Local How v0.9 和 sensor/relocation readiness
 worker 中核对原始 dataset 文件、episode/scene 唯一性，使用原生 `filter_episodes`
 在 `Env.__init__` **之前**保留准确的原始 episode 对象。原构造函数仅调用一次。
 不通过 seed 选择 episode，不先加载错误场景，不编辑 dataset、起始位姿或 vendor。
+原构造返回后的全部 selection 观察读取、序列化和写入单独隔离。
+`workload-selection-observer.json` v0.1 记录 available/unavailable；失败不补造
+`workload-selection.json`，也不重新构造环境。dataset/episode 选择错误和原构造异常
+仍 fail closed 并原样传播。存储完全不可用时侧证也可能缺失，缺失不能证明选择证据完整。
+
+原生 evaluator 与受控 Stage2 使用同一个进程内 `native_usage_observer`，只隔离此前
+添加的 `_record_usage` 详细日志，不编辑 vendor。原总 token 累计在诊断异常边界外
+执行一次；Provider 调用、原响应解码、历史保存及它们的真实错误保持原行为。
+未添加该 callback 的原始客户端不被修改。详细字段沿用 vendor encoder，读取、JSON
+或写入失败时尽力保存有界 `usage-observer-unavailable.json` v0.1，只记失败次数与错误
+类型，不保存异常文本、headers 或凭据。原 evaluator 退出或 Stage2 close 时撤销自身
+callback；其他 owner 后安装的 callback 不会被覆盖。完整计费仍由已有 Provider 代理
+独立核验，侧证缺失或部分 JSONL 不代表完整。本项是采集隔离修复，不改善原生 Leader、
+Stage2 的决策/技能，不改变任一 arm 的官方成功规则或重算历史结果。
 
 调用原生 evaluator 的一个 environment/episode；其既有自动 reset 可以继续发生，
 但第一次真实返回的初始化和第一 episode 终态不可被后续 reset 覆盖。观察器不添加

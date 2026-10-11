@@ -237,6 +237,8 @@ def test_native_entry_restores_factory_and_arguments_on_original_failure(
 
     def module_lookup(name: str) -> Any:
         """Return the native factory stub for this isolated entry-point test."""
+        if name == "habitat_mas.utils.models":
+            return SimpleNamespace()
         assert name == "habitat_baselines.common.habitat_env_factory"
         return factory_module
 

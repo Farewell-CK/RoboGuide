@@ -168,6 +168,12 @@ def test_initialization_records_compiled_simulator_without_route_diagnostics(
     )
     calls: list[str] = []
 
+    def original_usage(model: Any, response: Any, started_at: float) -> None:
+        """Represent the existing added callback without performing a model call or file write."""
+        raise AssertionError("initialization cannot observe a model response")
+
+    model_type: Any = type("InstrumentedClient", (), {"_record_usage": original_usage})
+
     def forbidden(*args: Any, **kwargs: Any) -> Any:
         """Reject any physical or model action from the source-recording initializer."""
         del args, kwargs
@@ -206,6 +212,10 @@ def test_initialization_records_compiled_simulator_without_route_diagnostics(
             "batch_obs": forbidden,
             "get_action_space_info": forbidden,
         },
+        "habitat_mas.utils.models": {
+            "OpenAIModel": model_type,
+            "CustomJSONEncoder": json.JSONEncoder,
+        },
     }
     for name, values in attributes.items():
         module = types.ModuleType(name)
@@ -237,13 +247,17 @@ def test_initialization_records_compiled_simulator_without_route_diagnostics(
         with pytest.raises(IntegrationError, match="runtime module .*habitat_sim_bindings"):
             runtime.initialize()
         assert not (config.evidence_dir / "runtime-source-manifest.json").exists()
+        assert model_type._record_usage is original_usage
     else:
         runtime.initialize()
+        assert model_type._record_usage is not original_usage
         manifest = json.loads((config.evidence_dir / "runtime-source-manifest.json").read_text())
         assert manifest["modules"][extension_name] == {
             "path": str(extension.resolve()),
             "sha256": hashlib.sha256(extension.read_bytes()).hexdigest(),
         }
+        runtime.close()
+        assert model_type._record_usage is original_usage
     assert calls == []
 
 

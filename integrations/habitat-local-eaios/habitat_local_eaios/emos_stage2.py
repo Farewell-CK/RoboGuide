@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sys
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -27,6 +28,7 @@ from .model import (
     CanonicalRelocationInvocation,
     IntegrationError,
 )
+from .native_usage_observer import install_usage_observer
 from .navigation_preparation import (
     NAVIGATION_PREPARATION_PROFILE,
     NavigationPreparationFailure,
@@ -225,6 +227,7 @@ class EmosStage2Runtime:
         self._stage2_accounting_agents: dict[str, Any] = {}
         self._relocation_capability: dict[str, object] | None = None
         self._last_navigation_preparation_failure: dict[str, Any] | None = None
+        self._restore_usage_observer: Callable[[], None] | None = None
         self._action_trace_writer = BufferedJsonlWriter(self._evidence_dir() / "action_trace.jsonl")
 
     def initialize(self) -> None:
@@ -318,6 +321,9 @@ class EmosStage2Runtime:
             self._episode = episode
             self._actor = actor
             self._agent_access = access
+            self._restore_usage_observer = install_usage_observer(
+                sys.modules.get("habitat_mas.utils.models"), self._evidence_dir()
+            )
             if bool(getattr(self._config, "enable_relocation", False)):
                 capability = inspect_relocation_capability(self._relocation_policies(actor))
                 self._relocation_capability = capability.as_dict()
@@ -424,6 +430,7 @@ class EmosStage2Runtime:
                         "habitat_baselines.rl.multi_agent.multi_llm_policy",
                         "habitat_mas.agents.crab_agent",
                         "habitat_mas.utils.models",
+                        "habitat_local_eaios.native_usage_observer",
                         "habitat_local_eaios.stage2_feedback",
                         *(
                             ("habitat_local_eaios.relocation_completion",)
@@ -458,6 +465,9 @@ class EmosStage2Runtime:
                 ),
             )
         except IntegrationError:
+            if self._restore_usage_observer is not None:
+                self._restore_usage_observer()
+                self._restore_usage_observer = None
             raise
         except Exception as error:
             self.close()
@@ -547,8 +557,14 @@ class EmosStage2Runtime:
 
     def close(self) -> None:
         """Close the environment and discard process-local policy state."""
-        if self._gym_env is not None:
-            self._gym_env.close()
+        try:
+            if self._gym_env is not None:
+                self._gym_env.close()
+        finally:
+            restore_usage = getattr(self, "_restore_usage_observer", None)
+            if restore_usage is not None:
+                restore_usage()
+                self._restore_usage_observer = None
         self._gym_env = None
         self._habitat_env = None
         self._episode = None

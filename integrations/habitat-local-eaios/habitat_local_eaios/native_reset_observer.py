@@ -22,6 +22,7 @@ from typing import Any
 
 from .diagnostics import PhysicalDiagnostics
 from .evidence_io import write_text_atomic
+from .native_usage_observer import install_usage_observer
 
 OBSERVER_SCHEMA = "roboguide.native-reset-observation/v0.1"
 
@@ -181,11 +182,17 @@ def main(argv: list[str] | None = None) -> None:
         native_arguments = native_arguments[1:]
     previous_argv = sys.argv
     sys.argv = ["habitat_baselines.run", *native_arguments]
+    restore_usage: Callable[[], None] | None = None
     try:
+        restore_usage = install_usage_observer(
+            importlib.import_module("habitat_mas.utils.models"), args.evidence_dir
+        )
         runpy.run_module("habitat_baselines.run", run_name="__main__", alter_sys=True)
     finally:
         factory.make_gym_from_config = original
         sys.argv = previous_argv
+        if restore_usage is not None:
+            restore_usage()
 
 
 if __name__ == "__main__":

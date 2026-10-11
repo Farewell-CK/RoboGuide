@@ -613,6 +613,11 @@ canonical scope 内进行。完成后无模型 idle 的 endpoint 不再作为请
 初态 reader，不修改原生源码、seed、动作或 multiprocessing mode；后续自动 reset
 不能覆盖首次快照。缺失字段与未暴露的 simulator RNG 状态仍为 unavailable，不能因此
 声称完整世界状态或 RNG 相同。默认原生入口不加载此观察器。
+显式原生观察入口与受控 Stage2 共用 adapter-owned usage 日志隔离：仅保护后来添加的
+详细采集 callback，Provider 请求、原响应解码和总 token 累计保持原行为；失败尽力
+记录 unavailable，不修改 EMOS 源码或决策。原生 workload 构造后的全部观察读取也
+单独隔离，不将采集错误当作构造失败。完整性边界见
+[配对进程入口](evaluation/docs/e1-pair.md#原生-workload-与观测)。
 当前 shared-world deployment 根据 Controller 已接受计划的版本化 Execution Session 选择
 双 Actor 双 endpoint 并发执行，或单 Actor 在同一 endpoint 上逐 Task 复用一次 Habitat reset。
 Task readiness、资源释放与下一次 dispatch 仍由 Control 决定；适配器不按官方目标数量

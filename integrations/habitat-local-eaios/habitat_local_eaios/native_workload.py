@@ -21,6 +21,7 @@ from typing import Any
 from .diagnostics import PhysicalDiagnostics, _json_scalar
 from .evidence_io import write_text_atomic
 from .native_reset_observer import install_reset_observer
+from .native_usage_observer import install_usage_observer
 from .source_provenance import build_runtime_source_manifest
 
 
@@ -381,7 +382,11 @@ def main(argv: list[str] | None = None) -> None:
         "habitat_baselines.run",
         *(native_arguments[1:] if native_arguments[:1] == ["--"] else native_arguments),
     ]
+    restore_usage: Callable[[], None] | None = None
     try:
+        restore_usage = install_usage_observer(
+            importlib.import_module("habitat_mas.utils.models"), args.evidence_dir
+        )
         runpy.run_module("habitat_baselines.run", run_name="__main__", alter_sys=True)
     finally:
         try:
@@ -400,6 +405,7 @@ def main(argv: list[str] | None = None) -> None:
                         "habitat_baselines.rl.multi_agent.multi_llm_policy",
                         "habitat_mas.agents.crab_agent",
                         "habitat_mas.utils.models",
+                        "habitat_local_eaios.native_usage_observer",
                     )
                 ),
             )
@@ -407,6 +413,8 @@ def main(argv: list[str] | None = None) -> None:
             pass
         factory.make_gym_from_config = original
         sys.argv = previous_argv
+        if restore_usage is not None:
+            restore_usage()
 
 
 if __name__ == "__main__":
