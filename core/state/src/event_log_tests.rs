@@ -885,3 +885,70 @@ fn transition_sql_failure_requires_outer_rollback() {
     log.begin_batch().unwrap();
     log.rollback_batch().unwrap();
 }
+
+/// Nested Mission rollback preserves its input and a later input rejection restores exact sequence.
+#[test]
+fn input_and_mission_savepoints_have_independent_event_rollback() {
+    let directory = tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let mut sink = log.clone();
+    let append = |sink: &mut SqliteEventLog, correlation: &str| {
+        sink.append(
+            TimestampMs::new(1),
+            &CorrelationId::new(correlation).unwrap(),
+            None,
+            EventPayload::ExecutionGroupBlocked {
+                group_id: ExecutionGroupId::new("group").unwrap(),
+                task_ref: TaskRef::new(
+                    MissionId::new("mission").unwrap(),
+                    TaskId::new("task").unwrap(),
+                ),
+                reason: "savepoint scope".into(),
+            },
+        );
+    };
+    log.begin_batch().unwrap();
+    log.with_input_savepoint(|| {
+        append(&mut sink, "accepted-input");
+        assert!(
+            log.with_transition_savepoint(|| {
+                append(&mut sink, "discarded-mission");
+                Err::<(), _>("local contract error")
+            })
+            .unwrap()
+            .is_err()
+        );
+        append(&mut sink, "retained-hold");
+        Ok::<_, ()>(())
+    })
+    .unwrap()
+    .unwrap();
+    assert!(
+        log.with_input_savepoint(|| {
+            append(&mut sink, "discarded-input");
+            log.with_transition_savepoint(|| {
+                append(&mut sink, "discarded-derived-event");
+                Ok::<_, ()>(())
+            })
+            .unwrap()
+            .unwrap();
+            Err::<(), _>("input rejected")
+        })
+        .unwrap()
+        .is_err()
+    );
+    append(&mut sink, "next-input");
+    log.commit_batch().unwrap();
+    assert_eq!(
+        log.events()
+            .unwrap()
+            .into_iter()
+            .map(|event| (event.sequence, event.event_id, event.correlation_id))
+            .collect::<Vec<_>>(),
+        vec![
+            (1, "event-1".into(), "accepted-input".into()),
+            (2, "event-2".into(), "retained-hold".into()),
+            (3, "event-3".into(), "next-input".into()),
+        ]
+    );
+}

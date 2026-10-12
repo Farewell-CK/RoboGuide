@@ -148,6 +148,23 @@ impl SqliteEventLog {
         &self,
         operation: impl FnOnce() -> Result<T, E>,
     ) -> Result<Result<T, E>, SqliteEventLogError> {
+        self.with_savepoint("roboguide_mission_transition", operation)
+    }
+
+    /// Rolls back one input's events/sequence independently of its nested Mission transitions.
+    pub fn with_input_savepoint<T, E>(
+        &self,
+        operation: impl FnOnce() -> Result<T, E>,
+    ) -> Result<Result<T, E>, SqliteEventLogError> {
+        self.with_savepoint("roboguide_input_transition", operation)
+    }
+
+    /// Uses one internal static savepoint name; callers serialize distinct nonrecursive scopes.
+    fn with_savepoint<T, E>(
+        &self,
+        name: &str,
+        operation: impl FnOnce() -> Result<T, E>,
+    ) -> Result<Result<T, E>, SqliteEventLogError> {
         let batch = self
             .batch_start_number
             .lock()
@@ -165,10 +182,13 @@ impl SqliteEventLog {
         self.connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?
-            .execute_batch("SAVEPOINT roboguide_mission_transition")?;
+            .execute_batch(&format!("SAVEPOINT {name}"))?;
         let result = operation();
         if result.is_err() {
-            self.connection.lock().map_err(|_| SqliteEventLogError::LockPoisoned)?.execute_batch("ROLLBACK TO roboguide_mission_transition; RELEASE roboguide_mission_transition")?;
+            self.connection
+                .lock()
+                .map_err(|_| SqliteEventLogError::LockPoisoned)?
+                .execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"))?;
             *self
                 .next_event_number
                 .lock()
@@ -177,7 +197,7 @@ impl SqliteEventLog {
             self.connection
                 .lock()
                 .map_err(|_| SqliteEventLogError::LockPoisoned)?
-                .execute_batch("RELEASE roboguide_mission_transition")?;
+                .execute_batch(&format!("RELEASE {name}"))?;
         }
         Ok(result)
     }

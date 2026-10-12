@@ -40,6 +40,12 @@ Runtime 保存原时刻，Orchestration 给出 exact-Task typed violation，Appl
 生产 timer 回归验证精确 hold、另一 Mission 完成、排队/重放/恢复、resume 409 及真实
 SQL 错误回滚；使用合成 Node facts，物理效果和 E6 未验证。详见 ADR 遗留项清单。
 
+ADR-0080 规定有界应用事实批处理：原始输入顺序、每项独立 candidate/input savepoint、
+嵌套 Mission savepoint 与 registration/route barriers 保留；完整派生事实按原时钟语义
+处理，只合并最终 checkpoint/Commit。Registered/Ack 和 outbox 仍在 durable acceptance
+后完成。真实 gRPC 和独立合成进程比较已验收，默认 8 条/2ms，显式 limit=1 兼容；
+该有限窗口不刷新证据、不提供硬实时保证，也不扩大 persistence 或 Control authority。
+
 | 组件 | 职责 |
 | --- | --- |
 | Mission / Application | 提供外部 Mission / Goal，不直接控制设备 |

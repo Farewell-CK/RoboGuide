@@ -5,7 +5,7 @@ use domain::TimestampMs;
 use integration::grpc::v0_4::{ExecutionPhase, NodeMessage, node_message::Message as NodePayload};
 
 /// Declares a real completion deadline while retaining the compatibility execution-report contract.
-fn plan(mission: &str, deadline: Option<u64>) -> domain::MissionPlan {
+pub(super) fn plan(mission: &str, deadline: Option<u64>) -> domain::MissionPlan {
     let operation = serde_json::json!({"namespace":"compute", "name":"work", "version":"v1"});
     decode_mission_plan(&serde_json::json!({
         "schema_version":"roboguide.mission-plan/v0.6",

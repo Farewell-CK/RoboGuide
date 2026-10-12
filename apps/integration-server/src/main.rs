@@ -402,6 +402,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let node_protocol_policy = configured_node_protocol_policy()?;
     let node_lease_policy = node_protocol_policy.lease_policy();
+    let fact_batch_limit = configured_duration("ROBOGUIDE_FACT_BATCH_LIMIT", 8)?;
+    if !(1..=32).contains(&fact_batch_limit) {
+        return Err("ROBOGUIDE_FACT_BATCH_LIMIT must be in 1..32".into());
+    }
+    let default_batch_wait = if fact_batch_limit == 1 {
+        0
+    } else {
+        2.min(
+            node_protocol_policy
+                .application_acceptance_timeout_ms()
+                .saturating_sub(1),
+        )
+    };
+    let fact_batch_wait = configured_duration("ROBOGUIDE_FACT_BATCH_WAIT_MS", default_batch_wait)?;
+    if fact_batch_wait > 5
+        || fact_batch_wait >= node_protocol_policy.application_acceptance_timeout_ms()
+    {
+        return Err(
+            "ROBOGUIDE_FACT_BATCH_WAIT_MS must be 0..5 and below the acceptance timeout".into(),
+        );
+    }
+    let fact_batch_wait = Duration::from_millis(fact_batch_wait);
     let actor_placement_constraints = actor_placement_path
         .as_deref()
         .map(|path| load_actor_placement_file(Path::new(path)))
@@ -743,313 +765,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     tokio::spawn(async move {
-        let correlation = domain::CorrelationId::new("integration-server")
-            .expect("static correlation id is valid");
-        while let Some(delivery) = receiver.recv().await {
-            let (event, metadata, completion) = delivery.into_observed_parts();
-            let kind = metadata
-                .as_ref()
-                .map_or(DiagnosticKind::Other, |metadata| metadata.kind);
-            let identity = metadata
-                .as_ref()
-                .and_then(|metadata| metadata.identity.as_ref());
-            if let GrpcNodeEvent::NodeMessage {
-                node_id,
-                session_id,
-                ..
-            } = &event
-            {
-                match receiver_router.session_is_current(node_id, session_id) {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        completion.reject("Node session is no longer current");
-                        continue;
-                    }
-                    Err(error) => {
-                        let reason = format!("cannot validate Node session: {error}");
-                        completion.unavailable(reason.clone());
-                        let _ = fatal_sender.send(reason);
-                        return;
-                    }
-                }
-            }
-            let registration_fact = matches!(&event, GrpcNodeEvent::Registered { .. });
-            let write_wait = StageObservation::start(
-                &receiver_diagnostics,
-                kind,
-                DiagnosticStage::WriteGate,
-                identity,
-            );
-            let _write_guard = match receiver_event_write_gate.lock() {
-                Ok(guard) => guard,
-                Err(_) => {
-                    let reason = "event-log write gate is poisoned".to_string();
-                    completion.unavailable(reason.clone());
-                    let _ = fatal_sender.send(reason);
-                    return;
-                }
+        let mut barrier = None;
+        loop {
+            let first = match barrier.take() {
+                Some(delivery) => delivery,
+                None => match receiver.recv().await {
+                    Some(delivery) => delivery,
+                    None => return,
+                },
             };
-            drop(write_wait);
-            if let Err(error) = receiver_event_log.begin_batch() {
-                let reason = format!("cannot begin durable event batch: {error}");
-                completion.unavailable(reason.clone());
-                let _ = fatal_sender.send(reason);
-                return;
-            }
-            let mut accepted = false;
-            let mut checkpoint_json = None;
-            let mut rejection = None;
-            let mut pending_controller = None;
-            let lock_wait = StageObservation::start(
-                &receiver_diagnostics,
-                kind,
-                DiagnosticStage::ControllerLock,
-                identity,
-            );
-            match controller.lock() {
-                Ok(controller) => {
-                    drop(lock_wait);
-                    // Evaluate the complete application transition on a private candidate. The
-                    // live authority is replaced only after the durable batch commits below.
-                    let cloning = StageObservation::start(
-                        &receiver_diagnostics,
-                        kind,
-                        DiagnosticStage::Clone,
-                        identity,
-                    );
-                    let mut candidate = controller.clone();
-                    drop(cloning);
-                    let now = receiver_clock.now();
-                    let reduction = StageObservation::start(
-                        &receiver_diagnostics,
-                        kind,
-                        DiagnosticStage::Reduce,
-                        identity,
-                    );
-                    let received_at = metadata
-                        .as_ref()
-                        .map_or(now, |metadata| metadata.received_at);
-                    if let Err(error) =
-                        candidate
-                            .bridge
-                            .consume_received(event, received_at, now, &correlation)
-                    {
-                        eprintln!("integration fact rejected by Runtime/Control: {error}");
-                        rejection = Some(error.to_string());
-                    } else if let Err(error) = apply_runtime_events(
-                        &mut candidate,
-                        now,
-                        &correlation,
-                        &mut receiver_event_log.clone(),
-                    ) {
-                        drop(controller);
-                        let _ = receiver_event_log.rollback_batch();
-                        let reason = format!(
-                            "Runtime lifecycle transition failed after fact acceptance: {error}"
-                        );
-                        completion.unavailable(reason.clone());
-                        let _ = fatal_sender.send(reason);
-                        return;
-                    } else if !registration_fact
-                        && let Err(error) = begin_current_ambiguity_recoveries(
-                            &mut candidate,
-                            now,
-                            &correlation,
-                            &mut receiver_event_log.clone(),
-                        )
-                    {
-                        let _ = receiver_event_log.rollback_batch();
-                        let reason = format!("physical ambiguity recovery failed: {error}");
-                        completion.unavailable(reason.clone());
-                        let _ = fatal_sender.send(reason);
-                        return;
-                    } else if !registration_fact
-                        && let Err(error) = resume_pending_recoveries(
-                            &mut candidate,
-                            now,
-                            &correlation,
-                            &mut receiver_event_log.clone(),
-                        )
-                    {
-                        let _ = receiver_event_log.rollback_batch();
-                        let reason = format!("pending recovery progression failed: {error}");
-                        completion.unavailable(reason.clone());
-                        let _ = fatal_sender.send(reason);
-                        return;
-                    } else if let Err(error) = apply_pending_cancellations(
-                        &mut candidate,
-                        now,
-                        &correlation,
-                        &mut receiver_event_log.clone(),
-                    ) {
-                        let _ = receiver_event_log.rollback_batch();
-                        let reason = format!("Mission cancellation progression failed: {error}");
-                        completion.unavailable(reason.clone());
-                        let _ = fatal_sender.send(reason);
-                        return;
-                    } else if let Err(error) = apply_runtime_outcomes(
-                        &mut candidate,
-                        now,
-                        &correlation,
-                        &mut receiver_event_log.clone(),
-                    ) {
-                        drop(controller);
-                        let _ = receiver_event_log.rollback_batch();
-                        let reason =
-                            format!("Mission orchestration failed after fact acceptance: {error}");
-                        completion.unavailable(reason.clone());
-                        let _ = fatal_sender.send(reason);
-                        return;
-                    } else if !registration_fact
-                        && let Err(error) = drive_ready_tasks(
-                            &mut candidate,
-                            now,
-                            &correlation,
-                            &mut receiver_event_log.clone(),
-                        )
-                    {
-                        let _ = receiver_event_log.rollback_batch();
-                        let reason =
-                            format!("Mission Task dispatch failed after fact acceptance: {error}");
-                        completion.unavailable(reason.clone());
-                        let _ = fatal_sender.send(reason);
-                        return;
-                    } else if !registration_fact
-                        && let Err(error) =
-                            drive_rebound_attempts(&mut candidate, now, &correlation)
-                    {
-                        let _ = receiver_event_log.rollback_batch();
-                        let reason = format!("rebound Task dispatch failed: {error}");
-                        completion.unavailable(reason.clone());
-                        let _ = fatal_sender.send(reason);
-                        return;
-                    } else {
-                        drop(reduction);
-                        let _serialization = StageObservation::start(
-                            &receiver_diagnostics,
-                            kind,
-                            DiagnosticStage::Serialize,
-                            identity,
-                        );
-                        match server_checkpoint_json(&candidate) {
-                            Ok(checkpoint) => {
-                                receiver_diagnostics.value(
-                                    kind,
-                                    DiagnosticStage::CheckpointBytes,
-                                    checkpoint.len() as u64,
-                                    identity,
-                                );
-                                checkpoint_json = Some(checkpoint);
-                                accepted = true;
-                                pending_controller = Some(candidate);
-                            }
-                            Err(error) => {
-                                let _ = receiver_event_log.rollback_batch();
-                                let reason =
-                                    format!("controller checkpoint serialization failed: {error}");
-                                completion.unavailable(reason.clone());
-                                let _ = fatal_sender.send(reason);
-                                return;
-                            }
-                        }
-                    }
-                }
-                Err(_) => {
-                    let _ = receiver_event_log.rollback_batch();
-                    let reason = "integration bridge lock is poisoned".to_string();
-                    completion.unavailable(reason.clone());
-                    let _ = fatal_sender.send(reason);
-                    return;
-                }
-            }
-            match receiver_event_log.take_error() {
-                Ok(Some(error)) => {
-                    let _ = receiver_event_log.rollback_batch();
-                    let reason = format!("durable event sink failed: {error}");
-                    completion.unavailable(reason.clone());
-                    let _ = fatal_sender.send(reason);
-                    return;
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    let _ = receiver_event_log.rollback_batch();
-                    let reason = format!("durable event sink health is unavailable: {error}");
-                    completion.unavailable(reason.clone());
-                    let _ = fatal_sender.send(reason);
-                    return;
-                }
-            }
-            let save = StageObservation::start(
-                &receiver_diagnostics,
-                kind,
-                DiagnosticStage::Save,
-                identity,
-            );
-            if let Some(checkpoint_json) = checkpoint_json
-                && let Err(error) =
-                    receiver_event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json)
-            {
-                let _ = receiver_event_log.rollback_batch();
-                let reason =
-                    format!("cannot persist controller checkpoint with accepted fact: {error}");
-                completion.unavailable(reason.clone());
-                let _ = fatal_sender.send(reason);
-                return;
-            }
-            drop(save);
-            let commit = StageObservation::start(
-                &receiver_diagnostics,
-                kind,
-                DiagnosticStage::Commit,
-                identity,
-            );
-            let batch_result = if accepted {
-                receiver_event_log.commit_batch()
-            } else {
-                receiver_event_log.rollback_batch()
+            let (deliveries, next_barrier) = collect_fact_batch(
+                first,
+                &mut receiver,
+                fact_batch_limit as usize,
+                fact_batch_wait,
+            )
+            .await;
+            barrier = next_barrier;
+            let driver = NodeFactDriver {
+                controller: &controller,
+                events: &receiver_event_log,
+                write_gate: &receiver_event_write_gate,
+                router: &receiver_router,
+                clock: receiver_clock.as_ref(),
+                diagnostics: &receiver_diagnostics,
             };
-            drop(commit);
-            if let Err(error) = batch_result {
-                let reason = format!("cannot finalize durable event batch: {error}");
-                completion.unavailable(reason.clone());
-                let _ = fatal_sender.send(reason);
+            if let Err(error) = driver.run(deliveries) {
+                let _ = fatal_sender.send(format!("durable Node fact driver failed: {error}"));
                 return;
-            }
-            if accepted {
-                if let Some(candidate) = pending_controller {
-                    match controller.lock() {
-                        Ok(mut live) => {
-                            *live = candidate;
-                            let _outbox = StageObservation::start(
-                                &receiver_diagnostics,
-                                kind,
-                                DiagnosticStage::Outbox,
-                                identity,
-                            );
-                            // Cancel receipts are nonterminal: retrying Cancel in response to its
-                            // own receipt/snapshot would form an unbounded feedback loop. The
-                            // application timer owns those retries until terminal evidence.
-                            if let Err(error) =
-                                flush_unisolated_dispatch(&mut live, receiver_clock.as_ref())
-                            {
-                                eprintln!("durable command outbox delivery deferred: {error}");
-                            }
-                        }
-                        Err(_) => {
-                            let reason = "integration bridge lock is poisoned after durable commit";
-                            completion.unavailable(reason);
-                            let _ = fatal_sender.send(reason.to_string());
-                            return;
-                        }
-                    }
-                }
-                completion.accept();
-            } else {
-                completion.reject(
-                    rejection.unwrap_or_else(|| {
-                        "Controller rejected the Node Protocol fact".to_string()
-                    }),
-                );
             }
         }
     });

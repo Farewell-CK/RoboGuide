@@ -75,6 +75,8 @@ pub enum DiagnosticStage {
     Serialize,
     /// Encoded checkpoint size.
     CheckpointBytes,
+    /// Number of original inputs sharing one application checkpoint transaction.
+    BatchFacts,
     /// SQLite checkpoint update.
     Save,
     /// SQLite transaction commit.
@@ -108,6 +110,7 @@ impl DiagnosticStage {
             Self::Reduce => "reduce",
             Self::Serialize => "serialize",
             Self::CheckpointBytes => "checkpoint_bytes",
+            Self::BatchFacts => "batch_facts",
             Self::Save => "sqlite_save",
             Self::Commit => "sqlite_commit",
             Self::Completion => "completion",

@@ -26,7 +26,7 @@
 | 工作 | 当前状态 | 验收要求 |
 | --- | --- | --- |
 | S1：运行期 typed contract isolation | 软件实现与生产 application path 回归通过；ADR-0079 | 5 项生产 timer/HTTP/SQL 检查及 Runtime immutable-time 检查通过；全 workspace、Clippy 验证；物理时限与 stop 未证明 |
-| S2：有界事实批处理 | 待 S1；先抽出通用 durable application driver | Input savepoint 与 Mission savepoint 正确嵌套；拒绝独立回滚；registered/session/route barriers；Commit 前不 ACK/发送；同轨迹 1/N 等价 |
+| S2：有界事实批处理 | ADR-0080 已实现；6 项真实 gRPC、嵌套 savepoint 与 128/128 合成进程检查通过 | 1/N 轨迹等价、拒绝/SQL/hold/barrier 均验证；2ms 窗口降低 serialization/Commit 次数，保留单条兼容模式 |
 | S3：增量 checkpoint 存储 | 待 S2；完整 authority snapshot 是恢复基线 | exact baseline/delta digest、revision/sequence/schema 链；损坏 fail closed；compaction 原子；旧库迁移；Unknown/no-blind-replay 保留 |
 | S4：多 Mission 优先级/公平/准入 | 待 S1–S3；Orchestration logical dispatch policy + Control commitment | priority/aging 持久；饥饿与资源冲突回归；只选择 Ready logical work；固定 Actor/Context/未来窗口不被策略绕过 |
 | S5：控制面复制与切换 | 待稳定事务/恢复/调度 authority | replicated durable acceptance、single leader delivery、term/session fence、失去 quorum fail closed；leader crash/partition 不重放物理歧义、不释放未停止 ownership |

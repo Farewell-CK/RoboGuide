@@ -81,6 +81,11 @@ enum ApplicationAcceptanceFailure {
 }
 
 impl GrpcNodeEventDelivery {
+    /// Borrows the validated wire fact for application-owned queue/barrier decisions only.
+    pub fn event(&self) -> &GrpcNodeEvent {
+        &self.event
+    }
+
     /// Splits the validated fact from the application-owned completion handle.
     pub fn into_parts(self) -> (GrpcNodeEvent, GrpcNodeEventCompletion) {
         let (event, _, completion) = self.into_observed_parts();
@@ -316,6 +321,23 @@ impl GrpcNodeRouter {
                 && route.session_id == session_id
                 && route.last_heartbeat.elapsed() < route.lease_duration
         }))
+    }
+
+    /// Fences commands to an exactly rejected session while its completion terminates the stream.
+    pub fn fence_current_session(&self, node_id: &str, session_id: &str) -> Result<(), Status> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        if let Some(route) = sessions
+            .get_mut(node_id)
+            .filter(|route| route.session_id == session_id)
+        {
+            route.active = false;
+            route.activated_at = None;
+            route.liveness_evidence = None;
+        }
+        Ok(())
     }
 
     /// Sends a canonical Execute through the node's current session.

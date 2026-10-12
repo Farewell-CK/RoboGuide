@@ -140,7 +140,12 @@ def inspect_database(path: Path) -> dict[str, Any]:
 
 
 def run_probe(
-    directory: Path, enabled: bool, waves: int, binaries: dict[str, Path]
+    directory: Path,
+    enabled: bool,
+    waves: int,
+    binaries: dict[str, Path],
+    batch_limit: int,
+    batch_wait_ms: int,
 ) -> dict[str, Any]:
     """Run fixed two-session waves and stop only the processes created by this probe."""
     directory.mkdir()
@@ -151,6 +156,8 @@ def run_probe(
     for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]:
         environment.pop(key, None)
     environment["NO_PROXY"] = "127.0.0.1,localhost"
+    environment["ROBOGUIDE_FACT_BATCH_LIMIT"] = str(batch_limit)
+    environment["ROBOGUIDE_FACT_BATCH_WAIT_MS"] = str(batch_wait_ms)
     environment["ROBOGUIDE_DIAGNOSTICS_PATH"] = (
         str(directory / "diagnostics.jsonl") if enabled else ""
     )
@@ -230,6 +237,8 @@ def run_probe(
                 controller.kill()
                 controller.wait(timeout=5)
     result = {
+        "batch_limit": batch_limit,
+        "batch_wait_ms": batch_wait_ms,
         "diagnostics_enabled": enabled,
         "waves": waves,
         "concurrency": 2,
@@ -252,9 +261,15 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--waves", type=int, default=8)
+    parser.add_argument("--batch-limits", type=int, nargs="+", default=[1, 8])
+    parser.add_argument("--batch-wait-ms", type=int, default=2)
     options = parser.parse_args()
     if not 1 <= options.repeats <= 5 or not 1 <= options.waves <= 16:
         parser.error("repeats must be 1..5 and waves must be 1..16")
+    if any(not 1 <= value <= 32 for value in options.batch_limits):
+        parser.error("batch limits must be 1..32")
+    if not 0 <= options.batch_wait_ms <= 5:
+        parser.error("batch wait must be 0..5ms")
     directory = options.output.resolve()
     directory.mkdir(parents=True, exist_ok=False)
     binaries = {
@@ -262,14 +277,19 @@ def main() -> None:
         "node": ROOT / "target/debug/real-node-smoke",
     }
     manifest = {
-        "schema": "roboguide.controller-pipeline-probe/v0.1",
+        "schema": "roboguide.controller-pipeline-probe/v0.2",
         "source_sha": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
         ).strip(),
+        "tracked_diff_sha256": hashlib.sha256(
+            subprocess.check_output(["git", "diff", "HEAD", "--binary"], cwd=ROOT)
+        ).hexdigest(),
         "binary_sha256": {key: digest(path) for key, path in binaries.items()},
         "driver_sha256": digest(Path(__file__)),
         "repeats": options.repeats,
         "waves": options.waves,
+        "batch_limits": options.batch_limits,
+        "batch_wait_ms": options.batch_wait_ms,
         "concurrency": 2,
         "profile": "synthetic-compute-smoke/v0.1",
         "build_profile": "debug",
@@ -279,29 +299,35 @@ def main() -> None:
             "process timing includes OS scheduling",
             "IDs and timestamps vary",
             "diagnostic percentiles are log2 upper bounds",
-            "no batch candidate measured",
+            "optional bounded coalescing window; two sessions limit opportunity",
         ],
     }
     save(directory / "manifest.json", manifest)
     runs = []
     for repeat in range(options.repeats):
         # Alternate arm order to reduce a fixed first-run bias; inputs and denominator stay fixed.
-        for enabled in [False, True] if repeat % 2 == 0 else [True, False]:
-            name = f"repeat-{repeat + 1}-diagnostics-{'on' if enabled else 'off'}"
-            result = run_probe(directory / name, enabled, options.waves, binaries)
-            runs.append({"directory": name, **result})
-            save(directory / "results.json", runs)
-            print(
-                json.dumps(
-                    {
-                        "run": name,
-                        "successful": result["successful_smokes"],
-                        "attempted": result["attempted"],
-                        "elapsed_s": result["workload_elapsed_s"],
-                    }
-                ),
-                flush=True,
-            )
+        limits = options.batch_limits if repeat % 2 == 0 else list(reversed(options.batch_limits))
+        for batch_limit in limits:
+            for enabled in [False, True] if repeat % 2 == 0 else [True, False]:
+                diagnostic_arm = "on" if enabled else "off"
+                name = f"repeat-{repeat + 1}-batch-{batch_limit}-diagnostics-{diagnostic_arm}"
+                wait_ms = options.batch_wait_ms if batch_limit > 1 else 0
+                result = run_probe(
+                    directory / name, enabled, options.waves, binaries, batch_limit, wait_ms
+                )
+                runs.append({"directory": name, **result})
+                save(directory / "results.json", runs)
+                print(
+                    json.dumps(
+                        {
+                            "run": name,
+                            "successful": result["successful_smokes"],
+                            "attempted": result["attempted"],
+                            "elapsed_s": result["workload_elapsed_s"],
+                        }
+                    ),
+                    flush=True,
+                )
     if any(run["failures"] or run["authority"]["completed"] != run["attempted"] for run in runs):
         raise SystemExit(
             "incomplete synthetic runs retained; inspect denominators before comparison"

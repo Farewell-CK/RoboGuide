@@ -1067,7 +1067,9 @@ deadline 的 accepted Task 按首次 Controller terminal received_at 检查，�
 
 Controller 分阶段合成测量入口为 `tools/quality/measure_controller_pipeline.py`；实际本地
 证据及 batch/增量持久化门禁见[事务性能记录](docs/development/controller-persistence-performance.md)。
-当前仍使用原单事实 durable 事务，测量不属于 E6 或硬件实验。
+ADR-0080 的有界事实批处理默认最多 8 条、单一合批窗口 2ms；registration/route barriers
+独立提交，每项保留独立回滚和原 receive time。单条兼容配置为
+`ROBOGUIDE_FACT_BATCH_LIMIT=1`。实际本地合成比较已完成，测量不属于 E6 或硬件实验。
 
 部署来源解析与中性消费者已在 application 内拆分；来源身份与 Control/Orchestration
 权威继续保留，见[部署证据边界](docs/development/deployment-evidence-boundaries.md)。

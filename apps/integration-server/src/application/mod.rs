@@ -6,6 +6,10 @@ mod deployment_feasibility;
 mod deployment_operation_admission;
 mod deployment_sources;
 mod dispatch;
+mod fact_batch;
+#[cfg(test)]
+pub(crate) use fact_batch::fact_is_barrier;
+pub(crate) use fact_batch::{NodeFactDriver, collect_fact_batch};
 mod initial_operation_assessment;
 mod initial_operation_preferences;
 pub(crate) use initial_operation_assessment::unavailable as unavailable_initial_assessment;

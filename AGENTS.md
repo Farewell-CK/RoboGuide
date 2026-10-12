@@ -162,6 +162,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Node Protocol `Registered` and sequence `Ack` mean Controller application authority plus durable
   checkpoint acceptance, not transport receipt. Integration waits on an application completion
   envelope but never makes the Control/State/Runtime decision itself.
+- ADR-0080's application `fact_batch.rs` processes ordered inputs under distinct input and Mission
+  savepoints, sharing only the final checkpoint/Commit. Registration/update/route-loss are independent
+  barriers. Batches default to at most 8 inputs within one 2ms coalescing window (bounds 32/5ms);
+  `ROBOGUIDE_FACT_BATCH_LIMIT=1` restores single-input behavior. Rejected exact sessions are fenced
+  before post-Commit outbox delivery; SQL/shared failures abort the entire uncommitted batch.
 - Node config v0.7 separates exact capability profiles from canonical operation workflows. Every
   profile owns typed scalar attributes plus one fixed readiness observation; Node Service observes
   before Register and emits complete RegistrationUpdate snapshots on change. Node Contract v0.6

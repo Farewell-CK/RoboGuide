@@ -2,6 +2,7 @@ use super::*;
 
 mod admission;
 mod event_snapshot;
+mod fact_batch;
 mod group_recovery;
 mod mission_isolation;
 mod runtime_contract;

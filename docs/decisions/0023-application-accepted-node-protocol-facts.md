@@ -59,3 +59,11 @@ Controller composition 因全局 ResourceId 冲突、未知 ownership、executio
 - synthetic Node 使用 node-scoped ResourceId 和 session-unique capability contract，既不会因
   fixture 自身发生全局冲突，也不会把 smoke Mission 调度到已有同类 Node；
 - self-triggered smoke 经 Controller Mission API 完成 Match -> Commit -> Execute -> facts。
+
+## 后续有界事务合并
+
+ADR-0080 已将 production application driver 抽为 `application/fact_batch.rs`，完整有序
+处理每条事实并保留独立 input savepoint；只合并最终 checkpoint/Commit。Registered、
+registration update 与 route-loss 仍独立提交，拒绝 exact session 在 post-Commit 发送前
+被 fence。6 项真实 gRPC 检查、嵌套事件/序号 rollback 和两组共 128/128 合成进程检查
+通过，原 durable acceptance 与 conservatively restored Unknown 语义保持。没有 E6 或硬件执行。
