@@ -16,7 +16,9 @@ pub const DEFAULT_NODE_LEASE_DURATION_MS: u64 = 15_000;
 /// authorities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NodeLeasePolicy {
+    /// Interval advertised to Nodes between periodic heartbeat messages.
     heartbeat_interval_ms: u64,
+    /// Maximum silence admitted by transport fencing and Control renewal.
     lease_duration_ms: u64,
 }
 
