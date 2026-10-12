@@ -381,7 +381,8 @@ cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051 \
 该 smoke 工具注册合成 Node、验证 Welcome/Registered/Heartbeat/Ack，并可在显式模拟模式
 下向 Controller 提交 synthetic Mission，经真实 Match/Commit/Dispatch 验证服务器下发的
 Execute 生命周期。模拟使用会话唯一的 capability contract，不会匹配已有同类 Node；它不调用
-Local EAIOS，也不能替代真实设备测试。
+Local EAIOS，也不能替代真实设备测试。模拟等待 ACK 时只去重完全相同的 Execute 重投，
+不再次生成执行事实；不同 command/session/payload 继续拒绝。
 
 ### Embodied Execution Group
 

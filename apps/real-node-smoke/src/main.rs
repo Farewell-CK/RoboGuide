@@ -12,7 +12,7 @@ use integration::grpc::v0_4::node_message::Message as NodePayload;
 use integration::grpc::v0_4::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
 use integration::grpc::v0_4::server_message::Message as ServerPayload;
 use integration::grpc::v0_4::{
-    CapabilityProfile, CommandKind, CommandReceipt, CommandReceiptStatus, ExecutionEvent,
+    CapabilityProfile, CommandKind, CommandReceipt, CommandReceiptStatus, Execute, ExecutionEvent,
     ExecutionPhase, Heartbeat, Hello, LocalRuntime, LocalSystemDescriptor, NODE_CONTRACT_VERSION,
     NodeMessage, NodeRegistration, NodeStatus, OperationRef, OperationSupport, PROTOCOL_VERSION,
     Register, Resource, ServerMessage,
@@ -336,15 +336,39 @@ async fn await_ack(
     inbound: &mut tonic::Streaming<ServerMessage>,
     sequence: u64,
 ) -> Result<(), String> {
-    let message = tokio::time::timeout(Duration::from_secs(5), next_server_payload(inbound))
-        .await
-        .map_err(|_| format!("timed out waiting for Node Protocol Ack sequence {sequence}"))??;
+    await_ack_with_execute(inbound, sequence, None).await
+}
+
+/// Awaits one ACK under a single deadline while deduplicating only the identical synthetic command.
+async fn await_ack_with_execute(
+    inbound: &mut tonic::Streaming<ServerMessage>,
+    sequence: u64,
+    expected: Option<&Execute>,
+) -> Result<(), String> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if classify_ack_payload(next_server_payload(inbound).await?, sequence, expected)? {
+                return Ok(());
+            }
+        }
+    })
+    .await
+    .map_err(|_| format!("timed out waiting for Node Protocol Ack sequence {sequence}"))?
+}
+
+/// Accepts the exact ACK or unchanged command retry; changed identities/payloads remain errors.
+fn classify_ack_payload(
+    message: ServerPayload,
+    sequence: u64,
+    expected: Option<&Execute>,
+) -> Result<bool, String> {
     match message {
-        ServerPayload::Ack(ack) if ack.sequence == sequence => Ok(()),
+        ServerPayload::Ack(ack) if ack.sequence == sequence => Ok(true),
         ServerPayload::Ack(ack) => Err(format!(
             "Node Protocol Ack sequence mismatch: expected {sequence}, got {}",
             ack.sequence
         )),
+        ServerPayload::Execute(execute) if expected == Some(&execute) => Ok(false),
         ServerPayload::Error(error) => Err(format!(
             "Node Protocol server error {}: {}",
             error.code, error.reason
@@ -377,6 +401,7 @@ async fn simulate_one_execute(
     if execute.command_id != format!("dispatch-{}", execute.execution_id) {
         return Err("server Execute carried an invalid command identity".to_string());
     }
+    let expected_execute = execute.clone();
     let invocation = execute
         .invocation
         .ok_or_else(|| "server Execute omitted its canonical invocation".to_string())?;
@@ -415,7 +440,7 @@ async fn simulate_one_execute(
             })),
         })
         .map_err(|_| "Node Protocol outbound stream closed before command receipt".to_string())?;
-    await_ack(inbound, 2).await?;
+    await_ack_with_execute(inbound, 2, Some(&expected_execute)).await?;
     for (sequence, phase) in [
         (1_u64, ExecutionPhase::Accepted),
         (2_u64, ExecutionPhase::Started),
@@ -432,7 +457,7 @@ async fn simulate_one_execute(
                 })),
             })
             .map_err(|_| "Node Protocol outbound stream closed during simulation".to_string())?;
-        await_ack(inbound, sequence).await?;
+        await_ack_with_execute(inbound, sequence, Some(&expected_execute)).await?;
     }
     println!("simulated execution completed; no physical action was performed");
     Ok(())
@@ -494,6 +519,51 @@ mod tests {
         assert_eq!(
             plan["tasks"][0]["roles"][0]["execution"]["parameters"]["probe"],
             "node-a"
+        );
+    }
+
+    /// Concurrent Controller outbox flushes may redeliver one command before its receipt commits.
+    #[test]
+    fn exact_execute_retry_is_deduplicated_but_changed_command_is_rejected() {
+        let execute = Execute {
+            session_id: "s1".into(),
+            execution_id: "attempt-1".into(),
+            command_id: "dispatch-attempt-1".into(),
+            resource_ids: vec!["slot-a".into()],
+            ..Default::default()
+        };
+        assert!(
+            !classify_ack_payload(ServerPayload::Execute(execute.clone()), 2, Some(&execute))
+                .unwrap()
+        );
+        assert!(classify_ack_payload(ServerPayload::Execute(execute.clone()), 2, None).is_err());
+        let mut changed = execute.clone();
+        changed.resource_ids = vec!["slot-b".into()];
+        assert!(classify_ack_payload(ServerPayload::Execute(changed), 2, Some(&execute)).is_err());
+        let mut changed = execute.clone();
+        changed.session_id = "s2".into();
+        assert!(classify_ack_payload(ServerPayload::Execute(changed), 2, Some(&execute)).is_err());
+        assert!(
+            classify_ack_payload(
+                ServerPayload::Ack(integration::grpc::v0_4::Ack {
+                    sequence: 3,
+                    ..Default::default()
+                }),
+                2,
+                Some(&execute)
+            )
+            .is_err()
+        );
+        assert!(
+            classify_ack_payload(
+                ServerPayload::Ack(integration::grpc::v0_4::Ack {
+                    sequence: 2,
+                    ..Default::default()
+                }),
+                2,
+                Some(&execute)
+            )
+            .unwrap()
         );
     }
 }
