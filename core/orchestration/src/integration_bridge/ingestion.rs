@@ -10,12 +10,24 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         events: E,
         router: GrpcNodeRouter,
     ) -> Self {
+        Self::new_with_lease_policy(control, state, events, router, NodeLeasePolicy::default())
+    }
+
+    /// Creates the composition bridge with an application-owned Node lease policy.
+    pub fn new_with_lease_policy(
+        control: ControlPlane,
+        state: InMemorySharedNodeState,
+        events: E,
+        router: GrpcNodeRouter,
+        node_lease_policy: NodeLeasePolicy,
+    ) -> Self {
         Self {
             control,
             state,
             state_records: StateRecordProjection::new(),
             events,
             router,
+            node_lease_policy,
             runtime: RuntimeExecutionManager::new(),
             runtime_events: VecDeque::new(),
             restored_recovery_pending: false,
@@ -44,6 +56,23 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         events: E,
         router: GrpcNodeRouter,
         restored_at: TimestampMs,
+    ) -> Result<Self, IntegrationRuntimeError> {
+        Self::restore_from_checkpoint_with_lease_policy(
+            checkpoint_json,
+            events,
+            router,
+            restored_at,
+            NodeLeasePolicy::default(),
+        )
+    }
+
+    /// Restores a checkpoint with the application-owned Node lease policy.
+    pub fn restore_from_checkpoint_with_lease_policy(
+        checkpoint_json: &str,
+        events: E,
+        router: GrpcNodeRouter,
+        restored_at: TimestampMs,
+        node_lease_policy: NodeLeasePolicy,
     ) -> Result<Self, IntegrationRuntimeError> {
         let checkpoint: ControllerCheckpoint = serde_json::from_str(checkpoint_json)
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
@@ -80,6 +109,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             state_records,
             events,
             router,
+            node_lease_policy,
             runtime,
             runtime_events: VecDeque::new(),
             restored_recovery_pending: true,
@@ -106,7 +136,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     LeaseId::new(lease_id)?,
                     node_id.clone(),
                     received_at,
-                    15_000,
+                    self.node_lease_policy.lease_duration_ms(),
                 )?;
                 self.control.register_node_with_lease(
                     &mut self.state,
@@ -151,7 +181,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                             &mut self.state,
                             NodeHeartbeat::new(node_id, lease_id, status),
                             received_at,
-                            15_000,
+                            self.node_lease_policy.lease_duration_ms(),
                             correlation_id,
                             &mut self.events,
                         )?;

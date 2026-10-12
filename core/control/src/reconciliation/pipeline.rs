@@ -41,8 +41,9 @@ impl ControlPlane {
             .ok_or_else(|| ControlError::UnknownGroup(need.group_id().clone()))?;
         let role = recovery_role(group, requirement, need.task_ref(), need.role_id())?;
         if group.lifecycle != GroupLifecycle::Blocked
-            || !group.is_task_role_unbound(need.task_ref(), need.role_id())
-                && !group.is_role_unbound(need.role_id())
+            || group
+                .recovery_unbound_role(need.task_ref(), need.role_id())
+                .is_none()
         {
             return Err(ControlError::InvalidProposal(
                 "Actor takeover requires the exact blocked unbound role".into(),
@@ -680,20 +681,12 @@ impl ControlPlane {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
         let previous_node = group
-            .unbound_roles
-            .get(need.role_id())
-            .or_else(|| {
-                group
-                    .task_unbound_roles
-                    .get(&(need.task_ref().clone(), need.role_id().clone()))
-            })
+            .recovery_unbound_role(need.task_ref(), need.role_id())
             .map(|binding| binding.previous_node_id.clone())
             .ok_or_else(|| {
                 ControlError::InvalidProposal("recovery role is not unbound".to_string())
             })?;
-        if (group.task_ref != *need.task_ref() && group.task_execution(need.task_ref()).is_none())
-            || previous_node != *need.current_node_id()
-        {
+        if previous_node != *need.current_node_id() {
             return Err(ControlError::InvalidProposal(
                 "recovery need no longer matches the blocked group role".to_string(),
             ));
@@ -813,10 +806,9 @@ impl ControlPlane {
         if group.lifecycle != GroupLifecycle::Blocked {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
-        if (group.task_ref != *candidates.task_ref()
-            && group.task_execution(candidates.task_ref()).is_none())
-            || (!group.is_role_unbound(candidates.role_id())
-                && !group.is_task_role_unbound(candidates.task_ref(), candidates.role_id()))
+        if group
+            .recovery_unbound_role(candidates.task_ref(), candidates.role_id())
+            .is_none()
         {
             return Err(ControlError::InvalidProposal(
                 "recovery candidates do not match the blocked group role".to_string(),
@@ -886,22 +878,12 @@ impl ControlPlane {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
         let previous_node = group
-            .unbound_roles
-            .get(proposal.role_id())
-            .or_else(|| {
-                group
-                    .task_unbound_roles
-                    .get(&(proposal.task_ref().clone(), proposal.role_id().clone()))
-            })
+            .recovery_unbound_role(proposal.task_ref(), proposal.role_id())
             .map(|binding| binding.previous_node_id.clone())
             .ok_or_else(|| {
                 ControlError::InvalidProposal("recovery role is not unbound".to_string())
             })?;
-        if (group.task_ref != *proposal.task_ref()
-            && group.task_execution(proposal.task_ref()).is_none())
-            || !group.is_role_unbound(proposal.role_id())
-                && !group.is_task_role_unbound(proposal.task_ref(), proposal.role_id())
-            || previous_node != *proposal.previous_node_id()
+        if previous_node != *proposal.previous_node_id()
             || (proposal.replacement_node_id() == proposal.previous_node_id()
                 && !proposal.stopped_owner_allowed)
         {
@@ -1051,10 +1033,9 @@ impl ControlPlane {
         if group.lifecycle != GroupLifecycle::Blocked {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }
-        if (group.task_ref != *committed.task_ref()
-            && group.task_execution(committed.task_ref()).is_none())
-            || (!group.is_role_unbound(committed.role_id())
-                && !group.is_task_role_unbound(committed.task_ref(), committed.role_id()))
+        if group
+            .recovery_unbound_role(committed.task_ref(), committed.role_id())
+            .is_none()
         {
             return Err(ControlError::InvalidProposal(
                 "pending recovery commitment does not match the blocked Group".to_string(),

@@ -429,15 +429,8 @@ impl ControlPlane {
         }
         self.validate_pending_recovery_commitment(committed)?;
         let unbound_role = group
-            .unbound_roles
-            .get(committed.role_id())
+            .recovery_unbound_role(committed.task_ref(), committed.role_id())
             .cloned()
-            .or_else(|| {
-                group
-                    .task_unbound_roles
-                    .get(&(committed.task_ref().clone(), committed.role_id().clone()))
-                    .cloned()
-            })
             .ok_or_else(|| {
                 ControlError::InvalidProposal(format!(
                     "role {} is not unbound for committed rebind",
@@ -531,6 +524,17 @@ impl ControlPlane {
                 .task_executions
                 .get_mut(committed.task_ref())
                 .expect("Task validated above");
+            if execution
+                .assignments()
+                .iter()
+                .any(|assignment| assignment.role_id() == committed.role_id())
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "role {} is still bound in Task {}",
+                    committed.role_id(),
+                    committed.task_ref()
+                )));
+            }
             let insertion_index = assignment_index.min(execution.assignments().len());
             let mut assignments = execution.assignments().to_vec();
             assignments.insert(insertion_index, replacement_assignment);
@@ -540,6 +544,17 @@ impl ControlPlane {
                 .remove(&(committed.task_ref().clone(), committed.role_id().clone()));
         } else {
             let insertion_index = assignment_index.min(group.assignments.len());
+            if group
+                .assignments
+                .iter()
+                .any(|assignment| assignment.role_id() == committed.role_id())
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "role {} is still bound in Group {}",
+                    committed.role_id(),
+                    committed.group_id()
+                )));
+            }
             group
                 .assignments
                 .insert(insertion_index, replacement_assignment);

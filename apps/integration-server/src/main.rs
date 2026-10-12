@@ -16,7 +16,7 @@ use orchestration::{
     IntegrationRuntimeError, ObservedTaskExecutionResult,
 };
 use orchestration::{MissionOrchestrator, OrchestrationError, decode_mission_plan};
-use ports::{Clock, SharedNodeStateReader, StateRecordReader};
+use ports::{Clock, NodeLeasePolicy, SharedNodeStateReader, StateRecordReader};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -317,6 +317,34 @@ struct ActorPlacementEntry {
     node_id: String,
 }
 
+/// Loads the shared Node transport lease policy from startup-owned configuration.
+///
+/// Defaults preserve the existing five-second heartbeat and fifteen-second lease. Core crates do
+/// not read process environment variables; this composition root resolves them once and passes the
+/// immutable policy to both transport and application authorities.
+fn configured_node_lease_policy() -> Result<NodeLeasePolicy, Box<dyn std::error::Error>> {
+    let heartbeat_interval_ms = std::env::var("ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS")
+        .ok()
+        .map(|value| {
+            value.parse::<u64>().map_err(|error| {
+                format!("ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS must be an unsigned integer: {error}")
+            })
+        })
+        .transpose()?
+        .unwrap_or(ports::DEFAULT_NODE_HEARTBEAT_INTERVAL_MS);
+    let lease_duration_ms = std::env::var("ROBOGUIDE_NODE_LEASE_DURATION_MS")
+        .ok()
+        .map(|value| {
+            value.parse::<u64>().map_err(|error| {
+                format!("ROBOGUIDE_NODE_LEASE_DURATION_MS must be an unsigned integer: {error}")
+            })
+        })
+        .transpose()?
+        .unwrap_or(ports::DEFAULT_NODE_LEASE_DURATION_MS);
+    NodeLeasePolicy::try_new(heartbeat_interval_ms, lease_duration_ms)
+        .map_err(|error| format!("invalid Node lease policy: {error}").into())
+}
+
 /// Binds the configured integration listener and keeps accepting connector sessions.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -347,6 +375,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .into(),
         );
     }
+    let node_lease_policy = configured_node_lease_policy()?;
     let actor_placement_constraints = actor_placement_path
         .as_deref()
         .map(|path| load_actor_placement_file(Path::new(path)))
@@ -427,7 +456,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let deployment_feasibility = deployment_feasibility.map(Arc::new);
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-    let (service, router) = GrpcIntegrationService::new(events);
+    let (service, router) =
+        GrpcIntegrationService::new_with_lease_policy(events, node_lease_policy);
     let receiver_router = router.clone();
     let memory_session_router = router.clone();
     let mut controller = match checkpoint {
@@ -476,11 +506,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             validate_restored_verifier_source(&saved, configured_verifier_digest.as_deref())?;
             ControllerState {
                 mission_admissions: saved.mission_admissions,
-                bridge: IntegrationRuntimeBridge::restore_from_checkpoint(
+                bridge: IntegrationRuntimeBridge::restore_from_checkpoint_with_lease_policy(
                     &saved.integration_json,
                     event_log.clone(),
                     router,
                     process_clock.now(),
+                    node_lease_policy,
                 )?,
                 orchestrator: MissionOrchestrator::restore_json(&saved.orchestration_json)?,
                 verifier_seen: saved.verifier_seen,
@@ -495,11 +526,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => ControllerState {
             mission_admissions: BTreeMap::new(),
-            bridge: IntegrationRuntimeBridge::new(
+            bridge: IntegrationRuntimeBridge::new_with_lease_policy(
                 control::ControlPlane::new(),
                 state::InMemorySharedNodeState::new(),
                 event_log.clone(),
                 router,
+                node_lease_policy,
             ),
             orchestrator: MissionOrchestrator::new(),
             verifier_seen: BTreeSet::new(),

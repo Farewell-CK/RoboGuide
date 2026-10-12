@@ -7,6 +7,7 @@ use crate::grpc::v0_4::{
     Ack, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION, NODE_CONTRACT_VERSION, NodeMessage,
     PREVIOUS_NODE_CONTRACT_VERSION, PROTOCOL_VERSION, Registered, ServerMessage, Welcome,
 };
+use ports::NodeLeasePolicy;
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -336,6 +337,8 @@ pub struct GrpcIntegrationService {
     next_session: Arc<AtomicU64>,
     /// Boot-unique nonce preventing session identity reuse after process restart.
     boot_nonce: String,
+    /// Shared heartbeat and transport lease policy.
+    lease_policy: NodeLeasePolicy,
 }
 
 /// Legacy v0.2 service endpoint retained only to return an explicit migration diagnostic.
@@ -364,6 +367,14 @@ impl crate::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocol
 impl GrpcIntegrationService {
     /// Creates a service and returns its command router.
     pub fn new(events: mpsc::UnboundedSender<GrpcNodeEventDelivery>) -> (Self, GrpcNodeRouter) {
+        Self::new_with_lease_policy(events, NodeLeasePolicy::default())
+    }
+
+    /// Creates a service using the application-owned heartbeat and lease policy.
+    pub fn new_with_lease_policy(
+        events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
+        lease_policy: NodeLeasePolicy,
+    ) -> (Self, GrpcNodeRouter) {
         let router = GrpcNodeRouter::default();
         (
             Self {
@@ -378,6 +389,7 @@ impl GrpcIntegrationService {
                         .map(|duration| duration.as_nanos())
                         .unwrap_or_default()
                 ),
+                lease_policy,
             },
             router,
         )
@@ -399,6 +411,7 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
         let events = self.events.clone();
         let identity = self.next_session.fetch_add(1, Ordering::Relaxed);
         let boot_nonce = self.boot_nonce.clone();
+        let lease_policy = self.lease_policy;
         tokio::spawn(async move {
             if let Err(status) = run_grpc_session(
                 inbound,
@@ -407,6 +420,7 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
                 events,
                 identity,
                 boot_nonce,
+                lease_policy,
             )
             .await
             {
@@ -428,6 +442,7 @@ async fn run_grpc_session(
     events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
     identity: u64,
     boot_nonce: String,
+    lease_policy: NodeLeasePolicy,
 ) -> Result<(), Status> {
     let first = inbound
         .next()
@@ -465,8 +480,8 @@ async fn run_grpc_session(
                 server_version: SERVER_VERSION.to_string(),
                 selected_protocol_version: PROTOCOL_VERSION.to_string(),
                 selected_node_contract_version: node_contract.clone(),
-                heartbeat_interval_ms: 5_000,
-                lease_duration_ms: 15_000,
+                heartbeat_interval_ms: lease_policy.heartbeat_interval_ms(),
+                lease_duration_ms: lease_policy.lease_duration_ms(),
             })),
         }))
         .map_err(|_| Status::unavailable("response stream closed"))?;
@@ -500,7 +515,7 @@ async fn run_grpc_session(
                 sender: outbound.clone(),
                 lease_id: lease_id.clone(),
                 last_heartbeat: std::time::Instant::now(),
-                lease_duration: std::time::Duration::from_millis(15_000),
+                lease_duration: lease_policy.lease_duration(),
                 node_contract_version: node_contract,
                 management_sequence: 0,
                 state_export_ids: registration

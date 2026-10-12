@@ -404,3 +404,174 @@ fn recovery_pipeline_requires_and_revalidates_operation_support() {
         GroupLifecycle::Blocked
     );
 }
+
+/// Mission-level Task recovery uses only its Task-local released binding and preserves
+/// the surrounding Group state through a successful replacement.
+#[test]
+fn mission_task_recovery_rebinds_exact_task_scope() {
+    let (plan, requirement, role_id) = operation_support_plan();
+    let timestamp = TimestampMs::new(0);
+    let correlation = CorrelationId::new("task-recovery-scope").expect("correlation is valid");
+    let mut control = ControlPlane::new();
+    let mut state = InMemorySharedNodeState::new();
+    let mut events = RecordingEvents::default();
+    for node_id in ["node-a", "node-b"] {
+        control
+            .register_node(
+                &mut state,
+                operation_support_node(node_id, "relocate"),
+                NodeStatus::new(NodeHealth::Online, timestamp),
+                timestamp,
+                &correlation,
+                &mut events,
+            )
+            .expect("recovery node registers");
+    }
+    let group_id = ExecutionGroupId::new("group-task-recovery-scope").expect("group is valid");
+    let task_ref = requirement.task_ref().clone();
+    control
+        .create_mission_group(
+            group_id.clone(),
+            &plan,
+            timestamp,
+            &correlation,
+            &mut events,
+        )
+        .expect("Mission Group creates");
+    control
+        .ready_task_execution(
+            &group_id,
+            &task_ref,
+            TimestampMs::new(1),
+            &correlation,
+            &mut events,
+        )
+        .expect("Task becomes ready");
+    control
+        .bind_task_execution(
+            &group_id,
+            &CommittedPlan::new(
+                task_ref.clone(),
+                vec![domain::RoleAssignment::new(
+                    role_id.clone(),
+                    NodeId::new("node-a").expect("node is valid"),
+                    Vec::new(),
+                )],
+            ),
+            TimestampMs::new(2),
+            &correlation,
+            &mut events,
+        )
+        .expect("Task binding succeeds");
+    control
+        .activate_task_execution(
+            &group_id,
+            &task_ref,
+            TimestampMs::new(3),
+            &correlation,
+            &mut events,
+        )
+        .expect("Task activates");
+    let need = control
+        .begin_execution_recovery(
+            &group_id,
+            &task_ref,
+            &role_id,
+            &NodeId::new("node-a").expect("node is valid"),
+            TimestampMs::new(4),
+            &correlation,
+            &mut events,
+        )
+        .expect("Task-local recovery begins");
+    let wrong_requirement = TaskRequirement::new(
+        requirement.mission_id().clone(),
+        TaskId::new("wrong-task").expect("Task is valid"),
+        requirement.roles().to_vec(),
+    )
+    .expect("wrong Task requirement is structurally valid");
+    let wrong_need = RoleRecoveryNeed::new(
+        group_id.clone(),
+        wrong_requirement.task_ref().clone(),
+        role_id.clone(),
+        NodeId::new("node-a").expect("node is valid"),
+    );
+    let before = serde_json::to_value(control.checkpoint()).expect("checkpoint serializes");
+    let event_count = events.records.len();
+    assert!(matches!(
+        control.match_recovery_candidates(
+            &state,
+            &wrong_need,
+            &wrong_requirement,
+            TimestampMs::new(5),
+            &correlation,
+            &mut events,
+        ),
+        Err(ControlError::InvalidProposal(reason)) if reason.contains("not unbound")
+    ));
+    assert_eq!(
+        serde_json::to_value(control.checkpoint()).expect("checkpoint serializes"),
+        before,
+        "wrong Task scope must not mutate recovery state"
+    );
+    assert_eq!(events.records.len(), event_count);
+    let operation = plan.task_graph().tasks()[0]
+        .execution_intent(&role_id)
+        .expect("operation intent exists")
+        .operation();
+    let candidates = control
+        .match_recovery_candidates_for_operation(
+            &state,
+            &need,
+            &requirement,
+            operation,
+            TimestampMs::new(5),
+            &correlation,
+            &mut events,
+        )
+        .expect("Task-local recovery matching succeeds");
+    assert_eq!(
+        candidates.candidate_node_ids(),
+        &[NodeId::new("node-b").expect("node is valid")]
+    );
+    let proposal = control
+        .propose_role_recovery(
+            &state,
+            &candidates,
+            &requirement,
+            NodeId::new("node-b").expect("node is valid"),
+            Vec::new(),
+            TimestampMs::new(6),
+            &correlation,
+            &mut events,
+        )
+        .expect("Task-local recovery proposal succeeds");
+    let committed = control
+        .commit_role_recovery(
+            &state,
+            &requirement,
+            &proposal,
+            TimestampMs::new(7),
+            &correlation,
+            &mut events,
+        )
+        .expect("Task-local recovery commitment succeeds");
+    control
+        .rebind_role(
+            &committed,
+            TimestampMs::new(8),
+            &correlation,
+            &mut events,
+        )
+        .expect("Task-local recovery rebind succeeds");
+
+    let group = control.group(&group_id).expect("Group remains");
+    let execution = group.task_execution(&task_ref).expect("Task remains");
+    assert_eq!(group.assignments(), &[]);
+    assert_eq!(execution.assignments().len(), 1);
+    assert_eq!(execution.assignments()[0].role_id(), &role_id);
+    assert_eq!(
+        execution.assignments()[0].node_id(),
+        &NodeId::new("node-b").expect("node is valid")
+    );
+    assert!(control.pending_role_recoveries().is_empty());
+}

@@ -1,6 +1,16 @@
 use super::session::{validate_registration, validate_state_observation_batch};
 use super::*;
 
+/// The production composition policy reaches the transport service unchanged.
+#[test]
+fn service_constructor_retains_custom_node_lease_policy() {
+    let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let policy = ports::NodeLeasePolicy::try_new(7_000, 22_000).unwrap();
+    let (service, _router) = GrpcIntegrationService::new_with_lease_policy(events, policy);
+
+    assert_eq!(service.lease_policy, policy);
+}
+
 /// Registration accepts static local/global provider maxima and rejects a concrete Group scope.
 #[test]
 fn registration_rejects_execution_group_memory_provider_scope() {

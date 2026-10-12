@@ -17,3 +17,4 @@ pub use grpc_server::{
     GrpcLegacyV02Service, GrpcNodeEvent, GrpcNodeEventCompletion, GrpcNodeEventDelivery,
     GrpcNodeRouter,
 };
+pub use ports::NodeLeasePolicy;

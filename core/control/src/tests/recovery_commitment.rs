@@ -46,6 +46,57 @@
         assert!(!fixture.control.reservations.contains_key(&space_c));
     }
 
+    /// Rebind rejects a pre-existing duplicate Role before mutating the Group or commitment.
+    #[test]
+    fn rebind_rejects_already_bound_legacy_role_without_mutation() {
+        let mut fixture = recovery_fixture(true);
+        let need = begin_detected_transport_recovery(&mut fixture);
+        let candidates =
+            match_fixture_recovery_candidates(&mut fixture, &need, TimestampMs::new(3));
+        let proposal = propose_fixture_node_b(&mut fixture, &candidates, TimestampMs::new(4));
+        let committed = commit_fixture_node_b(&mut fixture, &proposal, TimestampMs::new(5));
+
+        // Simulate a malformed legacy checkpoint that retained the released Role in
+        // assignments while also retaining its authoritative unbound record.
+        fixture
+            .control
+            .groups
+            .get_mut(&fixture.group_id)
+            .expect("Group remains")
+            .assignments
+            .push(domain::RoleAssignment::new(
+                fixture.transport_role.clone(),
+                fixture.node_a_id.clone(),
+                vec![fixture.space_a.clone()],
+            ));
+        let before = serde_json::to_value(fixture.control.checkpoint())
+            .expect("Control checkpoint serializes");
+        let event_count = fixture.events.records.len();
+
+        assert!(matches!(
+            fixture.control.rebind_role(
+                &committed,
+                TimestampMs::new(6),
+                &fixture.correlation_id,
+                &mut fixture.events,
+            ),
+            Err(ControlError::InvalidProposal(reason)) if reason.contains("still bound")
+        ));
+        assert_eq!(
+            serde_json::to_value(fixture.control.checkpoint())
+                .expect("Control checkpoint serializes"),
+            before,
+            "rejected rebind must not mutate Group or reservations"
+        );
+        assert_eq!(fixture.events.records.len(), event_count);
+        assert_eq!(
+            fixture
+                .control
+                .pending_recovery_commitment(&fixture.group_id, &fixture.transport_role),
+            Some(&committed)
+        );
+    }
+
     /// Abort releases only replacement resources and invalidates the old commitment handle.
     #[test]
     fn abort_recovery_commitment_preserves_group_and_rejects_stale_handle() {

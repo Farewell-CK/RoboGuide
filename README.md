@@ -756,6 +756,11 @@ Server 使用正式 gRPC bidirectional streaming：
 cargo run -p integration-server -- 0.0.0.0:50051
 ```
 
+默认 Node heartbeat 为 5 秒、Node lease 为 15 秒。部署需要调整时，在启动
+Integration Server 前设置 `ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS` 和
+`ROBOGUIDE_NODE_LEASE_DURATION_MS`；lease 至少覆盖两个 heartbeat 周期，非法配置会在
+启动时 fail-closed。该策略同时进入 gRPC transport 和 Control 的 Node lease renewal。
+
 Integration Server 还接受 controller evidence SQLite 路径、Control HTTP 地址、Artifact
 HTTP 地址和文件 CAS 根目录；后两者默认是 `127.0.0.1:8090` 与
 `roboguide-artifacts`：

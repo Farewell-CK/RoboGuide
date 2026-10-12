@@ -50,7 +50,7 @@ use std::fmt::{Display, Formatter};
 pub const DEFAULT_NODE_STATUS_TTL_MS: u64 = 5_000;
 
 /// Default lease duration assigned by convenience registration.
-pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = 15_000;
+pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = ports::DEFAULT_NODE_LEASE_DURATION_MS;
 
 /// Versioned durable representation of Control-owned commitments and Group state.
 ///

@@ -7,6 +7,7 @@
 mod allocation;
 mod memory;
 mod node_gateway;
+mod node_liveness;
 mod spatial_memory;
 mod state_record;
 mod task_satisfaction;
@@ -14,6 +15,10 @@ mod task_satisfaction;
 pub use allocation::{AllocationStateError, AllocationStateReader, AllocationStateWriter};
 pub use memory::{MemoryCatalogError, MemoryCatalogReader, MemoryCatalogWriter};
 pub use node_gateway::{NodeGateway, NodeGatewayError, NodeGatewayErrorKind};
+pub use node_liveness::{
+    DEFAULT_NODE_HEARTBEAT_INTERVAL_MS, DEFAULT_NODE_LEASE_DURATION_MS, NodeLeasePolicy,
+    NodeLeasePolicyError,
+};
 pub use spatial_memory::{
     ArtifactBlobReader, ArtifactBlobStore, ArtifactBlobWriter, ArtifactStoreError, MapCatalogError,
     MapCatalogReader, MapCatalogWriter,

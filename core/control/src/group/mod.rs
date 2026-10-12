@@ -300,6 +300,28 @@ impl ExecutionGroup {
             .contains_key(&(task_ref.clone(), role_id.clone()))
     }
 
+    /// Returns the released binding for the exact logical Task/Role recovery slot.
+    ///
+    /// Mission-level Groups use Task-local recovery state. The legacy Group map is
+    /// considered only for a legacy single-Task Group whose retained `task_ref` is
+    /// the requested Task; a sibling Task or a mixed checkpoint never falls through
+    /// into that map.
+    pub(crate) fn recovery_unbound_role(
+        &self,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+    ) -> Option<&UnboundRole> {
+        if self.task_execution(task_ref).is_some() {
+            return self
+                .task_unbound_roles
+                .get(&(task_ref.clone(), role_id.clone()));
+        }
+        if self.task_executions.is_empty() && self.task_ref == *task_ref {
+            return self.unbound_roles.get(role_id);
+        }
+        None
+    }
+
     /// Returns the current group lifecycle.
     pub const fn lifecycle(&self) -> GroupLifecycle {
         self.lifecycle

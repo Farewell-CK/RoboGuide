@@ -14,7 +14,8 @@ use integration::grpc::v0_4::node_message::Message as NodePayload;
 use integration::grpc::v0_4::{CanonicalInvocation, ExecutionPhase, NodeRegistration, ScalarValue};
 use integration::{GrpcNodeEvent, GrpcNodeRouter};
 use ports::{
-    EventSink, SharedNodeStateReader, SharedNodeStateWriter, StateRecordReader, StateRecordWriter,
+    EventSink, NodeLeasePolicy, SharedNodeStateReader, SharedNodeStateWriter, StateRecordReader,
+    StateRecordWriter,
 };
 use runtime::{
     ExecutionEvent, ExecutionStatus, PeerChannelReadinessEvidence, RuntimeExecutionCheckpoint,
@@ -259,6 +260,8 @@ pub struct IntegrationRuntimeBridge<E: Clone> {
     events: E,
     /// Current formal gRPC Node routes.
     router: GrpcNodeRouter,
+    /// Shared heartbeat and Control Node lease policy selected by the application.
+    node_lease_policy: NodeLeasePolicy,
     /// Runtime-owned live execution registry and sole execution checkpoint authority.
     runtime: RuntimeExecutionManager,
     /// Canonical Runtime transitions awaiting application/orchestration consumption.
