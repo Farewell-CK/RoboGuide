@@ -11,7 +11,7 @@
 | O4 时间与 Control 活性 | 已实现并验证 | ADR-0076；Control 验证连续 exact-session evidence，独立双时间 ingestion、失效/restart fence；workspace checks 通过 |
 | O5 Mission 故障隔离 | 已实现并验证 | ADR-0077；内存/SQL 回滚、持久 hold、Control 重验、generation-bound HTTP resume |
 | O6 事务性能 | 测量与设计已完成；batch 暂缓 | 96/96 合成 Mission；serialize/commit 为主要成本，未证明 batch 收益/等价性，保持单事实事务 |
-| O7 部署边界 | 待实施 | 在既有模块内拆分中性消费者与具体部署解析 |
+| O7 部署边界 | 已实现并验证 | 具体 source / neutral codec / consumers 分离；137 个 app tests 保留兼容与 provenance |
 | O8 发布技术准备 | 待实施 | 扫描、示例、ADR 标识、边界披露；不选择 LICENSE 或发布 |
 
 E6 尚未开始并持续暂缓。本任务只使用确定性离线测试及独立临时数据库、端口的本地合成
@@ -79,3 +79,13 @@ SQLite append/checkpoint/savepoint 故障、HTTP 400/409/503、持久重启、Ca
 已提交 smoke 精确重投去重修补，新增有界测量入口与分阶段证据、batch 实施门禁和
 增量持久化独立设计。未启用 batch、降低 durability 或启动 E6。详见
 [事务测量与设计](controller-persistence-performance.md)。
+
+## O7 交付
+
+具体 reset/endpoint/operation 解码、通用 digest、neutral verifier source codec 与
+中性候选/plan/attempt/satisfaction 消费者分别成模块。Core 和实际 adapter 权威未改变，
+源字段、digest、默认关闭、未知和 legacy profiles 保留。详见
+[部署证据边界](deployment-evidence-boundaries.md)。
+
+O7 验证：workspace tests 628 passed / 2 explicit ignored、workspace Clippy、Rustdoc、
+formatting 与 diff 检查通过。此处的代码组织改变不声明新分布式能力或物理证据。

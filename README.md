@@ -1064,3 +1064,6 @@ physical ambiguity、raw facts 与取消规则保留。GET Mission 显示 isolat
 Controller 分阶段合成测量入口为 `tools/quality/measure_controller_pipeline.py`；实际本地
 证据及 batch/增量持久化门禁见[事务性能记录](docs/development/controller-persistence-performance.md)。
 当前仍使用原单事实 durable 事务，测量不属于 E6 或硬件实验。
+
+部署来源解析与中性消费者已在 application 内拆分；来源身份与 Control/Orchestration
+权威继续保留，见[部署证据边界](docs/development/deployment-evidence-boundaries.md)。

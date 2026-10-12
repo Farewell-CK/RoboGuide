@@ -1,137 +1,32 @@
 //! Exact canonical relocation admission; navigation evidence never proves a manipulation route.
 
-use super::deployment_feasibility::{valid_prefixed_sha256, valid_sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Immutable configured endpoints and reset sources, with no reservation or reachability claim.
 #[derive(Debug, Clone)]
 pub(super) struct DeploymentOperationAdmission {
     /// Exact initial source associated with each observed object.
-    object_sources: BTreeMap<String, String>,
+    pub(super) object_sources: BTreeMap<String, String>,
     /// Only observed, typed destination entities may be named by the model.
-    destinations: BTreeSet<String>,
+    pub(super) destinations: BTreeSet<String>,
     /// Startup coverage narrows Control candidates but does not select an executor.
-    endpoints: BTreeSet<domain::NodeId>,
+    pub(super) endpoints: BTreeSet<domain::NodeId>,
 }
 
 impl DeploymentOperationAdmission {
-    /// Validate the bounded neutral projection against the matrix's exact Node source coverage.
+    /// Accepts only the source decoder's validated canonical operation projection.
     pub(super) fn from_json(
         document: &serde_json::Value,
         node_agents: &BTreeMap<domain::NodeId, i64>,
         node_sources: &BTreeMap<domain::NodeId, String>,
         allow_subset: bool,
     ) -> Result<Self, String> {
-        let body = document
-            .as_object()
-            .ok_or("operation admission must be an object")?;
-        if body.keys().map(String::as_str).collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                "schema_version",
-                "operation",
-                "parameter_names",
-                "source_basis",
-                "source_snapshot_digest",
-                "registration_profile_digest",
-                "object_sources",
-                "destination_entities",
-                "endpoint_profiles",
-                "route_reachability",
-            ])
-            || body["schema_version"] != "roboguide.deployment-operation-admission/v0.1"
-            || body["operation"] != "object.relocate@v1"
-            || body["parameter_names"] != serde_json::json!(["destination", "object", "source"])
-            || body["source_basis"] != "observed-initial-location"
-            || body["route_reachability"] != "unknown"
-            || ["source_snapshot_digest", "registration_profile_digest"]
-                .iter()
-                .any(|key| !valid_prefixed_sha256(body[*key].as_str().unwrap_or_default()))
-        {
-            return Err("operation admission schema, source or route claim is invalid".into());
-        }
-        let sources = body["object_sources"]
-            .as_object()
-            .ok_or("operation admission lacks object sources")?;
-        let mut object_sources = BTreeMap::new();
-        let mut source_ids = BTreeSet::new();
-        if sources.is_empty() || sources.len() > 64 {
-            return Err("operation admission object source coverage is invalid".into());
-        }
-        for (object, value) in sources {
-            let source = value.as_str().unwrap_or_default();
-            if object.trim().is_empty()
-                || !source
-                    .strip_prefix("initial-location:")
-                    .is_some_and(valid_sha256)
-                || !source_ids.insert(source.to_owned())
-            {
-                return Err(
-                    "operation admission source must identify one observed initial location".into(),
-                );
-            }
-            object_sources.insert(object.clone(), source.to_owned());
-        }
-        let entities = body["destination_entities"]
-            .as_array()
-            .ok_or("operation admission lacks destination entities")?;
-        let mut destinations = BTreeSet::new();
-        if entities.is_empty() || entities.len() > 64 {
-            return Err("operation admission destination coverage is invalid".into());
-        }
-        for value in entities {
-            let destination = value.as_str().unwrap_or_default();
-            if destination.trim().is_empty()
-                || object_sources.contains_key(destination)
-                || !destinations.insert(destination.to_owned())
-            {
-                return Err("operation admission destination entity is invalid".into());
-            }
-        }
-        let profiles = body["endpoint_profiles"]
-            .as_array()
-            .ok_or("operation admission lacks endpoint profiles")?;
-        let mut endpoints = BTreeSet::new();
-        let max_endpoints = if allow_subset { 4 } else { 2 };
-        if profiles.is_empty() || profiles.len() > max_endpoints {
-            return Err("operation admission endpoint coverage is invalid".into());
-        }
-        for profile in profiles {
-            let profile = profile
-                .as_object()
-                .ok_or("operation admission endpoint must be an object")?;
-            if profile.keys().map(String::as_str).collect::<BTreeSet<_>>()
-                != BTreeSet::from([
-                    "agent_id",
-                    "node_id",
-                    "node_config_digest",
-                    "resource_kind",
-                    "resource_capacity",
-                ])
-                || profile["resource_kind"] != "space"
-                || profile["resource_capacity"] != serde_json::json!(1)
-            {
-                return Err("operation admission needs a capacity-one space endpoint".into());
-            }
-            let node = domain::NodeId::new(profile["node_id"].as_str().unwrap_or_default())
-                .map_err(|error| error.to_string())?;
-            if profile["agent_id"].as_i64() != node_agents.get(&node).copied()
-                || profile["node_config_digest"].as_str()
-                    != node_sources.get(&node).map(String::as_str)
-                || !endpoints.insert(node)
-            {
-                return Err(
-                    "operation admission endpoint differs from the navigation Node source".into(),
-                );
-            }
-        }
-        if !allow_subset && endpoints != node_agents.keys().cloned().collect() {
-            return Err("operation admission endpoint coverage is incomplete".into());
-        }
-        Ok(Self {
-            object_sources,
-            destinations,
-            endpoints,
-        })
+        super::deployment_sources::load_operation_admission(
+            document,
+            node_agents,
+            node_sources,
+            allow_subset,
+        )
     }
 
     /// Validate all three canonical parameters without rewriting the model's selected object.
@@ -177,7 +72,8 @@ impl DeploymentOperationAdmission {
 
 #[cfg(test)]
 mod tests {
-    use super::super::deployment_feasibility::{DeploymentFeasibility, content_digest};
+    use super::super::deployment_document::content_digest;
+    use super::super::deployment_feasibility::DeploymentFeasibility;
     use super::DeploymentOperationAdmission;
     use crate::*;
     use domain::{NodeId, TimestampMs};

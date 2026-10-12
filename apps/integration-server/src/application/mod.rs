@@ -1,8 +1,10 @@
 //! Durable application transitions split by orchestration responsibility.
 
 mod actor_placement;
+mod deployment_document;
 mod deployment_feasibility;
 mod deployment_operation_admission;
+mod deployment_sources;
 mod dispatch;
 mod initial_operation_assessment;
 mod initial_operation_preferences;
@@ -16,6 +18,7 @@ mod physical_entity_registry;
 mod recovery;
 mod task_verifier;
 mod timer;
+mod verifier_source;
 pub(crate) use isolation::resume_mission_candidate;
 pub(crate) use isolation::{
     flush_unisolated_commands, flush_unisolated_dispatch, run_mission_transition,

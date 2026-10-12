@@ -1,6 +1,7 @@
 //! Optional Control policy consuming neutral positive initial-operation costs.
 
-use super::deployment_feasibility::{DeploymentFeasibility, content_digest, valid_prefixed_sha256};
+use super::deployment_document::{content_digest, valid_prefixed_sha256};
+use super::deployment_feasibility::DeploymentFeasibility;
 use crate::*;
 use control::InitialCandidatePreferences;
 use ports::SharedNodeStateReader;

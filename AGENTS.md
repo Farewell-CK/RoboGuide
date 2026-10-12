@@ -372,6 +372,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - The Robonix map adapter exposes process health separately from exact capability
   readiness. Its startup-fixed ROS service discovery command is read-only and
   deployment-owned; execution requests must never supply commands or service names.
+- The `apps/integration-server` application `deployment_sources.rs` owns concrete startup source decoding,
+  `deployment_document.rs` owns canonical source identities, and `verifier_source.rs` owns the
+  neutral immutable verifier codec. Existing candidate/plan/attempt/satisfaction consumers retain
+  Control and Orchestration authority; no producer gets execution mutation authority.
 - `apps/integration-server/` is the formal gRPC server composition root and
   `apps/roboguide-node/` is the configured node-side daemon composition root.
 - Each node machine runs only `roboguide-node`; new Local EAIOS integrations use
