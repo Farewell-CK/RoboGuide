@@ -7,7 +7,7 @@
 | --- | --- | --- |
 | O1 恢复定位硬化 | 已实现 | `7eab30d`；相关包回归通过。历史重复 Role 根因仍为 NOT PROVEN |
 | O2 所有权模型 | 已实现并验证 | Control 137 个常规测试；256 条固定轨迹及 10,000 条扩展轨迹通过，支持 case 缩减、保存与回放 |
-| O3 配置与只读指标 | 部分实现 | 租约配置已实现；补齐接受超时、new/restore 行为测试及有界 JSONL 指标 |
+| O3 配置与只读指标 | 已实现并验证 | ADR-0075；统一 timing、自定义 new/renew/restore/Welcome、两级 queue 及 default-off JSONL，观测失败不改变 durable trace |
 | O4 时间与 Control 活性 | 待设计 / 实现 | 先 ADR，再验证连续租约、真实静默、决策时效和 restart fence |
 | O5 Mission 故障隔离 | 待设计 / 实现 | 先 ADR；局部失败回滚，持久隔离，显式重验恢复 |
 | O6 事务性能 | 条件性 | 先固定合成轨迹测量；瓶颈和收益不足时记录不实施结论 |
@@ -36,3 +36,11 @@ shape 不变。此证据不证明 Claude 对历史 pilot 的根因归因。
 
 相关 Control Clippy 和 tests、workspace tests、Rustdoc、formatting、diff 检查通过。扩展
 检查 10,000 条轨迹耗时约 58 秒；只表示本地确定性模型覆盖，不是性能或硬件实验。
+
+## O3 交付
+
+新增 `NodeProtocolPolicy`、original ingress metadata 和传输中立诊断端口；部署 root 读取
+startup 配置、共享 process Clock，并注入默认关闭的本地 JSONL sink。指标有界聚合、
+try-send、独立 I/O thread 和两份文件轮转。格式、workspace Clippy、workspace tests、
+Rustdoc 与 diff 检查通过。custom loopback 协议、acceptance timeout、health freshness、
+checkpoint restore 及 disabled/full/failed sink 的一致轨迹测试通过。

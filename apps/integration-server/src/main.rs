@@ -7,7 +7,9 @@
 mod application;
 mod artifact_http;
 mod controller_http;
+mod diagnostics;
 
+use diagnostics::StageObservation;
 use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer as LegacyRoboGuideNodeProtocolServer;
 use integration::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
 use integration::{GrpcIntegrationService, GrpcLegacyV02Service, GrpcNodeEvent};
@@ -16,7 +18,8 @@ use orchestration::{
     IntegrationRuntimeError, ObservedTaskExecutionResult,
 };
 use orchestration::{MissionOrchestrator, OrchestrationError, decode_mission_plan};
-use ports::{Clock, NodeLeasePolicy, SharedNodeStateReader, StateRecordReader};
+use ports::{Clock, NodeLeasePolicy, NodeProtocolPolicy, SharedNodeStateReader, StateRecordReader};
+use ports::{DiagnosticKind, DiagnosticStage};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -322,27 +325,45 @@ struct ActorPlacementEntry {
 /// Defaults preserve the existing five-second heartbeat and fifteen-second lease. Core crates do
 /// not read process environment variables; this composition root resolves them once and passes the
 /// immutable policy to both transport and application authorities.
-fn configured_node_lease_policy() -> Result<NodeLeasePolicy, Box<dyn std::error::Error>> {
-    let heartbeat_interval_ms = std::env::var("ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS")
-        .ok()
+fn configured_node_protocol_policy() -> Result<NodeProtocolPolicy, Box<dyn std::error::Error>> {
+    let heartbeat = configured_duration(
+        "ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS",
+        ports::DEFAULT_NODE_HEARTBEAT_INTERVAL_MS,
+    )?;
+    let lease = configured_duration(
+        "ROBOGUIDE_NODE_LEASE_DURATION_MS",
+        ports::DEFAULT_NODE_LEASE_DURATION_MS,
+    )?;
+    let acceptance = configured_duration(
+        "ROBOGUIDE_NODE_APPLICATION_ACCEPTANCE_TIMEOUT_MS",
+        ports::DEFAULT_NODE_APPLICATION_ACCEPTANCE_TIMEOUT_MS,
+    )?;
+    let lease_policy = NodeLeasePolicy::try_new(heartbeat, lease)?;
+    Ok(NodeProtocolPolicy::try_new(lease_policy, acceptance)?)
+}
+
+/// Parses an optional unsigned duration without silently treating malformed configuration as absent.
+fn parsed_duration(name: &str, value: Option<&str>, default: u64) -> Result<u64, String> {
+    value
         .map(|value| {
-            value.parse::<u64>().map_err(|error| {
-                format!("ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS must be an unsigned integer: {error}")
-            })
+            value
+                .parse::<u64>()
+                .map_err(|error| format!("{name} must be an unsigned integer: {error}"))
         })
-        .transpose()?
-        .unwrap_or(ports::DEFAULT_NODE_HEARTBEAT_INTERVAL_MS);
-    let lease_duration_ms = std::env::var("ROBOGUIDE_NODE_LEASE_DURATION_MS")
-        .ok()
-        .map(|value| {
-            value.parse::<u64>().map_err(|error| {
-                format!("ROBOGUIDE_NODE_LEASE_DURATION_MS must be an unsigned integer: {error}")
-            })
-        })
-        .transpose()?
-        .unwrap_or(ports::DEFAULT_NODE_LEASE_DURATION_MS);
-    NodeLeasePolicy::try_new(heartbeat_interval_ms, lease_duration_ms)
-        .map_err(|error| format!("invalid Node lease policy: {error}").into())
+        .transpose()
+        .map(|value| value.unwrap_or(default))
+}
+
+/// Reads one startup-owned duration; non-Unicode values fail closed without exposing their bytes.
+fn configured_duration(name: &str, default: u64) -> Result<u64, Box<dyn std::error::Error>> {
+    let value = match std::env::var(name) {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(format!("{name} must be UTF-8").into());
+        }
+    };
+    parsed_duration(name, value.as_deref(), default).map_err(Into::into)
 }
 
 /// Binds the configured integration listener and keeps accepting connector sessions.
@@ -375,7 +396,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .into(),
         );
     }
-    let node_lease_policy = configured_node_lease_policy()?;
+    let node_protocol_policy = configured_node_protocol_policy()?;
+    let node_lease_policy = node_protocol_policy.lease_policy();
     let actor_placement_constraints = actor_placement_path
         .as_deref()
         .map(|path| load_actor_placement_file(Path::new(path)))
@@ -412,6 +434,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let process_clock = Arc::new(runtime::SystemMonotonicClock::from_floor(
         event_log.latest_timestamp()?,
     ));
+    let diagnostic_writer = diagnostics::DiagnosticWriter::configured();
+    let diagnostic_handle = diagnostic_writer.handle();
     let artifact_store = artifact_store::FileSystemArtifactStore::new(&artifact_root)?;
     let artifact_catalog =
         artifact_http::ArtifactCatalog::replay_with_gate(&event_log, event_write_gate.clone())
@@ -456,8 +480,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let deployment_feasibility = deployment_feasibility.map(Arc::new);
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-    let (service, router) =
-        GrpcIntegrationService::new_with_lease_policy(events, node_lease_policy);
+    let (service, router) = GrpcIntegrationService::new_with_observer(
+        events,
+        node_protocol_policy,
+        process_clock.clone(),
+        diagnostic_handle.clone(),
+    );
     let receiver_router = router.clone();
     let memory_session_router = router.clone();
     let mut controller = match checkpoint {
@@ -540,6 +568,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|feed| feed.source_digest().to_string()),
         },
     };
+    controller.bridge.set_diagnostics(diagnostic_handle.clone());
     for (mission_id, admission) in &controller.mission_admissions {
         admission.validate(&controller, mission_id)?;
     }
@@ -650,6 +679,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     let (fatal_sender, mut fatal_receiver) = tokio::sync::mpsc::unbounded_channel::<String>();
     let timer_fatal_sender = fatal_sender.clone();
+    let timer_diagnostics = diagnostic_handle.clone();
+    let receiver_diagnostics = diagnostic_handle.clone();
     tokio::spawn(async move {
         if let Err(error) = serve_http(
             http_address,
@@ -682,7 +713,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            interval.tick().await;
+            let scheduled = interval.tick().await;
+            timer_diagnostics.timing(
+                DiagnosticKind::Timer,
+                DiagnosticStage::TimerLag,
+                scheduled.elapsed(),
+                None,
+            );
             if let Err(error) = drive_application_timer_with_clock(
                 &timer_controller,
                 &timer_event_log,
@@ -700,7 +737,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let correlation = domain::CorrelationId::new("integration-server")
             .expect("static correlation id is valid");
         while let Some(delivery) = receiver.recv().await {
-            let (event, completion) = delivery.into_parts();
+            let (event, metadata, completion) = delivery.into_observed_parts();
+            let kind = metadata
+                .as_ref()
+                .map_or(DiagnosticKind::Other, |metadata| metadata.kind);
+            let identity = metadata
+                .as_ref()
+                .and_then(|metadata| metadata.identity.as_ref());
             if let GrpcNodeEvent::NodeMessage {
                 node_id,
                 session_id,
@@ -722,6 +765,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             let registration_fact = matches!(&event, GrpcNodeEvent::Registered { .. });
+            let write_wait = StageObservation::start(
+                &receiver_diagnostics,
+                kind,
+                DiagnosticStage::WriteGate,
+                identity,
+            );
             let _write_guard = match receiver_event_write_gate.lock() {
                 Ok(guard) => guard,
                 Err(_) => {
@@ -731,6 +780,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     return;
                 }
             };
+            drop(write_wait);
             if let Err(error) = receiver_event_log.begin_batch() {
                 let reason = format!("cannot begin durable event batch: {error}");
                 completion.unavailable(reason.clone());
@@ -741,12 +791,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut checkpoint_json = None;
             let mut rejection = None;
             let mut pending_controller = None;
+            let lock_wait = StageObservation::start(
+                &receiver_diagnostics,
+                kind,
+                DiagnosticStage::ControllerLock,
+                identity,
+            );
             match controller.lock() {
                 Ok(controller) => {
+                    drop(lock_wait);
                     // Evaluate the complete application transition on a private candidate. The
                     // live authority is replaced only after the durable batch commits below.
+                    let cloning = StageObservation::start(
+                        &receiver_diagnostics,
+                        kind,
+                        DiagnosticStage::Clone,
+                        identity,
+                    );
                     let mut candidate = controller.clone();
+                    drop(cloning);
                     let now = receiver_clock.now();
+                    let reduction = StageObservation::start(
+                        &receiver_diagnostics,
+                        kind,
+                        DiagnosticStage::Reduce,
+                        identity,
+                    );
                     if let Err(error) = candidate.bridge.consume(event, now, &correlation) {
                         eprintln!("integration fact rejected by Runtime/Control: {error}");
                         rejection = Some(error.to_string());
@@ -838,8 +908,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = fatal_sender.send(reason);
                         return;
                     } else {
+                        drop(reduction);
+                        let _serialization = StageObservation::start(
+                            &receiver_diagnostics,
+                            kind,
+                            DiagnosticStage::Serialize,
+                            identity,
+                        );
                         match server_checkpoint_json(&candidate) {
                             Ok(checkpoint) => {
+                                receiver_diagnostics.value(
+                                    kind,
+                                    DiagnosticStage::CheckpointBytes,
+                                    checkpoint.len() as u64,
+                                    identity,
+                                );
                                 checkpoint_json = Some(checkpoint);
                                 accepted = true;
                                 pending_controller = Some(candidate);
@@ -880,6 +963,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     return;
                 }
             }
+            let save = StageObservation::start(
+                &receiver_diagnostics,
+                kind,
+                DiagnosticStage::Save,
+                identity,
+            );
             if let Some(checkpoint_json) = checkpoint_json
                 && let Err(error) =
                     receiver_event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json)
@@ -891,11 +980,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = fatal_sender.send(reason);
                 return;
             }
+            drop(save);
+            let commit = StageObservation::start(
+                &receiver_diagnostics,
+                kind,
+                DiagnosticStage::Commit,
+                identity,
+            );
             let batch_result = if accepted {
                 receiver_event_log.commit_batch()
             } else {
                 receiver_event_log.rollback_batch()
             };
+            drop(commit);
             if let Err(error) = batch_result {
                 let reason = format!("cannot finalize durable event batch: {error}");
                 completion.unavailable(reason.clone());
@@ -907,6 +1004,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match controller.lock() {
                         Ok(mut live) => {
                             *live = candidate;
+                            let _outbox = StageObservation::start(
+                                &receiver_diagnostics,
+                                kind,
+                                DiagnosticStage::Outbox,
+                                identity,
+                            );
                             // Cancel receipts are nonterminal: retrying Cancel in response to its
                             // own receipt/snapshot would form an unbounded feedback loop. The
                             // application timer owns those retries until terminal evidence.
@@ -939,10 +1042,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(LegacyRoboGuideNodeProtocolServer::new(GrpcLegacyV02Service))
         .add_service(RoboGuideNodeProtocolServer::new(service))
         .serve(address);
-    tokio::select! {
+    let outcome = tokio::select! {
         result = server => result.map_err(Into::into),
         fatal = fatal_receiver.recv() => Err(fatal.unwrap_or_else(|| "application driver stopped unexpectedly".to_string()).into()),
-    }
+    };
+    let finishing = tokio::task::spawn_blocking(move || diagnostic_writer.finish());
+    let _ = tokio::time::timeout(Duration::from_secs(1), finishing).await;
+    outcome
 }
 
 use application::*;

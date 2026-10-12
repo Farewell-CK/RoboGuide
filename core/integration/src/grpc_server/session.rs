@@ -2,41 +2,21 @@
 
 use super::*;
 
-/// Emits one local route-loss observation without requiring a remote acknowledgement.
-pub(super) fn emit_unavailable(
-    events: &mpsc::UnboundedSender<GrpcNodeEventDelivery>,
-    node_id: String,
-    session_id: String,
-) {
-    let _ = events.send(GrpcNodeEventDelivery::observation(
-        GrpcNodeEvent::Unavailable {
-            node_id,
-            session_id,
-        },
-    ));
-}
-
 /// Delivers one validated fact and waits for application authority plus persistence acceptance.
+#[cfg(test)]
 pub(super) async fn deliver_for_acceptance(
     events: &mpsc::UnboundedSender<GrpcNodeEventDelivery>,
     event: GrpcNodeEvent,
+    acceptance_timeout: std::time::Duration,
 ) -> Result<(), Status> {
-    let (response, decision) = oneshot::channel();
-    events
-        .send(GrpcNodeEventDelivery::requiring_acceptance(event, response))
-        .map_err(|_| Status::unavailable("Controller fact consumer is closed"))?;
-    let decision = tokio::time::timeout(APPLICATION_ACCEPTANCE_TIMEOUT, decision)
-        .await
-        .map_err(|_| Status::deadline_exceeded("Controller fact acceptance timed out"))?
-        .map_err(|_| Status::unavailable("Controller fact response was dropped"))?;
-    decision.map_err(|failure| match failure {
-        ApplicationAcceptanceFailure::Rejected(reason) => {
-            Status::failed_precondition(format!("Controller rejected fact: {reason}"))
-        }
-        ApplicationAcceptanceFailure::Unavailable(reason) => {
-            Status::unavailable(format!("Controller fact acceptance unavailable: {reason}"))
-        }
-    })
+    deliver_received_fact(
+        events,
+        event,
+        acceptance_timeout,
+        None,
+        &GrpcSessionObservation::new(None, DiagnosticHandle::default()),
+    )
+    .await
 }
 
 /// Activates one accepted session and emits `Registered` before commands can be routed.

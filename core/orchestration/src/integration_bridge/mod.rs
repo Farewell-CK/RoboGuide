@@ -250,6 +250,8 @@ impl ObservedTaskExecutionOutcome {
 /// Live composition state consuming Integration events and routing Runtime commands.
 #[derive(Clone)]
 pub struct IntegrationRuntimeBridge<E: Clone> {
+    /// Optional observation-only sink, absent from all authority checkpoints.
+    diagnostics: ports::DiagnosticHandle,
     /// Existing Control authority for node leases and registration.
     control: ControlPlane,
     /// Shared Node State updated by remote facts.

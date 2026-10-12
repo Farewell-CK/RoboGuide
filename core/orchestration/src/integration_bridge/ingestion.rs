@@ -3,6 +3,25 @@
 use super::*;
 
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
+    /// Installs a best-effort diagnostic sink without changing any authority or checkpoint.
+    pub fn set_diagnostics(&mut self, diagnostics: ports::DiagnosticHandle) {
+        self.diagnostics = diagnostics;
+    }
+
+    /// Returns the observation-only sink used by application transaction stages.
+    pub fn diagnostics(&self) -> &ports::DiagnosticHandle {
+        &self.diagnostics
+    }
+
+    /// Reads current transport-only session/age metadata; it never establishes Control liveness.
+    pub fn diagnostic_session(
+        &self,
+        node_id: &str,
+    ) -> Result<Option<(String, std::time::Duration)>, IntegrationRuntimeError> {
+        self.router
+            .diagnostic_session(node_id)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
+    }
     /// Creates the composition bridge around existing core authorities.
     pub fn new(
         control: ControlPlane,
@@ -22,6 +41,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         node_lease_policy: NodeLeasePolicy,
     ) -> Self {
         Self {
+            diagnostics: ports::DiagnosticHandle::default(),
             control,
             state,
             state_records: StateRecordProjection::new(),
@@ -104,6 +124,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         let runtime = RuntimeExecutionManager::restore(checkpoint.runtime)
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
         Ok(Self {
+            diagnostics: ports::DiagnosticHandle::default(),
             control,
             state,
             state_records,

@@ -141,6 +141,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   continuity, and the declarative Local Integration Engine.
 - `core/integration/` contains only formal Node Protocol wire/session/router code;
   Controller composition and the Runtime bridge belong to `core/orchestration/`.
+- `ports::NodeProtocolPolicy` freezes transport lease and application-completion timing; optional
+  transport-neutral diagnostics preserve exact ingress metadata without granting authority.
+  `apps/integration-server/src/diagnostics.rs` owns bounded, default-off local JSONL observation;
+  observation loss cannot change facts, checkpoints, ACKs or scheduling. See ADR-0075.
 - Node Protocol `Registered` and sequence `Ack` mean Controller application authority plus durable
   checkpoint acceptance, not transport receipt. Integration waits on an application completion
   envelope but never makes the Control/State/Runtime decision itself.

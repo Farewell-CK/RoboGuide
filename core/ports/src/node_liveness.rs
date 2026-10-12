@@ -9,6 +9,92 @@ pub const DEFAULT_NODE_HEARTBEAT_INTERVAL_MS: u64 = 5_000;
 /// Default duration for the transport and Control Node lease.
 pub const DEFAULT_NODE_LEASE_DURATION_MS: u64 = 15_000;
 
+/// Default maximum wait for application authority and durable fact acceptance.
+pub const DEFAULT_NODE_APPLICATION_ACCEPTANCE_TIMEOUT_MS: u64 = 30_000;
+
+/// Startup-frozen transport timing, separate from health and other evidence freshness policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeProtocolPolicy {
+    /// Heartbeat and lease interval policy shared with Control.
+    lease_policy: NodeLeasePolicy,
+    /// Positive, representable wait for application completion, never a physical stop deadline.
+    application_acceptance_timeout_ms: u64,
+}
+
+impl NodeProtocolPolicy {
+    /// Validates the acceptance timer without changing any lease or reported-health TTL.
+    pub fn try_new(
+        lease_policy: NodeLeasePolicy,
+        application_acceptance_timeout_ms: u64,
+    ) -> Result<Self, NodeProtocolPolicyError> {
+        if application_acceptance_timeout_ms == 0 {
+            return Err(NodeProtocolPolicyError::NonPositiveAcceptanceTimeout);
+        }
+        if std::time::Instant::now()
+            .checked_add(Duration::from_millis(application_acceptance_timeout_ms))
+            .is_none()
+        {
+            return Err(NodeProtocolPolicyError::UnrepresentableAcceptanceTimeout);
+        }
+        Ok(Self {
+            lease_policy,
+            application_acceptance_timeout_ms,
+        })
+    }
+
+    /// Returns the same lease policy supplied to transport routing and Control renewal.
+    pub const fn lease_policy(self) -> NodeLeasePolicy {
+        self.lease_policy
+    }
+
+    /// Returns the maximum application completion wait in milliseconds.
+    pub const fn application_acceptance_timeout_ms(self) -> u64 {
+        self.application_acceptance_timeout_ms
+    }
+
+    /// Returns the process-local wait used by application-completion timers.
+    pub const fn application_acceptance_timeout(self) -> Duration {
+        Duration::from_millis(self.application_acceptance_timeout_ms)
+    }
+}
+
+impl Default for NodeProtocolPolicy {
+    /// Preserves the established 5s heartbeat, 15s lease and 30s application acceptance defaults.
+    fn default() -> Self {
+        Self {
+            lease_policy: NodeLeasePolicy::default(),
+            application_acceptance_timeout_ms: DEFAULT_NODE_APPLICATION_ACCEPTANCE_TIMEOUT_MS,
+        }
+    }
+}
+
+/// Startup configuration failures for application-completion timing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeProtocolPolicyError {
+    /// The completion wait was zero.
+    NonPositiveAcceptanceTimeout,
+    /// The local monotonic timer cannot represent the configured wait.
+    UnrepresentableAcceptanceTimeout,
+}
+
+impl Display for NodeProtocolPolicyError {
+    /// Formats a configuration error without embedding request or provider data.
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonPositiveAcceptanceTimeout => write!(
+                formatter,
+                "Node application acceptance timeout must be positive"
+            ),
+            Self::UnrepresentableAcceptanceTimeout => write!(
+                formatter,
+                "Node application acceptance timeout cannot be represented by the local timer"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for NodeProtocolPolicyError {}
+
 /// Immutable policy shared by the Node transport and Controller application.
 ///
 /// The policy carries only lease transport values. Reported health freshness, State TTLs, and
@@ -127,6 +213,25 @@ impl std::error::Error for NodeLeasePolicyError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Default and custom application waits preserve their independent lease policy.
+    #[test]
+    fn acceptance_policy_is_positive_and_independent() {
+        let policy = NodeProtocolPolicy::default();
+        assert_eq!(policy.application_acceptance_timeout_ms(), 30_000);
+        assert_eq!(policy.lease_policy(), NodeLeasePolicy::default());
+        let lease = NodeLeasePolicy::try_new(7_000, 22_000).unwrap();
+        let custom = NodeProtocolPolicy::try_new(lease, 500).unwrap();
+        assert_eq!(custom.lease_policy(), lease);
+        assert_eq!(
+            custom.application_acceptance_timeout(),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            NodeProtocolPolicy::try_new(lease, 0),
+            Err(NodeProtocolPolicyError::NonPositiveAcceptanceTimeout)
+        );
+    }
 
     /// The default policy preserves the existing wire values.
     #[test]

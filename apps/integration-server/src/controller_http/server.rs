@@ -5,7 +5,9 @@ use super::view::{
     inventory_json, memory_providers_json, relation_kind_name, state_providers_json,
     state_records_json,
 };
+use crate::diagnostics::StageObservation;
 use crate::*;
+use ports::{DiagnosticHandle, DiagnosticKind, DiagnosticStage};
 /// Serves the local Phase 1 Mission and operator diagnostics API.
 pub(crate) async fn serve_http(
     address: std::net::SocketAddr,
@@ -54,6 +56,17 @@ pub(crate) async fn handle_http_connection(
     deployment_feasibility: Option<&DeploymentFeasibility>,
     verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Observation cannot add a blocking lock or a poisoned-lock failure to request handling.
+    let diagnostics = controller
+        .try_lock()
+        .map(|live| live.bridge.diagnostics().clone())
+        .unwrap_or_else(|_| DiagnosticHandle::default());
+    let _request = StageObservation::start(
+        &diagnostics,
+        DiagnosticKind::Http,
+        DiagnosticStage::Request,
+        None,
+    );
     let request = match tokio::time::timeout(
         CONTROL_HTTP_REQUEST_TIMEOUT,
         read_control_http_request(stream),
@@ -234,9 +247,16 @@ pub(crate) async fn handle_http_connection(
             }
             let mission_id = plan.goal().mission_id().clone();
             let group_id = domain::ExecutionGroupId::new(format!("group-{mission_id}"))?;
+            let gate_wait = StageObservation::start(
+                &diagnostics,
+                DiagnosticKind::Http,
+                DiagnosticStage::WriteGate,
+                None,
+            );
             let _write_guard = event_write_gate
                 .lock()
                 .map_err(|_| "event-log write gate is poisoned")?;
+            drop(gate_wait);
             event_log.begin_batch()?;
             let now = clock.now();
             let mut pending_controller = None;
@@ -244,7 +264,14 @@ pub(crate) async fn handle_http_connection(
                 let controller = controller
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
+                let clone_sample = StageObservation::start(
+                    controller.bridge.diagnostics(),
+                    DiagnosticKind::Http,
+                    DiagnosticStage::Clone,
+                    None,
+                );
                 let mut candidate = controller.clone();
+                drop(clone_sample);
                 let mut events = event_log.clone();
                 let operation = {
                     let ControllerState {
@@ -330,14 +357,15 @@ pub(crate) async fn handle_http_connection(
                                     now,
                                 )
                             });
-                        server_checkpoint_json(&candidate).map_err(|error| error.to_string())
+                        crate::diagnostics::http_checkpoint(&candidate)
+                            .map_err(|error| error.to_string())
                     })
                     .inspect(|_| pending_controller = Some(candidate))
             };
             match result {
                 Ok(checkpoint_json) => {
                     if let Err(error) =
-                        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json)
+                        crate::diagnostics::http_save(event_log, &checkpoint_json, &diagnostics)
                     {
                         let rollback = event_log.rollback_batch();
                         drop(_write_guard);
@@ -347,7 +375,7 @@ pub(crate) async fn handle_http_connection(
                             serde_json::json!({"error": format!("checkpoint persistence failed: {error}; rollback: {}", rollback.as_ref().err().map(ToString::to_string).unwrap_or_else(|| "ok".to_string()))}),
                         ).await;
                     }
-                    if let Err(error) = event_log.commit_batch() {
+                    if let Err(error) = crate::diagnostics::http_commit(event_log, &diagnostics) {
                         let rollback = event_log.rollback_batch();
                         drop(_write_guard);
                         return write_http_response(
@@ -501,9 +529,16 @@ pub(crate) async fn handle_http_connection(
                 .trim_end_matches("/cancel")
                 .trim_end_matches('/');
             let mission_id = domain::MissionId::new(mission_text)?;
+            let gate_wait = StageObservation::start(
+                &diagnostics,
+                DiagnosticKind::Http,
+                DiagnosticStage::WriteGate,
+                None,
+            );
             let _write_guard = event_write_gate
                 .lock()
                 .map_err(|_| "event-log write gate is poisoned")?;
+            drop(gate_wait);
             event_log.begin_batch()?;
             let now = clock.now();
             let mut pending_controller = None;
@@ -512,7 +547,14 @@ pub(crate) async fn handle_http_connection(
                 let controller = controller
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
+                let clone_sample = StageObservation::start(
+                    controller.bridge.diagnostics(),
+                    DiagnosticKind::Http,
+                    DiagnosticStage::Clone,
+                    None,
+                );
                 let mut candidate = controller.clone();
+                drop(clone_sample);
                 let mut events = event_log.clone();
                 let operation: Result<(), String> = (|| {
                     let ControllerState {
@@ -566,14 +608,15 @@ pub(crate) async fn handle_http_connection(
                 }
                 operation
                     .and_then(|()| {
-                        server_checkpoint_json(&candidate).map_err(|error| error.to_string())
+                        crate::diagnostics::http_checkpoint(&candidate)
+                            .map_err(|error| error.to_string())
                     })
                     .inspect(|_| pending_controller = Some(candidate))
             };
             match result {
                 Ok(checkpoint_json) => {
                     if let Err(error) =
-                        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json)
+                        crate::diagnostics::http_save(event_log, &checkpoint_json, &diagnostics)
                     {
                         let rollback = event_log.rollback_batch();
                         drop(_write_guard);
@@ -583,7 +626,7 @@ pub(crate) async fn handle_http_connection(
                             serde_json::json!({"error": format!("checkpoint persistence failed: {error}; rollback: {}", rollback.as_ref().err().map(ToString::to_string).unwrap_or_else(|| "ok".to_string()))}),
                         ).await;
                     }
-                    if let Err(error) = event_log.commit_batch() {
+                    if let Err(error) = crate::diagnostics::http_commit(event_log, &diagnostics) {
                         let rollback = event_log.rollback_batch();
                         drop(_write_guard);
                         return write_http_response(
@@ -803,15 +846,29 @@ pub(crate) async fn handle_http_connection(
                     .await;
                 }
             };
+            let gate_wait = StageObservation::start(
+                &diagnostics,
+                DiagnosticKind::Http,
+                DiagnosticStage::WriteGate,
+                None,
+            );
             let _write_guard = event_write_gate
                 .lock()
                 .map_err(|_| "event-log write gate is poisoned")?;
+            drop(gate_wait);
             event_log.begin_batch()?;
             let result: Result<(ControllerState, String), String> = (|| {
                 let live = controller
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
+                let clone_sample = StageObservation::start(
+                    live.bridge.diagnostics(),
+                    DiagnosticKind::Http,
+                    DiagnosticStage::Clone,
+                    None,
+                );
                 let mut candidate = live.clone();
+                drop(clone_sample);
                 let mission_id = candidate
                     .bridge
                     .control()
@@ -839,19 +896,19 @@ pub(crate) async fn handle_http_connection(
                         command.max_replacements,
                     )
                     .map_err(|error| error.to_string())?;
-                let checkpoint =
-                    server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
+                let checkpoint = crate::diagnostics::http_checkpoint(&candidate)
+                    .map_err(|error| error.to_string())?;
                 Ok((candidate, checkpoint))
             })();
             match result {
                 Ok((candidate, checkpoint)) => {
                     if let Err(error) =
-                        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint)
+                        crate::diagnostics::http_save(event_log, &checkpoint, &diagnostics)
                     {
                         event_log.rollback_batch()?;
                         return Err(error.into());
                     }
-                    if let Err(error) = event_log.commit_batch() {
+                    if let Err(error) = crate::diagnostics::http_commit(event_log, &diagnostics) {
                         let _ = event_log.rollback_batch();
                         return Err(error.into());
                     }
@@ -945,15 +1002,29 @@ pub(crate) async fn handle_http_connection(
                 .trim_end_matches("/recover")
                 .trim_end_matches('/')
                 .to_string();
+            let gate_wait = StageObservation::start(
+                &diagnostics,
+                DiagnosticKind::Http,
+                DiagnosticStage::WriteGate,
+                None,
+            );
             let _write_guard = event_write_gate
                 .lock()
                 .map_err(|_| "event-log write gate is poisoned")?;
+            drop(gate_wait);
             event_log.begin_batch()?;
             let result: Result<(ControllerState, String), String> = (|| {
                 let live = controller
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
+                let clone_sample = StageObservation::start(
+                    live.bridge.diagnostics(),
+                    DiagnosticKind::Http,
+                    DiagnosticStage::Clone,
+                    None,
+                );
                 let mut candidate = live.clone();
+                drop(clone_sample);
                 if let Some(command) = &recovery {
                     let mission_id = candidate
                         .bridge
@@ -989,19 +1060,19 @@ pub(crate) async fn handle_http_connection(
                         .cancel(&execution_id)
                         .map_err(|error| error.to_string())?;
                 }
-                let checkpoint =
-                    server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
+                let checkpoint = crate::diagnostics::http_checkpoint(&candidate)
+                    .map_err(|error| error.to_string())?;
                 Ok((candidate, checkpoint))
             })();
             match result {
                 Ok((candidate, checkpoint)) => {
                     if let Err(error) =
-                        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint)
+                        crate::diagnostics::http_save(event_log, &checkpoint, &diagnostics)
                     {
                         event_log.rollback_batch()?;
                         return Err(error.into());
                     }
-                    if let Err(error) = event_log.commit_batch() {
+                    if let Err(error) = crate::diagnostics::http_commit(event_log, &diagnostics) {
                         let _ = event_log.rollback_batch();
                         return Err(error.into());
                     }

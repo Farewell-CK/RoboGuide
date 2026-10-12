@@ -739,3 +739,15 @@ fn restored_mission_is_revalidated_before_server_start() {
     assert!(error.contains("restored Mission placement is invalid"));
     assert!(error.contains("missing actors [robot-dog-a]"));
 }
+/// Duration parsing distinguishes absent defaults from malformed or overflowing startup values.
+#[test]
+fn node_protocol_duration_configuration_is_strict() {
+    assert_eq!(parsed_duration("acceptance", None, 30_000).unwrap(), 30_000);
+    assert_eq!(
+        parsed_duration("acceptance", Some("1234"), 30_000).unwrap(),
+        1234
+    );
+    for value in ["", "-1", "1.5", "18446744073709551616"] {
+        assert!(parsed_duration("acceptance", Some(value), 30_000).is_err());
+    }
+}

@@ -9,6 +9,7 @@ tokio = { version = "1.53", features = ["net", "sync", "time"] }
 tokio-stream = "0.1"
 prost = "0.14"
 ports = { path = "../ports" }
+domain = { path = "../domain" }
 serde_json = "1.0"
 tonic = { version = "0.14.6", features = ["transport"] }
 tonic-prost = "0.14.6"
@@ -19,5 +20,6 @@ protoc-bin-vendored = "3"
 tonic-prost-build = "0.14.6"
 
 [dev-dependencies]
-tokio = { version = "1.53", features = ["macros", "rt", "time"] }
+tokio = { version = "1.53", features = ["macros", "rt", "time", "test-util"] }
 testkit = { path = "../testkit" }
+tokio-stream = { version = "0.1", features = ["net"] }

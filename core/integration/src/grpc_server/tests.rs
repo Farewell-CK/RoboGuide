@@ -1,6 +1,8 @@
 use super::session::{validate_registration, validate_state_observation_batch};
 use super::*;
 
+mod observation;
+
 /// The production composition policy reaches the transport service unchanged.
 #[test]
 fn service_constructor_retains_custom_node_lease_policy() {
@@ -8,7 +10,35 @@ fn service_constructor_retains_custom_node_lease_policy() {
     let policy = ports::NodeLeasePolicy::try_new(7_000, 22_000).unwrap();
     let (service, _router) = GrpcIntegrationService::new_with_lease_policy(events, policy);
 
-    assert_eq!(service.lease_policy, policy);
+    assert_eq!(service.node_policy.lease_policy(), policy);
+}
+
+/// Configured completion timeout ends a waiting fact without synthesizing application acceptance.
+#[tokio::test(start_paused = true)]
+async fn custom_application_timeout_is_enforced() {
+    let (events, mut receiver) = mpsc::unbounded_channel();
+    let policy = NodeProtocolPolicy::try_new(NodeLeasePolicy::default(), 7).unwrap();
+    let waiting = tokio::spawn(async move {
+        deliver_for_acceptance(
+            &events,
+            GrpcNodeEvent::Unavailable {
+                node_id: "test".into(),
+                session_id: "session".into(),
+            },
+            policy.application_acceptance_timeout(),
+        )
+        .await
+    });
+    let delivery = receiver.recv().await.unwrap();
+    tokio::time::advance(std::time::Duration::from_millis(6)).await;
+    assert!(!waiting.is_finished());
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
+    assert_eq!(
+        waiting.await.unwrap().unwrap_err().code(),
+        tonic::Code::DeadlineExceeded
+    );
+    let (_, completion) = delivery.into_parts();
+    completion.accept(); // A late completion cannot turn the timed-out call into success.
 }
 
 /// Registration accepts static local/global provider maxima and rejects a concrete Group scope.
@@ -431,6 +461,7 @@ async fn fact_delivery_waits_for_application_acceptance() {
                 node_id: "dog-a".to_string(),
                 session_id: "session-a".to_string(),
             },
+            NodeProtocolPolicy::default().application_acceptance_timeout(),
         )
         .await
     });
@@ -455,6 +486,7 @@ async fn fact_delivery_preserves_application_rejection() {
                 node_id: "dog-a".to_string(),
                 session_id: "session-a".to_string(),
             },
+            NodeProtocolPolicy::default().application_acceptance_timeout(),
         )
         .await
     });
@@ -480,6 +512,7 @@ async fn fact_delivery_preserves_application_unavailability() {
                 node_id: "dog-a".to_string(),
                 session_id: "session-a".to_string(),
             },
+            NodeProtocolPolicy::default().application_acceptance_timeout(),
         )
         .await
     });

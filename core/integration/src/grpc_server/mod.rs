@@ -7,7 +7,9 @@ use crate::grpc::v0_4::{
     Ack, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION, NODE_CONTRACT_VERSION, NodeMessage,
     PREVIOUS_NODE_CONTRACT_VERSION, PROTOCOL_VERSION, Registered, ServerMessage, Welcome,
 };
-use ports::NodeLeasePolicy;
+use ports::{
+    Clock, DiagnosticHandle, DiagnosticStage, NodeFactMetadata, NodeLeasePolicy, NodeProtocolPolicy,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,8 +24,6 @@ const SERVER_VERSION: &str = "roboguide.server/v0.4";
 pub const EXECUTION_SESSION_METADATA_KEY: &str = "roboguide.execution-session";
 /// The only Session schema currently understood by the Controller/Node pair.
 pub const EXECUTION_SESSION_METADATA_VALUE: &str = "roboguide.execution-session/v0.1";
-/// Maximum time transport waits for Controller composition to durably accept one fact.
-const APPLICATION_ACCEPTANCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Events received from all formal gRPC Node sessions.
 #[derive(Debug)]
@@ -65,6 +65,10 @@ pub struct GrpcNodeEventDelivery {
     event: GrpcNodeEvent,
     /// Response required before transport emits `Registered` or `Ack`.
     response: Option<oneshot::Sender<Result<(), ApplicationAcceptanceFailure>>>,
+    /// Original receive metadata, absent on direct compatibility/test calls.
+    metadata: Option<NodeFactMetadata>,
+    /// Cancellation-safe application queue observation.
+    queue_ticket: Option<ports::DiagnosticQueueTicket>,
 }
 
 /// Application-level failure category preserved until it becomes a gRPC session status.
@@ -79,8 +83,22 @@ enum ApplicationAcceptanceFailure {
 impl GrpcNodeEventDelivery {
     /// Splits the validated fact from the application-owned completion handle.
     pub fn into_parts(self) -> (GrpcNodeEvent, GrpcNodeEventCompletion) {
+        let (event, _, completion) = self.into_observed_parts();
+        (event, completion)
+    }
+
+    /// Splits a delivery while retaining original receive metadata; dequeue accounting is automatic.
+    pub fn into_observed_parts(
+        self,
+    ) -> (
+        GrpcNodeEvent,
+        Option<NodeFactMetadata>,
+        GrpcNodeEventCompletion,
+    ) {
+        drop(self.queue_ticket);
         (
             self.event,
+            self.metadata,
             GrpcNodeEventCompletion {
                 response: self.response,
             },
@@ -95,6 +113,8 @@ impl GrpcNodeEventDelivery {
         Self {
             event,
             response: Some(response),
+            metadata: None,
+            queue_ticket: None,
         }
     }
 
@@ -103,6 +123,8 @@ impl GrpcNodeEventDelivery {
         Self {
             event,
             response: None,
+            metadata: None,
+            queue_ticket: None,
         }
     }
 }
@@ -172,6 +194,19 @@ struct RoutedSession {
 }
 
 impl GrpcNodeRouter {
+    /// Returns current session/heartbeat-age diagnostics without changing route or Control state.
+    pub fn diagnostic_session(
+        &self,
+        node_id: &str,
+    ) -> Result<Option<(String, std::time::Duration)>, Status> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        Ok(sessions
+            .get(node_id)
+            .map(|route| (route.session_id.clone(), route.last_heartbeat.elapsed())))
+    }
     /// Returns whether a route still belongs to the supplied session, regardless of lease state.
     pub fn session_matches(&self, node_id: &str, session_id: &str) -> Result<bool, Status> {
         let sessions = self
@@ -338,7 +373,9 @@ pub struct GrpcIntegrationService {
     /// Boot-unique nonce preventing session identity reuse after process restart.
     boot_nonce: String,
     /// Shared heartbeat and transport lease policy.
-    lease_policy: NodeLeasePolicy,
+    node_policy: NodeProtocolPolicy,
+    /// Injected process Clock and optional observer, independent of application authority.
+    observation: GrpcSessionObservation,
 }
 
 /// Legacy v0.2 service endpoint retained only to return an explicit migration diagnostic.
@@ -367,13 +404,54 @@ impl crate::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocol
 impl GrpcIntegrationService {
     /// Creates a service and returns its command router.
     pub fn new(events: mpsc::UnboundedSender<GrpcNodeEventDelivery>) -> (Self, GrpcNodeRouter) {
-        Self::new_with_lease_policy(events, NodeLeasePolicy::default())
+        Self::new_with_policy(events, NodeProtocolPolicy::default())
     }
 
     /// Creates a service using the application-owned heartbeat and lease policy.
     pub fn new_with_lease_policy(
         events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
         lease_policy: NodeLeasePolicy,
+    ) -> (Self, GrpcNodeRouter) {
+        // The default acceptance duration is a documented, representable startup invariant.
+        let policy = NodeProtocolPolicy::try_new(
+            lease_policy,
+            ports::DEFAULT_NODE_APPLICATION_ACCEPTANCE_TIMEOUT_MS,
+        )
+        .expect("default Node acceptance timeout is representable");
+        Self::new_with_policy(events, policy)
+    }
+
+    /// Creates transport with one startup-frozen lease and application-completion policy.
+    pub fn new_with_policy(
+        events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
+        node_policy: NodeProtocolPolicy,
+    ) -> (Self, GrpcNodeRouter) {
+        Self::new_configured(
+            events,
+            node_policy,
+            GrpcSessionObservation::new(None, DiagnosticHandle::default()),
+        )
+    }
+
+    /// Adds receive-time observation using the application's Clock and a best-effort diagnostic sink.
+    pub fn new_with_observer(
+        events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
+        node_policy: NodeProtocolPolicy,
+        clock: Arc<dyn Clock + Send + Sync>,
+        diagnostics: DiagnosticHandle,
+    ) -> (Self, GrpcNodeRouter) {
+        Self::new_configured(
+            events,
+            node_policy,
+            GrpcSessionObservation::new(Some(clock), diagnostics),
+        )
+    }
+
+    /// Centralizes construction so timing and observer dependencies remain frozen across sessions.
+    fn new_configured(
+        events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
+        node_policy: NodeProtocolPolicy,
+        observation: GrpcSessionObservation,
     ) -> (Self, GrpcNodeRouter) {
         let router = GrpcNodeRouter::default();
         (
@@ -389,7 +467,8 @@ impl GrpcIntegrationService {
                         .map(|duration| duration.as_nanos())
                         .unwrap_or_default()
                 ),
-                lease_policy,
+                node_policy,
+                observation,
             },
             router,
         )
@@ -411,7 +490,8 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
         let events = self.events.clone();
         let identity = self.next_session.fetch_add(1, Ordering::Relaxed);
         let boot_nonce = self.boot_nonce.clone();
-        let lease_policy = self.lease_policy;
+        let node_policy = self.node_policy;
+        let observation = self.observation.clone();
         tokio::spawn(async move {
             if let Err(status) = run_grpc_session(
                 inbound,
@@ -420,7 +500,10 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
                 events,
                 identity,
                 boot_nonce,
-                lease_policy,
+                GrpcSessionSettings {
+                    policy: node_policy,
+                    observation,
+                },
             )
             .await
             {
@@ -442,8 +525,11 @@ async fn run_grpc_session(
     events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
     identity: u64,
     boot_nonce: String,
-    lease_policy: NodeLeasePolicy,
+    settings: GrpcSessionSettings,
 ) -> Result<(), Status> {
+    let node_policy = settings.policy;
+    let observation = settings.observation;
+    let lease_policy = node_policy.lease_policy();
     let first = inbound
         .next()
         .await
@@ -489,6 +575,8 @@ async fn run_grpc_session(
         .next()
         .await
         .ok_or_else(|| Status::invalid_argument("Register required"))??;
+    let registration_received = observation.received();
+    let registration_bytes = wire_size(&second);
     let Some(NodePayload::Register(register)) = second.message else {
         return Err(Status::invalid_argument("second message must be Register"));
     };
@@ -539,36 +627,51 @@ async fn run_grpc_session(
             .send(Err(Status::aborted("session superseded by reconnect")));
     }
     let node_id = registration.node_id.clone();
-    let registration_result = deliver_for_acceptance(
+    let registration_metadata = observation.metadata(
+        registration_received,
+        &node_id,
+        &session_id,
+        ports::DiagnosticKind::Registration,
+        registration_bytes,
+    );
+    let registration_result = deliver_received_fact(
         &events,
         GrpcNodeEvent::Registered {
             session_id: session_id.clone(),
             lease_id: lease_id.clone(),
             registration,
         },
+        node_policy.application_acceptance_timeout(),
+        registration_metadata,
+        &observation,
     )
     .await;
     if let Err(status) = registration_result {
         let removed = remove_current_route(&router, &node_id, &session_id)?;
         if removed && status.code() != tonic::Code::FailedPrecondition {
-            emit_unavailable(&events, node_id.clone(), session_id.clone());
+            emit_unavailable_observed(&events, node_id.clone(), session_id.clone(), &observation);
         }
         return Err(status);
     }
     if let Err(status) = activate_current_route(&router, &node_id, &session_id, &lease_id) {
         let removed = remove_current_route(&router, &node_id, &session_id)?;
         if removed {
-            emit_unavailable(&events, node_id.clone(), session_id.clone());
+            emit_unavailable_observed(&events, node_id.clone(), session_id.clone(), &observation);
         }
         return Err(status);
     }
     // Keep reading and validating the transport stream while Controller application acceptance
     // may be slow. ACKs are emitted only by the serial application loop after durable acceptance.
     let (validated_sender, mut validated_receiver) =
-        mpsc::unbounded_channel::<Result<NodeMessage, Status>>();
+        mpsc::unbounded_channel::<Result<ReceivedNodeMessage, Status>>();
     let reader_router = router.clone();
     let reader_node_id = node_id.clone();
     let reader_session_id = session_id.clone();
+    let reader_observation = observation.clone();
+    let ingress_queue = ports::DiagnosticQueue::new(
+        observation.diagnostics.clone(),
+        DiagnosticStage::IngressQueue,
+    );
     let reader_task = tokio::spawn(async move {
         let mut lease_check = tokio::time::interval(std::time::Duration::from_millis(250));
         loop {
@@ -597,6 +700,7 @@ async fn run_grpc_session(
                     }
                 }
             };
+            let received = reader_observation.received();
             match reader_router.session_matches(&reader_node_id, &reader_session_id) {
                 Ok(true) => {}
                 Ok(false) => {
@@ -622,14 +726,36 @@ async fn run_grpc_session(
                     break;
                 }
             }
-            if validated_sender.send(Ok(message)).is_err() {
+            let metadata = reader_observation.metadata(
+                received,
+                &reader_node_id,
+                &reader_session_id,
+                diagnostic_kind(&message),
+                wire_size(&message),
+            );
+            let queue_ticket = metadata
+                .as_ref()
+                .and_then(|metadata| ingress_queue.enqueue(metadata));
+            if validated_sender
+                .send(Ok(ReceivedNodeMessage {
+                    message,
+                    metadata,
+                    queue_ticket,
+                }))
+                .is_err()
+            {
                 break;
             }
         }
     });
     let session_result: Result<(), Status> = async {
         while let Some(message) = validated_receiver.recv().await {
-            let message = message?;
+            let ReceivedNodeMessage {
+                message,
+                metadata,
+                queue_ticket,
+            } = message?;
+            drop(queue_ticket);
             let sequence = match &message.message {
                 Some(NodePayload::Heartbeat(value)) => value.sequence,
                 Some(NodePayload::RegistrationUpdate(value)) => value.sequence,
@@ -640,13 +766,16 @@ async fn run_grpc_session(
                 Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
                 _ => 0,
             };
-            let delivery = deliver_for_acceptance(
+            let delivery = deliver_received_fact(
                 &events,
                 GrpcNodeEvent::NodeMessage {
                     node_id: node_id.clone(),
                     session_id: session_id.clone(),
                     message,
                 },
+                node_policy.application_acceptance_timeout(),
+                metadata.clone(),
+                &observation,
             )
             .await;
             delivery?;
@@ -654,6 +783,14 @@ async fn run_grpc_session(
                 let _ = outbound.send(Ok(ServerMessage {
                     message: Some(ServerPayload::Ack(Ack { sequence })),
                 }));
+                if let Some(metadata) = &metadata {
+                    observation.diagnostics.timing(
+                        metadata.kind,
+                        DiagnosticStage::Ack,
+                        metadata.received_instant.elapsed(),
+                        metadata.identity.as_ref(),
+                    );
+                }
             }
         }
         Ok(())
@@ -662,7 +799,7 @@ async fn run_grpc_session(
     reader_task.abort();
     let removed = remove_current_route(&router, &node_id, &session_id)?;
     if removed {
-        emit_unavailable(&events, node_id, session_id);
+        emit_unavailable_observed(&events, node_id, session_id, &observation);
     }
     session_result
 }
@@ -758,12 +895,21 @@ fn validate_scalar_map(
     Ok(())
 }
 
+mod diagnostics;
 mod session;
 
-use session::{
-    accept_current_message, activate_current_route, deliver_for_acceptance, emit_unavailable,
-    remove_current_route, route_is_expired, validate_registration,
+use diagnostics::{
+    GrpcSessionObservation, GrpcSessionSettings, ReceivedNodeMessage, deliver_received_fact,
+    diagnostic_kind, emit_unavailable_observed, wire_size,
 };
+
+use session::{
+    accept_current_message, activate_current_route, remove_current_route, route_is_expired,
+    validate_registration,
+};
+
+#[cfg(test)]
+use session::deliver_for_acceptance;
 
 #[cfg(test)]
 mod tests;

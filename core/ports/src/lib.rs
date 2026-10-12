@@ -5,6 +5,7 @@
 //! Transport-neutral ports owned by the DEAIOS core.
 
 mod allocation;
+mod diagnostics;
 mod memory;
 mod node_gateway;
 mod node_liveness;
@@ -13,11 +14,17 @@ mod state_record;
 mod task_satisfaction;
 
 pub use allocation::{AllocationStateError, AllocationStateReader, AllocationStateWriter};
+pub use diagnostics::{
+    DiagnosticHandle, DiagnosticIdentity, DiagnosticKind, DiagnosticObserver, DiagnosticQueue,
+    DiagnosticQueueSnapshot, DiagnosticQueueTicket, DiagnosticRecord, DiagnosticStage,
+    NodeFactMetadata,
+};
 pub use memory::{MemoryCatalogError, MemoryCatalogReader, MemoryCatalogWriter};
 pub use node_gateway::{NodeGateway, NodeGatewayError, NodeGatewayErrorKind};
 pub use node_liveness::{
-    DEFAULT_NODE_HEARTBEAT_INTERVAL_MS, DEFAULT_NODE_LEASE_DURATION_MS, NodeLeasePolicy,
-    NodeLeasePolicyError,
+    DEFAULT_NODE_APPLICATION_ACCEPTANCE_TIMEOUT_MS, DEFAULT_NODE_HEARTBEAT_INTERVAL_MS,
+    DEFAULT_NODE_LEASE_DURATION_MS, NodeLeasePolicy, NodeLeasePolicyError, NodeProtocolPolicy,
+    NodeProtocolPolicyError,
 };
 pub use spatial_memory::{
     ArtifactBlobReader, ArtifactBlobStore, ArtifactBlobWriter, ArtifactStoreError, MapCatalogError,
