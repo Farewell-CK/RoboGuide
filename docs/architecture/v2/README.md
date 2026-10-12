@@ -21,12 +21,18 @@ Control 活性与观测时间的已接受演进见 ADR-0076：Integration 仅提
 用于 State/health/peer/progress 的年龄；当前 decision time 用于资格、Commit、恢复与发送。
 续约不更新 reported health；已提交失效、route loss 或 restart 必须重新注册，不能从
 router active 或 latest heartbeat 隐式恢复。
+Peer readiness 入库后同样按当前 decision time 刷新 Runtime fence，延迟或重放的旧 ack
+不能撤销已过期状态；证据自身的 received_at 与 expires_at 保持原值。
 
 ADR-0077 的 Mission isolation 是 Orchestration-owned 执行 hold，不是 Runtime terminal
 或第二资源表。精确 Mission 的派生 transition 在内存 candidate 与 event savepoint 内
 执行；只有明确 contract-local failure 才能回滚后持久隔离。raw Runtime 事实继续接受，
 Control/State/invariant/持久化或无法分类的失败继续 fail closed。恢复是 generation-bound
 显式重验，所有物理恢复仍走 stop-proof 与原 Match/Commit/Rebind 权威。
+Hold 同时阻止整组 continuation 的准备与发送，先前 repeat 授权不绕过 hold；显式恢复
+不刷新原 recovery deadline。当前已验证的是 hold、回滚与显式恢复机制，运行期自动
+错误分类尚未验收：现有 InvalidContract 来源在 admission/restore preflight，不能将
+人工注入错误的测试当作真实运行期故障隔离证据。
 
 | 组件 | 职责 |
 | --- | --- |

@@ -85,13 +85,14 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         }
     }
 
-    /// Validates an identified Local EAIOS acknowledgement against current Group ownership.
+    /// Retains original peer evidence while deriving readiness at the current decision time.
     pub(super) fn consume_peer_channel_readiness(
         &mut self,
         node_id: &str,
         session_id: &str,
         readiness: integration::grpc::v0_4::PeerChannelReadiness,
         received_at: TimestampMs,
+        decision_at: TimestampMs,
         correlation_id: &CorrelationId,
     ) -> Result<(), IntegrationRuntimeError> {
         if readiness.session_id != session_id {
@@ -174,6 +175,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime
             .observe_peer_channel_readiness(evidence.clone())
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+        // The evidence reducer uses its original receive time. Queued evidence must not undo
+        // the current-time expiry fence established before ingress, including exact replays.
+        self.runtime.refresh_peer_channel_deadlines(decision_at);
         self.events.append(
             received_at,
             correlation_id,

@@ -20,6 +20,8 @@
 4. 隔离可暂停后续 dispatch/outcome/recovery 推进，但 raw Runtime、Node health、State、
    receipt、迟到事实和显式取消继续保留。该 Mission 的 Control ownership 不因隔离释放。
    NodeUnavailable 仍可影响多个 Mission 并建立其原 physical ambiguity fences。
+   整组 continuation 在 preparation 前也必须检查 hold；先前授权及完整 stop facts
+   不能绕过隔离创建 replacement。显式 resume 不刷新原 Group recovery deadline。
 5. 未完成 work 从 accepted plan 的 Ready state 或 durable Runtime terminal attempts
    重建，isolation source stage 持久保留；不把 ephemeral queue 作为恢复 authority。
    其他未分类 lifecycle failure 不拆成第二事务，也不改变 ADR-0023 的失败语义。
@@ -40,3 +42,15 @@ pending ownership 保留、raw terminal evidence 保留、checkpoint restart、g
 过期 State/operation/registry 重验、同一 Node 多 Mission ambiguity 及取消。失败 scope
 不可证明、Control invariant、SQLite/savepoint/commit 或 poisoned lock 仍返回全局失败，
 没有 durable checkpoint 就不能 ACK。第一版的局部分类刻意狭窄，不宣称所有 fatal 已消除。
+
+当前运行期自动分类仍未验收：生产 InvalidContract 来源是 decode/implementation
+preflight，两个 accepted-plan dispatch/outcome 回调没有已验证的该类型错误来源。
+局部错误的 savepoint 测试人工注入 typed error，只证明回滚/hold 基础机制。
+生产 HTTP 测试确认非法 JSON/不支持的契约分别在 admission 返回 400/409，内存、
+事件、checkpoint 均不变，已有 Mission 仍由 timer 正常 dispatch，不制造 isolation。
+新增运行期分类必须先证明实际单 Mission 错误来源及共享权威完整性，不能扩大捕获
+全部 Control/Mission/SQL 错误来满足一个测试。
+
+整组恢复回归验证授权后隔离、迟到 Cancelled、重复 timer、generation 拒绝、durable
+restore 后重新登记、显式 resume 和原预算到期后的禁止 continuation；资源和 stop
+facts 始终保留。测试使用合成 Node facts，不表示物理停止已被硬件验证。

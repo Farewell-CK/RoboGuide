@@ -9,7 +9,7 @@
 | O2 所有权模型 | 已实现并验证 | Control 137 个常规测试；256 条固定轨迹及 10,000 条扩展轨迹通过，支持 case 缩减、保存与回放 |
 | O3 配置与只读指标 | 已实现并验证 | ADR-0075；统一 timing、自定义 new/renew/restore/Welcome、两级 queue 及 default-off JSONL，观测失败不改变 durable trace |
 | O4 时间与 Control 活性 | 已实现并验证 | ADR-0076；Control 验证连续 exact-session evidence，独立双时间 ingestion、失效/restart fence；workspace checks 通过 |
-| O5 Mission 故障隔离 | 已实现并验证 | ADR-0077；内存/SQL 回滚、持久 hold、Control 重验、generation-bound HTTP resume |
+| O5 Mission 故障隔离 | hold/回滚/显式恢复已验证；运行期自动分类未验收 | ADR-0077；当前 typed InvalidContract 来源在 admission/restore preflight；不得将注入错误的测试当作生产故障隔离 |
 | O6 事务性能 | 测量与设计已完成；batch 暂缓 | 96/96 合成 Mission；serialize/commit 为主要成本，未证明 batch 收益/等价性，保持单事实事务 |
 | O7 部署边界 | 已实现并验证 | 具体 source / neutral codec / consumers 分离；137 个 app tests 保留兼容与 provenance |
 | O8 发布技术准备 | 技术核验已完成；发布决策待定 | 历史扫描 23 提示（1 条凭据风险待处置）、依赖元数据、ADR-0078、4/4 quickstart、认证边界披露 |
@@ -99,3 +99,25 @@ Gitleaks 8.30.1 校验官方归档后扫描本地全 refs 可达历史（561 com
 重复 relocation ADR 改为 0078；78 个 ADR 无重复。声明式 validate 与真实 loopback
 最小 quickstart 4/4 完成，网络/认证/物理边界已披露。详见
 [发布技术准备审计](release-preparation-audit.md)。
+
+## 实施后 review 修补
+
+复核基线为 `dev@879a5be`。两个反例均先在未修复代码上失败，再在生产路径修补后通过：
+
+- Group continuation 的应用准备入口加入 Mission hold 检查，覆盖 timer 和 ingress 共用
+  路径。两个 current attempt 在隔离时保持两个，不提交 replacement；原 repeat 授权、
+  Cancelled facts、reservation 和 105ms deadline 保留。显式 generation-bound resume 后
+  才允许原预算内 continuation；预算到期不创建新 attempt。durable restore 后重新登记
+  当前 topology/health 仍受 hold 约束，不将过期 registration 当作新证据。
+- Peer ack 入库后按当前 decision_at 刷新 Runtime fence，保留原 received_at/expiry。
+  延迟新 sequence 和 exact replay 不复活过期 Ready；下一 tick 前 checkpoint 为 Fenced。
+  一个 peer 更新不能刷新其 partner，全部当前 ack 新鲜时正常恢复 Ready。
+- 对 O5 验收结论作纠正：新增真实 HTTP admission + timer 测试确认 400/409 拒绝、
+  内存/事件/checkpoint 不变及已有 Mission 继续 dispatch。人工 InvalidContract 注入
+  只验证 savepoint/hold 机制，当前 accepted-plan dispatch/outcome 尚无已验证的该类型
+  生产来源。运行期自动隔离分类仍为明确的后续门禁，不能扩大捕获所有 Control/未知
+  错误来伪造覆盖；README、V2、ADR 和故障矩阵保留这一限制。
+
+修补验证：workspace all-features tests **631 passed / 2 explicit ignored**，workspace
+all-targets/all-features Clippy（warnings denied）、Rustdoc、formatting、diff 检查与严格
+文档站构建通过。所有检查均为离线/本地合成证据；E6 未开始，未运行模型或硬件。

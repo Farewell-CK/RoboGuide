@@ -147,6 +147,7 @@ pub(crate) fn begin_current_ambiguity_recoveries(
                         mission.group_id() == &group_id
                             && mission.lifecycle()
                                 == orchestration::MissionExecutionLifecycle::Running
+                            && mission.isolation().is_none()
                     })
             })
         {

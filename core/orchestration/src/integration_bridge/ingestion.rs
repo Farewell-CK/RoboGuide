@@ -303,6 +303,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                             &session_id,
                             readiness,
                             received_at,
+                            decision_at,
                             correlation_id,
                         )?;
                     }

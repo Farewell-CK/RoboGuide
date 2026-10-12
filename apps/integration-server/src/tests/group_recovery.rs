@@ -8,6 +8,9 @@ use orchestration::RemoteExecutionStatus;
 #[path = "group_recovery_transport.rs"]
 mod transport;
 
+#[path = "group_recovery_isolation.rs"]
+mod isolation;
+
 /// Declares original owner support, session transport and one exclusive operation resource.
 fn registration(index: usize, supported: bool, capacity: u32) -> domain::NodeRegistration {
     let owner = domain::LocalSystemId::new("worker-runtime").unwrap();

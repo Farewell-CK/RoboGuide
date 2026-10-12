@@ -334,11 +334,62 @@ fn peer_readiness_is_owner_checked_expires_and_restores_fenced() {
         runtime::PeerChannelLifecycle::Ready
     );
 
+    for decision_at in [70, 71] {
+        bridge
+            .consume_received(
+                readiness("dog-a", "motion", "guide", 7),
+                TimestampMs::new(36),
+                TimestampMs::new(decision_at),
+                &correlation,
+            )
+            .expect("delayed evidence and its exact replay remain admissible raw facts");
+        let channels = bridge.peer_channel_snapshots(&group_id);
+        let channel = &channels[0];
+        assert_eq!(channel.lifecycle(), runtime::PeerChannelLifecycle::Fenced);
+        assert!(
+            channel.readiness().iter().all(|ack| {
+                ack.expires_at <= TimestampMs::new(decision_at)
+                    && ack.expires_at.as_millis() == ack.received_at.as_millis() + 20
+            }),
+            "queue delay and replay cannot refresh receive-relative TTL"
+        );
+        let checkpoint: serde_json::Value =
+            serde_json::from_str(&bridge.checkpoint_json().unwrap()).unwrap();
+        assert_eq!(
+            checkpoint["runtime"]["peer_channels"][0]["lifecycle"], "Fenced",
+            "the current fence must be durable before another timer tick"
+        );
+    }
+    bridge
+        .consume_received(
+            readiness("cane-a", "safety", "safety", 4),
+            TimestampMs::new(72),
+            TimestampMs::new(73),
+            &correlation,
+        )
+        .expect("one fresh peer cannot renew its expired partner");
+    assert_eq!(
+        bridge.peer_channel_snapshots(&group_id)[0].lifecycle(),
+        runtime::PeerChannelLifecycle::Fenced
+    );
+    bridge
+        .consume_received(
+            readiness("dog-a", "motion", "guide", 8),
+            TimestampMs::new(74),
+            TimestampMs::new(75),
+            &correlation,
+        )
+        .expect("both currently valid peers can restore readiness");
+    assert_eq!(
+        bridge.peer_channel_snapshots(&group_id)[0].lifecycle(),
+        runtime::PeerChannelLifecycle::Ready
+    );
+
     let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
         &bridge.checkpoint_json().expect("checkpoint serializes"),
         InMemoryEventLog::new(),
         GrpcNodeRouter::default(),
-        TimestampMs::new(40),
+        TimestampMs::new(100),
     )
     .expect("checkpoint restores conservatively");
     let channel = &restored.peer_channel_snapshots(&group_id)[0];

@@ -24,6 +24,8 @@
    process Clock 在拿到 writer/Controller lock 后读取。旧 `consume` 入口兼容地令两者相同。
    State、health、peer/progress 原始 receive-relative TTL 不因排队/restore 变新；Runtime
    deadline 刷新与所有后续 Match/Commit/recovery 使用 fresh decision time。
+   Peer ack reducer 入库后再次按该 decision time 刷新过期 fence，覆盖延迟新 sequence
+   和 exact replay；先前过期的 peer 不因另一个 peer 更新而变新。
 6. Registration 的 process lease grant 使用 decision time，initial reported Offline 事实保留
    ingress time；transport route 仍等待 durable Registered。第一份正常 health heartbeat
    仍是实际 dispatch 的门槛。短时间残留且 session 已 superseded 的 registration 被拒绝。
@@ -40,3 +42,5 @@ FixedClock/scripted ingress 验证连续心跳在 application 暂缓时仍保留
 route loss、restart 拒绝复活；延迟 State/peer/progress 保留 receive time。实际 loopback
 验证 timer 事务看到 reader evidence，ACK 仍等待原始事实持久接受。Control-only、
 合成网络与物理停止证据分别报告；当前历史 pilot 因果仍为 NOT PROVEN。
+延迟 peer 回归同时检查入库后的当前状态、下一 tick 前的 checkpoint、receive-relative
+expiry 原值、exact replay、部分 peer 更新及全部 peer 新鲜后的正常恢复。

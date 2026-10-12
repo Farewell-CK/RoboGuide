@@ -46,7 +46,7 @@ fn fixture(log: &state::SqliteEventLog) -> ControllerState {
     controller
 }
 
-/// A failed private candidate and its events are discarded before A's hold is committed; B progresses.
+/// An injected typed failure proves rollback/hold mechanics, not a production error's classification.
 #[test]
 fn local_failure_rolls_back_candidate_and_events_then_isolates_only_a() {
     let directory = tempfile::tempdir().unwrap();
@@ -510,10 +510,20 @@ fn sqlite_failure_is_not_downgraded_to_isolation() {
     log.rollback_batch().unwrap();
 }
 
-/// Exchanges one isolated local HTTP request against the production resume handler.
+/// Uses the exact resume path while sharing the production HTTP transport with admission checks.
 async fn resume_request(
     controller: &Arc<Mutex<ControllerState>>,
     events: &state::SqliteEventLog,
+    body: &str,
+) -> String {
+    http_request(controller, events, "/v1/missions/mission-a/resume", body).await
+}
+
+/// Exchanges one bounded POST through the production HTTP handler without injecting transition errors.
+async fn http_request(
+    controller: &Arc<Mutex<ControllerState>>,
+    events: &state::SqliteEventLog,
+    path: &str,
     body: &str,
 ) -> String {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -530,7 +540,7 @@ async fn resume_request(
     let client = async {
         let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
         let request = format!(
-            "POST /v1/missions/mission-a/resume HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         );
         stream.write_all(request.as_bytes()).await.unwrap();
@@ -544,6 +554,104 @@ async fn resume_request(
     })
     .await
     .unwrap()
+}
+
+/// Real contract errors reject before execution; they never manufacture a hold or stop existing Missions.
+#[tokio::test]
+async fn admission_contract_rejection_preserves_existing_missions_and_timer_dispatch() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let mut live = fixture(&log);
+    let correlation = domain::CorrelationId::new("admission-boundary").unwrap();
+    let mut state = live.bridge.state().clone();
+    for index in 0..2 {
+        live.bridge
+            .control_mut()
+            .register_node(
+                &mut state,
+                recovery_driver_node(&format!("worker-{index}"), &format!("cpu-{index}")),
+                domain::NodeStatus::new(domain::NodeHealth::Online, domain::TimestampMs::new(2)),
+                domain::TimestampMs::new(2),
+                &correlation,
+                &mut log.clone(),
+            )
+            .unwrap();
+    }
+    *live.bridge.state_mut() = state;
+    let before = server_checkpoint_json(&live).unwrap();
+    log.begin_batch().unwrap();
+    log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &before)
+        .unwrap();
+    log.commit_batch().unwrap();
+    let sequence = log.latest_sequence().unwrap();
+    let controller = Arc::new(Mutex::new(live));
+
+    let mut unsupported: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../scenarios/execution-relations-v0.1/mission-plan.json"
+    ))
+    .unwrap();
+    unsupported["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_4);
+    unsupported["contexts"][0]["coupling_mode"] = serde_json::json!("concurrent-cooperation");
+    unsupported["contexts"][0]["shared_view"] = serde_json::json!({
+        "bindings": [{"context_role_id":"guide", "field":"execution"}],
+        "include_freshness":false
+    });
+    unsupported["contexts"][0]["relations"][0] = serde_json::json!({
+        "id":"relative-guidance", "kind":"relative-pose", "frame_id":"map",
+        "source":{"task_id":"observe-safety", "role_id":"safety-observer"},
+        "target":{"task_id":"navigate", "role_id":"navigator"}
+    });
+    let rejected_plan = decode_mission_plan(&unsupported.to_string()).unwrap();
+    assert!(matches!(
+        orchestration::SupportedMechanismProfile::current().validate(&rejected_plan),
+        Err(OrchestrationError::InvalidContract(_))
+    ));
+    for (body, status) in [("{".to_string(), "400"), (unsupported.to_string(), "409")] {
+        let response = http_request(&controller, &log, "/v1/missions", &body).await;
+        assert!(
+            response.starts_with(&format!("HTTP/1.1 {status}")),
+            "{response}"
+        );
+        assert_eq!(
+            server_checkpoint_json(&controller.lock().unwrap()).unwrap(),
+            before
+        );
+        assert_eq!(log.latest_sequence().unwrap(), sequence);
+        assert_eq!(
+            log.load_checkpoint().unwrap().unwrap().checkpoint_json,
+            before
+        );
+    }
+    drive_application_timer(
+        &controller,
+        &log,
+        &Arc::new(Mutex::new(())),
+        domain::TimestampMs::new(4),
+        None,
+    )
+    .unwrap();
+    let live = controller.lock().unwrap();
+    assert!(
+        live.orchestrator
+            .execution(rejected_plan.goal().mission_id())
+            .is_none()
+    );
+    assert_eq!(live.bridge.attempt_history().len(), 2);
+    for mission_id in live.orchestrator.mission_ids() {
+        assert!(
+            live.orchestrator
+                .execution(&mission_id)
+                .unwrap()
+                .isolation()
+                .is_none()
+        );
+        assert!(
+            live.bridge
+                .attempt_history()
+                .iter()
+                .any(|attempt| attempt.command().mission_id() == &mission_id)
+        );
+    }
 }
 
 /// The public endpoint distinguishes rejection from persistence failure and publishes only after commit.
