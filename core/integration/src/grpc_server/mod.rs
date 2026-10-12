@@ -170,6 +170,8 @@ impl GrpcNodeEventCompletion {
 /// Cloneable command router for currently connected Node sessions.
 #[derive(Clone, Default)]
 pub struct GrpcNodeRouter {
+    /// Shared optional epoch/quorum gate checked at each actual Execute/Cancel send.
+    command_fence: Arc<Mutex<Option<Arc<dyn ports::CommandDeliveryFence>>>>,
     /// Node identities mapped to their current session and outbound stream.
     sessions: Arc<Mutex<BTreeMap<String, RoutedSession>>>,
 }
@@ -203,6 +205,30 @@ struct RoutedSession {
 }
 
 impl GrpcNodeRouter {
+    /// Installs one startup-owned delivery fence for every clone of this process's router.
+    pub fn set_command_delivery_fence(
+        &self,
+        fence: Arc<dyn ports::CommandDeliveryFence>,
+    ) -> Result<(), Status> {
+        *self
+            .command_fence
+            .lock()
+            .map_err(|_| Status::internal("delivery fence unavailable"))? = Some(fence);
+        Ok(())
+    }
+
+    /// Requires the original issuing epoch to retain quorum at the physical transport boundary.
+    fn check_command_delivery(&self) -> Result<(), Status> {
+        let fence = self
+            .command_fence
+            .lock()
+            .map_err(|_| Status::internal("delivery fence unavailable"))?
+            .clone();
+        if let Some(fence) = fence {
+            fence.check_delivery().map_err(Status::unavailable)?;
+        }
+        Ok(())
+    }
     /// Anchors current-process continuity only after application-accepted registration.
     fn anchor_liveness(
         &self,
@@ -369,6 +395,7 @@ impl GrpcNodeRouter {
         resource_ids: Vec<String>,
         execution_session_json: String,
     ) -> Result<(), Status> {
+        self.check_command_delivery()?;
         if command_id.trim().is_empty()
             || execution_id.trim().is_empty()
             || invocation.mission_id.trim().is_empty()
@@ -431,6 +458,7 @@ impl GrpcNodeRouter {
         command_id: String,
         execution_id: String,
     ) -> Result<(), Status> {
+        self.check_command_delivery()?;
         if command_id.trim().is_empty() || execution_id.trim().is_empty() {
             return Err(Status::invalid_argument(
                 "Cancel command and execution identities must be nonblank",

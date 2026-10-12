@@ -18,6 +18,12 @@ use std::sync::{Arc, Mutex};
 #[path = "checkpoint_store.rs"]
 mod checkpoint_store;
 use checkpoint_store::StoredCheckpoint;
+#[path = "application_replication.rs"]
+mod application_replication;
+pub use application_replication::{
+    APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch,
+    checkpoint_identity, validate_persisted_event,
+};
 pub use checkpoint_store::{CheckpointStoragePolicy, CheckpointWriteStats};
 
 /// Previous JSON payload codec retained for Mission/Execution evidence compatibility.
@@ -63,7 +69,7 @@ const EVENT_PAYLOAD_SCHEMA_V15: &str = "domain.EventPayload.json/v15";
 const EVENT_PAYLOAD_SCHEMA_V16: &str = "domain.EventPayload.json/v16";
 
 /// One event row retained by the durable evidence store.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PersistedEvent {
     /// Monotonic append sequence used for replay ordering and pagination.
     pub sequence: u64,
@@ -82,7 +88,7 @@ pub struct PersistedEvent {
 }
 
 /// One atomically persisted controller projection checkpoint.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PersistedCheckpoint {
     /// Event sequence represented by this projection.
     pub event_sequence: u64,
@@ -95,6 +101,8 @@ pub struct PersistedCheckpoint {
 /// Failures returned by the SQLite evidence store.
 #[derive(Debug)]
 pub enum SqliteEventLogError {
+    /// Required replica epoch/quorum acceptance was unavailable or rejected this batch.
+    Replication(String),
     /// SQLite returned an operational or schema error.
     Sqlite(rusqlite::Error),
     /// The event log mutex was poisoned by a previous panic.
@@ -107,6 +115,10 @@ impl std::fmt::Display for SqliteEventLogError {
     /// Formats a durable evidence failure.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Replication(error) => write!(
+                formatter,
+                "controller replication acceptance failed: {error}"
+            ),
             Self::Sqlite(error) => write!(formatter, "event log SQLite failure: {error}"),
             Self::LockPoisoned => formatter.write_str("event log lock is poisoned"),
             Self::Codec(error) => write!(formatter, "event log payload codec failure: {error}"),
@@ -126,6 +138,8 @@ impl From<rusqlite::Error> for SqliteEventLogError {
 /// SQLite WAL-backed immutable event envelope store.
 #[derive(Clone)]
 pub struct SqliteEventLog {
+    /// Optional quorum acceptance port, installed before any Controller authority uses the store.
+    replicator: Option<Arc<dyn ApplicationBatchReplicator>>,
     /// Optional bounded checkpoint-write observations; failure never changes storage authority.
     diagnostics: ports::DiagnosticHandle,
     /// Startup-owned storage representation, independent of application authority.
@@ -280,6 +294,7 @@ impl SqliteEventLog {
             .unwrap_or(0);
         let next_event_number = metadata_event_number.max(max_sequence);
         Ok(Self {
+            replicator: None,
             diagnostics: ports::DiagnosticHandle::default(),
             checkpoint_policy,
             checkpoint_cache: Arc::new(Mutex::new(checkpoint_cache)),
@@ -516,6 +531,11 @@ impl SqliteEventLog {
 
     /// Begins an application-level SQLite event batch.
     pub fn begin_batch(&self) -> Result<(), SqliteEventLogError> {
+        if let Some(replicator) = &self.replicator {
+            replicator
+                .assert_write_authority()
+                .map_err(SqliteEventLogError::Replication)?;
+        }
         let mut batch_start = self
             .batch_start_number
             .lock()
@@ -553,6 +573,46 @@ impl SqliteEventLog {
             .connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        if let Some(replicator) = &self.replicator {
+            let target = self
+                .pending_checkpoint_cache
+                .lock()
+                .map_err(|_| SqliteEventLogError::LockPoisoned)?
+                .as_ref()
+                .map(|stored| (*stored.snapshot).clone())
+                .ok_or_else(|| {
+                    SqliteEventLogError::Replication(
+                        "replicated batch lacks its complete checkpoint".into(),
+                    )
+                })?;
+            let previous = self
+                .checkpoint_cache
+                .lock()
+                .map_err(|_| SqliteEventLogError::LockPoisoned)?
+                .clone();
+            let mut statement = connection.prepare(
+                "SELECT sequence, event_id, timestamp_ms, correlation_id, causation_id, payload_schema, payload_json
+                 FROM events WHERE sequence > ?1 ORDER BY sequence",
+            )?;
+            let events = statement
+                .query_map([batch_start.expect("batch checked above")], event_from_row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            let batch = ApplicationCommitBatch {
+                schema: APPLICATION_COMMIT_SCHEMA.into(),
+                previous_event_sequence: previous
+                    .as_ref()
+                    .map_or(0, |stored| stored.snapshot.event_sequence),
+                previous_checkpoint_digest: previous
+                    .as_ref()
+                    .map(|stored| checkpoint_identity(&stored.snapshot)),
+                checkpoint: target,
+                events,
+            };
+            batch.validate()?;
+            replicator
+                .confirm_batch(batch)
+                .map_err(SqliteEventLogError::Replication)?;
+        }
         connection.execute_batch("COMMIT")?;
         if let Some(candidate) = self
             .pending_checkpoint_cache
@@ -791,6 +851,9 @@ impl SqliteEventLog {
             .batch_start_number
             .lock()
             .map_err(|_| "event batch lock is poisoned".to_string())?;
+        if self.replicator.is_some() && batch_start.is_none() {
+            return Err("replicated events require an application checkpoint transaction".into());
+        }
         let mut counter = self
             .next_event_number
             .lock()

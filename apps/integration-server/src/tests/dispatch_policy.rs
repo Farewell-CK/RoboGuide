@@ -3,6 +3,29 @@
 use super::*;
 use domain::{CorrelationId, ExecutionGroupId, MissionId, TimestampMs};
 
+/// Cluster authority cannot be restored standalone, under another profile or through an older wrapper.
+#[test]
+fn checkpoint_replication_profile_cannot_be_bypassed() {
+    let fixture = Fixture::new(1);
+    let mut saved: ServerCheckpoint = serde_json::from_str(
+        &fixture
+            .events
+            .load_checkpoint()
+            .unwrap()
+            .unwrap()
+            .checkpoint_json,
+    )
+    .unwrap();
+    validate_replication_checkpoint(&saved, None).unwrap();
+    assert!(validate_replication_checkpoint(&saved, Some("cluster")).is_err());
+    saved.replication_profile = Some("cluster".into());
+    validate_replication_checkpoint(&saved, Some("cluster")).unwrap();
+    assert!(validate_replication_checkpoint(&saved, None).is_err());
+    assert!(validate_replication_checkpoint(&saved, Some("different")).is_err());
+    saved.schema = PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA.into();
+    assert!(validate_replication_checkpoint(&saved, Some("cluster")).is_err());
+}
+
 /// Declares independent normalized roots, retaining canonical intent and Task-scoped resources.
 fn plan_body(mission: &str, count: usize) -> String {
     let operation = serde_json::json!({"namespace":"compute","name":"work","version":"v1"});

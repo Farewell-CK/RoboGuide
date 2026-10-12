@@ -5,6 +5,8 @@
 //! Transport-neutral ports owned by the DEAIOS core.
 
 mod allocation;
+mod command_delivery;
+pub use command_delivery::CommandDeliveryFence;
 mod diagnostics;
 mod memory;
 mod node_gateway;

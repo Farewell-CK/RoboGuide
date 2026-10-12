@@ -5,6 +5,46 @@ use crate::grpc::v0_4 as wire;
 use ports::{DiagnosticHandle, DiagnosticObserver, DiagnosticRecord};
 use std::sync::atomic::AtomicU64;
 
+/// Rejecting original-epoch authority, independent of any physical Node or route inventory.
+struct LostEpoch;
+
+impl ports::CommandDeliveryFence for LostEpoch {
+    /// Fences delivery before a wire command can enter any route.
+    fn check_delivery(&self) -> Result<(), String> {
+        Err("original epoch lost".into())
+    }
+}
+
+/// Both actual Execute and Cancel entry points honor the shared clone's original-epoch fence.
+#[test]
+fn original_epoch_fences_execute_and_cancel_before_routing() {
+    let router = GrpcNodeRouter::default();
+    let clone = router.clone();
+    router
+        .set_command_delivery_fence(Arc::new(LostEpoch))
+        .unwrap();
+    assert_eq!(
+        clone
+            .execute(
+                "node",
+                "command".into(),
+                "execution".into(),
+                wire::CanonicalInvocation::default(),
+                Vec::new()
+            )
+            .unwrap_err()
+            .code(),
+        tonic::Code::Unavailable
+    );
+    assert_eq!(
+        clone
+            .cancel("node", "cancel".into(), "execution".into())
+            .unwrap_err()
+            .code(),
+        tonic::Code::Unavailable
+    );
+}
+
 /// Injected shared process time whose advance does not require a sleep or remote clock.
 struct TestClock {
     /// Current controlled receive/decision timestamp.

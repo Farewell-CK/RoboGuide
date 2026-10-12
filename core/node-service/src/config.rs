@@ -21,6 +21,9 @@ pub struct NodeServiceConfig {
     pub node_id: String,
     /// Formal RoboGuide Server gRPC endpoint.
     pub server_endpoint: String,
+    /// At most two distinct startup-owned fallback Controller routes, available with v0.7 only.
+    #[serde(default)]
+    pub fallback_server_endpoints: Vec<String>,
     /// Durable directory used by the Node Service execution journal.
     pub state_directory: std::path::PathBuf,
     /// Delay before reconnect after transport loss.

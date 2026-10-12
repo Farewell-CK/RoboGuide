@@ -439,6 +439,7 @@ mod tests {
     #[test]
     fn checkpoint_restore_requires_the_same_verifier_source() {
         let checkpoint = ServerCheckpoint {
+            replication_profile: None,
             schema: SERVER_CHECKPOINT_SCHEMA.to_string(),
             integration_json: String::new(),
             orchestration_json: String::new(),

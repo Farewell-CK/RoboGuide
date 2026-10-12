@@ -1,0 +1,676 @@
+//! FULL-synchronous SQLite Raft vote/log/state storage and bounded exact snapshot transfer.
+
+// OpenRaft requires its concrete StorageError at every storage boundary; retain typed upstream failures.
+#![allow(clippy::result_large_err)]
+
+use crate::*;
+use openraft::storage::{LogFlushed, RaftLogStorage, RaftStateMachine};
+use openraft::{
+    Entry, EntryPayload, LogId, LogState, RaftLogReader, RaftSnapshotBuilder, Snapshot,
+    SnapshotMeta, StorageError, StorageIOError, StoredMembership, Vote,
+};
+use rusqlite::{Connection, OptionalExtension, params};
+use serde::de::DeserializeOwned;
+use sha2::{Digest as _, Sha256};
+use std::fs::File;
+use std::ops::{Bound, RangeBounds};
+use std::sync::Mutex;
+
+/// Bound on accepted historical metadata, separate from opaque Artifact/Memory content.
+const MAX_HISTORY_BYTES: u64 = 64 * 1024 * 1024;
+/// Bound on one complete replica snapshot including escaped checkpoint/history metadata.
+const MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
+
+/// Complete quorum-applied evidence for inactive materialization, not a second live Control map.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplicaView {
+    /// Highest accepted application revision.
+    pub revision: u64,
+    /// Exact complete accepted authority snapshot.
+    pub checkpoint: Option<state::PersistedCheckpoint>,
+    /// Immutable complete event metadata history, including catalog source evidence.
+    pub events: Vec<state::PersistedEvent>,
+}
+
+impl ReplicaView {
+    /// Validates bounded complete history and exact codecs on reopen and before snapshot installation.
+    fn validate(&self, application_schema: &str) -> Result<(), StorageError<u64>> {
+        match &self.checkpoint {
+            Some(checkpoint)
+                if checkpoint.schema == application_schema
+                    && checkpoint.event_sequence == self.events.len() as u64
+                    && checkpoint.checkpoint_json.len() <= 64 * 1024 * 1024
+                    && self.revision > 0 => {}
+            None if self.events.is_empty() && self.revision == 0 => {}
+            _ => {
+                return Err(io_error(
+                    "replica view schema/revision/checkpoint tail differs",
+                ));
+            }
+        }
+        let mut bytes = 0_u64;
+        let mut identities = std::collections::BTreeSet::new();
+        for (index, event) in self.events.iter().enumerate() {
+            if event.sequence != index as u64 + 1 || !identities.insert(&event.event_id) {
+                return Err(io_error("replica history identity/sequence differs"));
+            }
+            state::validate_persisted_event(event).map_err(io_error)?;
+            bytes = bytes
+                .checked_add(serde_json::to_vec(event).map_err(io_error)?.len() as u64)
+                .ok_or_else(|| io_error("replica history size overflow"))?;
+            if bytes > MAX_HISTORY_BYTES {
+                return Err(io_error("replica history exceeds bounds"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Closed snapshot body preserves log/membership pointers and source identity atomically.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoreSnapshot {
+    /// Startup-frozen cluster/profile identity.
+    profile: String,
+    /// Last quorum-applied log, including blank/membership entries.
+    last_applied: Option<LogId<u64>>,
+    /// Exact accepted consensus membership.
+    membership: StoredMembership<u64, BasicNode>,
+    /// Exact complete accepted application metadata.
+    view: ReplicaView,
+}
+
+/// One serialized durable connection implements distinct Raft storage responsibility traits.
+#[derive(Clone)]
+pub struct SqliteRaftStore {
+    /// Atomic SQLite storage shared by log and state-machine traits.
+    connection: Arc<Mutex<Connection>>,
+    /// Lifetime process writer lease; a second owner cannot fork local consensus history.
+    _writer: Arc<File>,
+    /// Frozen network/application identity.
+    profile: String,
+    /// Exact admitted opaque application schema.
+    application_schema: String,
+}
+
+/// Binds exact snapshot bytes and applied pointers, detecting corruption before any installation.
+fn snapshot_identity(applied: Option<LogId<u64>>, revision: u64, bytes: &[u8]) -> String {
+    format!(
+        "{}-{revision}-{:x}",
+        applied.map_or(0, |id| id.index),
+        Sha256::digest(bytes)
+    )
+}
+
+/// Maps persistence failures into the upstream fail-closed storage boundary.
+pub(super) fn io_error(error: impl std::fmt::Display) -> StorageError<u64> {
+    StorageIOError::write_state_machine(&std::io::Error::other(error.to_string())).into()
+}
+
+/// Reads one versioned JSON metadata value without replacing malformed authority with defaults.
+fn read_meta<T: DeserializeOwned>(
+    connection: &Connection,
+    key: &str,
+) -> Result<Option<T>, StorageError<u64>> {
+    let encoded: Option<String> = connection
+        .query_row(
+            "SELECT value FROM replica_meta WHERE key=?1",
+            [key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(io_error)?;
+    encoded
+        .map(|encoded| serde_json::from_str(&encoded).map_err(io_error))
+        .transpose()
+}
+
+/// Writes one metadata value in its caller's current atomic transaction.
+fn write_meta<T: Serialize>(
+    connection: &Connection,
+    key: &str,
+    value: &T,
+) -> Result<(), StorageError<u64>> {
+    let encoded = serde_json::to_string(value).map_err(io_error)?;
+    connection.execute("INSERT INTO replica_meta(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![key, encoded]).map_err(io_error)?;
+    Ok(())
+}
+
+/// Reads exact accepted checkpoint/history while one connection guard provides a consistent view.
+fn read_view(connection: &Connection) -> Result<ReplicaView, StorageError<u64>> {
+    let mut statement = connection
+        .prepare("SELECT sequence,event_id,data,digest FROM replica_events ORDER BY sequence")
+        .map_err(io_error)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, u64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(io_error)?;
+    let events = rows
+        .map(|row| {
+            let (sequence, event_id, data, digest) = row.map_err(io_error)?;
+            let event: state::PersistedEvent = serde_json::from_str(&data).map_err(io_error)?;
+            if event.sequence != sequence
+                || event.event_id != event_id
+                || digest != format!("{:x}", Sha256::digest(data.as_bytes()))
+            {
+                return Err(io_error("replica event envelope/digest differs"));
+            }
+            Ok(event)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let checkpoint: Option<state::PersistedCheckpoint> = read_meta(connection, "checkpoint")?;
+    let digest: Option<String> = read_meta(connection, "checkpoint_digest")?;
+    if checkpoint.as_ref().map(state::checkpoint_identity) != digest {
+        return Err(io_error("replica checkpoint digest differs"));
+    }
+    Ok(ReplicaView {
+        revision: read_meta(connection, "revision")?.unwrap_or(0),
+        checkpoint,
+        events,
+    })
+}
+
+impl SqliteRaftStore {
+    /// Opens a private consensus database and rejects a conflicting stored cluster/schema profile.
+    pub fn open(path: &Path, profile: &str, application_schema: &str) -> Result<Self, String> {
+        let mut lease = path.as_os_str().to_os_string();
+        lease.push(".writer.lock");
+        let writer = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(Path::new(&lease))
+            .map_err(|error| error.to_string())?;
+        writer
+            .try_lock()
+            .map_err(|error| format!("replica database already owned: {error}"))?;
+        let connection = Connection::open(path).map_err(|error| error.to_string())?;
+        connection
+            .pragma_update(None, "journal_mode", "WAL")
+            .map_err(|error| error.to_string())?;
+        connection
+            .pragma_update(None, "synchronous", "FULL")
+            .map_err(|error| error.to_string())?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS replica_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS replica_log(log_index INTEGER PRIMARY KEY,data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS replica_events(sequence INTEGER PRIMARY KEY,event_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL,digest TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS replica_snapshot(singleton INTEGER PRIMARY KEY CHECK(singleton=1),meta TEXT NOT NULL,data BLOB NOT NULL);").map_err(|error| error.to_string())?;
+        let identity: Option<(String, String)> =
+            read_meta(&connection, "identity").map_err(|error| error.to_string())?;
+        if identity.as_ref().is_some_and(|identity| {
+            identity != &(profile.to_string(), application_schema.to_string())
+        }) {
+            return Err("stored replica cluster/application identity differs".into());
+        }
+        write_meta(&connection, "identity", &(profile, application_schema))
+            .map_err(|error| error.to_string())?;
+        let store = Self {
+            connection: Arc::new(Mutex::new(connection)),
+            _writer: Arc::new(writer),
+            profile: profile.into(),
+            application_schema: application_schema.into(),
+        };
+        let view = store.accepted_view()?;
+        view.validate(application_schema)
+            .map_err(|error| error.to_string())?;
+        Ok(store)
+    }
+
+    /// Reads the complete already-applied view without evaluating Control or Runtime transitions.
+    pub fn accepted_view(&self) -> Result<ReplicaView, String> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| "replica store lock is poisoned")?;
+        read_view(&connection).map_err(|error| error.to_string())
+    }
+
+    /// Reads the applied application ordinal without decoding complete history on each supervisor tick.
+    pub fn accepted_revision(&self) -> Result<u64, String> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| "replica store lock is poisoned")?;
+        read_meta(&connection, "revision")
+            .map(|revision| revision.unwrap_or(0))
+            .map_err(|error| error.to_string())
+    }
+
+    /// Accepts only an exact predecessor/tail under the startup-owned application schema.
+    fn apply_batch(
+        &self,
+        connection: &Connection,
+        batch: &state::ApplicationCommitBatch,
+    ) -> Result<CommitReceipt, StorageError<u64>> {
+        let previous: Option<state::PersistedCheckpoint> = read_meta(connection, "checkpoint")?;
+        let revision: u64 = read_meta(connection, "revision")?.unwrap_or(0);
+        let current_digest = previous.as_ref().map(state::checkpoint_identity);
+        let rejection = if let Err(error) = batch.validate() {
+            Some(error.to_string())
+        } else if batch.checkpoint.schema != self.application_schema {
+            Some("replica application schema differs".into())
+        } else if previous
+            .as_ref()
+            .map_or(0, |checkpoint| checkpoint.event_sequence)
+            != batch.previous_event_sequence
+            || current_digest != batch.previous_checkpoint_digest
+        {
+            Some("replica predecessor identity differs".into())
+        } else {
+            None
+        };
+        if let Some(rejection) = rejection {
+            return Ok(CommitReceipt {
+                accepted: false,
+                revision,
+                checkpoint_digest: current_digest,
+                rejection: Some(rejection),
+            });
+        }
+        let bytes: u64 = connection
+            .query_row(
+                "SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM replica_events",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(io_error)?;
+        let encoded = batch
+            .events
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(io_error)?;
+        let additional: u64 = encoded.iter().map(|event| event.len() as u64).sum();
+        if bytes
+            .checked_add(additional)
+            .is_none_or(|bytes| bytes > MAX_HISTORY_BYTES)
+        {
+            return Ok(CommitReceipt {
+                accepted: false,
+                revision,
+                checkpoint_digest: current_digest,
+                rejection: Some("bounded replica metadata history is full".into()),
+            });
+        }
+        for (event, encoded) in batch.events.iter().zip(encoded) {
+            connection
+                .execute(
+                    "INSERT INTO replica_events(sequence,event_id,data,digest) VALUES (?1,?2,?3,?4)",
+                    params![event.sequence, event.event_id, encoded, format!("{:x}",Sha256::digest(encoded.as_bytes()))],
+                )
+                .map_err(io_error)?;
+        }
+        let revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io_error("application revision exhausted"))?;
+        write_meta(connection, "checkpoint", &batch.checkpoint)?;
+        write_meta(
+            connection,
+            "checkpoint_digest",
+            &state::checkpoint_identity(&batch.checkpoint),
+        )?;
+        write_meta(connection, "revision", &revision)?;
+        Ok(CommitReceipt {
+            accepted: true,
+            revision,
+            checkpoint_digest: Some(state::checkpoint_identity(&batch.checkpoint)),
+            rejection: None,
+        })
+    }
+}
+
+impl RaftLogReader<ControllerRaftConfig> for SqliteRaftStore {
+    /// Returns consecutive stored entries in the requested inclusive/exclusive range.
+    async fn try_get_log_entries<R>(
+        &mut self,
+        range: R,
+    ) -> Result<Vec<Entry<ControllerRaftConfig>>, StorageError<u64>>
+    where
+        R: RangeBounds<u64> + Clone + std::fmt::Debug + Send,
+    {
+        let start = match range.start_bound() {
+            Bound::Included(value) => *value,
+            Bound::Excluded(value) => match value.checked_add(1) {
+                Some(value) => value,
+                None => return Ok(Vec::new()),
+            },
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(value) => *value,
+            Bound::Excluded(value) => match value.checked_sub(1) {
+                Some(value) => value,
+                None => return Ok(Vec::new()),
+            },
+            Bound::Unbounded => i64::MAX as u64,
+        };
+        if start > end || start > i64::MAX as u64 {
+            return Ok(Vec::new());
+        }
+        let connection = self.connection.lock().map_err(io_error)?;
+        let mut statement = connection.prepare("SELECT data FROM replica_log WHERE log_index>=?1 AND log_index<=?2 ORDER BY log_index").map_err(io_error)?;
+        let rows = statement
+            .query_map(params![start, end.min(i64::MAX as u64)], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(io_error)?;
+        rows.map(|row| serde_json::from_str(&row.map_err(io_error)?).map_err(io_error))
+            .collect()
+    }
+}
+
+impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
+    type LogReader = Self;
+
+    /// Exposes the exact last-present/purged pointers independently of applied state.
+    async fn get_log_state(&mut self) -> Result<LogState<ControllerRaftConfig>, StorageError<u64>> {
+        let connection = self.connection.lock().map_err(io_error)?;
+        let purged: Option<LogId<u64>> = read_meta(&connection, "purged")?;
+        let last: Option<String> = connection
+            .query_row(
+                "SELECT data FROM replica_log ORDER BY log_index DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(io_error)?;
+        let last = last
+            .map(|entry| {
+                serde_json::from_str::<Entry<ControllerRaftConfig>>(&entry).map_err(io_error)
+            })
+            .transpose()?;
+        Ok(LogState {
+            last_purged_log_id: purged,
+            last_log_id: last.map(|entry| entry.log_id).or(purged),
+        })
+    }
+
+    /// Shares the same serialized persistent log reader.
+    async fn get_log_reader(&mut self) -> Self::LogReader {
+        self.clone()
+    }
+
+    /// Persists each vote under SQLite FULL before returning to the consensus protocol.
+    async fn save_vote(&mut self, vote: &Vote<u64>) -> Result<(), StorageError<u64>> {
+        let connection = self.connection.lock().map_err(io_error)?;
+        write_meta(&connection, "vote", vote)
+    }
+
+    /// Returns only the durable vote; malformed values fail closed.
+    async fn read_vote(&mut self) -> Result<Option<Vote<u64>>, StorageError<u64>> {
+        let connection = self.connection.lock().map_err(io_error)?;
+        read_meta(&connection, "vote")
+    }
+
+    /// Persists the exact committed log pointer independently of application projections.
+    async fn save_committed(
+        &mut self,
+        committed: Option<LogId<u64>>,
+    ) -> Result<(), StorageError<u64>> {
+        let connection = self.connection.lock().map_err(io_error)?;
+        match committed {
+            Some(committed) => write_meta(&connection, "committed", &committed),
+            None => {
+                connection
+                    .execute("DELETE FROM replica_meta WHERE key='committed'", [])
+                    .map_err(io_error)?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Reads the last durable consensus commitment.
+    async fn read_committed(&mut self) -> Result<Option<LogId<u64>>, StorageError<u64>> {
+        let connection = self.connection.lock().map_err(io_error)?;
+        read_meta(&connection, "committed")
+    }
+
+    /// Appends ordered logs atomically and reports flush only after the durable Commit.
+    async fn append<I>(
+        &mut self,
+        entries: I,
+        callback: LogFlushed<ControllerRaftConfig>,
+    ) -> Result<(), StorageError<u64>>
+    where
+        I: IntoIterator<Item = Entry<ControllerRaftConfig>> + Send,
+        I::IntoIter: Send,
+    {
+        let entries = entries.into_iter().collect::<Vec<_>>();
+        let result = (|| {
+            let mut connection = self.connection.lock().map_err(io_error)?;
+            let transaction = connection.transaction().map_err(io_error)?;
+            for entry in entries {
+                let encoded = serde_json::to_string(&entry).map_err(io_error)?;
+                transaction.execute("INSERT INTO replica_log(log_index,data) VALUES (?1,?2) ON CONFLICT(log_index) DO UPDATE SET data=excluded.data",
+                    params![entry.log_id.index,encoded]).map_err(io_error)?;
+            }
+            transaction.commit().map_err(io_error)?;
+            Ok(())
+        })();
+        callback.log_io_completed(
+            result
+                .as_ref()
+                .map(|_| ())
+                .map_err(|error: &StorageError<u64>| std::io::Error::other(error.to_string())),
+        );
+        result
+    }
+
+    /// Removes only the suffix specified by the upstream consensus engine.
+    async fn truncate(&mut self, log_id: LogId<u64>) -> Result<(), StorageError<u64>> {
+        self.connection
+            .lock()
+            .map_err(io_error)?
+            .execute(
+                "DELETE FROM replica_log WHERE log_index>=?1",
+                [log_id.index],
+            )
+            .map_err(io_error)?;
+        Ok(())
+    }
+
+    /// Deletes a compacted prefix and advances its durable pointer in one transaction.
+    async fn purge(&mut self, log_id: LogId<u64>) -> Result<(), StorageError<u64>> {
+        let mut connection = self.connection.lock().map_err(io_error)?;
+        let transaction = connection.transaction().map_err(io_error)?;
+        transaction
+            .execute(
+                "DELETE FROM replica_log WHERE log_index<=?1",
+                [log_id.index],
+            )
+            .map_err(io_error)?;
+        write_meta(&transaction, "purged", &log_id)?;
+        transaction.commit().map_err(io_error)?;
+        Ok(())
+    }
+}
+
+impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
+    type SnapshotBuilder = Self;
+
+    /// Returns only pointers and membership already persisted by quorum apply.
+    async fn applied_state(
+        &mut self,
+    ) -> Result<(Option<LogId<u64>>, StoredMembership<u64, BasicNode>), StorageError<u64>> {
+        let connection = self.connection.lock().map_err(io_error)?;
+        Ok((
+            read_meta(&connection, "applied")?,
+            read_meta(&connection, "membership")?.unwrap_or_default(),
+        ))
+    }
+
+    /// Persists consensus apply and exact accepted history before returning any application receipt.
+    async fn apply<I>(&mut self, entries: I) -> Result<Vec<CommitReceipt>, StorageError<u64>>
+    where
+        I: IntoIterator<Item = Entry<ControllerRaftConfig>> + Send,
+        I::IntoIter: Send,
+    {
+        let entries = entries.into_iter().collect::<Vec<_>>();
+        let mut connection = self.connection.lock().map_err(io_error)?;
+        let transaction = connection.transaction().map_err(io_error)?;
+        let mut replies = Vec::new();
+        for entry in entries {
+            let receipt = match &entry.payload {
+                EntryPayload::Blank => CommitReceipt::default(),
+                EntryPayload::Membership(membership) => {
+                    write_meta(
+                        &transaction,
+                        "membership",
+                        &StoredMembership::new(Some(entry.log_id), membership.clone()),
+                    )?;
+                    CommitReceipt::default()
+                }
+                EntryPayload::Normal(batch) => self.apply_batch(&transaction, batch)?,
+            };
+            write_meta(&transaction, "applied", &entry.log_id)?;
+            replies.push(receipt);
+        }
+        transaction.commit().map_err(io_error)?;
+        Ok(replies)
+    }
+
+    /// Provides the same serialized storage as a stable snapshot builder.
+    async fn get_snapshot_builder(&mut self) -> Self::SnapshotBuilder {
+        self.clone()
+    }
+
+    /// Creates a fresh bounded receive cursor; RPC chunking remains OpenRaft-owned.
+    async fn begin_receiving_snapshot(
+        &mut self,
+    ) -> Result<Box<Cursor<Vec<u8>>>, StorageError<u64>> {
+        Ok(Box::new(Cursor::new(Vec::new())))
+    }
+
+    /// Installs exact accepted metadata and consensus pointers atomically, preserving the last snapshot.
+    async fn install_snapshot(
+        &mut self,
+        meta: &SnapshotMeta<u64, BasicNode>,
+        snapshot: Box<Cursor<Vec<u8>>>,
+    ) -> Result<(), StorageError<u64>> {
+        let data = snapshot.into_inner();
+        if data.len() > MAX_SNAPSHOT_BYTES {
+            return Err(io_error("replica snapshot exceeds bounds"));
+        }
+        let restored: StoreSnapshot = serde_json::from_slice(&data).map_err(io_error)?;
+        if restored.profile != self.profile
+            || restored.last_applied != meta.last_log_id
+            || restored.membership != meta.last_membership
+            || meta.snapshot_id
+                != snapshot_identity(restored.last_applied, restored.view.revision, &data)
+        {
+            return Err(io_error("replica snapshot identity/pointers differ"));
+        }
+        restored.view.validate(&self.application_schema)?;
+        let mut connection = self.connection.lock().map_err(io_error)?;
+        let transaction = connection.transaction().map_err(io_error)?;
+        transaction
+            .execute("DELETE FROM replica_events", [])
+            .map_err(io_error)?;
+        for (index, event) in restored.view.events.iter().enumerate() {
+            if event.sequence != index as u64 + 1 {
+                return Err(io_error("replica snapshot evidence is discontinuous"));
+            }
+            transaction
+                .execute(
+                    "INSERT INTO replica_events(sequence,event_id,data,digest) VALUES (?1,?2,?3,?4)",
+                    params![
+                        event.sequence,
+                        event.event_id,
+                        serde_json::to_string(event).map_err(io_error)?,
+                        format!("{:x}",Sha256::digest(serde_json::to_vec(event).map_err(io_error)?))
+                    ],
+                )
+                .map_err(io_error)?;
+        }
+        write_meta(&transaction, "membership", &restored.membership)?;
+        write_meta(&transaction, "revision", &restored.view.revision)?;
+        if let Some(checkpoint) = restored.view.checkpoint {
+            write_meta(&transaction, "checkpoint", &checkpoint)?;
+            write_meta(
+                &transaction,
+                "checkpoint_digest",
+                &state::checkpoint_identity(&checkpoint),
+            )?;
+        } else {
+            transaction
+                .execute(
+                    "DELETE FROM replica_meta WHERE key IN ('checkpoint','checkpoint_digest')",
+                    [],
+                )
+                .map_err(io_error)?;
+        }
+        if let Some(applied) = restored.last_applied {
+            write_meta(&transaction, "applied", &applied)?;
+        } else {
+            transaction
+                .execute("DELETE FROM replica_meta WHERE key='applied'", [])
+                .map_err(io_error)?;
+        }
+        transaction.execute("INSERT INTO replica_snapshot(singleton,meta,data) VALUES (1,?1,?2) ON CONFLICT(singleton) DO UPDATE SET meta=excluded.meta,data=excluded.data",
+            params![serde_json::to_string(meta).map_err(io_error)?,data]).map_err(io_error)?;
+        transaction.commit().map_err(io_error)?;
+        Ok(())
+    }
+
+    /// Returns the exact persistent last snapshot for upstream streaming or recovery.
+    async fn get_current_snapshot(
+        &mut self,
+    ) -> Result<Option<Snapshot<ControllerRaftConfig>>, StorageError<u64>> {
+        let connection = self.connection.lock().map_err(io_error)?;
+        let saved: Option<(String, Vec<u8>)> = connection
+            .query_row(
+                "SELECT meta,data FROM replica_snapshot WHERE singleton=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(io_error)?;
+        saved
+            .map(|(meta, data)| {
+                Ok(Snapshot {
+                    meta: serde_json::from_str(&meta).map_err(io_error)?,
+                    snapshot: Box::new(Cursor::new(data)),
+                })
+            })
+            .transpose()
+    }
+}
+
+impl RaftSnapshotBuilder<ControllerRaftConfig> for SqliteRaftStore {
+    /// Builds one consistent complete snapshot and persists it before exposing the stream handle.
+    async fn build_snapshot(
+        &mut self,
+    ) -> Result<Snapshot<ControllerRaftConfig>, StorageError<u64>> {
+        let connection = self.connection.lock().map_err(io_error)?;
+        let snapshot = StoreSnapshot {
+            profile: self.profile.clone(),
+            last_applied: read_meta(&connection, "applied")?,
+            membership: read_meta(&connection, "membership")?.unwrap_or_default(),
+            view: read_view(&connection)?,
+        };
+        let data = serde_json::to_vec(&snapshot).map_err(io_error)?;
+        let meta = SnapshotMeta {
+            last_log_id: snapshot.last_applied,
+            last_membership: snapshot.membership.clone(),
+            snapshot_id: snapshot_identity(snapshot.last_applied, snapshot.view.revision, &data),
+        };
+        if data.len() > MAX_SNAPSHOT_BYTES {
+            return Err(io_error("replica snapshot exceeds bounds"));
+        }
+        connection.execute("INSERT INTO replica_snapshot(singleton,meta,data) VALUES (1,?1,?2) ON CONFLICT(singleton) DO UPDATE SET meta=excluded.meta,data=excluded.data",
+            params![serde_json::to_string(&meta).map_err(io_error)?,data]).map_err(io_error)?;
+        Ok(Snapshot {
+            meta,
+            snapshot: Box::new(Cursor::new(data)),
+        })
+    }
+}

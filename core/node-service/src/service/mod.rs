@@ -42,10 +42,19 @@ impl NodeService {
     /// Recovers durable executions and reconnects forever after session loss.
     pub async fn run(&self) -> Result<(), NodeServiceError> {
         self.engine.recover()?;
+        let mut route_attempt = 0_usize;
         loop {
-            if let Err(error) = self.run_session().await {
+            if let Err(error) = self
+                .run_session_on(
+                    self.engine
+                        .catalog()
+                        .server_endpoint_for_attempt(route_attempt),
+                )
+                .await
+            {
                 eprintln!("roboguide-node session ended: {error}");
             }
+            route_attempt = route_attempt.wrapping_add(1);
             tokio::time::sleep(std::time::Duration::from_millis(
                 self.engine.catalog().reconnect_delay_ms(),
             ))
@@ -55,11 +64,16 @@ impl NodeService {
 
     /// Runs one Hello -> Welcome -> Register -> Registered v0.4 session.
     pub async fn run_session(&self) -> Result<(), NodeServiceError> {
+        self.run_session_on(self.engine.catalog().server_endpoint())
+            .await
+    }
+
+    /// Reconnects one fixed route with the same durable journal and handles; registration does not replay Execute.
+    async fn run_session_on(&self, endpoint: &str) -> Result<(), NodeServiceError> {
         let catalog = self.engine.catalog();
-        let mut client =
-            RoboGuideNodeProtocolClient::connect(catalog.server_endpoint().to_string())
-                .await
-                .map_err(NodeServiceError::Transport)?;
+        let mut client = RoboGuideNodeProtocolClient::connect(endpoint.to_string())
+            .await
+            .map_err(NodeServiceError::Transport)?;
         let (outbound, receiver) = mpsc::unbounded_channel();
         outbound
             .send(NodeMessage {

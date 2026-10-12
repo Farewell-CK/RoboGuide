@@ -40,7 +40,9 @@ pub(crate) use dispatch::{drive_ready_tasks, drive_rebound_attempts};
 pub(crate) use outcomes::{
     apply_pending_cancellations, apply_runtime_outcomes, close_terminal_mission_coordination,
 };
-pub(crate) use persistence::{acquire_event_log_writer_lock, server_checkpoint_json};
+pub(crate) use persistence::{
+    acquire_event_log_writer_lock, server_checkpoint_json, validate_replication_checkpoint,
+};
 pub(crate) use physical_entity_registry::load_physical_entity_registry_file;
 #[cfg(test)]
 pub(crate) use recovery::{apply_recovery_required, resume_role_recovery};

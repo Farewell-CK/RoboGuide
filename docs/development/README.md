@@ -96,6 +96,7 @@ reference transport 和 configured command bridge 已
 apps -> node-service -> integration -> ports -> domain
 apps -> orchestration -> integration/control/runtime/state -> ports -> domain
 apps -> artifact-store -> ports -> domain
+apps/controller-replica -> controller-replication -> state/ports -> domain
 ```
 
 Mission Intelligence 从 `contracts/capability/v0.3/catalog.json` 读取稳定 Capability/Operation
@@ -384,6 +385,10 @@ estimation、priority/fairness/preemption、batching、bidding/auction、RL/LLM 
 multi-role recovery。演化这些能力前需要真实 Compute Load/Queue/GPU Memory、
 Pose/Travel/Traffic 与 contention evidence。完整 authority 决策见
 [`ADR-0029`](../decisions/0029-bounded-joint-scheduling-and-future-reservations.md)。
+
+当前 Orchestration 已通过 ADR-0082 补充 durable logical priority/aging、每 Mission round 和
+有界准入；它没有改变 stateless joint Scheduler 的 CandidateSet/Control commitment 分工。
+批处理由 ADR-0080 的 application transaction 实现；运行中物理 preemption 仍未实现。
 
 ### State & Memory Plane — Allocation State v0.1
 

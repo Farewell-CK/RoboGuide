@@ -2,6 +2,47 @@
 
 use super::*;
 
+/// Fixed failover routes rotate without changing Node identity; legacy, duplicate and excess routes reject.
+#[test]
+fn bounded_controller_failover_routes_preserve_catalog_identity() {
+    let source: NodeServiceConfig = toml::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scenarios/e1-shared-world-episode-51/node-a.toml"
+    )))
+    .unwrap();
+    let mut config = source.clone();
+    config.fallback_server_endpoints = vec![
+        "http://127.0.0.1:31001".into(),
+        "http://127.0.0.1:31002".into(),
+    ];
+    let catalog = CompiledLocalCatalog::compile(config.clone(), Path::new(".")).unwrap();
+    assert_eq!(catalog.node_id(), source.node_id);
+    assert_eq!(
+        catalog.server_endpoint_for_attempt(0),
+        source.server_endpoint
+    );
+    assert_eq!(
+        catalog.server_endpoint_for_attempt(1),
+        "http://127.0.0.1:31001"
+    );
+    assert_eq!(
+        catalog.server_endpoint_for_attempt(3),
+        source.server_endpoint
+    );
+    for mutation in ["legacy", "duplicate", "excess", "invalid"] {
+        let mut changed = config.clone();
+        match mutation {
+            "legacy" => changed.schema = CONFIG_SCHEMA_V0_6.into(),
+            "duplicate" => changed.fallback_server_endpoints[0] = source.server_endpoint.clone(),
+            "excess" => changed
+                .fallback_server_endpoints
+                .push("http://127.0.0.1:31003".into()),
+            _ => changed.fallback_server_endpoints[0] = "file:///tmp/forbidden".into(),
+        }
+        assert!(CompiledLocalCatalog::compile(changed, Path::new(".")).is_err());
+    }
+}
+
 /// Compiles the real deployment profile without network, simulator or State mutation.
 #[test]
 fn recovery_metadata_validates_exact_operations_before_connections_open() {

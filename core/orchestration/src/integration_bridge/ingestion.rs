@@ -3,6 +3,10 @@
 use super::*;
 
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
+    /// Borrows the composition-owned evidence port for checkpoint durability profile inspection.
+    pub fn event_sink(&self) -> &E {
+        &self.events
+    }
     /// Installs a best-effort diagnostic sink without changing any authority or checkpoint.
     pub fn set_diagnostics(&mut self, diagnostics: ports::DiagnosticHandle) {
         self.diagnostics = diagnostics;

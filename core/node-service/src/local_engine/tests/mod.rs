@@ -25,6 +25,7 @@ fn valid_config(_descriptor_set: PathBuf) -> NodeServiceConfig {
         schema: CONFIG_SCHEMA_V0_2.to_string(),
         node_id: "dog-a".to_string(),
         server_endpoint: "http://192.0.2.10:50051".to_string(),
+        fallback_server_endpoints: Vec::new(),
         state_directory: PathBuf::from("state"),
         reconnect_delay_ms: 100,
         local_systems: vec![

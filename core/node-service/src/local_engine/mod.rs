@@ -75,6 +75,8 @@ pub struct CompiledLocalCatalog {
     node_id: String,
     /// Remote RoboGuide Server endpoint.
     server_endpoint: String,
+    /// Startup-frozen fallback routes; none can change Node identity or local execution handles.
+    fallback_server_endpoints: Vec<String>,
     /// Durable journal directory resolved relative to the configuration file.
     state_directory: PathBuf,
     /// Reconnect backoff.

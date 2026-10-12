@@ -9,10 +9,12 @@ members = [
     "core/artifact-store",
     "core/testkit",
     "core/integration",
+    "core/controller-replication",
     "core/node-service",
     "apps/controller",
     "apps/real-node-smoke",
     "apps/integration-server",
+    "apps/controller-replica",
     "apps/roboguide-node",
 ]
 resolver = "2"

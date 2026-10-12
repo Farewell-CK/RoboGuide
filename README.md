@@ -81,6 +81,9 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
 - 核心 Rust 包按职责位于 `core/`，Mission 编排位于 `core/orchestration/`，可运行组合入口位于
   `apps/controller/` 和 `apps/integration-server/`；
+- 可选 `core/controller-replication/` 与 `apps/controller-replica/` 提供静态三成员 trusted-loopback
+  quorum 持久化和独立 supervisor；切换重建 metadata，保留 Unknown/ownership 且不重放 Execute。
+  默认 standalone；Artifact/Memory 内容不复制。软件部署边界见 [ADR-0083](docs/decisions/0083-quorum-controller-replication.md)。
 - `core/artifact-store` 提供独立 filesystem artifact CAS infrastructure；`apps/real-node-smoke`
   默认 probe formal Node Protocol v0.4，显式 `--simulate-execute` 经 Controller synthetic
   Mission 触发正式 dispatch 后只发送合成生命周期事实；
@@ -829,9 +832,11 @@ checkpoint。非终态 execution 恢复为 `Unknown` 并等待 Reconciliation，
 失败；live relation 同样保守重算并保留 coordination fence。缺少 checkpoint、schema 不支持、
 relation registry 与 MissionPlan 不一致或序号不一致时 fail-closed。
 
-当前 composition root 是单 writer：进程启动时会持有 controller SQLite 同目录下的
+默认 standalone composition root 是单 writer：进程启动时会持有 controller SQLite 同目录下的
 `<database>.writer.lock`，第二个指向同一数据库的 Integration Server 会立即启动失败，避免
-形成两个不同步的 Catalog projection。这是单机一致性护栏，不是 Leader Election 或 HA。
+形成两个不同步的 Catalog projection。可选的静态三成员 quorum 软件入口仍让每个数据库
+只有一个 writer；多数接受先于 ACK，切换走原保守恢复。配置与能力范围见
+[Controller 复制部署](docs/development/controller-replication.md)，默认不启用。
 
 节点侧复制并修改 `config/node.toml` 后启动常驻 Node Service：
 

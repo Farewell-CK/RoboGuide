@@ -67,6 +67,11 @@ pub(crate) fn server_checkpoint_json(
         .checkpoint_json()
         .map_err(|error| format!("orchestration checkpoint failure: {error}"))?;
     serde_json::to_string(&ServerCheckpoint {
+        replication_profile: controller
+            .bridge
+            .event_sink()
+            .replication_profile()
+            .map(str::to_string),
         mission_admissions: controller.mission_admissions.clone(),
         schema: SERVER_CHECKPOINT_SCHEMA.to_string(),
         integration_json,
@@ -75,4 +80,19 @@ pub(crate) fn server_checkpoint_json(
         verifier_source_digest: controller.verifier_source_digest.clone(),
     })
     .map_err(|error| format!("controller checkpoint wrapper failure: {error}").into())
+}
+
+/// Rejects cluster history under standalone/different profiles and legacy wrappers hiding quorum authority.
+pub(crate) fn validate_replication_checkpoint(
+    saved: &ServerCheckpoint,
+    profile: Option<&str>,
+) -> Result<(), String> {
+    if saved.replication_profile.as_deref() != profile
+        || (saved.schema != SERVER_CHECKPOINT_SCHEMA && saved.replication_profile.is_some())
+    {
+        return Err(
+            "controller checkpoint replication profile differs from startup authority".into(),
+        );
+    }
+    Ok(())
 }

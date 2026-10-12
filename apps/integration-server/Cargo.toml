@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+controller-replication = { path = "../../core/controller-replication" }
 integration = { path = "../../core/integration" }
 artifact-store = { path = "../../core/artifact-store" }
 orchestration = { path = "../../core/orchestration" }

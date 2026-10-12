@@ -60,7 +60,8 @@ Protocol v0.4 继承选择性 Reported/Observed push；State observation 不自�
 同一切片建立五类 Memory 的 provider discovery、immutable manifest catalog 和基于现有 CAS
 的 selective exchange evidence。它解决共同上层语义与 local ownership，不关闭 Q1：Belief
 provider、fusion/conflict policy、允许哪些 Belief 影响 Control、访问控制、retention/GC、
-多 Controller replication 仍需场景证据。通用 Node Memory workflow 已由
+多 Controller 的静态 quorum metadata profile 已由 ADR-0083 实现并通过合成进程检查；
+跨主机、内容可用性与物理发布仍需场景证据。通用 Node Memory workflow 已由
 [`ADR-0025`](decisions/0025-memory-provider-backend-and-workflow.md) 的 v0.6 provider
 discover/export/import workflow 与 filesystem/JSONL Node ledger/reference fallback 补齐；真实
 EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场证据。
@@ -159,10 +160,12 @@ Transport、序列化格式、数据库、调度算法或部署拓扑。
   [`ADR-0022`](decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md) 固定为单一
   `roboguide-node`、声明式 Local Integration Engine 与 deployment-owned Local EAIOS facade；
   Agent、SDK、Plugin、ROS Bridge 等仅是 facade 内部实现选择，不再是 RoboGuide core 的待决接入架构。
-- Control Plane 的进程划分、Leader Election、高可用与一致性算法；
+- Control Plane 已有 ADR-0083 的 OpenRaft 静态三成员 loopback 软件 profile；
+  跨主机认证、动态 membership、policy/history 升级与物理高可用发布仍待决；
 - State / Belief / Memory 的数据库、缓存、事件总线和复制方式；
 - Observation 融合采用投票、滤波、因子图或其他方法；
-- Scheduler v0.2 已采用 deterministic bounded joint search；真实 cost model、priority/fairness、
+- Scheduler v0.2 已采用 deterministic bounded joint search，ADR-0082 已实现 Orchestration
+  logical priority/fairness 和有界准入；真实 cost model、
   travel/traffic prediction、divisible quota、auction 或 RL policy 仍待证据决定；
 - Shared Resource Coordination 的时空图、Reservation 和冲突求解；
 - Messaging / Invocation 使用 DDS、Zenoh、gRPC、MQTT、WebRTC 或其他协议；

@@ -227,7 +227,10 @@ pub(crate) fn flush_unisolated_commands(
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
     let missions: Vec<serde_json::Value> =
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
-    if saved.schema == SERVER_CHECKPOINT_SCHEMA {
+    if matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
+    ) {
         if missions
             .iter()
             .any(|mission| mission.get("dispatch_policy").is_none())

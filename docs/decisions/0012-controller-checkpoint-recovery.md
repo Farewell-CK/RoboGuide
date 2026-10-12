@@ -61,6 +61,16 @@ ADR-0080 implements bounded fact transactions without weakening durable acceptan
 now implements opt-in exact checkpoint deltas, revision/digest validation, cache rollback and atomic
 compaction. Readonly inspection reconstructs the latest complete authority; missing/corrupt chains
 reject startup, and application recovery still preserves Unknown, retained ownership and no blind
-dispatch. This closes the incremental-storage software item; complete event reducers and replicated
-control recovery remain separate decisions. Engineering process measurements retain an initial
+dispatch. This closes the incremental-storage software item; complete event reducers remain a
+separate decision. Engineering process measurements retain an initial
 startup timeout and all later complete runs rather than claiming universal throughput improvement.
+
+## Later replication implementation
+
+ADR-0083 now supplies opt-in static three-member trusted-loopback quorum acceptance and leader
+child supervision. The accepted view contains complete authority snapshots plus metadata history;
+promotion rematerializes the private projection and applies the conservative restore above. Majority
+acceptance precedes local Commit/ACK; original epoch/quorum fences command delivery. Real process
+leader-loss and Node-journal checks cover this software slice. Cross-host deployment, content-blob
+replication, physical continuation and complete event reducers remain outside it. See the
+[deployment and evidence boundary](../development/controller-replication.md).

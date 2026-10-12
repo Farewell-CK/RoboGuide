@@ -1,0 +1,18 @@
+[package]
+name = "controller-replication"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openraft = { version = "=0.9.25", features = ["serde", "storage-v2"] }
+state = { path = "../state" }
+ports = { path = "../ports" }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tokio = { version = "1.53", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "3"

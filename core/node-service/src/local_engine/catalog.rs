@@ -47,6 +47,25 @@ impl CompiledLocalCatalog {
         validate_identity(&config.node_id, "node_id")?;
         validate_server_endpoint(&config.server_endpoint)?;
         require(
+            config.fallback_server_endpoints.is_empty() || config.schema == CONFIG_SCHEMA_V0_7,
+            "fallback_server_endpoints",
+            "requires node-config/v0.7",
+        )?;
+        require(
+            config.fallback_server_endpoints.len() <= 2,
+            "fallback_server_endpoints",
+            "at most two fallback routes are supported",
+        )?;
+        let mut endpoints = BTreeSet::from([config.server_endpoint.as_str()]);
+        for endpoint in &config.fallback_server_endpoints {
+            validate_server_endpoint(endpoint)?;
+            require(
+                endpoints.insert(endpoint.as_str()),
+                "fallback_server_endpoints",
+                "routes must be distinct",
+            )?;
+        }
+        require(
             config.reconnect_delay_ms > 0,
             "reconnect_delay_ms",
             "must be non-zero",
@@ -183,6 +202,7 @@ impl CompiledLocalCatalog {
             schema: config.schema,
             node_id: config.node_id,
             server_endpoint: config.server_endpoint,
+            fallback_server_endpoints: config.fallback_server_endpoints,
             state_directory,
             reconnect_delay_ms: config.reconnect_delay_ms,
             local_systems,
@@ -212,6 +232,16 @@ impl CompiledLocalCatalog {
     /// Returns the formal remote RoboGuide Server endpoint.
     pub fn server_endpoint(&self) -> &str {
         &self.server_endpoint
+    }
+
+    /// Selects a bounded configured route after session loss without opening connections or changing ownership.
+    pub fn server_endpoint_for_attempt(&self, attempt: usize) -> &str {
+        let index = attempt % (1 + self.fallback_server_endpoints.len());
+        if index == 0 {
+            &self.server_endpoint
+        } else {
+            &self.fallback_server_endpoints[index - 1]
+        }
     }
 
     /// Returns the resolved durable execution-journal directory.

@@ -399,6 +399,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Control and Orchestration authority; no producer gets execution mutation authority.
 - `apps/integration-server/` is the formal gRPC server composition root and
   `apps/roboguide-node/` is the configured node-side daemon composition root.
+- `core/controller-replication/` owns OpenRaft-backed durable opaque accepted batches, FULL SQLite
+  consensus storage and bounded trusted-loopback replica RPC; it never makes Control/Runtime decisions.
+  `apps/controller-replica/` owns the opt-in static three-member supervisor and only its Controller child.
+  Exact base/tail/profile and majority acceptance precede local SQL Commit/ACK; original epoch/quorum
+  fences each Execute/Cancel. Promotion rematerializes complete metadata then restores Unknown and
+  retained ownership without replay. Artifact/Memory bytes stay separate. See ADR-0083.
+  Node config v0.7 optionally permits two bounded fallback Controller endpoints; session loss rotates
+  fixed routes while preserving Node identity, command journal and Local EAIOS handles.
 - Each node machine runs only `roboguide-node`; new Local EAIOS integrations use
   startup-validated HTTP, dynamic gRPC, or MCP workflow configuration and never
   add an EAIOS-specific code branch or RoboGuide-side service.

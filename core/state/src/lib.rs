@@ -14,8 +14,9 @@ mod task_satisfaction;
 
 pub use allocation::InMemoryAllocationState;
 pub use event_log::{
+    APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch,
     CheckpointStoragePolicy, CheckpointWriteStats, PersistedCheckpoint, PersistedEvent,
-    SqliteEventLog, SqliteEventLogError,
+    SqliteEventLog, SqliteEventLogError, checkpoint_identity, validate_persisted_event,
 };
 pub use memory::MemoryCatalogProjection;
 pub use node::InMemorySharedNodeState;

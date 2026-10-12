@@ -80,7 +80,8 @@ Mission A: import(map-b/r1) -> localization.verify(anchor-lab)
   no-follow 文件打开约束叶子；词法 `..` 检查本身不构成受控路径边界。
 - 事件日志记录 evidence 和 catalog transition，不承载大文件；checkpoint 不复制 blob。
 - 当前单机 composition root 对每个 controller SQLite 获取 OS 级独占 writer lock；第二个
-  Server fail-closed。该约束不是 Leader Election 或 HA 方案，多 writer 留待后续决策。
+  Server fail-closed。standalone 仍保留该约束；ADR-0083 的可选三副本软件 profile 使用
+  独立 consensus storage 和一名 leader child，各本地数据库仍只有一个 writer。
 - Runtime 只路由不透明的 map reference，Control 只决定和提交执行配置；Catalog 不授予资源
   ownership，也不触发 Task。
 - 双节点验收必须显式约束逻辑 Actor 到不同物理 Node 并检查 committed assignment；不能把
@@ -96,5 +97,13 @@ Mission A: import(map-b/r1) -> localization.verify(anchor-lab)
   Runtime checkpoint。
 - 后续可以把 CAS 换成对象存储或把 HTTP 换成其他 transport，而不改变 Domain、State 或
   Node workflow 语义。
+
+## Later metadata recovery
+
+ADR-0083 在每个 quorum accepted view 保留完整 event metadata history；promotion 重建
+Controller event store 后，既有 catalog 按原 immutable source/time/sequence replay。
+Artifact/Memory 内容仍在独立 CAS/provider 内，本机制不会把发现的 manifest 当作新副本
+已拥有 bytes，也不授权自动复制。quorum/local Commit 不确定时旧 catalog recovery fence
+继续生效。跨主机 HA、内容可用性和认证仍需单独发布 gate。
 - 若未来需要动态产出绑定或多地图融合，必须新增版本化 Mission/Artifact contract 和 ADR，
   不能向 Runtime 偷渡该职责。

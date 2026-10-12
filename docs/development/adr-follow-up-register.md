@@ -29,14 +29,14 @@
 | S2：有界事实批处理 | ADR-0080 已实现；6 项真实 gRPC、嵌套 savepoint 与 128/128 合成进程检查通过 | 1/N 轨迹等价、拒绝/SQL/hold/barrier 均验证；2ms 窗口降低 serialization/Commit 次数，保留单条兼容模式 |
 | S3：增量 checkpoint 存储 | ADR-0081 软件已实现、显式 opt-in；默认 full | 8 项存储/损坏/rollback 检查、真实应用恢复与进程复核通过；写入 bytes 降低，吞吐收益尚未建立；首次 startup timeout 保留 |
 | S4：多 Mission 优先级/公平/准入 | ADR-0082 已实现；5 个 Core + 7 个 app 检查通过 | logical aging、实际资源 gang 饥饿反例、round/32-turn bound、restore、due window、priority HTTP 与 admission 429；不授予物理时限/停止保证 |
-| S5：控制面复制与切换 | 待稳定事务/恢复/调度 authority | replicated durable acceptance、single leader delivery、term/session fence、失去 quorum fail closed；leader crash/partition 不重放物理歧义、不释放未停止 ownership |
+| S5：控制面复制与切换 | ADR-0083 的静态三成员 trusted-loopback 软件已实现 | upstream storage conformance、真实 engine/process quorum/leader loss/rejoin、Unknown/ownership/policy/journal 与旧 route fence；Artifact/Memory 内容及跨主机/物理发布保留 |
 | S6：受支持的抢占 | 依赖 S4/S5 和明确 stop/repeat contract | 原 physical stop proof、隔离 stop support、原 retry budget；运行工作未提供该声明时仍排队；软件证据不能替代硬件验证 |
 
 ## 继续保留的明确边界
 
 | ADR / 工作族 | 遗留项 | 当前处理 |
 | --- | --- | --- |
-| 0012、0016、0023 | event-complete reducers、replication/HA、catalog recovery、durable acceptance | S2/S3/S5 联合关闭相应软件切片；不会按每 N 事件省略未可恢复事实 |
+| 0012、0016、0023 | event-complete reducers、replication/HA、catalog recovery、durable acceptance | S2/S3/S5 已关闭 batch/delta/静态 quorum metadata 软件切片，并同步原 ADR；完整 reducers、跨主机与内容可用性保留 |
 | 0019、0020、0028 | 真实 readiness 故障注入、Robonix quality/frame mapping、relation actuation/硬实时停止 | 保留物理/部署 gate；不会用 offline fixture 宣称关闭 |
 | 0025、0037、0040 | distributed ExecutionGroup authorization、Memory selective-import command、scope/visibility、structured entity/parameter contracts | 独立 authority/协议切片；既有 discovery 和单 Node invocation 不是分布式授权 |
 | 0029、0041 | 多 Mission priority/fairness、准入、preemption、动态预测及更大优化器 | S4/S6 先处理有边界的软件机制；成本模型/CP-SAT/物理 travel evidence 单列 |

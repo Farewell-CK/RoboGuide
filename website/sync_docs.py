@@ -109,6 +109,9 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         (
             ("编码规范", "docs/development/coding-standards.md"),
             ("运行时可靠性故障矩阵", "docs/development/runtime-reliability-fault-matrix.md"),
+            ("ADR 遗留核验", "docs/development/adr-follow-up-register.md"),
+            ("Controller 事务性能", "docs/development/controller-persistence-performance.md"),
+            ("Controller 复制软件部署", "docs/development/controller-replication.md"),
             ("C1 前生产链准入审计", "docs/development/pre-c1-readiness-audit-2026-09-15.md"),
             ("MI 协调指导验证", "docs/development/mi-coordination-guidance-validation.md"),
             ("设备扩展规范 v0.1", "docs/extensions/device-extension-conformance-v0.1.md"),

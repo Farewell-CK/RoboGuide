@@ -30,7 +30,9 @@ use std::time::Duration;
 ///
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v24";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v25";
+/// Prior wrapper with durable scheduling policy but no required replication profile.
+const PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v24";
 /// Prior wrapper with immutable terminal times but without persistent dispatch policy.
 const PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v23";
 /// Previous wrapper supports isolation but has no original terminal receive-time authority.
@@ -287,6 +289,9 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
 /// Durable Phase 1 process checkpoint saved in the same event-log transaction.
 #[derive(Serialize, Deserialize)]
 struct ServerCheckpoint {
+    /// Required cluster/profile identity; standalone restore cannot bypass quorum authority.
+    #[serde(default)]
+    replication_profile: Option<String>,
     /// Actual accepted body digests; old checkpoints retain unavailable receipt evidence.
     #[serde(default)]
     mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
@@ -483,8 +488,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok("incremental") => state::CheckpointStoragePolicy::Incremental,
         _ => return Err("ROBOGUIDE_CHECKPOINT_STORAGE must be full or incremental".into()),
     };
-    let event_log =
+    let mut event_log =
         state::SqliteEventLog::open_with_checkpoint_policy(&event_path, checkpoint_policy)?;
+    let replica_fence =
+        controller_replication::ReplicaFenceClient::from_environment()?.map(Arc::new);
+    if let Some(fence) = &replica_fence {
+        event_log = event_log.with_replicator(fence.clone());
+    }
     let event_write_gate = Arc::new(Mutex::new(()));
     let process_clock = Arc::new(runtime::SystemMonotonicClock::from_floor(
         event_log.latest_timestamp()?,
@@ -542,6 +552,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         process_clock.clone(),
         diagnostic_handle.clone(),
     );
+    if let Some(fence) = &replica_fence {
+        router.set_command_delivery_fence(fence.clone())?;
+    }
     let receiver_router = router.clone();
     let memory_session_router = router.clone();
     let mut controller = match checkpoint {
@@ -549,6 +562,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
                     | PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA
@@ -575,6 +589,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
                     | PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA
@@ -594,6 +609,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .as_ref()
                 .map(|feed| feed.source_digest().to_string());
             validate_restored_verifier_source(&saved, configured_verifier_digest.as_deref())?;
+            validate_replication_checkpoint(&saved, event_log.replication_profile())?;
             application::validate_isolation_checkpoint_schema(&saved)?;
             ControllerState {
                 mission_admissions: saved.mission_admissions,
@@ -750,6 +766,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             write_gate: event_write_gate.clone(),
         });
     let (fatal_sender, mut fatal_receiver) = tokio::sync::mpsc::unbounded_channel::<String>();
+    if let Some(fence) = replica_fence {
+        let watchdog_fatal = fatal_sender.clone();
+        tokio::spawn(async move {
+            let mut timer = tokio::time::interval(Duration::from_millis(200));
+            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                timer.tick().await;
+                let probe = fence.clone();
+                let result = tokio::task::spawn_blocking(move || probe.check()).await;
+                let failure = match result {
+                    Ok(Ok(())) => None,
+                    Ok(Err(error)) => Some(error),
+                    Err(error) => Some(error.to_string()),
+                };
+                if let Some(error) = failure {
+                    let _ = watchdog_fatal.send(format!(
+                        "Controller original replica epoch/quorum lost: {error}"
+                    ));
+                    return;
+                }
+            }
+        });
+    }
     let timer_fatal_sender = fatal_sender.clone();
     let timer_diagnostics = diagnostic_handle.clone();
     let receiver_diagnostics = diagnostic_handle.clone();

@@ -58,6 +58,13 @@ interval、Actor/Context、当前资格与唯一 Commit 权威保留；deploymen
 只约束新的 nonterminal Mission/declared slots，held/cancelling 也占用名额。实现验收前
 不宣称物理公平或时限保证，复制阶段必须携带该 ledger，避免切换重置服务历史。
 
+ADR-0083 指定 opt-in quorum Controller replica profile：OpenRaft 负责共识，SQLite
+持久接受完整 authority checkpoint/event history；leader supervisor 管理唯一 Controller
+child，在每次 durable acceptance 和 Execute/Cancel delivery 验证 epoch/quorum。
+切换先重建已接受投影，再由既有 startup restore 保留 ownership/Unknown/hold/fairness
+和原 source time，不自动重放物理工作。实现验收前保持 standalone 默认；当前设计
+限定三成员 loopback 软件 profile，Memory/Artifact 内容保留其独立数据平面。
+
 | 组件 | 职责 |
 | --- | --- |
 | Mission / Application | 提供外部 Mission / Goal，不直接控制设备 |

@@ -823,6 +823,7 @@ fn gated_catalog_for_contract(
             schema,
             node_id: "dog-a".to_string(),
             server_endpoint: endpoint,
+            fallback_server_endpoints: Vec::new(),
             state_directory,
             reconnect_delay_ms: 10,
             local_systems: vec![LocalSystemConfig {
