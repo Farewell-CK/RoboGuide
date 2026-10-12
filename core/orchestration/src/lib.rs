@@ -121,6 +121,13 @@ pub enum OrchestrationError {
     SchedulingDeferred(SchedulingDeferral),
     /// Input contract is invalid or requests an unsupported execution mechanism.
     InvalidContract(String),
+    /// One exact accepted Task's runtime outcome violates its declared completion contract.
+    RuntimeContractViolation {
+        /// Logical Task to which all violation evidence is attributed.
+        task_ref: TaskRef,
+        /// Typed reason, independent of Control/infrastructure diagnostics.
+        violation: domain::TaskRuntimeContractViolation,
+    },
     /// A Mission identity was absent or reused.
     Mission(String),
 }
@@ -137,6 +144,15 @@ impl Display for OrchestrationError {
                 write!(formatter, "joint scheduling deferred: {}", reason.as_str())
             }
             Self::InvalidContract(reason) | Self::Mission(reason) => formatter.write_str(reason),
+            Self::RuntimeContractViolation {
+                task_ref,
+                violation,
+            } => {
+                write!(
+                    formatter,
+                    "Task {task_ref} runtime contract rejected: {violation:?}"
+                )
+            }
         }
     }
 }

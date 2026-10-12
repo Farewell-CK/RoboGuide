@@ -251,6 +251,9 @@ struct ActiveExecutionCheckpoint {
 /// Transport-neutral durable Runtime projection embedded in the controller checkpoint.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeExecutionCheckpoint {
+    /// Original first terminal receive times; missing legacy evidence remains unavailable.
+    #[serde(default)]
+    terminal_received_at: BTreeMap<String, domain::TimestampMs>,
     /// Explicit whole-set authorizations; old checkpoints never invent Group continuation.
     #[serde(default)]
     group_recoveries: Vec<GroupRecoveryStopIntent>,
@@ -348,6 +351,8 @@ impl std::error::Error for ExecutionRuntimeError {}
 /// Live Runtime authority for stable distributed execution identities and facts.
 #[derive(Debug, Default, Clone)]
 pub struct RuntimeExecutionManager {
+    /// First terminal receive time belongs to each physical attempt and never changes on replay.
+    terminal_received_at: BTreeMap<String, domain::TimestampMs>,
     /// Immutable bounded recovery rounds, separate from isolated Role stop/release purposes.
     group_recoveries: Vec<GroupRecoveryStopIntent>,
     /// Stop-and-replace is opt-in; ordinary cancellation has no recovery purpose.

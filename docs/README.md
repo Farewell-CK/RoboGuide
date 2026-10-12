@@ -11,6 +11,7 @@
 - [`project-goals-and-mvp.md`](project-goals-and-mvp.md)：通用 OS 目标、多机异构 MVP 和应用演进；
 - [`mvp-definition.md`](mvp-definition.md)：完整 MVP 草案、已批准的 Slice v0.1、候选场景和冻结清单；
 - [`implementation-backlog.md`](implementation-backlog.md)：V2 开放架构问题、待定 MVP 决策和延后实现项。
+- [`development/adr-follow-up-register.md`](development/adr-follow-up-register.md)：全 ADR 遗留项核验、已实现子集的文档纠正，以及隔离/持久化/调度/复制的依赖顺序。
 
 ## 开发
 

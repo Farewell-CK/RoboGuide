@@ -12,6 +12,66 @@ mod progress;
 #[path = "tests/recovery_stop.rs"]
 mod recovery_stop;
 
+/// First terminal receive time survives replay/restore; legacy and orphan timing never become fresh.
+#[test]
+fn terminal_receive_time_is_immutable_and_legacy_time_is_unavailable() {
+    let mut runtime = RuntimeExecutionManager::new();
+    let command = command();
+    runtime
+        .prepare_dispatch("timed-attempt".into(), command.clone(), Vec::new())
+        .unwrap();
+    assert!(
+        runtime
+            .observe_execution_received(
+                "timed-attempt",
+                NodeId::new("wrong-node").unwrap(),
+                1,
+                ExecutionStatus::Completed,
+                "",
+                domain::TimestampMs::new(3)
+            )
+            .is_err()
+    );
+    assert_eq!(runtime.terminal_received_at("timed-attempt"), None);
+    runtime
+        .observe_execution_received(
+            "timed-attempt",
+            command.node_id().clone(),
+            1,
+            ExecutionStatus::Completed,
+            "",
+            domain::TimestampMs::new(4),
+        )
+        .unwrap();
+    runtime
+        .observe_execution_received(
+            "timed-attempt",
+            command.node_id().clone(),
+            2,
+            ExecutionStatus::Completed,
+            "",
+            domain::TimestampMs::new(9),
+        )
+        .unwrap();
+    let restored = RuntimeExecutionManager::restore(runtime.checkpoint()).unwrap();
+    assert_eq!(
+        restored.terminal_received_at("timed-attempt"),
+        Some(domain::TimestampMs::new(4))
+    );
+    let mut legacy: serde_json::Value = serde_json::to_value(runtime.checkpoint()).unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("terminal_received_at");
+    let legacy = RuntimeExecutionManager::restore(serde_json::from_value(legacy).unwrap()).unwrap();
+    assert_eq!(legacy.terminal_received_at("timed-attempt"), None);
+    let mut invalid = runtime.checkpoint();
+    invalid
+        .terminal_received_at
+        .insert("orphan-attempt".into(), domain::TimestampMs::new(5));
+    assert!(RuntimeExecutionManager::restore(invalid).is_err());
+}
+
 /// Builds one deterministic command for Runtime registry tests.
 fn command() -> ExecutionCommand {
     command_for("task-a", "carrier", "node-a")

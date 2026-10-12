@@ -52,6 +52,8 @@ const EVENT_PAYLOAD_SCHEMA_V12: &str = "domain.EventPayload.json/v12";
 const EVENT_PAYLOAD_SCHEMA_V13: &str = "domain.EventPayload.json/v13";
 /// Event codec including Mission execution isolate/resume dispositions.
 const EVENT_PAYLOAD_SCHEMA_V14: &str = "domain.EventPayload.json/v14";
+/// Codec including exact-Task production runtime contract rejection evidence.
+const EVENT_PAYLOAD_SCHEMA_V15: &str = "domain.EventPayload.json/v15";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -542,6 +544,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V12 => Ok(12),
         EVENT_PAYLOAD_SCHEMA_V13 => Ok(13),
         EVENT_PAYLOAD_SCHEMA_V14 => Ok(14),
+        EVENT_PAYLOAD_SCHEMA_V15 => Ok(15),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -555,6 +558,7 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::MissionExecutionContractRejected { .. } => 15,
         EventPayload::MissionExecutionIsolated { .. }
         | EventPayload::MissionExecutionResumed { .. } => 14,
         EventPayload::NodeSessionLivenessAccepted { .. } => 13,
@@ -696,7 +700,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V14,
+                    EVENT_PAYLOAD_SCHEMA_V15,
                     payload_json,
                 ],
             )

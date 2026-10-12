@@ -1,6 +1,6 @@
 # ADR-0066: Read-only initial operation support feedback
 
-- Status: Proposed for review
+- Status: Default-off implementation; physical profile validation pending
 - Date: 2026-10-04
 
 ## Context
@@ -86,6 +86,13 @@ body binding, crash recovery, one subsequent submit and B1 failure archival.
 These are conformance checks, not physical execution or success-rate evidence.
 
 ## Limitations and future work
+
+Current software evidence (2026-10-12): Controller assessment and loopback HTTP checks live in
+`apps/integration-server/src/application/initial_operation_assessment.rs` and its tests; durable
+Mission-side holds, exact-plan rechecks and interruption fences are covered by
+`mission/tests/test_initial_support_regressions.py` and `mission/tests/test_deployment_recovery.py`.
+These existing implementations close the software ingress/consumer item. The physical and causal
+limits below remain; this status does not approve a formal experiment or execution-time replanning.
 
 The Controller now emits assessment v0.2; archived v0.1 remains readable.
 Bounded candidate diagnostics partition the query's registrations by the first

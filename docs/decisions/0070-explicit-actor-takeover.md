@@ -1,6 +1,6 @@
 # ADR-0070: Explicit Mission Actor Takeover After Confirmed Stop
 
-- Status: Proposed for implementation validation
+- Status: Implemented in Control; application command and physical validation pending
 - Date: 2026-10-09
 
 ## Context
@@ -58,3 +58,12 @@ agent-specific operation inside the adapter.
 Ordinary recovery APIs and existing checkpoints remain valid; the new optional authorization field
 defaults to absent. Existing role recovery still cannot cross Actor authority. Checkpoint restore
 requires the exact registry revision named by a pending takeover commitment before Rebind.
+
+## Current implementation evidence (2026-10-12)
+
+The Control authorization, scoped candidate matching, commitment and atomic Rebind paths exist.
+`core/control/src/tests/actor_binding_semantics.rs` exercises an authorized distinct-entity standby
+through normal Match/Schedule/Commit/Rebind and checks Actor ownership. This closes the Core
+implementation item only. No application HTTP takeover command currently connects the retained
+Runtime stop evidence to that authorization; independent standby deployment and physical stop
+proof remain pending. Neither normal Role recovery nor an alias Node authorizes takeover.

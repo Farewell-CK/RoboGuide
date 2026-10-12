@@ -2,10 +2,18 @@
 
 use super::*;
 
+impl RuntimeExecutionCheckpoint {
+    /// Reports retained terminal timing authority so compatibility wrappers cannot silently ignore it.
+    pub fn has_terminal_receive_times(&self) -> bool {
+        !self.terminal_received_at.is_empty()
+    }
+}
+
 impl RuntimeExecutionManager {
     /// Creates an empty live execution authority.
     pub const fn new() -> Self {
         Self {
+            terminal_received_at: BTreeMap::new(),
             group_recoveries: Vec::new(),
             recovery_stops: BTreeMap::new(),
             recovery_budgets: BTreeMap::new(),
@@ -34,6 +42,7 @@ impl RuntimeExecutionManager {
     /// Returns a durable transport-neutral Runtime projection.
     pub fn checkpoint(&self) -> RuntimeExecutionCheckpoint {
         RuntimeExecutionCheckpoint {
+            terminal_received_at: self.terminal_received_at.clone(),
             group_recoveries: self.group_recoveries.clone(),
             recovery_stops: self.recovery_stops.clone(),
             recovery_budgets: self.recovery_budgets.values().cloned().collect(),
@@ -115,6 +124,18 @@ impl RuntimeExecutionManager {
 
     /// Restores a checkpoint conservatively without granting replay authority.
     pub fn restore(checkpoint: RuntimeExecutionCheckpoint) -> Result<Self, ExecutionRuntimeError> {
+        for execution_id in checkpoint.terminal_received_at.keys() {
+            if !checkpoint.executions.contains_key(execution_id)
+                || checkpoint
+                    .execution_status
+                    .get(execution_id)
+                    .is_none_or(|status| !status.is_terminal())
+            {
+                return Err(ExecutionRuntimeError::InvalidCheckpoint(
+                    "terminal receive-time evidence must belong to a known terminal attempt".into(),
+                ));
+            }
+        }
         validate_checkpoint(&checkpoint)?;
         let (relations, relation_states, relation_fences, relation_proofs) = restore_relation_maps(
             checkpoint.relations.clone(),
@@ -208,6 +229,7 @@ impl RuntimeExecutionManager {
             executions: checkpoint.executions,
             execution_status,
             execution_sequences: checkpoint.execution_sequences,
+            terminal_received_at: checkpoint.terminal_received_at,
             execution_nodes: checkpoint.execution_nodes,
             active_executions,
             restored_executions,

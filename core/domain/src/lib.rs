@@ -35,6 +35,7 @@ mod spatial_replica;
 mod state_model;
 mod task_execution;
 mod task_requirement;
+mod task_runtime_contract;
 mod task_satisfaction;
 mod time;
 
@@ -83,6 +84,7 @@ pub use memory::{
 };
 pub use mission::{MissionGoal, MissionPlan, PlannedTask, TaskGraph};
 pub use node_liveness_evidence::NodeSessionLivenessEvidence;
+pub use task_runtime_contract::TaskRuntimeContractViolation;
 
 /// Supplies the conservative identity used only when decoding pre-v7 replica evidence.
 fn legacy_memory_consumer_provider_id() -> String {

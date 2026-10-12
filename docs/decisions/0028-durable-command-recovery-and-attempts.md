@@ -103,3 +103,10 @@ This decision does not provide exactly-once physical action, distributed transac
 replay after ambiguous restart, a general recovery optimizer, multi-role joint recovery, or a new
 peer transport. Those require explicit policy and physical-world evidence rather than stronger
 claims from message delivery alone.
+
+The independent-session whole-Group retained-binding slice deferred here is now implemented by
+[ADR-0061](0061-confirmed-stop-group-continuation.md). It requires the exact full original attempt
+set, explicit repeat permissions and actual stop facts before new attempts; it performs no partial
+resource release or migration. `tests/group_recovery.rs`, its transport and isolation modules
+exercise the production scheduling/HTTP/timer/checkpoint path. General coupled joint recovery,
+replacement optimization and multi-Actor physical continuation remain outside that evidence.

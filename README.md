@@ -1059,8 +1059,10 @@ Mission 的可证明契约局部失败使用持久 execution isolation（ADR-007
 physical ambiguity、raw facts 与取消规则保留。GET Mission 显示 isolation；POST
 `/v1/missions/{id}/resume` 携带当前 `isolation_generation`，通过实时 Control 重验并
 提交 checkpoint 后才恢复。未知错误、Control invariant 和数据库失败仍 fail closed。
-当前已验证持久 hold、回滚和显式恢复；运行期自动分类尚未验收，现有 InvalidContract
-在 admission/restore preflight 拒绝。人工注入错误的回滚测试不证明真实运行期故障已隔离。
+当前已验证持久 hold、回滚和显式恢复。ADR-0079 增加真实运行期分类：声明 completion
+deadline 的 accepted Task 按首次 Controller terminal received_at 检查，违约只 hold
+对应 Mission。生产 timer 回归使用合成 Node facts；这是观察契约，不证明物理逾期或停止。
+其他未知错误继续 fail closed，非法输入仍在 admission/restore preflight 拒绝。
 见 [Mission 隔离决策](docs/decisions/0077-mission-execution-isolation.md)。
 
 Controller 分阶段合成测量入口为 `tools/quality/measure_controller_pipeline.py`；实际本地

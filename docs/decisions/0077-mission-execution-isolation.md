@@ -43,13 +43,19 @@ pending ownership 保留、raw terminal evidence 保留、checkpoint restart、g
 不可证明、Control invariant、SQLite/savepoint/commit 或 poisoned lock 仍返回全局失败，
 没有 durable checkpoint 就不能 ACK。第一版的局部分类刻意狭窄，不宣称所有 fatal 已消除。
 
-当前运行期自动分类仍未验收：生产 InvalidContract 来源是 decode/implementation
+第一版验收时运行期自动分类仍未验收：生产 InvalidContract 来源是 decode/implementation
 preflight，两个 accepted-plan dispatch/outcome 回调没有已验证的该类型错误来源。
 局部错误的 savepoint 测试人工注入 typed error，只证明回滚/hold 基础机制。
 生产 HTTP 测试确认非法 JSON/不支持的契约分别在 admission 返回 400/409，内存、
 事件、checkpoint 均不变，已有 Mission 仍由 timer 正常 dispatch，不制造 isolation。
 新增运行期分类必须先证明实际单 Mission 错误来源及共享权威完整性，不能扩大捕获
 全部 Control/Mission/SQL 错误来满足一个测试。
+
+2026-10-12 后续软件闭环见 ADR-0079：声明 completion deadline 的 accepted Task
+现在有真实生产 typed violation 来源。Runtime 保留首次 terminal receive time，
+Orchestration 检查 exact Task，生产 timer 回归验证 A hold/B 完成、ownership 保留、
+排队与重放不误判、历史缺失不补时间、resume 409 与实际 SQL 故障全事务回滚。
+上段描述保留第一版验收限制；当前已覆盖这一明确的运行期子集，其他错误仍不推定局部。
 
 整组恢复回归验证授权后隔离、迟到 Cancelled、重复 timer、generation 拒绝、durable
 restore 后重新登记、显式 resume 和原预算到期后的禁止 continuation；资源和 stop

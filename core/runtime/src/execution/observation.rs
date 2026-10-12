@@ -3,6 +3,36 @@
 use super::*;
 
 impl RuntimeExecutionManager {
+    /// Reduces original ingress evidence and freezes a known attempt's first terminal receive time.
+    #[allow(clippy::too_many_arguments)]
+    pub fn observe_execution_received(
+        &mut self,
+        execution_id: &str,
+        node_id: NodeId,
+        sequence: u64,
+        status: ExecutionStatus,
+        reason: impl Into<String>,
+        received_at: domain::TimestampMs,
+    ) -> Result<Vec<ExecutionEvent>, ExecutionRuntimeError> {
+        let previous = self.execution_status(execution_id);
+        let events = self.observe_execution(execution_id, node_id, sequence, status, reason)?;
+        if status.is_terminal()
+            && previous != Some(status)
+            && self.executions.contains_key(execution_id)
+            && self.execution_status(execution_id) == Some(status)
+        {
+            self.terminal_received_at
+                .entry(execution_id.to_string())
+                .or_insert(received_at);
+        }
+        Ok(events)
+    }
+
+    /// Reads immutable first terminal ingress time; legacy or untimed local evidence stays unavailable.
+    pub fn terminal_received_at(&self, execution_id: &str) -> Option<domain::TimestampMs> {
+        self.terminal_received_at.get(execution_id).copied()
+    }
+
     /// Converts each nonterminal attempt on an unavailable Node into recovery evidence.
     pub fn observe_node_unavailable(
         &mut self,

@@ -66,6 +66,11 @@ pub(crate) fn run_mission_transition(
             if matches!(
                 error.downcast_ref::<OrchestrationError>(),
                 Some(OrchestrationError::InvalidContract(_))
+            ) || matches!(
+                error.downcast_ref::<OrchestrationError>(),
+                Some(OrchestrationError::RuntimeContractViolation { task_ref, .. })
+                    if source == orchestration::MissionIsolationSource::TaskOutcome
+                        && task_ref.mission_id() == mission
             ) =>
         {
             validate_isolation_authority(controller, now)?;
@@ -77,6 +82,31 @@ pub(crate) fn run_mission_transition(
                 .bridge
                 .control()
                 .validate_mission_group_plan(execution.group_id(), execution.plan())?;
+            if let Some(OrchestrationError::RuntimeContractViolation {
+                task_ref,
+                violation,
+            }) = error.downcast_ref::<OrchestrationError>()
+            {
+                if !execution
+                    .plan()
+                    .task_graph()
+                    .tasks()
+                    .iter()
+                    .any(|task| task.requirement().task_ref() == task_ref)
+                {
+                    return Err("runtime contract rejection references an unproven Task".into());
+                }
+                use ports::EventSink;
+                events.append(
+                    now,
+                    correlation,
+                    None,
+                    domain::EventPayload::MissionExecutionContractRejected {
+                        task_ref: task_ref.clone(),
+                        violation: violation.clone(),
+                    },
+                );
+            }
             controller
                 .orchestrator
                 .isolate_execution(mission, source, now, correlation, events)?;
@@ -196,6 +226,18 @@ pub(crate) fn flush_unisolated_commands(
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
     if saved.schema == SERVER_CHECKPOINT_SCHEMA {
+        return Ok(());
+    }
+    let integration: serde_json::Value =
+        serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
+    if integration
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+        == Some(orchestration::CONTROLLER_CHECKPOINT_SCHEMA)
+    {
+        return Err("legacy wrapper contains new terminal receive-time authority".into());
+    }
+    if saved.schema == PRE_TIMING_SERVER_CHECKPOINT_SCHEMA {
         return Ok(());
     }
     let missions: Vec<serde_json::Value> =

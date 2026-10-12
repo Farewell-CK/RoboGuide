@@ -39,7 +39,10 @@ pub use dispatch::{RecoveryDeploymentSupport, RecoverySupportDisposition};
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
 /// Version 18 preserves exact-set Group recovery purposes without renewing original budgets.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v18";
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v19";
+
+/// Previous checkpoint retains Group recovery but has no original terminal receive-time authority.
+const PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v18";
 
 /// Pre-Group recovery checkpoints have isolated Role declarations but no Group permission.
 const PRE_GROUP_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v17";
@@ -81,6 +84,10 @@ pub enum ObservedTaskExecutionResult {
 /// One terminal local-execution outcome for Mission orchestration to consume explicitly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservedTaskExecutionOutcome {
+    /// Earliest original first terminal receive time across current Roles.
+    earliest_completion_received_at: Option<TimestampMs>,
+    /// Latest original first terminal receive time across current Roles, or unavailable legacy evidence.
+    completion_received_at: Option<TimestampMs>,
     /// Mission-level Group containing the TaskExecution.
     group_id: domain::ExecutionGroupId,
     /// Mission-scoped Task represented by the execution result.
@@ -231,6 +238,14 @@ impl GroupSharedViewSnapshot {
 }
 
 impl ObservedTaskExecutionOutcome {
+    /// Reads the earliest current Role completion receipt for acceptance-anchor validation.
+    pub const fn earliest_completion_received_at(&self) -> Option<TimestampMs> {
+        self.earliest_completion_received_at
+    }
+    /// Returns current-attempt aggregate completion receipt time without using processing time.
+    pub const fn completion_received_at(&self) -> Option<TimestampMs> {
+        self.completion_received_at
+    }
     /// Returns the Mission-level Group containing this Task.
     pub const fn group_id(&self) -> &domain::ExecutionGroupId {
         &self.group_id

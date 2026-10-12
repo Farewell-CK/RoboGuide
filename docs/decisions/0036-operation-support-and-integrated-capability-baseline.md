@@ -52,5 +52,11 @@ independently.
 - Shared Node State stores support evidence; Control owns feasibility policy and Commit authority.
 - Operation support neither replaces the Catalog nor advertises Local How.
 - Node Service retains final local operation lookup as defense against stale State or session change.
-- Dynamic operation readiness, operation-catalog negotiation, structured parameters, and generic
-  verifier evidence ingress remain future work.
+- Dynamic operation readiness, operation-catalog negotiation and structured parameters remain
+  future work.
+- The final-verdict verifier ingress deferred here is now implemented by
+  [ADR-0048](0048-deployment-task-verifier-ingress.md). The Controller source codec/consumer lives in
+  `apps/integration-server/src/application/verifier_source.rs` and `task_verifier.rs`; positive,
+  negative, stale-attempt and restore-source tests live in `tests/runtime_replay.rs` and the consumer
+  tests. This closes only the configured deployment final-verdict profile, not streaming,
+  intermediate predicates, authenticated remote evidence or multi-source arbitration.

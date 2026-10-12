@@ -66,6 +66,12 @@ fn apply_selected_outcomes(
                 } = controller;
                 match outcome.result() {
                     ObservedTaskExecutionResult::ExecutionCompleted => {
+                        orchestrator.validate_runtime_task_completion(
+                            &mission_id,
+                            outcome.task_ref(),
+                            outcome.earliest_completion_received_at(),
+                            outcome.completion_received_at(),
+                        )?;
                         orchestrator.record_task_execution_completed(
                             &mission_id,
                             outcome.task_ref(),

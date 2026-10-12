@@ -49,12 +49,13 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         let previous_status = self.runtime.execution_status(fact.execution_id);
         let runtime_events = self
             .runtime
-            .observe_execution(
+            .observe_execution_received(
                 fact.execution_id,
                 node_id.clone(),
                 fact.sequence,
                 runtime_status,
                 fact.reason,
+                received_at,
             )
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
         if phase == ExecutionPhase::Cancelled && !runtime_events.is_empty() {

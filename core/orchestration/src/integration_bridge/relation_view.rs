@@ -388,6 +388,34 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                         .task_execution_result(&group_id, task.task_ref(), role_ids)
                 {
                     outcomes.push(ObservedTaskExecutionOutcome {
+                        earliest_completion_received_at: task
+                            .assignments()
+                            .iter()
+                            .map(|assignment| {
+                                self.runtime
+                                    .current_attempt_id(
+                                        &group_id,
+                                        task.task_ref(),
+                                        assignment.role_id(),
+                                    )
+                                    .and_then(|id| self.runtime.terminal_received_at(id))
+                            })
+                            .collect::<Option<Vec<_>>>()
+                            .and_then(|times| times.into_iter().min()),
+                        completion_received_at: task
+                            .assignments()
+                            .iter()
+                            .map(|assignment| {
+                                self.runtime
+                                    .current_attempt_id(
+                                        &group_id,
+                                        task.task_ref(),
+                                        assignment.role_id(),
+                                    )
+                                    .and_then(|id| self.runtime.terminal_received_at(id))
+                            })
+                            .collect::<Option<Vec<_>>>()
+                            .and_then(|times| times.into_iter().max()),
                         group_id: group_id.clone(),
                         task_ref: task.task_ref().clone(),
                         result: match result {

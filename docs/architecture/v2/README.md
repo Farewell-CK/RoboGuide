@@ -30,9 +30,15 @@ ADR-0077 的 Mission isolation 是 Orchestration-owned 执行 hold，不是 Runt
 Control/State/invariant/持久化或无法分类的失败继续 fail closed。恢复是 generation-bound
 显式重验，所有物理恢复仍走 stop-proof 与原 Match/Commit/Rebind 权威。
 Hold 同时阻止整组 continuation 的准备与发送，先前 repeat 授权不绕过 hold；显式恢复
-不刷新原 recovery deadline。当前已验证的是 hold、回滚与显式恢复机制，运行期自动
-错误分类尚未验收：现有 InvalidContract 来源在 admission/restore preflight，不能将
-人工注入错误的测试当作真实运行期故障隔离证据。
+不刷新原 recovery deadline。hold、回滚与显式恢复机制已验证；真实运行期局部错误
+的首个来源由 ADR-0079 限定，其他无法证明 scope 的失败仍保持全局 fail closed。
+
+ADR-0079 已实现该局部分类：对声明 completion deadline 的 accepted Task，
+以各 current attempt 的首次 Controller terminal receive time 检查 outcome 接纳契约。
+Runtime 保存原时刻，Orchestration 给出 exact-Task typed violation，Application 回滚后
+持久 hold。它不比较 Node 时钟、不以排队时间推定物理逾期，也不授权停止或自动重放。
+生产 timer 回归验证精确 hold、另一 Mission 完成、排队/重放/恢复、resume 409 及真实
+SQL 错误回滚；使用合成 Node facts，物理效果和 E6 未验证。详见 ADR 遗留项清单。
 
 | 组件 | 职责 |
 | --- | --- |

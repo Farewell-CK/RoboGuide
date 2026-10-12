@@ -30,7 +30,9 @@ use std::time::Duration;
 ///
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v22";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v23";
+/// Previous wrapper supports isolation but has no original terminal receive-time authority.
+const PRE_TIMING_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v22";
 /// Prior wrapper without persisted Orchestration isolation authority.
 const PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v21";
 /// Previous wrapper has progress/stop intents but no immutable stop/continuation declarations.
@@ -495,6 +497,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
                     | ADMISSION_SERVER_CHECKPOINT_SCHEMA
@@ -519,6 +522,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
                     | ADMISSION_SERVER_CHECKPOINT_SCHEMA

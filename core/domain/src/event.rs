@@ -5,6 +5,13 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// A production outcome violated one accepted Task's receive-time completion contract.
+    MissionExecutionContractRejected {
+        /// Exact logical Task whose outcome remains retained behind a Mission hold.
+        task_ref: TaskRef,
+        /// Typed local contract evidence, never parsed diagnostic text.
+        violation: TaskRuntimeContractViolation,
+    },
     /// Orchestration persisted a Mission-local new-Execute hold without physical release.
     MissionExecutionIsolated {
         /// Exact Mission whose derived work was rejected.

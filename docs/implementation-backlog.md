@@ -2,6 +2,10 @@
 
 本文件跟踪 [`RoboGuide V2 架构基线`](architecture/v2/README.md) 尚未冻结的问题，以及应由 MVP 或实现证据决定的工程选择。当前架构语义以 V2 README 和已接受 ADR 为准；历史 DOCX 不是后续演进的 source of truth。
 
+2026-10-12 全 ADR 遗留项核验与当前实施顺序见
+[ADR 遗留项清单](development/adr-follow-up-register.md)。已由后续 ADR 实现的子集回写原
+文档；Software implemented、默认关闭、物理验证待补与一般研究扩展保持不同状态。
+
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |
@@ -101,7 +105,7 @@ EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场�
 | ID | 当前状态 | 验收边界 |
 | --- | --- | --- |
 | RT-G1 Durable dispatch | 软件闭环已完成 | Controller 在网络副作用前持久化 immutable dispatch intent；Node receipt 只证明 journal admission，restart ambiguity 不自动重放 |
-| RT-G2 Recovery closed loop | 单 Role bootstrap slice 已完成 | `Unknown`、session loss、lease expiry 和 restart fencing 进入 Partial Release -> Match -> Propose -> Commit -> Rebind；无 candidate 时保持 pending。multi-role joint recovery 与 physical-world fencing 仍未实现 |
+| RT-G2 Recovery closed loop | 单 Role 和独立 Session 整组 retained-binding 软件切片已完成 | 单 Role 复用 Partial Release -> Match -> Propose -> Commit -> Rebind；ADR-0061 的整组 continuation 保留绑定并要求完整 stop proof。coupled/migrating joint recovery 与 physical-world fencing 仍未完成 |
 | RT-G3 Attempt identity | 已完成 | logical `(GroupId, TaskRef, RoleId)` 与 durable-generation physical attempt 分离；rebind 保留旧 attempt history |
 | RT-G4 Durable cancellation | 最小两阶段语义已完成 | Mission `Cancelling`、per-attempt cancel intent、Node cancel-before-execute tombstone 与 terminal-evidence finalization 已持久化；远程安全 stop deadline/policy 仍属于 RT-G9 |
 | RT-G5 Timer and liveness driving | 已完成 | application timer 推进 lease/session expiry、recovery、cancel、Ready Task 与 outbox，失败时 fail-stop |

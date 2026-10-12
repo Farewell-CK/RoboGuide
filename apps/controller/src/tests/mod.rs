@@ -71,6 +71,7 @@ fn single_task_mission_plan(requirement: TaskRequirement) -> MissionPlan {
 fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
     match payload {
         EventPayload::CandidatesMatched { task_ref }
+        | EventPayload::MissionExecutionContractRejected { task_ref, .. }
         | EventPayload::TaskSchedulingSelected { task_ref, .. }
         | EventPayload::TaskSchedulingDeferred { task_ref, .. }
         | EventPayload::SchedulingReservationCreated { task_ref, .. }

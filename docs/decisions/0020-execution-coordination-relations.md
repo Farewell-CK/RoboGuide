@@ -102,6 +102,13 @@ and non-independent coupling evidence advances the event payload codec to v8; th
 
 ## Consequences
 
+RT-G3 的 physical-attempt history 已由
+[ADR-0028](0028-durable-command-recovery-and-attempts.md) 和 Runtime 的 current-slot、durable
+generation、attempt history 实现。`core/runtime/src/relation/tests.rs` 的 rebind/old-attempt
+测试与 `core/orchestration` 的 current-attempt outcome fences 验证这一软件边界。
+本文前述 central execution_id/RT-G3 文字保留历史设计背景，已不代表该项仍未实现。
+RT-G9 的通用远程 pause/stop、硬实时控制和物理安全验证仍未关闭。
+
 - Task DAG 继续只决定 readiness；Execution Relation 只约束已经并发运行的 logical executions。
 - Mission、Control、Runtime、State 和 Integration 的既有 authority 不发生横向复制。
 - 第一版能够显式声明、维护、查询、持久化并对 execution-lifecycle cross-device dependency 作出

@@ -2,6 +2,63 @@
 
 use super::super::*;
 
+impl MissionOrchestrator {
+    /// Checks an exact accepted Task's immutable Controller-received completion contract.
+    pub fn validate_runtime_task_completion(
+        &self,
+        mission_id: &MissionId,
+        task_ref: &TaskRef,
+        earliest_received_at: Option<TimestampMs>,
+        completion_received_at: Option<TimestampMs>,
+    ) -> Result<(), OrchestrationError> {
+        let execution = self.executions.get(mission_id).ok_or_else(|| {
+            OrchestrationError::Mission("unknown completion contract Mission".into())
+        })?;
+        if task_ref.mission_id() != mission_id {
+            return Err(OrchestrationError::Mission(
+                "completion contract belongs to another Mission".into(),
+            ));
+        }
+        let requirement = execution
+            .plan()
+            .task_graph()
+            .tasks()
+            .iter()
+            .find(|task| task.requirement().task_ref() == task_ref)
+            .map(domain::PlannedTask::requirement)
+            .ok_or_else(|| {
+                OrchestrationError::Mission("completion contract Task is absent".into())
+            })?;
+        let Some(offset) = requirement.timing().completion_deadline_offset_ms() else {
+            return Ok(());
+        };
+        let deadline = checked_plan_timestamp(execution.accepted_at(), offset, task_ref)?;
+        let violation = match completion_received_at.zip(earliest_received_at) {
+            None => Some(domain::TaskRuntimeContractViolation::CompletionTimeUnavailable),
+            Some((_, received_at)) if received_at < execution.accepted_at() => Some(
+                domain::TaskRuntimeContractViolation::CompletionBeforeAcceptance {
+                    received_at,
+                    accepted_at: execution.accepted_at(),
+                },
+            ),
+            Some((received_at, _)) if received_at > deadline => Some(
+                domain::TaskRuntimeContractViolation::CompletionDeadlineExceeded {
+                    received_at,
+                    deadline,
+                },
+            ),
+            Some(_) => None,
+        };
+        if let Some(violation) = violation {
+            return Err(OrchestrationError::RuntimeContractViolation {
+                task_ref: task_ref.clone(),
+                violation,
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Validates that every relative Task time remains representable after acceptance anchoring.
 pub(super) fn validate_plan_timing_anchor(
     plan: &MissionPlan,

@@ -1,6 +1,6 @@
 # ADR-0048: Deployment-owned final Task verifier ingress
 
-- Status: Proposed for review
+- Status: Implemented for the configured deployment final-verdict profile
 - Date: 2026-09-28
 
 ## Context
@@ -67,3 +67,15 @@ protocol. Its source time is retained for attribution, not compared with the
 Controller's independent clock.
 
 ADR-0039's freshness policy and the MissionPlan schema remain unchanged.
+
+## Current implementation evidence (2026-10-12)
+
+The source/verdict codec lives in `application/verifier_source.rs`; neutral admission, current
+attempt validation and satisfaction consumers live in `application/task_verifier.rs`. The actual
+application timer consumes the configured verdict and commits its event/receipt/checkpoint together.
+`tests/runtime_replay.rs` checks durable positive completion, final negative handling, stale physical
+attempt rejection and late verdicts after failure. Consumer tests check source digest/schema,
+supported predicates, final-Task topology and restart source identity.
+
+These are software/conformance evidence. The production profile and physical/official evidence
+limits stated above still apply; the status update does not claim streaming or generic truth.

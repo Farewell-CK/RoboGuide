@@ -1,6 +1,6 @@
 # ADR-0067: Bounded MI reconsideration before Controller submission
 
-- Status: Proposed for review; default-off implementation
+- Status: Default-off implementation; physical effectiveness and semantic fidelity unproven
 - Date: 2026-10-04
 
 ## Context

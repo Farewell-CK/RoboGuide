@@ -9,7 +9,7 @@
 | O2 所有权模型 | 已实现并验证 | Control 137 个常规测试；256 条固定轨迹及 10,000 条扩展轨迹通过，支持 case 缩减、保存与回放 |
 | O3 配置与只读指标 | 已实现并验证 | ADR-0075；统一 timing、自定义 new/renew/restore/Welcome、两级 queue 及 default-off JSONL，观测失败不改变 durable trace |
 | O4 时间与 Control 活性 | 已实现并验证 | ADR-0076；Control 验证连续 exact-session evidence，独立双时间 ingestion、失效/restart fence；workspace checks 通过 |
-| O5 Mission 故障隔离 | hold/回滚/显式恢复已验证；运行期自动分类未验收 | ADR-0077；当前 typed InvalidContract 来源在 admission/restore preflight；不得将注入错误的测试当作生产故障隔离 |
+| O5 Mission 故障隔离 | hold/回滚/显式恢复与 deadline 运行期局部分类已验证 | ADR-0077/0079；真实 timer/HTTP/SQL 路径证明 exact-Task 子集；其他未知错误仍 fail closed |
 | O6 事务性能 | 测量与设计已完成；batch 暂缓 | 96/96 合成 Mission；serialize/commit 为主要成本，未证明 batch 收益/等价性，保持单事实事务 |
 | O7 部署边界 | 已实现并验证 | 具体 source / neutral codec / consumers 分离；137 个 app tests 保留兼容与 provenance |
 | O8 发布技术准备 | 技术核验已完成；发布决策待定 | 历史扫描 23 提示（1 条凭据风险待处置）、依赖元数据、ADR-0078、4/4 quickstart、认证边界披露 |
@@ -121,3 +121,14 @@ Gitleaks 8.30.1 校验官方归档后扫描本地全 refs 可达历史（561 com
 修补验证：workspace all-features tests **631 passed / 2 explicit ignored**，workspace
 all-targets/all-features Clippy（warnings denied）、Rustdoc、formatting、diff 检查与严格
 文档站构建通过。所有检查均为离线/本地合成证据；E6 未开始，未运行模型或硬件。
+
+## 后续 S1 与 ADR 核验
+
+ADR-0079 关闭上节的首个运行期分类门禁：Runtime 保存不可变 first terminal received_at，
+Orchestration 检查 accepted Task completion deadline；生产 timer 持久隔离 A 而 B 完成。
+5 项新增 timer/HTTP/真实 SQL 检查验证 ownership、延迟处理、replay、历史时间缺失、
+resume conflict 与失败原子性，另有 Runtime 时间不可变/restore 检查。该时限是 Controller
+接收契约，不是物理时钟或停止证明；其他错误 scope 仍不能推定为 Mission-local。
+
+已实现而旧状态未更新的 ADR 已回写原文；完整状态与待实施依赖见
+[ADR 遗留项清单](adr-follow-up-register.md)。E6 保持暂停。

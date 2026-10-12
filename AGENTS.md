@@ -54,6 +54,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Control and persistence errors retain fail-closed behavior. Holds retain physical ownership and
   raw evidence while fencing new Execute and derived work. Explicit generation-bound resume uses
   Control's current eligibility rules and commits before delivery; cancellation retains its stop rules.
+- ADR-0079 adds a production exact-Task completion-deadline violation source. Runtime persists the
+  first terminal Controller receive time; Orchestration checks accepted timing, and application
+  TaskOutcome alone admits the proven Mission-local hold. Queue delay, replay or restore never
+  refresh that time. Missing legacy timing remains unavailable. This observation contract neither
+  proves physical deadline violation nor authorizes stop, resource release or automatic repetition.
 - Resource-bearing Commit requires current State and revalidates every selected ResourceId's
   Node, kind and capacity before any mutation. State-free compatibility Commit accepts only
   zero-resource proposals without independent operation constraints.

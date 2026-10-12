@@ -99,6 +99,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         if !matches!(
             checkpoint.schema.as_str(),
             CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_GROUP_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA
                 | PREVIOUS_CONTROLLER_CHECKPOINT_SCHEMA
@@ -109,11 +110,20 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 checkpoint.schema
             )));
         }
-        if checkpoint.schema != CONTROLLER_CHECKPOINT_SCHEMA
-            && checkpoint.runtime.has_group_recovery_history()
+        if !matches!(
+            checkpoint.schema.as_str(),
+            CONTROLLER_CHECKPOINT_SCHEMA | PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA
+        ) && checkpoint.runtime.has_group_recovery_history()
         {
             return Err(IntegrationRuntimeError::Checkpoint(
                 "pre-Group checkpoint contains Group recovery permission".into(),
+            ));
+        }
+        if checkpoint.schema != CONTROLLER_CHECKPOINT_SCHEMA
+            && checkpoint.runtime.has_terminal_receive_times()
+        {
+            return Err(IntegrationRuntimeError::Checkpoint(
+                "pre-timing checkpoint contains terminal receive-time authority".into(),
             ));
         }
         let control = ControlPlane::restore(checkpoint.control)?;

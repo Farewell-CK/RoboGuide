@@ -79,5 +79,11 @@ routing, Node Protocol, Local EAIOS Local How, or recovery selection authority.
   that policy rather than relying on an undocumented default.
 - Audit traces can distinguish Local EAIOS completion from Orchestration satisfaction acceptance.
 - The current basis is not independent physical-world verification and must not be described as one.
-- `state-evidence`, verifier identity, negative satisfaction evidence, disputed evidence, and
-  post-execution recovery remain deferred.
+- Verifier identity, freshness and a deployment-owned final positive/negative verdict profile are
+  now implemented by [ADR-0039](0039-mission-satisfaction-freshness-policy.md) and
+  [ADR-0048](0048-deployment-task-verifier-ingress.md). Production `task_verifier.rs` preserves exact
+  Task/Role/attempt and source identity; `runtime_replay` tests cover positive/negative verdicts,
+  stale attempts and failures followed by late verdicts.
+- General `state-evidence`, disputed or multi-source truth, streaming intermediate predicates and
+  semantic post-execution replanning remain deferred. Final negative-verdict handling does not
+  implement those broader policies.
