@@ -30,7 +30,9 @@ use std::time::Duration;
 ///
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v23";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v24";
+/// Prior wrapper with immutable terminal times but without persistent dispatch policy.
+const PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v23";
 /// Previous wrapper supports isolation but has no original terminal receive-time authority.
 const PRE_TIMING_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v22";
 /// Prior wrapper without persisted Orchestration isolation authority.
@@ -548,6 +550,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
                     | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
+                    | PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
                     | ADMISSION_SERVER_CHECKPOINT_SCHEMA
@@ -573,6 +576,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
                     | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
+                    | PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
                     | ADMISSION_SERVER_CHECKPOINT_SCHEMA
@@ -628,6 +632,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
     controller.bridge.set_diagnostics(diagnostic_handle.clone());
+    controller
+        .orchestrator
+        .set_admission_limits(orchestration::MissionAdmissionLimits::try_new(
+            usize::try_from(configured_duration("ROBOGUIDE_MAX_ADMITTED_MISSIONS", 128)?)?,
+            usize::try_from(configured_duration(
+                "ROBOGUIDE_MAX_ADMITTED_ROLE_SLOTS",
+                4096,
+            )?)?,
+        )?);
     for (mission_id, admission) in &controller.mission_admissions {
         admission.validate(&controller, mission_id)?;
     }

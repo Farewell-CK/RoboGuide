@@ -257,6 +257,26 @@ pub(crate) async fn handle_http_connection(
                 .lock()
                 .map_err(|_| "event-log write gate is poisoned")?;
             drop(gate_wait);
+            let capacity = {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned")?;
+                live.orchestrator.validate_admission_capacity(&plan)
+            };
+            if let Err(error) = capacity {
+                let status = if matches!(error, OrchestrationError::AdmissionCapacityExceeded) {
+                    "429 Too Many Requests"
+                } else {
+                    "409 Conflict"
+                };
+                drop(_write_guard);
+                return write_http_response(
+                    stream,
+                    status,
+                    serde_json::json!({"error": error.to_string()}),
+                )
+                .await;
+            }
             event_log.begin_batch()?;
             let now = clock.now();
             let mut pending_controller = None;
@@ -512,6 +532,7 @@ pub(crate) async fn handle_http_connection(
                             "group_id": execution.group_id().as_str(),
                             "status": format!("{:?}", execution.lifecycle()),
                             "isolation": execution.isolation(),
+                            "scheduling_policy": execution.dispatch_policy(),
                             "tasks": tasks,
                             "relations": relations,
                             "peer_channels": peer_channels
@@ -523,6 +544,19 @@ pub(crate) async fn handle_http_connection(
                     serde_json::json!({"error": "unknown Mission"}),
                 ),
             }
+        }
+        ("POST", path)
+            if path.starts_with("/v1/missions/") && path.ends_with("/scheduling-policy") =>
+        {
+            super::scheduling_policy::update_priority(
+                controller,
+                event_log,
+                event_write_gate,
+                clock,
+                path,
+                request_body,
+                &diagnostics,
+            )?
         }
         ("POST", path) if path.starts_with("/v1/missions/") && path.ends_with("/resume") => {
             let body: serde_json::Value = match serde_json::from_str(request_body) {

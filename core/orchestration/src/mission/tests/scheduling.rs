@@ -212,7 +212,7 @@ fn shared_world_endpoint_resources_flow_through_control_ownership() {
 }
 
 /// Current fixtures add bounded timing, quantitative resources, and satisfaction policy.
-fn scheduled_phase1_plan() -> MissionPlan {
+pub(super) fn scheduled_phase1_plan() -> MissionPlan {
     let source = include_str!("../../../../../scenarios/phase1-mission-v0.3/mission-plan.json");
     let mut document: serde_json::Value = serde_json::from_str(source).expect("fixture is JSON");
     document["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_6);

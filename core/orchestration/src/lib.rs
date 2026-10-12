@@ -22,6 +22,7 @@ mod mission {
     //! Mission acceptance, scheduling, and lifecycle responsibilities.
 
     pub(super) mod checkpoint;
+    pub(super) mod dispatch_policy;
     pub(super) mod isolation;
     pub(super) mod lifecycle;
     pub(super) mod scheduling;
@@ -30,6 +31,9 @@ mod mission {
 }
 mod mission_contract;
 mod scheduling_status;
+pub use mission::dispatch_policy::{
+    DISPATCH_TURN_LIMIT, MissionAdmissionLimits, MissionDispatchState,
+};
 
 pub use integration_bridge::{
     CONTROLLER_CHECKPOINT_SCHEMA, GroupSharedViewEntry, GroupSharedViewSnapshot,
@@ -62,6 +66,9 @@ pub enum MissionExecutionLifecycle {
 /// One accepted MissionPlan and its single default Phase 1 Execution Group.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MissionExecution {
+    /// Durable logical priority and waiting/service history.
+    #[serde(default)]
+    dispatch_policy: MissionDispatchState,
     /// Complete immutable plan used for DAG and completion decisions.
     plan: MissionPlan,
     /// Mission-level runtime coordination context.
@@ -82,6 +89,10 @@ pub struct MissionExecution {
 }
 
 impl MissionExecution {
+    /// Returns logical scheduling policy without granting executor or resource authority.
+    pub const fn dispatch_policy(&self) -> &MissionDispatchState {
+        &self.dispatch_policy
+    }
     /// Returns a persisted new-Execute hold without implying physical stop or Mission failure.
     pub const fn isolation(&self) -> Option<&MissionIsolation> {
         self.isolation.as_ref()
@@ -115,6 +126,8 @@ impl MissionExecution {
 /// Errors raised when Mission orchestration invariants are violated.
 #[derive(Debug)]
 pub enum OrchestrationError {
+    /// Deployment bounds cannot admit another nonterminal Mission or its declared logical slots.
+    AdmissionCapacityExceeded,
     /// Control rejected a lifecycle or ownership transition.
     Control(ControlError),
     /// Current evidence cannot produce a dispatchable assignment; the Task remains Ready.
@@ -136,6 +149,9 @@ impl Display for OrchestrationError {
     /// Formats a stable orchestration diagnostic.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::AdmissionCapacityExceeded => {
+                formatter.write_str("Controller Mission admission capacity reached")
+            }
             Self::Control(error) => write!(formatter, "control rejected orchestration: {error}"),
             Self::SchedulingDeferred(SchedulingDeferral::WindowMissed) => {
                 formatter.write_str("joint scheduling window missed")
@@ -169,6 +185,8 @@ impl From<ControlError> for OrchestrationError {
 /// Deterministic Phase 1 Mission execution authority.
 #[derive(Debug, Default, Clone)]
 pub struct MissionOrchestrator {
+    /// Startup-owned limits for prospective admission, independent of committed resources.
+    admission_limits: MissionAdmissionLimits,
     /// Accepted Missions keyed independently from Task-local identity.
     executions: BTreeMap<MissionId, MissionExecution>,
 }

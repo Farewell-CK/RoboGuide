@@ -44,3 +44,8 @@ entity alongside an unrelated Mission. Satisfaction of the first Task persists w
 terminating the timer; the second Task remains unbound with observable deferral evidence.
 After a second entity and eligible Node are supplied, the same Task binds and dispatches.
 Classification tests distinguish waiting conditions from invalid contracts and internal faults.
+
+ADR-0082 adds a separate typed new-Mission admission-capacity rejection, with HTTP 429 before
+Group creation. It is not a Ready-Task retry disposition. Durable priority/aging and per-Mission
+rounds retain this ADR's shortage/hold/reconciliation boundaries, including the rule that resource
+failure keeps its waiting age. Policy checkpoint/event schema additions belong to ADR-0082.

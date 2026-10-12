@@ -5,6 +5,13 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Operator/deployment logical scheduling priority changed without altering an accepted plan.
+    MissionSchedulingPriorityChanged {
+        /// Exact Mission affected by the policy decision.
+        mission_id: crate::MissionId,
+        /// Larger values receive earlier logical turns, within 0..255.
+        priority: u8,
+    },
     /// A production outcome violated one accepted Task's receive-time completion contract.
     MissionExecutionContractRejected {
         /// Exact logical Task whose outcome remains retained behind a Mission hold.

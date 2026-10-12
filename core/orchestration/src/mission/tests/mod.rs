@@ -11,5 +11,6 @@ use state::InMemorySharedNodeState;
 use testkit::InMemoryEventLog;
 
 mod contracts;
+mod dispatch_policy;
 mod lifecycle;
 mod scheduling;

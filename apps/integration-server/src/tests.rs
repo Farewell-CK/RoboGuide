@@ -1,6 +1,7 @@
 use super::*;
 
 mod admission;
+mod dispatch_policy;
 mod event_snapshot;
 mod fact_batch;
 mod group_recovery;

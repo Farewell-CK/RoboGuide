@@ -225,7 +225,24 @@ pub(crate) fn flush_unisolated_commands(
 
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
+    let missions: Vec<serde_json::Value> =
+        serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
     if saved.schema == SERVER_CHECKPOINT_SCHEMA {
+        if missions
+            .iter()
+            .any(|mission| mission.get("dispatch_policy").is_none())
+        {
+            return Err("current controller wrapper misses dispatch policy authority".into());
+        }
+        return Ok(());
+    }
+    if missions
+        .iter()
+        .any(|mission| mission.get("dispatch_policy").is_some())
+    {
+        return Err("legacy controller wrapper contains new dispatch policy authority".into());
+    }
+    if saved.schema == PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA {
         return Ok(());
     }
     let integration: serde_json::Value =
@@ -240,8 +257,6 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if saved.schema == PRE_TIMING_SERVER_CHECKPOINT_SCHEMA {
         return Ok(());
     }
-    let missions: Vec<serde_json::Value> =
-        serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
     if missions.iter().any(|mission| {
         mission.get("isolation").is_some_and(|hold| !hold.is_null())
             || mission

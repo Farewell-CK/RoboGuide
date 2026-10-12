@@ -1076,6 +1076,12 @@ ADR-0080 的有界事实批处理默认最多 8 条、单一合批窗口 2ms；r
 尚未证明整体吞吐提高。`integration-server --inspect-checkpoint <database>` 只读重建
 最新快照，原 Unknown/ownership/no-replay 恢复规则保留。
 
+多 Mission dispatch 采用持久 priority/aging 与按 Mission 分轮的 Ready-Task 顺序
+（ADR-0082）。`POST /v1/missions/{id}/scheduling-policy` 接受 `{"priority":0..255}`；
+默认 128。资源不足保留等待年龄，Control 继续独占资源/Actor/时间窗校验。准入默认最多
+128 个 nonterminal Mission、4096 个 declared slots，可用 `ROBOGUIDE_MAX_ADMITTED_MISSIONS`
+与 `ROBOGUIDE_MAX_ADMITTED_ROLE_SLOTS` 配置，容量拒绝返回 429，原 hold/取消规则保留。
+
 部署来源解析与中性消费者已在 application 内拆分；来源身份与 Control/Orchestration
 权威继续保留，见[部署证据边界](docs/development/deployment-evidence-boundaries.md)。
 

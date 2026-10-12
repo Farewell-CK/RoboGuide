@@ -8,8 +8,9 @@ use super::timing::{
 
 impl MissionOrchestrator {
     /// Creates an empty Mission execution authority.
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
+            admission_limits: MissionAdmissionLimits::default(),
             executions: BTreeMap::new(),
         }
     }
@@ -27,6 +28,7 @@ impl MissionOrchestrator {
                     "accepted_at_ms": execution.accepted_at().as_millis(),
                     "isolation": execution.isolation,
                     "isolation_generation": execution.isolation_generation,
+                    "dispatch_policy": execution.dispatch_policy,
                     "scheduling_deferrals": execution.scheduling_deferrals.iter().map(
                         |(task_id, reason)| serde_json::json!({
                             "task_id": task_id.as_str(),
@@ -136,6 +138,14 @@ impl MissionOrchestrator {
                 }
             }
             let execution = MissionExecution {
+                dispatch_policy: value
+                    .get("dispatch_policy")
+                    .map(|policy| {
+                        serde_json::from_value(policy.clone())
+                            .map_err(|error| OrchestrationError::Mission(error.to_string()))
+                    })
+                    .transpose()?
+                    .unwrap_or_default(),
                 isolation: value
                     .get("isolation")
                     .filter(|value| !value.is_null())
@@ -185,6 +195,7 @@ impl MissionOrchestrator {
                 ));
             }
         }
+        super::dispatch_policy::validate_restored_policy(&restored)?;
         Ok(restored)
     }
 
@@ -213,10 +224,12 @@ impl MissionOrchestrator {
             )));
         }
         validate_plan_timing_anchor(&plan, timestamp)?;
+        self.validate_admission_capacity(&plan)?;
         control.create_mission_group(group_id.clone(), &plan, timestamp, correlation_id, events)?;
         self.executions.insert(
             mission_id.clone(),
             MissionExecution {
+                dispatch_policy: MissionDispatchState::default(),
                 isolation: None,
                 isolation_generation: 0,
                 plan,

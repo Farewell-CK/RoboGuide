@@ -96,3 +96,13 @@ travel-time estimation, topology-aware spatial routing, batching across non-Read
 RL/LLM scheduling, multi-Role joint recovery, or distributed clock synchronization. Those require
 typed evidence and separate policy decisions. The bounded deterministic search is replaceable
 behind the same CandidateSet/decision/Control admission boundary.
+
+## Later logical dispatch policy
+
+ADR-0082 closes the priority/fairness/admission software item above at the Orchestration logical
+Task boundary. Durable waiting ordinals survive restore, scarce-resource deferrals preserve age,
+per-Mission rounds prevent root-count domination, and due Control intervals retain precedence.
+Production timer/HTTP/SQL and actual Control competition tests cover the supported slice. The
+stateless joint Scheduler still receives immutable supplied candidates/calendars and owns no
+commitment. Physical preemption, fractional sharing, travel evidence and larger optimization remain
+separate decisions; this update does not change those historical limits.

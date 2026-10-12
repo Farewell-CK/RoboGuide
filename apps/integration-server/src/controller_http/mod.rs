@@ -3,6 +3,7 @@
 mod admission;
 mod protocol;
 mod recovery;
+mod scheduling_policy;
 mod server;
 mod view;
 

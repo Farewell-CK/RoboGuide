@@ -48,6 +48,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Control, Runtime, Commit, Recovery, and Node Protocol authority is designed explicitly.
 - `core/orchestration/` owns complete MissionPlan acceptance, Mission-level Group
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
+- ADR-0082 adds Orchestration-owned durable logical priority/aging and bounded round dispatch.
+  Resource deferrals preserve first waiting ordinals; actual new bindings/preparation consume age.
+  Due Control windows retain precedence. Defaults are priority 128, aging per 8 logical turns and
+  at most 32 Task attempts per input/timer. Deployment admission limits (128 nonterminal Missions,
+  4096 declared slots) count holds/cancellation, reject before Group creation and never revoke
+  ownership. Operator priority updates persist through the existing application transaction.
 - Orchestration scheduling dispositions are typed: deployment shortages remain observable,
   durable deferrals, bound Actor reconciliation remains Control-owned, and invalid contracts
   remain separate from internal failures. Application dispatch never parses diagnostics to

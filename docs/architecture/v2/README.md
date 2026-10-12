@@ -52,6 +52,12 @@ ADR-0081 的增量 checkpoint 是 State 存储层的 opaque byte 表示：版本
 尚未建立吞吐收益，默认 full，incremental 为显式选项。该存储切片不提供
 event-complete replay 或 control replication。
 
+ADR-0082 规定 Orchestration-owned 的多 Mission logical dispatch：持久 priority、等待/
+service ordinal、每轮单 Mission 一个 Task 与每 transition 32 次预算。Control 的 due
+interval、Actor/Context、当前资格与唯一 Commit 权威保留；deployment admission limits
+只约束新的 nonterminal Mission/declared slots，held/cancelling 也占用名额。实现验收前
+不宣称物理公平或时限保证，复制阶段必须携带该 ledger，避免切换重置服务历史。
+
 | 组件 | 职责 |
 | --- | --- |
 | Mission / Application | 提供外部 Mission / Goal，不直接控制设备 |

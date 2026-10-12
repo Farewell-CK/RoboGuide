@@ -93,9 +93,9 @@ impl OrchestrationError {
             }
             Self::SchedulingDeferred(reason) => Disposition::Deferred(*reason),
             Self::InvalidContract(_) => Disposition::InvalidContract,
-            Self::Mission(_) | Self::RuntimeContractViolation { .. } => {
-                Disposition::InternalFailure
-            }
+            Self::Mission(_)
+            | Self::RuntimeContractViolation { .. }
+            | Self::AdmissionCapacityExceeded => Disposition::InternalFailure,
             Self::Control(error) => match error {
                 ControlError::NoCandidate(_) => Disposition::Deferred(Reason::NoCandidate),
                 ControlError::AssignmentUnavailable(_) => {
