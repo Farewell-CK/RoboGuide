@@ -29,8 +29,9 @@
 | S2：有界事实批处理 | ADR-0080 已实现；6 项真实 gRPC、嵌套 savepoint 与 128/128 合成进程检查通过 | 1/N 轨迹等价、拒绝/SQL/hold/barrier 均验证；2ms 窗口降低 serialization/Commit 次数，保留单条兼容模式 |
 | S3：增量 checkpoint 存储 | ADR-0081 软件已实现、显式 opt-in；默认 full | 8 项存储/损坏/rollback 检查、真实应用恢复与进程复核通过；写入 bytes 降低，吞吐收益尚未建立；首次 startup timeout 保留 |
 | S4：多 Mission 优先级/公平/准入 | ADR-0082 已实现；5 个 Core + 7 个 app 检查通过 | logical aging、实际资源 gang 饥饿反例、round/32-turn bound、restore、due window、priority HTTP 与 admission 429；不授予物理时限/停止保证 |
-| S5：控制面复制与切换 | ADR-0083 的静态三成员 trusted-loopback 软件已实现 | upstream storage conformance、真实 engine/process quorum/leader loss/rejoin、Unknown/ownership/policy/journal 与旧 route fence；Artifact/Memory 内容及跨主机/物理发布保留 |
+| S5：控制面复制与切换 | ADR-0083 的静态三成员 trusted-loopback 软件已实现；ambiguous Commit response 会在同 epoch 下回读 accepted identity，匹配则继续本地 Commit，否则回滚并交给 supervisor 重建 | upstream storage conformance、真实 engine/process quorum/leader loss/rejoin、Unknown/ownership/policy/journal 与旧 route fence；Artifact/Memory 内容及跨主机/物理发布保留 |
 | S6：受支持的抢占 | ADR-0084 的显式 future planning 子集已实现；运行中物理抢占仍未实现 | generation/更高 priority、unbound/未 Commit/strictly future、waiting age/restore、HTTP/SQL rollback；运行工作继续保留 stop/repeat/handoff/现场 gate |
+| S7：Node 侧 epoch fence 与 transport hardening | ADR-0085；复制 profile 的 Execute/Cancel 携带可选 epoch，Node journal 持久化最高 epoch；重复 Node 注册不再驱逐 live route；全拒绝 batch 也 fence rejected sessions；HTTP listener 异常进入 fatal 通道；Node-authored execution fact 的 owner/terminal rejection 使用 typed `FactRejected`，未分类 Runtime/Control/SQL 错误保持 fatal | 防止已观察新 epoch 后的旧 Controller 命令；不提供物理停止、mTLS、跨主机认证或竞态窗口的物理证明；不把全量 Mission-local isolation 宣称完成 |
 
 ## 继续保留的明确边界
 
@@ -47,6 +48,7 @@
 | 0070 | application takeover command 与真实 standby 证据 | Control typed authorization/registry/commit/rebind 软件与回归已核实；应用 command 尚无，现场 replay 与物理 stop 验证保留 |
 | 0075、0076 | diagnostics/连续活性运行证据与 TTL 不变 | 当前离线/本地进程测试已有；历史 pilot 因果和 hardware stop 没有升级为已证明 |
 | 0077 | 真正运行期局部分类与持久 isolation | ADR-0079 完成声明 deadline 的 exact-Task 子集；原注入回归仍只证明机制，不扩大未知错误分类 |
+| dev-review §1.4、§2.3、§3.2、§4 | 历史归档/压缩、EASY/backfill、应用期背压、终态 Mission GC、空间资源图与租户配额 | 继续保留为扩展性/研究性工作；S7 不把 epoch fence 或 batch 修补扩大为长期运行和公平性证明 |
 
 Normal pending reservations、未来 scheduling intervals、未到达的 source evidence 是可接受的
 运行状态，不是自动需要删除的遗留。多 Group decomposition、完整世界 Belief、融合、空间

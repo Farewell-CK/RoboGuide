@@ -336,6 +336,11 @@ pub enum IntegrationRuntimeError {
     Route(tonic::Status),
     /// Protocol conversion failed.
     Protocol(String),
+    /// One Node-authored execution fact was conclusively rejected for its exact attempt.
+    ///
+    /// This is distinct from a Controller/runtime invariant failure: the application may fence
+    /// the offending session without treating the whole fact driver as unhealthy.
+    FactRejected(String),
     /// The committed Task is waiting for its declared Runtime coordination evidence.
     CoordinationNotReady,
     /// Stable execution id was reused for another command.
@@ -353,6 +358,7 @@ impl Display for IntegrationRuntimeError {
             Self::Domain(error) => error.fmt(f),
             Self::Route(error) => error.fmt(f),
             Self::Protocol(reason) => f.write_str(reason),
+            Self::FactRejected(reason) => f.write_str(reason),
             Self::CoordinationNotReady => {
                 f.write_str("TaskExecution coordination mechanisms are not ready")
             }

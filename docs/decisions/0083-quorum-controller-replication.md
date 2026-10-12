@@ -59,8 +59,16 @@ two Node process 检查验证 minority 无 child、leader crash、Unknown/owners
 保留和 metadata rejoin；新 local Execute 数保持 2。补充 old route closure、standalone
 downgrade、live quorum loss 与恢复检查也已通过。
 
-发送 fence 是软件授权点，不是 Node 端分布式 fencing token，不证明任意进程暂停场景下
-的硬实时停止。已发送工作保留原停止证据规则；controller failover 不等于 physical
-continuation release。初次 debug hashing startup timeout 和一次切换瞬间的只读探针
-connection reset 均保留；探针之后对 GET 重新解析 leader，未给 POST 添加重试。
+发送 fence 本身是 Controller 软件授权点。ADR-0085 后，replicated profile 还把 issuing
+epoch 随 Execute/Cancel 传给 Node，并由 Node journal 持久化最高 epoch；这是 stale-command
+delivery fence，但不是密码学身份、硬实时停止或 physical continuation release。已发送工作
+仍保留原停止证据规则；controller failover 不等于 physical continuation release。初次 debug
+hashing startup timeout 和一次切换瞬间的只读探针 connection reset 均保留；探针之后对 GET
+重新解析 leader，未给 POST 添加重试。
+
+应用 Commit 的 transport response 若在 `client_write` 之后丢失，不再直接按拒绝处理。当前
+child 会在同一 issuing epoch 下读取小型 accepted application identity
+`(revision,event_sequence,checkpoint_digest)`：精确匹配目标时继续本地 SQL Commit；不匹配或
+identity 无法确认时返回 ambiguity，application batch 回滚，child 由 supervisor 重建。这样
+不会在 quorum 已接受而 response 丢失时继续使用旧前驱，也不会在无法确认时假造本地提交。
 部署、配置升级限制和完整结果入口见 [软件部署说明](../development/controller-replication.md)。

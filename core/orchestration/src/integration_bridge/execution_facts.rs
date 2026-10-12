@@ -57,7 +57,13 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 fact.reason,
                 received_at,
             )
-            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
+            .map_err(|error| match error {
+                runtime::ExecutionRuntimeError::NodeOwnership(reason)
+                | runtime::ExecutionRuntimeError::TerminalConflict(reason) => {
+                    IntegrationRuntimeError::FactRejected(reason)
+                }
+                error => IntegrationRuntimeError::Protocol(error.to_string()),
+            })?;
         if phase == ExecutionPhase::Cancelled && !runtime_events.is_empty() {
             self.runtime
                 .confirm_recovery_stop(fact.execution_id, received_at);

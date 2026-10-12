@@ -15,6 +15,32 @@ enum FactFailure {
     Fatal(DriverError),
 }
 
+/// Classifies only explicitly typed input rejections as session-local failures.
+///
+/// Runtime/Control/SQLite invariant failures stay fatal by default. This prevents a newly
+/// introduced internal error from being silently converted into a rejected Node session.
+fn classify_fact_error(error: orchestration::IntegrationRuntimeError) -> FactFailure {
+    let rejected = matches!(
+        &error,
+        orchestration::IntegrationRuntimeError::FactRejected(_)
+            | orchestration::IntegrationRuntimeError::Route(_)
+            | orchestration::IntegrationRuntimeError::Domain(_)
+            | orchestration::IntegrationRuntimeError::State(_)
+            | orchestration::IntegrationRuntimeError::StateRecord(_)
+            | orchestration::IntegrationRuntimeError::Control(
+                control::ControlError::UnknownLease { .. }
+                    | control::ControlError::LeaseExpired { .. }
+                    | control::ControlError::InvalidLease(_)
+                    | control::ControlError::SharedState(_)
+            )
+    );
+    if rejected {
+        FactFailure::Rejected(error.to_string())
+    } else {
+        FactFailure::Fatal(Box::new(error))
+    }
+}
+
 /// References the existing single-writer authorities; it owns no second execution or resource map.
 pub(crate) struct NodeFactDriver<'a, C: Clock> {
     /// Live projection published only after the complete batch commits.
@@ -190,7 +216,7 @@ impl<C: Clock> NodeFactDriver<'_, C> {
                 candidate
                     .bridge
                     .consume_received(event, received, now, &correlation)
-                    .map_err(|error| FactFailure::Rejected(error.to_string()))?;
+                    .map_err(classify_fact_error)?;
                 self.derive(&mut candidate, registration, now, &correlation)
                     .map_err(FactFailure::Fatal)
             })?;
@@ -214,6 +240,13 @@ impl<C: Clock> NodeFactDriver<'_, C> {
         }
         if dispositions.iter().all(Result::is_err) {
             self.events.rollback_batch()?;
+            // Keep rejected-session behavior independent of batch composition.  A batch that
+            // contains no accepted input still has to fence every route whose fact was rejected;
+            // otherwise the same invalid session remains eligible for the next transport fact,
+            // while the identical input in a mixed batch would have fenced it after Commit.
+            for (node, session) in rejected_sessions {
+                self.router.fence_current_session(&node, &session)?;
+            }
             return Ok(dispositions);
         }
         let serialization = StageObservation::start(

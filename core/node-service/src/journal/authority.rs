@@ -3,6 +3,66 @@
 use super::*;
 
 impl ExecutionJournal {
+    /// Durably advances the Node's Controller epoch before a replicated command is admitted.
+    ///
+    /// Epochs are compared lexicographically by `(term, replica_id)`. An equal epoch is
+    /// idempotent; an older epoch is rejected without changing any execution journal row.
+    pub fn admit_controller_epoch(&self, encoded: &str) -> Result<(), JournalError> {
+        if encoded.trim().is_empty() {
+            return Ok(());
+        }
+        let received: ControllerEpoch = serde_json::from_str(encoded)
+            .map_err(|error| JournalError::Corrupt(format!("invalid Controller epoch: {error}")))?;
+        if received.replica_id == 0 {
+            return Err(JournalError::Corrupt(
+                "Controller epoch replica_id must be nonzero".to_string(),
+            ));
+        }
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = transaction
+            .query_row(
+                "SELECT term, replica_id FROM controller_epoch WHERE singleton = 1",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()?;
+        if let Some((term, replica_id)) = current {
+            let current = ControllerEpoch {
+                term: u64::try_from(term).map_err(|_| {
+                    JournalError::Corrupt("stored Controller epoch term is negative".into())
+                })?,
+                replica_id: u64::try_from(replica_id).map_err(|_| {
+                    JournalError::Corrupt("stored Controller epoch replica_id is negative".into())
+                })?,
+            };
+            if (received.term, received.replica_id) < (current.term, current.replica_id) {
+                transaction.rollback()?;
+                return Err(JournalError::StaleControllerEpoch {
+                    current: serde_json::to_string(&current)?,
+                    received: encoded.to_string(),
+                });
+            }
+            if received == current {
+                transaction.commit()?;
+                return Ok(());
+            }
+        }
+        let term = i64::try_from(received.term).map_err(|_| {
+            JournalError::Corrupt("Controller epoch term exceeds SQLite range".into())
+        })?;
+        let replica_id = i64::try_from(received.replica_id).map_err(|_| {
+            JournalError::Corrupt("Controller epoch replica_id exceeds SQLite range".into())
+        })?;
+        transaction.execute(
+            "INSERT INTO controller_epoch(singleton,term,replica_id) VALUES (1,?1,?2)
+             ON CONFLICT(singleton) DO UPDATE SET term=excluded.term, replica_id=excluded.replica_id",
+            params![term, replica_id],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Opens or creates a journal and fences incomplete dispatches from replay.
     ///
     /// Opening the same database represents a new Node Service process lifetime. Any

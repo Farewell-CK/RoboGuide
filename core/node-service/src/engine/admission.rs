@@ -3,6 +3,13 @@
 use super::*;
 
 impl LocalIntegrationEngine {
+    /// Persists a replicated Controller epoch before any Execute or Cancel side effect is admitted.
+    /// Empty epochs retain standalone Controller compatibility.
+    pub fn admit_controller_epoch(&self, epoch: &str) -> Result<(), EngineError> {
+        self.inner.journal.admit_controller_epoch(epoch)?;
+        Ok(())
+    }
+
     /// Accepts a canonical invocation only when resources and durable identity match.
     pub fn execute(
         &self,

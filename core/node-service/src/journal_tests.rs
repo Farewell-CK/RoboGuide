@@ -684,3 +684,36 @@ fn status_updates_reject_stale_and_post_terminal_facts() {
         Err(JournalError::InvalidTransition(_, _))
     ));
 }
+
+/// Replicated Controller epochs survive restart and reject commands from an older leader.
+#[test]
+fn controller_epoch_is_durable_and_monotonic() {
+    let (directory, path, journal) = journal();
+    let first = r#"{"term":4,"replica_id":2}"#;
+    let same = r#"{"term":4,"replica_id":2}"#;
+    let older = r#"{"term":3,"replica_id":1}"#;
+    let newer = r#"{"term":5,"replica_id":1}"#;
+
+    journal
+        .admit_controller_epoch(first)
+        .expect("first Controller epoch is accepted");
+    journal
+        .admit_controller_epoch(same)
+        .expect("replaying the same epoch is idempotent");
+    assert!(matches!(
+        journal.admit_controller_epoch(older),
+        Err(JournalError::StaleControllerEpoch { .. })
+    ));
+    drop(journal);
+
+    let reopened = ExecutionJournal::open(&path).expect("journal reopens");
+    assert!(matches!(
+        reopened.admit_controller_epoch(older),
+        Err(JournalError::StaleControllerEpoch { .. })
+    ));
+    reopened
+        .admit_controller_epoch(newer)
+        .expect("newer Controller epoch advances the durable fence");
+    drop(reopened);
+    drop(directory);
+}

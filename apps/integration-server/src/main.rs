@@ -790,6 +790,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     let timer_fatal_sender = fatal_sender.clone();
+    let http_fatal_sender = fatal_sender.clone();
+    let artifact_fatal_sender = fatal_sender.clone();
     let timer_diagnostics = diagnostic_handle.clone();
     let receiver_diagnostics = diagnostic_handle.clone();
     tokio::spawn(async move {
@@ -804,7 +806,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await
         {
-            eprintln!("control HTTP server stopped: {error}");
+            let _ = http_fatal_sender.send(format!("control HTTP server stopped: {error}"));
         }
     });
     tokio::spawn(async move {
@@ -817,7 +819,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await
         {
-            eprintln!("artifact HTTP server stopped: {error}");
+            let _ = artifact_fatal_sender.send(format!("artifact HTTP server stopped: {error}"));
         }
     });
     tokio::spawn(async move {

@@ -23,7 +23,9 @@ flowchart LR
 事务先复制完整 authority checkpoint 和新增连续 event metadata，校验前一个 snapshot
 digest/tail；quorum 接受后才 local SQL Commit、安装 candidate、ACK。Execute/Cancel 各自
 检查原 epoch；父进程消失或 quorum 丢失时，child watchdog 关闭自己的公开 routes。
-该检查是软件发送授权点，不是 Node 端分布式 fencing token，也不是硬实时停止保证。
+该检查是 Controller 的软件发送授权点；ADR-0085 另外让 replicated profile 将 issuing
+epoch 传入 Node journal，拒绝已观察新 epoch 后的旧命令。它仍不是密码学身份、物理
+停止或硬实时停止保证。
 已经发送的工作保持原 Local EAIOS/Control stop-proof 规则。
 
 切换先从 accepted history 原子重建私有 `controller.sqlite3`，然后普通 startup restore

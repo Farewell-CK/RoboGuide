@@ -64,6 +64,11 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
          );
          CREATE TABLE IF NOT EXISTS cancellation_intents (
              execution_id TEXT PRIMARY KEY NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS controller_epoch (
+             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+             term INTEGER NOT NULL CHECK(term >= 0),
+             replica_id INTEGER NOT NULL CHECK(replica_id > 0)
          );",
     )?;
     if prior_version < 2 {

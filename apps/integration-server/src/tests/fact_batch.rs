@@ -524,6 +524,47 @@ async fn rejected_owner_fact_does_not_discard_another_sessions_accepted_fact() {
     );
 }
 
+/// A batch containing only rejected facts still fences every offending session after rollback.
+#[tokio::test]
+async fn all_rejected_facts_fence_every_session_without_commit() {
+    let mut fixture = Fixture::new().await;
+    fixture.submit(None);
+    let attempts = fixture.start().await;
+    let first = fixture
+        .execution(
+            1,
+            attempts[0].execution_id(),
+            2,
+            wire::ExecutionPhase::Completed,
+            5,
+        )
+        .await;
+    let second = fixture
+        .execution(
+            0,
+            attempts[1].execution_id(),
+            2,
+            wire::ExecutionPhase::Completed,
+            5,
+        )
+        .await;
+    let before = fixture.events.latest_sequence().unwrap();
+    fixture.run(vec![first, second]).unwrap();
+    assert_eq!(fixture.events.latest_sequence().unwrap(), before);
+    assert!(
+        !fixture
+            .router
+            .session_is_current("worker-0", &fixture.peers[0].session)
+            .unwrap()
+    );
+    assert!(
+        !fixture
+            .router
+            .session_is_current("worker-1", &fixture.peers[1].session)
+            .unwrap()
+    );
+}
+
 /// Real runtime violation holds A inside the nested Mission/input savepoints while B finishes.
 #[tokio::test]
 async fn deadline_isolation_nests_with_input_savepoints_without_losing_raw_facts() {

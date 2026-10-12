@@ -110,6 +110,29 @@ async fn accepted_history_snapshot_and_identity_reopen() {
     );
 }
 
+/// The small accepted identity is sufficient to resolve a lost application Commit response.
+#[tokio::test]
+async fn accepted_application_identity_matches_checkpoint_digest() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("identity.sqlite3");
+    let mut store = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap();
+    let first = batch(None, 1);
+    store
+        .apply([Entry {
+            log_id: LogId::new(CommittedLeaderId::new(1, 1), 1),
+            payload: EntryPayload::Normal(first.clone()),
+        }])
+        .await
+        .unwrap();
+    let identity = store.accepted_application_identity().unwrap();
+    assert_eq!(identity.revision, 1);
+    assert_eq!(identity.event_sequence, first.checkpoint.event_sequence);
+    assert_eq!(
+        identity.checkpoint_digest,
+        Some(state::checkpoint_identity(&first.checkpoint))
+    );
+}
+
 /// Acquires three simultaneous ephemeral listeners so their released loopback ports are distinct.
 fn members() -> BTreeMap<u64, SocketAddr> {
     let listeners = (0..3)

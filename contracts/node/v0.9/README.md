@@ -18,6 +18,12 @@ advertises `roboguide.execution-session=roboguide.execution-session/v0.1` in Loc
 The Controller attaches this optional field only for the registered Local System that owns the
 selected operation and advertises the schema. It rejects a stale route that does not advertise
 support before sending a non-empty field; generic Nodes keep their existing command shape.
+Replicated Controller deployments additionally carry an optional serialized Controller epoch on
+`Execute` and `Cancel`. A Node Service persists the highest observed `(term, replica_id)` in its
+execution journal and rejects an older epoch before admitting the command. Empty epochs preserve
+standalone compatibility. This is a delivery fence for stale Controller commands; it is not a
+physical stop proof, network authentication mechanism, or evidence that an earlier physical
+attempt has ended.
 Semantic invocation negotiation
 remains explicit Node Contract v0.6 negotiation.
 A v0.4 registration uses `capabilities`; a v0.5 registration uses `capability_profiles` without

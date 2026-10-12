@@ -492,7 +492,7 @@ fn terminal_execution_status_rejects_later_conflict() {
             TimestampMs::new(5),
             &correlation,
         ),
-        Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("immutable")
+        Err(IntegrationRuntimeError::FactRejected(reason)) if reason.contains("immutable")
     ));
     assert_eq!(
         bridge.execution_status("execution-terminal"),
@@ -524,7 +524,7 @@ fn wrong_node_execution_fact_does_not_poison_sequence() {
             TimestampMs::new(2),
             &correlation,
         ),
-        Err(IntegrationRuntimeError::Protocol(reason)) if reason.contains("owner")
+        Err(IntegrationRuntimeError::FactRejected(reason)) if reason.contains("owner")
     ));
     bridge
         .consume(

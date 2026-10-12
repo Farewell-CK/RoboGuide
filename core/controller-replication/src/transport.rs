@@ -46,6 +46,11 @@ enum Command {
         /// Complete candidate with immutable event/source evidence.
         batch: state::ApplicationCommitBatch,
     },
+    /// Read the accepted application identity after an ambiguous Commit response.
+    AcceptedIdentity {
+        /// Original issuing epoch whose quorum must still be current.
+        epoch: ControllerEpoch,
+    },
 }
 
 /// Closed response preserves upstream Raft errors separately from child acceptance.
@@ -61,6 +66,8 @@ enum Reply {
     Fence(Result<(), String>),
     /// Exact quorum-applied application result.
     Commit(Result<CommitReceipt, String>),
+    /// Small accepted application identity, never a live Control projection.
+    AcceptedIdentity(Result<AcceptedApplicationIdentity, String>),
     /// Identity/framing/profile rejected before entering the consensus engine.
     Rejected(String),
 }
@@ -144,6 +151,13 @@ async fn serve_connection(
             }
             Command::Fence(epoch) => Reply::Fence(node.check_epoch(epoch).await),
             Command::Commit { epoch, batch } => Reply::Commit(node.commit(epoch, batch).await),
+            Command::AcceptedIdentity { epoch } => {
+                let result = node
+                    .check_epoch(epoch)
+                    .await
+                    .and_then(|()| node.accepted_application_identity());
+                Reply::AcceptedIdentity(result)
+            }
         }
     };
     let encoded = serde_json::to_vec(&reply).map_err(|error| error.to_string())?;
@@ -438,13 +452,64 @@ impl state::ApplicationBatchReplicator for ReplicaFenceClient {
 
     /// Waits for majority durability of the complete candidate before local SQL Commit.
     fn confirm_batch(&self, batch: state::ApplicationCommitBatch) -> Result<(), String> {
-        match self.exchange(Command::Commit {
+        let target = AcceptedApplicationIdentity {
+            revision: 0,
+            event_sequence: batch.checkpoint.event_sequence,
+            checkpoint_digest: Some(state::checkpoint_identity(&batch.checkpoint)),
+        };
+        let commit = self.exchange(Command::Commit {
             epoch: self.epoch,
             batch,
-        })? {
-            Reply::Commit(Ok(receipt)) if receipt.accepted => Ok(()),
-            Reply::Commit(Err(error)) => Err(error),
-            _ => Err("replica application acceptance rejected".into()),
+        });
+        match commit {
+            Ok(Reply::Commit(Ok(receipt))) if receipt.accepted => Ok(()),
+            Ok(Reply::Commit(Err(error))) => {
+                match self.exchange(Command::AcceptedIdentity { epoch: self.epoch }) {
+                    Ok(Reply::AcceptedIdentity(Ok(identity)))
+                        if identity.event_sequence == target.event_sequence
+                            && identity.checkpoint_digest == target.checkpoint_digest =>
+                    {
+                        Ok(())
+                    }
+                    Ok(Reply::AcceptedIdentity(Ok(identity))) => Err(format!(
+                        "quorum Commit failed ({error}); accepted identity is revision {}, event {}, digest {:?}",
+                        identity.revision, identity.event_sequence, identity.checkpoint_digest
+                    )),
+                    Ok(Reply::AcceptedIdentity(Err(identity_error))) => Err(format!(
+                        "quorum Commit failed ({error}); accepted identity read failed: {identity_error}"
+                    )),
+                    Ok(_) => Err(format!(
+                        "quorum Commit failed ({error}); accepted identity response was invalid"
+                    )),
+                    Err(identity_error) => Err(format!(
+                        "quorum Commit failed ({error}); accepted identity read failed: {identity_error}"
+                    )),
+                }
+            }
+            Ok(_) => Err("replica application acceptance rejected".into()),
+            Err(original_error) => {
+                match self.exchange(Command::AcceptedIdentity { epoch: self.epoch }) {
+                    Ok(Reply::AcceptedIdentity(Ok(identity)))
+                        if identity.event_sequence == target.event_sequence
+                            && identity.checkpoint_digest == target.checkpoint_digest =>
+                    {
+                        Ok(())
+                    }
+                    Ok(Reply::AcceptedIdentity(Ok(identity))) => Err(format!(
+                        "ambiguous quorum Commit response ({original_error}); accepted identity is revision {}, event {}, digest {:?}",
+                        identity.revision, identity.event_sequence, identity.checkpoint_digest
+                    )),
+                    Ok(Reply::AcceptedIdentity(Err(error))) => Err(format!(
+                        "ambiguous quorum Commit response ({original_error}); accepted identity read failed: {error}"
+                    )),
+                    Ok(_) => Err(format!(
+                        "ambiguous quorum Commit response ({original_error}); accepted identity response was invalid"
+                    )),
+                    Err(identity_error) => Err(format!(
+                        "ambiguous quorum Commit response ({original_error}); accepted identity read failed: {identity_error}"
+                    )),
+                }
+            }
         }
     }
 }
@@ -453,5 +518,10 @@ impl ports::CommandDeliveryFence for ReplicaFenceClient {
     /// Rechecks the exact issuing epoch and majority immediately before each actual send.
     fn check_delivery(&self) -> Result<(), String> {
         self.check()
+    }
+
+    /// Serializes the immutable issuing epoch for Node-side monotonic command fencing.
+    fn controller_epoch(&self) -> Option<String> {
+        serde_json::to_string(&self.epoch).ok()
     }
 }

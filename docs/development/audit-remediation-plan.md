@@ -132,3 +132,21 @@ resume conflict 与失败原子性，另有 Runtime 时间不可变/restore 检�
 
 已实现而旧状态未更新的 ADR 已回写原文；完整状态与待实施依赖见
 [ADR 遗留项清单](adr-follow-up-register.md)。E6 保持暂停。
+
+## Dev review follow-up（2026-10-12）
+
+针对外部 dev review 的确定性软件缺陷已补入当前开发基线：
+
+- ADR-0085 为 replicated Controller 的 `Execute`/`Cancel` 增加可选 issuing epoch；Node
+  execution journal 持久化最高 `(term, replica_id)`，旧 epoch 在任何 Local EAIOS 调用前拒绝；
+- live Node route 不会再被尚未完成 application acceptance 的重复注册驱逐；
+- 全部输入均被拒绝的事实批次也会在 rollback 后 fence 对应 session；
+- HTTP/Artifact listener 停止进入 Controller fatal 通道；Node owner-mismatch 和 terminal
+  conflict 使用 typed `FactRejected`，未分类 Runtime/Control/SQL 错误继续 fail closed。
+- quorum `Commit` 的异常响应先回读同 issuing epoch 的 accepted application identity；精确匹配
+  时继续本地提交，无法确认时回滚并退出到 replica supervisor 重建路径。
+
+这些修补没有扩大复制 profile 的边界：当前仍是同机 trusted-loopback 软件复制，没有
+mTLS、跨主机 membership、物理 stop proof、历史归档/压缩、完整 Mission-local isolation、
+backfill/空间资源图或正式 E6 证据。专项 workspace checks 通过后，原 dev review 中的这些
+项目继续按 [ADR 遗留项清单](adr-follow-up-register.md) 保留。

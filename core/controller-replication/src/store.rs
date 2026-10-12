@@ -33,6 +33,18 @@ pub struct ReplicaView {
     pub events: Vec<state::PersistedEvent>,
 }
 
+/// Small accepted-application identity used to resolve a lost Commit response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcceptedApplicationIdentity {
+    /// Latest accepted application revision.
+    pub revision: u64,
+    /// Complete checkpoint event sequence represented by the accepted projection.
+    pub event_sequence: u64,
+    /// Digest of the complete accepted checkpoint, when one exists.
+    pub checkpoint_digest: Option<String>,
+}
+
 impl ReplicaView {
     /// Validates bounded complete history and exact codecs on reopen and before snapshot installation.
     fn validate(&self, application_schema: &str) -> Result<(), StorageError<u64>> {
@@ -243,6 +255,24 @@ impl SqliteRaftStore {
         read_meta(&connection, "revision")
             .map(|revision| revision.unwrap_or(0))
             .map_err(|error| error.to_string())
+    }
+
+    /// Reads only the accepted application identity without decoding the retained event history.
+    pub fn accepted_application_identity(&self) -> Result<AcceptedApplicationIdentity, String> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| "replica store lock is poisoned")?;
+        let checkpoint: Option<state::PersistedCheckpoint> =
+            read_meta(&connection, "checkpoint").map_err(|error| error.to_string())?;
+        let revision: u64 = read_meta(&connection, "revision")
+            .map_err(|error| error.to_string())?
+            .unwrap_or(0);
+        Ok(AcceptedApplicationIdentity {
+            revision,
+            event_sequence: checkpoint.as_ref().map_or(0, |value| value.event_sequence),
+            checkpoint_digest: checkpoint.as_ref().map(state::checkpoint_identity),
+        })
     }
 
     /// Accepts only an exact predecessor/tail under the startup-owned application schema.

@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub use store::{ReplicaView, SqliteRaftStore};
+pub use store::{AcceptedApplicationIdentity, ReplicaView, SqliteRaftStore};
 pub use transport::{ReplicaFenceClient, ReplicaServer};
 
 openraft::declare_raft_types!(
@@ -252,6 +252,11 @@ impl ReplicaNode {
     /// Returns the applied ordinal for local diagnostics without copying authority/history snapshots.
     pub fn accepted_revision(&self) -> Result<u64, String> {
         self.store.accepted_revision()
+    }
+
+    /// Returns the small accepted application identity used to resolve an ambiguous Commit reply.
+    pub fn accepted_application_identity(&self) -> Result<AcceptedApplicationIdentity, String> {
+        self.store.accepted_application_identity()
     }
 
     /// Returns the bound infrastructure RPC endpoint, never an embodied executor address.

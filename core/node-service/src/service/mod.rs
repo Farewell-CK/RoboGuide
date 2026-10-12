@@ -481,35 +481,51 @@ impl NodeService {
                     ));
                 }
                 let mut receipt_reason = String::new();
-                let receipt_status = match self.engine.execute_with_session(
-                    execution_id.clone(),
-                    invocation,
-                    execute.resource_ids,
-                    &execute.execution_session_json,
-                ) {
-                    Ok(ExecuteDisposition::Started | ExecuteDisposition::DispatchPending) => {
-                        integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
-                    }
-                    Ok(ExecuteDisposition::Existing(mut snapshot)) => {
-                        snapshot.session_id = session_id.to_string();
-                        outbound
-                            .send(NodeMessage {
-                                message: Some(NodePayload::ExecutionSnapshot(snapshot)),
-                            })
-                            .map_err(|_| NodeServiceError::Closed)?;
-                        integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
-                    }
+                let receipt_status = match self
+                    .engine
+                    .admit_controller_epoch(&execute.controller_epoch)
+                {
                     Err(error) => {
                         receipt_reason = error.to_string();
                         send_local_rejection(
                             outbound,
                             session_id,
                             &execution_id,
-                            "execute_rejected",
+                            "execute_epoch_rejected",
                             &error,
                         )?;
                         integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
                     }
+                    Ok(()) => match self.engine.execute_with_session(
+                        execution_id.clone(),
+                        invocation,
+                        execute.resource_ids,
+                        &execute.execution_session_json,
+                    ) {
+                        Ok(ExecuteDisposition::Started | ExecuteDisposition::DispatchPending) => {
+                            integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
+                        }
+                        Ok(ExecuteDisposition::Existing(mut snapshot)) => {
+                            snapshot.session_id = session_id.to_string();
+                            outbound
+                                .send(NodeMessage {
+                                    message: Some(NodePayload::ExecutionSnapshot(snapshot)),
+                                })
+                                .map_err(|_| NodeServiceError::Closed)?;
+                            integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
+                        }
+                        Err(error) => {
+                            receipt_reason = error.to_string();
+                            send_local_rejection(
+                                outbound,
+                                session_id,
+                                &execution_id,
+                                "execute_rejected",
+                                &error,
+                            )?;
+                            integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
+                        }
+                    },
                 };
                 send_command_receipt(
                     outbound,
@@ -528,6 +544,7 @@ impl NodeService {
                 session_id: command_session,
                 execution_id,
                 command_id,
+                controller_epoch,
             })) if command_session == session_id => {
                 if command_id != format!("cancel-{execution_id}") {
                     return Err(NodeServiceError::Protocol(
@@ -535,37 +552,48 @@ impl NodeService {
                     ));
                 }
                 let mut receipt_reason = String::new();
-                let receipt_status = if let Err(error) = self.engine.cancel(&execution_id) {
-                    receipt_reason = error.to_string();
-                    send_local_rejection(
-                        outbound,
-                        session_id,
-                        &execution_id,
-                        "cancel_rejected",
-                        &error,
-                    )?;
-                    integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
-                } else {
-                    let mut snapshot = self
-                        .engine
-                        .snapshots()?
-                        .into_iter()
-                        .find(|snapshot| snapshot.execution_id == execution_id)
-                        .unwrap_or_else(|| integration::grpc::v0_4::ExecutionSnapshot {
-                            execution_id: execution_id.clone(),
-                            session_id: session_id.to_string(),
-                            last_sequence: 1,
-                            phase: integration::grpc::v0_4::ExecutionPhase::Cancelled as i32,
-                            reason: "cancelled before Execute reached Node journal".to_string(),
-                        });
-                    snapshot.session_id = session_id.to_string();
-                    outbound
-                        .send(NodeMessage {
-                            message: Some(NodePayload::ExecutionSnapshot(snapshot)),
-                        })
-                        .map_err(|_| NodeServiceError::Closed)?;
-                    integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
-                };
+                let receipt_status =
+                    if let Err(error) = self.engine.admit_controller_epoch(&controller_epoch) {
+                        receipt_reason = error.to_string();
+                        send_local_rejection(
+                            outbound,
+                            session_id,
+                            &execution_id,
+                            "cancel_epoch_rejected",
+                            &error,
+                        )?;
+                        integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
+                    } else if let Err(error) = self.engine.cancel(&execution_id) {
+                        receipt_reason = error.to_string();
+                        send_local_rejection(
+                            outbound,
+                            session_id,
+                            &execution_id,
+                            "cancel_rejected",
+                            &error,
+                        )?;
+                        integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
+                    } else {
+                        let mut snapshot = self
+                            .engine
+                            .snapshots()?
+                            .into_iter()
+                            .find(|snapshot| snapshot.execution_id == execution_id)
+                            .unwrap_or_else(|| integration::grpc::v0_4::ExecutionSnapshot {
+                                execution_id: execution_id.clone(),
+                                session_id: session_id.to_string(),
+                                last_sequence: 1,
+                                phase: integration::grpc::v0_4::ExecutionPhase::Cancelled as i32,
+                                reason: "cancelled before Execute reached Node journal".to_string(),
+                            });
+                        snapshot.session_id = session_id.to_string();
+                        outbound
+                            .send(NodeMessage {
+                                message: Some(NodePayload::ExecutionSnapshot(snapshot)),
+                            })
+                            .map_err(|_| NodeServiceError::Closed)?;
+                        integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
+                    };
                 send_command_receipt(
                     outbound,
                     session_id,

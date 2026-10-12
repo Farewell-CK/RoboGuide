@@ -236,6 +236,10 @@ message Execute {
   // Controller-derived, digest-bound accepted-plan topology. Empty only on
   // explicit legacy commands; this is not an ExecutionIntent parameter.
   string execution_session_json = 6;
+  // Optional monotonic Controller epoch used by replicated Controllers. Empty
+  // preserves standalone/legacy delivery; a Node that receives a value must
+  // durably reject older epochs before admitting the command.
+  string controller_epoch = 7;
 }
 
 message Cancel {
@@ -243,6 +247,8 @@ message Cancel {
   string execution_id = 2;
   // Immutable Controller command identity. Replays must retain this value.
   string command_id = 3;
+  // Optional monotonic Controller epoch used by replicated Controllers.
+  string controller_epoch = 4;
 }
 
 enum CommandKind {

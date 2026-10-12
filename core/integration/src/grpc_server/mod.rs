@@ -229,6 +229,18 @@ impl GrpcNodeRouter {
         }
         Ok(())
     }
+
+    /// Returns the optional serialized Controller epoch attached to physical commands.
+    fn controller_epoch(&self) -> Result<String, Status> {
+        let fence = self
+            .command_fence
+            .lock()
+            .map_err(|_| Status::internal("delivery fence unavailable"))?
+            .clone();
+        Ok(fence
+            .and_then(|fence| fence.controller_epoch())
+            .unwrap_or_default())
+    }
     /// Anchors current-process continuity only after application-accepted registration.
     fn anchor_liveness(
         &self,
@@ -436,6 +448,7 @@ impl GrpcNodeRouter {
             return Err(Status::unavailable("node lease expired"));
         }
         let invocation = invocation_for_contract(invocation, &route.node_contract_version)?;
+        let controller_epoch = self.controller_epoch()?;
         route
             .sender
             .send(Ok(ServerMessage {
@@ -446,6 +459,7 @@ impl GrpcNodeRouter {
                     resource_ids,
                     command_id,
                     execution_session_json,
+                    controller_epoch,
                 })),
             }))
             .map_err(|_| Status::unavailable("node session closed"))
@@ -477,6 +491,7 @@ impl GrpcNodeRouter {
         if route.last_heartbeat.elapsed() >= route.lease_duration {
             return Err(Status::unavailable("node lease expired"));
         }
+        let controller_epoch = self.controller_epoch()?;
         route
             .sender
             .send(Ok(ServerMessage {
@@ -484,6 +499,7 @@ impl GrpcNodeRouter {
                     session_id: route.session_id.clone(),
                     execution_id,
                     command_id,
+                    controller_epoch,
                 })),
             }))
             .map_err(|_| Status::unavailable("node session closed"))
@@ -720,11 +736,23 @@ async fn run_grpc_session(
     validate_registration(&registration)?;
     let session_id = format!("grpc-session-{boot_nonce}-{identity}");
     let lease_id = format!("grpc-lease-{boot_nonce}-{identity}");
-    let previous = router
-        .sessions
-        .lock()
-        .map_err(|_| Status::internal("session registry unavailable"))?
-        .insert(
+    let previous = {
+        let mut sessions = router
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        if sessions.get(&registration.node_id).is_some_and(|route| {
+            route.active && route.last_heartbeat.elapsed() < route.lease_duration
+        }) {
+            // A live route is already the Controller's current owner for this Node identity.  Do
+            // not let an unauthenticated duplicate registration evict it before application
+            // acceptance. Legitimate reconnects are admitted after the old route has been fenced
+            // or its lease has expired; the old stream remains subject to the session check.
+            return Err(Status::already_exists(
+                "Node identity already has a live session",
+            ));
+        }
+        sessions.insert(
             registration.node_id.clone(),
             RoutedSession {
                 liveness_evidence: None,
@@ -750,7 +778,8 @@ async fn run_grpc_session(
                         == Some(EXECUTION_SESSION_METADATA_VALUE)
                 }),
             },
-        );
+        )
+    };
     if let Some(previous) = previous {
         let _ = previous
             .sender

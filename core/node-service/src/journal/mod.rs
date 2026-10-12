@@ -347,6 +347,16 @@ pub struct ExecutionJournal {
     connection: Mutex<Connection>,
 }
 
+/// Monotonic Controller identity persisted by the Node before accepting replicated commands.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct ControllerEpoch {
+    /// OpenRaft election term.
+    term: u64,
+    /// Infrastructure replica that issued the command.
+    replica_id: u64,
+}
+
 /// Execution journal storage or invariant failure.
 #[derive(Debug, Error)]
 pub enum JournalError {
@@ -411,6 +421,14 @@ pub enum JournalError {
     /// Persisted data did not satisfy the journal schema's semantic invariants.
     #[error("execution journal is corrupt: {0}")]
     Corrupt(String),
+    /// A command arrived from an older replicated Controller epoch.
+    #[error("Controller epoch is stale: current {current}, received {received}")]
+    StaleControllerEpoch {
+        /// Highest epoch already admitted by this Node journal.
+        current: String,
+        /// Older epoch supplied by the command.
+        received: String,
+    },
 }
 
 #[cfg(test)]

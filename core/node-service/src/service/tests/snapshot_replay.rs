@@ -103,6 +103,7 @@ async fn lagged_replay_during_dispatch_preserves_one_local_execution() {
                 invocation: Some(invocation),
                 resource_ids: vec!["base".into()],
                 execution_session_json: String::new(),
+                controller_epoch: String::new(),
             })),
         },
         "session-a",
