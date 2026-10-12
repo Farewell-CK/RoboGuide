@@ -2510,11 +2510,13 @@ mod tests {
                         &correlation,
                     )
                     .unwrap();
+                events.begin_batch().unwrap();
                 apply_runtime_events(&mut controller, now, &correlation, &mut events.clone())
                     .unwrap();
                 apply_runtime_outcomes(&mut controller, now, &correlation, &mut events.clone())
                     .unwrap();
                 drive_ready_tasks(&mut controller, now, &correlation, &mut events.clone()).unwrap();
+                events.commit_batch().unwrap();
             }
             assert_eq!(
                 controller.bridge.attempt_history().len(),

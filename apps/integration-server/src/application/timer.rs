@@ -34,7 +34,6 @@ pub(crate) fn drive_application_timer_with_clock(
         .lock()
         .map_err(|_| "event-log write gate is poisoned")?;
     let gate_elapsed = gate_started.elapsed();
-    let now = clock.now();
     event_log.begin_batch()?;
     let transition = (|| {
         let lock_started = std::time::Instant::now();
@@ -63,6 +62,7 @@ pub(crate) fn drive_application_timer_with_clock(
         let mut candidate = live.clone();
         drop(clone_observation);
         drop(live);
+        let now = clock.now();
         let reduction = StageObservation::start(
             &diagnostics,
             DiagnosticKind::Timer,
@@ -141,7 +141,7 @@ pub(crate) fn drive_application_timer_with_clock(
             DiagnosticStage::Outbox,
             None,
         );
-        if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
+        if let Err(error) = flush_unisolated_commands(&mut live, clock) {
             eprintln!("durable command outbox delivery deferred: {error}");
         }
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())

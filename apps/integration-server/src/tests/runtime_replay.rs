@@ -116,6 +116,7 @@ impl ParallelMission {
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: None,
         };
+        events.begin_batch().unwrap();
         drive_ready_tasks(
             &mut controller,
             TimestampMs::new(3),
@@ -123,6 +124,7 @@ impl ParallelMission {
             &mut events.clone(),
         )
         .expect("both Tasks prepare dispatch");
+        events.commit_batch().unwrap();
         let attempts = controller.bridge.attempt_history();
         assert_eq!(attempts.len(), 2);
         assert_ne!(
@@ -599,6 +601,7 @@ fn late_first_terminal_fact_does_not_activate_unbound_task() {
     fixture.legacy_unbound(0);
     let control_before =
         serde_json::to_value(fixture.controller.bridge.control().checkpoint()).expect("checkpoint");
+    fixture.events.begin_batch().unwrap();
     drive_ready_tasks(
         &mut fixture.controller,
         TimestampMs::new(10),
@@ -606,6 +609,7 @@ fn late_first_terminal_fact_does_not_activate_unbound_task() {
         &mut fixture.events.clone(),
     )
     .expect("normal dispatch defers recovery-owned Task");
+    fixture.events.commit_batch().unwrap();
     assert_eq!(
         serde_json::to_value(fixture.controller.bridge.control().checkpoint()).expect("checkpoint"),
         control_before

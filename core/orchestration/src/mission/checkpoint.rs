@@ -25,6 +25,8 @@ impl MissionOrchestrator {
                     "group_id": execution.group_id().as_str(),
                     "lifecycle": execution.lifecycle(),
                     "accepted_at_ms": execution.accepted_at().as_millis(),
+                    "isolation": execution.isolation,
+                    "isolation_generation": execution.isolation_generation,
                     "scheduling_deferrals": execution.scheduling_deferrals.iter().map(
                         |(task_id, reason)| serde_json::json!({
                             "task_id": task_id.as_str(),
@@ -134,12 +136,48 @@ impl MissionOrchestrator {
                 }
             }
             let execution = MissionExecution {
+                isolation: value
+                    .get("isolation")
+                    .filter(|value| !value.is_null())
+                    .map(|value| {
+                        serde_json::from_value::<MissionIsolation>(value.clone()).map_err(|error| {
+                            OrchestrationError::Mission(format!(
+                                "invalid isolation checkpoint: {error}"
+                            ))
+                        })
+                    })
+                    .transpose()?,
+                isolation_generation: value
+                    .get("isolation_generation")
+                    .map(|value| {
+                        value.as_u64().ok_or_else(|| {
+                            OrchestrationError::Mission("invalid isolation generation".into())
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or(0),
                 plan,
                 group_id,
                 lifecycle,
                 accepted_at,
                 scheduling_deferrals,
             };
+            if execution.isolation.as_ref().is_some_and(|hold| {
+                hold.generation == 0
+                    || hold.generation != execution.isolation_generation
+                    || hold.isolated_at < execution.accepted_at
+            }) || (execution.isolation.is_some()
+                && !matches!(
+                    execution.lifecycle,
+                    MissionExecutionLifecycle::Accepted
+                        | MissionExecutionLifecycle::Running
+                        | MissionExecutionLifecycle::Cancelling
+                ))
+            {
+                return Err(OrchestrationError::Mission(
+                    "inconsistent Mission execution isolation checkpoint".into(),
+                ));
+            }
             let mission_id = execution.plan.goal().mission_id().clone();
             if restored.executions.insert(mission_id, execution).is_some() {
                 return Err(OrchestrationError::Mission(
@@ -179,6 +217,8 @@ impl MissionOrchestrator {
         self.executions.insert(
             mission_id.clone(),
             MissionExecution {
+                isolation: None,
+                isolation_generation: 0,
                 plan,
                 group_id,
                 lifecycle: MissionExecutionLifecycle::Accepted,

@@ -355,6 +355,7 @@ pub(crate) fn validate_restored_verifier_source(
     if matches!(
         checkpoint.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
             | ADMISSION_SERVER_CHECKPOINT_SCHEMA
             | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
@@ -396,6 +397,11 @@ pub(crate) fn apply_task_verifier(
         let Some(execution) = controller.orchestrator.execution(&mission_id) else {
             continue;
         };
+        if execution.isolation().is_some() {
+            // Keep the original verdict unconsumed; the configured durable feed can present it
+            // again after explicit resume, with current source and attempt validation intact.
+            continue;
+        }
         if matches!(
             execution.lifecycle(),
             orchestration::MissionExecutionLifecycle::Completed

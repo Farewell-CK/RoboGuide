@@ -50,6 +50,8 @@ const EVENT_PAYLOAD_SCHEMA_V12: &str = "domain.EventPayload.json/v12";
 
 /// Event codec including exact-session continuous liveness acceptance, distinct from health.
 const EVENT_PAYLOAD_SCHEMA_V13: &str = "domain.EventPayload.json/v13";
+/// Event codec including Mission execution isolate/resume dispositions.
+const EVENT_PAYLOAD_SCHEMA_V14: &str = "domain.EventPayload.json/v14";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +137,48 @@ impl std::fmt::Debug for SqliteEventLog {
 }
 
 impl SqliteEventLog {
+    /// Runs one already-scoped application transition in a nested event/sequence savepoint.
+    ///
+    /// The caller separately owns its private memory candidate and discards it on error. This
+    /// method neither decides error scope nor commits the enclosing application batch. It must
+    /// be serialized by the existing writer gate and must not be nested recursively.
+    pub fn with_transition_savepoint<T, E>(
+        &self,
+        operation: impl FnOnce() -> Result<T, E>,
+    ) -> Result<Result<T, E>, SqliteEventLogError> {
+        let batch = self
+            .batch_start_number
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        if batch.is_none() {
+            return Err(SqliteEventLogError::Codec(
+                "transition savepoint requires an open application batch".into(),
+            ));
+        }
+        drop(batch);
+        let start = *self
+            .next_event_number
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        self.connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?
+            .execute_batch("SAVEPOINT roboguide_mission_transition")?;
+        let result = operation();
+        if result.is_err() {
+            self.connection.lock().map_err(|_| SqliteEventLogError::LockPoisoned)?.execute_batch("ROLLBACK TO roboguide_mission_transition; RELEASE roboguide_mission_transition")?;
+            *self
+                .next_event_number
+                .lock()
+                .map_err(|_| SqliteEventLogError::LockPoisoned)? = start;
+        } else {
+            self.connection
+                .lock()
+                .map_err(|_| SqliteEventLogError::LockPoisoned)?
+                .execute_batch("RELEASE roboguide_mission_transition")?;
+        }
+        Ok(result)
+    }
     /// Opens a WAL database and creates the immutable evidence schema if needed.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SqliteEventLogError> {
         let connection = Connection::open(path)?;
@@ -497,6 +541,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V11 => Ok(11),
         EVENT_PAYLOAD_SCHEMA_V12 => Ok(12),
         EVENT_PAYLOAD_SCHEMA_V13 => Ok(13),
+        EVENT_PAYLOAD_SCHEMA_V14 => Ok(14),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -510,6 +555,8 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::MissionExecutionIsolated { .. }
+        | EventPayload::MissionExecutionResumed { .. } => 14,
         EventPayload::NodeSessionLivenessAccepted { .. } => 13,
         EventPayload::MemoryArtifactStaged {
             consumer_provider_id,
@@ -649,7 +696,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V13,
+                    EVENT_PAYLOAD_SCHEMA_V14,
                     payload_json,
                 ],
             )

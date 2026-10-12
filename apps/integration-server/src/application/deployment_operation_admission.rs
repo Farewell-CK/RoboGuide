@@ -413,6 +413,7 @@ mod tests {
                     &correlation,
                 )
                 .unwrap();
+            self.events.begin_batch().unwrap();
             apply_runtime_events(
                 &mut controller,
                 TimestampMs::new(now),
@@ -434,6 +435,7 @@ mod tests {
                 &mut self.events.clone(),
             )
             .unwrap();
+            self.events.commit_batch().unwrap();
         }
     }
 

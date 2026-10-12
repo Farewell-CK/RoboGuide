@@ -8,9 +8,34 @@ pub(crate) fn apply_runtime_outcomes(
     correlation_id: &domain::CorrelationId,
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    apply_selected_outcomes(controller, None, timestamp, correlation_id, events)
+}
+
+/// Reconstructs durable pending outcomes for only the explicitly resumed Mission.
+pub(crate) fn apply_resumed_outcomes(
+    controller: &mut ControllerState,
+    mission: &domain::MissionId,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    apply_selected_outcomes(controller, Some(mission), timestamp, correlation_id, events)
+}
+
+/// Selects derived outcomes without changing their Runtime source or exact attempt fences.
+fn apply_selected_outcomes(
+    controller: &mut ControllerState,
+    only_mission: Option<&domain::MissionId>,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let outcomes = controller.bridge.terminal_task_execution_outcomes();
     for outcome in outcomes {
         let mission_id = outcome.task_ref().mission_id().clone();
+        if only_mission.is_some_and(|selected| selected != &mission_id) {
+            continue;
+        }
         if controller
             .orchestrator
             .execution(&mission_id)
@@ -26,45 +51,56 @@ pub(crate) fn apply_runtime_outcomes(
         {
             continue;
         }
-        let ControllerState {
-            bridge,
-            orchestrator,
-            ..
-        } = controller;
-        match outcome.result() {
-            ObservedTaskExecutionResult::ExecutionCompleted => {
-                orchestrator.record_task_execution_completed(
-                    &mission_id,
-                    outcome.task_ref(),
-                    bridge.control_mut(),
-                    timestamp,
-                    correlation_id,
-                    events,
-                )?;
-                if should_apply_execution_report(
-                    orchestrator.task_satisfaction_basis(&mission_id, outcome.task_ref()),
-                ) {
-                    orchestrator.satisfy_task_from_execution_report(
+        run_mission_transition(
+            controller,
+            &mission_id,
+            orchestration::MissionIsolationSource::TaskOutcome,
+            timestamp,
+            correlation_id,
+            events,
+            |controller, events| {
+                let ControllerState {
+                    bridge,
+                    orchestrator,
+                    ..
+                } = controller;
+                match outcome.result() {
+                    ObservedTaskExecutionResult::ExecutionCompleted => {
+                        orchestrator.record_task_execution_completed(
+                            &mission_id,
+                            outcome.task_ref(),
+                            bridge.control_mut(),
+                            timestamp,
+                            correlation_id,
+                            events,
+                        )?;
+                        if should_apply_execution_report(
+                            orchestrator.task_satisfaction_basis(&mission_id, outcome.task_ref()),
+                        ) {
+                            orchestrator.satisfy_task_from_execution_report(
+                                &mission_id,
+                                outcome.task_ref(),
+                                bridge.control_mut(),
+                                timestamp,
+                                correlation_id,
+                                events,
+                            )?;
+                        }
+                    }
+                    ObservedTaskExecutionResult::Failed => orchestrator.task_failed(
                         &mission_id,
                         outcome.task_ref(),
+                        "Runtime observed a terminal role failure",
                         bridge.control_mut(),
                         timestamp,
                         correlation_id,
                         events,
-                    )?;
+                    )?,
                 }
-            }
-            ObservedTaskExecutionResult::Failed => orchestrator.task_failed(
-                &mission_id,
-                outcome.task_ref(),
-                "Runtime observed a terminal role failure",
-                bridge.control_mut(),
-                timestamp,
-                correlation_id,
-                events,
-            )?,
-        }
-        close_terminal_mission_coordination(controller, &mission_id);
+                close_terminal_mission_coordination(controller, &mission_id);
+                Ok(())
+            },
+        )?;
     }
     Ok(())
 }

@@ -5,22 +5,22 @@ use domain::{NodeHealth, TimestampMs};
 use integration::grpc::v0_4::{ExecutionPhase, NodeMessage, node_message::Message as NodePayload};
 
 /// Keeps a running resource-bearing Mission and isolated persistence for recovery tests.
-struct Fixture {
+pub(super) struct Fixture {
     /// Keeps the isolated SQLite event database alive.
     _directory: tempfile::TempDir,
     /// Original application authority, with one independently bound role.
-    controller: ControllerState,
+    pub(super) controller: ControllerState,
     /// Shared durable event and checkpoint sink.
-    events: state::SqliteEventLog,
+    pub(super) events: state::SqliteEventLog,
     /// Original physical attempt selected by actual scheduling.
-    attempt: runtime::ExecutionAttemptSnapshot,
+    pub(super) attempt: runtime::ExecutionAttemptSnapshot,
     /// Stable evidence correlation.
-    correlation: domain::CorrelationId,
+    pub(super) correlation: domain::CorrelationId,
 }
 
 impl Fixture {
     /// Runs actual Submit -> Match -> Schedule -> Commit -> Bind and an original Started fact.
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self::with_support(Some(("execution", "repeat-after-stop")))
     }
 
@@ -77,6 +77,7 @@ impl Fixture {
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: None,
         };
+        events.begin_batch().unwrap();
         drive_ready_tasks(
             &mut controller,
             TimestampMs::new(3),
@@ -84,6 +85,7 @@ impl Fixture {
             &mut events.clone(),
         )
         .expect("dispatch prepares");
+        events.commit_batch().unwrap();
         let attempt = controller
             .bridge
             .attempt_history()
@@ -102,7 +104,7 @@ impl Fixture {
     }
 
     /// Uses the real Node fact reducer and application activation path, without any robot call.
-    fn fact(&mut self, sequence: u64, phase: ExecutionPhase, received: u64) {
+    pub(super) fn fact(&mut self, sequence: u64, phase: ExecutionPhase, received: u64) {
         self.controller
             .bridge
             .consume(
@@ -173,7 +175,7 @@ impl Fixture {
     }
 
     /// Returns a complete comparable projection of Control resource ownership.
-    fn allocations(&self) -> domain::AllocationViewSnapshot {
+    pub(super) fn allocations(&self) -> domain::AllocationViewSnapshot {
         self.controller
             .bridge
             .control()
@@ -429,6 +431,7 @@ fn unknown_does_not_release_or_repeat_a_running_operation() {
     );
     assert_eq!(fixture.controller.bridge.attempt_history().len(), 1);
     fixture.fact(3, ExecutionPhase::Completed, 7);
+    fixture.events.begin_batch().unwrap();
     apply_runtime_outcomes(
         &mut fixture.controller,
         TimestampMs::new(7),
@@ -436,6 +439,7 @@ fn unknown_does_not_release_or_repeat_a_running_operation() {
         &mut fixture.events.clone(),
     )
     .expect("normal completion");
+    fixture.events.commit_batch().unwrap();
     assert_eq!(
         fixture
             .controller

@@ -284,6 +284,61 @@ impl ControlPlane {
         Ok(expired.into_iter().map(|(node_id, _)| node_id).collect())
     }
 
+    /// Revalidates retained Mission bindings using the same current eligibility policy as Matching.
+    ///
+    /// This read-only check grants no retry, release or continuation permission and cannot select
+    /// another Node. It preserves this Control instance's configured health TTL.
+    pub fn validate_bound_mission_nodes<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        mission: &domain::MissionPlan,
+        group_id: &domain::ExecutionGroupId,
+        timestamp: TimestampMs,
+    ) -> Result<(), ControlError> {
+        self.validate_mission_group_plan(group_id, mission)?;
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        for task in group.task_executions() {
+            let planned = mission
+                .task_graph()
+                .tasks()
+                .iter()
+                .find(|planned| planned.requirement().task_ref() == task.task_ref())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal("retained Task absent from plan".into())
+                })?;
+            for assignment in task.assignments() {
+                let role = planned
+                    .requirement()
+                    .roles()
+                    .iter()
+                    .find(|role| role.role_id() == assignment.role_id())
+                    .ok_or_else(|| {
+                        ControlError::InvalidProposal("retained Role absent from plan".into())
+                    })?;
+                let intent = planned
+                    .execution_intent(assignment.role_id())
+                    .ok_or_else(|| {
+                        ControlError::InvalidProposal("retained Role intent absent".into())
+                    })?;
+                if !self.node_is_eligible_for_role_operation(
+                    state,
+                    assignment.node_id(),
+                    role,
+                    intent.operation(),
+                    timestamp,
+                ) {
+                    return Err(ControlError::InvalidProposal(
+                        "retained bound Node is not currently eligible".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Returns whether one node currently satisfies Control execution eligibility for a role.
     pub(crate) fn node_is_eligible_for_role<S: SharedNodeStateReader>(
         &self,

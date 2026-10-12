@@ -49,6 +49,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   decide retry policy; one Mission's current entity cardinality shortage cannot stop the timer.
 - Control reservations remain the sole commitment authority; Allocation State is
   a whole-view observable projection that may lag and never grants or revokes ownership.
+- ADR-0077 adds Orchestration-owned, durable Mission execution isolation for conclusively local
+  typed contract failures. Application candidates and event savepoints roll back together; shared,
+  Control and persistence errors retain fail-closed behavior. Holds retain physical ownership and
+  raw evidence while fencing new Execute and derived work. Explicit generation-bound resume uses
+  Control's current eligibility rules and commits before delivery; cancellation retains its stop rules.
 - Resource-bearing Commit requires current State and revalidates every selected ResourceId's
   Node, kind and capacity before any mutation. State-free compatibility Commit accepts only
   zero-resource proposals without independent operation constraints.

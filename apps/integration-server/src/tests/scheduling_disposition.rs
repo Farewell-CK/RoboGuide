@@ -159,6 +159,7 @@ fn distinct_cardinality_defers_without_stopping_other_missions_and_retries() {
         verifier_seen: BTreeSet::new(),
         verifier_source_digest: None,
     };
+    events.begin_batch().unwrap();
     drive_ready_tasks(
         &mut controller,
         TimestampMs::new(3),
@@ -166,6 +167,7 @@ fn distinct_cardinality_defers_without_stopping_other_missions_and_retries() {
         &mut events,
     )
     .unwrap();
+    events.commit_batch().unwrap();
     let attempts = controller.bridge.attempt_history();
     assert_eq!(attempts.len(), 2);
     let first_attempt = attempts

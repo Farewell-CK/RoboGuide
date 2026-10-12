@@ -233,7 +233,7 @@ fn sqlite_event_log_survives_reopen() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_id, "event-1");
     assert_eq!(events[0].correlation_id, "test-correlation");
-    assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V13);
+    assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V14);
     let payload: EventPayload =
         serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
     assert!(matches!(
@@ -849,4 +849,39 @@ fn controller_checkpoint_rolls_back_with_event_batch() {
             .expect("checkpoint query succeeds")
             .is_none()
     );
+}
+
+/// A transition cannot establish its own durable transaction or bypass the application writer.
+#[test]
+fn transition_savepoint_requires_outer_batch() {
+    let directory = tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let mut called = false;
+    let result = log.with_transition_savepoint(|| {
+        called = true;
+        Ok::<_, ()>(())
+    });
+    assert!(result.is_err());
+    assert!(!called);
+}
+
+/// Savepoint failure leaves the enclosing batch rollback-able and cannot be classified as local.
+#[test]
+fn transition_sql_failure_requires_outer_rollback() {
+    let directory = tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    log.begin_batch().unwrap();
+    let result = log.with_transition_savepoint(|| {
+        // An infrastructure failure deliberately destroys the nested SQLite boundary.
+        log.connection
+            .lock()
+            .unwrap()
+            .execute_batch("RELEASE roboguide_mission_transition")
+            .unwrap();
+        Err::<(), _>("local-looking error")
+    });
+    assert!(matches!(result, Err(SqliteEventLogError::Sqlite(_))));
+    log.rollback_batch().unwrap();
+    log.begin_batch().unwrap();
+    log.rollback_batch().unwrap();
 }

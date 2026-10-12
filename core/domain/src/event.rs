@@ -5,6 +5,22 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Orchestration persisted a Mission-local new-Execute hold without physical release.
+    MissionExecutionIsolated {
+        /// Exact Mission whose derived work was rejected.
+        mission_id: crate::MissionId,
+        /// Monotonic hold generation required by explicit resume.
+        generation: u64,
+        /// Fixed derived-work stage, not raw error text.
+        source: String,
+    },
+    /// Explicit live revalidation cleared the exact current execution hold.
+    MissionExecutionResumed {
+        /// Exact Mission whose continuation was revalidated.
+        mission_id: crate::MissionId,
+        /// Consumed isolation generation.
+        generation: u64,
+    },
     /// Control accepted continuous process-local liveness without refreshing reported health.
     NodeSessionLivenessAccepted {
         /// Exact Node with current registration authority.

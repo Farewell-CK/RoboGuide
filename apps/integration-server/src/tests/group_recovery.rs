@@ -179,6 +179,7 @@ impl Fixture {
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: None,
         };
+        events.begin_batch().unwrap();
         drive_ready_tasks(
             &mut controller,
             TimestampMs::new(3),
@@ -186,6 +187,7 @@ impl Fixture {
             &mut events.clone(),
         )
         .unwrap();
+        events.commit_batch().unwrap();
         let originals = controller.bridge.attempt_history();
         assert_eq!(originals.len(), count);
         assert!(

@@ -22,6 +22,12 @@ Control 活性与观测时间的已接受演进见 ADR-0076：Integration 仅提
 续约不更新 reported health；已提交失效、route loss 或 restart 必须重新注册，不能从
 router active 或 latest heartbeat 隐式恢复。
 
+ADR-0077 的 Mission isolation 是 Orchestration-owned 执行 hold，不是 Runtime terminal
+或第二资源表。精确 Mission 的派生 transition 在内存 candidate 与 event savepoint 内
+执行；只有明确 contract-local failure 才能回滚后持久隔离。raw Runtime 事实继续接受，
+Control/State/invariant/持久化或无法分类的失败继续 fail closed。恢复是 generation-bound
+显式重验，所有物理恢复仍走 stop-proof 与原 Match/Commit/Rebind 权威。
+
 | 组件 | 职责 |
 | --- | --- |
 | Mission / Application | 提供外部 Mission / Goal，不直接控制设备 |

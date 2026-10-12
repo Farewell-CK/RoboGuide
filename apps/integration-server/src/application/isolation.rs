@@ -1,0 +1,213 @@
+//! Proven Mission-local rollback/hold boundaries; shared and unclassified failures remain fatal.
+
+use crate::*;
+
+/// Revalidates trusted authority before any local-error classification or explicit continuation.
+pub(crate) fn validate_isolation_authority(
+    controller: &ControllerState,
+    now: domain::TimestampMs,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    controller.bridge.control().allocation_snapshot(now)?;
+    controller
+        .orchestrator
+        .validate_control_authority(controller.bridge.control())?;
+    controller
+        .bridge
+        .control()
+        .validate_physical_entity_registry_on_restore()?;
+    Ok(())
+}
+
+/// Runs one exact Mission's derived work with both memory and SQL rollback on conclusive local failure.
+pub(crate) fn run_mission_transition(
+    controller: &mut ControllerState,
+    mission: &domain::MissionId,
+    source: orchestration::MissionIsolationSource,
+    now: domain::TimestampMs,
+    correlation: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+    operation: impl FnOnce(
+        &mut ControllerState,
+        &mut state::SqliteEventLog,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if controller
+        .orchestrator
+        .execution(mission)
+        .is_some_and(|execution| execution.isolation().is_some())
+    {
+        return Ok(());
+    }
+    // Global baselines are validated only when an error is about to be classified as local.
+    // A successful transition follows the existing outer transaction validation/commit contract.
+    let cloning = StageObservation::start(
+        controller.bridge.diagnostics(),
+        DiagnosticKind::Other,
+        DiagnosticStage::Clone,
+        None,
+    );
+    let mut candidate = controller.clone();
+    drop(cloning);
+    let result = events
+        .clone()
+        .with_transition_savepoint(|| operation(&mut candidate, events))?;
+    if let Some(error) = events.take_error()? {
+        return Err(state::SqliteEventLogError::Codec(format!(
+            "Mission transition event sink failed: {error}"
+        ))
+        .into());
+    }
+    match result {
+        Ok(()) => {
+            *controller = candidate;
+            Ok(())
+        }
+        Err(error)
+            if matches!(
+                error.downcast_ref::<OrchestrationError>(),
+                Some(OrchestrationError::InvalidContract(_))
+            ) =>
+        {
+            validate_isolation_authority(controller, now)?;
+            let execution = controller
+                .orchestrator
+                .execution(mission)
+                .ok_or("unproven Mission transition scope")?;
+            controller
+                .bridge
+                .control()
+                .validate_mission_group_plan(execution.group_id(), execution.plan())?;
+            controller
+                .orchestrator
+                .isolate_execution(mission, source, now, correlation, events)?;
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Checks current bound Nodes and exact attempt ownership without inventing stop or retry permission.
+pub(crate) fn revalidate_mission_resume(
+    controller: &ControllerState,
+    mission_id: &domain::MissionId,
+    now: domain::TimestampMs,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    validate_isolation_authority(controller, now)?;
+    let execution = controller
+        .orchestrator
+        .execution(mission_id)
+        .ok_or("unknown Mission")?;
+    orchestration::SupportedMechanismProfile::current().validate(execution.plan())?;
+    controller.bridge.control().validate_bound_mission_nodes(
+        controller.bridge.state(),
+        execution.plan(),
+        execution.group_id(),
+        now,
+    )?;
+    let group = controller
+        .bridge
+        .control()
+        .group(execution.group_id())
+        .ok_or("missing Mission Group")?;
+    for task in group.task_executions() {
+        for assignment in task.assignments() {
+            if let Some(attempt) = controller.bridge.current_task_attempt_id(
+                execution.group_id(),
+                task.task_ref(),
+                assignment.role_id(),
+            ) && !controller.bridge.current_attempt_matches_binding(
+                execution.group_id(),
+                task.task_ref(),
+                assignment.role_id(),
+                assignment.node_id(),
+            ) {
+                return Err(
+                    format!("current attempt {attempt} differs from retained binding").into(),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Clears an exact hold and reconstructs its pending work only on an application-owned private candidate.
+pub(crate) fn resume_mission_candidate(
+    controller: &mut ControllerState,
+    mission_id: &domain::MissionId,
+    generation: u64,
+    now: domain::TimestampMs,
+    correlation: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    revalidate_mission_resume(controller, mission_id, now)?;
+    controller.orchestrator.resume_isolated_execution(
+        mission_id,
+        generation,
+        now,
+        correlation,
+        events,
+    )?;
+    super::outcomes::apply_resumed_outcomes(controller, mission_id, now, correlation, events)?;
+    super::dispatch::drive_ready_mission(controller, mission_id, now, correlation, events)?;
+    if controller
+        .orchestrator
+        .execution(mission_id)
+        .is_some_and(|execution| execution.isolation().is_some())
+    {
+        return Err("Mission remains isolated after explicit revalidation".into());
+    }
+    Ok(())
+}
+
+/// Delivers only already-persisted Execute intents allowed by current Orchestration holds.
+pub(crate) fn flush_unisolated_dispatch(
+    controller: &mut ControllerState,
+    clock: &impl Clock,
+) -> Result<usize, IntegrationRuntimeError> {
+    let held = controller
+        .orchestrator
+        .mission_ids()
+        .into_iter()
+        .filter_map(|mission| {
+            controller
+                .orchestrator
+                .execution(&mission)
+                .filter(|execution| execution.isolation().is_some())
+                .map(|execution| execution.group_id().clone())
+        })
+        .collect::<BTreeSet<_>>();
+    controller
+        .bridge
+        .flush_dispatch_outbox_excluding_groups(clock, &held)
+}
+
+/// Flushes Cancel independently while a persisted Orchestration hold fences new Execute delivery.
+pub(crate) fn flush_unisolated_commands(
+    controller: &mut ControllerState,
+    clock: &impl Clock,
+) -> Result<usize, IntegrationRuntimeError> {
+    let dispatch = flush_unisolated_dispatch(controller, clock);
+    let cancel = controller
+        .bridge
+        .flush_cancellation_outbox_with_clock(clock);
+    dispatch.and_then(|sent| cancel.map(|cancelled| sent.saturating_add(cancelled)))
+}
+
+/// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
+pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
+    if saved.schema == SERVER_CHECKPOINT_SCHEMA {
+        return Ok(());
+    }
+    let missions: Vec<serde_json::Value> =
+        serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
+    if missions.iter().any(|mission| {
+        mission.get("isolation").is_some_and(|hold| !hold.is_null())
+            || mission
+                .get("isolation_generation")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|generation| generation != 0)
+    }) {
+        return Err("legacy controller wrapper contains isolation authority".into());
+    }
+    Ok(())
+}

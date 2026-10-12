@@ -22,6 +22,7 @@ mod mission {
     //! Mission acceptance, scheduling, and lifecycle responsibilities.
 
     pub(super) mod checkpoint;
+    pub(super) mod isolation;
     pub(super) mod lifecycle;
     pub(super) mod scheduling;
     pub(super) mod serialization;
@@ -37,6 +38,7 @@ pub use integration_bridge::{
     RecoveryDeploymentSupport, RecoverySupportDisposition, RemoteExecutionStatus,
 };
 pub use mechanism_profile::SupportedMechanismProfile;
+pub use mission::isolation::{MissionIsolation, MissionIsolationSource};
 pub use mission_contract::decode_mission_plan;
 pub use scheduling_status::{SchedulingDeferral, SchedulingDisposition};
 
@@ -71,9 +73,19 @@ pub struct MissionExecution {
     /// Last durable scheduling deferral reason per Task, used to suppress duplicate evidence.
     #[serde(default)]
     scheduling_deferrals: BTreeMap<TaskId, SchedulingDeferral>,
+    /// Persistent execution hold, orthogonal to Mission semantics and physical lifecycle.
+    #[serde(default)]
+    isolation: Option<MissionIsolation>,
+    /// Highest nonrenewable isolation generation, retained after explicit resume.
+    #[serde(default)]
+    isolation_generation: u64,
 }
 
 impl MissionExecution {
+    /// Returns a persisted new-Execute hold without implying physical stop or Mission failure.
+    pub const fn isolation(&self) -> Option<&MissionIsolation> {
+        self.isolation.as_ref()
+    }
     /// Returns the complete accepted MissionPlan.
     pub const fn plan(&self) -> &MissionPlan {
         &self.plan

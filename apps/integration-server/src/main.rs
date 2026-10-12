@@ -30,7 +30,9 @@ use std::time::Duration;
 ///
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v21";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v22";
+/// Prior wrapper without persisted Orchestration isolation authority.
+const PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v21";
 /// Previous wrapper has progress/stop intents but no immutable stop/continuation declarations.
 const PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v20";
 /// Wrapper with exact HTTP admission records but no operation progress monitor.
@@ -493,6 +495,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
                     | ADMISSION_SERVER_CHECKPOINT_SCHEMA
                     | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
@@ -516,6 +519,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
                     | ADMISSION_SERVER_CHECKPOINT_SCHEMA
                     | PREVIOUS_SERVER_CHECKPOINT_SCHEMA
@@ -532,6 +536,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .as_ref()
                 .map(|feed| feed.source_digest().to_string());
             validate_restored_verifier_source(&saved, configured_verifier_digest.as_deref())?;
+            application::validate_isolation_checkpoint_schema(&saved)?;
             ControllerState {
                 mission_admissions: saved.mission_admissions,
                 bridge: IntegrationRuntimeBridge::restore_from_checkpoint_with_lease_policy(
@@ -1020,9 +1025,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // Cancel receipts are nonterminal: retrying Cancel in response to its
                             // own receipt/snapshot would form an unbounded feedback loop. The
                             // application timer owns those retries until terminal evidence.
-                            if let Err(error) = live
-                                .bridge
-                                .flush_dispatch_outbox_with_clock(receiver_clock.as_ref())
+                            if let Err(error) =
+                                flush_unisolated_dispatch(&mut live, receiver_clock.as_ref())
                             {
                                 eprintln!("durable command outbox delivery deferred: {error}");
                             }

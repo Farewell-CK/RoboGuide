@@ -9,7 +9,7 @@
 | O2 所有权模型 | 已实现并验证 | Control 137 个常规测试；256 条固定轨迹及 10,000 条扩展轨迹通过，支持 case 缩减、保存与回放 |
 | O3 配置与只读指标 | 已实现并验证 | ADR-0075；统一 timing、自定义 new/renew/restore/Welcome、两级 queue 及 default-off JSONL，观测失败不改变 durable trace |
 | O4 时间与 Control 活性 | 已实现并验证 | ADR-0076；Control 验证连续 exact-session evidence，独立双时间 ingestion、失效/restart fence；workspace checks 通过 |
-| O5 Mission 故障隔离 | 待设计 / 实现 | 先 ADR；局部失败回滚，持久隔离，显式重验恢复 |
+| O5 Mission 故障隔离 | 已实现并验证 | ADR-0077；内存/SQL 回滚、持久 hold、Control 重验、generation-bound HTTP resume |
 | O6 事务性能 | 条件性 | 先固定合成轨迹测量；瓶颈和收益不足时记录不实施结论 |
 | O7 部署边界 | 待实施 | 在既有模块内拆分中性消费者与具体部署解析 |
 | O8 发布技术准备 | 待实施 | 扫描、示例、ADR 标识、边界披露；不选择 LICENSE 或发布 |
@@ -56,3 +56,19 @@ registration lease 使用当前 decision time；其 Offline 状态及后续 Stat
 连续/真实静默/错误身份/顺序/重放/expiry/route-loss/restart、延迟 health 与 custom
 loopback metadata 检查通过；workspace Clippy、tests、Rustdoc 与 formatting 通过。
 此实现与合成证据仍不能证明历史 pilot 故障的因果或设备物理停止。
+
+## O5 交付
+
+ADR-0077 定义保守的 Mission execution hold。Ready dispatch / terminal outcome 使用独立
+candidate 和 SQLite savepoint；只有 typed InvalidContract 且 trusted baseline 验证通过
+才隔离。Control/未知/SQL 错误仍 fail closed，不宣称全部 fatal 已消除。
+
+隔离保留 raw facts、当前 attempt、资源和 Context ownership。Execute outbox、派生
+outcome、自动 recovery 和 verifier satisfaction 均暂停；取消继续使用原 draining 规则。
+显式恢复按 generation 验证 accepted plan、Control 资格规则、registry/ownership 和
+当前 attempt，再由同一事务 checkpoint/commit。旧 wrapper 防止忽略新增 authority；
+event codec v14 保持历史读取。
+
+验证：workspace tests 627 passed / 2 explicit ignored；8 个隔离专项测试通过。
+SQLite append/checkpoint/savepoint 故障、HTTP 400/409/503、持久重启、Cancel draining、
+不重放 Execute 已覆盖。workspace Clippy、Rustdoc、formatting 和 diff 检查通过。

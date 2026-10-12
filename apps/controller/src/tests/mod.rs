@@ -125,6 +125,8 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::NodeRegistered { .. }
         | EventPayload::NodeHeartbeatAccepted { .. }
         | EventPayload::NodeSessionLivenessAccepted { .. }
+        | EventPayload::MissionExecutionIsolated { .. }
+        | EventPayload::MissionExecutionResumed { .. }
         | EventPayload::NodeLeaseExpired { .. }
         | EventPayload::ExecutionGroupCreated { .. }
         | EventPayload::GroupContinuationProposed { .. }

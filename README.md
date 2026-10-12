@@ -1052,3 +1052,10 @@ python3 console/serve.py   # http://127.0.0.1:8095（默认演示回放模式）
 轮询 `/v1/events`，刷新 `/v1/inventory` 节点卡，并可用 `console/scenarios/`
 中的版本化 MissionPlan 通过既有 `POST /v1/missions` 提交真实任务。细节见
 [`console/README.md`](console/README.md)。
+
+Mission 的可证明契约局部失败使用持久 execution isolation（ADR-0077）：私有 candidate
+和 event savepoint 同时回滚，其他 Mission 可继续。新 Execute 和派生推进暂停，原资源、
+physical ambiguity、raw facts 与取消规则保留。GET Mission 显示 isolation；POST
+`/v1/missions/{id}/resume` 携带当前 `isolation_generation`，通过实时 Control 重验并
+提交 checkpoint 后才恢复。未知错误、Control invariant 和数据库失败仍 fail closed。
+见 [Mission 隔离决策](docs/decisions/0077-mission-execution-isolation.md)。

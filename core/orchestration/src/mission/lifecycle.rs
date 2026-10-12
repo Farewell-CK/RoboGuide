@@ -242,6 +242,10 @@ impl MissionOrchestrator {
             .get_mut(mission_id)
             .expect("Mission validated above")
             .lifecycle = MissionExecutionLifecycle::Failed;
+        self.executions
+            .get_mut(mission_id)
+            .expect("Mission validated above")
+            .isolation = None;
         Ok(())
     }
 
@@ -312,6 +316,10 @@ impl MissionOrchestrator {
             .get_mut(mission_id)
             .expect("Mission validated above")
             .lifecycle = MissionExecutionLifecycle::Cancelled;
+        self.executions
+            .get_mut(mission_id)
+            .expect("Mission validated above")
+            .isolation = None;
         Ok(())
     }
 
@@ -406,6 +414,10 @@ impl MissionOrchestrator {
             .get_mut(mission_id)
             .expect("Mission validated above")
             .lifecycle = MissionExecutionLifecycle::Cancelled;
+        self.executions
+            .get_mut(mission_id)
+            .expect("Mission validated above")
+            .isolation = None;
         Ok(())
     }
 
@@ -533,6 +545,10 @@ impl MissionOrchestrator {
             .get_mut(mission_id)
             .expect("Mission validated above")
             .lifecycle = MissionExecutionLifecycle::Completed;
+        self.executions
+            .get_mut(mission_id)
+            .expect("Mission validated above")
+            .isolation = None;
         Ok(())
     }
 }

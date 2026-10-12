@@ -34,7 +34,9 @@ impl MissionOrchestrator {
         let Some(execution) = self.executions.get(mission_id) else {
             return Vec::new();
         };
-        if execution.lifecycle() != MissionExecutionLifecycle::Running {
+        if execution.lifecycle() != MissionExecutionLifecycle::Running
+            || execution.isolation().is_some()
+        {
             return Vec::new();
         }
         let Some(group) = control.group(execution.group_id()) else {
@@ -170,6 +172,11 @@ impl MissionOrchestrator {
             let execution = self.executions.get(mission_id).ok_or_else(|| {
                 OrchestrationError::Mission(format!("unknown Mission {mission_id}"))
             })?;
+            if execution.isolation().is_some() {
+                return Err(OrchestrationError::Mission(
+                    "Mission execution is isolated".into(),
+                ));
+            }
             let requirement = execution
                 .plan()
                 .task_graph()

@@ -7,12 +7,20 @@ mod dispatch;
 mod initial_operation_assessment;
 mod initial_operation_preferences;
 pub(crate) use initial_operation_assessment::unavailable as unavailable_initial_assessment;
+mod isolation;
+#[cfg(test)]
+pub(crate) use isolation::revalidate_mission_resume;
 mod outcomes;
 mod persistence;
 mod physical_entity_registry;
 mod recovery;
 mod task_verifier;
 mod timer;
+pub(crate) use isolation::resume_mission_candidate;
+pub(crate) use isolation::{
+    flush_unisolated_commands, flush_unisolated_dispatch, run_mission_transition,
+    validate_isolation_checkpoint_schema,
+};
 
 pub(crate) use actor_placement::{
     load_actor_placement_file, validate_actor_placement_coverage,

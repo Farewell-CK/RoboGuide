@@ -11,116 +11,145 @@ pub(crate) fn drive_ready_tasks(
     for mission_id in controller.orchestrator.mission_ids() {
         if controller
             .orchestrator
-            .execution(&mission_id)
-            .is_some_and(|mission| {
-                controller
-                    .bridge
-                    .group_recovery_holds_dispatch(mission.group_id(), timestamp)
-            })
+            .dispatchable_tasks(&mission_id, controller.bridge.control())
+            .is_empty()
         {
             continue;
         }
-        'ready: for task_ref in controller
-            .orchestrator
-            .dispatchable_tasks(&mission_id, controller.bridge.control())
-        {
-            let current = controller
+        run_mission_transition(
+            controller,
+            &mission_id,
+            orchestration::MissionIsolationSource::ReadyDispatch,
+            timestamp,
+            correlation_id,
+            events,
+            |candidate, events| {
+                drive_ready_mission(candidate, &mission_id, timestamp, correlation_id, events)
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// Drives only one already-attributed Mission; the caller provides memory and SQL rollback.
+pub(crate) fn drive_ready_mission(
+    controller: &mut ControllerState,
+    mission_id: &domain::MissionId,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if controller
+        .orchestrator
+        .execution(mission_id)
+        .is_some_and(|mission| {
+            controller
                 .bridge
-                .control()
-                .group(
-                    controller
-                        .orchestrator
-                        .execution(&mission_id)
-                        .ok_or_else(|| "Mission disappeared during Task dispatch".to_string())?
-                        .group_id(),
-                )
-                .and_then(|group| group.task_execution(&task_ref))
-                .cloned()
-                .ok_or_else(|| "Ready TaskExecution disappeared".to_string())?;
-            let prepared = if current.assignments().is_empty() {
-                let state = controller.bridge.state().clone();
-                let ControllerState {
-                    bridge,
-                    orchestrator,
-                    ..
-                } = controller;
-                match orchestrator.prepare_task(
-                    &mission_id,
-                    &task_ref,
-                    &state,
-                    bridge.control_mut(),
-                    timestamp,
-                    correlation_id,
-                    events,
-                ) {
-                    Ok(prepared) => prepared,
-                    Err(error) if deferred_dispatch(&error) => continue 'ready,
-                    Err(error) => return Err(error.into()),
-                }
-            } else {
-                current
-            };
-            let execution = controller
-                .orchestrator
-                .execution(&mission_id)
-                .ok_or_else(|| "Mission disappeared during Task dispatch".to_string())?;
-            let group_id = execution.group_id().clone();
-            let session =
-                domain::ExecutionSessionDescriptor::from_plan(execution.plan(), group_id.clone())?;
-            let planned = execution
-                .plan()
-                .task_graph()
-                .tasks()
-                .iter()
-                .find(|task| task.requirement().task_ref() == &task_ref)
-                .ok_or_else(|| "Task disappeared from MissionPlan during dispatch".to_string())?;
-            let intents = prepared
-                .assignments()
-                .iter()
-                .map(|assignment| {
-                    planned
-                        .execution_intent(assignment.role_id())
-                        .cloned()
-                        .map(|intent| {
-                            (
-                                assignment.role_id().clone(),
-                                assignment.node_id().clone(),
-                                intent,
-                            )
-                        })
-                        .ok_or_else(|| {
-                            format!("Task role {} has no ExecutionIntent", assignment.role_id())
-                        })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            for (role_id, node_id, intent) in intents {
-                if controller
-                    .bridge
-                    .current_attempt_matches_binding(&group_id, &task_ref, &role_id, &node_id)
-                {
-                    continue;
-                }
-                let execution_id = controller
-                    .bridge
-                    .allocate_task_attempt_id(&group_id, &task_ref, &role_id)?;
-                let node_session = session.as_ref().filter(|_| {
-                    node_accepts_execution_session(controller.bridge.state(), &node_id, &intent)
-                });
-                let dispatched = controller.bridge.prepare_task_bound_with_session(
-                    execution_id,
-                    &group_id,
-                    &task_ref,
-                    &role_id,
-                    intent,
-                    node_session.cloned(),
-                    timestamp,
-                    correlation_id.clone(),
-                );
-                match dispatched {
-                    Ok(_) => {}
-                    Err(error) if coordination_dispatch_deferred(&error) => continue 'ready,
-                    Err(error) => return Err(error.into()),
-                }
+                .group_recovery_holds_dispatch(mission.group_id(), timestamp)
+        })
+    {
+        return Ok(());
+    }
+    'ready: for task_ref in controller
+        .orchestrator
+        .dispatchable_tasks(mission_id, controller.bridge.control())
+    {
+        let current = controller
+            .bridge
+            .control()
+            .group(
+                controller
+                    .orchestrator
+                    .execution(mission_id)
+                    .ok_or_else(|| "Mission disappeared during Task dispatch".to_string())?
+                    .group_id(),
+            )
+            .and_then(|group| group.task_execution(&task_ref))
+            .cloned()
+            .ok_or_else(|| "Ready TaskExecution disappeared".to_string())?;
+        let prepared = if current.assignments().is_empty() {
+            let state = controller.bridge.state().clone();
+            let ControllerState {
+                bridge,
+                orchestrator,
+                ..
+            } = controller;
+            match orchestrator.prepare_task(
+                mission_id,
+                &task_ref,
+                &state,
+                bridge.control_mut(),
+                timestamp,
+                correlation_id,
+                events,
+            ) {
+                Ok(prepared) => prepared,
+                Err(error) if deferred_dispatch(&error) => continue 'ready,
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            current
+        };
+        let execution = controller
+            .orchestrator
+            .execution(mission_id)
+            .ok_or_else(|| "Mission disappeared during Task dispatch".to_string())?;
+        let group_id = execution.group_id().clone();
+        let session =
+            domain::ExecutionSessionDescriptor::from_plan(execution.plan(), group_id.clone())?;
+        let planned = execution
+            .plan()
+            .task_graph()
+            .tasks()
+            .iter()
+            .find(|task| task.requirement().task_ref() == &task_ref)
+            .ok_or_else(|| "Task disappeared from MissionPlan during dispatch".to_string())?;
+        let intents = prepared
+            .assignments()
+            .iter()
+            .map(|assignment| {
+                planned
+                    .execution_intent(assignment.role_id())
+                    .cloned()
+                    .map(|intent| {
+                        (
+                            assignment.role_id().clone(),
+                            assignment.node_id().clone(),
+                            intent,
+                        )
+                    })
+                    .ok_or_else(|| {
+                        format!("Task role {} has no ExecutionIntent", assignment.role_id())
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for (role_id, node_id, intent) in intents {
+            if controller
+                .bridge
+                .current_attempt_matches_binding(&group_id, &task_ref, &role_id, &node_id)
+            {
+                continue;
+            }
+            let execution_id = controller
+                .bridge
+                .allocate_task_attempt_id(&group_id, &task_ref, &role_id)?;
+            let node_session = session.as_ref().filter(|_| {
+                node_accepts_execution_session(controller.bridge.state(), &node_id, &intent)
+            });
+            let dispatched = controller.bridge.prepare_task_bound_with_session(
+                execution_id,
+                &group_id,
+                &task_ref,
+                &role_id,
+                intent,
+                node_session.cloned(),
+                timestamp,
+                correlation_id.clone(),
+            );
+            match dispatched {
+                Ok(_) => {}
+                Err(error) if coordination_dispatch_deferred(&error) => continue 'ready,
+                Err(error) => return Err(error.into()),
             }
         }
     }
@@ -138,6 +167,9 @@ pub(crate) fn drive_rebound_attempts(
         let Some(execution) = controller.orchestrator.execution(&mission_id) else {
             continue;
         };
+        if execution.isolation().is_some() {
+            continue;
+        }
         let Some(group) = controller.bridge.control().group(execution.group_id()) else {
             continue;
         };

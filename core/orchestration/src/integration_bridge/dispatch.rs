@@ -1,6 +1,7 @@
 //! Runtime dispatch, cancellation, and bound-command orchestration.
 
 use super::*;
+use domain::ExecutionGroupId;
 
 /// Technical deployment support is distinct from explicit repeat permission and physical stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -91,7 +92,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
 
     /// Delivers every persisted Execute intent that is still waiting for a route.
     pub fn flush_dispatch_outbox(&mut self) -> Result<usize, IntegrationRuntimeError> {
-        self.flush_dispatch_outbox_using_clock(None)
+        self.flush_dispatch_outbox_using_clock(None, &BTreeSet::new())
     }
 
     /// Rechecks current Group deadlines immediately before persisted Execute delivery.
@@ -99,7 +100,10 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         &mut self,
         now: TimestampMs,
     ) -> Result<usize, IntegrationRuntimeError> {
-        self.flush_dispatch_outbox_using_clock(Some(&runtime::FixedClock::new(now)))
+        self.flush_dispatch_outbox_using_clock(
+            Some(&runtime::FixedClock::new(now)),
+            &BTreeSet::new(),
+        )
     }
 
     /// Reads the live receive clock for each pending Execute rather than sharing a stale batch time.
@@ -107,18 +111,31 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         &mut self,
         clock: &impl ports::Clock,
     ) -> Result<usize, IntegrationRuntimeError> {
-        self.flush_dispatch_outbox_using_clock(Some(clock))
+        self.flush_dispatch_outbox_using_clock(Some(clock), &BTreeSet::new())
+    }
+
+    /// Applies read-only Orchestration Group holds to delivery; no command is removed or rewritten.
+    pub fn flush_dispatch_outbox_excluding_groups(
+        &mut self,
+        clock: &impl ports::Clock,
+        held_groups: &BTreeSet<ExecutionGroupId>,
+    ) -> Result<usize, IntegrationRuntimeError> {
+        self.flush_dispatch_outbox_using_clock(Some(clock), held_groups)
     }
 
     /// Applies an optional receive clock; absent time cannot deliver Group recovery.
     fn flush_dispatch_outbox_using_clock(
         &mut self,
         clock: Option<&dyn ports::Clock>,
+        held_groups: &BTreeSet<ExecutionGroupId>,
     ) -> Result<usize, IntegrationRuntimeError> {
         let intents = self.runtime.pending_dispatch_intents();
         let mut delivered = 0;
         let mut first_error = None;
         for intent in intents {
+            if held_groups.contains(intent.command.group_id()) {
+                continue;
+            }
             if !self.group_recovery_delivery_permitted(
                 &intent.execution_id,
                 clock.map(ports::Clock::now),
@@ -211,6 +228,14 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     }
 
     /// Delivers durable execution and cancellation intents after their checkpoint commits.
+    pub fn flush_cancellation_outbox_with_clock(
+        &mut self,
+        clock: &impl ports::Clock,
+    ) -> Result<usize, IntegrationRuntimeError> {
+        self.flush_cancellation_outbox_using_clock(Some(clock))
+    }
+
+    /// Delivers durable execution and cancellation intents after their checkpoint commits.
     pub fn flush_command_outboxes(&mut self) -> Result<usize, IntegrationRuntimeError> {
         self.flush_command_outboxes_using_clock(None)
     }
@@ -236,7 +261,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         &mut self,
         clock: Option<&dyn ports::Clock>,
     ) -> Result<usize, IntegrationRuntimeError> {
-        let dispatches = self.flush_dispatch_outbox_using_clock(clock);
+        let dispatches = self.flush_dispatch_outbox_using_clock(clock, &BTreeSet::new());
         let cancellations = self.flush_cancellation_outbox_using_clock(clock);
         match (dispatches, cancellations) {
             (Ok(dispatches), Ok(cancellations)) => Ok(dispatches.saturating_add(cancellations)),

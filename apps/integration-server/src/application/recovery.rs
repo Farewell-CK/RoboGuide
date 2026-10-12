@@ -84,6 +84,7 @@ pub(crate) fn apply_recovery_required(
         .execution(command.mission_id())
         .is_some_and(|execution| {
             execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
+                || execution.isolation().is_some()
         })
     {
         return Ok(());
@@ -177,6 +178,7 @@ pub(crate) fn resume_pending_recoveries(
             .execution(need.task_ref().mission_id())
             .is_some_and(|execution| {
                 execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
+                    || execution.isolation().is_some()
             })
         {
             continue;

@@ -389,7 +389,7 @@ pub(crate) async fn handle_http_connection(
                             .lock()
                             .map_err(|_| "controller lock is poisoned")?;
                         *live = candidate;
-                        if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
+                        if let Err(error) = flush_unisolated_commands(&mut live, clock) {
                             eprintln!("durable command outbox delivery deferred: {error}");
                         }
                     }
@@ -511,6 +511,7 @@ pub(crate) async fn handle_http_connection(
                             "mission_id": mission_id.as_str(),
                             "group_id": execution.group_id().as_str(),
                             "status": format!("{:?}", execution.lifecycle()),
+                            "isolation": execution.isolation(),
                             "tasks": tasks,
                             "relations": relations,
                             "peer_channels": peer_channels
@@ -522,6 +523,94 @@ pub(crate) async fn handle_http_connection(
                     serde_json::json!({"error": "unknown Mission"}),
                 ),
             }
+        }
+        ("POST", path) if path.starts_with("/v1/missions/") && path.ends_with("/resume") => {
+            let body: serde_json::Value = match serde_json::from_str(request_body) {
+                Ok(body) => body,
+                Err(_) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": "invalid resume JSON"}),
+                    )
+                    .await;
+                }
+            };
+            let generation = body
+                .as_object()
+                .filter(|object| object.len() == 1)
+                .and_then(|object| object.get("isolation_generation"))
+                .and_then(serde_json::Value::as_u64)
+                .filter(|generation| *generation > 0);
+            let Some(generation) = generation else {
+                return write_http_response(stream, "400 Bad Request", serde_json::json!({"error": "resume requires one positive isolation_generation"})).await;
+            };
+            let mission = domain::MissionId::new(
+                path.trim_start_matches("/v1/missions/")
+                    .trim_end_matches("/resume"),
+            )?;
+            let write_guard = event_write_gate
+                .lock()
+                .map_err(|_| "event-log write gate is poisoned")?;
+            event_log.begin_batch()?;
+            let result: Result<(), (&str, String)> = (|| {
+                let unavailable = |error: String| ("503 Service Unavailable", error);
+                let mut live = controller
+                    .lock()
+                    .map_err(|_| unavailable("controller lock is poisoned".into()))?;
+                let mut candidate = live.clone();
+                let now = clock.now();
+                let correlation = domain::CorrelationId::new(format!("resume-{mission}"))
+                    .map_err(|error| unavailable(error.to_string()))?;
+                resume_mission_candidate(
+                    &mut candidate,
+                    &mission,
+                    generation,
+                    now,
+                    &correlation,
+                    &mut event_log.clone(),
+                )
+                .map_err(|error| {
+                    let status = if error.downcast_ref::<state::SqliteEventLogError>().is_some() {
+                        "503 Service Unavailable"
+                    } else {
+                        "409 Conflict"
+                    };
+                    (status, error.to_string())
+                })?;
+                if let Some(error) = event_log
+                    .take_error()
+                    .map_err(|error| unavailable(error.to_string()))?
+                {
+                    return Err(unavailable(format!("resume event sink failed: {error}")));
+                }
+                let checkpoint = crate::diagnostics::http_checkpoint(&candidate)
+                    .map_err(|error| unavailable(error.to_string()))?;
+                crate::diagnostics::http_save(event_log, &checkpoint, &diagnostics)
+                    .map_err(|error| unavailable(error.to_string()))?;
+                crate::diagnostics::http_commit(event_log, &diagnostics)
+                    .map_err(|error| unavailable(error.to_string()))?;
+                *live = candidate;
+                if let Err(error) = flush_unisolated_commands(&mut live, clock) {
+                    eprintln!("durable resumed outbox deferred: {error}");
+                }
+                Ok(())
+            })();
+            let response = match result {
+                Ok(()) => (
+                    "200 OK",
+                    serde_json::json!({"status": "resumed", "isolation_generation": generation}),
+                ),
+                Err((status, error)) => match event_log.rollback_batch() {
+                    Ok(()) => (status, serde_json::json!({"error": error})),
+                    Err(rollback) => (
+                        "503 Service Unavailable",
+                        serde_json::json!({"error": format!("resume unavailable: {error}; rollback failed: {rollback}")}),
+                    ),
+                },
+            };
+            drop(write_guard);
+            response
         }
         ("POST", path) if path.starts_with("/v1/missions/") && path.ends_with("/cancel") => {
             let mission_text = path
@@ -640,7 +729,7 @@ pub(crate) async fn handle_http_connection(
                             .lock()
                             .map_err(|_| "controller lock is poisoned")?;
                         *live = candidate;
-                        if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
+                        if let Err(error) = flush_unisolated_commands(&mut live, clock) {
                             eprintln!("durable command outbox delivery deferred: {error}");
                         }
                     }
@@ -881,6 +970,7 @@ pub(crate) async fn handle_http_connection(
                     .execution(&mission_id)
                     .is_some_and(|mission| {
                         mission.lifecycle() == orchestration::MissionExecutionLifecycle::Running
+                            && mission.isolation().is_none()
                     })
                 {
                     return Err("only a running Mission can authorize Group recovery".into());
@@ -916,7 +1006,7 @@ pub(crate) async fn handle_http_connection(
                         .lock()
                         .map_err(|_| "controller lock is poisoned")?;
                     *live = candidate;
-                    if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
+                    if let Err(error) = flush_unisolated_commands(&mut live, clock) {
                         eprintln!("durable Group command delivery deferred: {error}");
                     }
                     (
@@ -1038,6 +1128,7 @@ pub(crate) async fn handle_http_connection(
                         .execution(&mission_id)
                         .is_some_and(|mission| {
                             mission.lifecycle() == orchestration::MissionExecutionLifecycle::Running
+                                && mission.isolation().is_none()
                         })
                     {
                         return Err("only a running Mission can authorize recovery".into());
@@ -1080,7 +1171,7 @@ pub(crate) async fn handle_http_connection(
                         .lock()
                         .map_err(|_| "controller lock is poisoned")?;
                     *live = candidate;
-                    if let Err(error) = live.bridge.flush_command_outboxes_with_clock(clock) {
+                    if let Err(error) = flush_unisolated_commands(&mut live, clock) {
                         eprintln!("durable command outbox delivery deferred: {error}");
                     }
                     (

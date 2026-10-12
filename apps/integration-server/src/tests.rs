@@ -3,6 +3,7 @@ use super::*;
 mod admission;
 mod event_snapshot;
 mod group_recovery;
+mod mission_isolation;
 mod runtime_replay;
 mod scheduling_disposition;
 mod stop_recovery;
