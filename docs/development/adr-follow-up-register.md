@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | S1：运行期 typed contract isolation | 软件实现与生产 application path 回归通过；ADR-0079 | 5 项生产 timer/HTTP/SQL 检查及 Runtime immutable-time 检查通过；全 workspace、Clippy 验证；物理时限与 stop 未证明 |
 | S2：有界事实批处理 | ADR-0080 已实现；6 项真实 gRPC、嵌套 savepoint 与 128/128 合成进程检查通过 | 1/N 轨迹等价、拒绝/SQL/hold/barrier 均验证；2ms 窗口降低 serialization/Commit 次数，保留单条兼容模式 |
-| S3：增量 checkpoint 存储 | 待 S2；完整 authority snapshot 是恢复基线 | exact baseline/delta digest、revision/sequence/schema 链；损坏 fail closed；compaction 原子；旧库迁移；Unknown/no-blind-replay 保留 |
+| S3：增量 checkpoint 存储 | ADR-0081 软件已实现、显式 opt-in；默认 full | 8 项存储/损坏/rollback 检查、真实应用恢复与进程复核通过；写入 bytes 降低，吞吐收益尚未建立；首次 startup timeout 保留 |
 | S4：多 Mission 优先级/公平/准入 | 待 S1–S3；Orchestration logical dispatch policy + Control commitment | priority/aging 持久；饥饿与资源冲突回归；只选择 Ready logical work；固定 Actor/Context/未来窗口不被策略绕过 |
 | S5：控制面复制与切换 | 待稳定事务/恢复/调度 authority | replicated durable acceptance、single leader delivery、term/session fence、失去 quorum fail closed；leader crash/partition 不重放物理歧义、不释放未停止 ownership |
 | S6：受支持的抢占 | 依赖 S4/S5 和明确 stop/repeat contract | 原 physical stop proof、隔离 stop support、原 retry budget；运行工作未提供该声明时仍排队；软件证据不能替代硬件验证 |

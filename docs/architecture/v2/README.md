@@ -46,6 +46,12 @@ ADR-0080 规定有界应用事实批处理：原始输入顺序、每项独立 c
 后完成。真实 gRPC 和独立合成进程比较已验收，默认 8 条/2ms，显式 limit=1 兼容；
 该有限窗口不刷新证据、不提供硬实时保证，也不扩大 persistence 或 Control authority。
 
+ADR-0081 的增量 checkpoint 是 State 存储层的 opaque byte 表示：版本/digest/sequence
+完整链与原子 compaction 重建精确 authority snapshot，原恢复和 source-time 语义保留。
+它减少重复写入 bytes，仍编码完整 snapshot；存储/恢复软件检查已完成，debug 比较
+尚未建立吞吐收益，默认 full，incremental 为显式选项。该存储切片不提供
+event-complete replay 或 control replication。
+
 | 组件 | 职责 |
 | --- | --- |
 | Mission / Application | 提供外部 Mission / Goal，不直接控制设备 |

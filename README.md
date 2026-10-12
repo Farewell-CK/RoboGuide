@@ -1071,6 +1071,11 @@ ADR-0080 的有界事实批处理默认最多 8 条、单一合批窗口 2ms；r
 独立提交，每项保留独立回滚和原 receive time。单条兼容配置为
 `ROBOGUIDE_FACT_BATCH_LIMIT=1`。实际本地合成比较已完成，测量不属于 E6 或硬件实验。
 
+增量 checkpoint 存储已提供为显式选项 `ROBOGUIDE_CHECKPOINT_STORAGE=incremental`
+（ADR-0081），有完整 digest/revision 链与原子 compaction。默认 full；较少写入 bytes
+尚未证明整体吞吐提高。`integration-server --inspect-checkpoint <database>` 只读重建
+最新快照，原 Unknown/ownership/no-replay 恢复规则保留。
+
 部署来源解析与中性消费者已在 application 内拆分；来源身份与 Control/Orchestration
 权威继续保留，见[部署证据边界](docs/development/deployment-evidence-boundaries.md)。
 

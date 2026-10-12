@@ -15,6 +15,11 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+#[path = "checkpoint_store.rs"]
+mod checkpoint_store;
+use checkpoint_store::StoredCheckpoint;
+pub use checkpoint_store::{CheckpointStoragePolicy, CheckpointWriteStats};
+
 /// Previous JSON payload codec retained for Mission/Execution evidence compatibility.
 const EVENT_PAYLOAD_SCHEMA_V2: &str = "domain.EventPayload.json/v2";
 
@@ -119,6 +124,14 @@ impl From<rusqlite::Error> for SqliteEventLogError {
 /// SQLite WAL-backed immutable event envelope store.
 #[derive(Clone)]
 pub struct SqliteEventLog {
+    /// Optional bounded checkpoint-write observations; failure never changes storage authority.
+    diagnostics: ports::DiagnosticHandle,
+    /// Startup-owned storage representation, independent of application authority.
+    checkpoint_policy: CheckpointStoragePolicy,
+    /// Last complete committed snapshot; shared copies never duplicate its byte buffer.
+    checkpoint_cache: Arc<Mutex<Option<StoredCheckpoint>>>,
+    /// Candidate cache installed only after the existing SQLite transaction commits.
+    pending_checkpoint_cache: Arc<Mutex<Option<StoredCheckpoint>>>,
     /// Serialized access to one SQLite connection.
     connection: Arc<Mutex<Connection>>,
     /// Process-local event counter used for deterministic event identities.
@@ -175,6 +188,11 @@ impl SqliteEventLog {
             ));
         }
         drop(batch);
+        let pending_checkpoint = self
+            .pending_checkpoint_cache
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?
+            .clone();
         let start = *self
             .next_event_number
             .lock()
@@ -193,6 +211,10 @@ impl SqliteEventLog {
                 .next_event_number
                 .lock()
                 .map_err(|_| SqliteEventLogError::LockPoisoned)? = start;
+            *self
+                .pending_checkpoint_cache
+                .lock()
+                .map_err(|_| SqliteEventLogError::LockPoisoned)? = pending_checkpoint;
         } else {
             self.connection
                 .lock()
@@ -203,6 +225,14 @@ impl SqliteEventLog {
     }
     /// Opens a WAL database and creates the immutable evidence schema if needed.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SqliteEventLogError> {
+        Self::open_with_checkpoint_policy(path, CheckpointStoragePolicy::Full)
+    }
+
+    /// Opens the same atomic evidence store with an explicit bounded checkpoint representation.
+    pub fn open_with_checkpoint_policy(
+        path: impl AsRef<Path>,
+        checkpoint_policy: CheckpointStoragePolicy,
+    ) -> Result<Self, SqliteEventLogError> {
         let connection = Connection::open(path)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "FULL")?;
@@ -229,6 +259,8 @@ impl SqliteEventLog {
                 checkpoint_json TEXT NOT NULL
             );",
         )?;
+        checkpoint_store::initialize(&connection)?;
+        let checkpoint_cache = checkpoint_store::read(&connection)?;
         migrate_event_schema(&connection)?;
         let metadata_event_number = connection
             .query_row(
@@ -246,11 +278,21 @@ impl SqliteEventLog {
             .unwrap_or(0);
         let next_event_number = metadata_event_number.max(max_sequence);
         Ok(Self {
+            diagnostics: ports::DiagnosticHandle::default(),
+            checkpoint_policy,
+            checkpoint_cache: Arc::new(Mutex::new(checkpoint_cache)),
+            pending_checkpoint_cache: Arc::new(Mutex::new(None)),
             connection: Arc::new(Mutex::new(connection)),
             next_event_number: Arc::new(Mutex::new(next_event_number)),
             batch_start_number: Arc::new(Mutex::new(None)),
             last_error: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Installs checkpoint-write observations before the composition shares this store with authorities.
+    pub fn with_diagnostics(mut self, diagnostics: ports::DiagnosticHandle) -> Self {
+        self.diagnostics = diagnostics;
+        self
     }
 
     /// Returns durable events in monotonic append-sequence order.
@@ -367,21 +409,38 @@ impl SqliteEventLog {
             .connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
-        connection
-            .query_row(
-                "SELECT event_sequence, schema, checkpoint_json
-                 FROM controller_checkpoint WHERE singleton = 1",
-                [],
-                |row| {
-                    Ok(PersistedCheckpoint {
-                        event_sequence: row.get(0)?,
-                        schema: row.get(1)?,
-                        checkpoint_json: row.get(2)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(Into::into)
+        checkpoint_store::read(&connection)
+            .map(|stored| stored.map(|stored| (*stored.snapshot).clone()))
+    }
+
+    /// Reconstructs an existing checkpoint through a readonly connection without changing the database.
+    pub fn read_checkpoint(
+        path: impl AsRef<Path>,
+    ) -> Result<Option<PersistedCheckpoint>, SqliteEventLogError> {
+        let connection =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        checkpoint_store::read(&connection)
+            .map(|stored| stored.map(|stored| (*stored.snapshot).clone()))
+    }
+
+    /// Observes actual encoded write bytes; this metadata never grants persistence acceptance.
+    pub fn checkpoint_write_stats(&self) -> Result<CheckpointWriteStats, SqliteEventLogError> {
+        if let Some(pending) = self
+            .pending_checkpoint_cache
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?
+            .as_ref()
+        {
+            return Ok(pending.write_stats);
+        }
+        Ok(self
+            .checkpoint_cache
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?
+            .as_ref()
+            .map_or(CheckpointWriteStats::default(), |checkpoint| {
+                checkpoint.write_stats
+            }))
     }
 
     /// Saves a controller projection inside the currently open event batch.
@@ -403,19 +462,44 @@ impl SqliteEventLog {
             .next_event_number
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        let previous = self
+            .pending_checkpoint_cache
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?
+            .clone()
+            .or(self
+                .checkpoint_cache
+                .lock()
+                .map_err(|_| SqliteEventLogError::LockPoisoned)?
+                .clone());
         let connection = self
             .connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
-        connection.execute(
-            "INSERT INTO controller_checkpoint(singleton, event_sequence, schema, checkpoint_json)
-             VALUES (1, ?1, ?2, ?3)
-             ON CONFLICT(singleton) DO UPDATE SET
-                 event_sequence = excluded.event_sequence,
-                 schema = excluded.schema,
-                 checkpoint_json = excluded.checkpoint_json",
-            params![event_sequence, schema, checkpoint_json],
+        let candidate = checkpoint_store::write(
+            &connection,
+            previous.as_ref(),
+            self.checkpoint_policy,
+            schema,
+            checkpoint_json,
+            event_sequence,
         )?;
+        self.diagnostics.value(
+            ports::DiagnosticKind::Other,
+            ports::DiagnosticStage::CheckpointWriteBytes,
+            candidate.write_stats.encoded_bytes,
+            None,
+        );
+        self.diagnostics.value(
+            ports::DiagnosticKind::Other,
+            ports::DiagnosticStage::CheckpointDelta,
+            u64::from(candidate.write_stats.delta),
+            None,
+        );
+        *self
+            .pending_checkpoint_cache
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)? = Some(candidate);
         Ok(())
     }
 
@@ -468,6 +552,17 @@ impl SqliteEventLog {
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
         connection.execute_batch("COMMIT")?;
+        if let Some(candidate) = self
+            .pending_checkpoint_cache
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?
+            .take()
+        {
+            *self
+                .checkpoint_cache
+                .lock()
+                .map_err(|_| SqliteEventLogError::LockPoisoned)? = Some(candidate);
+        }
         *batch_start = None;
         Ok(())
     }
@@ -488,6 +583,10 @@ impl SqliteEventLog {
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
         connection.execute_batch("ROLLBACK")?;
+        *self
+            .pending_checkpoint_cache
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)? = None;
         *batch_start = None;
         let mut counter = self
             .next_event_number

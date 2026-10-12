@@ -105,3 +105,40 @@ serialization/Commit 包含 timer/HTTP，故不等于 fact batch 数；表来自
 
 每个 batch 仍编码完整 authority snapshot。减少全量磁盘写入的增量存储属于后续
 ADR-0081；本阶段不会把事件 log 当成已具备 event-complete reducers。
+
+## ADR-0081 增量存储与 full/release 对照（2026-10-12）
+
+增量链已实现，保留完整 authority snapshot；少量改变通过 exact Copy/Literal 表示，
+每项 schema/event-sequence/revision/前后摘要绑定，原子 compaction 最多保留 32 deltas。
+缓存只在 Commit 发布，input/Mission/outer rollback 同步恢复 pending cache。旧库迁移
+使用 storage marker fences downgrade；readonly inspection 返回当前重建结果。
+
+8 项存储检查覆盖 UTF-8/插入与多位置改变、迁移、nested rollback、事件原子性、
+compaction SQL failure、40 次同 event tail 的 bounded revisions、十种损坏拒绝恢复。
+应用 restore 检查验证 hold、资源和 nonterminal Unknown/no-blind-replay。workspace
+653 passed / 2 explicit ignored；Clippy、Rustdoc 和 Python 检查通过。
+
+原始 `s3-process-probe` 首轮完成 32/32，第二轮首个 Controller 达到 10 秒启动门限。
+该进程已创建 schema、尚无 checkpoint，未启动 Node；该轮计划 8、实际 0，另有三个
+后续 arm 未到达。日志和 `incomplete-run.json` 保留，原因 NOT PROVEN。随后
+`s3-process-probe-recheck` 与 `s3-process-probe-cached-digest` 两组各 64/64 完成。
+probe 现已明确记录 planned/started/success、startup/inspection failures 与不可用
+checkpoint，不因没有启动 Node 而把失败排除；真实非法 startup 配置验证了这个路径。
+
+改进缓存摘要、exact prefix/suffix reuse 后，debug 两轮 diagnostics-on 的编码写入量
+分别由 full 1,895,847 / 1,924,102 bytes 降到 incremental 434,087 / 446,101 bytes
+（约 77%）。这些是 representation bytes，包含待 Commit 写入尝试，不是磁盘物理写入
+或 SQLite/WAL page 数；两组都无 probe failure。增量计算仍增大 Save 的 CPU 成本。
+
+release 另两轮共 64/64 完成，workload elapsed（每 arm 8 个 Mission）如下：
+
+| 轮次 | full / diagnostics off | incremental / diagnostics off | full / on | incremental / on |
+| --- | --- | --- | --- | --- |
+| 1 | 2.081s | 2.119s | 2.285s | 2.131s |
+| 2 | 2.190s | 2.100s | 2.151s | 2.348s |
+
+样本少、差异双向，不能宣称吞吐或延迟固定提高。默认继续 full；部署在重复 snapshot
+写入量是瓶颈时可显式选 `ROBOGUIDE_CHECKPOINT_STORAGE=incremental`。batch 仍编码
+完整快照，event-complete reducers 与复制仍是独立机制。debug/release 比较严格区分，
+所有 binary/diff hashes、完整分母、WAL 身份和 logs 都在前述仓库外目录。
+检查无模型、Habitat、硬件或 E6；初始失败没有从后续结论中删除。

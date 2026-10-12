@@ -19,6 +19,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   source-aware State records, and generic/Spatial Memory catalog projections behind
   transport-neutral ports. Catalog metadata is rebuildable evidence; Memory blobs never live in
   State, Runtime checkpoints, or the Node Protocol.
+- ADR-0081 adds bounded opaque checkpoint deltas in `core/state/src/checkpoint_store.rs`.
+  Exact schema/sequence/revision/digests, atomic compaction and transaction-pending cache rollback
+  preserve the complete authority snapshot. Chain storage fences old binaries even for zero-event
+  revisions. Default storage remains full; incremental is explicit, and readonly inspection
+  reconstructs the current result. It does not provide complete event reducers or control replication.
 - State is not a Global Truth store. Records distinguish Node/World/RoboGuide objects and
   Desired/Committed/Reported/Observed/Derived/Belief semantics, retain source/channel/time/TTL,
   and never collapse independent sources implicitly. The Controller State API is a read-only

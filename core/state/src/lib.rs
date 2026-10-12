@@ -13,7 +13,10 @@ mod state_record;
 mod task_satisfaction;
 
 pub use allocation::InMemoryAllocationState;
-pub use event_log::{PersistedCheckpoint, PersistedEvent, SqliteEventLog, SqliteEventLogError};
+pub use event_log::{
+    CheckpointStoragePolicy, CheckpointWriteStats, PersistedCheckpoint, PersistedEvent,
+    SqliteEventLog, SqliteEventLogError,
+};
 pub use memory::MemoryCatalogProjection;
 pub use node::InMemorySharedNodeState;
 pub use spatial_memory::MapCatalogProjection;

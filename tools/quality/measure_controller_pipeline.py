@@ -99,6 +99,10 @@ def diagnostic_totals(path: Path) -> dict[str, Any]:
                     total["latest_queue"] = sample["queue"]
                 if sample["value"]["samples"]:
                     total["latest_value"] = sample["value"]["latest"]
+                    total["value_samples"] = (
+                        total.get("value_samples", 0) + sample["value"]["samples"]
+                    )
+                    total["value_sum"] = total.get("value_sum", 0) + sample["value"]["sum"]
     for total in totals.values():
         total["mean_us"] = total["sum_us"] / total["samples"] if total["samples"] else None
         for percentile in [50, 95, 99]:
@@ -113,29 +117,50 @@ def diagnostic_totals(path: Path) -> dict[str, Any]:
     return {"windows": windows, "loss": loss, "metrics": totals}
 
 
-def inspect_database(path: Path) -> dict[str, Any]:
+def inspect_database(path: Path, controller_binary: Path) -> dict[str, Any]:
     """Read the owned database's actual final authority and fixed fact-profile denominators."""
+    checkpoint = json.loads(
+        subprocess.check_output(
+            [str(controller_binary), "--inspect-checkpoint", str(path)],
+            cwd=ROOT,
+            text=True,
+            timeout=15,
+        )
+    )
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as database:
         row = database.execute(
             "SELECT schema, checkpoint_json FROM controller_checkpoint"
         ).fetchone()
         if row is None:
             raise RuntimeError("measured Controller has no committed checkpoint")
-        saved = json.loads(row[1])
+        saved = json.loads(checkpoint["checkpoint_json"])
+        tail = database.execute("SELECT COALESCE(MAX(sequence), 0) FROM events").fetchone()[0]
+        if checkpoint["event_sequence"] != tail:
+            raise RuntimeError("reconstructed checkpoint does not cover the actual event tail")
+        delta_rows, delta_bytes = database.execute(
+            "SELECT COUNT(*), COALESCE(SUM(length(CAST(delta_json AS BLOB))), 0) "
+            "FROM controller_checkpoint_deltas"
+        ).fetchone()
         missions = json.loads(saved["orchestration_json"])
         counts: dict[str, int] = {}
         for (payload,) in database.execute("SELECT payload_json FROM events ORDER BY sequence"):
             kind = next(iter(json.loads(payload)))
             counts[kind] = counts.get(kind, 0) + 1
     return {
-        "schema": row[0],
-        "checkpoint_bytes": len(row[1].encode()),
-        "checkpoint_sha256": hashlib.sha256(row[1].encode()).hexdigest(),
+        "schema": checkpoint["schema"],
+        "baseline_storage_schema": row[0],
+        "checkpoint_bytes": len(checkpoint["checkpoint_json"].encode()),
+        "checkpoint_sha256": hashlib.sha256(checkpoint["checkpoint_json"].encode()).hexdigest(),
+        "retained_delta_rows": delta_rows,
+        "retained_delta_bytes": delta_bytes,
         "missions": len(missions),
         "completed": sum(mission["lifecycle"] == "Completed" for mission in missions),
         "isolated": sum(mission.get("isolation") is not None for mission in missions),
         "event_counts": counts,
         "database_sha256": digest(path),
+        "wal_sha256": digest(Path(str(path) + "-wal"))
+        if Path(str(path) + "-wal").exists()
+        else None,
     }
 
 
@@ -146,6 +171,7 @@ def run_probe(
     binaries: dict[str, Path],
     batch_limit: int,
     batch_wait_ms: int,
+    checkpoint_mode: str,
 ) -> dict[str, Any]:
     """Run fixed two-session waves and stop only the processes created by this probe."""
     directory.mkdir()
@@ -158,6 +184,7 @@ def run_probe(
     environment["NO_PROXY"] = "127.0.0.1,localhost"
     environment["ROBOGUIDE_FACT_BATCH_LIMIT"] = str(batch_limit)
     environment["ROBOGUIDE_FACT_BATCH_WAIT_MS"] = str(batch_wait_ms)
+    environment["ROBOGUIDE_CHECKPOINT_STORAGE"] = checkpoint_mode
     environment["ROBOGUIDE_DIAGNOSTICS_PATH"] = (
         str(directory / "diagnostics.jsonl") if enabled else ""
     )
@@ -166,6 +193,9 @@ def run_probe(
     failures: list[dict[str, Any]] = []
     durations: list[float] = []
     owned_nodes: list[subprocess.Popen[bytes]] = []
+    phase = "controller_startup"
+    workload_started: float | None = None
+    elapsed = 0.0
     with (directory / "controller.log").open("wb") as output:
         controller = subprocess.Popen(
             [
@@ -184,6 +214,7 @@ def run_probe(
         try:
             await_ready(controller, http)
             workload_started = time.monotonic()
+            phase = "workload"
             for wave in range(waves):
                 participants: list[tuple[subprocess.Popen[bytes], int, float]] = []
                 for ordinal in range(2):
@@ -223,8 +254,19 @@ def run_probe(
                 if controller.poll() is not None:
                     raise RuntimeError("owned Controller failed during the workload")
             elapsed = time.monotonic() - workload_started
+            phase = "diagnostic_tail"
             # A complete diagnostic window is needed; exclude this tail from workload time.
             time.sleep(5.2 if enabled else 0.2)
+        except (OSError, RuntimeError, TimeoutError) as error:
+            elapsed = time.monotonic() - workload_started if workload_started is not None else 0.0
+            failures.append(
+                {
+                    "scope": phase,
+                    "error_type": type(error).__name__,
+                    "reason": str(error),
+                    "started_nodes": len(owned_nodes),
+                }
+            )
         finally:
             for process in owned_nodes:
                 if process.poll() is None:
@@ -236,18 +278,32 @@ def run_probe(
             except subprocess.TimeoutExpired:
                 controller.kill()
                 controller.wait(timeout=5)
+    authority: dict[str, Any] | None
+    try:
+        authority = inspect_database(database, binaries["controller"])
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        authority = None
+        failures.append(
+            {
+                "scope": "checkpoint_inspection",
+                "error_type": type(error).__name__,
+                "reason": str(error),
+            }
+        )
     result = {
         "batch_limit": batch_limit,
         "batch_wait_ms": batch_wait_ms,
+        "checkpoint_storage": checkpoint_mode,
         "diagnostics_enabled": enabled,
         "waves": waves,
         "concurrency": 2,
-        "attempted": waves * 2,
+        "planned": waves * 2,
+        "attempted": len(owned_nodes),
         "successful_smokes": successes,
         "failures": failures,
         "workload_elapsed_s": elapsed,
         "observed_process_durations_s": durations,
-        "authority": inspect_database(database),
+        "authority": authority,
         "diagnostics": diagnostic_totals(directory / "diagnostics.jsonl"),
         "ports": {"grpc": grpc, "http": http, "artifact": artifact},
     }
@@ -263,6 +319,13 @@ def main() -> None:
     parser.add_argument("--waves", type=int, default=8)
     parser.add_argument("--batch-limits", type=int, nargs="+", default=[1, 8])
     parser.add_argument("--batch-wait-ms", type=int, default=2)
+    parser.add_argument("--build-profile", choices=["debug", "release"], default="debug")
+    parser.add_argument(
+        "--checkpoint-modes",
+        nargs="+",
+        choices=["full", "incremental"],
+        default=["full", "incremental"],
+    )
     options = parser.parse_args()
     if not 1 <= options.repeats <= 5 or not 1 <= options.waves <= 16:
         parser.error("repeats must be 1..5 and waves must be 1..16")
@@ -273,11 +336,11 @@ def main() -> None:
     directory = options.output.resolve()
     directory.mkdir(parents=True, exist_ok=False)
     binaries = {
-        "controller": ROOT / "target/debug/integration-server",
-        "node": ROOT / "target/debug/real-node-smoke",
+        "controller": ROOT / "target" / options.build_profile / "integration-server",
+        "node": ROOT / "target" / options.build_profile / "real-node-smoke",
     }
     manifest = {
-        "schema": "roboguide.controller-pipeline-probe/v0.2",
+        "schema": "roboguide.controller-pipeline-probe/v0.3",
         "source_sha": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
         ).strip(),
@@ -290,9 +353,10 @@ def main() -> None:
         "waves": options.waves,
         "batch_limits": options.batch_limits,
         "batch_wait_ms": options.batch_wait_ms,
+        "checkpoint_modes": options.checkpoint_modes,
         "concurrency": 2,
         "profile": "synthetic-compute-smoke/v0.1",
-        "build_profile": "debug",
+        "build_profile": options.build_profile,
         "formal_experiment": False,
         "limitations": [
             "not E6",
@@ -308,27 +372,48 @@ def main() -> None:
         # Alternate arm order to reduce a fixed first-run bias; inputs and denominator stay fixed.
         limits = options.batch_limits if repeat % 2 == 0 else list(reversed(options.batch_limits))
         for batch_limit in limits:
-            for enabled in [False, True] if repeat % 2 == 0 else [True, False]:
-                diagnostic_arm = "on" if enabled else "off"
-                name = f"repeat-{repeat + 1}-batch-{batch_limit}-diagnostics-{diagnostic_arm}"
-                wait_ms = options.batch_wait_ms if batch_limit > 1 else 0
-                result = run_probe(
-                    directory / name, enabled, options.waves, binaries, batch_limit, wait_ms
-                )
-                runs.append({"directory": name, **result})
-                save(directory / "results.json", runs)
-                print(
-                    json.dumps(
-                        {
-                            "run": name,
-                            "successful": result["successful_smokes"],
-                            "attempted": result["attempted"],
-                            "elapsed_s": result["workload_elapsed_s"],
-                        }
-                    ),
-                    flush=True,
-                )
-    if any(run["failures"] or run["authority"]["completed"] != run["attempted"] for run in runs):
+            modes = (
+                options.checkpoint_modes
+                if repeat % 2 == 0
+                else list(reversed(options.checkpoint_modes))
+            )
+            for mode in modes:
+                for enabled in [False, True] if repeat % 2 == 0 else [True, False]:
+                    diagnostic_arm = "on" if enabled else "off"
+                    name = (
+                        f"repeat-{repeat + 1}-batch-{batch_limit}-storage-{mode}"
+                        f"-diagnostics-{diagnostic_arm}"
+                    )
+                    wait_ms = options.batch_wait_ms if batch_limit > 1 else 0
+                    result = run_probe(
+                        directory / name,
+                        enabled,
+                        options.waves,
+                        binaries,
+                        batch_limit,
+                        wait_ms,
+                        mode,
+                    )
+                    runs.append({"directory": name, **result})
+                    save(directory / "results.json", runs)
+                    print(
+                        json.dumps(
+                            {
+                                "run": name,
+                                "successful": result["successful_smokes"],
+                                "attempted": result["attempted"],
+                                "elapsed_s": result["workload_elapsed_s"],
+                            }
+                        ),
+                        flush=True,
+                    )
+    if any(
+        run["failures"]
+        or run["authority"] is None
+        or run["attempted"] != run["planned"]
+        or run["authority"]["completed"] != run["attempted"]
+        for run in runs
+    ):
         raise SystemExit(
             "incomplete synthetic runs retained; inspect denominators before comparison"
         )

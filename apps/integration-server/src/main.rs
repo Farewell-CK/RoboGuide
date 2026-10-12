@@ -373,7 +373,28 @@ fn configured_duration(name: &str, default: u64) -> Result<u64, Box<dyn std::err
 /// Binds the configured integration listener and keeps accepting connector sessions.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut arguments = std::env::args().skip(1);
+    let mut arguments = std::env::args().skip(1).peekable();
+    if arguments
+        .peek()
+        .is_some_and(|argument| argument == "--inspect-checkpoint")
+    {
+        arguments.next();
+        let path = arguments
+            .next()
+            .ok_or("checkpoint inspection requires one existing database path")?;
+        if arguments.next().is_some() {
+            return Err("checkpoint inspection accepts exactly one database path".into());
+        }
+        let saved =
+            state::SqliteEventLog::read_checkpoint(path)?.ok_or("database has no checkpoint")?;
+        println!(
+            "{}",
+            serde_json::json!({
+                "event_sequence": saved.event_sequence, "schema": saved.schema, "checkpoint_json": saved.checkpoint_json,
+            })
+        );
+        return Ok(());
+    }
     let address: std::net::SocketAddr = arguments
         .next()
         .unwrap_or_else(|| "127.0.0.1:50051".to_string())
@@ -455,13 +476,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let _event_log_writer_lock = acquire_event_log_writer_lock(Path::new(&event_path))?;
-    let event_log = state::SqliteEventLog::open(&event_path)?;
+    let checkpoint_policy = match std::env::var("ROBOGUIDE_CHECKPOINT_STORAGE").as_deref() {
+        Ok("full") | Err(std::env::VarError::NotPresent) => state::CheckpointStoragePolicy::Full,
+        Ok("incremental") => state::CheckpointStoragePolicy::Incremental,
+        _ => return Err("ROBOGUIDE_CHECKPOINT_STORAGE must be full or incremental".into()),
+    };
+    let event_log =
+        state::SqliteEventLog::open_with_checkpoint_policy(&event_path, checkpoint_policy)?;
     let event_write_gate = Arc::new(Mutex::new(()));
     let process_clock = Arc::new(runtime::SystemMonotonicClock::from_floor(
         event_log.latest_timestamp()?,
     ));
     let diagnostic_writer = diagnostics::DiagnosticWriter::configured();
     let diagnostic_handle = diagnostic_writer.handle();
+    let event_log = event_log.with_diagnostics(diagnostic_handle.clone());
     let artifact_store = artifact_store::FileSystemArtifactStore::new(&artifact_root)?;
     let artifact_catalog =
         artifact_http::ArtifactCatalog::replay_with_gate(&event_log, event_write_gate.clone())

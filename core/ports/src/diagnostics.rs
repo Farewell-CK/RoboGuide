@@ -77,6 +77,10 @@ pub enum DiagnosticStage {
     CheckpointBytes,
     /// Number of original inputs sharing one application checkpoint transaction.
     BatchFacts,
+    /// Encoded baseline/delta bytes in one attempted checkpoint storage save, excluding page overhead.
+    CheckpointWriteBytes,
+    /// Whether one attempted checkpoint save used a delta, represented as zero or one.
+    CheckpointDelta,
     /// SQLite checkpoint update.
     Save,
     /// SQLite transaction commit.
@@ -111,6 +115,8 @@ impl DiagnosticStage {
             Self::Serialize => "serialize",
             Self::CheckpointBytes => "checkpoint_bytes",
             Self::BatchFacts => "batch_facts",
+            Self::CheckpointWriteBytes => "checkpoint_write_bytes",
+            Self::CheckpointDelta => "checkpoint_delta",
             Self::Save => "sqlite_save",
             Self::Commit => "sqlite_commit",
             Self::Completion => "completion",

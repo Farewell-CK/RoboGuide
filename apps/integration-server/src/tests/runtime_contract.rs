@@ -35,8 +35,17 @@ struct Fixture {
 impl Fixture {
     /// Accepts, matches, commits and binds A/B before admitting their original Started facts.
     fn new() -> Self {
+        Self::with_storage(state::CheckpointStoragePolicy::Full)
+    }
+
+    /// Exercises the identical application authorities through either exact storage representation.
+    fn with_storage(policy: state::CheckpointStoragePolicy) -> Self {
         let directory = tempfile::tempdir().unwrap();
-        let events = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+        let events = state::SqliteEventLog::open_with_checkpoint_policy(
+            directory.path().join("events.sqlite3"),
+            policy,
+        )
+        .unwrap();
         let correlation = domain::CorrelationId::new("runtime-contract-setup").unwrap();
         let mut control = control::ControlPlane::new();
         let mut state = state::InMemorySharedNodeState::new();
@@ -391,4 +400,60 @@ fn production_deadline_sql_failure_remains_global_and_atomic() {
             .isolation()
             .is_some()
     );
+}
+
+/// Delta reconstruction preserves holds, physical ownership and nonterminal Unknown/no-replay restore.
+#[test]
+fn incremental_restore_retains_held_evidence_and_fences_nonterminal_attempts() {
+    let fixture = Fixture::with_storage(state::CheckpointStoragePolicy::Incremental);
+    fixture.fact(0, 2, ExecutionPhase::Completed, 10, 10);
+    fixture.tick(12);
+    let saved: ServerCheckpoint = serde_json::from_str(
+        &fixture
+            .events
+            .load_checkpoint()
+            .unwrap()
+            .unwrap()
+            .checkpoint_json,
+    )
+    .unwrap();
+    let mut bridge = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &saved.integration_json,
+        fixture.events.clone(),
+        integration::GrpcNodeRouter::default(),
+        TimestampMs::new(13),
+    )
+    .unwrap();
+    let orchestrator = MissionOrchestrator::restore_json(&saved.orchestration_json).unwrap();
+    assert!(
+        orchestrator
+            .execution(&domain::MissionId::new("mission-a").unwrap())
+            .unwrap()
+            .isolation()
+            .is_some()
+    );
+    assert_eq!(
+        bridge.execution_status(fixture.attempts[0].execution_id()),
+        Some(orchestration::RemoteExecutionStatus::Completed)
+    );
+    assert_eq!(
+        bridge.execution_status(fixture.attempts[1].execution_id()),
+        Some(orchestration::RemoteExecutionStatus::Unknown)
+    );
+    assert_eq!(
+        bridge
+            .control()
+            .allocation_snapshot(TimestampMs::new(13))
+            .unwrap()
+            .allocations()
+            .len(),
+        2
+    );
+    assert_eq!(
+        bridge
+            .flush_dispatch_outbox_with_clock(&runtime::FixedClock::new(TimestampMs::new(13)))
+            .unwrap(),
+        0
+    );
+    assert_eq!(bridge.attempt_history().len(), 2);
 }

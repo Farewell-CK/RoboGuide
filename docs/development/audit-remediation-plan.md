@@ -10,7 +10,7 @@
 | O3 配置与只读指标 | 已实现并验证 | ADR-0075；统一 timing、自定义 new/renew/restore/Welcome、两级 queue 及 default-off JSONL，观测失败不改变 durable trace |
 | O4 时间与 Control 活性 | 已实现并验证 | ADR-0076；Control 验证连续 exact-session evidence，独立双时间 ingestion、失效/restart fence；workspace checks 通过 |
 | O5 Mission 故障隔离 | hold/回滚/显式恢复与 deadline 运行期局部分类已验证 | ADR-0077/0079；真实 timer/HTTP/SQL 路径证明 exact-Task 子集；其他未知错误仍 fail closed |
-| O6 事务性能 | 测量与设计已完成；batch 暂缓 | 96/96 合成 Mission；serialize/commit 为主要成本，未证明 batch 收益/等价性，保持单事实事务 |
+| O6 事务性能 | 有界 batch 已验收；增量存储软件完成并保持 opt-in | ADR-0080/0081；真实协议轨迹等价、batch Commit/serialization 次数减少；delta 写入 bytes 减少但吞吐收益未建立；full 为默认，原始失败保留 |
 | O7 部署边界 | 已实现并验证 | 具体 source / neutral codec / consumers 分离；137 个 app tests 保留兼容与 provenance |
 | O8 发布技术准备 | 技术核验已完成；发布决策待定 | 历史扫描 23 提示（1 条凭据风险待处置）、依赖元数据、ADR-0078、4/4 quickstart、认证边界披露 |
 

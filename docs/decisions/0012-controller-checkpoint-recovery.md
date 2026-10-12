@@ -54,3 +54,13 @@ event-sourced replay, replication, or a second resource-commitment authority.
   checkpoint behind.
 - Full event-sourced historical projection and replicated/high-availability recovery remain future
   work and require separate ordering and idempotency decisions.
+
+## Later storage implementation
+
+ADR-0080 implements bounded fact transactions without weakening durable acceptance. ADR-0081
+now implements opt-in exact checkpoint deltas, revision/digest validation, cache rollback and atomic
+compaction. Readonly inspection reconstructs the latest complete authority; missing/corrupt chains
+reject startup, and application recovery still preserves Unknown, retained ownership and no blind
+dispatch. This closes the incremental-storage software item; complete event reducers and replicated
+control recovery remain separate decisions. Engineering process measurements retain an initial
+startup timeout and all later complete runs rather than claiming universal throughput improvement.
