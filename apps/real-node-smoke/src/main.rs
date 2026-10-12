@@ -545,10 +545,7 @@ mod tests {
         assert!(classify_ack_payload(ServerPayload::Execute(changed), 2, Some(&execute)).is_err());
         assert!(
             classify_ack_payload(
-                ServerPayload::Ack(integration::grpc::v0_4::Ack {
-                    sequence: 3,
-                    ..Default::default()
-                }),
+                ServerPayload::Ack(integration::grpc::v0_4::Ack { sequence: 3 }),
                 2,
                 Some(&execute)
             )
@@ -556,10 +553,7 @@ mod tests {
         );
         assert!(
             classify_ack_payload(
-                ServerPayload::Ack(integration::grpc::v0_4::Ack {
-                    sequence: 2,
-                    ..Default::default()
-                }),
+                ServerPayload::Ack(integration::grpc::v0_4::Ack { sequence: 2 }),
                 2,
                 Some(&execute)
             )
