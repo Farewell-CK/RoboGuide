@@ -749,10 +749,10 @@ Detect → Reconcile → Adapt
 | 层级 | 所有者 | 典型处理 |
 | --- | --- | --- |
 | L0 | Local Autonomy | 局部避障、短程重规划、motion retry、安全停机 |
-| L1 | Runtime | 短暂通信错误、调用失败、重连 |
-| L2 | Execution Group | 成员替换、re-bind、Group adaptation |
-| L3 | Scheduler / Coordination | 重新 Propose、Coordinate、Commit |
-| L4 | Mission Intelligence | Task Graph 已无法实现 Mission 时重新规划 |
+| L1 | Integration / Node Service；Runtime 保留执行 fence | transport 重连、durable handle 续查；歧义保持 Unknown |
+| L2 | Control | Role-scoped recovery、Commit 后 Rebind；保留停止证据和 Actor 限制 |
+| L3 | Control；Scheduler 提供 bounded decision | 当前 CandidateSet 下重新 Propose、Coordinate、Commit |
+| L4 | Mission Intelligence | 执行期 Task Graph 重规划尚未实现；现有 reconsideration 属于准入前 |
 
 恢复目标不是盲目重放旧命令，而是在当前物理世界中恢复任务进展，并且只升级到必要层级。
 
@@ -909,6 +909,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   ├── runtime/
 │   ├── artifact-store/      # filesystem ArtifactBlobStore implementation
 │   ├── integration/         # formal gRPC Node Protocol v0.4 wire/session/router
+│   ├── controller-replication/ # opt-in quorum accepted metadata; no execution authority
 │   ├── orchestration/       # Controller Mission orchestration + IntegrationRuntimeBridge composition
 │   ├── node-service/        # single service + declarative Local Integration Engine
 │   └── testkit/
@@ -918,6 +919,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 ├── apps/
 │   ├── controller/
 │   ├── integration-server/
+│   ├── controller-replica/  # static loopback consensus + one owned leader child
 │   ├── mission-service/
 │   ├── roboguide-node/
 │   └── real-node-smoke/

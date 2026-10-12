@@ -26,16 +26,18 @@ core/
   domain/                  纯领域类型、不变量和状态机
   ports/                   由核心拥有、与传输无关的接口
   control/                 Node、匹配、调度、提案、Mission-level Group、TaskExecution、恢复和 Allocation projection
-  runtime/                 发现、调用、Heartbeat、Lease 和诊断
+  runtime/                 stable execution/attempt registry、durable intents、facts、relations 和 checkpoint
   state/                   Shared Node、Allocation、source-aware State 与 Memory Catalog projection
   artifact-store/          filesystem ArtifactBlobStore implementation
   integration/             正式 gRPC Node Protocol v0.4 wire、session 和 router
+  controller-replication/   可选 OpenRaft quorum、FULL SQLite accepted metadata 与 bounded loopback RPC
   orchestration/           Mission orchestration 与 Controller integration-fact composition
   node-service/            单一 Node Service、声明式本地引擎和 durable journal
   testkit/                 Fake Nodes、虚拟时钟、Fixture 和故障注入
 apps/
   controller/              组合根和进程生命周期
   integration-server/      多 Node gRPC session 与独立 Artifact HTTP composition root
+  controller-replica/       独立 consensus supervisor；只管理自己拥有的 leader Controller child
   mission-service/         文本 Mission Request、澄清/审批与内部 plan submission 组合根
   roboguide-node/          每台节点机器唯一的通用 RoboGuide 服务
   real-node-smoke/         formal Node Protocol v0.4 probe 与合成 Execute simulation
@@ -58,9 +60,9 @@ tools/quality/             标准 Linter 未覆盖的仓库检查
 
 当前 Bootstrap 已创建 `core/domain`、`core/ports`、`core/state`、`core/control`、
 `core/orchestration`、
-`core/runtime`、`core/artifact-store`、`core/integration`、`core/node-service`、`core/testkit`、
+`core/runtime`、`core/artifact-store`、`core/integration`、`core/controller-replication`、`core/node-service`、`core/testkit`、
 `apps/controller`、`apps/integration-server`、`apps/mission-service`、`apps/roboguide-node`、
-`apps/real-node-smoke` 和 `mission`。Mission 通过
+`apps/controller-replica`、`apps/real-node-smoke` 和 `mission`。Mission 通过
 `contracts/mission/` 下的版本化 artifact 向 Rust 应用边界提供 Task Graph，
 不在 Rust 进程中嵌入 Python。`core/state` 当前包含 Shared Node State、非权威 Allocation
 View、source-aware State record 与通用/Spatial Memory catalog 的真实实现；旧 HTTP
@@ -79,11 +81,13 @@ reference transport 和 configured command bridge 已
 | Domain | ID、值对象、不变量和生命周期状态机 | I/O、SDK、存储和调度基础设施 |
 | Ports | Clock、Event Log、Node Registry 等核心接口 | 厂商或传输类型 |
 | Control | Match、Propose、Coordinate、Commit、Group 生命周期和恢复决策 | 硬件命令或本地运动 |
-| Runtime | Discovery、消息语义、Invocation、Heartbeat 和 Lease | 全局资源选择 |
+| Runtime | stable logical slot/physical attempt、durable command intents、ordered facts、relations、Unknown fence 与 checkpoint | transport/session lease、Control lease/commit/recovery 决策、Task satisfaction |
 | State | Shared Node、非权威 Allocation View、source-aware records 与可重建 Memory Catalog | 调度决策、Lease authority、Reservation commitment、Group lifecycle、跨来源 truth fusion 或 artifact bytes |
 | Artifact Store | filesystem CAS、digest/path safety、分块上传和端口实现 | Map/Task/Group 状态、Control commitment、设备 workflow |
 | Integration | formal gRPC Node Protocol、session/lease fencing、Node router 和 wire conversion | Control/State/Runtime composition、Local How 与调度选择 |
 | Controller composition | `core/orchestration` 中把 Node Protocol facts 接到 Control/State/Runtime 的 bridge | transport framing、Local EAIOS endpoint 或 reservation policy |
+| Mission Orchestration | accepted MissionPlan、DAG readiness、satisfaction、explicit completion、isolation 与 logical dispatch policy | physical reservation、Node selection authority 或 Local How |
+| Controller Replication | 版本绑定的 opaque accepted snapshot/history、共识 storage 与 trusted-loopback RPC | Match/Bind、Task lifecycle、commands 或 Artifact/Memory 内容 |
 | Node Service | 单一节点服务、声明式 Local Integration Engine、durable journal 与 Memory manifest ledger/reference fallback | 每种 EAIOS 的代码插件、真实 EAIOS Memory semantic/storage authority 或独立 RoboGuide 服务 |
 | Deployment integrations | Robonix/ROS/vendor-specific Local How 与受控本地文件边界 | Mission/Group/Task 状态、Control 决策、State Catalog、Node Protocol authority |
 | Mission Intelligence | 文本解释、澄清、Task Graph 草案、风险审批、attributed Mission grounding 和 deliberation persistence | live inventory eligibility、Node assignment、Commit、Group/Runtime execution lifecycle |
