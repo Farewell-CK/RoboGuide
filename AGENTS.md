@@ -678,6 +678,9 @@ Recovery pipeline tests prove candidate membership, proposal/commit separation,
 atomic conflicts, committed-only rebind, and stable unaffected bindings.
 Commitment lifecycle tests cover one-pending-per-role, stale handles, atomic Abort,
 terminal cleanup, zero-resource roles, and Multi-Mission ownership isolation.
+`tools/quality/measure_controller_pipeline.py` probes isolated production Controller processes with
+bounded two-session synthetic protocol waves, retaining binary/source identity, stage costs, durable
+completion denominators and all failures. It starts no simulator, Provider, hardware or E6.
 `core/control/src/tests/ownership_model.rs` adds an independent lifecycle-aware allocation model,
 fixed-seed interleavings, temporary counterexample retention and explicit extended/replay checks.
 Its model preserves pending normal/recovery commitments and single-owner Context reuse.

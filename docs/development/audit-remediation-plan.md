@@ -10,7 +10,7 @@
 | O3 配置与只读指标 | 已实现并验证 | ADR-0075；统一 timing、自定义 new/renew/restore/Welcome、两级 queue 及 default-off JSONL，观测失败不改变 durable trace |
 | O4 时间与 Control 活性 | 已实现并验证 | ADR-0076；Control 验证连续 exact-session evidence，独立双时间 ingestion、失效/restart fence；workspace checks 通过 |
 | O5 Mission 故障隔离 | 已实现并验证 | ADR-0077；内存/SQL 回滚、持久 hold、Control 重验、generation-bound HTTP resume |
-| O6 事务性能 | 条件性 | 先固定合成轨迹测量；瓶颈和收益不足时记录不实施结论 |
+| O6 事务性能 | 测量与设计已完成；batch 暂缓 | 96/96 合成 Mission；serialize/commit 为主要成本，未证明 batch 收益/等价性，保持单事实事务 |
 | O7 部署边界 | 待实施 | 在既有模块内拆分中性消费者与具体部署解析 |
 | O8 发布技术准备 | 待实施 | 扫描、示例、ADR 标识、边界披露；不选择 LICENSE 或发布 |
 
@@ -72,3 +72,10 @@ event codec v14 保持历史读取。
 验证：workspace tests 627 passed / 2 explicit ignored；8 个隔离专项测试通过。
 SQLite append/checkpoint/savepoint 故障、HTTP 400/409/503、持久重启、Cancel draining、
 不重放 Execute 已覆盖。workspace Clippy、Rustdoc、formatting 和 diff 检查通过。
+
+## O6 交付
+
+真实 loopback Controller + synthetic smoke 六轮共 96/96 完成，原失败轮 13/96 保留。
+已提交 smoke 精确重投去重修补，新增有界测量入口与分阶段证据、batch 实施门禁和
+增量持久化独立设计。未启用 batch、降低 durability 或启动 E6。详见
+[事务测量与设计](controller-persistence-performance.md)。
