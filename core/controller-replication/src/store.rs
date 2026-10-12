@@ -9,7 +9,7 @@ use openraft::{
     Entry, EntryPayload, LogId, LogState, RaftLogReader, RaftSnapshotBuilder, Snapshot,
     SnapshotMeta, StorageError, StorageIOError, StoredMembership, Vote,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::de::DeserializeOwned;
 use sha2::{Digest as _, Sha256};
 use std::fs::File;
@@ -29,9 +29,29 @@ pub struct ReplicaView {
     pub revision: u64,
     /// Exact complete accepted authority snapshot.
     pub checkpoint: Option<state::PersistedCheckpoint>,
-    /// Immutable complete event metadata history, including catalog source evidence.
+    /// Immutable retained event metadata tail; a complete checkpoint covers any compacted prefix.
     pub events: Vec<state::PersistedEvent>,
+    /// Optional durable prefix anchor when old metadata rows were compacted.
+    #[serde(default)]
+    pub history_anchor: Option<HistoryAnchor>,
 }
+
+/// Verifiable identity of the compacted application-history prefix.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HistoryAnchor {
+    /// Last event sequence represented by the complete checkpoint but no longer retained as a row.
+    pub base_sequence: u64,
+    /// Digest of the compacted prefix chain, never a replacement for the checkpoint.
+    pub base_digest: String,
+    /// Checkpoint digest captured when this anchor was written.
+    pub checkpoint_digest: String,
+    /// Versioned anchor codec.
+    pub schema: String,
+}
+
+/// Versioned codec marker for a retained event-history prefix anchor.
+const HISTORY_ANCHOR_SCHEMA: &str = "roboguide.replica-history-anchor/v1";
 
 /// Small accepted-application identity used to resolve a lost Commit response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,12 +66,11 @@ pub struct AcceptedApplicationIdentity {
 }
 
 impl ReplicaView {
-    /// Validates bounded complete history and exact codecs on reopen and before snapshot installation.
+    /// Validates bounded retained history and exact codecs on reopen and before snapshot installation.
     fn validate(&self, application_schema: &str) -> Result<(), StorageError<u64>> {
         match &self.checkpoint {
             Some(checkpoint)
                 if checkpoint.schema == application_schema
-                    && checkpoint.event_sequence == self.events.len() as u64
                     && checkpoint.checkpoint_json.len() <= 64 * 1024 * 1024
                     && self.revision > 0 => {}
             None if self.events.is_empty() && self.revision == 0 => {}
@@ -63,8 +82,56 @@ impl ReplicaView {
         }
         let mut bytes = 0_u64;
         let mut identities = std::collections::BTreeSet::new();
+        let first_sequence = self.events.first().map_or(0, |event| event.sequence);
+        if let Some(anchor) = &self.history_anchor {
+            if anchor.schema != HISTORY_ANCHOR_SCHEMA
+                || anchor.base_sequence == 0
+                || (!self.events.is_empty()
+                    && first_sequence != anchor.base_sequence.saturating_add(1))
+                || (self.events.is_empty()
+                    && self.checkpoint.as_ref().is_some_and(|checkpoint| {
+                        anchor.base_sequence != checkpoint.event_sequence
+                    }))
+                || self
+                    .checkpoint
+                    .as_ref()
+                    .is_none_or(|checkpoint| anchor.base_sequence > checkpoint.event_sequence)
+                || anchor.base_digest.trim().is_empty()
+                || anchor.checkpoint_digest
+                    != self
+                        .checkpoint
+                        .as_ref()
+                        .map(state::checkpoint_identity)
+                        .unwrap_or_default()
+            {
+                return Err(io_error("replica history anchor differs"));
+            }
+        } else if first_sequence > 1 {
+            return Err(io_error(
+                "replica history has a missing prefix without an anchor",
+            ));
+        } else if self
+            .checkpoint
+            .as_ref()
+            .is_some_and(|checkpoint| checkpoint.event_sequence > 0 && self.events.is_empty())
+        {
+            return Err(io_error(
+                "replica checkpoint has no retained history anchor",
+            ));
+        }
         for (index, event) in self.events.iter().enumerate() {
-            if event.sequence != index as u64 + 1 || !identities.insert(&event.event_id) {
+            let expected = if first_sequence == 0 {
+                1
+            } else {
+                first_sequence + index as u64
+            };
+            if event.sequence != expected
+                || !identities.insert(&event.event_id)
+                || self
+                    .checkpoint
+                    .as_ref()
+                    .is_none_or(|checkpoint| event.sequence > checkpoint.event_sequence)
+            {
                 return Err(io_error("replica history identity/sequence differs"));
             }
             state::validate_persisted_event(event).map_err(io_error)?;
@@ -179,6 +246,7 @@ fn read_view(connection: &Connection) -> Result<ReplicaView, StorageError<u64>> 
         })
         .collect::<Result<Vec<_>, _>>()?;
     let checkpoint: Option<state::PersistedCheckpoint> = read_meta(connection, "checkpoint")?;
+    let history_anchor: Option<HistoryAnchor> = read_meta(connection, "history_anchor")?;
     let digest: Option<String> = read_meta(connection, "checkpoint_digest")?;
     if checkpoint.as_ref().map(state::checkpoint_identity) != digest {
         return Err(io_error("replica checkpoint digest differs"));
@@ -187,6 +255,7 @@ fn read_view(connection: &Connection) -> Result<ReplicaView, StorageError<u64>> 
         revision: read_meta(connection, "revision")?.unwrap_or(0),
         checkpoint,
         events,
+        history_anchor,
     })
 }
 
@@ -306,13 +375,6 @@ impl SqliteRaftStore {
                 rejection: Some(rejection),
             });
         }
-        let bytes: u64 = connection
-            .query_row(
-                "SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM replica_events",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(io_error)?;
         let encoded = batch
             .events
             .iter()
@@ -320,16 +382,24 @@ impl SqliteRaftStore {
             .collect::<Result<Vec<_>, _>>()
             .map_err(io_error)?;
         let additional: u64 = encoded.iter().map(|event| event.len() as u64).sum();
+        let bytes: u64 = connection
+            .query_row(
+                "SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM replica_events",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(io_error)?;
         if bytes
             .checked_add(additional)
             .is_none_or(|bytes| bytes > MAX_HISTORY_BYTES)
         {
-            return Ok(CommitReceipt {
-                accepted: false,
-                revision,
-                checkpoint_digest: current_digest,
-                rejection: Some("bounded replica metadata history is full".into()),
-            });
+            compact_prefix(
+                connection,
+                batch.checkpoint.event_sequence,
+                &state::checkpoint_identity(&batch.checkpoint),
+                bytes.saturating_add(additional),
+                None,
+            )?;
         }
         for (event, encoded) in batch.events.iter().zip(encoded) {
             connection
@@ -348,6 +418,10 @@ impl SqliteRaftStore {
             "checkpoint_digest",
             &state::checkpoint_identity(&batch.checkpoint),
         )?;
+        if let Some(mut anchor) = read_meta::<HistoryAnchor>(connection, "history_anchor")? {
+            anchor.checkpoint_digest = state::checkpoint_identity(&batch.checkpoint);
+            write_meta(connection, "history_anchor", &anchor)?;
+        }
         write_meta(connection, "revision", &revision)?;
         Ok(CommitReceipt {
             accepted: true,
@@ -356,6 +430,120 @@ impl SqliteRaftStore {
             rejection: None,
         })
     }
+
+    /// Compacts old accepted rows while preserving a complete checkpoint and a verifiable anchor.
+    pub fn compact_history(&self, retain_events: usize) -> Result<HistoryAnchor, String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| "replica store lock is poisoned")?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let checkpoint: state::PersistedCheckpoint = read_meta(&transaction, "checkpoint")
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "cannot compact an empty replica checkpoint".to_string())?;
+        let bytes: u64 = transaction
+            .query_row(
+                "SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM replica_events",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        let mut anchor = compact_prefix(
+            &transaction,
+            checkpoint.event_sequence,
+            &state::checkpoint_identity(&checkpoint),
+            bytes,
+            Some(retain_events),
+        )
+        .map_err(|error| error.to_string())?;
+        anchor.checkpoint_digest = state::checkpoint_identity(&checkpoint);
+        write_meta(&transaction, "history_anchor", &anchor).map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(anchor)
+    }
+}
+
+/// Removes the oldest rows only after the complete checkpoint is already in the same transaction.
+fn compact_prefix(
+    connection: &Connection,
+    checkpoint_sequence: u64,
+    checkpoint_digest: &str,
+    current_bytes: u64,
+    retain_events: Option<usize>,
+) -> Result<HistoryAnchor, StorageError<u64>> {
+    let current_anchor: Option<HistoryAnchor> = read_meta(connection, "history_anchor")?;
+    let mut statement = connection
+        .prepare("SELECT sequence,event_id,data,digest FROM replica_events ORDER BY sequence")
+        .map_err(io_error)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, u64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(io_error)?;
+    let mut remove = Vec::new();
+    let mut remaining = current_bytes;
+    let target = if let Some(retain_events) = retain_events {
+        let count = connection
+            .query_row("SELECT COUNT(*) FROM replica_events", [], |row| {
+                row.get::<_, u64>(0)
+            })
+            .map_err(io_error)?;
+        count.saturating_sub(retain_events as u64)
+    } else {
+        MAX_HISTORY_BYTES.saturating_mul(3) / 4
+    };
+    let mut removed_count = 0_u64;
+    for row in rows {
+        let (sequence, event_id, data, digest) = row.map_err(io_error)?;
+        if (retain_events.is_some() && removed_count >= target)
+            || (retain_events.is_none() && remaining <= target)
+        {
+            break;
+        }
+        remaining = remaining.saturating_sub(data.len() as u64);
+        remove.push((sequence, event_id, data, digest));
+        removed_count = removed_count.saturating_add(1);
+    }
+    if remove.is_empty() {
+        return Err(io_error("replica history cannot fit one accepted batch"));
+    }
+    if retain_events.is_none() && remaining > MAX_HISTORY_BYTES {
+        return Err(io_error(
+            "one accepted replica batch exceeds history bounds",
+        ));
+    }
+    let last = remove.last().expect("remove is nonempty");
+    drop(statement);
+    let mut chain = Sha256::new();
+    if let Some(anchor) = &current_anchor {
+        chain.update(anchor.base_digest.as_bytes());
+    }
+    for (_, _, _, digest) in &remove {
+        chain.update(digest.as_bytes());
+    }
+    let anchor = HistoryAnchor {
+        base_sequence: last.0,
+        base_digest: format!("{:x}", chain.finalize()),
+        checkpoint_digest: checkpoint_digest.to_string(),
+        schema: HISTORY_ANCHOR_SCHEMA.to_string(),
+    };
+    for (sequence, _, _, _) in &remove {
+        connection
+            .execute("DELETE FROM replica_events WHERE sequence=?1", [sequence])
+            .map_err(io_error)?;
+    }
+    write_meta(connection, "history_anchor", &anchor)?;
+    if last.0 > checkpoint_sequence {
+        return Err(io_error("replica compaction removed the checkpoint tail"));
+    }
+    Ok(anchor)
 }
 
 impl RaftLogReader<ControllerRaftConfig> for SqliteRaftStore {
@@ -605,8 +793,18 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
         transaction
             .execute("DELETE FROM replica_events", [])
             .map_err(io_error)?;
+        let first_sequence = restored
+            .view
+            .events
+            .first()
+            .map_or(0, |event| event.sequence);
         for (index, event) in restored.view.events.iter().enumerate() {
-            if event.sequence != index as u64 + 1 {
+            let expected = if first_sequence == 0 {
+                1
+            } else {
+                first_sequence + index as u64
+            };
+            if event.sequence != expected {
                 return Err(io_error("replica snapshot evidence is discontinuous"));
             }
             transaction
@@ -636,6 +834,13 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
                     "DELETE FROM replica_meta WHERE key IN ('checkpoint','checkpoint_digest')",
                     [],
                 )
+                .map_err(io_error)?;
+        }
+        if let Some(anchor) = restored.view.history_anchor {
+            write_meta(&transaction, "history_anchor", &anchor)?;
+        } else {
+            transaction
+                .execute("DELETE FROM replica_meta WHERE key='history_anchor'", [])
                 .map_err(io_error)?;
         }
         if let Some(applied) = restored.last_applied {

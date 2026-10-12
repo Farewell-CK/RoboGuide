@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub use store::{AcceptedApplicationIdentity, ReplicaView, SqliteRaftStore};
+pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};
 pub use transport::{ReplicaFenceClient, ReplicaServer};
 
 openraft::declare_raft_types!(
@@ -73,6 +73,9 @@ pub struct ReplicaConfig {
     pub application_schema: String,
     /// Startup-owned application policy identity, identical on all members.
     pub application_policy_digest: String,
+    /// Optional shared transport secret for non-loopback-capable deployments.
+    #[serde(default)]
+    pub shared_secret: Option<String>,
 }
 
 impl ReplicaConfig {
@@ -90,6 +93,10 @@ impl ReplicaConfig {
                 .any(|address| !address.ip().is_loopback() || address.port() == 0)
             || self.application_schema.trim().is_empty()
             || self.application_policy_digest.trim().is_empty()
+            || self
+                .shared_secret
+                .as_ref()
+                .is_some_and(|secret| secret.len() < 32 || secret.len() > 256)
         {
             return Err("unsupported or incomplete controller replica profile".into());
         }
@@ -109,6 +116,9 @@ impl ReplicaConfig {
         let bytes = serde_json::to_vec(&serde_json::json!({
             "schema":self.schema,"cluster_id":self.cluster_id,"members":self.members,
             "application_schema":self.application_schema,"application_policy_digest":self.application_policy_digest,
+            "transport_auth":self.shared_secret.as_ref().map(|secret| {
+                format!("{:x}", sha2::Sha256::digest(secret.as_bytes()))
+            }),
         })).expect("validated scalar replica configuration encodes");
         format!("{:x}", Sha256::digest(bytes))
     }
@@ -157,6 +167,7 @@ impl ReplicaNode {
             config.profile_identity(),
             config.replica_id,
             network_online.clone(),
+            config.shared_secret.clone(),
         );
         let raft = Raft::new(
             config.replica_id,

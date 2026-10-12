@@ -133,6 +133,48 @@ async fn accepted_application_identity_matches_checkpoint_digest() {
     );
 }
 
+/// Explicit history compaction retains a complete checkpoint and a restart-verifiable prefix anchor.
+#[tokio::test]
+async fn compacted_history_reopens_and_materializes_from_checkpoint() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("compact.sqlite3");
+    let mut store = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap();
+    let first = batch(None, 1);
+    store
+        .apply([Entry {
+            log_id: LogId::new(CommittedLeaderId::new(1, 1), 1),
+            payload: EntryPayload::Normal(first.clone()),
+        }])
+        .await
+        .unwrap();
+    let anchor = store.compact_history(0).unwrap();
+    assert_eq!(anchor.base_sequence, first.checkpoint.event_sequence);
+    let view = store.accepted_view().unwrap();
+    assert!(view.events.is_empty());
+    assert_eq!(view.history_anchor, Some(anchor));
+    let materialized =
+        state::SqliteEventLog::open(directory.path().join("materialized.sqlite3")).unwrap();
+    materialized
+        .install_replica_view_with_history_floor(
+            &view.events,
+            view.checkpoint.as_ref().unwrap(),
+            view.history_anchor
+                .as_ref()
+                .map(|value| value.base_sequence),
+        )
+        .unwrap();
+    assert_eq!(
+        materialized.latest_sequence().unwrap(),
+        first.checkpoint.event_sequence
+    );
+    drop(store);
+    let reopened = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap();
+    assert_eq!(
+        reopened.accepted_view().unwrap().checkpoint,
+        Some(first.checkpoint)
+    );
+}
+
 /// Acquires three simultaneous ephemeral listeners so their released loopback ports are distinct.
 fn members() -> BTreeMap<u64, SocketAddr> {
     let listeners = (0..3)
@@ -154,6 +196,7 @@ fn configuration(id: u64, members: &BTreeMap<u64, SocketAddr>) -> ReplicaConfig 
         members: members.clone(),
         application_schema: "test/checkpoint-v1".into(),
         application_policy_digest: "same-explicit-policy".into(),
+        shared_secret: None,
     }
 }
 
@@ -269,6 +312,21 @@ fn configuration_rejects_unsupported_network_and_membership() {
     config = configuration(1, &members());
     config.members.remove(&3);
     assert!(config.validate().is_err());
+}
+
+/// Replica transport authentication accepts only a bounded secret profile.
+#[test]
+fn configuration_rejects_short_transport_secret() {
+    let mut config = configuration(1, &members());
+    config.shared_secret = Some("too-short".into());
+    assert!(config.validate().is_err());
+    config.shared_secret = Some("s".repeat(32));
+    assert!(config.validate().is_ok());
+    assert_ne!(
+        config.profile_identity(),
+        configuration(1, &config.members).profile_identity(),
+        "security profile participates in the immutable cluster identity"
+    );
 }
 
 /// Persistence failure rolls back history and consensus apply; corrupted snapshots/rows cannot become authority.

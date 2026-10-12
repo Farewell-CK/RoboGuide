@@ -12,7 +12,9 @@ mod diagnostics;
 use diagnostics::StageObservation;
 use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer as LegacyRoboGuideNodeProtocolServer;
 use integration::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer;
-use integration::{GrpcIntegrationService, GrpcLegacyV02Service, GrpcNodeEvent};
+use integration::{
+    GrpcIntegrationService, GrpcLegacyV02Service, GrpcNodeEvent, NodeIdentityPolicy,
+};
 use orchestration::{
     CONTROLLER_CHECKPOINT_SCHEMA as INTEGRATION_CHECKPOINT_SCHEMA, IntegrationRuntimeBridge,
     IntegrationRuntimeError, ObservedTaskExecutionResult,
@@ -25,6 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 
 /// Schema marker for the Controller wrapper including deployment candidate restrictions.
 ///
@@ -353,6 +356,43 @@ fn configured_node_protocol_policy() -> Result<NodeProtocolPolicy, Box<dyn std::
     Ok(NodeProtocolPolicy::try_new(lease_policy, acceptance)?)
 }
 
+/// Loads the opt-in mutual-TLS identity profile; unset variables retain trusted loopback mode.
+fn configured_node_identity()
+-> Result<(NodeIdentityPolicy, Option<ServerTlsConfig>), Box<dyn std::error::Error>> {
+    let names = [
+        "ROBOGUIDE_NODE_MTLS_SERVER_CERT",
+        "ROBOGUIDE_NODE_MTLS_SERVER_KEY",
+        "ROBOGUIDE_NODE_MTLS_CLIENT_CA",
+        "ROBOGUIDE_NODE_MTLS_NODE_CERT_DIGESTS",
+    ];
+    let values = names
+        .iter()
+        .map(|name| std::env::var(name).ok())
+        .collect::<Vec<_>>();
+    if values.iter().all(Option::is_none) {
+        return Ok((NodeIdentityPolicy::TrustedLoopback, None));
+    }
+    if values.iter().any(Option::is_none) {
+        return Err(
+            "mTLS requires server cert, server key, client CA and Node certificate digest map"
+                .into(),
+        );
+    }
+    let [server_cert, server_key, client_ca, digest_json] = values
+        .try_into()
+        .expect("four mTLS variables are collected");
+    let server_cert = std::fs::read(server_cert.expect("validated mTLS cert path"))?;
+    let server_key = std::fs::read(server_key.expect("validated mTLS key path"))?;
+    let client_ca = std::fs::read(client_ca.expect("validated mTLS CA path"))?;
+    let digests: BTreeMap<String, String> =
+        serde_json::from_str(&digest_json.expect("validated mTLS digest map"))?;
+    let policy = NodeIdentityPolicy::require_peer_certificates(digests)?;
+    let tls = ServerTlsConfig::new()
+        .identity(Identity::from_pem(server_cert, server_key))
+        .client_ca_root(Certificate::from_pem(client_ca));
+    Ok((policy, Some(tls)))
+}
+
 /// Parses an optional unsigned duration without silently treating malformed configuration as absent.
 fn parsed_duration(name: &str, value: Option<&str>, default: u64) -> Result<u64, String> {
     value
@@ -429,6 +469,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let node_protocol_policy = configured_node_protocol_policy()?;
+    let (node_identity_policy, node_tls) = configured_node_identity()?;
+    if node_tls.is_none() && !address.ip().is_loopback() {
+        return Err(
+            "Node Protocol must remain loopback unless the opt-in mTLS identity profile is enabled"
+                .into(),
+        );
+    }
     let node_lease_policy = node_protocol_policy.lease_policy();
     let fact_batch_limit = configured_duration("ROBOGUIDE_FACT_BATCH_LIMIT", 8)?;
     if !(1..=32).contains(&fact_batch_limit) {
@@ -546,11 +593,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let deployment_feasibility = deployment_feasibility.map(Arc::new);
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-    let (service, router) = GrpcIntegrationService::new_with_observer(
+    let (service, router) = GrpcIntegrationService::new_with_observer_and_identity(
         events,
         node_protocol_policy,
         process_clock.clone(),
         diagnostic_handle.clone(),
+        node_identity_policy,
     );
     if let Some(fence) = &replica_fence {
         router.set_command_delivery_fence(fence.clone())?;
@@ -878,10 +926,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-    let server = tonic::transport::Server::builder()
-        .add_service(LegacyRoboGuideNodeProtocolServer::new(GrpcLegacyV02Service))
-        .add_service(RoboGuideNodeProtocolServer::new(service))
-        .serve(address);
+    let server = if let Some(tls) = node_tls {
+        tonic::transport::Server::builder()
+            .tls_config(tls)?
+            .add_service(LegacyRoboGuideNodeProtocolServer::new(GrpcLegacyV02Service))
+            .add_service(RoboGuideNodeProtocolServer::new(service))
+            .serve(address)
+    } else {
+        tonic::transport::Server::builder()
+            .add_service(LegacyRoboGuideNodeProtocolServer::new(GrpcLegacyV02Service))
+            .add_service(RoboGuideNodeProtocolServer::new(service))
+            .serve(address)
+    };
     let outcome = tokio::select! {
         result = server => result.map_err(Into::into),
         fatal = fatal_receiver.recv() => Err(fatal.unwrap_or_else(|| "application driver stopped unexpectedly".to_string()).into()),

@@ -54,7 +54,8 @@ schema 和 byte-bound policy。路径必须显式且 storage/binary 为绝对路
       "3": "127.0.0.1:32003"
     },
     "application_schema": "roboguide.controller-checkpoint/v25",
-    "application_policy_digest": "REPLACE_WITH_POLICY_DIGEST"
+    "application_policy_digest": "REPLACE_WITH_POLICY_DIGEST",
+    "shared_secret": null
   },
   "storage_directory": "/absolute/private/replica-1",
   "controller_binary": "/absolute/RoboGuide/target/debug/integration-server",
@@ -81,6 +82,10 @@ NodeId、durable command journal 和 Local EAIOS handle；旧 v0.2-v0.6 配置�
 HTTP/Artifact 客户端使用当前 leader 的显式地址；本 slice 不提供自动 client redirect。
 private `status.json` 仅供本地观察，不授予写入或资源 authority。
 
+跨进程 replica envelope 可在三份配置中设置同一个至少 32 字节的 `shared_secret`；secret
+只进入请求 digest，不写入 wire envelope。Node Protocol 的 mTLS 环境变量见 ADR-0086，
+证书 digest map 必须显式绑定每个 NodeId。
+
 SIGINT 请求 supervisor 停止自己拥有的 child 和共识；异常 parent 退出由 child watchdog
 保守关闭。不要共享 replica 的 storage directory；既有 writer lock 与 supervisor lease
 防止第二 writer。每个 supervisor 仅管理自己的 child，不扫描或终止外部服务。
@@ -104,12 +109,13 @@ closure、standalone downgrade、live majority loss/restore，local Execute 仍�
 记录位于仓库外 `adr-follow-up-audit-2026-10-12/replica-processes-{1,2,3,4}/`；
 后续存储完整性修订还需在最终源码重跑进程检查，不把旧 binary 结果当作新 binary 证据。
 
-当前只支持三成员同机 trusted-loopback；无跨主机认证/网络发布、动态 membership、
-unbounded archive 或物理 continuity 认证。每个 checkpoint 至多 64MiB，新增 batch
-至多 8192 events，完整 event metadata history 至多 64MiB，snapshot/frame 至多 256MiB；
-超过界限 fail closed。Artifact blobs、provider-local Memory 内容不复制；目录可发现
+当前基础 profile 仍是三成员同机 trusted-loopback；ADR-0086 增加 opt-in Node mTLS 与
+replica envelope secret，但不提供动态 membership、外部完整归档或物理 continuity 认证。
+每个 checkpoint 至多 64MiB，新增 batch 至多 8192 events，retained event metadata 通过
+ADR-0087 的 checkpoint/history anchor 压缩保持有界，snapshot/frame 至多 256MiB；单批次
+本身超过界限仍 fail closed。Artifact blobs、provider-local Memory 内容不复制；目录可发现
 manifest 不证明新 leader 已有相应 bytes。完整 event reducers 仍未实现，复制完整
-snapshot/history 不是每 N events 丢弃不可恢复事实。E6 持续暂停。
+checkpoint 加 retained tail 不是外部完整历史归档。E6 持续暂停。
 
 最终存储修订增加 event/checkpoint digest 与 snapshot byte identity、真实 SQL rollback/
 corruption 回归。此前最终源码进程检查在正常工作阶段发生早期 child fence，原结果保留在
@@ -121,3 +127,10 @@ Node transport lease、health/readiness TTL 保持原规则。supervisor 使用�
 45 rows exact metadata prefix 汇聚，两个原 local Execute 保持不变，quorum 恢复使用
 新 registration 的 Reachable 证据。676 Rust tests（另 2 个既有 ignored）、Clippy、
 Rustdoc、完整 Python 检查和严格站点构建通过；这些不是 E6 或生产规模/硬实时结果。
+
+S8–S10 实施后的新源码进程复核输出在仓库外 `/tmp/roboguide-replica-s8-s10-20261012/`，
+binary SHA-256 为 `fdb5b24d577758d70469611c7078d0e95961da471e1433e36103e9c4bd0a911d`。
+minority startup、old epoch route closure、leader death 后 Unknown/ownership/policy/journal、
+32 行 accepted metadata rejoin、standalone downgrade、quorum loss/restore 全部通过；两个
+原 Local EAIOS 调用仍为 2。该运行只使用合成 Local EAIOS 和隔离本地进程，没有模型、Habitat、
+硬件或 E6。

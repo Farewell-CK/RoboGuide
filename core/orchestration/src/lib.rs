@@ -43,7 +43,9 @@ pub use integration_bridge::{
     RecoveryDeploymentSupport, RecoverySupportDisposition, RemoteExecutionStatus,
 };
 pub use mechanism_profile::SupportedMechanismProfile;
-pub use mission::isolation::{MissionIsolation, MissionIsolationSource};
+pub use mission::isolation::{
+    MISSION_HOLD_REVIEW_WINDOW_MS, MissionIsolation, MissionIsolationSource,
+};
 pub use mission::preemption::FutureSchedulingPreemption;
 pub use mission_contract::decode_mission_plan;
 pub use scheduling_status::{SchedulingDeferral, SchedulingDisposition};

@@ -32,6 +32,9 @@
 | S5：控制面复制与切换 | ADR-0083 的静态三成员 trusted-loopback 软件已实现；ambiguous Commit response 会在同 epoch 下回读 accepted identity，匹配则继续本地 Commit，否则回滚并交给 supervisor 重建 | upstream storage conformance、真实 engine/process quorum/leader loss/rejoin、Unknown/ownership/policy/journal 与旧 route fence；Artifact/Memory 内容及跨主机/物理发布保留 |
 | S6：受支持的抢占 | ADR-0084 的显式 future planning 子集已实现；运行中物理抢占仍未实现 | generation/更高 priority、unbound/未 Commit/strictly future、waiting age/restore、HTTP/SQL rollback；运行工作继续保留 stop/repeat/handoff/现场 gate |
 | S7：Node 侧 epoch fence 与 transport hardening | ADR-0085；复制 profile 的 Execute/Cancel 携带可选 epoch，Node journal 持久化最高 epoch；重复 Node 注册不再驱逐 live route；全拒绝 batch 也 fence rejected sessions；HTTP listener 异常进入 fatal 通道；Node-authored execution fact 的 owner/terminal rejection 使用 typed `FactRejected`，未分类 Runtime/Control/SQL 错误保持 fatal | 防止已观察新 epoch 后的旧 Controller 命令；不提供物理停止、mTLS、跨主机认证或竞态窗口的物理证明；不把全量 Mission-local isolation 宣称完成 |
+| S8：增量身份安全档案 | ADR-0086；Node gRPC 可选双向 TLS、证书 digest 到 NodeId 绑定；replica RPC 可选 envelope secret；loopback 兼容模式保留 | 离线身份/digest/配置检查通过；跨主机证书轮换、真实 PKI 运维和物理身份仍未证明 |
+| S9：复制历史锚点压缩 | ADR-0087；完整 checkpoint 加 `HistoryAnchor` 与连续 retained tail，支持空 tail 重启和快照 materialization | 压缩/恢复/OpenRaft conformance 通过；外部完整归档、长期容量曲线和生产运维策略仍待独立验证 |
+| S10：Mission Hold SLA 与有界 ingress | ADR-0088；Hold 保存 review deadline/escalation，validated reader ingress 为每 session 有界并产生 transport backpressure | 离线 Hold/背压/故障路径通过；不自动释放资源，不证明物理停止或全量运行期错误分类 |
 
 ## 继续保留的明确边界
 
@@ -48,7 +51,7 @@
 | 0070 | application takeover command 与真实 standby 证据 | Control typed authorization/registry/commit/rebind 软件与回归已核实；应用 command 尚无，现场 replay 与物理 stop 验证保留 |
 | 0075、0076 | diagnostics/连续活性运行证据与 TTL 不变 | 当前离线/本地进程测试已有；历史 pilot 因果和 hardware stop 没有升级为已证明 |
 | 0077 | 真正运行期局部分类与持久 isolation | ADR-0079 完成声明 deadline 的 exact-Task 子集；原注入回归仍只证明机制，不扩大未知错误分类 |
-| dev-review §1.4、§2.3、§3.2、§4 | 历史归档/压缩、EASY/backfill、应用期背压、终态 Mission GC、空间资源图与租户配额 | 继续保留为扩展性/研究性工作；S7 不把 epoch fence 或 batch 修补扩大为长期运行和公平性证明 |
+| dev-review §1.4、§2.3、§3.2、§4 | 外部完整历史归档、EASY/backfill、终态 Mission GC、空间资源图与租户配额 | S8–S10 关闭了安全档案、checkpoint 锚点压缩和 validated ingress/hold SLA 的软件切片；完整归档、自动 GC、空间调度和长期公平性仍保留 |
 
 Normal pending reservations、未来 scheduling intervals、未到达的 source evidence 是可接受的
 运行状态，不是自动需要删除的遗留。多 Group decomposition、完整世界 Belief、融合、空间

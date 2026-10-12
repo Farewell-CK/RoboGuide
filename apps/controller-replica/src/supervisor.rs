@@ -58,8 +58,14 @@ fn materialize(directory: &Path, view: &ReplicaView) -> Result<(), String> {
     {
         let log = state::SqliteEventLog::open(&temporary).map_err(|error| error.to_string())?;
         if let Some(checkpoint) = &view.checkpoint {
-            log.install_replica_view(&view.events, checkpoint)
-                .map_err(|error| error.to_string())?;
+            log.install_replica_view_with_history_floor(
+                &view.events,
+                checkpoint,
+                view.history_anchor
+                    .as_ref()
+                    .map(|anchor| anchor.base_sequence),
+            )
+            .map_err(|error| error.to_string())?;
         } else if !view.events.is_empty() {
             return Err("replica materialization lacks its accepted checkpoint".into());
         }
@@ -128,6 +134,9 @@ fn start_controller(
         .stdout(output)
         .stderr(error_output)
         .kill_on_drop(true);
+    if let Some(secret) = &configuration.replica.shared_secret {
+        command.env("ROBOGUIDE_REPLICA_SHARED_SECRET", secret);
+    }
     let child = command.spawn().map_err(|error| error.to_string())?;
     eprintln!(
         "Controller child {} started under epoch {epoch:?}",

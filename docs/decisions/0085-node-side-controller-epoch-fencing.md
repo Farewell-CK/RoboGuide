@@ -23,8 +23,8 @@ delivery admission。它阻止 Node 在已经观察并持久化新 leader epoch 
 
 - epoch fence 不会撤销已经被 Node 接受的旧命令，也不证明 Local EAIOS 已停止；Unknown、
   stop proof、replacement 和 Actor takeover 仍遵循既有 Control/Runtime authority。
-- 当前 profile 仍是 trusted-loopback 软件复制；Node Protocol 和 replica RPC 没有因此获得
-  mTLS、调用者认证、跨主机 membership 或物理连续性证明。
+- S7 基础 profile 仍是 trusted-loopback 软件复制；ADR-0086 单独提供 opt-in mTLS/transport
+  identity，不把认证能力混入 epoch fence，也不提供跨主机 membership 或物理连续性证明。
 - 若旧命令和新 epoch 首次接触在物理网络中竞态，Node 只能按到达顺序推进 durable fence；
   生产恢复仍必须先满足原有 stop-proof/recovery gate，不能仅凭 epoch 自动重派。
 - 历史 Node journal 没有 epoch 行时按空值迁移；第一次 replicated command 原子建立该行。

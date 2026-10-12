@@ -193,6 +193,41 @@ fn admission_rejection_precedes_group_mutation_and_preserves_exact_retry() {
     assert_eq!(events.records().len(), trace);
 }
 
+/// Hold review deadlines produce escalation evidence while preserving the no-auto-release fence.
+#[test]
+fn mission_hold_sla_is_observable_without_authorizing_retry() {
+    let (mut orchestrator, _control, mut events) = fixture();
+    let mission = MissionId::new("a").unwrap();
+    orchestrator
+        .isolate_execution(
+            &mission,
+            MissionIsolationSource::ReadyDispatch,
+            TimestampMs::new(10),
+            &CorrelationId::new("hold-sla").unwrap(),
+            &mut events,
+        )
+        .unwrap();
+    let hold = orchestrator
+        .execution(&mission)
+        .unwrap()
+        .isolation()
+        .unwrap();
+    assert!(!hold.is_review_due(TimestampMs::new(10)));
+    assert!(hold.is_review_due(TimestampMs::new(10 + MISSION_HOLD_REVIEW_WINDOW_MS)));
+    assert_eq!(hold.escalation_level_at(TimestampMs::new(10)), 0);
+    assert_eq!(
+        hold.escalation_level_at(TimestampMs::new(10 + MISSION_HOLD_REVIEW_WINDOW_MS)),
+        1
+    );
+    assert!(
+        orchestrator
+            .execution(&mission)
+            .unwrap()
+            .isolation()
+            .is_some()
+    );
+}
+
 /// Legacy policy omission is compatible; fabricated waiting slots, future ordinals or priorities reject.
 #[test]
 fn restored_policy_rejects_unproven_history_and_accepts_legacy_defaults() {

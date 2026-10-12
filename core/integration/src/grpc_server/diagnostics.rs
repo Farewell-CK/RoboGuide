@@ -29,6 +29,10 @@ pub(super) struct GrpcSessionSettings {
     pub(super) policy: NodeProtocolPolicy,
     /// Receive-time metadata and best-effort diagnostics.
     pub(super) observation: GrpcSessionObservation,
+    /// Startup-frozen peer identity policy.
+    pub(super) identity_policy: NodeIdentityPolicy,
+    /// Leaf certificate digest captured before the streaming body is consumed.
+    pub(super) certificate_digest: Option<String>,
 }
 
 /// Shared receive-time and observation dependencies; compatibility constructors remain disabled.

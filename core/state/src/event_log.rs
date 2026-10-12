@@ -294,7 +294,12 @@ impl SqliteEventLog {
                 row.get::<_, u64>(0)
             })
             .unwrap_or(0);
-        let next_event_number = metadata_event_number.max(max_sequence);
+        let checkpoint_sequence = checkpoint_cache
+            .as_ref()
+            .map_or(0, |stored| stored.snapshot.event_sequence);
+        let next_event_number = metadata_event_number
+            .max(max_sequence)
+            .max(checkpoint_sequence);
         Ok(Self {
             replicator: None,
             diagnostics: ports::DiagnosticHandle::default(),
@@ -399,11 +404,13 @@ impl SqliteEventLog {
             .connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
-        connection
-            .query_row("SELECT COALESCE(MAX(sequence), 0) FROM events", [], |row| {
+        let max_sequence: u64 =
+            connection.query_row("SELECT COALESCE(MAX(sequence), 0) FROM events", [], |row| {
                 row.get(0)
-            })
-            .map_err(Into::into)
+            })?;
+        let checkpoint_sequence =
+            checkpoint_store::read(&connection)?.map_or(0, |stored| stored.snapshot.event_sequence);
+        Ok(max_sequence.max(checkpoint_sequence))
     }
 
     /// Returns the latest durable event timestamp, or zero for an empty log.

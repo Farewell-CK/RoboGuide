@@ -17,6 +17,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 
 mod protocol_projection;
 
@@ -71,9 +72,7 @@ impl NodeService {
     /// Reconnects one fixed route with the same durable journal and handles; registration does not replay Execute.
     async fn run_session_on(&self, endpoint: &str) -> Result<(), NodeServiceError> {
         let catalog = self.engine.catalog();
-        let mut client = RoboGuideNodeProtocolClient::connect(endpoint.to_string())
-            .await
-            .map_err(NodeServiceError::Transport)?;
+        let mut client = connect_node_client(endpoint).await?;
         let (outbound, receiver) = mpsc::unbounded_channel();
         outbound
             .send(NodeMessage {
@@ -656,6 +655,61 @@ impl NodeService {
         }
         Ok(())
     }
+}
+
+/// Connects a Node session with the optional certificate-bound mTLS profile.
+async fn connect_node_client(
+    endpoint: &str,
+) -> Result<RoboGuideNodeProtocolClient<tonic::transport::Channel>, NodeServiceError> {
+    let names = [
+        "ROBOGUIDE_NODE_MTLS_CLIENT_CERT",
+        "ROBOGUIDE_NODE_MTLS_CLIENT_KEY",
+        "ROBOGUIDE_NODE_MTLS_SERVER_CA",
+        "ROBOGUIDE_NODE_MTLS_DOMAIN",
+    ];
+    let values = names
+        .iter()
+        .map(|name| std::env::var(name).ok())
+        .collect::<Vec<_>>();
+    let any = values.iter().any(Option::is_some);
+    if any && values.iter().any(Option::is_none) {
+        return Err(NodeServiceError::Protocol(
+            "Node mTLS requires client cert, client key, server CA and domain".into(),
+        ));
+    }
+    let mut builder = Endpoint::from_shared(endpoint.to_string())
+        .map_err(|error| NodeServiceError::Protocol(error.to_string()))?;
+    if any {
+        if !endpoint.starts_with("https://") {
+            return Err(NodeServiceError::Protocol(
+                "Node mTLS requires an https:// Controller endpoint".into(),
+            ));
+        }
+        let [cert, key, ca, domain] = values
+            .try_into()
+            .expect("four Node mTLS variables are collected");
+        let tls = ClientTlsConfig::new()
+            .domain_name(domain.expect("validated Node mTLS domain"))
+            .ca_certificate(Certificate::from_pem(
+                std::fs::read(ca.expect("validated Node mTLS CA path"))
+                    .map_err(|error| NodeServiceError::Protocol(error.to_string()))?,
+            ))
+            .identity(Identity::from_pem(
+                std::fs::read(cert.expect("validated Node mTLS cert path"))
+                    .map_err(|error| NodeServiceError::Protocol(error.to_string()))?,
+                std::fs::read(key.expect("validated Node mTLS key path"))
+                    .map_err(|error| NodeServiceError::Protocol(error.to_string()))?,
+            ));
+        builder = builder
+            .tls_config(tls)
+            .map_err(NodeServiceError::Transport)?;
+    }
+    Ok(RoboGuideNodeProtocolClient::new(
+        builder
+            .connect()
+            .await
+            .map_err(NodeServiceError::Transport)?,
+    ))
 }
 
 /// Sends command-admission evidence with monotonic management ordering.

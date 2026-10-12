@@ -113,14 +113,44 @@ impl SqliteEventLog {
         events: &[PersistedEvent],
         checkpoint: &PersistedCheckpoint,
     ) -> Result<(), SqliteEventLogError> {
+        self.install_replica_view_with_history_floor(events, checkpoint, None)
+    }
+
+    /// Installs a checkpoint plus a retained event tail after a verified replication-history anchor.
+    ///
+    /// The complete checkpoint remains the recovery authority.  A nonzero history floor means
+    /// older immutable event rows were compacted and therefore cannot be replayed from this local
+    /// copy; subsequent event sequences continue from the checkpoint without being renumbered.
+    pub fn install_replica_view_with_history_floor(
+        &self,
+        events: &[PersistedEvent],
+        checkpoint: &PersistedCheckpoint,
+        history_floor: Option<u64>,
+    ) -> Result<(), SqliteEventLogError> {
         self.ensure_no_open_batch()?;
-        if self.replicator.is_some() || checkpoint.event_sequence != events.len() as u64 {
+        if self.replicator.is_some()
+            || history_floor.is_some_and(|floor| floor > checkpoint.event_sequence)
+        {
             return Err(SqliteEventLogError::Codec(
                 "replica materialization requires an inactive complete history".into(),
             ));
         }
+        let first_sequence = events.first().map_or(0, |event| event.sequence);
+        let expected_first = history_floor.map_or(1, |floor| floor.saturating_add(1));
+        if !(events.is_empty()
+            && ((checkpoint.event_sequence == 0 && history_floor.is_none())
+                || history_floor == Some(checkpoint.event_sequence)))
+            && (first_sequence != expected_first
+                || history_floor.is_none() && checkpoint.event_sequence != events.len() as u64)
+        {
+            return Err(SqliteEventLogError::Codec(
+                "replica view has missing evidence without a valid history floor".into(),
+            ));
+        }
         for (index, event) in events.iter().enumerate() {
-            if event.sequence != index as u64 + 1 {
+            if event.sequence != expected_first + index as u64
+                || event.sequence > checkpoint.event_sequence
+            {
                 return Err(SqliteEventLogError::Codec(
                     "replica view has missing evidence".into(),
                 ));
@@ -148,6 +178,18 @@ impl SqliteEventLog {
             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             [checkpoint.event_sequence.to_string()],
         )?;
+        if let Some(floor) = history_floor {
+            transaction.execute(
+                "INSERT INTO event_log_metadata(key,value) VALUES ('history_floor',?1)
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [floor.to_string()],
+            )?;
+        } else {
+            transaction.execute(
+                "DELETE FROM event_log_metadata WHERE key='history_floor'",
+                [],
+            )?;
+        }
         transaction.commit()?;
         *self
             .next_event_number

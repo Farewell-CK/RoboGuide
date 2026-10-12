@@ -405,7 +405,9 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - `apps/integration-server/` is the formal gRPC server composition root and
   `apps/roboguide-node/` is the configured node-side daemon composition root.
 - `core/controller-replication/` owns OpenRaft-backed durable opaque accepted batches, FULL SQLite
-  consensus storage and bounded trusted-loopback replica RPC; it never makes Control/Runtime decisions.
+  consensus storage and bounded replica RPC; the default profile is trusted-loopback, while
+  ADR-0086 adds opt-in transport identity/envelope authentication. It never makes Control/Runtime
+  decisions.
   `apps/controller-replica/` owns the opt-in static three-member supervisor and only its Controller child.
   Exact base/tail/profile and majority acceptance precede local SQL Commit/ACK; original epoch/quorum
   fences each Execute/Cancel. Promotion rematerializes complete metadata then restores Unknown and

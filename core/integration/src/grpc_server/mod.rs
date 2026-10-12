@@ -10,6 +10,7 @@ use crate::grpc::v0_4::{
 use ports::{
     Clock, DiagnosticHandle, DiagnosticStage, NodeFactMetadata, NodeLeasePolicy, NodeProtocolPolicy,
 };
+use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,8 +19,69 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{Stream, StreamExt, wrappers::UnboundedReceiverStream};
 use tonic::{Request, Response, Status};
 
+/// Startup-selected Node transport identity mode.
+#[derive(Debug, Clone, Default)]
+pub enum NodeIdentityPolicy {
+    /// Development-compatible mode for explicitly trusted loopback deployments.
+    #[default]
+    TrustedLoopback,
+    /// Require a TLS client certificate whose SHA-256 DER digest is bound to the Node identity.
+    RequirePeerCertificate(BTreeMap<String, String>),
+}
+
+impl NodeIdentityPolicy {
+    /// Builds a certificate-bound identity policy after validating its exact map.
+    pub fn require_peer_certificates(identities: BTreeMap<String, String>) -> Result<Self, String> {
+        if identities.is_empty()
+            || identities.iter().any(|(node, digest)| {
+                node.trim().is_empty()
+                    || digest.len() != 64
+                    || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        {
+            return Err(
+                "Node certificate identity map must contain Node IDs and SHA-256 digests".into(),
+            );
+        }
+        Ok(Self::RequirePeerCertificate(identities))
+    }
+
+    /// Verifies the peer certificate digest for one negotiated Node identity.
+    fn validate_peer(&self, node_id: &str, certificate_digest: Option<&str>) -> Result<(), Status> {
+        match self {
+            Self::TrustedLoopback => Ok(()),
+            Self::RequirePeerCertificate(identities) => {
+                let expected = identities.get(node_id).ok_or_else(|| {
+                    Status::unauthenticated(
+                        "Node identity is not admitted by the certificate profile",
+                    )
+                })?;
+                if certificate_digest != Some(expected.as_str()) {
+                    return Err(Status::unauthenticated(
+                        "Node TLS certificate does not match the admitted identity",
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Returns the SHA-256 digest of the peer's leaf certificate when TLS transport metadata exists.
+fn peer_certificate_digest(request: &Request<tonic::Streaming<NodeMessage>>) -> Option<String> {
+    let info = request
+        .extensions()
+        .get::<tonic::transport::server::TlsConnectInfo<tonic::transport::server::TcpConnectInfo>>(
+        )?;
+    let certificates = info.peer_certs()?;
+    let certificate = certificates.first()?.as_ref();
+    Some(format!("{:x}", Sha256::digest(certificate)))
+}
+
 /// Current Integration Server implementation version.
 const SERVER_VERSION: &str = "roboguide.server/v0.4";
+/// Per-session bounded reader-to-application ingress capacity.
+const VALIDATED_INGRESS_CAPACITY: usize = 256;
 /// Registration metadata that explicitly opts a Node into accepted-plan Session transport.
 pub const EXECUTION_SESSION_METADATA_KEY: &str = "roboguide.execution-session";
 /// The only Session schema currently understood by the Controller/Node pair.
@@ -520,6 +582,8 @@ pub struct GrpcIntegrationService {
     node_policy: NodeProtocolPolicy,
     /// Injected process Clock and optional observer, independent of application authority.
     observation: GrpcSessionObservation,
+    /// Startup-frozen peer identity policy.
+    identity_policy: NodeIdentityPolicy,
 }
 
 /// Legacy v0.2 service endpoint retained only to return an explicit migration diagnostic.
@@ -574,6 +638,7 @@ impl GrpcIntegrationService {
             events,
             node_policy,
             GrpcSessionObservation::new(None, DiagnosticHandle::default()),
+            NodeIdentityPolicy::TrustedLoopback,
         )
     }
 
@@ -588,6 +653,23 @@ impl GrpcIntegrationService {
             events,
             node_policy,
             GrpcSessionObservation::new(Some(clock), diagnostics),
+            NodeIdentityPolicy::TrustedLoopback,
+        )
+    }
+
+    /// Adds receive observation and an explicit TLS certificate-to-Node identity policy.
+    pub fn new_with_observer_and_identity(
+        events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
+        node_policy: NodeProtocolPolicy,
+        clock: Arc<dyn Clock + Send + Sync>,
+        diagnostics: DiagnosticHandle,
+        identity_policy: NodeIdentityPolicy,
+    ) -> (Self, GrpcNodeRouter) {
+        Self::new_configured(
+            events,
+            node_policy,
+            GrpcSessionObservation::new(Some(clock), diagnostics),
+            identity_policy,
         )
     }
 
@@ -596,6 +678,7 @@ impl GrpcIntegrationService {
         events: mpsc::UnboundedSender<GrpcNodeEventDelivery>,
         node_policy: NodeProtocolPolicy,
         observation: GrpcSessionObservation,
+        identity_policy: NodeIdentityPolicy,
     ) -> (Self, GrpcNodeRouter) {
         let router = GrpcNodeRouter::default();
         (
@@ -613,6 +696,7 @@ impl GrpcIntegrationService {
                 ),
                 node_policy,
                 observation,
+                identity_policy,
             },
             router,
         )
@@ -629,6 +713,7 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
         request: Request<tonic::Streaming<NodeMessage>>,
     ) -> Result<Response<Self::NodeSessionStream>, Status> {
         let (outbound, receiver) = mpsc::unbounded_channel();
+        let certificate_digest = peer_certificate_digest(&request);
         let inbound = request.into_inner();
         let router = self.router.clone();
         let events = self.events.clone();
@@ -636,6 +721,7 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
         let boot_nonce = self.boot_nonce.clone();
         let node_policy = self.node_policy;
         let observation = self.observation.clone();
+        let identity_policy = self.identity_policy.clone();
         tokio::spawn(async move {
             if let Err(status) = run_grpc_session(
                 inbound,
@@ -647,6 +733,8 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
                 GrpcSessionSettings {
                     policy: node_policy,
                     observation,
+                    identity_policy,
+                    certificate_digest,
                 },
             )
             .await
@@ -673,6 +761,8 @@ async fn run_grpc_session(
 ) -> Result<(), Status> {
     let node_policy = settings.policy;
     let observation = settings.observation;
+    let identity_policy = settings.identity_policy;
+    let certificate_digest = settings.certificate_digest;
     let lease_policy = node_policy.lease_policy();
     let first = inbound
         .next()
@@ -681,6 +771,7 @@ async fn run_grpc_session(
     let Some(NodePayload::Hello(hello)) = first.message else {
         return Err(Status::invalid_argument("first message must be Hello"));
     };
+    identity_policy.validate_peer(&hello.node_id, certificate_digest.as_deref())?;
     if !hello
         .protocol_versions
         .iter()
@@ -825,7 +916,7 @@ async fn run_grpc_session(
     // Keep reading and validating the transport stream while Controller application acceptance
     // may be slow. ACKs are emitted only by the serial application loop after durable acceptance.
     let (validated_sender, mut validated_receiver) =
-        mpsc::unbounded_channel::<Result<ReceivedNodeMessage, Status>>();
+        mpsc::channel::<Result<ReceivedNodeMessage, Status>>(VALIDATED_INGRESS_CAPACITY);
     let reader_router = router.clone();
     let reader_node_id = node_id.clone();
     let reader_session_id = session_id.clone();
@@ -841,7 +932,7 @@ async fn run_grpc_session(
                 message = inbound.next() => match message {
                     Some(Ok(message)) => message,
                     Some(Err(error)) => {
-                        let _ = validated_sender.send(Err(error));
+                        let _ = validated_sender.send(Err(error)).await;
                         break;
                     }
                     None => break,
@@ -851,12 +942,12 @@ async fn run_grpc_session(
                         Ok(true) => {
                             let _ = validated_sender.send(Err(Status::deadline_exceeded(
                                 "node heartbeat lease expired",
-                            )));
+                            ))).await;
                             break;
                         }
                         Ok(false) => continue,
                         Err(error) => {
-                            let _ = validated_sender.send(Err(error));
+                            let _ = validated_sender.send(Err(error)).await;
                             break;
                         }
                     }
@@ -867,11 +958,12 @@ async fn run_grpc_session(
                 Ok(true) => {}
                 Ok(false) => {
                     let _ = validated_sender
-                        .send(Err(Status::aborted("session superseded by reconnect")));
+                        .send(Err(Status::aborted("session superseded by reconnect")))
+                        .await;
                     break;
                 }
                 Err(error) => {
-                    let _ = validated_sender.send(Err(error));
+                    let _ = validated_sender.send(Err(error)).await;
                     break;
                 }
             }
@@ -884,7 +976,7 @@ async fn run_grpc_session(
                 Ok(true) => {}
                 Ok(false) => continue,
                 Err(error) => {
-                    let _ = validated_sender.send(Err(error));
+                    let _ = validated_sender.send(Err(error)).await;
                     break;
                 }
             }
@@ -896,7 +988,7 @@ async fn run_grpc_session(
                     at,
                 )
             {
-                let _ = validated_sender.send(Err(error));
+                let _ = validated_sender.send(Err(error)).await;
                 break;
             }
             let metadata = reader_observation.metadata(
@@ -915,6 +1007,7 @@ async fn run_grpc_session(
                     metadata,
                     queue_ticket,
                 }))
+                .await
                 .is_err()
             {
                 break;

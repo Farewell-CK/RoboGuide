@@ -1,5 +1,6 @@
 use super::session::{validate_registration, validate_state_observation_batch};
 use super::*;
+use std::collections::BTreeMap;
 
 mod observation;
 
@@ -11,6 +12,32 @@ fn service_constructor_retains_custom_node_lease_policy() {
     let (service, _router) = GrpcIntegrationService::new_with_lease_policy(events, policy);
 
     assert_eq!(service.node_policy.lease_policy(), policy);
+}
+
+/// The opt-in identity profile rejects unknown Nodes and certificate mismatches before Register.
+#[test]
+fn certificate_identity_profile_is_fail_closed() {
+    let digest = "a".repeat(64);
+    let policy = NodeIdentityPolicy::require_peer_certificates(BTreeMap::from([(
+        "node-a".to_string(),
+        digest.clone(),
+    )]))
+    .unwrap();
+    assert!(policy.validate_peer("node-a", Some(&digest)).is_ok());
+    assert_eq!(
+        policy
+            .validate_peer("node-a", Some(&"b".repeat(64)))
+            .unwrap_err()
+            .code(),
+        tonic::Code::Unauthenticated
+    );
+    assert_eq!(
+        policy
+            .validate_peer("node-b", Some(&digest))
+            .unwrap_err()
+            .code(),
+        tonic::Code::Unauthenticated
+    );
 }
 
 /// Configured completion timeout ends a waiting fact without synthesizing application acceptance.

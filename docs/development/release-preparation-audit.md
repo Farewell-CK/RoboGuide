@@ -73,10 +73,11 @@ uv run python tools/quality/measure_controller_pipeline.py \
 
 ## 当前网络与认证边界
 
-Controller gRPC、Control HTTP 和 Artifact HTTP 默认 loopback。当前 composition root
-没有配置 TLS/mTLS 或 HTTP caller authentication；Node identity/session/sequence/owner
-验证是协议与执行归属校验，不是外部调用者的密码学身份认证。可显式绑定其他地址，
-本地可执行示例因此以可信主机/网络为部署前提；它不证明公网接入就绪。
+Controller gRPC、Control HTTP 和 Artifact HTTP 默认 loopback。Node Protocol 现在提供
+ADR-0086 的 opt-in mTLS profile：服务端要求客户端证书，并以证书 digest 绑定 NodeId；
+Node Service 支持对应 client profile。未配置该 profile 时仍是 trusted-loopback 开发模式，
+不是公网接入认证。Control/Artifact HTTP caller authentication、真实 PKI 轮换和跨主机
+部署仍未证明。
 
 MI 示例通过环境变量读取 API key。具体 Local EAIOS 的 endpoints、workflow 和凭据
 属于启动配置；Mission 参数没有配置命令或改变路由的权力。真实安全停止与硬件

@@ -7,6 +7,7 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
+use sha2::{Digest as _, Sha256};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -24,6 +25,9 @@ struct Request {
     target: u64,
     /// Valid infrastructure sender or its owned Controller child.
     sender: u64,
+    /// Optional digest authenticating the exact profile/target/sender/command envelope.
+    #[serde(default)]
+    auth_digest: Option<String>,
     /// Upstream consensus or local child-fencing request.
     command: Command,
 }
@@ -129,9 +133,17 @@ async fn serve_connection(
     if !node.network_online.load(Ordering::SeqCst) {
         return Err("test replica is partitioned".into());
     }
+    let authenticated = request_auth_digest(
+        node.config.shared_secret.as_deref(),
+        &request.profile,
+        request.target,
+        request.sender,
+        &request.command,
+    );
     let reply = if request.profile != node.profile_identity()
         || request.target != node.config.replica_id
         || !node.config.members.contains_key(&request.sender)
+        || authenticated != request.auth_digest
     {
         Reply::Rejected("replica profile/member identity mismatch".into())
     } else {
@@ -183,15 +195,23 @@ pub(crate) struct ReplicaNetworkFactory {
     sender: u64,
     /// Test-controlled whole-network partition; production remains enabled.
     online: Arc<AtomicBool>,
+    /// Optional shared secret copied only into the authenticated transport client.
+    shared_secret: Option<String>,
 }
 
 impl ReplicaNetworkFactory {
     /// Freezes profile and sender; a shared switch permits deterministic partition checks.
-    pub(crate) fn new(profile: String, sender: u64, online: Arc<AtomicBool>) -> Self {
+    pub(crate) fn new(
+        profile: String,
+        sender: u64,
+        online: Arc<AtomicBool>,
+        shared_secret: Option<String>,
+    ) -> Self {
         Self {
             profile,
             sender,
             online,
+            shared_secret,
         }
     }
 }
@@ -208,6 +228,8 @@ pub(crate) struct ReplicaNetwork {
     sender: u64,
     /// Shared partition control, unused by the production deployment API.
     online: Arc<AtomicBool>,
+    /// Optional shared transport secret.
+    shared_secret: Option<String>,
 }
 
 impl RaftNetworkFactory<ControllerRaftConfig> for ReplicaNetworkFactory {
@@ -221,6 +243,7 @@ impl RaftNetworkFactory<ControllerRaftConfig> for ReplicaNetworkFactory {
             profile: self.profile.clone(),
             sender: self.sender,
             online: self.online.clone(),
+            shared_secret: self.shared_secret.clone(),
         }
     }
 }
@@ -235,6 +258,13 @@ impl ReplicaNetwork {
             profile: self.profile.clone(),
             target: self.target,
             sender: self.sender,
+            auth_digest: request_auth_digest(
+                self.shared_secret.as_deref(),
+                &self.profile,
+                self.target,
+                self.sender,
+                &command,
+            ),
             command,
         };
         let encoded = serde_json::to_vec(&request).map_err(std::io::Error::other)?;
@@ -342,6 +372,8 @@ pub struct ReplicaFenceClient {
     profile: String,
     /// Original issuing child epoch, never renewed after process creation.
     epoch: ControllerEpoch,
+    /// Optional shared transport secret inherited from the supervisor.
+    shared_secret: Option<String>,
 }
 
 impl ReplicaFenceClient {
@@ -362,6 +394,7 @@ impl ReplicaFenceClient {
             address,
             profile,
             epoch,
+            shared_secret: None,
         })
     }
 
@@ -378,12 +411,20 @@ impl ReplicaFenceClient {
             read("ROBOGUIDE_REPLICA_EPOCH")?,
         ) {
             (None, None, None) => Ok(None),
-            (Some(address), Some(profile), Some(epoch)) => Self::new(
-                address.parse().map_err(|_| "invalid replica endpoint")?,
-                profile,
-                serde_json::from_str(&epoch).map_err(|_| "invalid replica epoch")?,
-            )
-            .map(Some),
+            (Some(address), Some(profile), Some(epoch)) => {
+                let mut client = Self::new(
+                    address.parse().map_err(|_| "invalid replica endpoint")?,
+                    profile,
+                    serde_json::from_str(&epoch).map_err(|_| "invalid replica epoch")?,
+                )?;
+                client.shared_secret = read("ROBOGUIDE_REPLICA_SHARED_SECRET")?;
+                if let Some(secret) = client.shared_secret.as_ref()
+                    && (secret.len() < 32 || secret.len() > 256)
+                {
+                    return Err("invalid replica shared secret length".into());
+                }
+                Ok(Some(client))
+            }
             _ => Err("replica child fence requires endpoint/profile/epoch together".into()),
         }
     }
@@ -394,6 +435,13 @@ impl ReplicaFenceClient {
             profile: self.profile.clone(),
             target: self.epoch.replica_id,
             sender: self.epoch.replica_id,
+            auth_digest: request_auth_digest(
+                self.shared_secret.as_deref(),
+                &self.profile,
+                self.epoch.replica_id,
+                self.epoch.replica_id,
+                &command,
+            ),
             command,
         };
         let bytes = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
@@ -437,6 +485,22 @@ impl ReplicaFenceClient {
             _ => Err("replica child epoch fence rejected".into()),
         }
     }
+}
+
+/// Computes the exact transport authentication digest without exposing the shared secret on wire.
+fn request_auth_digest(
+    secret: Option<&str>,
+    profile: &str,
+    target: u64,
+    sender: u64,
+    command: &Command,
+) -> Option<String> {
+    let secret = secret?;
+    let payload = serde_json::to_vec(&(profile, target, sender, command)).ok()?;
+    let mut digest = Sha256::new();
+    digest.update(secret.as_bytes());
+    digest.update(payload);
+    Some(format!("{:x}", digest.finalize()))
 }
 
 impl state::ApplicationBatchReplicator for ReplicaFenceClient {
@@ -523,5 +587,35 @@ impl ports::CommandDeliveryFence for ReplicaFenceClient {
     /// Serializes the immutable issuing epoch for Node-side monotonic command fencing.
     fn controller_epoch(&self) -> Option<String> {
         serde_json::to_string(&self.epoch).ok()
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    //! Replica envelope authentication regressions.
+
+    use super::*;
+
+    /// Authentication binds the exact command envelope and requires an explicit secret.
+    #[test]
+    fn envelope_digest_binds_target_and_secret() {
+        let command = Command::AcceptedIdentity {
+            epoch: ControllerEpoch {
+                term: 3,
+                replica_id: 1,
+            },
+        };
+        let secret = "s".repeat(32);
+        let first = request_auth_digest(Some(&secret), "profile", 2, 1, &command);
+        assert!(first.is_some());
+        assert_ne!(
+            first,
+            request_auth_digest(Some(&secret), "profile", 3, 1, &command)
+        );
+        assert_ne!(
+            first,
+            request_auth_digest(Some(&"t".repeat(32)), "profile", 2, 1, &command)
+        );
+        assert_eq!(request_auth_digest(None, "profile", 2, 1, &command), None);
     }
 }

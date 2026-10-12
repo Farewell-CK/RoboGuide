@@ -150,3 +150,22 @@ resume conflict 与失败原子性，另有 Runtime 时间不可变/restore 检�
 mTLS、跨主机 membership、物理 stop proof、历史归档/压缩、完整 Mission-local isolation、
 backfill/空间资源图或正式 E6 证据。专项 workspace checks 通过后，原 dev review 中的这些
 项目继续按 [ADR 遗留项清单](adr-follow-up-register.md) 保留。
+
+## Dev review follow-up implementation (S8–S10)
+
+后续切片已把审计中剩余的三个软件边界落到当前开发基线：
+
+- ADR-0086 增加 opt-in Node mTLS。Integration Server 在 Hello 前后绑定 TLS client
+  certificate digest 与 NodeId，Node Service 支持对应 client profile；replica RPC 增加可选
+  envelope secret。默认 trusted loopback 兼容路径仍明确标注为开发模式。
+- ADR-0087 将 replica metadata history 从硬拒绝改为 checkpoint-anchored compaction。
+  `HistoryAnchor` 保留前缀 sequence/digest，完整 checkpoint 仍是恢复 authority；空 tail、
+  snapshot/reopen 和旧格式 downgrade fence 均保留。
+- ADR-0088 为 Mission Hold 增加 review deadline/escalation evidence，并将每个 gRPC session
+  的 validated reader ingress 改为固定有界队列。SLA 只产生告警状态，不能自动释放、重试或
+  重新绑定；队列背压不改变应用 acceptance 和 ACK authority。
+
+三机器人 Controller 崩溃目标作为离线故障矩阵验证：失联期间 Node 不接受旧 epoch 新命令，
+重启使用 checkpoint/replica identity，失联 Node 保持 Unknown/RecoveryRequired，资源未知时
+拒绝冲突性 Commit，恢复后仍需 Match → Propose → Commit → Rebind。该矩阵是目标行为的离线
+证据，不是物理 stop proof，也不启动 E6。
