@@ -165,8 +165,9 @@ Transport、序列化格式、数据库、调度算法或部署拓扑。
 - State / Belief / Memory 的数据库、缓存、事件总线和复制方式；
 - Observation 融合采用投票、滤波、因子图或其他方法；
 - Scheduler v0.2 已采用 deterministic bounded joint search，ADR-0082 已实现 Orchestration
-  logical priority/fairness 和有界准入；真实 cost model、
-  travel/traffic prediction、divisible quota、auction 或 RL policy 仍待证据决定；
+  logical priority/fairness 和有界准入，ADR-0084 已实现显式 future planning preemption；
+  运行中物理抢占、真实 cost model、travel/traffic prediction、divisible quota、auction
+  或 RL policy 仍待独立设计/证据 gate；
 - Shared Resource Coordination 的时空图、Reservation 和冲突求解；
 - Messaging / Invocation 使用 DDS、Zenoh、gRPC、MQTT、WebRTC 或其他协议；
 - Memory 使用向量库、图数据库、关系库、对象存储或组合；

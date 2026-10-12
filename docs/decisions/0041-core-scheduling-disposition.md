@@ -49,3 +49,8 @@ ADR-0082 adds a separate typed new-Mission admission-capacity rejection, with HT
 Group creation. It is not a Ready-Task retry disposition. Durable priority/aging and per-Mission
 rounds retain this ADR's shortage/hold/reconciliation boundaries, including the rule that resource
 failure keeps its waiting age. Policy checkpoint/event schema additions belong to ADR-0082.
+
+ADR-0084 adds explicit higher-priority future planning preemption with exact calendar generation,
+typed evidence and atomic rollback. It neither retries a window-missed Task nor stops running/
+Unknown work; resource shortages remain durable deferrals. Ready waiting age survives the planning
+release. The current profile rejects physical bindings and pending commitments before any mutation.

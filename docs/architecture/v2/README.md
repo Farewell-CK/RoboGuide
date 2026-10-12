@@ -62,8 +62,12 @@ ADR-0083 指定 opt-in quorum Controller replica profile：OpenRaft 负责共识
 持久接受完整 authority checkpoint/event history；leader supervisor 管理唯一 Controller
 child，在每次 durable acceptance 和 Execute/Cancel delivery 验证 epoch/quorum。
 切换先重建已接受投影，再由既有 startup restore 保留 ownership/Unknown/hold/fairness
-和原 source time，不自动重放物理工作。实现验收前保持 standalone 默认；当前设计
+和原 source time，不自动重放物理工作。软件实现与本机进程检查已完成，standalone 仍为默认；当前 profile
 限定三成员 loopback 软件 profile，Memory/Artifact 内容保留其独立数据平面。
+
+ADR-0084 提供显式 generation-bound future planning preemption。Orchestration 核对更高
+当前 priority 和双方非 held/Ready 状态；Control 只释放未激活、未 Commit/Bind 的未来
+interval。原计划、等待年龄与物理 ownership 保留；due/running/recovery 不会经此 API 停止。
 
 | 组件 | 职责 |
 | --- | --- |

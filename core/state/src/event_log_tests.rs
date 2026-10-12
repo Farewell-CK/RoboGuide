@@ -13,6 +13,39 @@ use domain::{
 use ports::MemoryCatalogReader;
 use tempfile::tempdir;
 
+/// New planning authority evidence cannot hide under the previous event codec marker.
+#[test]
+fn future_preemption_requires_its_current_event_codec() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("events.sqlite3");
+    let mut log = SqliteEventLog::open(&path).unwrap();
+    log.append(
+        TimestampMs::new(5),
+        &CorrelationId::new("preemption").unwrap(),
+        None,
+        EventPayload::SchedulingReservationPreempted {
+            group_id: ExecutionGroupId::new("group-a").unwrap(),
+            task_ref: TaskRef::new(MissionId::new("a").unwrap(), TaskId::new("task").unwrap()),
+            beneficiary_mission_id: MissionId::new("b").unwrap(),
+            calendar_version: 3,
+        },
+    );
+    assert!(log.take_error().unwrap().is_none());
+    assert_eq!(
+        log.events().unwrap()[0].payload_schema,
+        "domain.EventPayload.json/v17"
+    );
+    log.decoded_events().unwrap();
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .execute(
+            "UPDATE events SET payload_schema='domain.EventPayload.json/v16'",
+            [],
+        )
+        .unwrap();
+    assert!(log.decoded_events().is_err());
+}
+
 /// Builds one valid map manifest shared by payload-version compatibility tests.
 fn manifest() -> MapArtifactManifest {
     MapArtifactManifest::new(
@@ -233,7 +266,7 @@ fn sqlite_event_log_survives_reopen() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_id, "event-1");
     assert_eq!(events[0].correlation_id, "test-correlation");
-    assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V16);
+    assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V17);
     let payload: EventPayload =
         serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
     assert!(matches!(

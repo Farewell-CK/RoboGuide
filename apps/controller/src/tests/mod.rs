@@ -72,6 +72,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
     match payload {
         EventPayload::MissionSchedulingPriorityChanged { .. } => None,
         EventPayload::CandidatesMatched { task_ref }
+        | EventPayload::SchedulingReservationPreempted { task_ref, .. }
         | EventPayload::MissionExecutionContractRejected { task_ref, .. }
         | EventPayload::TaskSchedulingSelected { task_ref, .. }
         | EventPayload::TaskSchedulingDeferred { task_ref, .. }

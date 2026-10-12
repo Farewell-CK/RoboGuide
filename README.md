@@ -838,6 +838,11 @@ relation registry 与 MissionPlan 不一致或序号不一致时 fail-closed。
 只有一个 writer；多数接受先于 ACK，切换走原保守恢复。配置与能力范围见
 [Controller 复制部署](docs/development/controller-replication.md)，默认不启用。
 
+未来排期可通过 `POST /v1/missions/{beneficiary}/scheduling-preemption` 显式让位给更高
+priority 的 Ready Mission；请求必须使用 `GET /v1/scheduling-reservations` 的当前
+`calendar_version`，且目标未到期、未 Bind/Commit。原计划、等待年龄和物理资源保留；
+运行中工作不能经此 API 抢占。请求格式与回归范围见 [ADR-0084](docs/decisions/0084-explicit-future-scheduling-preemption.md)。
+
 节点侧复制并修改 `config/node.toml` 后启动常驻 Node Service：
 
 ```bash

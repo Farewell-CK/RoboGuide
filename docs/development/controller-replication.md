@@ -75,7 +75,7 @@ verifier 文件消费者；它们需要独立复制配置/source-history 决策�
 
 Node config v0.7 保留 `server_endpoint`，可加 `fallback_server_endpoints`（最多两个，
 全部 distinct、startup validated）。Node 在 session loss 后按配置顺序旋转，保持同一
-NodeId、durable command journal 和 Local EAIOS handle；旧 v0.2-v0.6 配置不能加入此字段。
+NodeId、durable command journal 和 Local EAIOS handle；旧 v0.2-v0.6 配置不能启用非空 fallback。
 HTTP/Artifact 客户端使用当前 leader 的显式地址；本 slice 不提供自动 client redirect。
 private `status.json` 仅供本地观察，不授予写入或资源 authority。
 

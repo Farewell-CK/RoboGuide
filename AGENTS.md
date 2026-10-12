@@ -159,6 +159,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   selected/latest/deadline-derived activation window. Window-missed deferrals are durable and
   deduplicated per Task and leave automatic timer dispatch so one Mission cannot terminate or spin
   the application timer.
+- ADR-0084 permits explicit higher-priority Orchestration requests to preempt only an exact-generation,
+  unactivated/unbound/uncommitted strictly future interval. Current due windows, held Missions,
+  Context resource ownership, physical bindings and pending commitments reject; original waiting age
+  and plan remain. Typed codec-v17 evidence and candidate/calendar changes commit together. No stop
+  or immediate Execute is authorized; running preemption remains a separate stop/repeat/handoff gate.
 - `core/artifact-store/` contains the filesystem implementation of the transport-neutral
   ArtifactBlobStore port; it stores opaque bytes and does not own map, task, or execution policy.
 - `core/integration/` owns the formal gRPC Node Protocol v0.4 transport;

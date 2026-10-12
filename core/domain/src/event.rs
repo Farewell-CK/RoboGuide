@@ -5,6 +5,17 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Control released an uncommitted future interval after current higher-priority Mission authorization.
+    SchedulingReservationPreempted {
+        /// Exact Group of the displaced planning interval.
+        group_id: ExecutionGroupId,
+        /// Exact future Task retaining its original Ready lifecycle and waiting age.
+        task_ref: TaskRef,
+        /// Current higher-priority Mission with unbound Ready work.
+        beneficiary_mission_id: crate::MissionId,
+        /// Exact reviewed calendar generation, checked before release.
+        calendar_version: u64,
+    },
     /// Operator/deployment logical scheduling priority changed without altering an accepted plan.
     MissionSchedulingPriorityChanged {
         /// Exact Mission affected by the policy decision.

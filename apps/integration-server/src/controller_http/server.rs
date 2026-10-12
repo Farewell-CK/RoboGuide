@@ -558,6 +558,19 @@ pub(crate) async fn handle_http_connection(
                 &diagnostics,
             )?
         }
+        ("POST", path)
+            if path.starts_with("/v1/missions/") && path.ends_with("/scheduling-preemption") =>
+        {
+            super::preemption::preempt(
+                controller,
+                event_log,
+                event_write_gate,
+                clock,
+                path,
+                request_body,
+                &diagnostics,
+            )?
+        }
         ("POST", path) if path.starts_with("/v1/missions/") && path.ends_with("/resume") => {
             let body: serde_json::Value = match serde_json::from_str(request_body) {
                 Ok(body) => body,
@@ -821,6 +834,7 @@ pub(crate) async fn handle_http_connection(
                 "200 OK",
                 serde_json::json!({
                     "schema": "roboguide.scheduling-reservations/v0.1",
+                    "calendar_version": controller.bridge.control().scheduling_snapshot(clock.now()).version(),
                     "reservations": reservations,
                 }),
             )

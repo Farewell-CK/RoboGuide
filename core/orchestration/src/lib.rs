@@ -25,6 +25,7 @@ mod mission {
     pub(super) mod dispatch_policy;
     pub(super) mod isolation;
     pub(super) mod lifecycle;
+    pub(super) mod preemption;
     pub(super) mod scheduling;
     pub(super) mod serialization;
     pub(super) mod timing;
@@ -43,6 +44,7 @@ pub use integration_bridge::{
 };
 pub use mechanism_profile::SupportedMechanismProfile;
 pub use mission::isolation::{MissionIsolation, MissionIsolationSource};
+pub use mission::preemption::FutureSchedulingPreemption;
 pub use mission_contract::decode_mission_plan;
 pub use scheduling_status::{SchedulingDeferral, SchedulingDisposition};
 

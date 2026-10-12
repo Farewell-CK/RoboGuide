@@ -1,6 +1,7 @@
 //! Controller HTTP composition by transport and projection responsibility.
 
 mod admission;
+mod preemption;
 mod protocol;
 mod recovery;
 mod scheduling_policy;

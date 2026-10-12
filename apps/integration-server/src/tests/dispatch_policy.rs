@@ -47,6 +47,379 @@ fn plan_body(mission: &str, count: usize) -> String {
     }).to_string()
 }
 
+/// Supplies a legacy duration-bearing future plan without inventing current v0.8 duration evidence.
+fn future_plan() -> domain::MissionPlan {
+    let operation = serde_json::json!({"namespace":"compute","name":"work","version":"v1"});
+    decode_mission_plan(&serde_json::json!({
+        "schema_version":"roboguide.mission-plan/v0.6",
+        "mission":{"id":"a","objective":"future synthetic work"},
+        "contexts":[{"id":"context","roles":[{"id":"worker","actor":"worker"}],"relations":[]}],
+        "tasks":[{"id":"task","description":"future work","context_id":"context","depends_on":[],
+            "timing":{"earliest_start_offset_ms":100,"latest_start_offset_ms":null,"completion_deadline_offset_ms":null,"estimated_duration_ms":5},
+            "satisfaction":{"basis":"execution-report","verifier":null},
+            "roles":[{"id":"worker","actor":"worker","capability":"compute","contract":operation,
+                "context_role":"worker","resource_scope":"task","resources":[{"kind":"compute","units":1}],
+                "execution":{"capability_contract":operation,"parameters":{}}}]}]
+    }).to_string()).unwrap()
+}
+
+/// Prepares one future interval and higher-priority unbound B, retaining original waiting age and no physical work.
+fn future_fixture() -> (Fixture, domain::TaskRef, u64) {
+    let fixture = Fixture::with_plans(future_plan(), runtime_contract::plan("b", None));
+    let victim = domain::TaskRef::new(
+        MissionId::new("a").unwrap(),
+        domain::TaskId::new("task").unwrap(),
+    );
+    fixture.events.begin_batch().unwrap();
+    let version = {
+        let mut live = fixture.controller.lock().unwrap();
+        let now = TimestampMs::new(2);
+        let correlation = CorrelationId::new("future-fixture").unwrap();
+        live.orchestrator
+            .set_mission_priority(
+                &MissionId::new("b").unwrap(),
+                255,
+                now,
+                &correlation,
+                &mut fixture.events.clone(),
+            )
+            .unwrap();
+        live.orchestrator
+            .record_dispatch_attempt(&victim, false)
+            .unwrap();
+        let state = live.bridge.state().clone();
+        let ControllerState {
+            orchestrator,
+            bridge,
+            ..
+        } = &mut *live;
+        let task = orchestrator
+            .prepare_task(
+                victim.mission_id(),
+                &victim,
+                &state,
+                bridge.control_mut(),
+                now,
+                &correlation,
+                &mut fixture.events.clone(),
+            )
+            .unwrap();
+        assert!(task.assignments().is_empty());
+        let version = bridge.control().scheduling_snapshot(now).version();
+        fixture
+            .events
+            .save_checkpoint(
+                SERVER_CHECKPOINT_SCHEMA,
+                &server_checkpoint_json(&live).unwrap(),
+            )
+            .unwrap();
+        version
+    };
+    fixture.events.commit_batch().unwrap();
+    (fixture, victim, version)
+}
+
+/// Builds only the closed planning command; it never carries a Node, execution, stop or plan revision.
+fn preemption_body(version: u64) -> String {
+    serde_json::json!({"victim_mission_id":"a","victim_task_id":"task","expected_calendar_version":version}).to_string()
+}
+
+/// A committed but unbound resource claim cannot be erased by planning preemption.
+#[test]
+fn future_preemption_retains_pending_physical_commitment() {
+    let (fixture, victim, _version) = future_fixture();
+    let mut live = fixture.controller.lock().unwrap();
+    let state = live.bridge.state().clone();
+    let plan = live
+        .orchestrator
+        .execution(victim.mission_id())
+        .unwrap()
+        .plan()
+        .clone();
+    let group = live
+        .orchestrator
+        .execution(victim.mission_id())
+        .unwrap()
+        .group_id()
+        .clone();
+    let requirement = plan.task_graph().tasks()[0].requirement();
+    let now = TimestampMs::new(101);
+    let correlation = CorrelationId::new("pending-commitment").unwrap();
+    let mut events = testkit::InMemoryEventLog::new();
+    let control = live.bridge.control_mut();
+    let assignments = control
+        .scheduled_task(&victim)
+        .unwrap()
+        .decision()
+        .proposed_assignments();
+    let candidates = control
+        .match_capabilities_for_mission(&state, &plan, requirement, now, &correlation, &mut events)
+        .unwrap();
+    let proposal = control
+        .propose(
+            &state,
+            requirement,
+            &candidates,
+            assignments,
+            now,
+            &correlation,
+            &mut events,
+        )
+        .unwrap();
+    control
+        .commit_for_group_with_state(&state, &group, &proposal, now, &correlation, &mut events)
+        .unwrap();
+    assert!(
+        control
+            .group(&group)
+            .unwrap()
+            .task_execution(&victim)
+            .unwrap()
+            .assignments()
+            .is_empty()
+    );
+    let before = serde_json::to_value(control.checkpoint()).unwrap();
+    assert!(
+        control
+            .preempt_future_task(
+                &victim,
+                control.scheduling_snapshot(now).version(),
+                TimestampMs::new(2)
+            )
+            .is_err()
+    );
+    assert_eq!(serde_json::to_value(control.checkpoint()).unwrap(), before);
+    assert_eq!(
+        control
+            .allocation_snapshot(now)
+            .unwrap()
+            .allocations()
+            .len(),
+        1
+    );
+}
+
+/// Real HTTP preemption persists exact generation, waiting age and Ready state, then permits ordinary replan.
+#[tokio::test]
+async fn future_preemption_is_durable_and_preserves_ownership_and_age() {
+    let (fixture, victim, version) = future_fixture();
+    let before = fixture
+        .controller
+        .lock()
+        .unwrap()
+        .orchestrator
+        .execution(victim.mission_id())
+        .unwrap()
+        .dispatch_policy()
+        .clone();
+    let response = fixture
+        .post(
+            "/v1/missions/b/scheduling-preemption",
+            &preemption_body(version),
+        )
+        .await;
+    assert!(response.starts_with("HTTP/1.1 200"));
+    let live = fixture.controller.lock().unwrap();
+    assert!(live.bridge.control().scheduled_task(&victim).is_none());
+    assert_eq!(
+        live.orchestrator
+            .execution(victim.mission_id())
+            .unwrap()
+            .dispatch_policy(),
+        &before
+    );
+    assert!(live.bridge.attempt_history().is_empty());
+    assert!(
+        live.bridge
+            .control()
+            .allocation_snapshot(TimestampMs::new(2))
+            .unwrap()
+            .allocations()
+            .is_empty()
+    );
+    let saved: ServerCheckpoint = serde_json::from_str(
+        &fixture
+            .events
+            .load_checkpoint()
+            .unwrap()
+            .unwrap()
+            .checkpoint_json,
+    )
+    .unwrap();
+    let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &saved.integration_json,
+        fixture.events.clone(),
+        integration::GrpcNodeRouter::default(),
+        TimestampMs::new(3),
+    )
+    .unwrap();
+    assert!(restored.control().scheduled_task(&victim).is_none());
+    let payloads = fixture.events.decoded_events().unwrap();
+    assert!(payloads.iter().any(|payload|matches!(payload.payload(),domain::EventPayload::SchedulingReservationPreempted { task_ref,.. } if task_ref == &victim)));
+    drop(live);
+    let mut live = fixture.controller.lock().unwrap();
+    let state = live.bridge.state().clone();
+    let ControllerState {
+        orchestrator,
+        bridge,
+        ..
+    } = &mut *live;
+    let next = orchestrator
+        .prepare_task(
+            victim.mission_id(),
+            &victim,
+            &state,
+            bridge.control_mut(),
+            TimestampMs::new(3),
+            &CorrelationId::new("normal-replan").unwrap(),
+            &mut testkit::InMemoryEventLog::new(),
+        )
+        .unwrap();
+    assert!(next.assignments().is_empty());
+    assert!(bridge.control().scheduled_task(&victim).is_some());
+}
+
+/// Current stale/equal/held policy and malformed scopes reject without any live/SQL mutation.
+#[tokio::test]
+async fn future_preemption_rejects_stale_equal_held_and_malformed_requests() {
+    for case in ["stale", "equal", "held", "extra-field"] {
+        let (fixture, _victim, version) = future_fixture();
+        if case == "equal" {
+            fixture
+                .post("/v1/missions/b/scheduling-policy", "{\"priority\":128}")
+                .await;
+        }
+        if case == "held" {
+            fixture.events.begin_batch().unwrap();
+            let mut live = fixture.controller.lock().unwrap();
+            live.orchestrator
+                .isolate_execution(
+                    &MissionId::new("b").unwrap(),
+                    orchestration::MissionIsolationSource::TaskOutcome,
+                    TimestampMs::new(2),
+                    &CorrelationId::new("held-beneficiary").unwrap(),
+                    &mut fixture.events.clone(),
+                )
+                .unwrap();
+            fixture
+                .events
+                .save_checkpoint(
+                    SERVER_CHECKPOINT_SCHEMA,
+                    &server_checkpoint_json(&live).unwrap(),
+                )
+                .unwrap();
+            fixture.events.commit_batch().unwrap();
+        }
+        let before = server_checkpoint_json(&fixture.controller.lock().unwrap()).unwrap();
+        let sequence = fixture.events.latest_sequence().unwrap();
+        let body = if case == "extra-field" {
+            format!(
+                "{{\"victim_mission_id\":\"a\",\"victim_task_id\":\"task\",\"expected_calendar_version\":{version},\"stop\":true}}"
+            )
+        } else {
+            preemption_body(if case == "stale" {
+                version + 1
+            } else {
+                version
+            })
+        };
+        let response = fixture
+            .post("/v1/missions/b/scheduling-preemption", &body)
+            .await;
+        assert!(
+            response.starts_with(if case == "extra-field" {
+                "HTTP/1.1 400"
+            } else {
+                "HTTP/1.1 409"
+            }),
+            "{case}: {response}"
+        );
+        assert_eq!(
+            server_checkpoint_json(&fixture.controller.lock().unwrap()).unwrap(),
+            before
+        );
+        assert_eq!(fixture.events.latest_sequence().unwrap(), sequence);
+    }
+}
+
+/// Due/committed work rejects even before Runtime activation; SQL failure rolls back the planning release.
+#[tokio::test]
+async fn future_preemption_rejects_due_bound_and_rolls_back_sql_failure() {
+    let (fixture, victim, version) = future_fixture();
+    {
+        let mut live = fixture.controller.lock().unwrap();
+        assert!(
+            live.bridge
+                .control_mut()
+                .preempt_future_task(&victim, version, TimestampMs::new(101))
+                .is_err()
+        );
+    }
+    let before = server_checkpoint_json(&fixture.controller.lock().unwrap()).unwrap();
+    let sequence = fixture.events.latest_sequence().unwrap();
+    let sql = rusqlite::Connection::open(fixture.directory.path().join("events.sqlite3")).unwrap();
+    sql.execute_batch("CREATE TRIGGER fail_preemption BEFORE UPDATE ON controller_checkpoint BEGIN SELECT RAISE(ABORT,'injected preemption save failure'); END;").unwrap();
+    let response = fixture
+        .post(
+            "/v1/missions/b/scheduling-preemption",
+            &preemption_body(version),
+        )
+        .await;
+    assert!(response.starts_with("HTTP/1.1 503"));
+    assert_eq!(
+        server_checkpoint_json(&fixture.controller.lock().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(fixture.events.latest_sequence().unwrap(), sequence);
+    assert_eq!(
+        fixture
+            .events
+            .load_checkpoint()
+            .unwrap()
+            .unwrap()
+            .checkpoint_json,
+        before
+    );
+    sql.execute_batch("DROP TRIGGER fail_preemption").unwrap();
+    let mut live = fixture.controller.lock().unwrap();
+    let state = live.bridge.state().clone();
+    let ControllerState {
+        orchestrator,
+        bridge,
+        ..
+    } = &mut *live;
+    orchestrator
+        .prepare_task(
+            victim.mission_id(),
+            &victim,
+            &state,
+            bridge.control_mut(),
+            TimestampMs::new(101),
+            &CorrelationId::new("ordinary-bind").unwrap(),
+            &mut testkit::InMemoryEventLog::new(),
+        )
+        .unwrap();
+    let generation = bridge
+        .control()
+        .scheduling_snapshot(TimestampMs::new(101))
+        .version();
+    assert!(
+        bridge
+            .control_mut()
+            .preempt_future_task(&victim, generation, TimestampMs::new(2))
+            .is_err()
+    );
+    assert_eq!(
+        bridge
+            .control()
+            .allocation_snapshot(TimestampMs::new(101))
+            .unwrap()
+            .allocations()
+            .len(),
+        1
+    );
+}
+
 /// Two exclusive resources and competing A/B plans use real Control, Orchestration and SQLite.
 struct Fixture {
     /// Test-owned database directory.

@@ -383,6 +383,68 @@ impl ControlPlane {
         self.scheduled_tasks.get(task_ref)
     }
 
+    /// Releases only an exact unbound future planning interval; stale/due/physically committed work rejects.
+    pub fn preempt_future_task(
+        &mut self,
+        task_ref: &TaskRef,
+        expected_calendar_version: u64,
+        now: TimestampMs,
+    ) -> Result<ScheduledTaskReservation, ControlError> {
+        if self.calendar_version != expected_calendar_version {
+            return Err(ControlError::InvalidProposal(
+                "future preemption uses a stale calendar generation".into(),
+            ));
+        }
+        let reservation = self.scheduled_tasks.get(task_ref).ok_or_else(|| {
+            ControlError::InvalidProposal("future preemption has no scheduled target".into())
+        })?;
+        let group = self
+            .groups
+            .get(reservation.group_id())
+            .ok_or_else(|| ControlError::UnknownGroup(reservation.group_id().clone()))?;
+        let task = group.task_execution(task_ref).ok_or_else(|| {
+            ControlError::InvalidProposal("future preemption lacks current Task authority".into())
+        })?;
+        if reservation.phase() != SchedulingReservationPhase::Scheduled
+            || !matches!(
+                group.lifecycle(),
+                crate::GroupLifecycle::Bound
+                    | crate::GroupLifecycle::Active
+                    | crate::GroupLifecycle::Adapted
+            )
+            || reservation.decision().starts_at() <= now
+            || task.lifecycle() != domain::TaskExecutionLifecycle::Ready
+            || !task.assignments().is_empty()
+            || self
+                .reservations
+                .values()
+                .any(|ownership| &ownership.task_ref == task_ref)
+            || reservation.decision().selections().iter().any(|selection| {
+                selection
+                    .resource_ids()
+                    .iter()
+                    .any(|resource| self.reservations.contains_key(resource))
+            })
+            || self
+                .pending_recovery_commitments
+                .values()
+                .any(|commitment| commitment.task_ref() == task_ref)
+        {
+            return Err(ControlError::InvalidProposal(
+                "preemption requires an unbound, uncommitted, strictly future Ready Task".into(),
+            ));
+        }
+        let next = self.calendar_version.checked_add(1).ok_or_else(|| {
+            ControlError::AllocationInvariant("calendar generation exhausted".into())
+        })?;
+        let removed = self
+            .scheduled_tasks
+            .remove(task_ref)
+            .expect("target validated before mutation");
+        self.calendar_version = next;
+        Ok(removed)
+    }
+
     /// Marks one scheduled interval active after Runtime confirms Task activation.
     pub(crate) fn activate_scheduled_task(&mut self, task_ref: &TaskRef) {
         if let Some(reservation) = self.scheduled_tasks.get_mut(task_ref)

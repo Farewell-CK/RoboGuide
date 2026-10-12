@@ -1092,6 +1092,7 @@ dependencies = [
  "sha2",
  "state",
  "tempfile",
+ "testkit",
  "tokio",
  "tokio-stream",
  "tonic",

@@ -67,6 +67,8 @@ const EVENT_PAYLOAD_SCHEMA_V14: &str = "domain.EventPayload.json/v14";
 const EVENT_PAYLOAD_SCHEMA_V15: &str = "domain.EventPayload.json/v15";
 /// Codec including operator/deployment Mission priority decisions.
 const EVENT_PAYLOAD_SCHEMA_V16: &str = "domain.EventPayload.json/v16";
+/// Codec including explicit generation-bound future planning preemption.
+const EVENT_PAYLOAD_SCHEMA_V17: &str = "domain.EventPayload.json/v17";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -727,6 +729,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V14 => Ok(14),
         EVENT_PAYLOAD_SCHEMA_V15 => Ok(15),
         EVENT_PAYLOAD_SCHEMA_V16 => Ok(16),
+        EVENT_PAYLOAD_SCHEMA_V17 => Ok(17),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -740,6 +743,7 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::SchedulingReservationPreempted { .. } => 17,
         EventPayload::MissionSchedulingPriorityChanged { .. } => 16,
         EventPayload::MissionExecutionContractRejected { .. } => 15,
         EventPayload::MissionExecutionIsolated { .. }
@@ -886,7 +890,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V16,
+                    EVENT_PAYLOAD_SCHEMA_V17,
                     payload_json,
                 ],
             )

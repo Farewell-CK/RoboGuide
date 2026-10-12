@@ -106,3 +106,12 @@ Production timer/HTTP/SQL and actual Control competition tests cover the support
 stateless joint Scheduler still receives immutable supplied candidates/calendars and owns no
 commitment. Physical preemption, fractional sharing, travel evidence and larger optimization remain
 separate decisions; this update does not change those historical limits.
+
+## Explicit future planning preemption
+
+ADR-0084 adds an operator-owned, generation-bound request from a strictly higher-priority Ready
+Mission to release an unactivated, unbound and uncommitted future interval. Current due windows,
+pending physical commitments and running/recovery work reject; waiting age, accepted timing and
+physical ownership remain unchanged. The private application candidate and typed codec-v17
+evidence commit atomically. This closes future planning displacement only; running work still
+requires a separate stop/repeat/handoff design and physical evidence.
