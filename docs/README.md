@@ -16,6 +16,10 @@
 
 - [`development/README.md`](development/README.md)：`Proposed` 开发基线、目标目录、模块职责、依赖方向和变更门槛；
 - [`development/coding-standards.md`](development/coding-standards.md)：Rust/Python 函数文档、类型、错误处理、测试和质量门槛；
+- [`development/audit-remediation-plan.md`](development/audit-remediation-plan.md)：O1–O8 实施、验证、条件性优化与未关闭事项；
+- [`development/controller-persistence-performance.md`](development/controller-persistence-performance.md)：合成事务测量、批处理门禁与增量持久化设计；
+- [`development/deployment-evidence-boundaries.md`](development/deployment-evidence-boundaries.md)：部署 source codec 与中性消费者的代码边界；
+- [`development/release-preparation-audit.md`](development/release-preparation-audit.md)：历史凭据扫描、许可证元数据、ADR 编号、quickstart 与认证边界；
 - [`development/pre-c1-readiness-audit-2026-09-15.md`](development/pre-c1-readiness-audit-2026-09-15.md)：Habitat Local EAIOS Bridge 前的生产链准入审计、证据范围与未闭环风险；
 - [`extensions/device-extension-conformance-v0.1.md`](extensions/device-extension-conformance-v0.1.md)：不修改 RoboGuide core 接入新 Local EAIOS 的配置、离线 conformance 与真机验证边界；
 - [`decisions/0001-rust-core-python-edges.md`](decisions/0001-rust-core-python-edges.md)：`Proposed` Rust 核心与 Python 边缘职责 ADR。

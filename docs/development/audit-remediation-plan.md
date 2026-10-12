@@ -12,7 +12,7 @@
 | O5 Mission 故障隔离 | 已实现并验证 | ADR-0077；内存/SQL 回滚、持久 hold、Control 重验、generation-bound HTTP resume |
 | O6 事务性能 | 测量与设计已完成；batch 暂缓 | 96/96 合成 Mission；serialize/commit 为主要成本，未证明 batch 收益/等价性，保持单事实事务 |
 | O7 部署边界 | 已实现并验证 | 具体 source / neutral codec / consumers 分离；137 个 app tests 保留兼容与 provenance |
-| O8 发布技术准备 | 待实施 | 扫描、示例、ADR 标识、边界披露；不选择 LICENSE 或发布 |
+| O8 发布技术准备 | 技术核验已完成；发布决策待定 | 历史扫描 23 提示（1 条凭据风险待处置）、依赖元数据、ADR-0078、4/4 quickstart、认证边界披露 |
 
 E6 尚未开始并持续暂缓。本任务只使用确定性离线测试及独立临时数据库、端口的本地合成
 gRPC 测量，不修改 E6 harness、配置、产物，也不启动模型、Habitat 或真实设备。
@@ -89,3 +89,13 @@ SQLite append/checkpoint/savepoint 故障、HTTP 400/409/503、持久重启、Ca
 
 O7 验证：workspace tests 628 passed / 2 explicit ignored、workspace Clippy、Rustdoc、
 formatting 与 diff 检查通过。此处的代码组织改变不声明新分布式能力或物理证据。
+
+## O8 交付
+
+Gitleaks 8.30.1 校验官方归档后扫描本地全 refs 可达历史（561 commits）与 tracked HEAD；
+历史 23 提示，22 个 response cache 标识和 1 个旧功能分支硬编码凭据 fallback。
+当前 HEAD 0 提示不代表历史风险已关闭；真实凭据有效性和失效处理未执行。
+当前锁定 Rust/Python 依赖的许可证元数据已盘点，项目 LICENSE 保留负责人选择。
+重复 relocation ADR 改为 0078；78 个 ADR 无重复。声明式 validate 与真实 loopback
+最小 quickstart 4/4 完成，网络/认证/物理边界已披露。详见
+[发布技术准备审计](release-preparation-audit.md)。

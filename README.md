@@ -1067,3 +1067,7 @@ Controller 分阶段合成测量入口为 `tools/quality/measure_controller_pipe
 
 部署来源解析与中性消费者已在 application 内拆分；来源身份与 Control/Orchestration
 权威继续保留，见[部署证据边界](docs/development/deployment-evidence-boundaries.md)。
+
+当前开源准备、锁定依赖清单、历史凭据风险与网络认证边界见
+[发布技术准备审计](docs/development/release-preparation-audit.md)。项目 LICENSE 与历史
+风险处置待负责人决定；此处的代码与合成检查不表示发布批准。

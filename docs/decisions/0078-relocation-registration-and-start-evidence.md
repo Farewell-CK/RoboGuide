@@ -1,7 +1,10 @@
-# ADR-0070: Deployment registration and reset-bound relocation evidence
+# ADR-0078: Deployment registration and reset-bound relocation evidence
 
 - Status: Accepted
 - Scope: Habitat Local EAIOS deployment and Mission grounding evidence; no Core or MissionPlan contract change
+- Identifier correction (2026-10-12): this document previously duplicated ADR-0070. The original
+  Actor takeover decision retains ADR-0070; only this document's identifier/path changes. Existing
+  relocation behavior and accepted decision remain unchanged. Historical revisions retain the old path.
 
 ## Context
 
