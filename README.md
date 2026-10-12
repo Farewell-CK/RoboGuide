@@ -316,6 +316,10 @@ commitments 及所有指向该 Group 的 reservations，确保 Released Group �
 Pending commitment 不是 Execution Group lifecycle state，也不写入 Shared Node State。
 Abort 不表示 recovery exhausted；它允许后续重新 Match/Propose/Commit。
 
+恢复进入 Blocked 前先验证精确 Task/Role、previous owner 和既有 release 合同；拒绝不留下
+部分生命周期或事件变化。阶段性[所有权模型与可回放测试](docs/development/control-ownership-model.md)
+覆盖同名 Role 的跨 Task 交错、合法 pending/Context/零资源状态及 malformed checkpoint。
+
 本切片未实现 background reconciliation loop、跨 Node 的整组重匹配、
 spatial/task-timeout recovery、Mission replanning、自动 Runtime re-execution 或 recovery
 exhaustion policy。

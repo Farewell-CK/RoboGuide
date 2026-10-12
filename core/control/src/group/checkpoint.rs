@@ -23,6 +23,18 @@ impl ControlPlane {
                     "checkpoint recovery commitment references an unknown Group".to_string(),
                 )
             })?;
+            let unbound = group
+                .recovery_unbound_role(commitment.task_ref(), commitment.role_id())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(
+                        "checkpoint recovery commitment has no exact unbound Task/Role".into(),
+                    )
+                })?;
+            if unbound.previous_node_id != *commitment.previous_node_id() {
+                return Err(ControlError::InvalidProposal(
+                    "checkpoint recovery commitment differs from its previous owner".into(),
+                ));
+            }
             let role = group.role_requirement(commitment.task_ref(), commitment.role_id());
             if !group.task_executions.is_empty() && role.is_none() {
                 return Err(ControlError::InvalidProposal(
@@ -219,6 +231,12 @@ impl ControlPlane {
 
     /// Validates the optional metadata retained by a legacy single-Task Group.
     fn validate_legacy_group_checkpoint(&self, group: &ExecutionGroup) -> Result<(), ControlError> {
+        if !group.task_unbound_roles.is_empty() || !group.context_bindings.is_empty() {
+            return Err(ControlError::InvalidProposal(
+                "legacy Group checkpoint contains Mission-local binding state".into(),
+            ));
+        }
+        let mut represented_roles = std::collections::BTreeSet::new();
         for ((task_ref, role_id), requirement) in &group.role_requirements {
             if task_ref != &group.task_ref || role_id != requirement.role_id() {
                 return Err(ControlError::InvalidProposal(
@@ -227,6 +245,11 @@ impl ControlPlane {
             }
         }
         for assignment in &group.assignments {
+            if !represented_roles.insert(assignment.role_id()) {
+                return Err(ControlError::InvalidProposal(
+                    "legacy Group checkpoint contains a duplicate Role assignment".into(),
+                ));
+            }
             if group.role_requirements.is_empty() {
                 continue;
             }
@@ -238,6 +261,11 @@ impl ControlPlane {
             )?;
         }
         for (role_id, unbound) in &group.unbound_roles {
+            if !represented_roles.insert(role_id) {
+                return Err(ControlError::InvalidProposal(
+                    "legacy Group checkpoint Role is both bound and unbound".into(),
+                ));
+            }
             if !group.role_requirements.is_empty() {
                 self.validate_checkpoint_actor_assignment(
                     group,

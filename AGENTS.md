@@ -665,6 +665,9 @@ Recovery pipeline tests prove candidate membership, proposal/commit separation,
 atomic conflicts, committed-only rebind, and stable unaffected bindings.
 Commitment lifecycle tests cover one-pending-per-role, stale handles, atomic Abort,
 terminal cleanup, zero-resource roles, and Multi-Mission ownership isolation.
+`core/control/src/tests/ownership_model.rs` adds an independent lifecycle-aware allocation model,
+fixed-seed interleavings, temporary counterexample retention and explicit extended/replay checks.
+Its model preserves pending normal/recovery commitments and single-owner Context reuse.
 Scheduler tests require stable joint node/resource/time choices, bounded backtracking,
 CandidateSet confinement, normal/recovery policy consistency, decision-local exclusive-resource
 avoidance, Context binding reuse, future admission/restore/due/cancel/overrun behavior,

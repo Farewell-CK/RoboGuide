@@ -448,6 +448,7 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<RecoveryOutcome, ControlError> {
+        self.validate_role_recovery_release(need)?;
         let group = self
             .groups
             .get(need.group_id())
@@ -510,6 +511,65 @@ impl ControlPlane {
         })
     }
 
+    /// Checks exact released-slot ownership and release support before any Group or event mutation.
+    ///
+    /// This repeats no policy selection: it applies the existing release contract before the
+    /// aggregate Blocked transition, including the prohibition on Task-local Context release.
+    fn validate_role_recovery_release(&self, need: &RoleRecoveryNeed) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get(need.group_id())
+            .ok_or_else(|| ControlError::UnknownGroup(need.group_id().clone()))?;
+        if !matches!(
+            group.lifecycle,
+            GroupLifecycle::Bound | GroupLifecycle::Active | GroupLifecycle::Adapted
+        ) {
+            return Err(ControlError::InvalidLifecycle(group.lifecycle));
+        }
+        let (assignments, task_scoped) =
+            if let Some(execution) = group.task_execution(need.task_ref()) {
+                (execution.assignments(), true)
+            } else if group.task_executions.is_empty() && group.task_ref == *need.task_ref() {
+                (group.assignments.as_slice(), false)
+            } else {
+                return Err(ControlError::InvalidProposal(
+                    "recovery Task is not registered in this Group".into(),
+                ));
+            };
+        let assignment = assignments
+            .iter()
+            .find(|assignment| {
+                assignment.role_id() == need.role_id()
+                    && assignment.node_id() == need.current_node_id()
+            })
+            .ok_or_else(|| {
+                ControlError::InvalidProposal(
+                    "recovery need no longer matches the active group assignment".into(),
+                )
+            })?;
+        for resource_id in assignment.resource_ids() {
+            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
+                ControlError::InvalidProposal(format!(
+                    "recovery binding {resource_id} has no reservation"
+                ))
+            })?;
+            if reservation.task_ref != *need.task_ref()
+                || reservation.role_id != *need.role_id()
+                || reservation.group_id.as_ref() != Some(need.group_id())
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "recovery does not own reservation {resource_id}"
+                )));
+            }
+            if task_scoped && reservation.scope == domain::ResourceBindingScope::Context {
+                return Err(ControlError::InvalidProposal(
+                    "Context-scoped role bindings must end with their Context before recovery release".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Partially releases the exact binding after the composition proves physical stop or fencing.
     ///
     /// Unlike [`Self::assess_group`], this transition does not infer ambiguity from Node health.
@@ -533,6 +593,7 @@ impl ControlPlane {
             role_id.clone(),
             current_node_id.clone(),
         );
+        self.validate_role_recovery_release(&need)?;
         events.append(
             timestamp,
             correlation_id,
