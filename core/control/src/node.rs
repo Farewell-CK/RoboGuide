@@ -78,6 +78,39 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<(), ControlError> {
+        self.register_node_with_lease_received(
+            state,
+            registration,
+            status,
+            lease,
+            timestamp,
+            timestamp,
+            correlation_id,
+            events,
+        )
+    }
+
+    /// Registers a fresh lease at decision time while preserving the original reported-health receive time.
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_node_with_lease_received<
+        S: SharedNodeStateReader + SharedNodeStateWriter,
+        E: EventSink,
+    >(
+        &mut self,
+        state: &mut S,
+        registration: NodeRegistration,
+        status: NodeStatus,
+        lease: NodeLease,
+        received_at: TimestampMs,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        if received_at > timestamp {
+            return Err(ControlError::InvalidLease(
+                "registration receive time is after decision time".into(),
+            ));
+        }
         if lease.node_id() != registration.node_id() {
             return Err(ControlError::InvalidLease(
                 "lease node does not match registration node".to_string(),
@@ -99,11 +132,12 @@ impl ControlPlane {
             .record_node(NodeStateSnapshot::new(
                 registration,
                 status,
-                timestamp,
+                received_at,
                 NodeLivenessObservation::new(NodeLiveness::Reachable, timestamp),
             ))
             .map_err(ControlError::SharedState)?;
         self.leases.insert(node_id.clone(), lease);
+        self.node_sessions.remove(&node_id);
         events.append(
             timestamp,
             correlation_id,
@@ -230,6 +264,7 @@ impl ControlPlane {
             .map(|(node_id, lease)| (node_id.clone(), lease.lease_id().clone()))
             .collect::<Vec<_>>();
         for (node_id, lease_id) in &expired {
+            self.fence_node_session(node_id);
             state
                 .record_node_liveness(
                     node_id,

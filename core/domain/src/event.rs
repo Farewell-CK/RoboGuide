@@ -5,6 +5,27 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Control accepted continuous process-local liveness without refreshing reported health.
+    NodeSessionLivenessAccepted {
+        /// Exact Node with current registration authority.
+        node_id: NodeId,
+        /// Current boot-unique session.
+        session_id: String,
+        /// Exact renewable lease identity.
+        lease_id: LeaseId,
+        /// First heartbeat sequence represented by the continuous summary.
+        first_sequence: u64,
+        /// Highest validated sequence accepted by Control.
+        last_sequence: u64,
+        /// Receive-time anchor after application-accepted registration.
+        activated_at: TimestampMs,
+        /// First actual heartbeat receive time.
+        first_received_at: TimestampMs,
+        /// Last actual heartbeat receive time.
+        last_received_at: TimestampMs,
+        /// Maximum gap from activation and between valid heartbeats.
+        maximum_gap_ms: u64,
+    },
     /// A source-aware State record was durably accepted for projection.
     StateRecordObserved {
         /// Bounded record retaining source, semantic, receive time, and freshness.

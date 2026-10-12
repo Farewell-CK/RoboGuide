@@ -29,12 +29,12 @@ pub(crate) fn drive_application_timer_with_clock(
     clock: &impl Clock,
     verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let now = clock.now();
     let gate_started = std::time::Instant::now();
     let _write_guard = event_write_gate
         .lock()
         .map_err(|_| "event-log write gate is poisoned")?;
     let gate_elapsed = gate_started.elapsed();
+    let now = clock.now();
     event_log.begin_batch()?;
     let transition = (|| {
         let lock_started = std::time::Instant::now();

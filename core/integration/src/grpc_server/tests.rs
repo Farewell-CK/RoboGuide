@@ -380,6 +380,8 @@ fn peer_readiness_requires_current_session_identity_and_bounds() {
     router.sessions.lock().expect("registry lock").insert(
         "dog-a".to_string(),
         RoutedSession {
+            liveness_evidence: None,
+            activated_at: None,
             session_id: "session-current".to_string(),
             sender,
             lease_id: "lease-current".to_string(),
@@ -535,6 +537,8 @@ fn pending_registration_cannot_route_commands() {
     router.sessions.lock().expect("registry lock").insert(
         "dog-a".to_string(),
         RoutedSession {
+            liveness_evidence: None,
+            activated_at: None,
             session_id: "session-pending".to_string(),
             sender,
             lease_id: "lease-pending".to_string(),
@@ -576,6 +580,8 @@ fn execution_session_requires_registration_metadata() {
     router.sessions.lock().expect("registry lock").insert(
         "dog-a".to_string(),
         RoutedSession {
+            liveness_evidence: None,
+            activated_at: None,
             session_id: "session-current".to_string(),
             sender,
             lease_id: "lease-current".to_string(),
@@ -625,6 +631,8 @@ fn expired_lease_rejects_new_commands() {
     router.sessions.lock().expect("registry lock").insert(
         "dog-a".to_string(),
         RoutedSession {
+            liveness_evidence: None,
+            activated_at: None,
             session_id: "session-old".to_string(),
             sender,
             lease_id: "lease-old".to_string(),
@@ -668,6 +676,8 @@ fn current_session_check_rejects_pending_wrong_and_expired_routes() {
     router.sessions.lock().expect("registry lock").insert(
         "dog-a".to_string(),
         RoutedSession {
+            liveness_evidence: None,
+            activated_at: None,
             session_id: "session-current".to_string(),
             sender,
             lease_id: "lease-current".to_string(),
@@ -726,6 +736,8 @@ fn newer_session_fences_late_old_heartbeat() {
     router.sessions.lock().expect("registry lock").insert(
         "dog-a".to_string(),
         RoutedSession {
+            liveness_evidence: None,
+            activated_at: None,
             session_id: "session-new".to_string(),
             sender,
             lease_id: "lease-new".to_string(),

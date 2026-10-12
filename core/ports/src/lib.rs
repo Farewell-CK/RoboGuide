@@ -47,6 +47,12 @@ pub trait Clock {
     fn now(&self) -> TimestampMs;
 }
 
+/// Read-only current-process ingress continuity, supplied to existing Control authority.
+pub trait NodeLivenessReader {
+    /// Returns fixed-size exact-session evidence snapshots; failure cannot authorize renewal.
+    fn node_liveness_evidence(&self) -> Result<Vec<domain::NodeSessionLivenessEvidence>, String>;
+}
+
 /// The event sink used to make cross-module behavior inspectable.
 pub trait EventSink {
     /// Appends one immutable event to the configured evidence sink.

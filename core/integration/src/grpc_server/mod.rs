@@ -171,6 +171,10 @@ pub struct GrpcNodeRouter {
 
 /// Current command route for one connected node.
 struct RoutedSession {
+    /// Current-process continuous receive evidence, absent until the first valid heartbeat.
+    liveness_evidence: Option<domain::NodeSessionLivenessEvidence>,
+    /// Shared process-clock anchor established when Registered activates the route.
+    activated_at: Option<domain::TimestampMs>,
     /// Current session identity inserted into commands.
     session_id: String,
     /// Outbound stream producer.
@@ -194,6 +198,80 @@ struct RoutedSession {
 }
 
 impl GrpcNodeRouter {
+    /// Anchors current-process continuity only after application-accepted registration.
+    fn anchor_liveness(
+        &self,
+        node_id: &str,
+        session_id: &str,
+        at: domain::TimestampMs,
+    ) -> Result<(), Status> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        if let Some(route) = sessions
+            .get_mut(node_id)
+            .filter(|route| route.session_id == session_id && route.active)
+        {
+            route.activated_at = Some(at);
+            route.liveness_evidence = None;
+        }
+        Ok(())
+    }
+
+    /// Records fixed-size continuity after identity/lease/sequence and health-shape validation.
+    fn observe_received_heartbeat(
+        &self,
+        node_id: &str,
+        session_id: &str,
+        message: &NodeMessage,
+        at: domain::TimestampMs,
+    ) -> Result<(), Status> {
+        let Some(NodePayload::Heartbeat(heartbeat)) = &message.message else {
+            return Ok(());
+        };
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        let Some(route) = sessions
+            .get_mut(node_id)
+            .filter(|route| route.session_id == session_id && route.active)
+        else {
+            return Ok(());
+        };
+        let Some(activated_at) = route.activated_at else {
+            return Ok(());
+        };
+        let previous = route
+            .liveness_evidence
+            .as_ref()
+            .map_or(activated_at, |evidence| evidence.last_received_at);
+        let gap = at
+            .as_millis()
+            .checked_sub(previous.as_millis())
+            .ok_or_else(|| Status::failed_precondition("receive clock regressed"))?;
+        if let Some(evidence) = &mut route.liveness_evidence {
+            evidence.maximum_gap_ms = evidence.maximum_gap_ms.max(gap);
+            evidence.last_sequence = heartbeat.sequence;
+            evidence.last_received_at = at;
+        } else {
+            route.liveness_evidence = Some(domain::NodeSessionLivenessEvidence {
+                node_id: domain::NodeId::new(node_id)
+                    .map_err(|error| Status::invalid_argument(error.to_string()))?,
+                session_id: session_id.into(),
+                lease_id: domain::LeaseId::new(&route.lease_id)
+                    .map_err(|error| Status::invalid_argument(error.to_string()))?,
+                activated_at,
+                first_sequence: heartbeat.sequence,
+                last_sequence: heartbeat.sequence,
+                first_received_at: at,
+                last_received_at: at,
+                maximum_gap_ms: gap,
+            });
+        }
+        Ok(())
+    }
     /// Returns current session/heartbeat-age diagnostics without changing route or Control state.
     pub fn diagnostic_session(
         &self,
@@ -599,6 +677,8 @@ async fn run_grpc_session(
         .insert(
             registration.node_id.clone(),
             RoutedSession {
+                liveness_evidence: None,
+                activated_at: None,
                 session_id: session_id.clone(),
                 sender: outbound.clone(),
                 lease_id: lease_id.clone(),
@@ -659,6 +739,9 @@ async fn run_grpc_session(
             emit_unavailable_observed(&events, node_id.clone(), session_id.clone(), &observation);
         }
         return Err(status);
+    }
+    if let Some(clock) = &observation.clock {
+        router.anchor_liveness(&node_id, &session_id, clock.now())?;
     }
     // Keep reading and validating the transport stream while Controller application acceptance
     // may be slow. ACKs are emitted only by the serial application loop after durable acceptance.
@@ -725,6 +808,17 @@ async fn run_grpc_session(
                     let _ = validated_sender.send(Err(error));
                     break;
                 }
+            }
+            if let Some((at, _)) = received
+                && let Err(error) = reader_router.observe_received_heartbeat(
+                    &reader_node_id,
+                    &reader_session_id,
+                    &message,
+                    at,
+                )
+            {
+                let _ = validated_sender.send(Err(error));
+                break;
             }
             let metadata = reader_observation.metadata(
                 received,

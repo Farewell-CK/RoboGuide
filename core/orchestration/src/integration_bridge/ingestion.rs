@@ -144,29 +144,65 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         received_at: TimestampMs,
         correlation_id: &CorrelationId,
     ) -> Result<(), IntegrationRuntimeError> {
-        self.runtime.refresh_peer_channel_deadlines(received_at);
+        self.consume_received(event, received_at, received_at, correlation_id)
+    }
+
+    /// Preserves actual ingress ages while current decisions and deadline refresh use the same Clock's fresh time.
+    pub fn consume_received(
+        &mut self,
+        event: GrpcNodeEvent,
+        received_at: TimestampMs,
+        decision_at: TimestampMs,
+        correlation_id: &CorrelationId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        if received_at > decision_at {
+            return Err(IntegrationRuntimeError::Protocol(
+                "ingress receive time exceeds decision time".into(),
+            ));
+        }
+        self.refresh_node_liveness(decision_at, correlation_id)?;
+        self.runtime.refresh_peer_channel_deadlines(decision_at);
         match event {
             GrpcNodeEvent::Registered {
+                session_id,
                 lease_id,
                 registration,
-                ..
             } => {
+                if self
+                    .router
+                    .has_session(&registration.node_id)
+                    .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
+                    && !self
+                        .router
+                        .session_matches(&registration.node_id, &session_id)
+                        .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
+                {
+                    return Err(IntegrationRuntimeError::Protocol(
+                        "registration session was superseded".into(),
+                    ));
+                }
                 let registration = registration_from_wire(registration)?;
                 let node_id = registration.node_id().clone();
                 let lease = NodeLease::new(
                     LeaseId::new(lease_id)?,
                     node_id.clone(),
-                    received_at,
+                    decision_at,
                     self.node_lease_policy.lease_duration_ms(),
                 )?;
-                self.control.register_node_with_lease(
+                self.control.register_node_with_lease_received(
                     &mut self.state,
                     registration,
                     NodeStatus::new(NodeHealth::Offline, received_at),
                     lease,
                     received_at,
+                    decision_at,
                     correlation_id,
                     &mut self.events,
+                )?;
+                self.control.register_node_session(
+                    &node_id,
+                    &session_id,
+                    self.node_lease_policy.lease_duration_ms(),
                 )?;
                 self.runtime.fence_peer_channels_for_node(&node_id);
                 self.runtime.fence_progress_for_node(&node_id);
@@ -198,10 +234,11 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                         let node_id = NodeId::new(node_id)?;
                         let lease_id = LeaseId::new(heartbeat.lease_id)?;
                         let status = status_from_wire(heartbeat.status.as_ref(), received_at)?;
-                        self.control.accept_heartbeat(
+                        self.control.accept_received_heartbeat(
                             &mut self.state,
                             NodeHeartbeat::new(node_id, lease_id, status),
                             received_at,
+                            decision_at,
                             self.node_lease_policy.lease_duration_ms(),
                             correlation_id,
                             &mut self.events,
@@ -295,6 +332,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     return Ok(());
                 }
                 let node_id_value = NodeId::new(&node_id)?;
+                self.control.fence_node_session(&node_id_value);
                 self.state.record_node_liveness(
                     &node_id_value,
                     domain::NodeLivenessObservation::new(

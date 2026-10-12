@@ -3,12 +3,35 @@
 use super::*;
 
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
+    /// Lets existing Control authority validate continuous exact-session receive evidence in this transaction.
+    pub fn refresh_node_liveness(
+        &mut self,
+        decision_at: TimestampMs,
+        correlation_id: &CorrelationId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        use ports::NodeLivenessReader;
+        let evidence = self
+            .router
+            .node_liveness_evidence()
+            .map_err(IntegrationRuntimeError::Protocol)?;
+        for evidence in evidence {
+            self.control.accept_session_liveness(
+                &self.state,
+                &evidence,
+                decision_at,
+                correlation_id,
+                &mut self.events,
+            )?;
+        }
+        Ok(())
+    }
     /// Applies time-driven lease and coordination expiry using existing Control/Runtime authority.
     pub fn tick(
         &mut self,
         now: TimestampMs,
         correlation_id: &CorrelationId,
     ) -> Result<Vec<NodeId>, IntegrationRuntimeError> {
+        self.refresh_node_liveness(now, correlation_id)?;
         self.runtime.refresh_peer_channel_deadlines(now);
         if self.restored_recovery_pending {
             self.restored_recovery_pending = false;

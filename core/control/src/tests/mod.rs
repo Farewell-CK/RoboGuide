@@ -15,4 +15,5 @@ include!("commit_resource_identity.rs");
 include!("registry_provenance.rs");
 include!("initial_preferences.rs");
 
+mod continuous_liveness;
 mod ownership_model;

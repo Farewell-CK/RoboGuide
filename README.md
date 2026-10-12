@@ -768,6 +768,11 @@ Integration Server 前设置 `ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS` 和
 等待上限（默认 30 秒）。默认关闭的 `ROBOGUIDE_DIAGNOSTICS_PATH` 输出有界本地 JSONL
 阶段指标；sink 失败不影响事实接受。见[配置与只读诊断](docs/development/node-protocol-diagnostics.md)。
 
+Control 在持久事务中检查当前精确 session/lease 的连续 reader 心跳证据，先续约再做
+timer expiry。该证据不刷新排队 health，也不提前 Ack 原始事实；实际 ingress time 保留
+证据年龄，fresh decision time 驱动资格与恢复。已提交 expiry、route loss 或 restart 仍
+要求新 registration。见 [ADR-0076](docs/decisions/0076-continuous-node-liveness-and-decision-time.md)。
+
 Integration Server 还接受 controller evidence SQLite 路径、Control HTTP 地址、Artifact
 HTTP 地址和文件 CAS 根目录；后两者默认是 `127.0.0.1:8090` 与
 `roboguide-artifacts`：

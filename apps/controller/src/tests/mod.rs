@@ -124,6 +124,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::MapArtifactRejected { .. }
         | EventPayload::NodeRegistered { .. }
         | EventPayload::NodeHeartbeatAccepted { .. }
+        | EventPayload::NodeSessionLivenessAccepted { .. }
         | EventPayload::NodeLeaseExpired { .. }
         | EventPayload::ExecutionGroupCreated { .. }
         | EventPayload::GroupContinuationProposed { .. }

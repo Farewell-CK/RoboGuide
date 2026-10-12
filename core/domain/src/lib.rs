@@ -24,6 +24,7 @@ mod memory;
 mod mission;
 mod mission_plan;
 mod node_health;
+mod node_liveness_evidence;
 mod node_registration;
 mod node_state;
 mod physical_entity;
@@ -81,6 +82,7 @@ pub use memory::{
     MemorySelector, MemoryVisibility,
 };
 pub use mission::{MissionGoal, MissionPlan, PlannedTask, TaskGraph};
+pub use node_liveness_evidence::NodeSessionLivenessEvidence;
 
 /// Supplies the conservative identity used only when decoding pre-v7 replica evidence.
 fn legacy_memory_consumer_provider_id() -> String {

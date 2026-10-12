@@ -7,6 +7,21 @@ use ports::{
 };
 use prost::Message as _;
 
+impl ports::NodeLivenessReader for GrpcNodeRouter {
+    /// Reads only current active session summaries; expired routes and removed sessions provide no renewal evidence.
+    fn node_liveness_evidence(&self) -> Result<Vec<domain::NodeSessionLivenessEvidence>, String> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| "session registry unavailable".to_string())?;
+        Ok(sessions
+            .values()
+            .filter(|route| route.active && route.last_heartbeat.elapsed() < route.lease_duration)
+            .filter_map(|route| route.liveness_evidence.clone())
+            .collect())
+    }
+}
+
 /// Per-session immutable timing and observer dependencies selected at application startup.
 #[derive(Clone)]
 pub(super) struct GrpcSessionSettings {

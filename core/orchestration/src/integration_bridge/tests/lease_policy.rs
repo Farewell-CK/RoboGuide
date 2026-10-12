@@ -149,3 +149,106 @@ fn custom_policy_covers_registration_renewal_and_restore() {
         &domain::LeaseId::new("new-lease").unwrap()
     );
 }
+
+/// Queued registration and health preserve their original receive age while lease grant uses current time.
+#[test]
+fn queued_health_uses_original_receive_time_and_current_decision_time() {
+    let mut bridge = IntegrationRuntimeBridge::new(
+        ControlPlane::new(),
+        InMemorySharedNodeState::new(),
+        InMemoryEventLog::new(),
+        GrpcNodeRouter::default(),
+    );
+    let correlation = CorrelationId::new("delayed-policy").unwrap();
+    bridge
+        .consume_received(
+            GrpcNodeEvent::Registered {
+                session_id: "delayed-session".into(),
+                lease_id: "delayed-lease".into(),
+                registration: registration(),
+            },
+            TimestampMs::new(1),
+            TimestampMs::new(100),
+            &correlation,
+        )
+        .unwrap();
+    let node = NodeId::new("lease-node").unwrap();
+    assert_eq!(
+        bridge.control().node_lease(&node).unwrap().issued_at(),
+        TimestampMs::new(100)
+    );
+    assert_eq!(
+        bridge
+            .state()
+            .node(&node)
+            .unwrap()
+            .reported_status_received_at(),
+        TimestampMs::new(1)
+    );
+    bridge
+        .consume_received(
+            GrpcNodeEvent::NodeMessage {
+                node_id: "lease-node".into(),
+                session_id: "delayed-session".into(),
+                message: integration::grpc::v0_4::NodeMessage {
+                    message: Some(NodePayload::Heartbeat(integration::grpc::v0_4::Heartbeat {
+                        session_id: "delayed-session".into(),
+                        lease_id: "delayed-lease".into(),
+                        sequence: 1,
+                        status: Some(integration::grpc::v0_4::NodeStatus {
+                            health: "online".into(),
+                            detail: String::new(),
+                        }),
+                    })),
+                },
+            },
+            TimestampMs::new(101),
+            TimestampMs::new(10_000),
+            &correlation,
+        )
+        .unwrap();
+    assert_eq!(
+        bridge
+            .state()
+            .node(&node)
+            .unwrap()
+            .reported_status_received_at(),
+        TimestampMs::new(101)
+    );
+    let requirement = domain::TaskRequirement::new(
+        domain::MissionId::new("delayed").unwrap(),
+        domain::TaskId::new("delayed-task").unwrap(),
+        vec![domain::RoleRequirement::new(
+            domain::RoleId::new("mover").unwrap(),
+            CapabilityKind::Mobility,
+            None,
+        )],
+    )
+    .unwrap();
+    assert!(matches!(
+        bridge.control().match_capabilities(
+            bridge.state(),
+            &requirement,
+            TimestampMs::new(10_000),
+            &correlation,
+            &mut InMemoryEventLog::new()
+        ),
+        Err(control::ControlError::NoCandidate(_))
+    ));
+    let checkpoint = bridge.checkpoint_json().unwrap();
+    let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &checkpoint,
+        InMemoryEventLog::new(),
+        GrpcNodeRouter::default(),
+        TimestampMs::new(20_000),
+    )
+    .unwrap();
+    assert_eq!(
+        restored
+            .state()
+            .node(&node)
+            .unwrap()
+            .reported_status_received_at(),
+        TimestampMs::new(101)
+    );
+}

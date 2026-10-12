@@ -16,6 +16,12 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 
 ## 2. 逻辑架构
 
+Control 活性与观测时间的已接受演进见 ADR-0076：Integration 仅提供当前精确 session/lease
+的连续接收证据，由 Control 在应用持久事务中决定续约/过期。原始 ingress receive time
+用于 State/health/peer/progress 的年龄；当前 decision time 用于资格、Commit、恢复与发送。
+续约不更新 reported health；已提交失效、route loss 或 restart 必须重新注册，不能从
+router active 或 latest heartbeat 隐式恢复。
+
 | 组件 | 职责 |
 | --- | --- |
 | Mission / Application | 提供外部 Mission / Goal，不直接控制设备 |

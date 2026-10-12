@@ -175,6 +175,11 @@ async fn custom_policy_and_original_ingress_survive_application_delay() {
     let metadata = metadata.unwrap();
     assert_eq!(metadata.received_at, domain::TimestampMs::new(100));
     assert_eq!(metadata.identity.unwrap().session_id, session_id);
+    use ports::NodeLivenessReader;
+    let evidence = router.node_liveness_evidence().unwrap();
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(evidence[0].first_received_at, domain::TimestampMs::new(100));
+    assert_eq!(evidence[0].last_sequence, 1);
     assert!(
         tokio::time::timeout(std::time::Duration::ZERO, inbound.message())
             .await

@@ -817,7 +817,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         DiagnosticStage::Reduce,
                         identity,
                     );
-                    if let Err(error) = candidate.bridge.consume(event, now, &correlation) {
+                    let received_at = metadata
+                        .as_ref()
+                        .map_or(now, |metadata| metadata.received_at);
+                    if let Err(error) =
+                        candidate
+                            .bridge
+                            .consume_received(event, received_at, now, &correlation)
+                    {
                         eprintln!("integration fact rejected by Runtime/Control: {error}");
                         rejection = Some(error.to_string());
                     } else if let Err(error) = apply_runtime_events(

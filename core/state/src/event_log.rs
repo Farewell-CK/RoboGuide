@@ -48,6 +48,9 @@ const EVENT_PAYLOAD_SCHEMA_V11: &str = "domain.EventPayload.json/v11";
 /// Current JSON payload codec including attributed final verifier verdicts.
 const EVENT_PAYLOAD_SCHEMA_V12: &str = "domain.EventPayload.json/v12";
 
+/// Event codec including exact-session continuous liveness acceptance, distinct from health.
+const EVENT_PAYLOAD_SCHEMA_V13: &str = "domain.EventPayload.json/v13";
+
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistedEvent {
@@ -493,6 +496,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V10 => Ok(10),
         EVENT_PAYLOAD_SCHEMA_V11 => Ok(11),
         EVENT_PAYLOAD_SCHEMA_V12 => Ok(12),
+        EVENT_PAYLOAD_SCHEMA_V13 => Ok(13),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -506,6 +510,7 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::NodeSessionLivenessAccepted { .. } => 13,
         EventPayload::MemoryArtifactStaged {
             consumer_provider_id,
             ..
@@ -644,7 +649,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V12,
+                    EVENT_PAYLOAD_SCHEMA_V13,
                     payload_json,
                 ],
             )

@@ -101,12 +101,24 @@ pub(super) fn accept_current_message(
     if route.session_id != session_id {
         return Ok(false);
     }
+    if route.active && route.last_heartbeat.elapsed() >= route.lease_duration {
+        return Err(Status::deadline_exceeded(
+            "expired Node route requires new registration",
+        ));
+    }
     if let Some(NodePayload::Heartbeat(heartbeat)) = &message.message {
         if heartbeat.session_id != session_id || heartbeat.lease_id != route.lease_id {
             return Ok(false);
         }
         if heartbeat.sequence <= route.management_sequence {
             return Ok(false);
+        }
+        if heartbeat.status.as_ref().is_none_or(|status| {
+            !matches!(status.health.as_str(), "online" | "degraded" | "offline")
+        }) {
+            return Err(Status::invalid_argument(
+                "heartbeat requires known local health",
+            ));
         }
         route.management_sequence = heartbeat.sequence;
         route.last_heartbeat = std::time::Instant::now();

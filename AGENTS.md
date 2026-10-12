@@ -103,6 +103,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Observation time semantics preserve source-local `NodeStatus.observed_at` while
   State ordering and Control freshness use RoboGuide-local `received_at`; do not
   compare independent source clocks or claim distributed clock synchronization.
+- ADR-0076 adds exact-session continuous liveness evidence projected by Integration and admitted
+  only by Control inside application transactions. It does not refresh health or acknowledge queued
+  raw facts. Process-local session anchors clear on restore; expiry/route-loss fences require new
+  registration. Bridge ingress preserves original receive time while decisions use fresh local time.
 - State checkpoint restore preserves each record's original `received_at`; restart must never make
   expired evidence Fresh. Group views and relation evidence use the same persisted receive-time
   semantics.

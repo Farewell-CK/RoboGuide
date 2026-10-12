@@ -11,6 +11,7 @@ mod group;
 mod initial_preferences;
 mod matching;
 mod node;
+mod node_session;
 mod proposal;
 mod reconciliation;
 mod registry_provenance;
@@ -377,6 +378,8 @@ impl std::error::Error for ControlError {}
 pub struct ControlPlane {
     /// Renewable lease authority pending later ownership review.
     pub(crate) leases: BTreeMap<NodeId, NodeLease>,
+    /// Live session continuity anchors, cleared with leases after process restart.
+    pub(crate) node_sessions: BTreeMap<NodeId, node_session::NodeSessionAnchor>,
     /// Unique resource commitment authority.
     pub(crate) reservations: BTreeMap<ResourceId, Reservation>,
     /// Future Ready-Task interval reservations keyed by mission-scoped Task.
@@ -425,6 +428,7 @@ impl ControlPlane {
     pub const fn with_status_ttl(max_status_age_ms: u64) -> Self {
         Self {
             leases: BTreeMap::new(),
+            node_sessions: BTreeMap::new(),
             reservations: BTreeMap::new(),
             scheduled_tasks: BTreeMap::new(),
             calendar_version: 0,
@@ -651,6 +655,7 @@ impl ControlPlane {
         }
         let restored = Self {
             leases: BTreeMap::new(),
+            node_sessions: BTreeMap::new(),
             reservations: checkpoint.reservations,
             scheduled_tasks,
             calendar_version: checkpoint.calendar_version,

@@ -233,7 +233,7 @@ fn sqlite_event_log_survives_reopen() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_id, "event-1");
     assert_eq!(events[0].correlation_id, "test-correlation");
-    assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V12);
+    assert_eq!(events[0].payload_schema, EVENT_PAYLOAD_SCHEMA_V13);
     let payload: EventPayload =
         serde_json::from_str(&events[0].payload_json).expect("payload codec is readable");
     assert!(matches!(
