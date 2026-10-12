@@ -227,12 +227,14 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         return lines.joinToString("\n")
     }
 
-    /** 把当前室内阶段的指令下发给机器狗：先中止上一轮可能未结束的任务、清空旧记录，再重新下发。
+    /** 把当前室内阶段的指令下发给机器狗：清空旧记录后重新下发。是否要打断上一轮未结束的任务由
+     * RobotConnectionManager.sendIndoorInstruction 内部按 turn 状态决定（steer 还是 task），这里不再
+     * 显式调用 cancelIndoorInstruction——那样会产生一个不等待、也不针对具体 turn 的 abort，容易打到
+     * 刚提交的新指令上，导致新指令一下发就收到 interrupted。
      * 只把 final_text/error 写入 RobotConversationLog，text_chunk/plan/batch_result/node_state/
      * task_state/status 等中间态事件不展示也不播报，避免刷屏（参考 robonix-client-android 的
      * ChatViewModel.handlePilotEvent：只有最终结果和错误会进入可见的消息列表）。 */
     private fun dispatchIndoorInstruction(instruction: String) {
-        RobotConnectionManager.cancelIndoorInstruction()
         RobotConversationLog.clear()
         dispatchInstructionToRobot(instruction)
     }
@@ -241,11 +243,13 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         RobotConnectionManager.sendIndoorInstruction(
             text = instruction,
             onEvent = { event ->
-//                if (event.kind == "final_text" && event.finalText.isNotBlank()) {
-//                    RobotConversationLog.append(instruction, event.finalText, event.kind)
-//                }
-                val summary = event.finalText.ifBlank { event.textChunk.ifBlank { event.status?.message.orEmpty() } }
-                RobotConversationLog.append(instruction, summary.ifBlank { event.kind }, event.kind)
+                // 只把 final_text 写入可见记录；plan/batch_result/node_state/task_state/status 等中间态
+                // 事件只用于 RobotConnectionManager 内部维护 turn 状态，不展示也不播报——参考
+                // robonix-client-android 的 ChatViewModel.handlePilotEvent：这些事件只会落进它自己的
+                // 二级 timeline（折叠、限容），从不进入主消息列表，否则同一状态反复下发会在列表里刷屏。
+                if (event.kind == "final_text" && event.finalText.isNotBlank()) {
+                    RobotConversationLog.append(instruction, event.finalText, event.kind)
+                }
             },
             onError = { error -> RobotConversationLog.append(instruction, error, "error") },
         )
@@ -263,9 +267,9 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         sendIndoorFreeformInstruction(text)
     }
 
-    /** 用户手动输入/语音下发的自由指令：中止上一轮未完成任务后发送，结果追加进现有下发记录（不清空历史） */
+    /** 用户手动输入/语音下发的自由指令：结果追加进现有下发记录（不清空历史）。是否打断上一轮同样交给
+     * RobotConnectionManager.sendIndoorInstruction 按 turn 状态决定，不在这里显式 abort。 */
     private fun sendIndoorFreeformInstruction(text: String) {
-        RobotConnectionManager.cancelIndoorInstruction()
         dispatchInstructionToRobot(text)
     }
 
