@@ -228,6 +228,110 @@ fn mission_hold_sla_is_observable_without_authorizing_retry() {
     );
 }
 
+/// Repeated typed local failures quarantine only one Mission and survive checkpoint restore.
+#[test]
+fn crash_loop_breaker_requires_explicit_operator_acknowledgement() {
+    let (mut orchestrator, _control, mut events) = fixture();
+    let mission = MissionId::new("a").unwrap();
+    let correlation = CorrelationId::new("crash-loop").unwrap();
+    for (index, timestamp) in [10_u64, 20, 30].into_iter().enumerate() {
+        orchestrator
+            .isolate_execution_with_failure(
+                &mission,
+                MissionIsolationSource::ReadyDispatch,
+                MissionFailureClass::InvalidContract,
+                "sha256:stable-contract".into(),
+                TimestampMs::new(timestamp),
+                &correlation,
+                &mut events,
+            )
+            .unwrap();
+        let hold = orchestrator
+            .execution(&mission)
+            .unwrap()
+            .isolation()
+            .unwrap();
+        assert_eq!(hold.failure.count, (index + 1) as u32);
+        if index < 2 {
+            orchestrator
+                .resume_isolated_execution(
+                    &mission,
+                    hold.generation,
+                    TimestampMs::new(timestamp + 1),
+                    &correlation,
+                    &mut events,
+                )
+                .unwrap();
+        }
+    }
+    assert!(
+        orchestrator
+            .execution(&mission)
+            .unwrap()
+            .is_crash_loop_quarantined()
+    );
+    assert!(
+        orchestrator
+            .dispatchable_tasks(&mission, &_control)
+            .is_empty()
+    );
+    let checkpoint = orchestrator.checkpoint_json().unwrap();
+    let mut restored = MissionOrchestrator::restore_json(&checkpoint).unwrap();
+    assert!(
+        restored
+            .execution(&mission)
+            .unwrap()
+            .is_crash_loop_quarantined()
+    );
+    let generation = restored
+        .execution(&mission)
+        .unwrap()
+        .isolation()
+        .unwrap()
+        .generation;
+    assert!(
+        restored
+            .resume_isolated_execution(
+                &mission,
+                generation,
+                TimestampMs::new(31),
+                &correlation,
+                &mut events,
+            )
+            .is_err()
+    );
+    restored
+        .clear_crash_loop_quarantine(
+            &mission,
+            generation,
+            TimestampMs::new(31),
+            &correlation,
+            &mut events,
+            "recovery-admin".into(),
+            "validated node status and retained ownership".into(),
+        )
+        .unwrap();
+    restored
+        .resume_isolated_execution(
+            &mission,
+            generation,
+            TimestampMs::new(32),
+            &correlation,
+            &mut events,
+        )
+        .unwrap();
+    assert!(
+        !restored
+            .execution(&mission)
+            .unwrap()
+            .is_crash_loop_quarantined()
+    );
+    assert!(events.records().iter().any(|event| matches!(
+        event.payload(),
+        domain::EventPayload::MissionExecutionQuarantineCleared { .. }
+    )));
+}
+
 /// Legacy policy omission is compatible; fabricated waiting slots, future ordinals or priorities reject.
 #[test]
 fn restored_policy_rejects_unproven_history_and_accepts_legacy_defaults() {

@@ -1,6 +1,32 @@
 //! Proven Mission-local rollback/hold boundaries; shared and unclassified failures remain fatal.
 
 use crate::*;
+use sha2::{Digest as _, Sha256};
+
+/// Converts one typed Orchestration rejection into stable breaker evidence.
+fn typed_failure_evidence(
+    error: &(dyn std::error::Error + Send + Sync + 'static),
+) -> Option<(orchestration::MissionFailureClass, String)> {
+    let orchestration = error.downcast_ref::<OrchestrationError>()?;
+    let (class, identity) = match orchestration {
+        OrchestrationError::InvalidContract(reason) => (
+            orchestration::MissionFailureClass::InvalidContract,
+            reason.clone(),
+        ),
+        OrchestrationError::RuntimeContractViolation {
+            task_ref,
+            violation,
+        } => (
+            orchestration::MissionFailureClass::RuntimeContractViolation,
+            format!("{task_ref}:{violation:?}"),
+        ),
+        _ => return None,
+    };
+    Some((
+        class,
+        format!("sha256:{:x}", Sha256::digest(identity.as_bytes())),
+    ))
+}
 
 /// Revalidates trusted authority before any local-error classification or explicit continuation.
 pub(crate) fn validate_isolation_authority(
@@ -107,9 +133,17 @@ pub(crate) fn run_mission_transition(
                     },
                 );
             }
-            controller
-                .orchestrator
-                .isolate_execution(mission, source, now, correlation, events)?;
+            let (failure_class, failure_fingerprint) = typed_failure_evidence(error.as_ref())
+                .ok_or("unproven Mission local failure classification")?;
+            controller.orchestrator.isolate_execution_with_failure(
+                mission,
+                source,
+                failure_class,
+                failure_fingerprint,
+                now,
+                correlation,
+                events,
+            )?;
             Ok(())
         }
         Err(error) => Err(error),
@@ -161,6 +195,7 @@ pub(crate) fn revalidate_mission_resume(
 }
 
 /// Clears an exact hold and reconstructs its pending work only on an application-owned private candidate.
+#[cfg(test)]
 pub(crate) fn resume_mission_candidate(
     controller: &mut ControllerState,
     mission_id: &domain::MissionId,
@@ -169,7 +204,44 @@ pub(crate) fn resume_mission_candidate(
     correlation: &domain::CorrelationId,
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    resume_mission_candidate_with_policy(
+        controller,
+        mission_id,
+        generation,
+        now,
+        correlation,
+        events,
+        false,
+        "local-test",
+        "explicit test resume",
+    )
+}
+
+/// Clears a crash-loop quarantine only when an operator explicitly opts into that action.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resume_mission_candidate_with_policy(
+    controller: &mut ControllerState,
+    mission_id: &domain::MissionId,
+    generation: u64,
+    now: domain::TimestampMs,
+    correlation: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+    acknowledge_crash_loop: bool,
+    operator_role: &str,
+    operator_reason: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     revalidate_mission_resume(controller, mission_id, now)?;
+    if acknowledge_crash_loop {
+        controller.orchestrator.clear_crash_loop_quarantine(
+            mission_id,
+            generation,
+            now,
+            correlation,
+            events,
+            operator_role.to_string(),
+            operator_reason.to_string(),
+        )?;
+    }
     controller.orchestrator.resume_isolated_execution(
         mission_id,
         generation,

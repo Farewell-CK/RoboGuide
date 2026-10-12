@@ -130,6 +130,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::NodeSessionLivenessAccepted { .. }
         | EventPayload::MissionExecutionIsolated { .. }
         | EventPayload::MissionExecutionResumed { .. }
+        | EventPayload::MissionExecutionQuarantineCleared { .. }
         | EventPayload::NodeLeaseExpired { .. }
         | EventPayload::ExecutionGroupCreated { .. }
         | EventPayload::GroupContinuationProposed { .. }

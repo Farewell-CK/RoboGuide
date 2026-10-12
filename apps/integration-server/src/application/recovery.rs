@@ -1,6 +1,63 @@
 //! Runtime ambiguity assessment and role recovery orchestration.
 
 use crate::*;
+
+/// Projects the unified controller recovery state without granting any automatic recovery authority.
+pub(crate) fn recovery_view(
+    controller: &ControllerState,
+    now: domain::TimestampMs,
+) -> serde_json::Value {
+    let unknown_attempts = controller.bridge.current_unknown_attempts();
+    let groups = controller.bridge.group_recovery_ids();
+    let held_missions = controller
+        .orchestrator
+        .mission_ids()
+        .into_iter()
+        .filter(|mission| {
+            controller
+                .orchestrator
+                .execution(mission)
+                .is_some_and(|execution| {
+                    execution.isolation().is_some() || execution.is_crash_loop_quarantined()
+                })
+        })
+        .map(|mission| mission.as_str().to_string())
+        .collect::<Vec<_>>();
+    let state = if !unknown_attempts.is_empty() || !groups.is_empty() {
+        "ReconciliationRequired"
+    } else if !held_missions.is_empty() {
+        "ManualIntervention"
+    } else {
+        "Ready"
+    };
+    serde_json::json!({
+        "schema_version": "roboguide.controller-recovery-view/v0.1",
+        "state": state,
+        "observed_at_ms": now.as_millis(),
+        "unknown_attempts": unknown_attempts.iter().map(|command| serde_json::json!({
+            "execution_id": command.correlation_id().as_str(),
+            "mission_id": command.mission_id().as_str(),
+            "group_id": command.group_id().as_str(),
+            "task_ref": command.task_ref().to_string(),
+            "role_id": command.role_id().as_str(),
+            "node_id": command.node_id().as_str(),
+        })).collect::<Vec<_>>(),
+        "groups_requiring_recovery": groups.iter().map(|group| group.as_str()).collect::<Vec<_>>(),
+        "held_missions": held_missions,
+        "sequence": [
+            "restore_checkpoint",
+            "clear_process_local_session_anchors",
+            "require_node_registration_and_status",
+            "retain_unknown_physical_attempts",
+            "reconcile_control_commitments",
+            "require_operator_approval_for_ambiguous_resume",
+            "ready"
+        ],
+        "automatic_execute_replay": false,
+        "automatic_resource_release": false,
+        "automatic_node_replacement": false,
+    })
+}
 /// Applies Runtime-owned lifecycle transitions without giving Integration Control authority.
 pub(crate) fn apply_runtime_events(
     controller: &mut ControllerState,

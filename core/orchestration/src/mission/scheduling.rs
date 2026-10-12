@@ -36,6 +36,7 @@ impl MissionOrchestrator {
         };
         if execution.lifecycle() != MissionExecutionLifecycle::Running
             || execution.isolation().is_some()
+            || execution.is_crash_loop_quarantined()
         {
             return Vec::new();
         }

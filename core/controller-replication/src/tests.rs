@@ -197,6 +197,7 @@ fn configuration(id: u64, members: &BTreeMap<u64, SocketAddr>) -> ReplicaConfig 
         application_schema: "test/checkpoint-v1".into(),
         application_policy_digest: "same-explicit-policy".into(),
         shared_secret: None,
+        tls: None,
     }
 }
 

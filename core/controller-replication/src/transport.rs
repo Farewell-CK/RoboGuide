@@ -9,8 +9,10 @@ use openraft::raft::{
 };
 use sha2::{Digest as _, Sha256};
 use std::io::{Read, Write};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 /// Maximum private frame, including escaped authority/history JSON.
 const MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
@@ -90,7 +92,7 @@ impl Drop for ReplicaServer {
 }
 
 impl ReplicaServer {
-    /// Binds the validated loopback member endpoint and admits only exact profile/target envelopes.
+    /// Binds the validated member endpoint and admits only exact profile/target envelopes.
     pub(crate) async fn bind(node: ReplicaNode) -> Result<Self, String> {
         let listener = tokio::net::TcpListener::bind(node.local_address())
             .await
@@ -115,10 +117,33 @@ impl ReplicaServer {
 }
 
 /// Dispatches one bounded request; the existing OpenRaft engine alone interprets consensus messages.
-async fn serve_connection(
-    mut stream: tokio::net::TcpStream,
+async fn serve_connection(stream: tokio::net::TcpStream, node: ReplicaNode) -> Result<(), String> {
+    if let Some(tls) = &node.tls {
+        let acceptor = TlsAcceptor::from(tls.server.clone());
+        let stream = acceptor
+            .accept(stream)
+            .await
+            .map_err(|error| format!("replica TLS handshake failed: {error}"))?;
+        let peer_digest = stream
+            .get_ref()
+            .1
+            .peer_certificates()
+            .and_then(|certificates| certificates.first())
+            .map(|certificate| format!("sha256:{:x}", Sha256::digest(certificate.as_ref())));
+        return serve_framed_connection(stream, node, peer_digest).await;
+    }
+    serve_framed_connection(stream, node, None).await
+}
+
+/// Reads and dispatches one framed request over either raw loopback or an authenticated TLS stream.
+async fn serve_framed_connection<S>(
+    mut stream: S,
     node: ReplicaNode,
-) -> Result<(), String> {
+    peer_certificate_digest: Option<String>,
+) -> Result<(), String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let length = stream.read_u64().await.map_err(|error| error.to_string())?;
     if length == 0 || length > MAX_FRAME_BYTES as u64 {
         return Err("replica request frame exceeds bounds".into());
@@ -140,9 +165,15 @@ async fn serve_connection(
         request.sender,
         &request.command,
     );
+    let certificate_authenticated = node.tls.as_ref().is_none_or(|tls| {
+        tls.peer_certificate_digests
+            .get(&request.sender)
+            .is_some_and(|expected| peer_certificate_digest.as_deref() == Some(expected))
+    });
     let reply = if request.profile != node.profile_identity()
         || request.target != node.config.replica_id
         || !node.config.members.contains_key(&request.sender)
+        || !certificate_authenticated
         || authenticated != request.auth_digest
     {
         Reply::Rejected("replica profile/member identity mismatch".into())
@@ -197,6 +228,8 @@ pub(crate) struct ReplicaNetworkFactory {
     online: Arc<AtomicBool>,
     /// Optional shared secret copied only into the authenticated transport client.
     shared_secret: Option<String>,
+    /// Optional loaded mTLS client profile for cross-host members.
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
 }
 
 impl ReplicaNetworkFactory {
@@ -206,12 +239,14 @@ impl ReplicaNetworkFactory {
         sender: u64,
         online: Arc<AtomicBool>,
         shared_secret: Option<String>,
+        tls: Option<Arc<crate::tls::TlsMaterial>>,
     ) -> Self {
         Self {
             profile,
             sender,
             online,
             shared_secret,
+            tls,
         }
     }
 }
@@ -230,6 +265,8 @@ pub(crate) struct ReplicaNetwork {
     online: Arc<AtomicBool>,
     /// Optional shared transport secret.
     shared_secret: Option<String>,
+    /// Optional loaded mTLS client profile for the remote member.
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
 }
 
 impl RaftNetworkFactory<ControllerRaftConfig> for ReplicaNetworkFactory {
@@ -244,6 +281,7 @@ impl RaftNetworkFactory<ControllerRaftConfig> for ReplicaNetworkFactory {
             sender: self.sender,
             online: self.online.clone(),
             shared_secret: self.shared_secret.clone(),
+            tls: self.tls.clone(),
         }
     }
 }
@@ -272,21 +310,43 @@ impl ReplicaNetwork {
             return Err(std::io::Error::other("replica frame exceeds bounds"));
         }
         let operation = async {
-            let mut stream = tokio::net::TcpStream::connect(&self.node.addr).await?;
-            stream.write_u64(encoded.len() as u64).await?;
-            stream.write_all(&encoded).await?;
-            let length = stream.read_u64().await?;
-            if length == 0 || length > MAX_FRAME_BYTES as u64 {
-                return Err(std::io::Error::other("replica reply exceeds bounds"));
+            let stream = tokio::net::TcpStream::connect(&self.node.addr).await?;
+            if let Some(tls) = &self.tls {
+                let connector = TlsConnector::from(tls.client.clone());
+                let name = rustls::pki_types::ServerName::try_from(tls.server_name.clone())
+                    .map_err(std::io::Error::other)?;
+                let mut stream = connector
+                    .connect(name, stream)
+                    .await
+                    .map_err(std::io::Error::other)?;
+                stream.write_u64(encoded.len() as u64).await?;
+                stream.write_all(&encoded).await?;
+                read_reply(&mut stream).await
+            } else {
+                let mut stream = stream;
+                stream.write_u64(encoded.len() as u64).await?;
+                stream.write_all(&encoded).await?;
+                read_reply(&mut stream).await
             }
-            let mut bytes = vec![0; length as usize];
-            stream.read_exact(&mut bytes).await?;
-            serde_json::from_slice(&bytes).map_err(std::io::Error::other)
         };
         tokio::time::timeout(option.hard_ttl(), operation)
             .await
             .map_err(std::io::Error::other)?
     }
+}
+
+/// Reads one bounded framed reply from an async replica stream.
+async fn read_reply<S>(stream: &mut S) -> Result<Reply, std::io::Error>
+where
+    S: tokio::io::AsyncRead + Unpin,
+{
+    let length = stream.read_u64().await?;
+    if length == 0 || length > MAX_FRAME_BYTES as u64 {
+        return Err(std::io::Error::other("replica reply exceeds bounds"));
+    }
+    let mut bytes = vec![0; length as usize];
+    stream.read_exact(&mut bytes).await?;
+    serde_json::from_slice(&bytes).map_err(std::io::Error::other)
 }
 
 impl RaftNetwork<ControllerRaftConfig> for ReplicaNetwork {
@@ -374,6 +434,8 @@ pub struct ReplicaFenceClient {
     epoch: ControllerEpoch,
     /// Optional shared transport secret inherited from the supervisor.
     shared_secret: Option<String>,
+    /// Optional loaded mTLS client profile for a cross-host replica endpoint.
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
 }
 
 impl ReplicaFenceClient {
@@ -395,6 +457,27 @@ impl ReplicaFenceClient {
             profile,
             epoch,
             shared_secret: None,
+            tls: None,
+        })
+    }
+
+    /// Constructs a child fence for either loopback or a validated mTLS cross-host endpoint.
+    pub fn new_with_tls(
+        address: SocketAddr,
+        profile: String,
+        epoch: ControllerEpoch,
+        tls_config: ReplicaTlsConfig,
+    ) -> Result<Self, String> {
+        if address.port() == 0 || profile.is_empty() || epoch.replica_id == 0 {
+            return Err("invalid Controller replica child fence".into());
+        }
+        let tls = crate::tls::load(Some(&tls_config))?.map(Arc::new);
+        Ok(Self {
+            address,
+            profile,
+            epoch,
+            shared_secret: None,
+            tls,
         })
     }
 
@@ -412,11 +495,48 @@ impl ReplicaFenceClient {
         ) {
             (None, None, None) => Ok(None),
             (Some(address), Some(profile), Some(epoch)) => {
-                let mut client = Self::new(
-                    address.parse().map_err(|_| "invalid replica endpoint")?,
-                    profile,
-                    serde_json::from_str(&epoch).map_err(|_| "invalid replica epoch")?,
-                )?;
+                let address = address.parse().map_err(|_| "invalid replica endpoint")?;
+                let epoch = serde_json::from_str(&epoch).map_err(|_| "invalid replica epoch")?;
+                let tls_values = (
+                    read("ROBOGUIDE_REPLICA_TLS_CA")?,
+                    read("ROBOGUIDE_REPLICA_TLS_CERT")?,
+                    read("ROBOGUIDE_REPLICA_TLS_KEY")?,
+                    read("ROBOGUIDE_REPLICA_TLS_SERVER_NAME")?,
+                    read("ROBOGUIDE_REPLICA_TLS_PEER_DIGESTS")?,
+                );
+                let mut client = if tls_values.0.is_some()
+                    || tls_values.1.is_some()
+                    || tls_values.2.is_some()
+                    || tls_values.3.is_some()
+                    || tls_values.4.is_some()
+                {
+                    let tls_config = ReplicaTlsConfig {
+                        ca_cert_path: tls_values
+                            .0
+                            .ok_or("replica TLS child fence misses CA path")?
+                            .into(),
+                        cert_path: tls_values
+                            .1
+                            .ok_or("replica TLS child fence misses certificate path")?
+                            .into(),
+                        key_path: tls_values
+                            .2
+                            .ok_or("replica TLS child fence misses key path")?
+                            .into(),
+                        server_name: tls_values
+                            .3
+                            .ok_or("replica TLS child fence misses server name")?,
+                        peer_certificate_digests: serde_json::from_str(
+                            &tls_values
+                                .4
+                                .ok_or("replica TLS child fence misses peer digest map")?,
+                        )
+                        .map_err(|_| "replica TLS child fence has invalid peer digest map")?,
+                    };
+                    Self::new_with_tls(address, profile, epoch, tls_config)?
+                } else {
+                    Self::new(address, profile, epoch)?
+                };
                 client.shared_secret = read("ROBOGUIDE_REPLICA_SHARED_SECRET")?;
                 if let Some(secret) = client.shared_secret.as_ref()
                     && (secret.len() < 32 || secret.len() > 256)
@@ -448,9 +568,51 @@ impl ReplicaFenceClient {
         if bytes.len() > MAX_FRAME_BYTES {
             return Err("replica child request exceeds bounds".into());
         }
-        let mut stream =
-            std::net::TcpStream::connect_timeout(&self.address, Duration::from_secs(2))
+        let stream = std::net::TcpStream::connect_timeout(&self.address, Duration::from_secs(2))
+            .map_err(|error| error.to_string())?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(12)))
+            .map_err(|error| error.to_string())?;
+        stream
+            .set_write_timeout(Some(Duration::from_secs(12)))
+            .map_err(|error| error.to_string())?;
+        let mut stream = if let Some(tls) = &self.tls {
+            let name = rustls::pki_types::ServerName::try_from(tls.server_name.clone())
                 .map_err(|error| error.to_string())?;
+            let connection = rustls::ClientConnection::new(tls.client.clone(), name)
+                .map_err(|error| error.to_string())?;
+            rustls::StreamOwned::new(connection, stream)
+        } else {
+            return self.exchange_raw(request, stream);
+        };
+        stream
+            .write_all(&(bytes.len() as u64).to_be_bytes())
+            .map_err(|error| error.to_string())?;
+        stream
+            .write_all(&bytes)
+            .map_err(|error| error.to_string())?;
+        let mut prefix = [0; 8];
+        stream
+            .read_exact(&mut prefix)
+            .map_err(|error| error.to_string())?;
+        let length = u64::from_be_bytes(prefix);
+        if length == 0 || length > MAX_FRAME_BYTES as u64 {
+            return Err("replica child reply exceeds bounds".into());
+        }
+        let mut bytes = vec![0; length as usize];
+        stream
+            .read_exact(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+    }
+
+    /// Sends one raw loopback child request while keeping the common framing logic bounded.
+    fn exchange_raw(
+        &self,
+        request: Request,
+        mut stream: std::net::TcpStream,
+    ) -> Result<Reply, String> {
+        let bytes = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
         stream
             .set_read_timeout(Some(Duration::from_secs(12)))
             .map_err(|error| error.to_string())?;

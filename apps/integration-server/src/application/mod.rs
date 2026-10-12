@@ -23,7 +23,9 @@ mod recovery;
 mod task_verifier;
 mod timer;
 mod verifier_source;
+#[cfg(test)]
 pub(crate) use isolation::resume_mission_candidate;
+pub(crate) use isolation::resume_mission_candidate_with_policy;
 pub(crate) use isolation::{
     flush_unisolated_commands, flush_unisolated_dispatch, run_mission_transition,
     validate_isolation_checkpoint_schema,
@@ -47,7 +49,8 @@ pub(crate) use physical_entity_registry::load_physical_entity_registry_file;
 #[cfg(test)]
 pub(crate) use recovery::{apply_recovery_required, resume_role_recovery};
 pub(crate) use recovery::{
-    apply_runtime_events, begin_current_ambiguity_recoveries, resume_pending_recoveries,
+    apply_runtime_events, begin_current_ambiguity_recoveries, recovery_view,
+    resume_pending_recoveries,
 };
 pub(crate) use task_verifier::{
     TaskVerifierFeed, apply_task_verifier, validate_restored_verifier_source,

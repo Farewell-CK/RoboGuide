@@ -27,6 +27,7 @@ impl MissionOrchestrator {
                     "lifecycle": execution.lifecycle(),
                     "accepted_at_ms": execution.accepted_at().as_millis(),
                     "isolation": execution.isolation,
+                    "failure_state": execution.failure_state,
                     "isolation_generation": execution.isolation_generation,
                     "dispatch_policy": execution.dispatch_policy,
                     "scheduling_deferrals": execution.scheduling_deferrals.iter().map(
@@ -157,6 +158,19 @@ impl MissionOrchestrator {
                         })
                     })
                     .transpose()?,
+                failure_state: value
+                    .get("failure_state")
+                    .filter(|value| !value.is_null())
+                    .map(|value| {
+                        serde_json::from_value::<MissionFailureState>(value.clone()).map_err(
+                            |error| {
+                                OrchestrationError::Mission(format!(
+                                    "invalid Mission failure checkpoint: {error}"
+                                ))
+                            },
+                        )
+                    })
+                    .transpose()?,
                 isolation_generation: value
                     .get("isolation_generation")
                     .map(|value| {
@@ -231,6 +245,7 @@ impl MissionOrchestrator {
             MissionExecution {
                 dispatch_policy: MissionDispatchState::default(),
                 isolation: None,
+                failure_state: None,
                 isolation_generation: 0,
                 plan,
                 group_id,

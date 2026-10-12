@@ -20,10 +20,13 @@ mod checkpoint_store;
 use checkpoint_store::StoredCheckpoint;
 #[path = "application_replication.rs"]
 mod application_replication;
+#[path = "archive.rs"]
+mod archive;
 pub use application_replication::{
     APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch,
     checkpoint_identity, validate_persisted_event,
 };
+pub use archive::{ArchiveManifest, ArchiveSink, FileArchiveSink};
 pub use checkpoint_store::{CheckpointStoragePolicy, CheckpointWriteStats};
 
 /// Previous JSON payload codec retained for Mission/Execution evidence compatibility.
@@ -69,6 +72,8 @@ const EVENT_PAYLOAD_SCHEMA_V15: &str = "domain.EventPayload.json/v15";
 const EVENT_PAYLOAD_SCHEMA_V16: &str = "domain.EventPayload.json/v16";
 /// Codec including explicit generation-bound future planning preemption.
 const EVENT_PAYLOAD_SCHEMA_V17: &str = "domain.EventPayload.json/v17";
+/// Codec including explicit operator acknowledgement of a Mission crash-loop quarantine.
+const EVENT_PAYLOAD_SCHEMA_V18: &str = "domain.EventPayload.json/v18";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -737,6 +742,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V15 => Ok(15),
         EVENT_PAYLOAD_SCHEMA_V16 => Ok(16),
         EVENT_PAYLOAD_SCHEMA_V17 => Ok(17),
+        EVENT_PAYLOAD_SCHEMA_V18 => Ok(18),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -751,6 +757,7 @@ fn validate_payload_schema(
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
         EventPayload::SchedulingReservationPreempted { .. } => 17,
+        EventPayload::MissionExecutionQuarantineCleared { .. } => 18,
         EventPayload::MissionSchedulingPriorityChanged { .. } => 16,
         EventPayload::MissionExecutionContractRejected { .. } => 15,
         EventPayload::MissionExecutionIsolated { .. }
@@ -886,6 +893,7 @@ impl SqliteEventLog {
             .connection
             .lock()
             .map_err(|_| "event connection lock is poisoned".to_string())?;
+        let payload_schema = payload_schema_for_payload(record.payload());
         let insert = |connection: &Connection| {
             connection.execute(
                 "INSERT INTO events
@@ -897,7 +905,7 @@ impl SqliteEventLog {
                     record.timestamp().as_millis(),
                     record.correlation_id().as_str(),
                     record.causation_id().map(|id| id.as_str()),
-                    EVENT_PAYLOAD_SCHEMA_V17,
+                    payload_schema,
                     payload_json,
                 ],
             )
@@ -921,6 +929,14 @@ impl SqliteEventLog {
             update_counter(&transaction).map_err(|error| error.to_string())?;
             transaction.commit().map_err(|error| error.to_string())
         }
+    }
+}
+
+/// Selects the newest codec marker only for payloads introduced by that codec.
+fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
+    match payload {
+        EventPayload::MissionExecutionQuarantineCleared { .. } => EVENT_PAYLOAD_SCHEMA_V18,
+        _ => EVENT_PAYLOAD_SCHEMA_V17,
     }
 }
 

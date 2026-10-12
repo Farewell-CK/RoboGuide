@@ -38,6 +38,18 @@ pub enum EventPayload {
         generation: u64,
         /// Fixed derived-work stage, not raw error text.
         source: String,
+        /// Typed failure class when the hold was produced by the current application.
+        #[serde(default)]
+        failure_class: Option<String>,
+        /// Stable digest of the typed failure identity.
+        #[serde(default)]
+        failure_fingerprint: Option<String>,
+        /// Repeated occurrences in the current crash-loop window.
+        #[serde(default)]
+        failure_count: u32,
+        /// Whether the hold crossed the explicit crash-loop breaker threshold.
+        #[serde(default)]
+        crash_loop: bool,
     },
     /// Explicit live revalidation cleared the exact current execution hold.
     MissionExecutionResumed {
@@ -45,6 +57,19 @@ pub enum EventPayload {
         mission_id: crate::MissionId,
         /// Consumed isolation generation.
         generation: u64,
+    },
+    /// An operator explicitly acknowledged a Mission crash-loop quarantine after revalidation.
+    MissionExecutionQuarantineCleared {
+        /// Exact Mission whose breaker state was cleared.
+        mission_id: crate::MissionId,
+        /// Generation of the reviewed execution hold.
+        generation: u64,
+        /// Count observed before the acknowledgement, retained as audit evidence.
+        failure_count: u32,
+        /// Authenticated operator role that acknowledged the quarantine.
+        operator_role: String,
+        /// Bounded human reason retained for audit review.
+        operator_reason: String,
     },
     /// Control accepted continuous process-local liveness without refreshing reported health.
     NodeSessionLivenessAccepted {

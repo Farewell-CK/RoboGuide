@@ -137,6 +137,18 @@ fn start_controller(
     if let Some(secret) = &configuration.replica.shared_secret {
         command.env("ROBOGUIDE_REPLICA_SHARED_SECRET", secret);
     }
+    if let Some(tls) = &configuration.replica.tls {
+        command
+            .env("ROBOGUIDE_REPLICA_TLS_CA", &tls.ca_cert_path)
+            .env("ROBOGUIDE_REPLICA_TLS_CERT", &tls.cert_path)
+            .env("ROBOGUIDE_REPLICA_TLS_KEY", &tls.key_path)
+            .env("ROBOGUIDE_REPLICA_TLS_SERVER_NAME", &tls.server_name)
+            .env(
+                "ROBOGUIDE_REPLICA_TLS_PEER_DIGESTS",
+                serde_json::to_string(&tls.peer_certificate_digests)
+                    .map_err(|error| error.to_string())?,
+            );
+    }
     let child = command.spawn().map_err(|error| error.to_string())?;
     eprintln!(
         "Controller child {} started under epoch {epoch:?}",

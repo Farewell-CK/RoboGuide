@@ -75,6 +75,8 @@ struct ControlHttpRequest {
     method: String,
     /// Raw origin-form request target, including an optional query.
     target: String,
+    /// Lowercase bounded headers used by the operator authorization layer.
+    headers: BTreeMap<String, String>,
     /// Exactly the number of body bytes declared by Content-Length.
     body: Vec<u8>,
 }
@@ -420,6 +422,8 @@ fn configured_duration(name: &str, default: u64) -> Result<u64, Box<dyn std::err
 /// Binds the configured integration listener and keeps accepting connector sessions.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // The workspace may enable multiple rustls crypto backends; choose ring before any TLS builder.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let mut arguments = std::env::args().skip(1).peekable();
     if arguments
         .peek()
@@ -473,6 +477,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if node_tls.is_none() && !address.ip().is_loopback() {
         return Err(
             "Node Protocol must remain loopback unless the opt-in mTLS identity profile is enabled"
+                .into(),
+        );
+    }
+    let operator_tls_configured = [
+        "ROBOGUIDE_OPERATOR_MTLS_SERVER_CERT",
+        "ROBOGUIDE_OPERATOR_MTLS_SERVER_KEY",
+        "ROBOGUIDE_OPERATOR_MTLS_CLIENT_CA",
+        "ROBOGUIDE_OPERATOR_MTLS_ROLE_MAP",
+    ]
+    .iter()
+    .all(|name| std::env::var_os(name).is_some());
+    if !http_address.ip().is_loopback() && !operator_tls_configured {
+        return Err(
+            "operator HTTP must remain loopback unless the opt-in mTLS role profile is enabled"
                 .into(),
         );
     }

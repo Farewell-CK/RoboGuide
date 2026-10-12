@@ -7,6 +7,7 @@
 mod store;
 #[cfg(test)]
 mod tests;
+mod tls;
 mod transport;
 
 use openraft::{BasicNode, Raft};
@@ -44,6 +45,22 @@ pub struct ControllerEpoch {
     pub replica_id: u64,
 }
 
+/// Mutual-TLS material required when replica RPC crosses host/container trust boundaries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplicaTlsConfig {
+    /// CA certificate bundle trusted for peer server and client certificates.
+    pub ca_cert_path: std::path::PathBuf,
+    /// This member's certificate chain in PEM format.
+    pub cert_path: std::path::PathBuf,
+    /// This member's private key in PEM format.
+    pub key_path: std::path::PathBuf,
+    /// DNS name asserted by the peer certificates.
+    pub server_name: String,
+    /// Exact leaf certificate digest expected for each infrastructure member.
+    pub peer_certificate_digests: BTreeMap<u64, String>,
+}
+
 /// Quorum-applied application outcome; rejection advances no accepted checkpoint/evidence history.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CommitReceipt {
@@ -57,7 +74,7 @@ pub struct CommitReceipt {
     pub rejection: Option<String>,
 }
 
-/// Startup-frozen, bounded three-member trusted loopback profile.
+/// Startup-frozen, bounded three-member Controller replica profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplicaConfig {
@@ -76,6 +93,9 @@ pub struct ReplicaConfig {
     /// Optional shared transport secret for non-loopback-capable deployments.
     #[serde(default)]
     pub shared_secret: Option<String>,
+    /// Optional mandatory mTLS profile; required whenever a member is non-loopback.
+    #[serde(default)]
+    pub tls: Option<ReplicaTlsConfig>,
 }
 
 impl ReplicaConfig {
@@ -87,10 +107,12 @@ impl ReplicaConfig {
             || self.members.len() != 3
             || !self.members.contains_key(&self.replica_id)
             || self.members.contains_key(&0)
-            || self
+            || self.members.values().any(|address| address.port() == 0)
+            || (self
                 .members
                 .values()
-                .any(|address| !address.ip().is_loopback() || address.port() == 0)
+                .any(|address| !address.ip().is_loopback())
+                && self.tls.is_none())
             || self.application_schema.trim().is_empty()
             || self.application_policy_digest.trim().is_empty()
             || self
@@ -99,6 +121,21 @@ impl ReplicaConfig {
                 .is_some_and(|secret| secret.len() < 32 || secret.len() > 256)
         {
             return Err("unsupported or incomplete controller replica profile".into());
+        }
+        if let Some(tls) = &self.tls
+            && (tls.server_name.trim().is_empty()
+                || tls.server_name.len() > 253
+                || !tls.ca_cert_path.is_absolute()
+                || !tls.cert_path.is_absolute()
+                || !tls.key_path.is_absolute()
+                || tls.peer_certificate_digests.len() != self.members.len()
+                || self.members.keys().any(|member| {
+                    tls.peer_certificate_digests
+                        .get(member)
+                        .is_none_or(|digest| !digest.starts_with("sha256:") || digest.len() != 71)
+                }))
+        {
+            return Err("replica TLS paths/name must be absolute and bounded".into());
         }
         let unique = self
             .members
@@ -119,6 +156,9 @@ impl ReplicaConfig {
             "transport_auth":self.shared_secret.as_ref().map(|secret| {
                 format!("{:x}", sha2::Sha256::digest(secret.as_bytes()))
             }),
+            "transport_tls": self.tls.as_ref().map(|tls| {
+                serde_json::json!({"server_name": &tls.server_name, "peer_certificate_digests": &tls.peer_certificate_digests})
+            }),
         })).expect("validated scalar replica configuration encodes");
         format!("{:x}", Sha256::digest(bytes))
     }
@@ -136,6 +176,8 @@ pub struct ReplicaNode {
     raft: ControllerRaft,
     /// Durable accepted history and consensus storage.
     store: SqliteRaftStore,
+    /// Optional loaded mutual-TLS material shared by the listener and Raft clients.
+    pub(crate) tls: Option<Arc<tls::TlsMaterial>>,
 }
 
 impl ReplicaNode {
@@ -145,6 +187,7 @@ impl ReplicaNode {
         path: &Path,
     ) -> Result<(Self, ReplicaServer), String> {
         config.validate()?;
+        let tls = tls::load(config.tls.as_ref())?.map(Arc::new);
         let store =
             SqliteRaftStore::open(path, &config.profile_identity(), &config.application_schema)?;
         let settings = Arc::new(
@@ -168,6 +211,7 @@ impl ReplicaNode {
             config.replica_id,
             network_online.clone(),
             config.shared_secret.clone(),
+            tls.clone(),
         );
         let raft = Raft::new(
             config.replica_id,
@@ -182,6 +226,7 @@ impl ReplicaNode {
             config: Arc::new(config),
             raft,
             store,
+            tls,
             #[cfg(test)]
             network_online,
         };

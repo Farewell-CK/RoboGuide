@@ -32,7 +32,11 @@ from check_group_continuation_processes import (
 )
 
 
-def run(directory: Path) -> dict[str, Any]:
+def run(
+    directory: Path,
+    tls_enabled: bool = False,
+    member_host: str = "127.0.0.1",
+) -> dict[str, Any]:
     """Verify quorum-only startup, leader death, conservative restore and journal continuity."""
     directory.mkdir(parents=True, exist_ok=False)
     processes: list[subprocess.Popen[bytes]] = []
@@ -46,11 +50,22 @@ def run(directory: Path) -> dict[str, Any]:
         for key, value in os.environ.items()
         if not key.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
     }
-    members = {str(index): free_address() for index in range(1, 4)}
+    def member_address() -> str:
+        """Choose one unused port on the selected replica member interface."""
+        with socket.socket() as listener:
+            listener.bind((member_host, 0))
+            return f"{member_host}:{listener.getsockname()[1]}"
+
+    members = {str(index): member_address() for index in range(1, 4)}
     routes = [[free_address() for _ in range(3)] for _ in range(3)]
     configurations: list[Path] = []
     replicas: list[subprocess.Popen[bytes] | None] = [None, None, None]
-    result: dict[str, Any] = {"passed": False, "schema": "roboguide.replica-process-check/v0.1"}
+    result: dict[str, Any] = {
+        "passed": False,
+        "schema": "roboguide.replica-process-check/v0.2",
+        "tls_enabled": tls_enabled,
+        "member_host": member_host,
+    }
 
     def start(command: list[str], name: str) -> subprocess.Popen[bytes]:
         """Own a new process group without finding or touching existing service PIDs."""
@@ -102,6 +117,109 @@ def run(directory: Path) -> dict[str, Any]:
     try:
         binary = ROOT / "target/debug/integration-server"
         result["controller_binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+        tls_profiles: list[dict[str, Any]] | None = None
+        if tls_enabled:
+            ca_key = directory / "replica-ca.key"
+            ca_cert = directory / "replica-ca.crt"
+            subprocess.run(
+                [
+                    "openssl",
+                    "req",
+                    "-x509",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-keyout",
+                    str(ca_key),
+                    "-out",
+                    str(ca_cert),
+                    "-subj",
+                    "/CN=roboguide-replica-ca",
+                    "-days",
+                    "2",
+                    "-addext",
+                    "basicConstraints=critical,CA:TRUE",
+                    "-addext",
+                    "keyUsage=critical,keyCertSign,cRLSign",
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            peer_digests: dict[str, str] = {}
+            leaf_paths: list[tuple[Path, Path]] = []
+            for member in range(1, 4):
+                leaf_key = directory / f"replica-{member}.key"
+                leaf_csr = directory / f"replica-{member}.csr"
+                leaf_cert = directory / f"replica-{member}.crt"
+                extensions = directory / f"replica-{member}.ext"
+                subprocess.run(
+                    [
+                        "openssl",
+                        "req",
+                        "-newkey",
+                        "rsa:2048",
+                        "-nodes",
+                        "-keyout",
+                        str(leaf_key),
+                        "-out",
+                        str(leaf_csr),
+                        "-subj",
+                        f"/CN=roboguide-replica-{member}",
+                    ],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                extensions.write_text(
+                    "basicConstraints=CA:FALSE\n"
+                    "subjectAltName=DNS:localhost\n"
+                    "extendedKeyUsage=serverAuth,clientAuth\n"
+                )
+                serial_args = (
+                    ["-CAcreateserial"]
+                    if member == 1
+                    else ["-CAserial", str(directory / "replica-ca.srl")]
+                )
+                subprocess.run(
+                    [
+                        "openssl",
+                        "x509",
+                        "-req",
+                        "-in",
+                        str(leaf_csr),
+                        "-CA",
+                        str(ca_cert),
+                        "-CAkey",
+                        str(ca_key),
+                        *serial_args,
+                        "-out",
+                        str(leaf_cert),
+                        "-days",
+                        "2",
+                        "-sha256",
+                        "-extfile",
+                        str(extensions),
+                    ],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                der = subprocess.check_output(
+                    ["openssl", "x509", "-in", str(leaf_cert), "-outform", "DER"]
+                )
+                peer_digests[str(member)] = f"sha256:{hashlib.sha256(der).hexdigest()}"
+                leaf_paths.append((leaf_key, leaf_cert))
+            tls_profiles = [
+                {
+                    "ca_cert_path": str(ca_cert),
+                    "cert_path": str(cert),
+                    "key_path": str(key),
+                    "server_name": "localhost",
+                    "peer_certificate_digests": peer_digests,
+                }
+                for key, cert in leaf_paths
+            ]
         for index in range(3):
             config: dict[str, Any] = {
                 "schema": "roboguide.controller-replica-process/v0.1",
@@ -120,6 +238,8 @@ def run(directory: Path) -> dict[str, Any]:
                 "artifact_address": routes[index][2],
                 "controller_environment": {"ROBOGUIDE_CHECKPOINT_STORAGE": "full"},
             }
+            if tls_profiles is not None:
+                config["replica"]["tls"] = tls_profiles[index]
             path = directory / f"replica-{index + 1}.json"
             save(path, config)
             digest = (
@@ -350,6 +470,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument(
+        "--tls",
+        action="store_true",
+        help="run the same software fault matrix over mutual-TLS replica RPC",
+    )
+    parser.add_argument(
+        "--member-host",
+        default="127.0.0.1",
+        help="interface/address used by replica RPC (non-loopback requires --tls)",
+    )
     arguments = parser.parse_args()
     if not arguments.skip_build:
         subprocess.run(
@@ -367,7 +497,12 @@ def main() -> None:
             cwd=ROOT,
             check=True,
         )
-    print(json.dumps(run(arguments.output.resolve()), indent=2))
+    print(
+        json.dumps(
+            run(arguments.output.resolve(), arguments.tls, arguments.member_host),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

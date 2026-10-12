@@ -1,6 +1,7 @@
 # 可选 Controller 三副本软件部署
 
-ADR-0083 的当前实现是三个静态成员的 trusted-loopback 软件 profile，默认不启动。
+ADR-0083 的当前实现是三个静态成员的软件 profile，默认不启动；loopback 可保持开发兼容，
+任一非 loopback member 必须启用 ADR-0091 的双向 TLS。
 每个 `controller-replica` 有独立 FULL-synchronous SQLite log/state machine，OpenRaft
 负责共识；它仅在当前 epoch 能确认多数时拥有一个 `integration-server` child。
 child 仍使用既有 Control/Runtime/Orchestration，不复制一套资源或 Task 决策。
@@ -83,8 +84,27 @@ HTTP/Artifact 客户端使用当前 leader 的显式地址；本 slice 不提供
 private `status.json` 仅供本地观察，不授予写入或资源 authority。
 
 跨进程 replica envelope 可在三份配置中设置同一个至少 32 字节的 `shared_secret`；secret
-只进入请求 digest，不写入 wire envelope。Node Protocol 的 mTLS 环境变量见 ADR-0086，
-证书 digest map 必须显式绑定每个 NodeId。
+只进入请求 digest，不写入 wire envelope。跨主机配置还必须增加：
+
+```json
+"tls": {
+  "ca_cert_path": "/absolute/pki/replica-ca.crt",
+  "cert_path": "/absolute/pki/replica-1.crt",
+  "key_path": "/absolute/pki/replica-1.key",
+  "server_name": "replica.internal",
+  "peer_certificate_digests": {
+    "1": "sha256:<replica-1-leaf-sha256>",
+    "2": "sha256:<replica-2-leaf-sha256>",
+    "3": "sha256:<replica-3-leaf-sha256>"
+  }
+}
+```
+
+三份配置使用同一 CA、各自证书和相同 peer DNS name。Node Protocol 的 mTLS 环境变量见
+ADR-0086，证书 digest map 必须显式绑定每个 NodeId。Operator HTTP 若绑定非 loopback，
+还必须设置 `ROBOGUIDE_OPERATOR_MTLS_SERVER_CERT`、`_SERVER_KEY`、`_CLIENT_CA` 和
+`_ROLE_MAP`；role map 将 `sha256:<leaf-cert>` 映射到 `viewer`、`operator` 或
+`recovery-admin`。
 
 SIGINT 请求 supervisor 停止自己拥有的 child 和共识；异常 parent 退出由 child watchdog
 保守关闭。不要共享 replica 的 storage directory；既有 writer lock 与 supervisor lease
@@ -100,6 +120,17 @@ rejoin、old route closure、standalone downgrade 和 live majority loss，保�
 完整 storage conformance、snapshot/reopen、错 base、stale epoch、quorum loss 和 quorum
 接受后 response/SQL Commit 失败；既有 production restore 测试验证 holds/停止预算。
 
+`--tls` 选项使用临时 CA/leaf 证书运行同一软件矩阵；用 `--member-host` 可验证非 loopback
+TCP 监听（本轮使用 `192.168.1.86`）：
+
+```bash
+uv run python tools/quality/check_controller_replication_processes.py --tls --output /fresh/tls-output
+uv run python tools/quality/check_controller_replication_processes.py --tls --member-host 192.168.1.86 --output /fresh/nonloopback-tls-output
+```
+
+它实际经过 rustls client/server certificate verification，并保留 SIGSTOP 造成的多数派
+丢失与恢复证据；仍不是跨站点网络 SLA 或物理 continuity 证明。
+
 2026-10-12 第一轮 debug binary hashing 导致 30s startup timeout，失败完整保留；改为
 bounded streaming SHA 并启用 SHA 加速后，第二轮真实进程检查通过，两个原 local Execute
 没有增加，45 rows 的 accepted metadata prefix 重新汇聚。第三轮在 quorum 恢复瞬间
@@ -109,8 +140,8 @@ closure、standalone downgrade、live majority loss/restore，local Execute 仍�
 记录位于仓库外 `adr-follow-up-audit-2026-10-12/replica-processes-{1,2,3,4}/`；
 后续存储完整性修订还需在最终源码重跑进程检查，不把旧 binary 结果当作新 binary 证据。
 
-当前基础 profile 仍是三成员同机 trusted-loopback；ADR-0086 增加 opt-in Node mTLS 与
-replica envelope secret，但不提供动态 membership、外部完整归档或物理 continuity 认证。
+当前基础 profile 仍是三成员静态 membership；loopback 可不启用 TLS，跨主机必须使用
+ADR-0091 mTLS。系统仍不提供动态 membership、跨副本 archive 共识或物理 continuity 认证。
 每个 checkpoint 至多 64MiB，新增 batch 至多 8192 events，retained event metadata 通过
 ADR-0087 的 checkpoint/history anchor 压缩保持有界，snapshot/frame 至多 256MiB；单批次
 本身超过界限仍 fail closed。Artifact blobs、provider-local Memory 内容不复制；目录可发现
@@ -134,3 +165,8 @@ minority startup、old epoch route closure、leader death 后 Unknown/ownership/
 32 行 accepted metadata rejoin、standalone downgrade、quorum loss/restore 全部通过；两个
 原 Local EAIOS 调用仍为 2。该运行只使用合成 Local EAIOS 和隔离本地进程，没有模型、Habitat、
 硬件或 E6。
+
+S12 的 TLS 进程复核输出在 `/tmp/roboguide-replica-tls-nonloopback-20261013g/result.json`，binary
+SHA-256 为 `73cf1c4ea3ea09200795362f427c02b0028e37f7c3d73f581a2f4e5afe07a7d0`；三副本
+启动、leader death、rejoin、SIGSTOP majority loss/restore 和两个原 Local EAIOS Execute
+保持不变均通过。

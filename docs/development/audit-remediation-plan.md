@@ -146,10 +146,10 @@ resume conflict 与失败原子性，另有 Runtime 时间不可变/restore 检�
 - quorum `Commit` 的异常响应先回读同 issuing epoch 的 accepted application identity；精确匹配
   时继续本地提交，无法确认时回滚并退出到 replica supervisor 重建路径。
 
-这些修补没有扩大复制 profile 的边界：当前仍是同机 trusted-loopback 软件复制，没有
-mTLS、跨主机 membership、物理 stop proof、历史归档/压缩、完整 Mission-local isolation、
-backfill/空间资源图或正式 E6 证据。专项 workspace checks 通过后，原 dev review 中的这些
-项目继续按 [ADR 遗留项清单](adr-follow-up-register.md) 保留。
+这些修补没有扩大执行与物理边界：静态 replica profile 现在可选 mTLS，非 loopback member
+必须使用证书；但仍没有动态 membership、物理 stop proof、完整 Mission-local isolation、
+跨副本 archive 共识、backfill/空间资源图或正式 E6 证据。专项 workspace checks 通过后，
+原 dev review 中的这些项目继续按 [ADR 遗留项清单](adr-follow-up-register.md) 保留。
 
 ## Dev review follow-up implementation (S8–S10)
 
@@ -169,3 +169,21 @@ backfill/空间资源图或正式 E6 证据。专项 workspace checks 通过后�
 重启使用 checkpoint/replica identity，失联 Node 保持 Unknown/RecoveryRequired，资源未知时
 拒绝冲突性 Commit，恢复后仍需 Match → Propose → Commit → Rebind。该矩阵是目标行为的离线
 证据，不是物理 stop proof，也不启动 E6。
+
+## Dev review follow-up implementation (S11–S13)
+
+- ADR-0089 将 accepted-plan 的 `InvalidContract` 和 exact-Task `RuntimeContractViolation`
+  变成 Mission-local typed failure evidence。稳定 fingerprint 在十分钟内连续三次后进入
+  持久化 crash-loop quarantine；`recovery-admin` review endpoint 必须携带 generation 和
+  bounded reason，其他 Mission 不受影响。未知/共享/SQL 错误继续 fatal。
+- ADR-0090 增加 checkpoint-bound append-only event archive。File sink 先写入并 fsync digest-
+  bound segment，随后 SQLite 才在事务内推进 history floor 和 GC；sink/tamper/incomplete
+  prefix 任一失败都不删除 rows。维护 API 需要显式 cutoff 和 recovery-admin；没有自动 Mission
+  终态 GC 或远端 retention 声明。
+- ADR-0091 将 replica 的非 loopback 网络收敛到真正的 rustls mTLS，supervisor 将证书只注入
+  自己的 child；`--tls` 进程检查覆盖多数派 SIGSTOP/恢复。`GET /v1/recovery` 公开统一的
+  Unknown/Group Hold/人工恢复顺序，不自动重放 Execute、释放资源或替换 Node。
+
+新的软件进程证据为 `/tmp/roboguide-replica-tls-nonloopback-20261013g/result.json`，使用 binary SHA
+`73cf1c4ea3ea09200795362f427c02b0028e37f7c3d73f581a2f4e5afe07a7d0`；仅包含合成 Local
+EAIOS 和本地隔离进程，不能升级为 E6、Habitat、真实硬件或物理连续性结论。

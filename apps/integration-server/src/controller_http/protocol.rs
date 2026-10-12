@@ -2,9 +2,12 @@
 
 use crate::*;
 /// Reads one HTTP/1.1 request using explicit header and Content-Length boundaries.
-pub(crate) async fn read_control_http_request(
-    stream: &mut tokio::net::TcpStream,
-) -> Result<ControlHttpRequest, String> {
+pub(crate) async fn read_control_http_request<S>(
+    stream: &mut S,
+) -> Result<ControlHttpRequest, String>
+where
+    S: tokio::io::AsyncRead + Unpin,
+{
     use tokio::io::AsyncReadExt;
     let mut bytes = Vec::new();
     let mut chunk = [0_u8; 4096];
@@ -50,6 +53,7 @@ pub(crate) async fn read_control_http_request(
         return Err("control HTTP request line is invalid".to_string());
     }
     let mut content_length = None;
+    let mut headers = std::collections::BTreeMap::new();
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
@@ -67,6 +71,14 @@ pub(crate) async fn read_control_http_request(
                     .parse::<usize>()
                     .map_err(|_| "Content-Length must be an integer".to_string())?,
             );
+        }
+        let key = name.trim().to_ascii_lowercase();
+        let value = value.trim();
+        if key.len() > 128 || value.len() > 1024 {
+            return Err("control HTTP header exceeds bound".to_string());
+        }
+        if headers.insert(key, value.to_string()).is_some() {
+            return Err("duplicate control HTTP header".to_string());
         }
     }
     let content_length = match content_length {
@@ -96,16 +108,20 @@ pub(crate) async fn read_control_http_request(
     Ok(ControlHttpRequest {
         method,
         target,
+        headers,
         body,
     })
 }
 
 /// Writes one bounded JSON response and closes the HTTP/1.1 connection.
-pub(super) async fn write_http_response(
-    stream: &mut tokio::net::TcpStream,
+pub(super) async fn write_http_response<S>(
+    stream: &mut S,
     status: &str,
     body: serde_json::Value,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    S: tokio::io::AsyncWrite + Unpin,
+{
     use tokio::io::AsyncWriteExt;
     let body = serde_json::to_string(&body)?;
     let response = format!(

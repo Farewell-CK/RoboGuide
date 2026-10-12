@@ -81,9 +81,11 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   transport-neutral Port 读取节点注册、能力、资源和最新健康事实；
 - 核心 Rust 包按职责位于 `core/`，Mission 编排位于 `core/orchestration/`，可运行组合入口位于
   `apps/controller/` 和 `apps/integration-server/`；
-- 可选 `core/controller-replication/` 与 `apps/controller-replica/` 提供静态三成员 trusted-loopback
-  quorum 持久化和独立 supervisor；切换重建 metadata，保留 Unknown/ownership 且不重放 Execute。
-  默认 standalone；Artifact/Memory 内容不复制。软件部署边界见 [ADR-0083](docs/decisions/0083-quorum-controller-replication.md)。
+- 可选 `core/controller-replication/` 与 `apps/controller-replica/` 提供静态三成员 quorum
+  持久化和独立 supervisor；loopback 保留开发兼容，非 loopback member 必须使用双向 mTLS。
+  切换重建 metadata，保留 Unknown/ownership 且不重放 Execute。默认 standalone；Artifact/Memory
+  内容不复制。软件部署边界见 [ADR-0083](docs/decisions/0083-quorum-controller-replication.md)
+  和 [ADR-0091](docs/decisions/0091-cross-host-replica-mtls-and-recovery-view.md)。
 - `core/artifact-store` 提供独立 filesystem artifact CAS infrastructure；`apps/real-node-smoke`
   默认 probe formal Node Protocol v0.4，显式 `--simulate-execute` 经 Controller synthetic
   Mission 触发正式 dispatch 后只发送合成生命周期事实；
@@ -492,8 +494,8 @@ Staged/Imported/Rejected evidence；replica durable identity 保留 exact
 [`ADR-0024`](docs/decisions/0024-federated-state-and-selective-memory.md)。
 
 这仍不是完整 State & Memory Plane。可驱动 Control 的 Shared Belief/fusion policy、完整
-Execution/Task/Group 历史 projection、多 Controller replication/HA、访问控制、retention/GC
-以及面向具体 Mission 的 consumer selection/prefetch policy、Controller 到 Node 的 durable
+Execution/Task/Group 历史 projection、动态多 Controller membership、远端 archive 共识、长期
+容量治理以及面向具体 Mission 的 consumer selection/prefetch policy、Controller 到 Node 的 durable
 selective-import command 仍未实现。通用 Node Memory provider workflow、filesystem/JSONL 参考
 backend 和显式 data-plane CAS exchange operation 已由 ADR-0025 实现；Node 不会因为 discovery
 结果自动复制 Memory。
@@ -825,8 +827,8 @@ MissionPlan v0.8 可选择性声明 Actor 的 admitted `physical_entity`，并�
 registry 缺失，服务拒绝以旧绑定继续启动。没有此约束的 v0.7 Mission 仍可照常使用。
 
 Control HTTP 不绕过 Control 修改 reservation；独立 Artifact HTTP 只写不可变 CAS bytes 和
-Memory catalog/replica evidence，不驱动 Task/Group lifecycle。身份认证与传输安全不在当前切片
-范围内。若 SQLite 中存在与事件末尾一致的版本化 controller checkpoint，Integration Server
+Memory catalog/replica evidence，不驱动 Task/Group lifecycle。Operator HTTP 可在非 loopback
+部署中配置 mTLS certificate-to-role map；loopback 开发模式仍显式区分。若 SQLite 中存在与事件末尾一致的版本化 controller checkpoint，Integration Server
 会恢复 Control/State/Runtime projection；Spatial evidence 会在同一事务中 carry-forward 该
 checkpoint。非终态 execution 恢复为 `Unknown` 并等待 Reconciliation，不会直接判定 Mission
 失败；live relation 同样保守重算并保留 coordination fence。缺少 checkpoint、schema 不支持、

@@ -44,7 +44,8 @@ pub use integration_bridge::{
 };
 pub use mechanism_profile::SupportedMechanismProfile;
 pub use mission::isolation::{
-    MISSION_HOLD_REVIEW_WINDOW_MS, MissionIsolation, MissionIsolationSource,
+    MISSION_CRASH_LOOP_THRESHOLD, MISSION_CRASH_LOOP_WINDOW_MS, MISSION_HOLD_REVIEW_WINDOW_MS,
+    MissionFailureClass, MissionFailureState, MissionIsolation, MissionIsolationSource,
 };
 pub use mission::preemption::FutureSchedulingPreemption;
 pub use mission_contract::decode_mission_plan;
@@ -87,6 +88,9 @@ pub struct MissionExecution {
     /// Persistent execution hold, orthogonal to Mission semantics and physical lifecycle.
     #[serde(default)]
     isolation: Option<MissionIsolation>,
+    /// Latest typed local failure, retained after an explicit hold resume for crash-loop fencing.
+    #[serde(default)]
+    failure_state: Option<MissionFailureState>,
     /// Highest nonrenewable isolation generation, retained after explicit resume.
     #[serde(default)]
     isolation_generation: u64,
@@ -100,6 +104,18 @@ impl MissionExecution {
     /// Returns a persisted new-Execute hold without implying physical stop or Mission failure.
     pub const fn isolation(&self) -> Option<&MissionIsolation> {
         self.isolation.as_ref()
+    }
+
+    /// Returns whether the Mission is quarantined by the crash-loop breaker.
+    pub fn is_crash_loop_quarantined(&self) -> bool {
+        self.failure_state
+            .as_ref()
+            .is_some_and(|failure| failure.quarantined)
+    }
+
+    /// Returns the latest typed local failure evidence, if any.
+    pub const fn failure_state(&self) -> Option<&MissionFailureState> {
+        self.failure_state.as_ref()
     }
     /// Returns the complete accepted MissionPlan.
     pub const fn plan(&self) -> &MissionPlan {
