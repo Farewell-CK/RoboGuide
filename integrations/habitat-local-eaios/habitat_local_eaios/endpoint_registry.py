@@ -11,6 +11,11 @@ from .model import IntegrationError
 
 REGISTRY_SCHEMA = "roboguide.habitat-endpoint-registry/v0.1"
 LIVE_PROFILE = "independent-live/v0.1"
+FINALITY_PROFILE = {
+    "verifier_publication": "after-all-session-slots",
+    "endpoint_capacity": 1,
+    "resource_release": "after-task-satisfaction",
+}
 MAX_ENDPOINTS = 4
 MAX_SLOTS = 32
 MAX_REGISTRY_BYTES = 65536

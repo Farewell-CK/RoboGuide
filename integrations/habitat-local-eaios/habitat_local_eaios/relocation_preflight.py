@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .endpoint_registry import FINALITY_PROFILE
 from .model import IntegrationError
 from .operation_admission import OPERATION_FEASIBILITY_SCHEMA, attach_relocation_admission
 from .preassignment_feasibility import PREASSIGNMENT_FEASIBILITY_SCHEMA, preassignment_digest
@@ -263,6 +264,15 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
     if live:
         expected_matrix["schema_version"] = matrix["schema_version"]
         expected_matrix["execution_profile"] = matrix["execution_profile"]
+        if matrix["schema_version"] == "roboguide.deployment-intent-feasibility/v0.6":
+            finality = matrix.get("finality_profile")
+            if (
+                not isinstance(finality, dict)
+                or type(finality.get("endpoint_capacity")) is not int
+                or finality != FINALITY_PROFILE
+            ):
+                raise IntegrationError("deployment operation admission finality profile is invalid")
+            expected_matrix["finality_profile"] = FINALITY_PROFILE
         expected_matrix["digest"] = preassignment_digest(
             {key: value for key, value in expected_matrix.items() if key != "digest"}
         )

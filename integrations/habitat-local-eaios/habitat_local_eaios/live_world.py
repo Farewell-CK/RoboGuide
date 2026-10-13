@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .backend import LocalExecutionOutcome, _observation_true
-from .endpoint_registry import LIVE_PROFILE, load_endpoint_registry
+from .endpoint_registry import FINALITY_PROFILE, LIVE_PROFILE, load_endpoint_registry
 from .evidence_io import json_observation
 from .live_bindings import LivePolicyBindings as LivePolicyBindings
 from .live_coordinator import LiveWorldCoordinator as LiveWorldCoordinator
@@ -36,11 +36,6 @@ from .shared_world import SharedEmosStage2Runtime
 
 _LOG = logging.getLogger(__name__)
 LIVE_FEASIBILITY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.6"
-FINALITY_PROFILE = {
-    "verifier_publication": "after-all-session-slots",
-    "endpoint_capacity": 1,
-    "resource_release": "after-task-satisfaction",
-}
 
 
 class LiveEmosStage2Runtime(SharedEmosStage2Runtime):

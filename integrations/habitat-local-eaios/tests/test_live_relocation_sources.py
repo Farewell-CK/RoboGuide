@@ -37,7 +37,7 @@ from test_relocation_preflight import bound_run  # noqa: E402
 from test_relocation_start import relocation_world  # noqa: E402
 
 
-def live_relocation_run(tmp_path: Path) -> Path:
+def live_relocation_run(tmp_path: Path, *, version: int = 5, recoveries: int = 0) -> Path:
     """Use real builders over one synthetic reset and actual three-Node config sources."""
     run = bound_run(tmp_path)
     for name in ("relocation-registration-profile.json", "spatial-profile.json"):
@@ -76,7 +76,7 @@ def live_relocation_run(tmp_path: Path) -> Path:
     )
     matrix = attach_relocation_admission(navigation, semantic, start, profile)
     matrix.update(
-        schema_version="roboguide.deployment-intent-feasibility/v0.5",
+        schema_version=f"roboguide.deployment-intent-feasibility/v0.{version}",
         execution_profile={
             "mode": registry["profile"],
             "registry_digest": registry["digest"],
@@ -86,6 +86,12 @@ def live_relocation_run(tmp_path: Path) -> Path:
             ],
         },
     )
+    if version == 6:
+        matrix["finality_profile"] = {
+            "verifier_publication": "after-all-session-slots",
+            "endpoint_capacity": 1,
+            "resource_release": "after-task-satisfaction",
+        }
     matrix["digest"] = preassignment_digest(
         {key: value for key, value in matrix.items() if key != "digest"}
     )
@@ -95,6 +101,7 @@ def live_relocation_run(tmp_path: Path) -> Path:
         episode_id="offline",
         reset_goal_geometry=True,
         object_sources=planning_object_sources(start, semantic),
+        entity_geometry=version == 6,
     )
     evidence = run / "evidence"
     base_how = json.loads((evidence / "local-how-profile.json").read_bytes())
@@ -108,25 +115,45 @@ def live_relocation_run(tmp_path: Path) -> Path:
         (
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.9",
+                "schema_version": "roboguide.habitat-local-how-profile/v0.10"
+                if recoveries
+                else "roboguide.habitat-local-how-profile/v0.9",
                 "execution_profile": registry["profile"],
                 "endpoint_registry_digest": registry["digest"],
                 "observation_enabled": False,
                 "base_profile": base_how,
                 "unassigned_policy": "original-wait-model-free",
                 "official_success_authority": "habitat-pddl",
+                **(
+                    {
+                        "execution_options": {
+                            "enable_observation_acquisition": False,
+                            "observation_acquisition_max_steps": 256,
+                            "contract_recovery_attempts": recoveries,
+                        }
+                    }
+                    if recoveries
+                    else {}
+                ),
             },
         ),
     ):
         (evidence / name).write_text(json.dumps(document))
     used_path = run / "b1-deployment-used.json"
     used = json.loads(used_path.read_bytes())
-    used["schema_version"] = "roboguide.e1.b1-deployment-used/v0.3"
+    deployment_version = 4 if recoveries else 3
+    used["schema_version"] = f"roboguide.e1.b1-deployment-used/v0.{deployment_version}"
     used["declaration"].update(
-        schema_version="roboguide.e1.b1-deployment/v0.3",
+        schema_version=f"roboguide.e1.b1-deployment/v0.{deployment_version}",
         enable_observation=False,
         endpoints=[f"node-{chr(97 + agent)}.toml" for agent in range(3)],
     )
+    if recoveries:
+        used["declaration"].update(
+            enable_observation_acquisition=False,
+            observation_acquisition_max_steps=256,
+            contract_recovery_attempts=recoveries,
+        )
     used["node_ids"] = [record["node_id"] for record in registry["endpoints"]]
     used_path.write_text(json.dumps(used))
     required_path = run / "b1-local-execution-profile-required.json"
@@ -136,9 +163,13 @@ def live_relocation_run(tmp_path: Path) -> Path:
     return run
 
 
-def test_three_endpoint_preflight_accepts_only_actual_relocators(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", [5, 6])
+@pytest.mark.parametrize("recoveries", [0, 2])
+def test_three_endpoint_preflight_accepts_only_actual_relocators(
+    tmp_path: Path, version: int, recoveries: int
+) -> None:
     """The nav-only Drone remains in world evidence without invented manipulation readiness."""
-    run = live_relocation_run(tmp_path)
+    run = live_relocation_run(tmp_path, version=version, recoveries=recoveries)
     result = preflight_relocation(run)
     assert result["valid"] is True and result["simulator_steps"] == 0
     start = json.loads((run / "evidence/relocation-episode-start.json").read_bytes())
@@ -154,6 +185,34 @@ def test_three_endpoint_preflight_accepts_only_actual_relocators(tmp_path: Path)
     )
 
     assert preflight_deployment_feasibility(run) == matrix
+
+
+@pytest.mark.parametrize(
+    "mutation", ["missing", "capacity", "capacity-bool", "capacity-float", "publication", "release"]
+)
+def test_live_finality_forgery_fails_even_after_rehash(tmp_path: Path, mutation: str) -> None:
+    """Versioned finality cannot claim unsupported publication or resource lifetimes."""
+    run = live_relocation_run(tmp_path, version=6, recoveries=2)
+    path = run / "evidence/preassignment-feasibility.json"
+    matrix = json.loads(path.read_bytes())
+    if mutation == "missing":
+        del matrix["finality_profile"]
+    elif mutation == "capacity":
+        matrix["finality_profile"]["endpoint_capacity"] = 2
+    elif mutation == "capacity-bool":
+        matrix["finality_profile"]["endpoint_capacity"] = True
+    elif mutation == "capacity-float":
+        matrix["finality_profile"]["endpoint_capacity"] = 1.0
+    elif mutation == "publication":
+        matrix["finality_profile"]["verifier_publication"] = "after-each-task"
+    else:
+        matrix["finality_profile"]["resource_release"] = "before-task-satisfaction"
+    matrix["digest"] = preassignment_digest(
+        {key: value for key, value in matrix.items() if key != "digest"}
+    )
+    path.write_text(json.dumps(matrix))
+    with pytest.raises(IntegrationError, match="operation admission"):
+        preflight_relocation(run)
 
 
 @pytest.mark.parametrize(
