@@ -99,6 +99,34 @@ def required_text(document: JSONObject, name: str) -> str:
     return value
 
 
+def validate_wait_budgets(config: JSONObject, llm: Mapping[str, object]) -> None:
+    """Reject conflicting frozen waits before starting any service or Provider call.
+
+    The proxy must cover the MI client's single-call wait, and the MI observer
+    must cover at least one such call. The outer arm must cover the two runner
+    observation windows, which run consecutively. These are minimum consistency
+    checks, not a promise that every permitted recovery chain fits the budget.
+    Socket timeouts also do not guarantee a wall-clock ceiling for slow streams.
+    """
+    timeout = llm.get("timeout_seconds")
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, int | float)
+        or not 0 < timeout <= 86400
+    ):
+        raise ValueError("invalid frozen MI provider timeout")
+    provider = cast(float, config["provider_timeout_seconds"])
+    mi = cast(float, config["mi_observation_seconds"])
+    mission = cast(float, config["mission_observation_seconds"])
+    arm = cast(float, config["arm_timeout_seconds"])
+    if provider < timeout:
+        raise ValueError("pair proxy timeout is shorter than the MI provider timeout")
+    if mi < timeout:
+        raise ValueError("pair MI observation budget is shorter than one provider call")
+    if arm < mi + mission:
+        raise ValueError("pair arm timeout is shorter than consecutive runner observation budgets")
+
+
 @dataclass(frozen=True)
 class PairSpec:
     """Freeze one pair's identities, source gates, ports and process budgets."""
@@ -235,6 +263,7 @@ class PairSpec:
             or provider.get("wire_api") != "responses"
         ):
             raise ValueError("frozen MI model or Provider configuration differs from population")
+        validate_wait_budgets(config, llm)
         spec = cls(population, row, ordinal, config, sources, ports)
         spec.verify_sources()
         if "b1_deployment" in config:
@@ -699,6 +728,12 @@ def run_arm(spec: PairSpec, arm: ArmName, directory: Path) -> JSONObject:
                 "gpu_device": spec.config["gpu_device"],
                 "credential_archived": False,
                 "arm_timeout_seconds": spec.config["arm_timeout_seconds"],
+                "provider_timeout_seconds": spec.config["provider_timeout_seconds"],
+                "mi_provider_timeout_seconds": tomllib.loads(text)["mission"]["llm"][
+                    "timeout_seconds"
+                ],
+                "mi_observation_seconds": spec.config["mi_observation_seconds"],
+                "mission_observation_seconds": spec.config["mission_observation_seconds"],
                 "population_digest": spec.population.digest,
             },
         )

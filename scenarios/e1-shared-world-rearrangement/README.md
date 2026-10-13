@@ -1,6 +1,6 @@
 # Three-agent Rearrangement candidate
 
-Explicit B1 deployment v0.3 preserves the available original
+Explicit B1 deployment v0.4 preserves the available original
 `llm_multi_agent_mobility.yaml`, `mp3d_episodes_1.json.gz` (100 episodes),
 Spot/Fetch/Drone configuration and 5,000-step budget. Its actual goal relocates
 two objects; a navigation-only plan cannot establish those object goals. Only
@@ -24,3 +24,8 @@ Prepare offline with an exact frozen B1 input and a fresh output directory.
 See the [live deployment guide](../../docs/extensions/habitat-independent-live-profile.md)
 for commands, identity gates, explicit Local How differences and physical release
 requirements. Common MI Prompts and benchmark/Formal rules are unchanged.
+
+MI's per-call timeout is 1,200 seconds. The frozen worker's proxy must cover that
+wait, the MI observer must cover at least one call, and the outer arm must cover
+both consecutive observation windows plus a deployment-chosen startup/cleanup
+margin. This gives slow calls more time without adding model/whole-arm retries.

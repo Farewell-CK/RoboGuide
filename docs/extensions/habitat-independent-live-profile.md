@@ -38,11 +38,11 @@ prove Task/Mission satisfaction. Official outcome comes only from Habitat.
 
 | Artifact | Version and purpose |
 | --- | --- |
-| `b1-deployment.json` | v0.3; endpoint config paths, original config/budget, relocation and observation flags |
+| `b1-deployment.json` | v0.4; endpoint config paths, original config/budget, relocation/observation and bounded action-reselection flags |
 | `endpoint-registry.json` | v0.1; exact Node sources, operation support, robot type, port, DB and exclusive resource |
-| `preassignment-feasibility.json` | v0.5; full world identity plus explicit endpoint support; no new commitment authority |
+| `preassignment-feasibility.json` | v0.6; world identity, endpoint support and final-verifier resource-retention constraints; no new commitment authority |
 | `relocation-episode-start.json` | v0.2 only for a relocator subset; actual objects, sources and relocator reset state |
-| `local-how-profile.json` | v0.9; original base profile plus the explicit live deployment differences |
+| `local-how-profile.json` | v0.10 when acquisition/reselection is enabled; original base profile and exact bounded live differences; v0.9 remains compatible |
 | `observation-<invocation-digest>.json` | local-condition-observation v0.1; cached detection receipt with exact attempt and scope |
 | `live-session-state.json` | v0.1; local dispatch and terminal history, independent of official success |
 
@@ -80,8 +80,11 @@ manipulation operation. Detection uses `observation.verify@v1` with exactly
 `expected=detected(entity-ref)` for an admitted entity. It only queries whether the
 already observed condition holds. A negative observation cannot satisfy an
 affirmative detection goal. Missing/malformed data is unavailable. Global
-detector observations are not attributed to one camera/agent. No active search,
-camera motion or semantic goal rewrite is added.
+detector observations are not attributed to one camera/agent. The separately
+declared `observation.acquire@v1` profile performs at most 256 original navigation/
+wait cycles and reads that cache after the original step. Only actual detection
+completes acquisition; navigation arrival is neither detection nor a combined
+goal receipt. It adds no render, sensor refresh, simulator step or semantic rewrite.
 Detection resolves the admitted PDDL entity index through the original
 `scene_obj_ids` mapping before adding `object_ids_start`, matching the original
 Habitat identity convention. Missing or malformed mappings remain unavailable;
@@ -144,6 +147,27 @@ must include exactly its configured endpoint ports (`endpoint_a` through
 `endpoint_d`, as applicable) plus proxy/grpc/controller/artifact/mission. Source
 gates also cover Node files and planning/execution/service profiles. Current
 navigation/Task3 workers keep their previous schemas and frozen views.
+
+The Perception and Rearrangement templates give each MI Responses call 1,200
+seconds. Freeze the other waits explicitly in the worker manifest. For example:
+
+| Window | Example seconds | Meaning |
+| --- | ---: | --- |
+| MI Provider client | 1200 | One existing Responses call; no new retry |
+| Accounting proxy upstream | 1260 | Covers that call with transport margin |
+| MI observation | 14400 | One request's complete deliberation/observation window |
+| Mission observation | 7200 | Starts only after MI acceptance |
+| Outer arm | 22500 | Both consecutive windows plus 900 seconds for startup/cleanup |
+
+Before any process starts, `PairSpec.load()` requires a valid MI timeout, a proxy
+wait at least as long, an MI observation window at least as long as one call, and
+an outer arm covering both observation windows. Deployment owns larger startup,
+cleanup and deliberation margins; the checks do not promise every allowed repair
+chain will finish. Socket timeouts are not strict wall-clock caps for slow streams.
+The outer arm remains bounded. The frozen source config and `launch.json` retain
+all waits; MI also archives its actual Runner budget. Observation expiry preserves
+the original request ID and failure attribution, with no second Mission Request.
+This changes no model, API parameters, native EMOS timeout or official step budget.
 
 First release runs one preselected pair only after existing GPU queues free
 capacity. Both actual reset snapshots, official outcome availability, operation

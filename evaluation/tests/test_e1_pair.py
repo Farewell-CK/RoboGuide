@@ -59,7 +59,7 @@ def setup_pair(root: Path) -> tuple[Path, Path]:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             '[mission.llm]\nmodel = "test-model"\nreview_model = "test-model"\n'
-            'model_provider = "test"\n'
+            'model_provider = "test"\ntimeout_seconds = 2\n'
             '[model_providers.test]\nbase_url = "http://127.0.0.1:9"\nwire_api = "responses"\n'
         )
         sources[str(path)] = file_digest(path)
@@ -148,7 +148,7 @@ def setup_pair(root: Path) -> tuple[Path, Path]:
         "native_config": "test.yaml",
         "b1_runner": "run.sh",
         "mission_config": "mission.toml",
-        "arm_timeout_seconds": 30,
+        "arm_timeout_seconds": 50,
         "mi_observation_seconds": 20,
         "mission_observation_seconds": 20,
         "provider_timeout_seconds": 3,
@@ -162,6 +162,67 @@ def setup_pair(root: Path) -> tuple[Path, Path]:
     config_path = root / "worker.json"
     write_json(config_path, config)
     return population_path, config_path
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("provider_timeout_seconds", 1, "proxy timeout is shorter"),
+        ("mi_observation_seconds", 1, "MI observation budget is shorter"),
+        ("arm_timeout_seconds", 39, "consecutive runner observation budgets"),
+    ],
+)
+def test_conflicting_waits_reject_before_any_arm(
+    tmp_path: Path, field: str, value: int, error: str
+) -> None:
+    """Freeze real config files and refuse each premature timeout before process launch."""
+    population, config_path = setup_pair(tmp_path)
+    config = json.loads(config_path.read_text())
+    config[field] = value
+    write_json(config_path, config)
+    with pytest.raises(ValueError, match=error):
+        PairSpec.load(population, config_path, "pair-0")
+
+
+@pytest.mark.parametrize("timeout", [None, True, 0, -1, "1200", float("inf"), float("nan")])
+def test_invalid_frozen_mi_timeout_rejects(tmp_path: Path, timeout: object) -> None:
+    """A missing or unusable client wait cannot bypass the source-bound budget gate."""
+    population, config_path = setup_pair(tmp_path)
+    config = json.loads(config_path.read_text())
+    mission = Path(config["code_root"]) / "mission.toml"
+    text = mission.read_text().replace("timeout_seconds = 2\n", "")
+    if timeout is not None:
+        encoded = (
+            str(timeout).lower() if isinstance(timeout, float) else json.dumps(timeout).lower()
+        )
+        text = text.replace(
+            "[model_providers.test]", f"timeout_seconds = {encoded}\n[model_providers.test]"
+        )
+    mission.write_text(text)
+    config["source_sha256"][str(mission)] = file_digest(mission)
+    write_json(config_path, config)
+    with pytest.raises(ValueError, match="invalid frozen MI provider timeout"):
+        PairSpec.load(population, config_path, "pair-0")
+
+
+def test_slow_provider_budgets_are_accepted_and_frozen(tmp_path: Path) -> None:
+    """A 630-second response fits a consistent 1,200-second client deployment window."""
+    population, config_path = setup_pair(tmp_path)
+    config = json.loads(config_path.read_text())
+    mission = Path(config["code_root"]) / "mission.toml"
+    mission.write_text(mission.read_text().replace("timeout_seconds = 2", "timeout_seconds = 1200"))
+    config["source_sha256"][str(mission)] = file_digest(mission)
+    config.update(
+        provider_timeout_seconds=1260,
+        mi_observation_seconds=14400,
+        mission_observation_seconds=7200,
+        arm_timeout_seconds=22500,
+    )
+    write_json(config_path, config)
+    spec = PairSpec.load(population, config_path, "pair-0")
+    assert spec.config["provider_timeout_seconds"] == 1260
+    assert spec.config["mi_observation_seconds"] == 14400
+    assert spec.config["arm_timeout_seconds"] == 22500
 
 
 def select_deployment(config_path: Path, *, native_config: str = "test.yaml") -> Path:
