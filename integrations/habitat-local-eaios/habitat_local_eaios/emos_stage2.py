@@ -13,7 +13,7 @@ from typing import Any
 
 from .backend import LocalExecutionOutcome, _observation_true, habitat_config_overrides
 from .diagnostics import BufferedJsonlWriter
-from .evidence_io import write_text_atomic
+from .evidence_io import dumps_json_safe, write_text_atomic
 from .execution_progress import NavigationProgressPublisher
 from .idle_endpoint import (
     PassiveIdleAgent,
@@ -1398,4 +1398,4 @@ class EmosStage2Runtime:
 
     def _write_json(self, name: str, value: object) -> None:
         """Persist deterministic JSON evidence without creating authority."""
-        self._write_text(name, json.dumps(value, indent=2, sort_keys=True) + "\n")
+        self._write_text(name, dumps_json_safe(value) + "\n")

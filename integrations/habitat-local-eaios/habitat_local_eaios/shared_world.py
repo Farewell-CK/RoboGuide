@@ -32,6 +32,7 @@ from .backend import (
 )
 from .crabagent_backend import CrabAgentBackendConfig
 from .diagnostics import create_physical_diagnostics, diagnostics_enabled
+from .evidence_io import dumps_json_safe
 from .emos_stage2 import EmosStage2Runtime
 from .evidence_io import write_text_atomic
 from .execution_progress import NavigationProgressPublisher, read_execution_progress
@@ -2973,7 +2974,7 @@ class SharedWorldCoordinator:
     def _write_json(self, name: str, value: object) -> None:
         """Persist one deterministic JSON evidence file."""
         path = self._evidence_dir / name
-        write_text_atomic(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
+        write_text_atomic(path, dumps_json_safe(value) + "\n")
 
     def _write_start_admission(
         self,
