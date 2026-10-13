@@ -12,10 +12,10 @@ partitions, physical continuity, long-term capacity and E6 remain unproven.
 2026-10-13 final review-fix validation: 713 Rust tests passed, 2 existing long-running tests remained
 ignored; workspace Clippy with warnings denied, Rustdoc, Rust/Python formatting, Ruff, strict mypy,
 Python function docs, full pytest and strict MkDocs passed. Final nonloopback mTLS process evidence:
-`/tmp/roboguide-reliability-fix-replica-tls-final-20261013/result.json`, Controller binary SHA-256
+`/tmp/roboguide-reliability-fix-replica-tls-postpush-20261013/result.json`, Controller binary SHA-256
 `47805c1ef6213ee71f1d683874d57e05316cf9d96d728ba98a69f5ac006a32ca`. All quorum/leader/rejoin/
 SIGSTOP cases passed with the original two Local EAIOS Execute calls unchanged. Explicit group
-recovery cases passed at `/tmp/roboguide-reliability-fix-group-processes-20261013/summary.json`;
+recovery cases passed at `/tmp/roboguide-reliability-fix-group-postpush-20261013/summary.json`;
 both live peers produced two authorized replacements, while a completed peer was excluded and only
 one replacement was produced. These are same-host software results, not E6 or physical proof.
 

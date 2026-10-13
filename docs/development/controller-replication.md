@@ -184,12 +184,12 @@ SHA-256 为 `73cf1c4ea3ea09200795362f427c02b0028e37f7c3d73f581a2f4e5afe07a7d0`�
 保持不变均通过。
 
 ADR-0092 复查修订的最终源码软件矩阵位于仓库外
-`/tmp/roboguide-reliability-fix-replica-tls-final-20261013/result.json`，Controller binary SHA-256
+`/tmp/roboguide-reliability-fix-replica-tls-postpush-20261013/result.json`，Controller binary SHA-256
 为 `47805c1ef6213ee71f1d683874d57e05316cf9d96d728ba98a69f5ac006a32ca`。Minority startup、
 旧 epoch 路由关闭、leader death 后 Unknown/ownership/policy/journal 保留、33 行 accepted
 metadata rejoin、standalone downgrade、SIGSTOP majority loss/restore 均通过，两个原 Local
 EAIOS Execute 保持为 2。相同 binary 的显式 group recovery 进程回归位于
-`/tmp/roboguide-reliability-fix-group-processes-20261013/summary.json`：all-live 产生两个授权
+`/tmp/roboguide-reliability-fix-group-postpush-20261013/summary.json`：all-live 产生两个授权
 replacement attempts，completed-peer 只产生一个，已完成的 peer 不重复。
 全部进程由本轮夹具在独立目录/临时端口启动和清理，未启动 Provider、Habitat、硬件或 E6。
 三副本在同一主机使用 `192.168.1.86` 非 loopback TCP；这不证明跨两个独立主机的网络分区。
