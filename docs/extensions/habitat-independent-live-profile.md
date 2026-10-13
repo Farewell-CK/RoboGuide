@@ -140,6 +140,13 @@ endpoint/recovery/spatial/relocation profiles. Consumed prepare directories cann
 be reused for execution. `roboguide-node --validate <file>` independently
 checks rendered configs without registration or execution.
 
+Preparation also loads configured planning and execution profiles through the
+production MI consumers before rendering run-local files. A stale planning
+content digest or malformed execution requirement fails before Habitat reset,
+service startup or model calls. Source fingerprints alone do not validate a
+profile's declared content digest. Template regressions additionally compose the
+actual MI engine offline, without serving HTTP or creating a Mission Request.
+
 Before physical release freeze clean code SHA, built binaries, full vendor/module
 and config identity, dataset digest, original budget, model `gpt-6.1-sol`, both API
 paths, timeouts, diagnostics and distinct worker ports. The pair worker with v0.3

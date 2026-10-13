@@ -7,6 +7,9 @@ import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from mission.execution_profile import DeploymentExecutionProfile
+from mission.planning_profile import DeploymentPlanningProfile
+
 PORT_DEFAULTS = {
     "CONTROLLER_GRPC_PORT": 25060,
     "CONTROLLER_PORT": 28060,
@@ -48,6 +51,19 @@ def render_deployment_configs(
     run: Path, scenario: Path, ports: Mapping[str, int], node_configs: tuple[str, ...] = ()
 ) -> None:
     """Render run-local configs, substituting only known endpoints and storage paths."""
+    service_text = (scenario / "mission-service-b1.toml").read_text(encoding="utf-8")
+    # Exercise the actual MI consumers before rendering or starting any world.
+    # Byte/source hashes alone cannot prove a profile's declared content digest.
+    for placeholder, filename, loader in (
+        (
+            "EXECUTION_PROFILE_PLACEHOLDER",
+            "execution-profile.json",
+            DeploymentExecutionProfile.load,
+        ),
+        ("PLANNING_PROFILE_PLACEHOLDER", "planning-profile.json", DeploymentPlanningProfile.load),
+    ):
+        if placeholder in service_text:
+            loader(scenario / filename)
     defaults = {**PORT_DEFAULTS, "HABITAT_PORT_C": 28104, "HABITAT_PORT_D": 28106}
     substitutions = {
         f"127.0.0.1:{default}": f"127.0.0.1:{ports[name]}"

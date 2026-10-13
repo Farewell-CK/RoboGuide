@@ -11,6 +11,7 @@ from typing import Any, cast
 import pytest
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.models import JSONObject, MissionPlan
+from mission.planning_profile import DeploymentPlanningProfile
 
 _INTEGRATION_ROOT = Path(__file__).parents[1]
 if str(_INTEGRATION_ROOT) not in sys.path:
@@ -30,6 +31,17 @@ _SPOT_PROFILES = (
     _ROOT / "scenarios/habitat-local-eaios-c1-s0b/node.toml",
 )
 _FETCH_PROFILES = (_ROOT / "scenarios/e1-shared-world-episode-51/node-b.toml",)
+
+
+@pytest.mark.parametrize("scenario", ["episode-51", "relocation", "perception", "rearrangement"])
+def test_checked_in_planning_profiles_load_through_production_mi(scenario: str) -> None:
+    """Real MI parsing, content digests and typed Catalog validation fence deployment edits."""
+    path = _ROOT / f"scenarios/e1-shared-world-{scenario}/planning-profile.json"
+    profile = DeploymentPlanningProfile.load(path)
+    profile.validate_catalog(
+        CanonicalCapabilityCatalog.load(_ROOT / "contracts/capability/v0.3/catalog.json")
+    )
+    assert profile.to_json() == json.loads(path.read_bytes())
 
 
 def _capability_attributes(path: Path) -> dict[str, dict[str, Any]]:

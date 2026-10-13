@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 import tomllib
 from pathlib import Path
 
 import pytest
+from mission.api import build_engine
+from mission.execution_profile import DeploymentExecutionProfile
+from mission.planning_profile import DeploymentPlanningProfile
 from roboguide_eval.b1_ports import (
     PORT_DEFAULTS,
     deployment_ports,
@@ -14,6 +19,76 @@ from roboguide_eval.b1_ports import (
 )
 
 SCENARIO = Path(__file__).resolve().parents[2] / "scenarios/e1-shared-world-episode-51"
+
+
+@pytest.mark.parametrize("scenario", ["episode-51", "relocation", "perception", "rearrangement"])
+def test_prepared_templates_compose_the_real_mi_engine_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str
+) -> None:
+    """Compose production MI without serving HTTP, creating a Request or calling a Provider."""
+    source = SCENARIO.parent / f"e1-shared-world-{scenario}"
+    count = 3 if scenario == "rearrangement" else 2
+    configs = tuple(f"node-{chr(97 + index)}.toml" for index in range(count))
+    render_deployment_configs(tmp_path, source, deployment_ports({}, count), configs)
+
+    def prohibit_network(*args: object, **kwargs: object) -> None:
+        """Fail the test if configuration composition unexpectedly attempts any HTTP call."""
+        raise AssertionError("offline MI startup must not make network requests")
+
+    monkeypatch.setattr("urllib.request.urlopen", prohibit_network)
+    monkeypatch.setattr(
+        "mission.api.current_environment",
+        lambda: {"OPENAI_API_KEY": "offline-placeholder", "ROBOGUIDE_ALLOW_INSECURE_LLM_HTTP": "1"},
+    )
+    engine, settings = build_engine(
+        source / "mission-config-b1.toml",
+        tmp_path / "mission-service-b1.toml",
+        SCENARIO.parents[1],
+    )
+    assert engine is not None
+    assert settings.state_db == tmp_path / "mission-service.sqlite3"
+
+
+@pytest.mark.parametrize("scenario", ["episode-51", "relocation", "perception", "rearrangement"])
+def test_rendered_profiles_are_consumable_before_starting_a_world(
+    tmp_path: Path, scenario: str
+) -> None:
+    """Runner preparation loads exact production profiles without credentials or services."""
+    source = SCENARIO.parent / f"e1-shared-world-{scenario}"
+    count = 3 if scenario == "rearrangement" else 2
+    configs = tuple(f"node-{chr(97 + index)}.toml" for index in range(count))
+    render_deployment_configs(tmp_path, source, deployment_ports({}, count), configs)
+    for filename, loader in (
+        ("planning-profile.json", DeploymentPlanningProfile.load),
+        ("execution-profile.json", DeploymentExecutionProfile.load),
+    ):
+        rendered = tmp_path / filename
+        loaded = loader(rendered if rendered.is_file() else source / filename)
+        assert loaded.to_json() == json.loads((source / filename).read_bytes())
+
+
+@pytest.mark.parametrize(
+    ("filename", "message"),
+    [("planning-profile.json", "digest does not match"), ("execution-profile.json", "units")],
+)
+def test_profile_content_drift_rejects_before_any_render_or_service(
+    tmp_path: Path, filename: str, message: str
+) -> None:
+    """Unconsumable deployment facts fail preparation before any run-local write or service."""
+    source = tmp_path / "scenario"
+    shutil.copytree(SCENARIO.parent / "e1-shared-world-perception", source)
+    profile_path = source / filename
+    document = json.loads(profile_path.read_bytes())
+    if filename == "planning-profile.json":
+        document["identity"]["revision"] = "edited-without-new-content-digest"
+    else:
+        document["profiles"][0]["resources"][0]["units"] = 0
+    profile_path.write_text(json.dumps(document))
+    output = tmp_path / "run"
+    output.mkdir()
+    with pytest.raises(ValueError, match=message):
+        render_deployment_configs(output, source, deployment_ports({}))
+    assert list(output.iterdir()) == []
 
 
 def test_legacy_ports_remain_default() -> None:
