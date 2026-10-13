@@ -78,6 +78,8 @@ const EVENT_PAYLOAD_SCHEMA_V17: &str = "domain.EventPayload.json/v17";
 const EVENT_PAYLOAD_SCHEMA_V18: &str = "domain.EventPayload.json/v18";
 /// Codec fencing bounded rolling-window failure and quarantine-review evidence.
 const EVENT_PAYLOAD_SCHEMA_V19: &str = "domain.EventPayload.json/v19";
+/// Codec distinguishing semantic Task satisfaction rejection from local execution failure.
+const EVENT_PAYLOAD_SCHEMA_V20: &str = "domain.EventPayload.json/v20";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -769,6 +771,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V17 => Ok(17),
         EVENT_PAYLOAD_SCHEMA_V18 => Ok(18),
         EVENT_PAYLOAD_SCHEMA_V19 => Ok(19),
+        EVENT_PAYLOAD_SCHEMA_V20 => Ok(20),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -827,6 +830,7 @@ fn validate_payload_schema(
         | EventPayload::SchedulingReservationInvalidated { .. }
         | EventPayload::SchedulingReservationReleased { .. } => 10,
         EventPayload::TaskSatisfied { .. } => 11,
+        EventPayload::TaskSatisfactionRejected { .. } => 20,
         EventPayload::TaskVerifierVerdictObserved { .. } => 12,
         EventPayload::StateRecordObserved { .. } | EventPayload::MemoryManifestPublished { .. } => {
             6
@@ -971,6 +975,7 @@ fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
     match payload {
         EventPayload::MissionExecutionQuarantineCleared { .. }
         | EventPayload::MissionExecutionIsolated { .. } => EVENT_PAYLOAD_SCHEMA_V19,
+        EventPayload::TaskSatisfactionRejected { .. } => EVENT_PAYLOAD_SCHEMA_V20,
         _ => EVENT_PAYLOAD_SCHEMA_V17,
     }
 }

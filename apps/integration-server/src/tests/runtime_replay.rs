@@ -354,6 +354,18 @@ fn current_positive_verifier_verdict_completes_mission_durably() {
         restored.verifier_source_digest,
         fixture.controller.verifier_source_digest
     );
+    let restored_bridge = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &restored.integration_json,
+        fixture.events.clone(),
+        integration::GrpcNodeRouter::default(),
+        TimestampMs::new(100),
+    )
+    .expect("Task satisfaction evidence restores with the Controller bridge");
+    let restored_evidence = restored_bridge
+        .task_satisfaction_evidence(fixture.attempts[verified_index].command().task_ref());
+    assert_eq!(restored_evidence.len(), 1);
+    assert!(restored_evidence[0].is_satisfied());
+    assert_eq!(restored_evidence[0].received_at(), TimestampMs::new(12));
     let events = fixture
         .events
         .events_page(None, 500)
@@ -394,7 +406,8 @@ fn current_positive_verifier_verdict_completes_mission_durably() {
     );
 }
 
-/// A final negative official verdict fails the Task without claiming benchmark success.
+/// A final negative verifier verdict rejects semantic satisfaction without claiming local execution
+/// failed.
 #[test]
 fn current_negative_verifier_verdict_fails_mission() {
     let mut fixture = ParallelMission::new_with_verifier(true);
@@ -419,6 +432,21 @@ fn current_negative_verifier_verdict_fails_mission() {
     )
     .expect("final negative verifier fails Task");
     fixture.events.commit_batch().expect("transaction commits");
+    let verified_index = fixture
+        .attempts
+        .iter()
+        .position(|attempt| attempt.command().task_id().as_str() == "a")
+        .expect("verified Task has an attempt");
+    assert_eq!(
+        fixture.task_lifecycle(verified_index),
+        TaskExecutionLifecycle::SatisfactionRejected
+    );
+    let evidence = fixture
+        .controller
+        .bridge
+        .task_satisfaction_evidence(fixture.attempts[verified_index].command().task_ref());
+    assert_eq!(evidence.len(), 1);
+    assert!(!evidence[0].is_satisfied());
     assert_eq!(
         fixture
             .controller
@@ -437,6 +465,17 @@ fn current_negative_verifier_verdict_fails_mission() {
             .any(|event| event.payload_json.contains("TaskSatisfied")
                 && event.payload_json.contains("\"task_id\":\"a\""))
     );
+    let events = fixture.events.decoded_events().expect("events decode");
+    assert!(events.iter().any(|event| matches!(
+        event.payload(),
+        domain::EventPayload::TaskSatisfactionRejected { task_ref, .. }
+            if task_ref.task_id().as_str() == "a"
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event.payload(),
+        domain::EventPayload::TaskExecutionFailed { task_ref, .. }
+            if task_ref.task_id().as_str() == "a"
+    )));
 }
 
 /// A late final-world verdict cannot reopen a Group released after physical failure.

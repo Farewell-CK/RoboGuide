@@ -72,7 +72,7 @@ impl Default for TaskSatisfactionBasis {
 }
 
 /// One immutable external verdict offered to Orchestration after execution completion.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskSatisfactionEvidence {
     /// Exact Task whose semantic effect was assessed.
     task_ref: TaskRef,

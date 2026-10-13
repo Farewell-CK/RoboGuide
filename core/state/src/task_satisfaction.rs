@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 type EvidenceKey = (TaskRef, CapabilityContractRef, String, StateSource);
 
 /// Latest verifier verdict per exact Task, contract, predicate, and producer.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct InMemoryTaskSatisfactionState {
     /// Independently attributed verdicts in deterministic identity order.
     evidence: BTreeMap<EvidenceKey, TaskSatisfactionEvidence>,
@@ -23,6 +23,23 @@ impl InMemoryTaskSatisfactionState {
         Self {
             evidence: BTreeMap::new(),
         }
+    }
+
+    /// Returns the latest exact-source evidence in deterministic identity order.
+    pub fn snapshots(&self) -> Vec<TaskSatisfactionEvidence> {
+        self.evidence.values().cloned().collect()
+    }
+
+    /// Restores evidence through the same source and receive-time ordering invariants as live
+    /// ingestion.
+    pub fn restore(
+        evidence: Vec<TaskSatisfactionEvidence>,
+    ) -> Result<Self, TaskSatisfactionStateError> {
+        let mut projection = Self::new();
+        for item in evidence {
+            projection.record_task_satisfaction_evidence(item)?;
+        }
+        Ok(projection)
     }
 }
 
@@ -42,6 +59,11 @@ impl TaskSatisfactionEvidenceWriter for InMemoryTaskSatisfactionState {
         &mut self,
         evidence: TaskSatisfactionEvidence,
     ) -> Result<(), TaskSatisfactionStateError> {
+        if evidence.predicate().trim().is_empty() {
+            return Err(TaskSatisfactionStateError::InvalidEvidence(
+                "predicate must be nonblank".to_string(),
+            ));
+        }
         let key = (
             evidence.task_ref().clone(),
             evidence.verifier().clone(),

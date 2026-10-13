@@ -37,15 +37,16 @@ the physical attempt ID supplied by Runtime through the existing Node workflow
 mapping. A failed evidence write does not rewrite physical execution outcome.
 
 Controller accepts a verdict only when its digest, frozen source, exact Task
-specification, and complete current Role attempt set match. It records a
-`TaskVerifierVerdictObserved` event in the same event/checkpoint transaction as
-the Orchestration transition. A positive verdict follows existing
-`satisfy_task_from_verifier` policy, using Controller receive time for the
-declared freshness bound. A final negative verdict fails the awaiting Task; it
-does not claim local execution failed. Already processed verdict/Task receipts
-survive restart, and a restored Controller refuses a different source digest
-for the same database. Missing or invalid evidence remains unavailable and cannot
-produce `TaskSatisfied`.
+specification, and complete current Role attempt set match. It records normalized
+source-aware evidence in the State projection and a `TaskVerifierVerdictObserved`
+receipt in the same event/checkpoint transaction as the Orchestration transition.
+A positive verdict follows existing `satisfy_task_from_verifier` policy, using
+Controller receive time for the declared freshness bound. A final negative verdict
+records `TaskSatisfactionRejected` and the Task's `SatisfactionRejected` terminal
+state; Mission policy may still fail and release the Group. This does not claim
+local execution failed. Already processed verdict/Task receipts survive restart,
+and a restored Controller refuses a different source digest for the same database.
+Missing or invalid evidence remains unavailable and cannot produce `TaskSatisfied`.
 
 B1 archival verification independently binds the source and verdict to its
 frozen input, authoritative semantic digest, observed physical attempts, and
@@ -72,10 +73,11 @@ ADR-0039's freshness policy and the MissionPlan schema remain unchanged.
 
 The source/verdict codec lives in `application/verifier_source.rs`; neutral admission, current
 attempt validation and satisfaction consumers live in `application/task_verifier.rs`. The actual
-application timer consumes the configured verdict and commits its event/receipt/checkpoint together.
-`tests/runtime_replay.rs` checks durable positive completion, final negative handling, stale physical
-attempt rejection and late verdicts after failure. Consumer tests check source digest/schema,
-supported predicates, final-Task topology and restart source identity.
+application timer consumes the configured verdict and commits State evidence, event/receipt and
+checkpoint together. `tests/runtime_replay.rs` checks durable positive completion with State restore,
+semantic negative rejection without `TaskExecutionFailed`, stale physical attempt rejection and
+late verdicts after failure. Consumer tests check source digest/schema, supported predicates,
+final-Task topology and restart source identity.
 
 These are software/conformance evidence. The production profile and physical/official evidence
 limits stated above still apply; the status update does not claim streaming or generic truth.

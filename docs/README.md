@@ -56,6 +56,7 @@
 - [`decisions/0032-mission-review-and-repair-loop.md`](decisions/0032-mission-review-and-repair-loop.md)：结构化 Review evidence、用户 clarification 分流与有界 MissionPlan Repair。
 - [`decisions/0033-task-satisfaction-boundary.md`](decisions/0033-task-satisfaction-boundary.md)：本地 execution completion、Task satisfaction 与 Mission completion 的显式边界。
 - [`decisions/0034-mission-semantic-contract-normalization.md`](decisions/0034-mission-semantic-contract-normalization.md)：Capability/Operation/Requirement、Role identity、Dialogue、Timing、Satisfaction 与风险审批的长期统一边界。
+- [`decisions/0093-task-satisfaction-rejection-and-evidence-projection.md`](decisions/0093-task-satisfaction-rejection-and-evidence-projection.md)：负 verifier 的语义拒绝终态、State evidence projection 与 receipt/artifact replay 边界。
 
 ## 历史架构
 

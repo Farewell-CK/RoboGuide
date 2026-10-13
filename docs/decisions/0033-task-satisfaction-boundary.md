@@ -1,12 +1,13 @@
 # ADR-0033: Task Satisfaction Boundary v0.1
 
-- Status: Accepted for Task Satisfaction Boundary v0.1
+- Status: Accepted historical boundary; extended by ADR-0034, ADR-0039, ADR-0048 and ADR-0093
 - Date: 2026-09-10
 
-> Follow-up: ADR-0034 and MissionPlan v0.7 add explicit expected effects plus source-aware
-> `verifier-evidence`. State preserves independent verdict evidence; Orchestration validates the
-> declared contract, predicate, positive verdict, and receive-time freshness before satisfaction.
-> Multi-source truth fusion and disputed-evidence policy remain deferred.
+> Current scope: this ADR records the original v0.1/v0.6 boundary. ADR-0034 and MissionPlan v0.7
+> add explicit expected effects plus source-aware `verifier-evidence`; ADR-0048 limits the
+> implemented verifier ingress to a configured deployment-owned final source. The State plane now
+> persists independently attributed evidence, while Orchestration remains the only satisfaction
+> authority. ADR-0093 defines negative-verdict rejection and the replay/artifact boundary.
 
 ## Context
 
@@ -24,7 +25,7 @@ predicate now would invent a verifier language and State authority that RoboGuid
 
 ## Decision
 
-MissionPlan v0.6 adds one required Task field:
+At the time of this decision, MissionPlan v0.6 added one required Task field:
 
 ```json
 {
@@ -34,7 +35,7 @@ MissionPlan v0.6 adds one required Task field:
 }
 ```
 
-The Task `description` remains its human-readable expected outcome. `satisfaction.basis` specifies
+At that baseline, the Task `description` remained its human-readable expected outcome. `satisfaction.basis` specifies
 which admitted evidence may close that outcome. v0.1 implements only `execution-report`: successful
 terminal reports from every current Role execution, after Runtime relation fences are satisfied,
 may be accepted by Orchestration as Task satisfaction. Historical MissionPlan v0.2-v0.5 inputs
@@ -64,10 +65,10 @@ implemented `execution-report` basis. The intermediate `AwaitingSatisfaction` st
 events remain observable and checkpointable. Task-scoped resources are retained until satisfaction,
 not merely execution completion.
 
-MissionPlan v0.6 does not add an `expected_effect` duplicate because Task `description` already owns
-that human-readable outcome. Reviewer/Planner prompts must treat it as an outcome, not a procedure.
-A future machine-checkable effect or State evidence basis requires its own versioned contract,
-source identity, freshness, provenance, and admission rules.
+At that baseline, MissionPlan v0.6 did not add an `expected_effect` duplicate because Task
+`description` already owned that human-readable outcome. ADR-0034 later introduced an explicit
+machine-checkable effect and source-aware verifier basis with its own contract, freshness,
+provenance, and admission rules.
 
 This decision does not change Proposal -> Commit -> Bind, Execution Group ownership, Runtime command
 routing, Node Protocol, Local EAIOS Local How, or recovery selection authority.
@@ -80,10 +81,34 @@ routing, Node Protocol, Local EAIOS Local How, or recovery selection authority.
 - Audit traces can distinguish Local EAIOS completion from Orchestration satisfaction acceptance.
 - The current basis is not independent physical-world verification and must not be described as one.
 - Verifier identity, freshness and a deployment-owned final positive/negative verdict profile are
-  now implemented by [ADR-0039](0039-mission-satisfaction-freshness-policy.md) and
+  implemented by [ADR-0039](0039-mission-satisfaction-freshness-policy.md) and
   [ADR-0048](0048-deployment-task-verifier-ingress.md). Production `task_verifier.rs` preserves exact
-  Task/Role/attempt and source identity; `runtime_replay` tests cover positive/negative verdicts,
-  stale attempts and failures followed by late verdicts.
-- General `state-evidence`, disputed or multi-source truth, streaming intermediate predicates and
-  semantic post-execution replanning remain deferred. Final negative-verdict handling does not
-  implement those broader policies.
+  Task/Role/attempt and source identity, records the normalized verdict in the State projection,
+  and emits a durable receipt event. Positive evidence produces `TaskSatisfied`; a final negative
+  verdict produces `TaskSatisfactionRejected` and the Task's `SatisfactionRejected` terminal state.
+- `TaskSatisfactionRejected` is a semantic policy outcome, not a claim that the local execution
+  failed. The Mission may still become `Failed` and release its Group according to the configured
+  final-verdict policy, while the earlier `TaskExecutionCompleted` evidence remains distinct.
+- The event stores the immutable source/artifact digest and normalized State stores source and
+  receive-time evidence. Full replay of the producer document still requires the deployment-owned
+  artifact identified by that digest; the event is not a replacement for that artifact.
+- General State evidence beyond this verifier projection, disputed or multi-source truth, streaming
+  intermediate predicates and semantic post-execution replanning remain deferred.
+
+## Current implementation boundary (2026-10-13)
+
+The active MissionPlan contract is v0.8; v0.2-v0.7 remain compatibility inputs. The satisfaction
+slice introduced here is extended by ADR-0034/0039/0048/0093 as follows:
+
+```text
+local Role execution completes
+  -> Control TaskExecution = AwaitingSatisfaction
+  -> TaskExecutionCompleted
+  -> State records exact-source verifier evidence (when configured)
+  -> positive evidence: TaskSatisfied -> Task Completed -> release/advance
+  -> negative final evidence: TaskSatisfactionRejected -> SatisfactionRejected
+     -> Mission policy may fail/release, without emitting TaskExecutionFailed
+```
+
+Only the configured final-verdict profile is implemented. Missing, malformed, stale-attempt, or
+source-mismatched evidence remains unavailable and cannot produce `TaskSatisfied`.

@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | 0020：RT-G3 attempt history | ADR-0028；Runtime logical slot、durable generation、attempt history；relation rebind 和 current-attempt outcome fences | 原 ADR 已追加软件闭环说明；RT-G9 保留 |
 | 0028：multi-role joint recovery | ADR-0061；仅独立 Session 的 whole-Group retained-binding continuation；实际 scheduling/HTTP/timer/checkpoint 与 transport/isolation 回归 | 原 ADR 已注明已实现的子集；coupled/migration 与多 Actor 物理续跑保留 |
-| 0033：verifier identity / negative verdict | ADR-0039/0048；task_verifier、verifier_source、runtime_replay 的 positive/negative/stale-attempt/restore 检查 | 原 ADR 已修正；multi-source truth 与通用 State basis 保留 |
+| 0033：verifier identity / negative verdict | ADR-0039/0048/0093；Task verifier、State projection、negative rejection event、checkpoint restore 与 runtime_replay 正负/stale-attempt 检查 | 负 verdict 已与 `TaskExecutionFailed` 分离；通用多源 truth、streaming 与 artifact 外部归档仍保留 |
 | 0036：generic verifier ingress | ADR-0048；部署 final-verdict source codec、admission 和 timer 消费者 | 原 ADR 已修正为该 profile 已实现；streaming/remote authentication 保留 |
 | 0048：仍标 Proposed 的实现状态 | 上述真实 source/consumer、timer 和正负 verdict 回归已存在 | 改为 configured final-verdict profile 已实现；来源与物理边界不扩大 |
 | 0039：同一 verifier ingress 遗留 | 原文已引用 ADR-0048 并区分来源与 freshness | 文档已有演进说明；配置重启后的完整 MI policy history 仍待实现 |

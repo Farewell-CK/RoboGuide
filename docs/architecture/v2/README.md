@@ -211,13 +211,15 @@ state-aware Commit；不在 Control 内另建一份 Node resource truth。详见
 
 Task 的本地执行结束与 Mission 语义满足是两个不同事实。MissionPlan v0.7 为每个 Task 显式
 声明 expected effect 与 `satisfaction.basis`。`execution-report` 保留兼容 bootstrap 语义；
-`verifier-evidence` 要求 exact verifier contract/predicate，并由 State 保存相互独立、带 source、
-source time 和 RoboGuide receive time 的 verdict。Runtime 只归约 execution completion，不拥有
-Task 或 Mission completion authority。Control 先将 TaskExecution 置为
-`AwaitingSatisfaction` 并记录 `TaskExecutionCompleted`；Orchestration 校验当前 Task policy、
-positive verdict 与 receive-time freshness 后才记录 `TaskSatisfied`、释放 Task-scoped binding、
-推进 DAG，并在所有 Task 满足后结束 Mission。该 slice 不进行多源融合、争议裁决或宣称全局
-物理真值。详见 ADR-0033 与 ADR-0034。
+`verifier-evidence` 要求 exact verifier contract/predicate，并由 State 按 exact source 保存带
+source、source time 和 RoboGuide receive time 的 verdict。Runtime 只归约 execution completion，
+不拥有 Task 或 Mission completion authority。Control 先将 TaskExecution 置为
+`AwaitingSatisfaction` 并记录 `TaskExecutionCompleted`；正 evidence 经 Orchestration 校验
+当前 Task policy 与 receive-time freshness 后记录 `TaskSatisfied`、释放 Task-scoped binding、
+推进 DAG。负 final verdict 记录 `TaskSatisfactionRejected`，Task 进入
+`SatisfactionRejected`；Mission 可按 final policy 失败，但不产生 `TaskExecutionFailed`。完整
+verdict artifact 由 deployment 按 digest 保留，事件是 receipt。该 slice 不进行多源融合、
+争议裁决或宣称全局物理真值。详见 ADR-0033、ADR-0034 与 ADR-0093。
 
 Mission Intelligence 的 verifier freshness 来自显式、版本化的系统 satisfaction policy；
 Planner、Reviewer、Repairer 消费同一不可变 policy 和 digest，不能为了填满 schema 猜测数值。

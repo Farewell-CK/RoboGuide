@@ -217,7 +217,9 @@ impl ControlPlane {
             // Terminal Task history may retain Context-scoped role assignments until Context or
             // Group release, so role coverage is intentionally not required here.
             TaskExecutionLifecycle::Completed => !has_task_recovery,
-            TaskExecutionLifecycle::Failed | TaskExecutionLifecycle::Cancelled => exact,
+            TaskExecutionLifecycle::Failed
+            | TaskExecutionLifecycle::SatisfactionRejected
+            | TaskExecutionLifecycle::Cancelled => exact,
         };
         if !valid {
             return Err(ControlError::InvalidProposal(format!(

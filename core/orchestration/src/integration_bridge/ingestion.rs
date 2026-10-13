@@ -49,6 +49,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             control,
             state,
             state_records: StateRecordProjection::new(),
+            task_satisfaction: InMemoryTaskSatisfactionState::new(),
             events,
             router,
             node_lease_policy,
@@ -65,6 +66,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             control: self.control.checkpoint(),
             nodes: self.state.snapshots(),
             state_records: self.state_records.snapshots(),
+            task_satisfaction: self.task_satisfaction.snapshots(),
             runtime: self.runtime.checkpoint(),
         };
         serde_json::to_string(&checkpoint)
@@ -103,6 +105,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         if !matches!(
             checkpoint.schema.as_str(),
             CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_SATISFACTION_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_GROUP_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_RECOVERY_CONTROLLER_CHECKPOINT_SCHEMA
@@ -116,15 +119,21 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         }
         if !matches!(
             checkpoint.schema.as_str(),
-            CONTROLLER_CHECKPOINT_SCHEMA | PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA
+            CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_SATISFACTION_CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA
         ) && checkpoint.runtime.has_group_recovery_history()
         {
             return Err(IntegrationRuntimeError::Checkpoint(
                 "pre-Group checkpoint contains Group recovery permission".into(),
             ));
         }
-        if checkpoint.schema != CONTROLLER_CHECKPOINT_SCHEMA
-            && checkpoint.runtime.has_terminal_receive_times()
+        if !matches!(
+            checkpoint.schema.as_str(),
+            CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_SATISFACTION_CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA
+        ) && checkpoint.runtime.has_terminal_receive_times()
         {
             return Err(IntegrationRuntimeError::Checkpoint(
                 "pre-timing checkpoint contains terminal receive-time authority".into(),
@@ -135,6 +144,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .map_err(IntegrationRuntimeError::Checkpoint)?;
         let state_records = StateRecordProjection::restore(checkpoint.state_records)
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
+        let task_satisfaction =
+            InMemoryTaskSatisfactionState::restore(checkpoint.task_satisfaction)
+                .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
         let runtime = RuntimeExecutionManager::restore(checkpoint.runtime)
             .map_err(|error| IntegrationRuntimeError::Checkpoint(error.to_string()))?;
         Ok(Self {
@@ -142,6 +154,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             control,
             state,
             state_records,
+            task_satisfaction,
             events,
             router,
             node_lease_policy,

@@ -83,3 +83,27 @@ fn older_receive_time_is_rejected() {
         vec![&current]
     );
 }
+
+/// Checkpoint restore retains exact-source evidence and rejects a tampered blank predicate.
+#[test]
+fn checkpoint_restore_preserves_evidence_invariants() {
+    let current = evidence("camera-a", 10, 20, true);
+    let mut state = InMemoryTaskSatisfactionState::new();
+    state
+        .record_task_satisfaction_evidence(current.clone())
+        .expect("evidence records");
+    let restored =
+        InMemoryTaskSatisfactionState::restore(state.snapshots()).expect("valid evidence restores");
+    assert_eq!(
+        restored.task_satisfaction_evidence(current.task_ref()),
+        vec![&current]
+    );
+
+    let mut tampered = serde_json::to_value(current).expect("evidence serializes");
+    tampered["predicate"] = serde_json::Value::String("  ".to_string());
+    let tampered = serde_json::from_value(tampered).expect("tampered evidence decodes");
+    assert!(matches!(
+        InMemoryTaskSatisfactionState::restore(vec![tampered]),
+        Err(TaskSatisfactionStateError::InvalidEvidence(_))
+    ));
+}

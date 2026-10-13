@@ -15,13 +15,13 @@ use integration::grpc::v0_4::{CanonicalInvocation, ExecutionPhase, NodeRegistrat
 use integration::{GrpcNodeEvent, GrpcNodeRouter};
 use ports::{
     EventSink, NodeLeasePolicy, SharedNodeStateReader, SharedNodeStateWriter, StateRecordReader,
-    StateRecordWriter,
+    StateRecordWriter, TaskSatisfactionEvidenceReader, TaskSatisfactionEvidenceWriter,
 };
 use runtime::{
     ExecutionEvent, ExecutionStatus, PeerChannelReadinessEvidence, RuntimeExecutionCheckpoint,
     RuntimeExecutionManager, RuntimeRelationSnapshot, SharedSpatialEvidence,
 };
-use state::{InMemorySharedNodeState, StateRecordProjection};
+use state::{InMemorySharedNodeState, InMemoryTaskSatisfactionState, StateRecordProjection};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::{Display, Formatter};
 
@@ -38,8 +38,11 @@ pub use dispatch::{RecoveryDeploymentSupport, RecoverySupportDisposition};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 18 preserves exact-set Group recovery purposes without renewing original budgets.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v19";
+/// Version 20 persists the source-aware Task satisfaction evidence projection.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v20";
+
+/// Previous checkpoint has no persisted Task satisfaction evidence projection.
+const PRE_SATISFACTION_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v19";
 
 /// Previous checkpoint retains Group recovery but has no original terminal receive-time authority.
 const PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v18";
@@ -273,6 +276,8 @@ pub struct IntegrationRuntimeBridge<E: Clone> {
     state: InMemorySharedNodeState,
     /// Source-aware State records kept separate from typed authority projections.
     state_records: StateRecordProjection,
+    /// Independently attributed Task satisfaction evidence projected by the State plane.
+    task_satisfaction: InMemoryTaskSatisfactionState,
     /// Existing domain event sink used by Runtime/Control.
     events: E,
     /// Current formal gRPC Node routes.
@@ -299,6 +304,9 @@ struct ControllerCheckpoint {
     /// Independently attributed State channels, preserving their original receive times.
     #[serde(default)]
     state_records: Vec<StateRecord>,
+    /// Independently attributed Task satisfaction evidence, preserving source and receive times.
+    #[serde(default)]
+    task_satisfaction: Vec<domain::TaskSatisfactionEvidence>,
     /// Runtime-owned live execution contexts and continuity state.
     runtime: RuntimeExecutionCheckpoint,
 }
@@ -330,6 +338,8 @@ pub enum IntegrationRuntimeError {
     State(ports::SharedStateError),
     /// Source-aware State rejected an ordering or conflict invariant.
     StateRecord(ports::StateRecordError),
+    /// Task satisfaction evidence rejected an ordering or conflict invariant.
+    TaskSatisfactionState(ports::TaskSatisfactionStateError),
     /// Domain conversion failed.
     Domain(domain::DomainError),
     /// gRPC router rejected a command.
@@ -355,6 +365,7 @@ impl Display for IntegrationRuntimeError {
             Self::Control(error) => error.fmt(f),
             Self::State(error) => error.fmt(f),
             Self::StateRecord(error) => error.fmt(f),
+            Self::TaskSatisfactionState(error) => error.fmt(f),
             Self::Domain(error) => error.fmt(f),
             Self::Route(error) => error.fmt(f),
             Self::Protocol(reason) => f.write_str(reason),
@@ -384,6 +395,12 @@ impl From<ports::StateRecordError> for IntegrationRuntimeError {
     /// Preserves source-aware State projection failures at the composition boundary.
     fn from(value: ports::StateRecordError) -> Self {
         Self::StateRecord(value)
+    }
+}
+impl From<ports::TaskSatisfactionStateError> for IntegrationRuntimeError {
+    /// Preserves Task satisfaction State projection failures at the composition boundary.
+    fn from(value: ports::TaskSatisfactionStateError) -> Self {
+        Self::TaskSatisfactionState(value)
     }
 }
 impl From<domain::DomainError> for IntegrationRuntimeError {

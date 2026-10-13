@@ -101,8 +101,10 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   historical physical-binding checkpoints without this watermark require trusted migration.
 - Runtime successful terminal facts mean local execution completed, not that a Task or Mission is
   semantically satisfied. Control records `AwaitingSatisfaction` and retains bindings;
-  Orchestration applies the Mission-declared basis, emits `TaskSatisfied`, then releases Task-scoped
-  ownership, advances the DAG, and evaluates Mission completion.
+  positive Mission-declared evidence emits `TaskSatisfied`, then releases Task-scoped ownership,
+  advances the DAG, and evaluates Mission completion. A final negative verifier emits
+  `TaskSatisfactionRejected` and enters `SatisfactionRejected`; Mission policy may fail/release the
+  Group without emitting `TaskExecutionFailed`, which remains reserved for local execution failure.
 - Accepted-plan Execution Session v0.1 is immutable Group topology evidence carried with
   Runtime Execute through Node Protocol; it is not Mission semantics, a Node selector, or
   resource authority. The Habitat shared-world deployment admits either two independent

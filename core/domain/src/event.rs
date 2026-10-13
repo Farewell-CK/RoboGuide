@@ -349,6 +349,19 @@ pub enum EventPayload {
         /// Mission-declared evidence basis accepted for this transition.
         basis: TaskSatisfactionBasis,
     },
+    /// Orchestration rejected the Mission-declared semantic outcome after local execution ended.
+    ///
+    /// This is distinct from [`Self::TaskExecutionFailed`]: the local execution aggregate may
+    /// already have completed successfully, while the final evidence did not establish the
+    /// requested effect.
+    TaskSatisfactionRejected {
+        /// Group retaining the Mission execution context.
+        group_id: ExecutionGroupId,
+        /// Task whose semantic outcome was rejected.
+        task_ref: TaskRef,
+        /// Mission-declared evidence basis that produced the rejection.
+        basis: TaskSatisfactionBasis,
+    },
     /// A Task execution reached an unrecoverable failure state.
     TaskExecutionFailed {
         /// Group hosting the failed Task.

@@ -23,6 +23,11 @@ pub enum TaskExecutionLifecycle {
     Completed,
     /// The Task reached an unrecoverable failure.
     Failed,
+    /// The local execution completed, but the Mission-declared semantic outcome was rejected.
+    ///
+    /// This terminal state preserves the distinction between a physical/local execution failure
+    /// and a final verifier verdict that did not establish the requested effect.
+    SatisfactionRejected,
     /// The Task was explicitly cancelled.
     Cancelled,
 }

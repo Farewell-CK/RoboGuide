@@ -224,6 +224,10 @@ pub(crate) fn apply_task_verifier(
             verdict.satisfied,
         )
         .map_err(|error| error.to_string())?;
+        controller
+            .bridge
+            .record_task_satisfaction_evidence(evidence.clone())
+            .map_err(|error| error.to_string())?;
         events.append(
             now,
             correlation_id,
@@ -255,10 +259,9 @@ pub(crate) fn apply_task_verifier(
                 .map_err(|error| error.to_string())?;
         } else {
             orchestrator
-                .task_failed(
+                .reject_task_satisfaction_from_verifier(
                     &mission_id,
-                    &task_ref,
-                    "final independent verifier verdict was negative",
+                    &evidence,
                     bridge.control_mut(),
                     now,
                     correlation_id,

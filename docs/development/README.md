@@ -366,16 +366,19 @@ decision 的 earliest/end/latest activation，拒绝被扩宽的 checkpoint 证�
 
 MissionPlan v0.7 为每个 Task 增加 explicit `expected_effect`，并支持
 `execution-report` 与 `verifier-evidence`。前者保留兼容 bootstrap；后者要求 exact verifier
-contract/predicate 和最大 evidence age。State 按 exact source 分开保存 verdict，使用 RoboGuide
-receive time 排序；它不融合来源，也不决定 Task 是否满足。
+contract/predicate 和最大 evidence age。Controller Bridge 将 evidence 写入 State projection，
+按 exact source 分开保存并使用 RoboGuide receive time 排序；它不融合来源，也不决定 Task 是否满足。
 
 Runtime 只报告 execution completion。Control 将 Task 从 `Active` 迁移到
 `AwaitingSatisfaction`，保留 Task binding、reservation 和后继 DAG fence，并记录
-`TaskExecutionCompleted`。Orchestration 随后应用 Mission policy，记录 `TaskSatisfied`，再释放
-Task-scoped ownership、推进 DAG，并仅在全部 Task 已满足后完成 Mission。历史 v0.2-v0.6
-MissionPlan 兼容输入保持 `execution-report`。Orchestration 对 verifier evidence 校验 TaskRef、
-contract、predicate、positive verdict 与 receive-time freshness；多源 conflict resolution、
-negative-verdict recovery 和 disputed evidence policy 仍是后续独立合同。
+`TaskExecutionCompleted`。Orchestration 随后应用 Mission policy：正 verifier evidence 记录
+`TaskSatisfied`、释放 Task-scoped ownership、推进 DAG；负 final verdict 记录
+`TaskSatisfactionRejected`，进入 `SatisfactionRejected`，Mission 可按 final policy 失败并释放
+Group，但不产生 `TaskExecutionFailed`。历史 v0.2-v0.7 MissionPlan 兼容输入保持
+`execution-report`。Orchestration 对 verifier evidence 校验 TaskRef、contract、predicate、
+positive verdict 与 receive-time freshness；多源 conflict resolution、streaming predicate 和
+disputed evidence policy 仍是后续独立合同。完整 verifier JSON 由 deployment-owned artifact
+按 digest 保存，事件本身是 receipt。
 
 Mission Actor 的物理 placement 是独立的 Control deployment policy，不是 MissionPlan 字段。
 可选 `(MissionId, ActorId) -> NodeId` constraint 在首次 Matching 时生成 singleton candidate，

@@ -416,6 +416,43 @@ fn event_decoder_rejects_verifier_verdict_under_v11_marker() {
     ));
 }
 
+/// A v19 row cannot claim semantic satisfaction rejection introduced by codec v20.
+#[test]
+fn event_decoder_rejects_satisfaction_rejection_under_v19_marker() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let path = directory
+        .path()
+        .join("events-task-satisfaction-rejection-v20.sqlite3");
+    let correlation =
+        CorrelationId::new("task-satisfaction-rejection-v20").expect("correlation valid");
+    let mut log = SqliteEventLog::open(&path).expect("event log opens");
+    log.append(
+        TimestampMs::new(50),
+        &correlation,
+        None,
+        EventPayload::TaskSatisfactionRejected {
+            group_id: ExecutionGroupId::new("group-a").expect("group id valid"),
+            task_ref: TaskRef::new(
+                MissionId::new("mission-a").expect("mission id valid"),
+                TaskId::new("task-a").expect("task id valid"),
+            ),
+            basis: domain::TaskSatisfactionBasis::ExecutionReport,
+        },
+    );
+    log.connection
+        .lock()
+        .expect("event connection lock is available")
+        .execute(
+            "UPDATE events SET payload_schema = 'domain.EventPayload.json/v19' WHERE sequence = 1",
+            [],
+        )
+        .expect("fixture marker changes to v19");
+    assert!(matches!(
+        log.decoded_events(),
+        Err(SqliteEventLogError::Codec(reason)) if reason.contains("requires schema v20")
+    ));
+}
+
 /// The current decoder retains the previous v2 JSON path after v3 Spatial variants ship.
 #[test]
 fn event_decoder_retains_v2_payload_compatibility() {

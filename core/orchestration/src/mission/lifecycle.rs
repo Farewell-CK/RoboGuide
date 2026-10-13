@@ -249,6 +249,106 @@ impl MissionOrchestrator {
         Ok(())
     }
 
+    /// Rejects a final negative verifier verdict without mislabeling successful local execution
+    /// as a physical execution failure.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reject_task_satisfaction_from_verifier<E: EventSink>(
+        &mut self,
+        mission_id: &MissionId,
+        evidence: &domain::TaskSatisfactionEvidence,
+        control: &mut ControlPlane,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), OrchestrationError> {
+        if evidence.task_ref().mission_id() != mission_id {
+            return Err(OrchestrationError::Mission(
+                "Task satisfaction evidence belongs to another Mission".to_string(),
+            ));
+        }
+        let basis = self
+            .executions
+            .get(mission_id)
+            .and_then(|execution| {
+                execution
+                    .plan()
+                    .task_graph()
+                    .tasks()
+                    .iter()
+                    .find(|task| task.requirement().task_ref() == evidence.task_ref())
+            })
+            .map(|task| task.satisfaction_basis().clone())
+            .ok_or_else(|| {
+                OrchestrationError::Mission(
+                    "Task satisfaction policy is absent from the accepted MissionPlan".to_string(),
+                )
+            })?;
+        let domain::TaskSatisfactionBasis::VerifierEvidence(spec) = &basis else {
+            return Err(OrchestrationError::Mission(
+                "Task satisfaction basis cannot accept verifier evidence".to_string(),
+            ));
+        };
+        if evidence.verifier() != spec.verifier()
+            || evidence.predicate() != spec.predicate()
+            || evidence.is_satisfied()
+        {
+            return Err(OrchestrationError::Mission(
+                "Task satisfaction rejection does not match the declared verifier policy"
+                    .to_string(),
+            ));
+        }
+        let group_id = self
+            .group_for_task(mission_id, evidence.task_ref())?
+            .clone();
+        release_mission_scheduling(
+            control,
+            mission_id,
+            "Mission semantic satisfaction rejected",
+            timestamp,
+            correlation_id,
+            events,
+        );
+        control.reject_task_satisfaction(
+            &group_id,
+            evidence.task_ref(),
+            basis,
+            timestamp,
+            correlation_id,
+            events,
+        )?;
+        if control.group(&group_id).is_some_and(|group| {
+            matches!(
+                group.lifecycle(),
+                GroupLifecycle::Bound | GroupLifecycle::Active | GroupLifecycle::Adapted
+            )
+        }) {
+            control.block_group(
+                &group_id,
+                "final verifier verdict rejected the declared Task effect",
+                timestamp,
+                correlation_id,
+                events,
+            )?;
+        }
+        control.fail_group(
+            &group_id,
+            "Mission semantic satisfaction policy declared final rejection",
+            timestamp,
+            correlation_id,
+            events,
+        )?;
+        control.release_group(&group_id, timestamp, correlation_id, events)?;
+        self.executions
+            .get_mut(mission_id)
+            .expect("Mission validated above")
+            .lifecycle = MissionExecutionLifecycle::Failed;
+        self.executions
+            .get_mut(mission_id)
+            .expect("Mission validated above")
+            .isolation = None;
+        Ok(())
+    }
+
     /// Applies an explicit Mission cancellation and releases its long-lived Group.
     pub fn cancel<E: EventSink>(
         &mut self,

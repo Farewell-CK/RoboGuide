@@ -724,6 +724,22 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     pub const fn state_records(&self) -> &StateRecordProjection {
         &self.state_records
     }
+    /// Records one independently attributed Task satisfaction verdict in the State projection.
+    pub fn record_task_satisfaction_evidence(
+        &mut self,
+        evidence: domain::TaskSatisfactionEvidence,
+    ) -> Result<(), IntegrationRuntimeError> {
+        self.task_satisfaction
+            .record_task_satisfaction_evidence(evidence)
+            .map_err(IntegrationRuntimeError::from)
+    }
+    /// Returns the latest exact-source Task satisfaction verdicts without selecting global truth.
+    pub fn task_satisfaction_evidence(
+        &self,
+        task_ref: &domain::TaskRef,
+    ) -> Vec<&domain::TaskSatisfactionEvidence> {
+        self.task_satisfaction.task_satisfaction_evidence(task_ref)
+    }
     /// Returns current remote execution status.
     pub fn execution_status(&self, execution_id: &str) -> Option<RemoteExecutionStatus> {
         self.runtime

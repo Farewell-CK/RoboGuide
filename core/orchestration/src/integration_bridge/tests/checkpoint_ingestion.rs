@@ -90,6 +90,44 @@ fn v11_checkpoint_migrates_missing_command_and_attempt_evidence() {
     );
 }
 
+/// The v19 checkpoint migrates with an empty Task satisfaction projection introduced by v20.
+#[test]
+fn v19_checkpoint_migrates_missing_task_satisfaction_evidence() {
+    let bridge = IntegrationRuntimeBridge::new(
+        ControlPlane::new(),
+        InMemorySharedNodeState::new(),
+        InMemoryEventLog::new(),
+        GrpcNodeRouter::default(),
+    );
+    let mut checkpoint: serde_json::Value = serde_json::from_str(
+        &bridge
+            .checkpoint_json()
+            .expect("current checkpoint serializes"),
+    )
+    .expect("current checkpoint is JSON");
+    checkpoint["schema"] = serde_json::json!(PRE_SATISFACTION_CONTROLLER_CHECKPOINT_SCHEMA);
+    checkpoint
+        .as_object_mut()
+        .expect("checkpoint is an object")
+        .remove("task_satisfaction");
+
+    let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &checkpoint.to_string(),
+        InMemoryEventLog::new(),
+        GrpcNodeRouter::default(),
+        TimestampMs::new(1),
+    )
+    .expect("v19 checkpoint migrates");
+    assert!(
+        restored
+            .task_satisfaction_evidence(&domain::TaskRef::new(
+                domain::MissionId::new("unused").expect("Mission id is valid"),
+                domain::TaskId::new("unused").expect("Task id is valid"),
+            ))
+            .is_empty()
+    );
+}
+
 /// Integration cannot create a relation registry beside an absent Control Group.
 #[test]
 fn relation_registration_requires_existing_control_group() {

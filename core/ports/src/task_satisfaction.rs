@@ -17,6 +17,8 @@ pub enum TaskSatisfactionStateError {
     },
     /// Equal receive time carried a different immutable verdict for the same exact source.
     ConflictingEvidence(TaskRef),
+    /// Checkpoint or ingress evidence violated the nonblank predicate invariant.
+    InvalidEvidence(String),
 }
 
 impl Display for TaskSatisfactionStateError {
@@ -38,6 +40,9 @@ impl Display for TaskSatisfactionStateError {
                     formatter,
                     "conflicting satisfaction evidence for {task_ref}"
                 )
+            }
+            Self::InvalidEvidence(reason) => {
+                write!(formatter, "invalid satisfaction evidence: {reason}")
             }
         }
     }

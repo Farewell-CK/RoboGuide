@@ -318,6 +318,46 @@ impl ControlPlane {
         Ok(())
     }
 
+    /// Records a final semantic rejection after local execution completed successfully.
+    pub fn reject_task_satisfaction<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        basis: TaskSatisfactionBasis,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), ControlError> {
+        let group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        let execution = group
+            .task_executions
+            .get(task_ref)
+            .ok_or_else(|| ControlError::InvalidProposal("unknown Task execution".to_string()))?;
+        if execution.lifecycle() != TaskExecutionLifecycle::AwaitingSatisfaction {
+            return Err(ControlError::InvalidProposal(
+                "only a Task awaiting satisfaction can reject semantic satisfaction".to_string(),
+            ));
+        }
+        group.task_executions.insert(
+            task_ref.clone(),
+            execution.with_lifecycle(TaskExecutionLifecycle::SatisfactionRejected),
+        );
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            EventPayload::TaskSatisfactionRejected {
+                group_id: group_id.clone(),
+                task_ref: task_ref.clone(),
+                basis,
+            },
+        );
+        Ok(())
+    }
+
     /// Releases only the supplied temporary Task resources and retains the parent Group.
     pub fn release_task_bindings<E: EventSink>(
         &mut self,
@@ -339,6 +379,7 @@ impl ControlPlane {
             execution.lifecycle(),
             TaskExecutionLifecycle::Completed
                 | TaskExecutionLifecycle::Failed
+                | TaskExecutionLifecycle::SatisfactionRejected
                 | TaskExecutionLifecycle::Cancelled
         ) {
             return Err(ControlError::InvalidProposal(
