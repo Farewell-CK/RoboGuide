@@ -78,9 +78,24 @@ def test_perception_planning_preserves_registered_platform_and_observation_modes
             assert capability["attributes"] == registered[key]
         mobility = registered["mobility.move@v1"]
         acquired = registered["observation.acquire@v1"]
+        assert acquired["condition-format"] == "detected(entity-ref)"
+        assert registered["observation.verify@v1"]["condition-format"] == "detected(entity-ref)"
         assert acquired["viewpoint-positioning"] == (
             "flight" if mobility["base-type"] == "flying" else "ground"
         )
+
+
+@pytest.mark.parametrize("expected", ["is_detected(entity)", "any_at(entity) AND detected(entity)"])
+def test_acquisition_cannot_expand_the_registered_condition_contract(expected: str) -> None:
+    """Composite goals are not silently reinterpreted as local detection or arrival success."""
+    from habitat_local_eaios.model import IntegrationError, parse_canonical_invocation
+    from test_live_world import invocation
+
+    document = invocation(0, ("actor",), observation=True).as_dict()
+    document["operation"] = "observation.acquire@v1"
+    document["parameters"] = {"expected": expected}
+    with pytest.raises(IntegrationError, match="requires detected"):
+        parse_canonical_invocation({"invocation": document})
 
 
 def test_configured_readiness_routes_resolve_to_declared_canonical_operations() -> None:

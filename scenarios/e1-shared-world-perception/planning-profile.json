@@ -3,13 +3,13 @@
   "authority": "deployment-owned",
   "identity": {
     "profile_id": "e1-shared-world-perception",
-    "revision": "v2",
+    "revision": "v3",
     "source": "deployment://e1-shared-world-perception"
   },
   "capability_classes": [
     {
       "id": "capability-class-0",
-      "description": "Deployment-declared legged mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes acquisition only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Camera FOV and gimbal limits are not declared and remain unknown. Base type and viewpoint positioning are typed capability attributes for Matching; flight permits aerial positioning, ground may traverse supporting surfaces. Neither mode proves a route or visibility.",
+      "description": "Deployment-declared legged mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes the read-only observation only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Camera FOV and gimbal limits are not declared and remain unknown. Base type and viewpoint positioning are typed capability attributes for Matching; flight permits aerial positioning, ground may traverse supporting surfaces. Neither mode proves a route or visibility. Both observation operations accept exactly expected=detected(entity-ref), as registered by condition-format. Active acquisition completes only on observed detection; it does not establish navigation arrival or a conjunction of conditions. Required arrival remains a separate mobility intent and satisfaction requirement.",
       "capabilities": [
         {
           "contract": {
@@ -41,6 +41,7 @@
           },
           "attributes": {
             "acquisition-mode": "snapshot",
+            "condition-format": "detected(entity-ref)",
             "sensing-modality": "visual",
             "moves-observer": false
           }
@@ -53,6 +54,7 @@
           },
           "attributes": {
             "acquisition-mode": "bounded-active",
+            "condition-format": "detected(entity-ref)",
             "sensing-modality": "visual",
             "moves-observer": true,
             "max-observation-cycles": 256,
@@ -63,7 +65,7 @@
     },
     {
       "id": "capability-class-1",
-      "description": "Deployment-declared flying mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes acquisition only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Camera FOV and gimbal limits are not declared and remain unknown. Base type and viewpoint positioning are typed capability attributes for Matching; flight permits aerial positioning, ground may traverse supporting surfaces. Neither mode proves a route or visibility.",
+      "description": "Deployment-declared flying mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes the read-only observation only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Camera FOV and gimbal limits are not declared and remain unknown. Base type and viewpoint positioning are typed capability attributes for Matching; flight permits aerial positioning, ground may traverse supporting surfaces. Neither mode proves a route or visibility. Both observation operations accept exactly expected=detected(entity-ref), as registered by condition-format. Active acquisition completes only on observed detection; it does not establish navigation arrival or a conjunction of conditions. Required arrival remains a separate mobility intent and satisfaction requirement.",
       "capabilities": [
         {
           "contract": {
@@ -95,6 +97,7 @@
           },
           "attributes": {
             "acquisition-mode": "snapshot",
+            "condition-format": "detected(entity-ref)",
             "sensing-modality": "visual",
             "moves-observer": false
           }
@@ -107,6 +110,7 @@
           },
           "attributes": {
             "acquisition-mode": "bounded-active",
+            "condition-format": "detected(entity-ref)",
             "sensing-modality": "visual",
             "moves-observer": true,
             "max-observation-cycles": 256,

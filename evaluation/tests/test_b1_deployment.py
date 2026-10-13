@@ -396,3 +396,31 @@ def test_first_launcher_port_gate_uses_declared_endpoint_count(
         assert not (run / "node-b.toml").exists()
     else:
         assert not (run / "b1-input-used.json").exists()
+
+
+def test_acquisition_registration_cannot_claim_a_different_condition_format(tmp_path: Path) -> None:
+    """Freeze the real profile before services; unsupported registered syntax fails closed."""
+    scenario = tmp_path / "scenario"
+    scenario.mkdir()
+    original = ROOT / "scenarios/e1-shared-world-perception"
+    for name in ("b1-deployment.json", "node-a.toml", "node-b.toml"):
+        (scenario / name).write_bytes((original / name).read_bytes())
+    path = scenario / "node-a.toml"
+    path.write_text(
+        path.read_text().replace(
+            'condition-format = "detected(entity-ref)"',
+            'condition-format = "arbitrary-conjunction"',
+        )
+    )
+    environment = offline_environment(tmp_path)
+    deployment = load_deployment(scenario)
+    native = Path(environment["ROBOGUIDE_EMOS_ROOT"]) / deployment.habitat_config
+    native.parent.mkdir(parents=True, exist_ok=True)
+    native.write_text("# Configuration-only fixture; no simulator.\n")
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "b1-input-used.json").write_bytes((NAVIGATION / "b1-input.json").read_bytes())
+    with pytest.raises(ValueError, match="condition format"):
+        freeze_deployment(run, scenario, Path(environment["ROBOGUIDE_EMOS_ROOT"]))
+    assert not (run / "b1-deployment-used.json").exists()
+    assert not (run / "b1-request-record.json").exists()

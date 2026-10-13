@@ -92,7 +92,7 @@ base = {}
 contract = "observation.verify@v1"
 kind = "observation"
 owner = "habitat-local-eaios"
-attributes = { acquisition-mode = "snapshot", sensing-modality = "visual", moves-observer = false }
+attributes = { acquisition-mode = "snapshot", condition-format = "detected(entity-ref)", sensing-modality = "visual", moves-observer = false }
 
 [capability_profiles.readiness]
 state_pointer = "/state"
@@ -116,7 +116,7 @@ base = {}
 contract = "observation.acquire@v1"
 kind = "observation"
 owner = "habitat-local-eaios"
-attributes = { acquisition-mode = "bounded-active", sensing-modality = "visual", moves-observer = true, max-observation-cycles = 256, viewpoint-positioning = "ground" }
+attributes = { acquisition-mode = "bounded-active", condition-format = "detected(entity-ref)", sensing-modality = "visual", moves-observer = true, max-observation-cycles = 256, viewpoint-positioning = "ground" }
 
 [capability_profiles.readiness]
 state_pointer = "/state"

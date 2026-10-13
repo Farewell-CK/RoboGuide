@@ -18,6 +18,11 @@ acquire 的唯一参数是 `expected=detected(entity-ref)`。当前 profile 没�
 typed capability constraints 做 Matching；逻辑 Actor 名称和文字描述均不选择物理端点。
 当前部署仍未提供 FOV、gimbal 或 visibility guarantee，MI 不得猜测。
 
+当前检测能力通过注册的 `condition-format=detected(entity-ref)` 声明精确参数格式，
+该字段完整进入 MI capability class。acquire 的完成条件仅为检测成立；接近实体是
+本地采集手段，并不证明已到达目的地。需要同时到达和检测的 Mission 仍须保留独立的
+移动意图和 satisfaction 要求，不能将任意联合目标填入这个部署的 `expected` 参数。
+
 deployment v0.4 增加 `enable_observation_acquisition`、
 `observation_acquisition_max_steps`（1–4096）与 `contract_recovery_attempts`（0–3）。
 它们由声明冻结，子进程实际使用值须与 Local How v0.10 一致；acquire 还要求原始传感器、
