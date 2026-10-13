@@ -630,8 +630,9 @@ def test_later_endpoint_activation_preserves_running_peer(tmp_path: Path) -> Non
     assert summary["identity"]["simulator_steps"] == 3
 
 
+@pytest.mark.parametrize("archive_failed", [False, True])
 def test_post_reset_profile_failure_flushes_diagnostics(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, archive_failed: bool
 ) -> None:
     """A live registry/sensor failure after the one reset retains its original exception."""
     from habitat_local_eaios.shared_world import SharedEmosStage2Runtime
@@ -644,11 +645,24 @@ def test_post_reset_profile_failure_flushes_diagnostics(
         raise IntegrationError("sensor readiness sentinel")
 
     monkeypatch.setattr(runtime, "_initialize_live_profile", fail_profile)
+    if archive_failed:
+
+        def fail_archive(name: str, value: object) -> None:
+            """Represent unavailable diagnostic storage without replacing the startup exception."""
+            raise OSError("startup archive unavailable")
+
+        monkeypatch.setattr(runtime, "_write_json", fail_archive)
     with pytest.raises(IntegrationError, match="sensor readiness sentinel"):
         runtime.initialize()
     assert runtime.test_diagnostics.terminals == [
         (0, "execution_exception:live_initialization:IntegrationError")
     ]
+    if not archive_failed:
+        evidence = json.loads((tmp_path / "live-initialization-failure.json").read_bytes())
+        assert evidence["exception_type"] == "IntegrationError"
+        assert evidence["source_frames"][-1]["function"] == "fail_profile"
+        assert evidence["physical_episode_executed"] is False
+        assert "sensor readiness sentinel" not in json.dumps(evidence)
     with pytest.raises(IntegrationError, match="cannot restart"):
         runtime.initialize()
 
@@ -666,6 +680,64 @@ def test_successful_live_initialization_is_idempotent(
     runtime.initialize()
     runtime.initialize()
     assert calls == ["world", "profile"]
+
+
+@pytest.mark.parametrize("count", [1, 2])
+@pytest.mark.parametrize("acquisition", [False, True])
+def test_loaded_perception_initialization_archives_actual_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int, acquisition: bool
+) -> None:
+    """Exercise real post-reset readiness writers with registered sensors and no model or step."""
+    from habitat_local_eaios.shared_world import SharedEmosStage2Runtime
+
+    run = tmp_path / "run"
+    run.mkdir()
+    templates = Path(__file__).parents[3] / "scenarios/e1-shared-world-perception"
+    sources = []
+    for agent in range(count):
+        path = run / f"node-{chr(97 + agent)}.toml"
+        path.write_bytes((templates / path.name).read_bytes())
+        sources.append((agent, path))
+    registry = build_endpoint_registry(tuple(sources), run)
+    registry_path = run / "endpoint-registry.json"
+    registry_path.write_text(json.dumps(registry))
+    actor, gym = Actor(count), Gym({})
+    runtime = Runtime(run, count, gym, actor)
+    runtime._config.endpoint_registry_path = registry_path
+    runtime._config.enable_observation = True
+    runtime._config.enable_observation_acquisition = acquisition
+    runtime._config.observation_acquisition_max_steps = 256
+    runtime._config.contract_recovery_attempts = 2
+    robots = {
+        record["agent_id"]: type(record["robot_type"], (), {})() for record in registry["endpoints"]
+    }
+    sensor = type("DetectedObjectsSensor", (), {"pixel_threshold": 10})()
+    environment = runtime._habitat_env
+    assert environment is not None
+    environment.sim = SimpleNamespace(
+        _sensors={f"agent_{agent}_semantic": object() for agent in range(count)},
+        get_agent_data=lambda agent: SimpleNamespace(articulated_agent=robots[agent]),
+    )
+    environment.task.sensor_suite = SimpleNamespace(sensors={"detected_objects": sensor})
+    for policy in actor._active_policies:
+        policy._name_to_idx["nav_to_obj"] = 2
+        policy._skills[2] = object()
+    (run / "local-how-profile.json").write_text(
+        '{"schema_version":"roboguide.habitat-local-how-profile/v0.2"}'
+    )
+    resets: list[bool] = []
+    monkeypatch.setattr(SharedEmosStage2Runtime, "initialize", lambda self: resets.append(True))
+    runtime.initialize()
+    runtime.initialize()
+    readiness = json.loads((run / "perception-readiness.json").read_bytes())
+    assert readiness["sensors"] == {str(agent): "detected_objects" for agent in range(count)}
+    assert runtime._detection_sensors == {agent: "detected_objects" for agent in range(count)}
+    assert "observation.verify@v1" in runtime.supported_operations()
+    assert ("observation.acquire@v1" in runtime.supported_operations()) is acquisition
+    assert resets == [True]
+    assert gym.steps == actor.calls == 0
+    assert all(agent.llm_model.calls == 0 for agent in actor.originals)
+    assert runtime.test_diagnostics.terminals == []
 
 
 @pytest.mark.parametrize("count", [1, 2, 3, 4])

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import traceback
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -57,6 +58,20 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             self._initialize_live_profile()
             self._live_initialization_complete = True
         except BaseException as error:
+            self._best_effort_write_json(
+                "live-initialization-failure.json",
+                {
+                    "schema_version": "roboguide.local-initialization-failure/v0.1",
+                    "stage": "post-reset-live-profile",
+                    "exception_type": type(error).__name__,
+                    "source_frames": [
+                        {"file": frame.filename, "line": frame.lineno, "function": frame.name}
+                        for frame in traceback.extract_tb(error.__traceback__, limit=8)
+                    ],
+                    "physical_episode_executed": False,
+                },
+                "post-reset live initialization",
+            )
             self._record_terminal_diagnostics(
                 self._habitat_env,
                 0,
@@ -107,7 +122,9 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             "perception-readiness.json",
             {
                 "enabled": self._config.enable_observation,
-                "sensors": self._detection_sensors,
+                "sensors": {
+                    str(agent): sensor for agent, sensor in self._detection_sensors.items()
+                },
                 "source": "loaded-original-sensors-and-cameras",
             },
         )
