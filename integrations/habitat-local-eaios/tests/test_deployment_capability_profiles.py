@@ -64,6 +64,25 @@ def test_known_fetch_profile_advertises_single_floor_mobility() -> None:
         }
 
 
+def test_perception_planning_preserves_registered_platform_and_observation_modes() -> None:
+    """MI receives typed platform facts from Node declarations, not only descriptive prose."""
+    scenario = _ROOT / "scenarios/e1-shared-world-perception"
+    profile = json.loads((scenario / "planning-profile.json").read_bytes())
+    for name, capability_class in zip(
+        ("node-a.toml", "node-b.toml"), profile["capability_classes"], strict=True
+    ):
+        registered = _capability_attributes(scenario / name)
+        for capability in capability_class["capabilities"]:
+            contract = capability["contract"]
+            key = contract["namespace"] + "." + contract["name"] + "@" + contract["version"]
+            assert capability["attributes"] == registered[key]
+        mobility = registered["mobility.move@v1"]
+        acquired = registered["observation.acquire@v1"]
+        assert acquired["viewpoint-positioning"] == (
+            "flight" if mobility["base-type"] == "flying" else "ground"
+        )
+
+
 def test_configured_readiness_routes_resolve_to_declared_canonical_operations() -> None:
     """Every checked-in Habitat node binds one readiness route to its declared operation."""
     for path in _SPOT_PROFILES + _FETCH_PROFILES:

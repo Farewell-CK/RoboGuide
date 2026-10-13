@@ -3,7 +3,7 @@
   "authority": "deployment-owned",
   "identity": {
     "profile_id": "e1-shared-world-rearrangement",
-    "revision": "v1",
+    "revision": "v2",
     "source": "deployment://e1-shared-world-rearrangement"
   },
   "capability_classes": [
@@ -18,6 +18,7 @@
             "version": "v1"
           },
           "attributes": {
+            "base-type": "legged",
             "supports-floor-transition": true
           }
         },
@@ -28,6 +29,7 @@
             "version": "v1"
           },
           "attributes": {
+            "base-type": "legged",
             "supports-floor-transition": true
           }
         },
@@ -52,6 +54,7 @@
             "version": "v1"
           },
           "attributes": {
+            "base-type": "wheeled",
             "supports-floor-transition": false
           }
         },
@@ -62,6 +65,7 @@
             "version": "v1"
           },
           "attributes": {
+            "base-type": "wheeled",
             "supports-floor-transition": false
           }
         },
@@ -86,6 +90,7 @@
             "version": "v1"
           },
           "attributes": {
+            "base-type": "flying",
             "supports-floor-transition": true
           }
         },
@@ -96,11 +101,12 @@
             "version": "v1"
           },
           "attributes": {
+            "base-type": "flying",
             "supports-floor-transition": true
           }
         }
       ]
     }
   ],
-  "digest": "sha256:071e09eaa4cb418784dd4f27739084aa3187656afb1c377f0999257737b1ec58"
+  "digest": "sha256:0735edb69ed0de401e324c872625335229880ad6475dd6ce8f6c59e0780a803d"
 }

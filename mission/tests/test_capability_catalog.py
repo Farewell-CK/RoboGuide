@@ -164,7 +164,7 @@ def test_catalog_rejects_invalid_intent_parameters(mutation: str, message: str) 
 def test_mobility_catalog_declares_deployment_feasibility_attributes() -> None:
     """Mobility requirements may name typed deployment facts without naming a concrete Node."""
     catalog = CanonicalCapabilityCatalog.load(CURRENT_CATALOG)
-    expected = {"supports-floor-transition": "boolean"}
+    expected = {"supports-floor-transition": "boolean", "base-type": "string"}
     for definition in catalog.capabilities:
         if definition.contract.name not in {"move", "navigate"}:
             continue

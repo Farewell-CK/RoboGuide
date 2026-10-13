@@ -186,6 +186,24 @@ def freeze_deployment(
                 {},
             )
             bound = profile.get("attributes", {}).get("max-observation-cycles")
+            mobility: dict[str, Any] = next(
+                (
+                    item
+                    for item in document.get("capability_profiles", [])
+                    if item.get("contract") == "mobility.move@v1"
+                ),
+                {},
+            )
+            base_type = mobility.get("attributes", {}).get("base-type")
+            mode = (
+                "flight"
+                if base_type == "flying"
+                else "ground"
+                if base_type in {"legged", "wheeled"}
+                else "unknown"
+            )
+            if profile.get("attributes", {}).get("viewpoint-positioning") != mode:
+                raise ValueError("observation positioning differs from registered mobility")
             if (
                 not declaration.enable_observation_acquisition
                 or type(bound) is not int

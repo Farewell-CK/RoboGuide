@@ -116,7 +116,7 @@ base = {}
 contract = "observation.acquire@v1"
 kind = "observation"
 owner = "habitat-local-eaios"
-attributes = { acquisition-mode = "bounded-active", sensing-modality = "visual", moves-observer = true, max-observation-cycles = 256 }
+attributes = { acquisition-mode = "bounded-active", sensing-modality = "visual", moves-observer = true, max-observation-cycles = 256, viewpoint-positioning = "flight" }
 
 [capability_profiles.readiness]
 state_pointer = "/state"

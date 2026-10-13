@@ -13,6 +13,9 @@ Proposal/Commit/Bind 与 Task satisfaction/release 权限保持原有边界。�
 acquire 的唯一参数是 `expected=detected(entity-ref)`。当前 profile 没有独立相机云台、
 全场搜索或任意动作控制能力；预算也不证明超时目标不可能达到。新的 capability attributes
 只有来源明确的 acquisition mode、visual modality、允许移动与本地 cycle 上限。
+运动方式复用 Node 已有的 `base-type`（如 legged/flying），完整投影到 MI capability class；
+主动观测的 `viewpoint-positioning` 则从同一注册事实约束为 ground/flight。Control 使用已有
+typed capability constraints 做 Matching；逻辑 Actor 名称和文字描述均不选择物理端点。
 当前部署仍未提供 FOV、gimbal 或 visibility guarantee，MI 不得猜测。
 
 deployment v0.4 增加 `enable_observation_acquisition`、

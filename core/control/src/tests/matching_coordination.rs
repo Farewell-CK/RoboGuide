@@ -1010,3 +1010,36 @@
         );
         assert!(!control.reservations.contains_key(&resource_id));
     }
+
+/// Platform constraints affect Matching, while logical names and unconstrained roles do not select nodes.
+#[test]
+fn matching_preserves_platform_string_constraints() {
+    let contract = CapabilityContractRef::new("mobility", "move", "v1").unwrap();
+    let now = TimestampMs::new(0);
+    let mut control = ControlPlane::new();
+    let mut state = InMemorySharedNodeState::new();
+    let mut events = TestEvents;
+    for (name, base_type) in [("provider-ground", "legged"), ("provider-air", "flying")] {
+        let registration = NodeRegistration::new_with_contracts(
+            NodeId::new(name).unwrap(), domain::LocalRuntime::new("local-provider", "1").unwrap(),
+            domain::NodeContractVersion::v0_1(), vec![Capability::new(CapabilityKind::Mobility, true)],
+            vec![contract.clone()], vec![Resource::new(ResourceId::new(name).unwrap(), ResourceKind::Space, 1).unwrap()],
+        ).with_capability_attributes(BTreeMap::from([(contract.clone(), BTreeMap::from([
+            ("base-type".to_string(), domain::ExecutionValue::String(base_type.to_string()))
+        ]))])).unwrap();
+        control.register_node(&mut state, registration, NodeStatus::new(NodeHealth::Online, now), now, &correlation(), &mut events).unwrap();
+    }
+    let role = RoleId::new("logical-observer").unwrap();
+    for constrained in [false, true] {
+        let capability = domain::CapabilityRequirement::new(contract.clone(), if constrained {
+            vec![domain::CapabilityConstraint::new("base-type", domain::CapabilityConstraintOperator::Equals,
+                domain::ExecutionValue::String("flying".to_string())).unwrap()]
+        } else { Vec::new() }).unwrap();
+        let requirement = TaskRequirement::new(domain::MissionId::new("generic-mission").unwrap(), TaskId::new("generic-task").unwrap(),
+            vec![RoleRequirement::new_normalized(role.clone(), None, vec![capability], vec![ResourceRequirement::new(ResourceKind::Space, 1).unwrap()]).unwrap()]).unwrap();
+        let candidates = control.match_capabilities(&state, &requirement, now, &correlation(), &mut events).unwrap();
+        let actual = candidates.for_role(&role).unwrap().node_ids();
+        assert_eq!(actual.len(), if constrained { 1 } else { 2 });
+        if constrained { assert_eq!(actual, &[NodeId::new("provider-air").unwrap()]); }
+    }
+}

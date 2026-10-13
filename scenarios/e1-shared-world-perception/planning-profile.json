@@ -9,7 +9,7 @@
   "capability_classes": [
     {
       "id": "capability-class-0",
-      "description": "Deployment-declared legged mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes acquisition only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Camera FOV and gimbal limits are not declared and remain unknown.",
+      "description": "Deployment-declared legged mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes acquisition only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Camera FOV and gimbal limits are not declared and remain unknown. Base type and viewpoint positioning are typed capability attributes for Matching; flight permits aerial positioning, ground may traverse supporting surfaces. Neither mode proves a route or visibility.",
       "capabilities": [
         {
           "contract": {
@@ -18,6 +18,7 @@
             "version": "v1"
           },
           "attributes": {
+            "base-type": "legged",
             "supports-floor-transition": true
           }
         },
@@ -28,6 +29,7 @@
             "version": "v1"
           },
           "attributes": {
+            "base-type": "legged",
             "supports-floor-transition": true
           }
         },
@@ -53,14 +55,15 @@
             "acquisition-mode": "bounded-active",
             "sensing-modality": "visual",
             "moves-observer": true,
-            "max-observation-cycles": 256
+            "max-observation-cycles": 256,
+            "viewpoint-positioning": "ground"
           }
         }
       ]
     },
     {
       "id": "capability-class-1",
-      "description": "Deployment-declared flying mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes acquisition only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Camera FOV and gimbal limits are not declared and remain unknown.",
+      "description": "Deployment-declared flying mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes acquisition only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Camera FOV and gimbal limits are not declared and remain unknown. Base type and viewpoint positioning are typed capability attributes for Matching; flight permits aerial positioning, ground may traverse supporting surfaces. Neither mode proves a route or visibility.",
       "capabilities": [
         {
           "contract": {
@@ -69,6 +72,7 @@
             "version": "v1"
           },
           "attributes": {
+            "base-type": "flying",
             "supports-floor-transition": true
           }
         },
@@ -79,6 +83,7 @@
             "version": "v1"
           },
           "attributes": {
+            "base-type": "flying",
             "supports-floor-transition": true
           }
         },
@@ -104,11 +109,12 @@
             "acquisition-mode": "bounded-active",
             "sensing-modality": "visual",
             "moves-observer": true,
-            "max-observation-cycles": 256
+            "max-observation-cycles": 256,
+            "viewpoint-positioning": "flight"
           }
         }
       ]
     }
   ],
-  "digest": "sha256:0559bcaa545b8f6bd66d5aba5d1a88efd9e2e49ba9ae447610e52a37714348a3"
+  "digest": "sha256:a482316e858927b412efca8a642fb8e65b14e05f2ef2bad00b2133821faf8041"
 }
