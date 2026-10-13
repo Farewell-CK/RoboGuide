@@ -20,9 +20,23 @@ pub(super) async fn request(
     let clock = runtime::SystemMonotonicClock::new();
     let server = async {
         let (mut stream, _) = listener.accept().await.expect("connects");
-        handle_http_connection(&mut stream, controller, log, &gate, &clock, None, None)
+        if method == "POST" && path.ends_with("/recover") {
+            handle_recovery_admin_test_connection(
+                &mut stream,
+                controller,
+                log,
+                &gate,
+                &clock,
+                None,
+                None,
+            )
             .await
             .expect("handler completes");
+        } else {
+            handle_http_connection(&mut stream, controller, log, &gate, &clock, None, None)
+                .await
+                .expect("handler completes");
+        }
     };
     let client = async {
         let mut stream = tokio::net::TcpStream::connect(address)

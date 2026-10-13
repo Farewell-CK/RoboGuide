@@ -48,6 +48,18 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Control, Runtime, Commit, Recovery, and Node Protocol authority is designed explicitly.
 - `core/orchestration/` owns complete MissionPlan acceptance, Mission-level Group
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
+- ADR-0092 fences the reviewed reliability slice: wrapper v26 and failure-window event codec v19
+  retain at most three rolling ten-minute failure samples. Same-outcome replay and rejected resumes
+  are not new failures; legacy samples remain unavailable, and unreviewed quarantine never expires.
+  Operator mutation routes authorize certificate-mapped roles before application mutation; headers
+  never grant authority. Raw loopback defaults to operator; a development administrator requires an
+  explicit startup flag and cannot be combined with mTLS or remote binding. Replica clients pin the
+  exact target leaf before sending frames, and startup verifies the local member identity.
+  Local archive uses bounded segments, immutable sidecars, a durable paged manifest index and managed
+  SQL transactions. Catalog/Memory/localization replay evidence cannot be deleted until a complete
+  snapshot/archive-replay contract exists. Active/Unknown and replicated maintenance are refused.
+  Recovery view v0.2 separates current blockers from retained history and exposes actual attempt IDs;
+  its sequence is guidance. Software tests do not establish physical continuity or E6 readiness.
 - ADR-0082 adds Orchestration-owned durable logical priority/aging and bounded round dispatch.
   Resource deferrals preserve first waiting ordinals; actual new bindings/preparation consume age.
   Due Control windows retain precedence. Defaults are priority 128, aging per 8 logical turns and

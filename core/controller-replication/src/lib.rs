@@ -132,8 +132,21 @@ impl ReplicaConfig {
                 || self.members.keys().any(|member| {
                     tls.peer_certificate_digests
                         .get(member)
-                        .is_none_or(|digest| !digest.starts_with("sha256:") || digest.len() != 71)
-                }))
+                        .is_none_or(|digest| {
+                            !digest.strip_prefix("sha256:").is_some_and(|value| {
+                                value.len() == 64
+                                    && value.bytes().all(|byte| {
+                                        byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+                                    })
+                            })
+                        })
+                })
+                || tls
+                    .peer_certificate_digests
+                    .values()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    != self.members.len())
         {
             return Err("replica TLS paths/name must be absolute and bounded".into());
         }
@@ -188,6 +201,9 @@ impl ReplicaNode {
     ) -> Result<(Self, ReplicaServer), String> {
         config.validate()?;
         let tls = tls::load(config.tls.as_ref())?.map(Arc::new);
+        if let Some(tls) = &tls {
+            tls.authenticate_local(config.replica_id)?;
+        }
         let store =
             SqliteRaftStore::open(path, &config.profile_identity(), &config.application_schema)?;
         let settings = Arc::new(

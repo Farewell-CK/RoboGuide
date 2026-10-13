@@ -9,6 +9,30 @@ pub(crate) fn recovery_view(
 ) -> serde_json::Value {
     let unknown_attempts = controller.bridge.current_unknown_attempts();
     let groups = controller.bridge.group_recovery_ids();
+    let mut pending_groups = Vec::new();
+    let mut manual_groups = Vec::new();
+    for group in &groups {
+        let active = controller
+            .bridge
+            .control()
+            .group(group)
+            .is_some_and(|group| group.lifecycle() != control::GroupLifecycle::Released);
+        if !active {
+            continue;
+        }
+        match controller.bridge.group_recovery_disposition(group, now) {
+            runtime::GroupRecoveryDisposition::AwaitingStop
+            | runtime::GroupRecoveryDisposition::StopConfirmed
+            | runtime::GroupRecoveryDisposition::ContinuationPrepared => {
+                pending_groups.push(group.clone())
+            }
+            runtime::GroupRecoveryDisposition::BudgetExpired
+            | runtime::GroupRecoveryDisposition::OriginalFailed => {
+                manual_groups.push(group.clone())
+            }
+            _ => {}
+        }
+    }
     let held_missions = controller
         .orchestrator
         .mission_ids()
@@ -18,31 +42,39 @@ pub(crate) fn recovery_view(
                 .orchestrator
                 .execution(mission)
                 .is_some_and(|execution| {
-                    execution.isolation().is_some() || execution.is_crash_loop_quarantined()
+                    matches!(
+                        execution.lifecycle(),
+                        orchestration::MissionExecutionLifecycle::Accepted
+                            | orchestration::MissionExecutionLifecycle::Running
+                            | orchestration::MissionExecutionLifecycle::Cancelling
+                    ) && (execution.isolation().is_some() || execution.is_crash_loop_quarantined())
                 })
         })
         .map(|mission| mission.as_str().to_string())
         .collect::<Vec<_>>();
-    let state = if !unknown_attempts.is_empty() || !groups.is_empty() {
+    let state = if !unknown_attempts.is_empty() || !pending_groups.is_empty() {
         "ReconciliationRequired"
-    } else if !held_missions.is_empty() {
+    } else if !held_missions.is_empty() || !manual_groups.is_empty() {
         "ManualIntervention"
     } else {
         "Ready"
     };
     serde_json::json!({
-        "schema_version": "roboguide.controller-recovery-view/v0.1",
+        "schema_version": "roboguide.controller-recovery-view/v0.2",
         "state": state,
         "observed_at_ms": now.as_millis(),
         "unknown_attempts": unknown_attempts.iter().map(|command| serde_json::json!({
-            "execution_id": command.correlation_id().as_str(),
+            "execution_id": controller.bridge.current_task_attempt_id(command.group_id(),command.task_ref(),command.role_id()),
+            "correlation_id": command.correlation_id().as_str(),
             "mission_id": command.mission_id().as_str(),
             "group_id": command.group_id().as_str(),
             "task_ref": command.task_ref().to_string(),
             "role_id": command.role_id().as_str(),
             "node_id": command.node_id().as_str(),
         })).collect::<Vec<_>>(),
-        "groups_requiring_recovery": groups.iter().map(|group| group.as_str()).collect::<Vec<_>>(),
+        "groups_requiring_recovery": pending_groups.iter().map(|group| group.as_str()).collect::<Vec<_>>(),
+        "groups_requiring_intervention": manual_groups.iter().map(|group| group.as_str()).collect::<Vec<_>>(),
+        "group_recovery_history": groups.iter().map(|group|serde_json::json!({"group_id":group.as_str(),"disposition":controller.bridge.group_recovery_disposition(group,now)})).collect::<Vec<_>>(),
         "held_missions": held_missions,
         "sequence": [
             "restore_checkpoint",
@@ -53,6 +85,7 @@ pub(crate) fn recovery_view(
             "require_operator_approval_for_ambiguous_resume",
             "ready"
         ],
+        "sequence_is_guidance": true,
         "automatic_execute_replay": false,
         "automatic_resource_release": false,
         "automatic_node_replacement": false,

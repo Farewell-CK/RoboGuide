@@ -186,6 +186,38 @@ impl MissionOrchestrator {
                 accepted_at,
                 scheduling_deferrals,
             };
+            if let Some(failure) = &execution.failure_state {
+                failure.validate_checkpoint(execution.accepted_at)?;
+            }
+            if let Some(hold) = &execution.isolation {
+                hold.failure.validate_checkpoint(execution.accepted_at)?;
+                if execution
+                    .failure_state
+                    .as_ref()
+                    .is_some_and(|failure| failure != &hold.failure)
+                    || ((hold.failure.count > 0
+                        || !hold.failure.fingerprint.is_empty()
+                        || hold.failure.quarantined)
+                        && execution.failure_state.is_none())
+                {
+                    return Err(OrchestrationError::Mission(
+                        "Mission hold differs from failure-state authority".into(),
+                    ));
+                }
+            }
+            if execution.is_crash_loop_quarantined()
+                && execution.isolation.is_none()
+                && matches!(
+                    execution.lifecycle,
+                    MissionExecutionLifecycle::Accepted
+                        | MissionExecutionLifecycle::Running
+                        | MissionExecutionLifecycle::Cancelling
+                )
+            {
+                return Err(OrchestrationError::Mission(
+                    "nonterminal quarantine requires a retained hold".into(),
+                ));
+            }
             if execution.isolation.as_ref().is_some_and(|hold| {
                 hold.generation == 0
                     || hold.generation != execution.isolation_generation

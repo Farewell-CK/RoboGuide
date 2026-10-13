@@ -316,6 +316,39 @@ fn configuration_rejects_unsupported_network_and_membership() {
 }
 
 /// Replica transport authentication accepts only a bounded secret profile.
+/// One member cannot reuse another member's leaf pin or configure a noncanonical digest.
+#[test]
+fn tls_configuration_requires_distinct_canonical_member_pins() {
+    let mut config = configuration(1, &members());
+    config.tls = Some(ReplicaTlsConfig {
+        ca_cert_path: "/fixture/ca.crt".into(),
+        cert_path: "/fixture/1.crt".into(),
+        key_path: "/fixture/1.key".into(),
+        server_name: "localhost".into(),
+        peer_certificate_digests: (1..=3)
+            .map(|member| {
+                (
+                    member,
+                    format!("sha256:{}", format!("{member:x}").repeat(64)),
+                )
+            })
+            .collect(),
+    });
+    config.validate().unwrap();
+    let tls = config.tls.as_mut().unwrap();
+    tls.peer_certificate_digests
+        .insert(2, tls.peer_certificate_digests[&1].clone());
+    assert!(config.validate().is_err());
+    config
+        .tls
+        .as_mut()
+        .unwrap()
+        .peer_certificate_digests
+        .insert(2, format!("sha256:{}", "G".repeat(64)));
+    assert!(config.validate().is_err());
+}
+
+/// Replica transport authentication accepts only a bounded secret profile.
 #[test]
 fn configuration_rejects_short_transport_secret() {
     let mut config = configuration(1, &members());

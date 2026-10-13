@@ -4,8 +4,33 @@ This matrix maps the first reliability-completion slice to deterministic offline
 inject faults at authority boundaries; they do not claim hardware, network-partition, or distributed
 exactly-once certification.
 
+ADR-0092 additionally ports the `dev@dbb44f6` self-review counterexamples into maintained tests.
+The PKI fixtures use temporary OpenSSL-generated keys and actual rustls sockets; all remain offline
+software evidence. Replica process tests use one host and synthetic Local EAIOS, so cross-host
+partitions, physical continuity, long-term capacity and E6 remain unproven.
+
+2026-10-13 final review-fix validation: 713 Rust tests passed, 2 existing long-running tests remained
+ignored; workspace Clippy with warnings denied, Rustdoc, Rust/Python formatting, Ruff, strict mypy,
+Python function docs, full pytest and strict MkDocs passed. Final nonloopback mTLS process evidence:
+`/tmp/roboguide-reliability-fix-replica-tls-final-20261013/result.json`, Controller binary SHA-256
+`47805c1ef6213ee71f1d683874d57e05316cf9d96d728ba98a69f5ac006a32ca`. All quorum/leader/rejoin/
+SIGSTOP cases passed with the original two Local EAIOS Execute calls unchanged. Explicit group
+recovery cases passed at `/tmp/roboguide-reliability-fix-group-processes-20261013/summary.json`;
+both live peers produced two authorized replacements, while a completed peer was excluded and only
+one replacement was produced. These are same-host software results, not E6 or physical proof.
+
 | Fault | Required invariant | Executable evidence |
 | --- | --- | --- |
+| Archive cutoff includes catalog or Memory reconstruction evidence | Reject before sink/delete; complete Spatial/generic Memory replay remains possible | `integration_server::artifact_http::tests::spatial_catalog::archive_gc_retains_catalog_rebuild_evidence`, `archive_gc_preserves_catalog_transition_prefix`, `memory_catalog::archive_gc_preserves_generic_memory_replay_evidence` |
+| Archive COMMIT or sink fails; existing files are tampered | Managed transaction rolls back rows/floor/index; the next batch remains usable; retry verifies actual file contents | `state::event_log::archive::tests::failed_archive_commit_rolls_back_and_allows_next_write`, `sink_failure_and_oversized_cutoff_preserve_history`, `archive_sink_rejects_tampered_existing_segment` |
+| GC removes the last retained row | Sequence, manifest pages and receive-time restart lower bound survive reopen; missing legacy time evidence rejects | `state::event_log::archive::tests::archive_pages_survive_restart_and_sequence_continues`, `legacy_archive_without_timestamp_floor_requires_trusted_migration` |
+| Same CA and DNS, but wrong replica member leaf | Async RPC and synchronous child fence reject before sending application bytes; own/member pins are exact and distinct | `controller_replication::transport::tls_tests::asynchronous_and_child_clients_pin_exact_server_member`, `unrelated_ca_is_rejected_before_fence_frame`, `tests::tls_configuration_requires_distinct_canonical_member_pins` |
+| Mapped viewer or CA-valid unmapped operator client submits a Mission; role header claims admin | Production handler rejects all viewer mutations; actual mTLS leaf-role derivation rejects unmapped leaf; headers cannot elevate | `integration_server::controller_http::server::operator_tests::viewer_cannot_mutate_and_headers_cannot_elevate_authority`, `actual_mtls_viewer_and_unmapped_certificate_cannot_submit` |
+| Review checkpoint write fails | 503 differs from contract 409; quarantine, checkpoint and ownership stay intact; next explicit review succeeds once | `integration_server::controller_http::server::operator_tests::review_sql_failure_preserves_quarantine_and_next_review_succeeds` |
+| Breaker checkpoint/state/window omitted, inconsistent or downgraded | v26/codec v19 gate new authority; real legacy samples remain unavailable; quarantine survives restore | `orchestration::tests::dispatch_policy::failure_checkpoint_rejects_removed_state_and_inconsistent_window`, `integration_server::tests::mission_isolation::breaker_wrapper_fences_omission_and_downgrade_after_resume`, `state::event_log::tests::failure_window_codec_fences_downgrade_and_retains_legacy_unknown_window` |
+| Same fingerprint fails at 0, 9, 18, 19 minutes | Counts are 1, 2, 2, 3; unreviewed quarantine cannot expire or change fingerprint implicitly | `orchestration::tests::dispatch_policy::failure_window_prunes_old_samples_and_keeps_quarantine_sticky` |
+| Three production resumes replay one immutable deadline violation | All return 409 without counting a new failure, advancing generation or redispatching Execute | `integration_server::tests::runtime_contract::repeated_deadline_resume_does_not_count_outcome_replay` |
+| Recovery view exposes an Unknown attempt or a completed recovery | Use exact attempt ID plus separate correlation; completed history no longer blocks Ready; active expired budget remains intervention | `integration_server::tests::runtime_contract::recovery_view_reports_exact_current_attempt_identity`, `group_recovery::completed_group_recovery_is_history_in_controller_view`, `expired_group_recovery_retains_ownership_and_fences_new_attempts` |
 | Controller crashes after intent commit but before Node receipt | Dispatch intent survives; restored nonterminal attempt is `Unknown`; no implicit action replay | `runtime::execution::tests::dispatch_outbox_survives_restore_and_receipt_is_idempotent`, `orchestration::integration_bridge::tests::durable_dispatch_crash_window_restores_as_one_recovery_event` |
 | Node crashes around Local EAIOS dispatch | Journal distinguishes pre-dispatch failure from physical ambiguity and never authorizes blind restart | `node_service::journal::tests::ambiguous_dispatch_requires_reconciliation_and_never_restarts`, `node_service::service::tests::reconciliation_required_execution_fences_local_resources_after_restart` |
 | Node route or lease is lost | Current attempt becomes `Unknown`; exactly one Runtime recovery transition is emitted; Group recovery stays Control-owned | `runtime::execution::tests::node_loss_emits_one_recovery_event_and_retains_attempt_history`, `integration_server::tests::unavailable_bound_actor_is_deferred_without_failing_server` |

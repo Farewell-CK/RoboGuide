@@ -54,7 +54,7 @@ schema 和 byte-bound policy。路径必须显式且 storage/binary 为绝对路
       "2": "127.0.0.1:32002",
       "3": "127.0.0.1:32003"
     },
-    "application_schema": "roboguide.controller-checkpoint/v25",
+    "application_schema": "roboguide.controller-checkpoint/v26",
     "application_policy_digest": "REPLACE_WITH_POLICY_DIGEST",
     "shared_secret": null
   },
@@ -100,11 +100,23 @@ private `status.json` 仅供本地观察，不授予写入或资源 authority。
 }
 ```
 
-三份配置使用同一 CA、各自证书和相同 peer DNS name。Node Protocol 的 mTLS 环境变量见
+三份配置使用同一 CA、各自证书和相同 peer DNS name。
+ADR-0092 要求每个 member 的 leaf digest 互不重复；启动核验自己的 leaf，async RPC 与同步
+child fence 都在发送任何 application frame 前核验 target member 的 exact leaf。CA/DNS
+验证仍必须通过，不能以共同 CA 或共同 DNS 代替 member identity。该静态 policy 的改动
+参与 profile identity，不支持绕过可信迁移直接接管旧集群历史。
+
+Node Protocol 的 mTLS 环境变量见
 ADR-0086，证书 digest map 必须显式绑定每个 NodeId。Operator HTTP 若绑定非 loopback，
 还必须设置 `ROBOGUIDE_OPERATOR_MTLS_SERVER_CERT`、`_SERVER_KEY`、`_CLIENT_CA` 和
 `_ROLE_MAP`；role map 将 `sha256:<leaf-cert>` 映射到 `viewer`、`operator` 或
 `recovery-admin`。
+所有 mutation 路由在持久事务前统一鉴权；header 仅可确认已认证角色，不赋权。
+viewer 只能读取/只读 assessment，operator 可执行普通 Mission 操作与 execution cancel；
+review/quarantine acknowledgement、execution/group recovery 和 archive 需要 recovery-admin。
+隔离的无 mTLS loopback 开发环境默认 operator；如需恢复管理员，明确配置
+`ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN=1`，remote/mTLS listener 使用该标志会拒绝启动。
+恢复操作还必须满足原来的 generation、stop proof、current eligibility 和 ownership gates。
 
 SIGINT 请求 supervisor 停止自己拥有的 child 和共识；异常 parent 退出由 child watchdog
 保守关闭。不要共享 replica 的 storage directory；既有 writer lock 与 supervisor lease
@@ -170,3 +182,14 @@ S12 的 TLS 进程复核输出在 `/tmp/roboguide-replica-tls-nonloopback-202610
 SHA-256 为 `73cf1c4ea3ea09200795362f427c02b0028e37f7c3d73f581a2f4e5afe07a7d0`；三副本
 启动、leader death、rejoin、SIGSTOP majority loss/restore 和两个原 Local EAIOS Execute
 保持不变均通过。
+
+ADR-0092 复查修订的最终源码软件矩阵位于仓库外
+`/tmp/roboguide-reliability-fix-replica-tls-final-20261013/result.json`，Controller binary SHA-256
+为 `47805c1ef6213ee71f1d683874d57e05316cf9d96d728ba98a69f5ac006a32ca`。Minority startup、
+旧 epoch 路由关闭、leader death 后 Unknown/ownership/policy/journal 保留、33 行 accepted
+metadata rejoin、standalone downgrade、SIGSTOP majority loss/restore 均通过，两个原 Local
+EAIOS Execute 保持为 2。相同 binary 的显式 group recovery 进程回归位于
+`/tmp/roboguide-reliability-fix-group-processes-20261013/summary.json`：all-live 产生两个授权
+replacement attempts，completed-peer 只产生一个，已完成的 peer 不重复。
+全部进程由本轮夹具在独立目录/临时端口启动和清理，未启动 Provider、Habitat、硬件或 E6。
+三副本在同一主机使用 `192.168.1.86` 非 loopback TCP；这不证明跨两个独立主机的网络分区。

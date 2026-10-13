@@ -173,7 +173,7 @@ resume conflict 与失败原子性，另有 Runtime 时间不可变/restore 检�
 ## Dev review follow-up implementation (S11–S13)
 
 - ADR-0089 将 accepted-plan 的 `InvalidContract` 和 exact-Task `RuntimeContractViolation`
-  变成 Mission-local typed failure evidence。稳定 fingerprint 在十分钟内连续三次后进入
+  变成 Mission-local typed failure evidence。同 class/fingerprint 在滚动十分钟内三次独立失败后进入
   持久化 crash-loop quarantine；`recovery-admin` review endpoint 必须携带 generation 和
   bounded reason，其他 Mission 不受影响。未知/共享/SQL 错误继续 fatal。
 - ADR-0090 增加 checkpoint-bound append-only event archive。File sink 先写入并 fsync digest-
@@ -187,3 +187,18 @@ resume conflict 与失败原子性，另有 Runtime 时间不可变/restore 检�
 新的软件进程证据为 `/tmp/roboguide-replica-tls-nonloopback-20261013g/result.json`，使用 binary SHA
 `73cf1c4ea3ea09200795362f427c02b0028e37f7c3d73f581a2f4e5afe07a7d0`；仅包含合成 Local
 EAIOS 和本地隔离进程，不能升级为 E6、Habitat、真实硬件或物理连续性结论。
+
+## 对 dbb44f6 的反例复查修复（S14）
+
+[ADR-0092](../decisions/0092-reliability-review-authority-and-archive-fences.md) 修正了此前
+软件切片的八项缺口：GC 删除 catalog 重建证据、Replica client 未绑定 target leaf、viewer
+可修改 Mission、breaker checkpoint 缺失/降级 authority、archive COMMIT 错误遗留事务、
+recovery execution ID 错误、completed recovery history 被误报为待恢复、计数不符合滚动窗口。
+归档另外增加有界 segments、immutable sidecars/paged manifest index、目录 fsync 和持久时间
+下界；HTTP header 不能赋权，review 的 SQL 失败与 contract rejection 分开。
+
+这些改动将原始反例纳入正式回归。真实 HTTP 重复审核同一 immutable completion violation
+保持 generation=1/count=1，而不是人为累计三次；生产中独立失败达到 breaker threshold
+仍未证明。Catalog history GC 当前是显式拒绝，不等于 snapshot/archive replay 已实现。
+软件进程矩阵仍采用同机三 replica、两合成 Node，独立跨主机 partition、长期容量、物理
+连续性和 E6 均保留。最终验证证据随 fault matrix 与复制部署文档更新。

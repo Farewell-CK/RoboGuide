@@ -26,7 +26,9 @@ pub use application_replication::{
     APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch,
     checkpoint_identity, validate_persisted_event,
 };
-pub use archive::{ArchiveManifest, ArchiveSink, FileArchiveSink};
+pub use archive::{
+    ArchiveManifest, ArchiveSink, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,
+};
 pub use checkpoint_store::{CheckpointStoragePolicy, CheckpointWriteStats};
 
 /// Previous JSON payload codec retained for Mission/Execution evidence compatibility.
@@ -74,6 +76,8 @@ const EVENT_PAYLOAD_SCHEMA_V16: &str = "domain.EventPayload.json/v16";
 const EVENT_PAYLOAD_SCHEMA_V17: &str = "domain.EventPayload.json/v17";
 /// Codec including explicit operator acknowledgement of a Mission crash-loop quarantine.
 const EVENT_PAYLOAD_SCHEMA_V18: &str = "domain.EventPayload.json/v18";
+/// Codec fencing bounded rolling-window failure and quarantine-review evidence.
+const EVENT_PAYLOAD_SCHEMA_V19: &str = "domain.EventPayload.json/v19";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -108,6 +112,10 @@ pub struct PersistedCheckpoint {
 /// Failures returned by the SQLite evidence store.
 #[derive(Debug)]
 pub enum SqliteEventLogError {
+    /// Explicit maintenance policy rejected a cutoff before any rows were removed.
+    ArchivePolicy(String),
+    /// The durable archive sink could not publish or verify the exact immutable segment.
+    ArchiveSink(String),
     /// Required replica epoch/quorum acceptance was unavailable or rejected this batch.
     Replication(String),
     /// SQLite returned an operational or schema error.
@@ -122,6 +130,10 @@ impl std::fmt::Display for SqliteEventLogError {
     /// Formats a durable evidence failure.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ArchivePolicy(error) => {
+                write!(formatter, "event archive policy rejected: {error}")
+            }
+            Self::ArchiveSink(error) => write!(formatter, "event archive sink failed: {error}"),
             Self::Replication(error) => write!(
                 formatter,
                 "controller replication acceptance failed: {error}"
@@ -418,7 +430,7 @@ impl SqliteEventLog {
         Ok(max_sequence.max(checkpoint_sequence))
     }
 
-    /// Returns the latest durable event timestamp, or zero for an empty log.
+    /// Returns the durable receive-time high-water, including events removed by verified archive maintenance.
     pub fn latest_timestamp(&self) -> Result<TimestampMs, SqliteEventLogError> {
         self.ensure_no_open_batch()?;
         let connection = self
@@ -430,7 +442,9 @@ impl SqliteEventLog {
             [],
             |row| row.get::<_, u64>(0),
         )?;
-        Ok(TimestampMs::new(timestamp))
+        Ok(TimestampMs::new(
+            timestamp.max(archive::read_archive_timestamp_floor(&connection)?),
+        ))
     }
 
     /// Loads the last committed controller projection checkpoint, if present.
@@ -719,6 +733,17 @@ impl SqliteEventLog {
                 "event batch is still open".to_string(),
             ));
         }
+        drop(batch_start);
+        if !self
+            .connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?
+            .is_autocommit()
+        {
+            return Err(SqliteEventLogError::Codec(
+                "event store has an untracked transaction; recovery required".into(),
+            ));
+        }
         Ok(())
     }
 }
@@ -743,6 +768,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V16 => Ok(16),
         EVENT_PAYLOAD_SCHEMA_V17 => Ok(17),
         EVENT_PAYLOAD_SCHEMA_V18 => Ok(18),
+        EVENT_PAYLOAD_SCHEMA_V19 => Ok(19),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -756,6 +782,14 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::MissionExecutionIsolated {
+            failure_window: Some(_),
+            ..
+        }
+        | EventPayload::MissionExecutionQuarantineCleared {
+            failure_window: Some(_),
+            ..
+        } => 19,
         EventPayload::SchedulingReservationPreempted { .. } => 17,
         EventPayload::MissionExecutionQuarantineCleared { .. } => 18,
         EventPayload::MissionSchedulingPriorityChanged { .. } => 16,
@@ -935,7 +969,8 @@ impl SqliteEventLog {
 /// Selects the newest codec marker only for payloads introduced by that codec.
 fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
     match payload {
-        EventPayload::MissionExecutionQuarantineCleared { .. } => EVENT_PAYLOAD_SCHEMA_V18,
+        EventPayload::MissionExecutionQuarantineCleared { .. }
+        | EventPayload::MissionExecutionIsolated { .. } => EVENT_PAYLOAD_SCHEMA_V19,
         _ => EVENT_PAYLOAD_SCHEMA_V17,
     }
 }

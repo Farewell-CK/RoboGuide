@@ -1,5 +1,56 @@
 use super::*;
 
+/// An operator cutoff cannot delete generic Memory manifests or provider-qualified replica replay prerequisites.
+#[test]
+fn archive_gc_preserves_generic_memory_replay_evidence() {
+    use ports::EventSink;
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let manifest = fixture_memory_manifest(
+        "archive-memory",
+        MemoryKind::Execution,
+        &digest_bytes(b"memory"),
+        6,
+    );
+    let correlation = domain::CorrelationId::new("archive-memory").unwrap();
+    log.begin_batch().unwrap();
+    log.clone().append(
+        TimestampMs::new(1),
+        &correlation,
+        None,
+        EventPayload::MemoryManifestPublished {
+            manifest: manifest.clone(),
+        },
+    );
+    log.clone().append(
+        TimestampMs::new(2),
+        &correlation,
+        None,
+        EventPayload::MemoryArtifactStaged {
+            manifest: manifest.clone(),
+            node_id: NodeId::new("dog-b").unwrap(),
+            consumer_provider_id: "consumer".into(),
+        },
+    );
+    log.save_checkpoint(TEST_CHECKPOINT_SCHEMA, TEST_CHECKPOINT_JSON)
+        .unwrap();
+    log.commit_batch().unwrap();
+    let sink = state::FileArchiveSink::new(directory.path().join("archive"));
+    for cutoff in [1, 2] {
+        assert!(matches!(
+            log.archive_and_gc(cutoff, &sink),
+            Err(state::SqliteEventLogError::ArchivePolicy(_))
+        ));
+    }
+    let replayed = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    assert_eq!(
+        replayed.memory_replicas(manifest.selector()).unwrap().len(),
+        1
+    );
+    assert_eq!(log.history_floor().unwrap(), 0);
+    assert_eq!(log.len().unwrap(), 2);
+}
+
 /// The generic Memory facade retains the fixture consumed by Mission Grounding.
 #[test]
 fn memory_catalog_matches_mission_grounding_contract_fixture() {

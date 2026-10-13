@@ -247,6 +247,76 @@ fn shared_or_unclassified_failure_is_not_quarantined() {
     log.rollback_batch().unwrap();
 }
 
+/// Current wrappers require breaker authority, and resumed histories cannot be relabeled as an older schema.
+#[test]
+fn breaker_wrapper_fences_omission_and_downgrade_after_resume() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let mut controller = fixture(&log);
+    let mission = domain::MissionId::new("mission-a").unwrap();
+    let correlation = domain::CorrelationId::new("breaker-schema").unwrap();
+    controller
+        .orchestrator
+        .isolate_execution(
+            &mission,
+            orchestration::MissionIsolationSource::ReadyDispatch,
+            domain::TimestampMs::new(2),
+            &correlation,
+            &mut log.clone(),
+        )
+        .unwrap();
+    controller
+        .orchestrator
+        .resume_isolated_execution(
+            &mission,
+            1,
+            domain::TimestampMs::new(3),
+            &correlation,
+            &mut log.clone(),
+        )
+        .unwrap();
+    let saved: ServerCheckpoint =
+        serde_json::from_str(&server_checkpoint_json(&controller).unwrap()).unwrap();
+    validate_isolation_checkpoint_schema(&saved).unwrap();
+    for field in ["failure_state", "recent_failed_at"] {
+        let mut changed = saved.clone();
+        let mut missions: Vec<serde_json::Value> =
+            serde_json::from_str(&changed.orchestration_json).unwrap();
+        if field == "failure_state" {
+            missions[0].as_object_mut().unwrap().remove(field);
+        } else {
+            missions[0]["failure_state"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+        }
+        changed.orchestration_json = serde_json::to_string(&missions).unwrap();
+        assert!(validate_isolation_checkpoint_schema(&changed).is_err());
+    }
+    let mut downgraded = saved.clone();
+    downgraded.schema = PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA.into();
+    assert!(validate_isolation_checkpoint_schema(&downgraded).is_err());
+    // Actual v25 input has counter evidence but no rolling samples; migration retains unavailable samples.
+    let mut missions: Vec<serde_json::Value> =
+        serde_json::from_str(&downgraded.orchestration_json).unwrap();
+    missions[0]["failure_state"]
+        .as_object_mut()
+        .unwrap()
+        .remove("recent_failed_at");
+    downgraded.orchestration_json = serde_json::to_string(&missions).unwrap();
+    validate_isolation_checkpoint_schema(&downgraded).unwrap();
+    let restored = MissionOrchestrator::restore_json(&downgraded.orchestration_json).unwrap();
+    assert_eq!(
+        restored
+            .execution(&mission)
+            .unwrap()
+            .failure_state()
+            .unwrap()
+            .recent_failed_at,
+        None
+    );
+}
+
 /// Resume must consume exactly the live hold and old wrapper schemas cannot launder that authority.
 #[test]
 fn explicit_resume_is_generation_bound_and_checkpoint_fenced() {

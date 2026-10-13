@@ -11,6 +11,8 @@ use std::sync::Arc;
 /// Loaded mutual-TLS configuration owned by one replica process.
 #[derive(Clone)]
 pub(crate) struct TlsMaterial {
+    /// Leaf identity of this process, checked against its configured infrastructure member.
+    pub(crate) local_certificate_digest: String,
     /// Client certificate verifier and trust roots.
     pub(crate) client: Arc<ClientConfig>,
     /// Server certificate and mandatory client certificate verifier.
@@ -19,6 +21,38 @@ pub(crate) struct TlsMaterial {
     pub(crate) server_name: String,
     /// Expected leaf certificate digest per infrastructure member.
     pub(crate) peer_certificate_digests: BTreeMap<u64, String>,
+}
+
+impl TlsMaterial {
+    /// Checks the exact target member after CA/DNS validation and before any application bytes flow.
+    pub(crate) fn authenticate_peer(
+        &self,
+        member: u64,
+        certificates: Option<&[CertificateDer<'_>]>,
+    ) -> Result<(), String> {
+        use sha2::{Digest as _, Sha256};
+        let actual = certificates
+            .and_then(|certificates| certificates.first())
+            .map(|certificate| format!("sha256:{:x}", Sha256::digest(certificate.as_ref())));
+        if self
+            .peer_certificate_digests
+            .get(&member)
+            .is_some_and(|expected| actual.as_deref() == Some(expected.as_str()))
+        {
+            Ok(())
+        } else {
+            Err("replica TLS peer certificate differs from exact target member".into())
+        }
+    }
+
+    /// Prevents a misconfigured local certificate from impersonating another member at startup.
+    pub(crate) fn authenticate_local(&self, member: u64) -> Result<(), String> {
+        if self.peer_certificate_digests.get(&member) == Some(&self.local_certificate_digest) {
+            Ok(())
+        } else {
+            Err("replica TLS local certificate differs from configured member".into())
+        }
+    }
 }
 
 /// Loads one strict PEM file containing one or more certificates.
@@ -50,6 +84,8 @@ pub(crate) fn load(config: Option<&ReplicaTlsConfig>) -> Result<Option<TlsMateri
         return Err("replica TLS CA/certificate chain must not be empty".into());
     }
     let key = private_key(&config.key_path)?;
+    use sha2::{Digest as _, Sha256};
+    let local_certificate_digest = format!("sha256:{:x}", Sha256::digest(cert_chain[0].as_ref()));
     let mut roots = RootCertStore::empty();
     for certificate in ca {
         roots
@@ -70,6 +106,7 @@ pub(crate) fn load(config: Option<&ReplicaTlsConfig>) -> Result<Option<TlsMateri
     ServerName::try_from(config.server_name.clone())
         .map_err(|_| "replica TLS server_name must be a valid DNS name".to_string())?;
     Ok(Some(TlsMaterial {
+        local_certificate_digest,
         client: Arc::new(client),
         server: Arc::new(server),
         server_name: config.server_name.clone(),

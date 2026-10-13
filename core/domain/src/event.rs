@@ -50,6 +50,9 @@ pub enum EventPayload {
         /// Whether the hold crossed the explicit crash-loop breaker threshold.
         #[serde(default)]
         crash_loop: bool,
+        /// Bounded rolling-window observations; absent legacy evidence is unavailable.
+        #[serde(default)]
+        failure_window: Option<Vec<TimestampMs>>,
     },
     /// Explicit live revalidation cleared the exact current execution hold.
     MissionExecutionResumed {
@@ -70,6 +73,9 @@ pub enum EventPayload {
         operator_role: String,
         /// Bounded human reason retained for audit review.
         operator_reason: String,
+        /// Original bounded window evidence retained before the operator cleared it.
+        #[serde(default)]
+        failure_window: Option<Vec<TimestampMs>>,
     },
     /// Control accepted continuous process-local liveness without refreshing reported health.
     NodeSessionLivenessAccepted {

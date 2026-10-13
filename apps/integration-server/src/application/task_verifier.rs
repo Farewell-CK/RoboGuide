@@ -133,6 +133,10 @@ pub(crate) fn validate_restored_verifier_source(
     if matches!(
         checkpoint.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
+            | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
+            | PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA
+            | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
             | PRE_ISOLATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RECOVERY_SERVER_CHECKPOINT_SCHEMA
             | ADMISSION_SERVER_CHECKPOINT_SCHEMA

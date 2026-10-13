@@ -42,6 +42,9 @@ impl Default for MissionFailureClass {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MissionFailureState {
+    /// At most three actual failure receive times; None preserves unavailable legacy window evidence.
+    #[serde(default)]
+    pub recent_failed_at: Option<Vec<TimestampMs>>,
     /// Typed source category used by the breaker.
     #[serde(default)]
     pub class: MissionFailureClass,
@@ -71,6 +74,7 @@ impl Default for MissionFailureState {
     /// Legacy holds carry no typed failure evidence until a new failure is classified.
     fn default() -> Self {
         Self {
+            recent_failed_at: Some(Vec::new()),
             class: MissionFailureClass::Unknown,
             fingerprint: String::new(),
             count: 0,
@@ -89,24 +93,76 @@ impl MissionFailureState {
         fingerprint: String,
         timestamp: TimestampMs,
     ) -> Self {
-        let repeated = previous.filter(|previous| {
-            previous.class == class
-                && previous.fingerprint == fingerprint
-                && timestamp
-                    .as_millis()
-                    .saturating_sub(previous.last_failed_at.as_millis())
-                    <= MISSION_CRASH_LOOP_WINDOW_MS
+        // An unreviewed quarantine cannot expire or change identity as a side effect of a new failure.
+        if let Some(previous) = previous.filter(|previous| previous.quarantined) {
+            return previous.clone();
+        }
+        let repeated = previous
+            .filter(|previous| previous.class == class && previous.fingerprint == fingerprint);
+        let mut recent = repeated
+            .map(|previous| {
+                previous
+                    .recent_failed_at
+                    .clone()
+                    .unwrap_or_else(|| match previous.count {
+                        1 => vec![previous.last_failed_at],
+                        2 => vec![previous.first_failed_at, previous.last_failed_at],
+                        _ => Vec::new(),
+                    })
+            })
+            .unwrap_or_default();
+        recent.retain(|failed_at| {
+            *failed_at <= timestamp
+                && timestamp.as_millis() - failed_at.as_millis() <= MISSION_CRASH_LOOP_WINDOW_MS
         });
-        let count = repeated.map_or(1, |previous| previous.count.saturating_add(1));
+        recent.push(timestamp);
+        if recent.len() > MISSION_CRASH_LOOP_THRESHOLD as usize {
+            recent.remove(0);
+        }
+        let count = recent.len() as u32;
         Self {
+            first_failed_at: recent[0],
+            recent_failed_at: Some(recent),
             class,
             fingerprint,
             count,
-            first_failed_at: repeated.map_or(timestamp, |previous| previous.first_failed_at),
             last_failed_at: timestamp,
-            quarantined: repeated.is_some_and(|previous| previous.quarantined)
-                || count >= MISSION_CRASH_LOOP_THRESHOLD,
+            quarantined: count >= MISSION_CRASH_LOOP_THRESHOLD,
         }
+    }
+
+    /// Rejects malformed durable authority; legacy counters retain quarantine without inventing samples.
+    pub fn validate_checkpoint(&self, accepted_at: TimestampMs) -> Result<(), OrchestrationError> {
+        let invalid_samples = self.recent_failed_at.as_ref().is_some_and(|samples| {
+            samples.len() > MISSION_CRASH_LOOP_THRESHOLD as usize
+                || samples.len() != self.count as usize
+                || samples.windows(2).any(|pair| pair[0] > pair[1])
+                || samples
+                    .first()
+                    .is_some_and(|first| *first != self.first_failed_at)
+                || samples
+                    .last()
+                    .is_some_and(|last| *last != self.last_failed_at)
+                || self
+                    .last_failed_at
+                    .as_millis()
+                    .saturating_sub(self.first_failed_at.as_millis())
+                    > MISSION_CRASH_LOOP_WINDOW_MS
+                    && !samples.is_empty()
+        });
+        if self.fingerprint.len() > 128
+            || (self.count > 0
+                && (self.fingerprint.is_empty()
+                    || self.first_failed_at < accepted_at
+                    || self.last_failed_at < self.first_failed_at))
+            || self.quarantined != (self.count >= MISSION_CRASH_LOOP_THRESHOLD)
+            || invalid_samples
+        {
+            return Err(OrchestrationError::Mission(
+                "inconsistent Mission failure checkpoint authority".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -203,6 +259,18 @@ impl MissionOrchestrator {
         if execution.isolation.is_some() {
             return Ok(());
         }
+        if timestamp < execution.accepted_at
+            || execution
+                .failure_state
+                .as_ref()
+                .is_some_and(|failure| timestamp < failure.last_failed_at)
+            || failure_fingerprint.is_empty()
+            || failure_fingerprint.len() > 128
+        {
+            return Err(OrchestrationError::Mission(
+                "invalid Mission failure identity or receive time".into(),
+            ));
+        }
         let generation = execution
             .isolation_generation
             .checked_add(1)
@@ -242,6 +310,7 @@ impl MissionOrchestrator {
                 failure_fingerprint: Some(failure.fingerprint.clone()),
                 failure_count: failure.count,
                 crash_loop: failure.quarantined,
+                failure_window: failure.recent_failed_at.clone(),
             },
         );
         Ok(())
@@ -337,10 +406,18 @@ impl MissionOrchestrator {
         if !failure.quarantined {
             return Ok(());
         }
+        let failure_count = failure.count;
+        let failure_window = failure.recent_failed_at.clone();
         failure.count = 0;
+        failure.recent_failed_at = Some(Vec::new());
         failure.first_failed_at = timestamp;
         failure.last_failed_at = timestamp;
         failure.quarantined = false;
+        execution
+            .isolation
+            .as_mut()
+            .expect("hold validated above")
+            .failure = failure.clone();
         events.append(
             timestamp,
             correlation_id,
@@ -348,9 +425,10 @@ impl MissionOrchestrator {
             domain::EventPayload::MissionExecutionQuarantineCleared {
                 mission_id: mission_id.clone(),
                 generation,
-                failure_count: MISSION_CRASH_LOOP_THRESHOLD,
+                failure_count,
                 operator_role,
                 operator_reason,
+                failure_window,
             },
         );
         Ok(())

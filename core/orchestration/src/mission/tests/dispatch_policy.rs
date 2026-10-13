@@ -332,6 +332,112 @@ fn crash_loop_breaker_requires_explicit_operator_acknowledgement() {
     )));
 }
 
+/// A rolling window measures its oldest retained sample, rather than the gap to the previous failure.
+#[test]
+fn failure_window_prunes_old_samples_and_keeps_quarantine_sticky() {
+    let mut previous = None;
+    for (minutes, expected) in [(0, 1), (9, 2), (18, 2), (19, 3)] {
+        let failure = MissionFailureState::next(
+            previous.as_ref(),
+            MissionFailureClass::InvalidContract,
+            "stable".into(),
+            TimestampMs::new(minutes * 60_000),
+        );
+        assert_eq!(failure.count, expected);
+        assert_eq!(failure.quarantined, minutes == 19);
+        previous = Some(failure);
+    }
+    let quarantined = previous.unwrap();
+    assert_eq!(
+        quarantined.recent_failed_at.as_ref().unwrap(),
+        &vec![
+            TimestampMs::new(9 * 60_000),
+            TimestampMs::new(18 * 60_000),
+            TimestampMs::new(19 * 60_000)
+        ]
+    );
+    assert_eq!(
+        MissionFailureState::next(
+            Some(&quarantined),
+            MissionFailureClass::Unknown,
+            "different".into(),
+            TimestampMs::new(40 * 60_000)
+        ),
+        quarantined
+    );
+}
+
+/// Missing or contradictory authority is rejected while legitimate legacy window evidence remains unavailable.
+#[test]
+fn failure_checkpoint_rejects_removed_state_and_inconsistent_window() {
+    let (mut orchestrator, _, mut events) = fixture();
+    let mission = MissionId::new("a").unwrap();
+    let correlation = CorrelationId::new("checkpoint-breaker").unwrap();
+    for timestamp in [10, 20, 30] {
+        orchestrator
+            .isolate_execution_with_failure(
+                &mission,
+                MissionIsolationSource::ReadyDispatch,
+                MissionFailureClass::InvalidContract,
+                "stable".into(),
+                TimestampMs::new(timestamp),
+                &correlation,
+                &mut events,
+            )
+            .unwrap();
+        if timestamp < 30 {
+            let generation = orchestrator
+                .execution(&mission)
+                .unwrap()
+                .isolation()
+                .unwrap()
+                .generation;
+            orchestrator
+                .resume_isolated_execution(
+                    &mission,
+                    generation,
+                    TimestampMs::new(timestamp + 1),
+                    &correlation,
+                    &mut events,
+                )
+                .unwrap();
+        }
+    }
+    let original: Vec<serde_json::Value> =
+        serde_json::from_str(&orchestrator.checkpoint_json().unwrap()).unwrap();
+    let mut missing = original.clone();
+    missing[0].as_object_mut().unwrap().remove("failure_state");
+    assert!(MissionOrchestrator::restore_json(&serde_json::to_string(&missing).unwrap()).is_err());
+    for samples in [
+        serde_json::json!([10, 20]),
+        serde_json::json!([10, 30, 20]),
+        serde_json::json!([10, 20, 600011]),
+    ] {
+        let mut bad = original.clone();
+        bad[0]["failure_state"]["recent_failed_at"] = samples.clone();
+        bad[0]["isolation"]["failure"]["recent_failed_at"] = samples;
+        assert!(MissionOrchestrator::restore_json(&serde_json::to_string(&bad).unwrap()).is_err());
+    }
+    let mut legacy = original;
+    legacy[0]["failure_state"]
+        .as_object_mut()
+        .unwrap()
+        .remove("recent_failed_at");
+    legacy[0]["isolation"]["failure"]
+        .as_object_mut()
+        .unwrap()
+        .remove("recent_failed_at");
+    let restored =
+        MissionOrchestrator::restore_json(&serde_json::to_string(&legacy).unwrap()).unwrap();
+    let failure = restored
+        .execution(&mission)
+        .unwrap()
+        .failure_state()
+        .unwrap();
+    assert!(failure.quarantined);
+    assert_eq!(failure.recent_failed_at, None);
+}
+
 /// Legacy policy omission is compatible; fabricated waiting slots, future ordinals or priorities reject.
 #[test]
 fn restored_policy_rejects_unproven_history_and_accepts_legacy_defaults() {

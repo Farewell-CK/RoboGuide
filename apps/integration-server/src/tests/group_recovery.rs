@@ -349,7 +349,7 @@ impl Fixture {
         let gate = Arc::new(Mutex::new(()));
         let server = async {
             let (mut stream, _) = listener.accept().await.unwrap();
-            handle_http_connection(
+            handle_recovery_admin_test_connection(
                 &mut stream,
                 &self.controller,
                 &self.events,
@@ -541,6 +541,12 @@ fn expired_group_recovery_retains_ownership_and_fences_new_attempts() {
             .group_recovery_disposition(&fixture.group_id, TimestampMs::new(105)),
         runtime::GroupRecoveryDisposition::BudgetExpired
     );
+    let view = recovery_view(&fixture.controller.lock().unwrap(), TimestampMs::new(105));
+    assert_eq!(
+        view["groups_requiring_intervention"][0],
+        fixture.group_id.as_str()
+    );
+    assert_eq!(view["groups_requiring_recovery"], serde_json::json!([]));
     fixture.fact(&fixture.originals[1], 2, ExecutionPhase::Cancelled, 106);
     fixture.tick(107).unwrap();
     assert_eq!(
@@ -1075,5 +1081,32 @@ fn late_node_admission_remains_expired_and_keeps_real_runtime_facts() {
             .unwrap()
             .lifecycle(),
         orchestration::MissionExecutionLifecycle::Running
+    );
+}
+
+/// Completed Group recovery remains history and does not create a pending recovery.
+#[test]
+fn completed_group_recovery_is_history_in_controller_view() {
+    let fixture = Fixture::new(2, true, false);
+    fixture.authorize();
+    for index in 0..2 {
+        fixture.fact(&fixture.originals[index], 2, ExecutionPhase::Completed, 7);
+    }
+    fixture.tick(8).unwrap();
+    let live = fixture.controller.lock().unwrap();
+    let view = recovery_view(&live, TimestampMs::new(8));
+    println!(
+        "group_phase={:?}, mission_lifecycle={:?}, recovery_state={}",
+        live.bridge
+            .group_recovery_disposition(&fixture.group_id, TimestampMs::new(8)),
+        live.orchestrator
+            .execution(&domain::MissionId::new("group-mission").unwrap())
+            .unwrap()
+            .lifecycle(),
+        view["state"]
+    );
+    assert_eq!(
+        view["state"], "Ready",
+        "Completed recovery history makes the global view permanently pending"
     );
 }

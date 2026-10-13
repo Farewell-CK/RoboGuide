@@ -9,9 +9,10 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 /// Application wrapper fences standalone/older binaries from a cluster's authority history.
-pub(super) const APPLICATION_SCHEMA: &str = "roboguide.controller-checkpoint/v25";
+pub(super) const APPLICATION_SCHEMA: &str = "roboguide.controller-checkpoint/v26";
 /// Controller environment allowed by the current static software deployment.
 const ALLOWED_ENVIRONMENT: &[&str] = &[
+    "ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN",
     "ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS",
     "ROBOGUIDE_NODE_LEASE_DURATION_MS",
     "ROBOGUIDE_NODE_APPLICATION_ACCEPTANCE_TIMEOUT_MS",

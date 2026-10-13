@@ -15,19 +15,23 @@ use std::io::BufReader;
 use std::sync::Arc;
 use tokio_rustls::TlsAcceptor;
 
+#[cfg(test)]
+#[path = "operator_tests.rs"]
+mod operator_tests;
+
 /// Operator role permitted to acknowledge a crash-loop quarantine.
 const RECOVERY_ADMIN_ROLE: &str = "recovery-admin";
 
 /// Authenticated operator context attached to one HTTP connection.
 #[derive(Debug, Clone, Default)]
 struct OperatorPrincipal {
-    /// Role selected by the certificate digest map or local test gateway header.
+    /// Role selected solely by a certificate map or explicit loopback deployment configuration.
     role: Option<String>,
     /// Whether the connection completed the configured mutual-TLS handshake.
     mtls: bool,
 }
 
-/// Reads and validates a role attached by the local gateway or mTLS certificate map.
+/// Validates an optional role hint against the connection principal; headers never grant authority.
 fn operator_role(request: &ControlHttpRequest, principal: &OperatorPrincipal) -> Option<String> {
     let header = request.headers.get("x-roboguide-operator-role").cloned();
     if header
@@ -36,14 +40,103 @@ fn operator_role(request: &ControlHttpRequest, principal: &OperatorPrincipal) ->
     {
         return None;
     }
-    if principal.mtls {
-        return match (principal.role.clone(), header) {
-            (Some(role), None) => Some(role),
-            (Some(role), Some(header)) if role == header => Some(role),
-            _ => None,
-        };
+    let role = principal
+        .role
+        .clone()
+        .or_else(|| (!principal.mtls).then(|| "operator".into()));
+    match (role, header) {
+        (Some(role), None) => Some(role),
+        (Some(role), Some(header)) if role == header => Some(role),
+        _ => None,
     }
-    header.or_else(|| principal.role.clone())
+}
+
+/// Central fail-closed route authorization; the immutable Mission contract remains independently checked.
+fn authorize_operator_request(
+    request: &ControlHttpRequest,
+    principal: &OperatorPrincipal,
+    method: &str,
+    path: &str,
+) -> Result<(), (&'static str, &'static str)> {
+    let required = match (method, path) {
+        ("GET", _) | ("POST", "/v1/missions/assess-initial-support") => 0,
+        ("POST", "/v1/missions") => 1,
+        ("POST", "/v1/maintenance/archive") => 2,
+        ("POST", path)
+            if path.starts_with("/v1/missions/")
+                && [
+                    "/cancel",
+                    "/scheduling-policy",
+                    "/scheduling-preemption",
+                    "/resume",
+                ]
+                .iter()
+                .any(|suffix| path.ends_with(suffix)) =>
+        {
+            if path.ends_with("/resume")
+                && serde_json::from_slice::<serde_json::Value>(&request.body)
+                    .ok()
+                    .and_then(|body| {
+                        body.get("acknowledge_crash_loop")
+                            .and_then(serde_json::Value::as_bool)
+                    })
+                    == Some(true)
+            {
+                2
+            } else {
+                1
+            }
+        }
+        ("POST", path) if path.starts_with("/v1/missions/") && path.ends_with("/review") => 2,
+        ("POST", path) if path.starts_with("/v1/groups/") && path.ends_with("/recover") => 2,
+        ("POST", path) if path.starts_with("/v1/executions/") && path.ends_with("/recover") => 2,
+        ("POST", path) if path.starts_with("/v1/executions/") && path.ends_with("/cancel") => 1,
+        _ => return Err(("404 Not Found", "operator route is not supported")),
+    };
+    let role = operator_role(request, principal)
+        .ok_or(("401 Unauthorized", "operator role is not authenticated"))?;
+    let granted = match role.as_str() {
+        "viewer" => 0,
+        "operator" => 1,
+        "recovery-admin" => 2,
+        _ => return Err(("401 Unauthorized", "invalid operator principal")),
+    };
+    if granted < required {
+        Err((
+            "403 Forbidden",
+            "operator role does not authorize this operation",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Freezes an explicit development-only administrator context; remote and mTLS listeners cannot use it.
+fn local_operator_principal(
+    address: std::net::SocketAddr,
+    mtls: bool,
+) -> Result<OperatorPrincipal, String> {
+    let enabled = match std::env::var("ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN").as_deref() {
+        Ok("1") => true,
+        Ok("0") | Err(std::env::VarError::NotPresent) => false,
+        _ => return Err("local recovery administrator flag must be 0 or 1".into()),
+    };
+    if enabled && (!address.ip().is_loopback() || mtls) {
+        return Err(
+            "local recovery administrator is an explicit loopback-only development profile".into(),
+        );
+    }
+    Ok(OperatorPrincipal {
+        role: Some(
+            if enabled {
+                RECOVERY_ADMIN_ROLE
+            } else {
+                "operator"
+            }
+            .into(),
+        ),
+        mtls: false,
+    })
 }
 
 /// Loaded mTLS listener and certificate-to-role policy for operator HTTP.
@@ -116,29 +209,42 @@ fn configured_operator_tls()
             "operator mTLS requires server cert, server key, client CA and role map".into(),
         );
     }
-    let server_cert = operator_certificates(std::path::Path::new(
-        values[0].as_ref().expect("validated path"),
-    ))?;
-    let server_key = operator_private_key(std::path::Path::new(
-        values[1].as_ref().expect("validated path"),
-    ))?;
-    let ca = operator_certificates(std::path::Path::new(
-        values[2].as_ref().expect("validated path"),
-    ))?;
+    load_operator_tls(
+        std::path::Path::new(values[0].as_ref().expect("validated path")),
+        std::path::Path::new(values[1].as_ref().expect("validated path")),
+        std::path::Path::new(values[2].as_ref().expect("validated path")),
+        std::path::Path::new(values[3].as_ref().expect("validated role map")),
+    )
+    .map(Some)
+}
+
+/// Builds the same production mTLS policy from explicit files, without process-global test configuration.
+fn load_operator_tls(
+    certificate_path: &std::path::Path,
+    key_path: &std::path::Path,
+    ca_path: &std::path::Path,
+    role_map_path: &std::path::Path,
+) -> Result<OperatorTlsProfile, Box<dyn std::error::Error + Send + Sync>> {
+    let server_cert = operator_certificates(certificate_path)?;
+    let server_key = operator_private_key(key_path)?;
+    let ca = operator_certificates(ca_path)?;
     let mut roots = rustls::RootCertStore::empty();
     for certificate in ca {
         roots.add(certificate)?;
     }
-    let roles: BTreeMap<String, String> = serde_json::from_slice(&std::fs::read(
-        values[3].as_ref().expect("validated role map"),
-    )?)?;
+    let roles: BTreeMap<String, String> = serde_json::from_slice(&std::fs::read(role_map_path)?)?;
     if roles.is_empty()
         || roles
             .values()
             .any(|role| !matches!(role.as_str(), "viewer" | "operator" | "recovery-admin"))
-        || roles
-            .keys()
-            .any(|digest| !digest.starts_with("sha256:") || digest.len() != 71)
+        || roles.keys().any(|digest| {
+            !digest.strip_prefix("sha256:").is_some_and(|hex| {
+                hex.len() == 64
+                    && hex
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+        })
     {
         return Err("operator mTLS role map has an invalid digest or role".into());
     }
@@ -147,10 +253,10 @@ fn configured_operator_tls()
     let server = rustls::ServerConfig::builder()
         .with_client_cert_verifier(verifier)
         .with_single_cert(server_cert, server_key)?;
-    Ok(Some(OperatorTlsProfile {
+    Ok(OperatorTlsProfile {
         acceptor: TlsAcceptor::from(Arc::new(server)),
         roles: Arc::new(roles),
-    }))
+    })
 }
 /// Serves the local Phase 1 Mission and operator diagnostics API.
 pub(crate) async fn serve_http(
@@ -164,6 +270,7 @@ pub(crate) async fn serve_http(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = tokio::net::TcpListener::bind(address).await?;
     let operator_tls = configured_operator_tls()?;
+    let local_principal = local_operator_principal(address, operator_tls.is_some())?;
     loop {
         let (mut stream, _) = listener.accept().await?;
         let shared_controller = controller.clone();
@@ -173,10 +280,16 @@ pub(crate) async fn serve_http(
         let shared_feasibility = deployment_feasibility.clone();
         let shared_verifier_feed = verifier_feed.clone();
         let operator_tls = operator_tls.clone();
+        let local_principal = local_principal.clone();
         tokio::spawn(async move {
             let result = if let Some(profile) = operator_tls {
-                match profile.acceptor.accept(stream).await {
-                    Ok(mut tls_stream) => {
+                match tokio::time::timeout(
+                    CONTROL_HTTP_REQUEST_TIMEOUT,
+                    profile.acceptor.accept(stream),
+                )
+                .await
+                {
+                    Ok(Ok(mut tls_stream)) => {
                         let principal = match profile.principal(&tls_stream) {
                             Ok(principal) => principal,
                             Err(error) => {
@@ -196,10 +309,13 @@ pub(crate) async fn serve_http(
                         )
                         .await
                     }
-                    Err(error) => Err(format!("operator mTLS handshake failed: {error:?}").into()),
+                    Ok(Err(error)) => {
+                        Err(format!("operator mTLS handshake failed: {error:?}").into())
+                    }
+                    Err(_) => Err("operator mTLS handshake timed out".into()),
                 }
             } else {
-                handle_http_connection(
+                handle_http_connection_with_principal(
                     &mut stream,
                     &shared_controller,
                     &log,
@@ -207,6 +323,7 @@ pub(crate) async fn serve_http(
                     shared_clock.as_ref(),
                     shared_feasibility.as_deref(),
                     shared_verifier_feed.as_deref(),
+                    &local_principal,
                 )
                 .await
             };
@@ -218,6 +335,7 @@ pub(crate) async fn serve_http(
 }
 
 /// Handles one bounded HTTP/1.1 request for Mission commands and diagnostics.
+#[cfg(test)]
 pub(crate) async fn handle_http_connection(
     stream: &mut tokio::net::TcpStream,
     controller: &Arc<Mutex<ControllerState>>,
@@ -236,6 +354,33 @@ pub(crate) async fn handle_http_connection(
         deployment_feasibility,
         verifier_feed,
         &OperatorPrincipal::default(),
+    )
+    .await
+}
+
+/// Supplies an explicit authenticated administrator principal to isolated application fixtures.
+#[cfg(test)]
+pub(crate) async fn handle_recovery_admin_test_connection(
+    stream: &mut tokio::net::TcpStream,
+    controller: &Arc<Mutex<ControllerState>>,
+    event_log: &state::SqliteEventLog,
+    event_write_gate: &Arc<Mutex<()>>,
+    clock: &(impl Clock + Sync),
+    deployment_feasibility: Option<&DeploymentFeasibility>,
+    verifier_feed: Option<&TaskVerifierFeed>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    handle_http_connection_with_principal(
+        stream,
+        controller,
+        event_log,
+        event_write_gate,
+        clock,
+        deployment_feasibility,
+        verifier_feed,
+        &OperatorPrincipal {
+            role: Some(RECOVERY_ADMIN_ROLE.into()),
+            mtls: true,
+        },
     )
     .await
 }
@@ -304,6 +449,9 @@ where
     let method = request.method.as_str();
     let target = request.target.as_str();
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    if let Err((status, error)) = authorize_operator_request(&request, principal, method, path) {
+        return write_http_response(stream, status, serde_json::json!({"error":error})).await;
+    }
     let (status, body) = match (method, path) {
         ("GET", "/healthz") => ("200 OK", serde_json::json!({"status": "ok"})),
         ("GET", "/v1/recovery") => {
@@ -392,13 +540,29 @@ where
         }
         ("GET", "/v1/maintenance/archive") => {
             let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            let query = parse_query(query);
+            let after = query
+                .get("after")
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(0);
+            let limit = query
+                .get("limit")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(128);
             let status = tokio::task::spawn_blocking(move || {
+                let _guard = gate.lock().map_err(|_|"event-log write gate is poisoned".to_string())?;
                 Ok::<_, String>(serde_json::json!({
                     "schema_version": "roboguide.event-archive-status/v0.1",
                     "latest_sequence": log.latest_sequence().map_err(|error| error.to_string())?,
                     "history_floor": log.history_floor().map_err(|error| error.to_string())?,
                     "retained_events": log.len().map_err(|error| error.to_string())?,
                     "manifest": log.archive_manifest().map_err(|error| error.to_string())?,
+                    "manifests": log.archive_manifests(after,limit).map_err(|error|error.to_string())?,
+                    "manifest_page_limit": limit.clamp(1,128),
+                    "max_segment_events": state::MAX_ARCHIVE_EVENTS,
+                    "max_segment_bytes": state::MAX_ARCHIVE_BYTES,
+                    "catalog_and_localization_history_gc": "unsupported_until_recovery_contract_exists",
                     "automatic_gc": false,
                     "replicated_writer_requires_coordinated_maintenance": log.replication_profile().is_some(),
                 }))
@@ -458,12 +622,17 @@ where
             };
             let log = event_log.clone();
             let gate = event_write_gate.clone();
+            let shared_controller = controller.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let _write_guard = gate
                     .lock()
-                    .map_err(|_| "event-log write gate is poisoned".to_string())?;
+                    .map_err(|_| state::SqliteEventLogError::LockPoisoned)?;
+                let live = shared_controller.lock().map_err(|_|state::SqliteEventLogError::LockPoisoned)?;
+                if live.orchestrator.mission_ids().iter().any(|mission| live.orchestrator.execution(mission).is_some_and(|execution| matches!(execution.lifecycle(),orchestration::MissionExecutionLifecycle::Accepted | orchestration::MissionExecutionLifecycle::Running | orchestration::MissionExecutionLifecycle::Cancelling))) || !live.bridge.current_unknown_attempts().is_empty() {
+                    return Err(state::SqliteEventLogError::ArchivePolicy("archive maintenance requires no nonterminal Missions or unknown physical attempts".into()));
+                }
+                drop(live);
                 log.archive_and_gc(cutoff, &state::FileArchiveSink::new(archive_root))
-                    .map_err(|error| error.to_string())
             })
             .await
             .map_err(|error| format!("archive worker failed: {error}"))?;
@@ -472,9 +641,13 @@ where
                     "200 OK",
                     serde_json::json!({"status": "archived_and_compacted", "manifest": manifest}),
                 ),
-                Err(error) => (
+                Err(state::SqliteEventLogError::ArchivePolicy(error)) => (
                     "409 Conflict",
                     serde_json::json!({"error": error, "rows_deleted": false}),
+                ),
+                Err(error) => (
+                    "503 Service Unavailable",
+                    serde_json::json!({"error":error.to_string(),"maintenance_outcome":"not_confirmed"}),
                 ),
             }
         }
@@ -763,7 +936,7 @@ where
                         "crash_loop_quarantined": execution.is_crash_loop_quarantined(),
                         "review_due": execution.isolation().is_some_and(|hold| hold.is_review_due(clock.now())),
                         "new_execute_fenced": execution.isolation().is_some() || execution.is_crash_loop_quarantined(),
-                        "ownership_retained": true,
+                        "ownership_retained": live.bridge.control().group(execution.group_id()).is_some_and(|group|group.lifecycle() != control::GroupLifecycle::Released),
                         "automatic_resource_release": false,
                         "automatic_node_replacement": false,
                     }),
@@ -922,6 +1095,24 @@ where
                 .get("acknowledge_crash_loop")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
+            if body
+                .get("acknowledge_crash_loop")
+                .is_some_and(|value| !value.is_boolean())
+            {
+                return write_http_response(
+                    stream,
+                    "400 Bad Request",
+                    serde_json::json!({"error":"acknowledge_crash_loop must be a boolean"}),
+                )
+                .await;
+            }
+            let reason = body
+                .get("reason")
+                .and_then(serde_json::Value::as_str)
+                .filter(|reason| !reason.trim().is_empty() && reason.len() <= 512);
+            if acknowledge_crash_loop && reason.is_none() {
+                return write_http_response(stream,"400 Bad Request",serde_json::json!({"error":"crash-loop acknowledgement requires a bounded explicit reason"})).await;
+            }
             let resume_role = operator_role(&request, principal);
             if acknowledge_crash_loop && resume_role.as_deref() != Some(RECOVERY_ADMIN_ROLE) {
                 return write_http_response(
@@ -938,7 +1129,15 @@ where
             let write_guard = event_write_gate
                 .lock()
                 .map_err(|_| "event-log write gate is poisoned")?;
-            event_log.begin_batch()?;
+            if let Err(error) = event_log.begin_batch() {
+                drop(write_guard);
+                return write_http_response(
+                    stream,
+                    "503 Service Unavailable",
+                    serde_json::json!({"error":format!("resume transaction unavailable: {error}")}),
+                )
+                .await;
+            }
             let result: Result<(), (&str, String)> = (|| {
                 let unavailable = |error: String| ("503 Service Unavailable", error);
                 let mut live = controller
@@ -948,7 +1147,7 @@ where
                 let now = clock.now();
                 let correlation = domain::CorrelationId::new(format!("resume-{mission}"))
                     .map_err(|error| unavailable(error.to_string()))?;
-                resume_mission_candidate_with_policy(
+                let resume = resume_mission_candidate_with_policy(
                     &mut candidate,
                     &mission,
                     generation,
@@ -957,24 +1156,24 @@ where
                     &mut event_log.clone(),
                     acknowledge_crash_loop,
                     resume_role.as_deref().unwrap_or("operator"),
-                    body.get("reason")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("generation-bound resume"),
-                )
-                .map_err(|error| {
-                    let status = if error.downcast_ref::<state::SqliteEventLogError>().is_some() {
-                        "503 Service Unavailable"
-                    } else {
-                        "409 Conflict"
-                    };
-                    (status, error.to_string())
-                })?;
+                    reason.unwrap_or("generation-bound resume"),
+                );
                 if let Some(error) = event_log
                     .take_error()
                     .map_err(|error| unavailable(error.to_string()))?
                 {
                     return Err(unavailable(format!("resume event sink failed: {error}")));
                 }
+                resume.map_err(|error| {
+                    let status = if error.downcast_ref::<state::SqliteEventLogError>().is_some()
+                        || error.downcast_ref::<serde_json::Error>().is_some()
+                    {
+                        "503 Service Unavailable"
+                    } else {
+                        "409 Conflict"
+                    };
+                    (status, error.to_string())
+                })?;
                 let checkpoint = crate::diagnostics::http_checkpoint(&candidate)
                     .map_err(|error| unavailable(error.to_string()))?;
                 crate::diagnostics::http_save(event_log, &checkpoint, &diagnostics)
@@ -1062,8 +1261,12 @@ where
             let _write_guard = event_write_gate
                 .lock()
                 .map_err(|_| "event-log write gate is poisoned")?;
-            event_log.begin_batch()?;
+            if let Err(error) = event_log.begin_batch() {
+                drop(_write_guard);
+                return write_http_response(stream,"503 Service Unavailable",serde_json::json!({"error": format!("review transaction unavailable: {error}")})).await;
+            }
             let now = clock.now();
+            let mut failure_status = "503 Service Unavailable";
             let result: Result<(), String> = (|| {
                 let mut live = controller
                     .lock()
@@ -1071,7 +1274,7 @@ where
                 let mut candidate = live.clone();
                 let correlation = domain::CorrelationId::new(format!("review-{mission}"))
                     .map_err(|error| error.to_string())?;
-                resume_mission_candidate_with_policy(
+                let resume = resume_mission_candidate_with_policy(
                     &mut candidate,
                     &mission,
                     generation,
@@ -1081,10 +1284,19 @@ where
                     true,
                     &role,
                     reason,
-                )
-                .map_err(|error| error.to_string())?;
+                );
                 if let Some(error) = event_log.take_error().map_err(|error| error.to_string())? {
                     return Err(format!("review event sink failed: {error}"));
+                }
+                if let Err(error) = resume {
+                    failure_status = if error.downcast_ref::<state::SqliteEventLogError>().is_some()
+                        || error.downcast_ref::<serde_json::Error>().is_some()
+                    {
+                        "503 Service Unavailable"
+                    } else {
+                        "409 Conflict"
+                    };
+                    return Err(error.to_string());
                 }
                 let checkpoint = crate::diagnostics::http_checkpoint(&candidate)
                     .map_err(|error| error.to_string())?;
@@ -1109,7 +1321,7 @@ where
                     }),
                 ),
                 Err(error) => match event_log.rollback_batch() {
-                    Ok(()) => ("409 Conflict", serde_json::json!({"error": error})),
+                    Ok(()) => (failure_status, serde_json::json!({"error": error})),
                     Err(rollback) => (
                         "503 Service Unavailable",
                         serde_json::json!({"error": format!("review unavailable: {error}; rollback failed: {rollback}")}),

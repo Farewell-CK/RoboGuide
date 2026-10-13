@@ -457,3 +457,50 @@ fn incremental_restore_retains_held_evidence_and_fences_nonterminal_attempts() {
     );
     assert_eq!(bridge.attempt_history().len(), 2);
 }
+
+/// Rejected review of one immutable outcome remains idempotent; it is not a new execution failure.
+#[tokio::test]
+async fn repeated_deadline_resume_does_not_count_outcome_replay() {
+    let fixture = Fixture::new();
+    fixture.fact(0, 2, ExecutionPhase::Completed, 10, 10);
+    fixture.fact(1, 2, ExecutionPhase::Completed, 11, 11);
+    fixture.tick(12);
+    for now in [13, 14, 15] {
+        let response = fixture.resume(now).await;
+        let live = fixture.controller.lock().unwrap();
+        let execution = live
+            .orchestrator
+            .execution(&domain::MissionId::new("mission-a").unwrap())
+            .unwrap();
+        println!(
+            "resume_at={now}, response={}, generation={}, failure_count={}, quarantined={}",
+            response.lines().next().unwrap(),
+            execution.isolation().unwrap().generation,
+            execution.failure_state().unwrap().count,
+            execution.is_crash_loop_quarantined()
+        );
+    }
+    let live = fixture.controller.lock().unwrap();
+    let execution = live
+        .orchestrator
+        .execution(&domain::MissionId::new("mission-a").unwrap())
+        .unwrap();
+    assert!(!execution.is_crash_loop_quarantined());
+    assert_eq!(execution.failure_state().unwrap().count, 1);
+    assert_eq!(execution.isolation().unwrap().generation, 1);
+}
+
+/// Independent review counterexample: the recovery view must use the current physical attempt identity.
+#[test]
+fn recovery_view_reports_exact_current_attempt_identity() {
+    let fixture = Fixture::new();
+    fixture.fact(0, 2, ExecutionPhase::Unknown, 7, 7);
+    let live = fixture.controller.lock().unwrap();
+    let view = recovery_view(&live, TimestampMs::new(7));
+    let actual_id = fixture.attempts[0].execution_id();
+    let reported_id = view["unknown_attempts"][0]["execution_id"]
+        .as_str()
+        .unwrap();
+    println!("actual_execution_id={actual_id}, reported_execution_id={reported_id}");
+    assert_eq!(reported_id, actual_id);
+}

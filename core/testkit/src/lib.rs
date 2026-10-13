@@ -266,3 +266,6 @@ impl NodeGateway for FakeNode {
 
 #[cfg(test)]
 mod tests;
+
+mod tls_fixture;
+pub use tls_fixture::{TestCertificate, TestPki};

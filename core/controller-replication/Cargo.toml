@@ -19,3 +19,4 @@ tokio-rustls = "0.26.4"
 
 [dev-dependencies]
 tempfile = "3"
+testkit = { path = "../testkit" }

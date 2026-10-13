@@ -33,7 +33,9 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 ///
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v25";
+const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v26";
+/// Previous wrapper has legacy breaker counters but cannot carry the new rolling-window authority.
+const PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v25";
 /// Prior wrapper with durable scheduling policy but no required replication profile.
 const PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v24";
 /// Prior wrapper with immutable terminal times but without persistent dispatch policy.
@@ -292,7 +294,7 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
 }
 
 /// Durable Phase 1 process checkpoint saved in the same event-log transaction.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct ServerCheckpoint {
     /// Required cluster/profile identity; standalone restore cannot bypass quorum authority.
     #[serde(default)]
@@ -628,6 +630,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
                     | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
                     | PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA
@@ -655,6 +658,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
                     | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
                     | PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA

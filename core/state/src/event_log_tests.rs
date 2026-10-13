@@ -1,6 +1,69 @@
 //! Durable event log and checkpoint tests.
 
 use super::*;
+
+/// Rolling failure evidence cannot be relabeled as an old codec, while real old counter-only evidence remains readable.
+#[test]
+fn failure_window_codec_fences_downgrade_and_retains_legacy_unknown_window() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let payload = EventPayload::MissionExecutionIsolated {
+        mission_id: domain::MissionId::new("codec-mission").unwrap(),
+        generation: 3,
+        source: "ready-dispatch".into(),
+        failure_class: Some("InvalidContract".into()),
+        failure_fingerprint: Some("stable".into()),
+        failure_count: 3,
+        crash_loop: true,
+        failure_window: Some(vec![
+            TimestampMs::new(1),
+            TimestampMs::new(2),
+            TimestampMs::new(3),
+        ]),
+    };
+    log.clone().append(
+        TimestampMs::new(3),
+        &CorrelationId::new("codec-window").unwrap(),
+        None,
+        payload.clone(),
+    );
+    assert!(log.take_error().unwrap().is_none());
+    assert_eq!(
+        log.events().unwrap()[0].payload_schema,
+        EVENT_PAYLOAD_SCHEMA_V19
+    );
+    log.connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE events SET payload_schema=?1",
+            [EVENT_PAYLOAD_SCHEMA_V17],
+        )
+        .unwrap();
+    assert!(log.decoded_events().is_err());
+    let mut historical = serde_json::to_value(payload).unwrap();
+    historical["MissionExecutionIsolated"]
+        .as_object_mut()
+        .unwrap()
+        .remove("failure_window");
+    log.connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE events SET payload_json=?1",
+            [serde_json::to_string(&historical).unwrap()],
+        )
+        .unwrap();
+    assert!(matches!(
+        log.decoded_events().unwrap()[0].payload(),
+        EventPayload::MissionExecutionIsolated {
+            failure_window: None,
+            failure_count: 3,
+            crash_loop: true,
+            ..
+        }
+    ));
+}
 use domain::{
     ContentDigest, ContextRoleId, CoordinationContextId, CorrelationId, EventPayload,
     ExecutionGroupId, LocalSystemId, LocalizationFrames, LocalizationVerificationEvidence,

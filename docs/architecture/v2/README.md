@@ -63,11 +63,22 @@ ADR-0083 指定 opt-in quorum Controller replica profile：OpenRaft 负责共识
 child，在每次 durable acceptance 和 Execute/Cancel delivery 验证 epoch/quorum。
 切换先重建已接受投影，再由既有 startup restore 保留 ownership/Unknown/hold/fairness
 和原 source time，不自动重放物理工作。软件实现与本机进程检查已完成，standalone 仍为默认；当前 profile
-限定三成员 loopback 软件 profile，Memory/Artifact 内容保留其独立数据平面。
+限定静态三成员软件 profile；ADR-0091 要求非 loopback RPC 使用 mTLS，已验证本机隔离进程，
+跨独立主机的部署与物理连续性仍未证明。Memory/Artifact 内容保留其独立数据平面。
 
 ADR-0084 提供显式 generation-bound future planning preemption。Orchestration 核对更高
 当前 priority 和双方非 held/Ready 状态；Control 只释放未激活、未 Commit/Bind 的未来
 interval。原计划、等待年龄与物理 ownership 保留；due/running/recovery 不会经此 API 停止。
+
+ADR-0089/0092 的 Mission-local breaker 保存滚动十分钟内的同类失败样本；三次独立失败
+触发 quarantine，重放同一终态或拒绝的 resume 不增加次数，未审核 quarantine 不自动过期。
+Checkpoint v26 与 event codec v19 防止缺失/降级 authority，legacy 样本保持 unavailable。
+Operator mTLS 的证书身份与 viewer/operator/recovery-admin 权限分开，所有 mutation 先鉴权；
+header 不能赋权。Replica client 在发送 frame 前核验 exact target member 的 leaf digest。
+恢复 view v0.2 区分 exact Unknown attempt、当前 pending/manual 事项与已结束历史，恢复
+sequence 仅是操作指引。ADR-0090/0092 的显式本地 archive 有条数/bytes 上限和原子 manifest
+index；当前缺少 catalog snapshot/archive replay，软件拒绝删除 Map/Memory/localization
+重建证据，也拒绝 active/Unknown maintenance 和单副本 GC。以上不证明长期容量或物理恢复。
 
 | 组件 | 职责 |
 | --- | --- |

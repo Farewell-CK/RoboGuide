@@ -260,6 +260,7 @@ def run_case(directory: Path, completed_peer: bool) -> dict[str, Any]:
     env = {
         k: v for k, v in os.environ.items() if not k.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
     }
+    env["ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN"] = "1"
     grpc, http, artifact = (free_address() for _ in range(3))
     base = "http://" + http
     mission = "process-completed-peer" if completed_peer else "process-all-live"

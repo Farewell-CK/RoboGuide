@@ -38,6 +38,7 @@
 | S11：Mission-local typed failure 与 crash-loop breaker | ADR-0089；InvalidContract/RuntimeContractViolation 有稳定 fingerprint、窗口计数和持久化 quarantine；`/recovery` 与 `recovery-admin` review/acknowledge 流程保留 ownership | orchestration breaker、checkpoint restore、其他 Mission 继续 dispatch、review event 回归通过；未知/共享/SQL 错误仍 fatal，物理 stop 未证明 |
 | S12：跨主机 replica transport 与恢复观察 | ADR-0091；replica 非 loopback 必须 mTLS，client/server certificate 双向校验；真实进程脚本增加 `--tls`、SIGSTOP 多数派损失与恢复；`GET /v1/recovery` 暴露统一恢复状态 | TLS 三副本软件矩阵通过（binary SHA `73cf1c4ea3ea09200795362f427c02b0028e37f7c3d73f581a2f4e5afe07a7d0`）；动态 membership、证书轮换、物理 continuity 仍保留 |
 | S13：append-only archive 与显式 GC | ADR-0090；checkpoint-bound segment manifest、digest/fsync、sink 插件、history floor 和失败不删行闸门；`recovery-admin` maintenance API 仅接受显式 cutoff | State archive/GC/tamper/idempotency 回归通过；远端归档、长期容量曲线、自动 Mission GC 与跨副本 archive 共识仍未证明 |
+| S14：可靠性反例修复 | ADR-0092；保留 catalog/Memory/localization replay，managed SQL rollback 与归档时间下界；target/local replica leaf 绑定；全 mutation 角色鉴权；wrapper v26/codec v19、真正滚动窗口与幂等 resume；recovery view v0.2 分离 exact attempt、当前事项和历史 | 正式反例回归与完整软件检查见 fault matrix；旧 S11–S13 的检查不能替代本轮负向证据。生产三次独立失败、catalog 历史 GC、独立跨主机 partition、长期容量与物理恢复仍未证明 |
 
 ## 继续保留的明确边界
 

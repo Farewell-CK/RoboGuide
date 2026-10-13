@@ -14,6 +14,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
+#[cfg(test)]
+#[path = "transport_tls_tests.rs"]
+mod tls_tests;
+
 /// Maximum private frame, including escaped authority/history JSON.
 const MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
 
@@ -319,6 +323,8 @@ impl ReplicaNetwork {
                     .connect(name, stream)
                     .await
                     .map_err(std::io::Error::other)?;
+                tls.authenticate_peer(self.target, stream.get_ref().1.peer_certificates())
+                    .map_err(std::io::Error::other)?;
                 stream.write_u64(encoded.len() as u64).await?;
                 stream.write_all(&encoded).await?;
                 read_reply(&mut stream).await
@@ -472,6 +478,9 @@ impl ReplicaFenceClient {
             return Err("invalid Controller replica child fence".into());
         }
         let tls = crate::tls::load(Some(&tls_config))?.map(Arc::new);
+        if let Some(tls) = &tls {
+            tls.authenticate_local(epoch.replica_id)?;
+        }
         Ok(Self {
             address,
             profile,
@@ -579,8 +588,15 @@ impl ReplicaFenceClient {
         let mut stream = if let Some(tls) = &self.tls {
             let name = rustls::pki_types::ServerName::try_from(tls.server_name.clone())
                 .map_err(|error| error.to_string())?;
-            let connection = rustls::ClientConnection::new(tls.client.clone(), name)
+            let mut connection = rustls::ClientConnection::new(tls.client.clone(), name)
                 .map_err(|error| error.to_string())?;
+            let mut stream = stream;
+            while connection.is_handshaking() {
+                connection
+                    .complete_io(&mut stream)
+                    .map_err(|error| error.to_string())?;
+            }
+            tls.authenticate_peer(self.epoch.replica_id, connection.peer_certificates())?;
             rustls::StreamOwned::new(connection, stream)
         } else {
             return self.exchange_raw(request, stream);

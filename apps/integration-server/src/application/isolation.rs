@@ -274,7 +274,9 @@ pub(crate) fn flush_unisolated_dispatch(
             controller
                 .orchestrator
                 .execution(&mission)
-                .filter(|execution| execution.isolation().is_some())
+                .filter(|execution| {
+                    execution.isolation().is_some() || execution.is_crash_loop_quarantined()
+                })
                 .map(|execution| execution.group_id().clone())
         })
         .collect::<BTreeSet<_>>();
@@ -299,9 +301,56 @@ pub(crate) fn flush_unisolated_commands(
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
     let missions: Vec<serde_json::Value> =
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
+    if saved.schema == SERVER_CHECKPOINT_SCHEMA {
+        if missions.iter().any(|mission| {
+            mission.get("failure_state").is_none()
+                || mission
+                    .get("failure_state")
+                    .filter(|failure| !failure.is_null())
+                    .is_some_and(|failure| failure.get("recent_failed_at").is_none())
+                || mission
+                    .get("isolation")
+                    .filter(|hold| !hold.is_null())
+                    .is_some_and(|hold| {
+                        hold.get("failure")
+                            .and_then(|failure| failure.get("recent_failed_at"))
+                            .is_none()
+                    })
+        }) {
+            return Err("current controller wrapper misses breaker window authority".into());
+        }
+    } else if missions.iter().any(|mission| {
+        mission
+            .get("failure_state")
+            .and_then(|failure| failure.get("recent_failed_at"))
+            .is_some()
+            || mission
+                .get("isolation")
+                .and_then(|hold| hold.get("failure"))
+                .and_then(|failure| failure.get("recent_failed_at"))
+                .is_some()
+    }) {
+        return Err("legacy wrapper contains new breaker window authority".into());
+    }
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
+    ) && missions.iter().any(|mission| {
+        mission
+            .get("failure_state")
+            .is_some_and(|failure| !failure.is_null())
+            || mission
+                .get("isolation")
+                .and_then(|hold| hold.get("failure"))
+                .is_some()
+    }) {
+        return Err("pre-breaker wrapper contains typed failure authority".into());
+    }
     if matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
+            | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
     ) {
         if missions
             .iter()

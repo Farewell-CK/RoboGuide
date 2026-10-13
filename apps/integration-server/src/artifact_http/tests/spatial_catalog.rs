@@ -449,3 +449,90 @@ fn recovery_fence_rejects_stale_projection_access() {
         Err(error) if error.status() == "503 Service Unavailable"
     ));
 }
+
+/// Archive refuses catalog deletion and preserves exact replay evidence.
+#[test]
+fn archive_gc_retains_catalog_rebuild_evidence() {
+    use ports::EventSink;
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let manifest = fixture_manifest(&digest_bytes(b"review-map"), 10);
+    log.begin_batch().unwrap();
+    log.clone().append(
+        TimestampMs::new(1),
+        &domain::CorrelationId::new("review-archive").unwrap(),
+        None,
+        EventPayload::MapArtifactPublished { manifest },
+    );
+    log.save_checkpoint(TEST_CHECKPOINT_SCHEMA, TEST_CHECKPOINT_JSON)
+        .unwrap();
+    log.commit_batch().unwrap();
+    let gate = Arc::new(Mutex::new(()));
+    let before = ArtifactCatalog::replay_with_gate(&log, gate.clone())
+        .unwrap()
+        .revisions()
+        .unwrap()
+        .len();
+    assert!(matches!(
+        log.archive_and_gc(
+            1,
+            &state::FileArchiveSink::new(directory.path().join("archive"))
+        ),
+        Err(state::SqliteEventLogError::ArchivePolicy(_))
+    ));
+    let after = ArtifactCatalog::replay_with_gate(&log, gate)
+        .unwrap()
+        .revisions()
+        .unwrap()
+        .len();
+    println!(
+        "catalog_count_before={before}, after_archive_replay={after}, history_floor={}",
+        log.history_floor().unwrap()
+    );
+    assert_eq!(
+        after, before,
+        "Archive removes the only catalog reconstruction evidence"
+    );
+}
+
+/// Independent review counterexample: an archive prefix must not make retained replica history unreplayable.
+#[test]
+fn archive_gc_preserves_catalog_transition_prefix() {
+    use ports::EventSink;
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let manifest = fixture_manifest(&digest_bytes(b"review-map"), 10);
+    let correlation = domain::CorrelationId::new("review-archive").unwrap();
+    log.begin_batch().unwrap();
+    log.clone().append(
+        TimestampMs::new(1),
+        &correlation,
+        None,
+        EventPayload::MapArtifactPublished {
+            manifest: manifest.clone(),
+        },
+    );
+    log.clone().append(
+        TimestampMs::new(2),
+        &correlation,
+        None,
+        EventPayload::MapArtifactStaged {
+            manifest,
+            node_id: NodeId::new("dog-b").unwrap(),
+            mission_id: domain::MissionId::new("mission-a").unwrap(),
+        },
+    );
+    log.save_checkpoint(TEST_CHECKPOINT_SCHEMA, TEST_CHECKPOINT_JSON)
+        .unwrap();
+    log.commit_batch().unwrap();
+    assert!(matches!(
+        log.archive_and_gc(
+            1,
+            &state::FileArchiveSink::new(directory.path().join("archive"))
+        ),
+        Err(state::SqliteEventLogError::ArchivePolicy(_))
+    ));
+    let after = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(())));
+    println!("catalog_replay_error={:?}", after.as_ref().err());
+    assert!(after.is_ok(), "Valid GC cutoff prevents Controller startup");
+}

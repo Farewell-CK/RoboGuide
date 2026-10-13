@@ -50,6 +50,7 @@ def run(
         for key, value in os.environ.items()
         if not key.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
     }
+
     def member_address() -> str:
         """Choose one unused port on the selected replica member interface."""
         with socket.socket() as listener:
@@ -228,7 +229,7 @@ def run(
                     "cluster_id": "synthetic-process-check",
                     "replica_id": index + 1,
                     "members": members,
-                    "application_schema": "roboguide.controller-checkpoint/v25",
+                    "application_schema": "roboguide.controller-checkpoint/v26",
                     "application_policy_digest": "compute-before-start",
                 },
                 "storage_directory": str(directory / f"replica-{index + 1}"),

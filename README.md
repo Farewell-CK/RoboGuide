@@ -85,7 +85,9 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
   持久化和独立 supervisor；loopback 保留开发兼容，非 loopback member 必须使用双向 mTLS。
   切换重建 metadata，保留 Unknown/ownership 且不重放 Execute。默认 standalone；Artifact/Memory
   内容不复制。软件部署边界见 [ADR-0083](docs/decisions/0083-quorum-controller-replication.md)
-  和 [ADR-0091](docs/decisions/0091-cross-host-replica-mtls-and-recovery-view.md)。
+  和 [ADR-0091](docs/decisions/0091-cross-host-replica-mtls-and-recovery-view.md)。复查修订
+  [ADR-0092](docs/decisions/0092-reliability-review-authority-and-archive-fences.md) 增加 exact-member
+  证书绑定、mutation 鉴权、breaker checkpoint/window 闸门与安全归档限制。
 - `core/artifact-store` 提供独立 filesystem artifact CAS infrastructure；`apps/real-node-smoke`
   默认 probe formal Node Protocol v0.4，显式 `--simulate-execute` 经 Controller synthetic
   Mission 触发正式 dispatch 后只发送合成生命周期事实；
@@ -828,7 +830,12 @@ registry 缺失，服务拒绝以旧绑定继续启动。没有此约束的 v0.7
 
 Control HTTP 不绕过 Control 修改 reservation；独立 Artifact HTTP 只写不可变 CAS bytes 和
 Memory catalog/replica evidence，不驱动 Task/Group lifecycle。Operator HTTP 可在非 loopback
-部署中配置 mTLS certificate-to-role map；loopback 开发模式仍显式区分。若 SQLite 中存在与事件末尾一致的版本化 controller checkpoint，Integration Server
+部署中配置 mTLS certificate-to-role map。viewer 不能修改 Mission；operator 可提交/取消、
+修改 future scheduling 和普通 resume；recovery-admin 才能进行 review、显式物理恢复授权和
+归档维护。角色 header 不赋权。Loopback 默认 operator，隔离开发管理员必须显式配置
+`ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN=1`，仅适用于无 mTLS 的 loopback listener。
+统一恢复 view v0.2 使用实际 attempt ID，完成的恢复历史不作为待恢复事项。
+若 SQLite 中存在与事件末尾一致的版本化 controller checkpoint，Integration Server
 会恢复 Control/State/Runtime projection；Spatial evidence 会在同一事务中 carry-forward 该
 checkpoint。非终态 execution 恢复为 `Unknown` 并等待 Reconciliation，不会直接判定 Mission
 失败；live relation 同样保守重算并保留 coordination fence。缺少 checkpoint、schema 不支持、
