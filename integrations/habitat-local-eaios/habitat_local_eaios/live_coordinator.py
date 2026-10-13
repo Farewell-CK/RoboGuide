@@ -10,6 +10,7 @@ from typing import Any
 
 from .backend import LocalExecutionOutcome
 from .endpoint_registry import LIVE_PROFILE, load_endpoint_registry
+from .evidence_io import dumps_json_safe, write_text_atomic
 from .live_session import LiveSlotLedger
 from .model import CanonicalInvocation, IntegrationError
 from .shared_world import SharedWorldCoordinator
@@ -41,6 +42,14 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
         self._entries: dict[int, tuple[Any, str]] = {}
         self._history: list[dict[str, Any]] = []
         self._finished = False
+        self._closure_phase = "starting"
+        self._closure_error: str | None = None
+        self._state_archived = False
+        self._closure_archived = False
+        self._summary_published = False
+        self._verifier_published = False
+        self._verifier_required = False
+        self._execution_error: str | None = None
         self._initialization_error: str | None = None
         self._worker = threading.Thread(
             target=self._run, name="shared-world-live-coordinator", daemon=True
@@ -87,6 +96,36 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
             "sequential_endpoint_reuse_supported": True,
             "assignment_wait_seconds": self._wait_seconds,
         }
+
+    def closure(self) -> dict[str, object]:
+        """Expose a monotonic, read-only execution/evidence closure state."""
+        with self._condition:
+            return {
+                "schema_version": "roboguide.shared-world-closure/v0.1",
+                "phase": self._closure_phase,
+                "finished": self._finished,
+                "endpoint_registry_digest": self.registry["digest"],
+                "execution_session_digest": self._ledger.session.digest
+                if self._ledger.session is not None
+                else None,
+                "mission_id": self._ledger.session.mission_id
+                if self._ledger.session is not None
+                else None,
+                "group_id": self._ledger.session.group_id
+                if self._ledger.session is not None
+                else None,
+                "summary_published": self._summary_published,
+                "verifier_published": self._verifier_published,
+                "verifier_required": self._verifier_required,
+                "evidence_flushed": self._closure_phase == "closed"
+                and self._state_archived
+                and self._summary_published
+                and self._closure_archived
+                and (self._verifier_published or not self._verifier_required)
+                and self._closure_error is None,
+                "error": self._closure_error,
+                "execution_error": self._execution_error,
+            }
 
     def can_accept(self, endpoint: Any, invocation: CanonicalInvocation) -> bool:
         """Check immutable session compatibility without reserving a physical executor."""
@@ -137,6 +176,7 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
                 raise
             self._entries[endpoint.agent_id] = (endpoint, execution_id)
             self._queue.append((endpoint, execution_id))
+            self._closure_phase = "running"
             self._condition.notify_all()
 
     def episode_consumed(self) -> bool:
@@ -195,26 +235,23 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
     def _write_state(self, state: str) -> None:
         """Archive exact local facts best-effort; missing archival never rewrites execution."""
         try:
-            self._evidence_dir.mkdir(parents=True, exist_ok=True)
-            (self._evidence_dir / "live-session-state.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": "roboguide.shared-world-live-session/v0.1",
-                        "execution_profile": LIVE_PROFILE,
-                        "endpoint_registry_digest": self.registry["digest"],
-                        "state": state,
-                        "session": self._ledger.session.as_dict()
-                        if self._ledger.session is not None
-                        else None,
-                        "task_outcomes": self._history,
-                    },
-                    indent=2,
-                    sort_keys=True,
-                )
-                + "\n",
-                encoding="utf-8",
+            self._write_json(
+                "live-session-state.json",
+                {
+                    "schema_version": "roboguide.shared-world-live-session/v0.1",
+                    "execution_profile": LIVE_PROFILE,
+                    "endpoint_registry_digest": self.registry["digest"],
+                    "state": state,
+                    "session": self._ledger.session.as_dict()
+                    if self._ledger.session is not None
+                    else None,
+                    "task_outcomes": self._history,
+                },
             )
+            self._state_archived = True
         except Exception:
+            self._state_archived = False
+            self._closure_error = "live-session-state-archival"
             _LOG.exception("live local evidence archival unavailable")
 
     def _run(self) -> None:
@@ -223,6 +260,11 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
             self._world.start()
         except Exception as error:
             self._initialization_error = str(error)
+            with self._condition:
+                self._closure_phase = "failed"
+                self._closure_error = f"initialization:{type(error).__name__}"
+                self._finished = True
+            self._archive_closure()
             return
         try:
             with self._condition:
@@ -240,12 +282,15 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
             )
             with self._condition:
                 self._finished = True
+                self._closure_phase = "finalizing"
                 invocations = [value for _, value in self._ledger.seen.values()]
             # Reuse the same official summary/verifier projection, not a new success rule.
-            self._publish_summary_best_effort(outcomes, summary, serial_task_outcomes=self._history)
-            self._publish_verifier_verdict_best_effort(summary, invocations)
+            self._publish_terminal(outcomes, summary, invocations)
             self._write_state("ended")
         except Exception as error:
+            with self._condition:
+                self._execution_error = f"execution:{type(error).__name__}"
+                self._closure_phase = "finalizing"
             with self._condition:
                 self._finished = True
                 for agent in list(self._ledger.active):
@@ -260,11 +305,11 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
                 self._write_state("failed")
             try:
                 failure = json.loads((self._evidence_dir / "live-world-failure.json").read_bytes())
-                self._publish_summary_best_effort({}, failure, serial_task_outcomes=self._history)
-                self._publish_verifier_verdict_best_effort(
-                    failure, [value for _, value in self._ledger.seen.values()]
+                self._publish_terminal(
+                    {}, failure, [value for _, value in self._ledger.seen.values()]
                 )
             except Exception:
+                self._closure_error = "failure_snapshot_unavailable"
                 _LOG.exception("live world failure summary unavailable")
         finally:
             with self._condition:
@@ -280,13 +325,52 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
                         endpoint.store().mark_failed(
                             handle, "shared world ended before this dispatch activated"
                         )
+                self._closure_phase = "closed"
+            self._archive_closure()
+
+    def _publish_terminal(
+        self,
+        outcomes: dict[int, LocalExecutionOutcome],
+        summary: dict[str, Any],
+        invocations: list[CanonicalInvocation],
+    ) -> None:
+        """Retain actual write results; executing a best-effort writer proves no publication."""
+        self._summary_published = self._publish_summary_best_effort(
+            outcomes, summary, serial_task_outcomes=self._history
+        )
+        metrics = summary.get("official_metrics")
+        self._verifier_required = (
+            bool(invocations)
+            and isinstance(metrics, dict)
+            and isinstance(metrics.get("pddl_success"), bool)
+        )
+        self._verifier_published = self._publish_verifier_verdict_best_effort(summary, invocations)
+        if not self._summary_published or (
+            self._verifier_required and not self._verifier_published
+        ):
+            self._closure_error = "terminal_evidence_unavailable"
+
+    def _archive_closure(self) -> None:
+        """Persist the last closure observation without changing any execution outcome."""
+        try:
+            document = self.closure()
+            document["evidence_flushed"] = (
+                document["phase"] == "closed"
+                and self._summary_published
+                and self._state_archived
+                and (self._verifier_published or not self._verifier_required)
+                and self._closure_error is None
+            )
+            self._write_json("shared-world-closure.json", document)
+            self._closure_archived = True
+        except Exception:
+            self._closure_archived = False
+            self._closure_error = "closure_snapshot_unavailable"
+            _LOG.exception("live closure evidence unavailable")
 
     def _write_json(self, name: str, value: object) -> None:
         """Write deployment evidence without changing original vendor files."""
-        self._evidence_dir.mkdir(parents=True, exist_ok=True)
-        (self._evidence_dir / name).write_text(
-            json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-        )
+        write_text_atomic(self._evidence_dir / name, dumps_json_safe(value) + "\n")
 
     def shutdown(self) -> None:
         """Stop only this owned session and child process, never a neighboring experiment."""

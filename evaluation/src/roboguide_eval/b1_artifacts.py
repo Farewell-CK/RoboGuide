@@ -13,6 +13,7 @@ from typing import Any
 
 from roboguide_eval.b1_admission import FailureOwner
 from roboguide_eval.b1_event_archive import collect_controller_events
+from roboguide_eval.b1_evidence_closure import collect_evidence_closure
 from roboguide_eval.b1_goal_geometry import write_goal_geometry_diagnostic
 from roboguide_eval.b1_provenance import (
     PLANNING_SOURCE_REQUIREMENT_ARTIFACT,
@@ -54,6 +55,7 @@ def collect_b1_artifacts(
     owner: FailureOwner = FailureOwner.NONE,
     component: str = "",
     reason: str = "",
+    closure_endpoint: str = "",
 ) -> dict[str, Any]:
     """Archive matching request/observations before provenance and canonical admission."""
     request: Any = load_document(run / "b1-request-record.json")
@@ -76,6 +78,8 @@ def collect_b1_artifacts(
     mission_id = request.get("mission_id")
     if isinstance(mission_id, str):
         _write(run / "mission.json", _fetch(f"{controller_endpoint}/v1/missions/{mission_id}"))
+        if closure_endpoint:
+            collect_evidence_closure(run, closure_endpoint, mission_id)
     collect_controller_events(
         run,
         controller_endpoint,
@@ -142,6 +146,7 @@ def main() -> None:
     parser.add_argument("--failure-owner", type=FailureOwner, default=FailureOwner.NONE)
     parser.add_argument("--component", default="")
     parser.add_argument("--reason", default="")
+    parser.add_argument("--closure-endpoint", default="")
     args = parser.parse_args()
     result = collect_b1_artifacts(
         args.run,
@@ -151,9 +156,13 @@ def main() -> None:
         owner=args.failure_owner,
         component=args.component,
         reason=args.reason,
+        closure_endpoint=args.closure_endpoint,
     )
     print(json.dumps(result, indent=2))
     if result["context"].get("event_archive_error"):
+        raise SystemExit(2)
+    closure = load_document(args.run / "evidence-closure-archive.json")
+    if args.closure_endpoint and (not isinstance(closure, dict) or not closure.get("complete")):
         raise SystemExit(2)
 
 

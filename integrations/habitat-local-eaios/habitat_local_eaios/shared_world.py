@@ -32,9 +32,8 @@ from .backend import (
 )
 from .crabagent_backend import CrabAgentBackendConfig
 from .diagnostics import create_physical_diagnostics, diagnostics_enabled
-from .evidence_io import dumps_json_safe
 from .emos_stage2 import EmosStage2Runtime
-from .evidence_io import write_text_atomic
+from .evidence_io import dumps_json_safe, json_observation, write_text_atomic
 from .execution_progress import NavigationProgressPublisher, read_execution_progress
 from .execution_recovery import execution_recovery_profile
 from .idle_endpoint import PassiveIdleBinding, install_passive_idle_agents
@@ -1679,6 +1678,13 @@ class NodeEndpoint:
             ),
         )
 
+    def closure(self) -> dict[str, object]:
+        """Read the owned world's archival closure; legacy profiles remain unavailable."""
+        observe = getattr(self._coordinator, "closure", None)
+        if callable(observe):
+            return dict(observe())
+        return {"schema_version": "roboguide.shared-world-closure/v0.1", "phase": "unavailable"}
+
     @staticmethod
     def _execution_response(execution: StoredExecution) -> dict[str, object]:
         """Expose local facts plus the exact retained semantic invocation."""
@@ -1728,7 +1734,7 @@ def _archive_official_metrics(runtime: Any, summary: dict[str, Any]) -> None:
             "local navigation preparation failed before the first physical Gym step"
         )
     else:
-        summary["official_metrics"] = runtime.final_metrics()
+        summary["official_metrics"] = json_observation(runtime.final_metrics())
 
 
 class InProcessWorldService:
@@ -2934,7 +2940,7 @@ class SharedWorldCoordinator:
         summary: dict[str, Any],
         *,
         serial_task_outcomes: list[dict[str, object]] | None = None,
-    ) -> None:
+    ) -> bool:
         """Publish terminal evidence before lifecycle exposure without changing outcomes."""
         try:
             self._publish_summary(
@@ -2942,14 +2948,16 @@ class SharedWorldCoordinator:
                 summary,
                 serial_task_outcomes=serial_task_outcomes,
             )
+            return True
         except Exception:  # noqa: BLE001 - evidence cannot become execution authority
             _LOG.exception("shared-world terminal summary unavailable")
+            return False
 
     def _publish_verifier_verdict_best_effort(
         self,
         summary: dict[str, Any],
         invocations: Sequence[CanonicalInvocation],
-    ) -> None:
+    ) -> bool:
         """Publish exact official-goal evidence before local terminal visibility."""
         try:
             source_path = self._evidence_dir / "task-verifier-source.json"
@@ -2966,10 +2974,12 @@ class SharedWorldCoordinator:
             )
             if verdict is None:
                 _LOG.warning("official goal verifier verdict unavailable")
-                return
+                return False
             self._write_json("task-verifier-verdict.json", verdict)
+            return True
         except Exception:  # noqa: BLE001 - verifier failure cannot rewrite physical outcome
             _LOG.exception("official goal verifier verdict could not be published")
+            return False
 
     def _write_json(self, name: str, value: object) -> None:
         """Persist one deterministic JSON evidence file."""

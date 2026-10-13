@@ -35,6 +35,7 @@ ENDPOINT_ARGS=()
 LIVE_ENDPOINT_PROFILE=0
 OBSERVATION_ENABLED=0
 ENDPOINT_COUNT=2
+WORLD_CLOSURE_REQUIRED=0
 PREPARE_ONLY="${ROBOGUIDE_B1_PREPARE_ONLY:-0}"
 case "$PREPARE_ONLY" in
     0|1) ;;
@@ -80,11 +81,15 @@ finish_run() {
             reason="sut_process_exited_before_collection"
         fi
     done
+    local closure_args=()
+    if [[ "${LIVE_ENDPOINT_PROFILE:-0}" == 1 && "${WORLD_CLOSURE_REQUIRED:-0}" == 1 ]]; then
+        closure_args=(--closure-endpoint "http://127.0.0.1:${HABITAT_PORT}")
+    fi
     uv run --project "$REPO" python -m roboguide_eval.b1_artifacts "$RUN" \
         --controller-endpoint "http://127.0.0.1:${CONTROLLER_PORT}" \
         --mission-endpoint "http://127.0.0.1:${MISSION_PORT}" \
         --request-id "$REQUEST_ID" --failure-owner "$owner" \
-        --component "$component" --reason "$reason"
+        --component "$component" --reason "$reason" "${closure_args[@]}"
     local archive_code=$?
     for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
     for pid in "${AUX_PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
@@ -588,8 +593,8 @@ case "$MI_OUTCOME" in
         FAILURE_OWNER=NONE
         FAILURE_COMPONENT=""
         FAILURE_REASON=""
+        WORLD_CLOSURE_REQUIRED=1
         wait_mission_terminal "$RUN/mission.json" "$MISSION_OBSERVATION_BUDGET_SECONDS"
-        sleep 3
         curl -sf "http://127.0.0.1:${CONTROLLER_PORT}/v1/missions/$MISSION_ID" -o "$RUN/mission.json" || true
         ;;
     mi_terminal|awaiting_interaction)

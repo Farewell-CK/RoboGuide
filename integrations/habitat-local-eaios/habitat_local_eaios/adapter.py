@@ -174,6 +174,10 @@ class HabitatLocalAdapter:
         """Expose actual stop scope; a reset-on-new-invocation backend cannot resume its world."""
         return execution_recovery_profile(shared_world=False)
 
+    def closure(self) -> dict[str, object]:
+        """Single-execution legacy backends do not claim shared-world archival closure."""
+        return {"schema_version": "roboguide.shared-world-closure/v0.1", "phase": "unavailable"}
+
     def _run_worker(self) -> None:
         """Own all Habitat initialization, stepping, cancellation, and shutdown on one thread."""
         backend: MobilityBackend | None = None

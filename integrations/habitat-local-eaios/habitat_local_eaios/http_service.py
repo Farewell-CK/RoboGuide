@@ -42,6 +42,9 @@ class WorkflowAdapter(Protocol):
     def recovery_support(self) -> dict[str, object]:
         """Read deployment cancellation and continuation facts without changing execution."""
 
+    def closure(self) -> dict[str, object]:
+        """Report whether the owned execution and its evidence are sealed."""
+
 
 class HabitatBridgeServer(ThreadingHTTPServer):
     """Threaded loopback server retaining one shared Local EAIOS adapter."""
@@ -69,6 +72,13 @@ class HabitatBridgeHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/v1/executions/recovery-support":
             self._respond(HTTPStatus.OK, self.server.adapter.recovery_support())
+            return
+        if self.path == "/v1/executions/closure":
+            closure = getattr(self.server.adapter, "closure", None)
+            if closure is None:
+                self._respond(HTTPStatus.NOT_IMPLEMENTED, {"error": "closure unavailable"})
+            else:
+                self._respond(HTTPStatus.OK, closure())
             return
         path = urlsplit(self.path).path
         if path.startswith("/v1/capabilities/"):
