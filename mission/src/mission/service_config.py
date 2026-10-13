@@ -43,6 +43,8 @@ class MissionServiceSettings:
     grounding_planning_world_evidence_required: bool
     execution_profile_path: Path | None
     planning_profile_path: Path | None
+    execution_planning_evidence_path: Path | None
+    execution_planning_evidence_required: bool
     max_request_bytes: int
     approval_policy: ApprovalPolicy
     controller_preflight_enabled: bool = False
@@ -88,6 +90,14 @@ def load_service_settings(
         )
     if planning_world_required and planning_world_path is None:
         raise MissionServiceConfigError("required planning world evidence needs a configured path")
+    execution_planning_path = _optional_path(service, "execution_planning_evidence_path", root)
+    execution_planning_required = _optional_bool(
+        service, "execution_planning_evidence_required", False
+    )
+    if execution_planning_required and execution_planning_path is None:
+        raise MissionServiceConfigError(
+            "required execution planning evidence needs a configured path"
+        )
     preflight = service.get("controller_preflight_enabled", False)
     if not isinstance(preflight, bool):
         raise MissionServiceConfigError("service.controller_preflight_enabled must be a Boolean")
@@ -137,6 +147,8 @@ def load_service_settings(
         grounding_planning_world_evidence_required=planning_world_required,
         execution_profile_path=_optional_path(service, "execution_profile_path", root),
         planning_profile_path=_optional_path(service, "planning_profile_path", root),
+        execution_planning_evidence_path=execution_planning_path,
+        execution_planning_evidence_required=execution_planning_required,
         max_request_bytes=_positive_integer(service, "max_request_bytes"),
         approval_policy=approval_policy,
         controller_preflight_enabled=preflight,
@@ -180,6 +192,16 @@ def _optional_text(table: Mapping[str, object], key: str, default: str) -> str:
     if key not in table:
         return default
     return _text(table, key)
+
+
+def _optional_bool(table: Mapping[str, object], key: str, default: bool) -> bool:
+    """Read an additive Boolean setting without truthy coercion."""
+    if key not in table:
+        return default
+    value = table[key]
+    if not isinstance(value, bool):
+        raise MissionServiceConfigError(f"service.{key} must be a Boolean")
+    return value
 
 
 def _optional_path(table: Mapping[str, object], key: str, root: Path) -> Path | None:

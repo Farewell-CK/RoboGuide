@@ -21,6 +21,10 @@ from mission.deployment_recovery import (
     DeploymentRecoverySession,
     frozen_document,
 )
+from mission.execution_planning_evidence import (
+    ExecutionPlanningEvidence,
+    ExecutionPlanningEvidenceError,
+)
 from mission.execution_profile import DeploymentExecutionProfile
 from mission.grounding_context import GroundingContextSnapshot, admitted_physical_entity_ids
 from mission.intent import GroundedIntent
@@ -108,6 +112,7 @@ def _validate_plan_output(
     satisfaction_policy: MissionSatisfactionPolicy | None,
     grounding_context: GroundingContextSnapshot,
     execution_profile: DeploymentExecutionProfile | None,
+    execution_planning_evidence: ExecutionPlanningEvidence | None = None,
 ) -> MissionPlan:
     """Validate one generated draft against identity, implementation, and Catalog boundaries."""
     plan = MissionPlan.from_json(value)
@@ -117,6 +122,12 @@ def _validate_plan_output(
         raise MissionProviderError("model changed the requested mission objective")
     if execution_profile is not None:
         plan = execution_profile.apply(plan)
+    if execution_planning_evidence is not None:
+        try:
+            execution_planning_evidence.validate_world(grounding_context.semantic_evidence)
+            execution_planning_evidence.validate_plan(plan)
+        except ExecutionPlanningEvidenceError as error:
+            raise MissionPlanError(str(error)) from error
     plan.validate_implementation_support()
     plan.validate_physical_entity_grounding(admitted_physical_entity_ids(grounding_context))
     validate_authoritative_executor_constraints(plan, grounding_context)
@@ -135,6 +146,7 @@ def _validated_provider_draft(
     satisfaction_policy: MissionSatisfactionPolicy | None,
     grounding_context: GroundingContextSnapshot,
     execution_profile: DeploymentExecutionProfile | None,
+    execution_planning_evidence: ExecutionPlanningEvidence | None = None,
 ) -> MissionPlan:
     """Normalize and admit a Planner or Repairer output with durable rejection payloads."""
     try:
@@ -156,6 +168,7 @@ def _validated_provider_draft(
             satisfaction_policy,
             grounding_context,
             execution_profile,
+            execution_planning_evidence,
         )
     except MissionPlanError as error:
         raise RejectedPlanError(
@@ -358,12 +371,14 @@ class ResponsesMissionPlanner:
         transport: JsonTransport | None = None,
         execution_profile: DeploymentExecutionProfile | None = None,
         planning_profile: DeploymentPlanningProfile | None = None,
+        execution_planning_evidence: ExecutionPlanningEvidence | None = None,
     ) -> None:
         """Create a Planner over transport mechanics that carry no Mission authority."""
         self._client = _ResponsesClient(settings, environment, transport)
         self._settings = settings
         self._execution_profile = execution_profile
         self._planning_profile = planning_profile
+        self._execution_planning_evidence = execution_planning_evidence
 
     def plan(
         self,
@@ -440,6 +455,11 @@ class ResponsesMissionPlanner:
                 else {}
             ),
             **(
+                {"execution_planning_evidence": self._execution_planning_evidence.to_json()}
+                if self._execution_planning_evidence is not None
+                else {}
+            ),
+            **(
                 {"deployment_planning_profile": self._planning_profile.to_json()}
                 if self._planning_profile is not None
                 else {}
@@ -475,6 +495,7 @@ class ResponsesMissionPlanner:
             self._settings.satisfaction_policy,
             grounding_context,
             self._execution_profile,
+            self._execution_planning_evidence,
         )
 
 
@@ -488,12 +509,14 @@ class ResponsesMissionReviewer:
         transport: JsonTransport | None = None,
         execution_profile: DeploymentExecutionProfile | None = None,
         planning_profile: DeploymentPlanningProfile | None = None,
+        execution_planning_evidence: ExecutionPlanningEvidence | None = None,
     ) -> None:
         """Create a Reviewer adapter over the shared Responses request implementation."""
         self._client = _ResponsesClient(settings, environment, transport)
         self._settings = settings
         self._execution_profile = execution_profile
         self._planning_profile = planning_profile
+        self._execution_planning_evidence = execution_planning_evidence
 
     def review(
         self,
@@ -506,6 +529,17 @@ class ResponsesMissionReviewer:
         validate_satisfaction_policy(
             plan, self._settings.satisfaction_policy, grounding_context.semantic_evidence
         )
+        if self._execution_planning_evidence is not None:
+            try:
+                self._execution_planning_evidence.validate_world(
+                    grounding_context.semantic_evidence
+                )
+                self._execution_planning_evidence.validate_plan(plan)
+            except ExecutionPlanningEvidenceError as error:
+                raise MissionProviderError(
+                    f"execution planning evidence is invalid: {error}",
+                    configuration_failure=True,
+                ) from error
         response = self._client._request(
             model=self._settings.llm.review_model,
             instructions=self._client._load_prompt(self._settings.prompts.reviewer_path),
@@ -526,6 +560,15 @@ class ResponsesMissionReviewer:
                             **(
                                 {"deployment_planning_profile": self._planning_profile.to_json()}
                                 if self._planning_profile is not None
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "execution_planning_evidence": (
+                                        self._execution_planning_evidence.to_json()
+                                    )
+                                }
+                                if self._execution_planning_evidence is not None
                                 else {}
                             ),
                         },
@@ -553,12 +596,14 @@ class ResponsesMissionRepairer:
         transport: JsonTransport | None = None,
         execution_profile: DeploymentExecutionProfile | None = None,
         planning_profile: DeploymentPlanningProfile | None = None,
+        execution_planning_evidence: ExecutionPlanningEvidence | None = None,
     ) -> None:
         """Create a Repairer adapter over the shared Responses request implementation."""
         self._client = _ResponsesClient(settings, environment, transport)
         self._settings = settings
         self._execution_profile = execution_profile
         self._planning_profile = planning_profile
+        self._execution_planning_evidence = execution_planning_evidence
 
     def reconsider_deployment(
         self,
@@ -638,6 +683,11 @@ class ResponsesMissionRepairer:
                 if self._planning_profile
                 else {}
             ),
+            **(
+                {"execution_planning_evidence": self._execution_planning_evidence.to_json()}
+                if self._execution_planning_evidence is not None
+                else {}
+            ),
         }
         remaining_seconds = (session.expires_at_ms - int(time.time() * 1000)) / 1000
         if remaining_seconds <= 0:
@@ -688,6 +738,7 @@ class ResponsesMissionRepairer:
                     self._settings.satisfaction_policy,
                     grounding_context,
                     self._execution_profile,
+                    self._execution_planning_evidence,
                 )
             explanation = raw["explanation"]
             if not isinstance(explanation, str):
@@ -782,6 +833,11 @@ class ResponsesMissionRepairer:
                 if self._planning_profile is not None
                 else {}
             ),
+            **(
+                {"execution_planning_evidence": self._execution_planning_evidence.to_json()}
+                if self._execution_planning_evidence is not None
+                else {}
+            ),
         }
         if feedback is not None:
             payload["repair_prevalidation_recovery_feedback"] = feedback
@@ -814,6 +870,7 @@ class ResponsesMissionRepairer:
             self._settings.satisfaction_policy,
             grounding_context,
             self._execution_profile,
+            self._execution_planning_evidence,
         )
 
 

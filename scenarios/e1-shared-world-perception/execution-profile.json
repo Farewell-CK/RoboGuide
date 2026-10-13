@@ -39,6 +39,19 @@
           "units": 1
         }
       ]
+    },
+    {
+      "operation": {
+        "namespace": "observation",
+        "name": "acquire",
+        "version": "v1"
+      },
+      "resources": [
+        {
+          "kind": "space",
+          "units": 1
+        }
+      ]
     }
   ]
 }

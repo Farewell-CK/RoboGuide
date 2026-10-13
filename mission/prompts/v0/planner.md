@@ -18,6 +18,16 @@ visible instead of guessing or choosing a provider class.
 When `authoritative_planning_world_evidence` is supplied, use only its explicit spatial facts and
 versioned relations. Its gaps are unknowns: they do not support guessed floors, reachability, start poses, or executor
 assignments. These facts describe the world and never select a Node, Resource, or Physical Entity.
+When `execution_planning_evidence` is supplied, treat it as an immutable deployment-published
+declaration bound to the same reset identity. Its `verifier_source` is the exact supported
+terminal verifier contract and predicate set; preserve the required predicate and do not infer
+success from local execution. Its `execution_lifetime` describes endpoint capacity and release
+semantics for Control. It is not live inventory and never selects a Node, ResourceId, Actor
+binding, or Physical Entity. Aggregate the declared exclusive resource demand only for Roles that
+must run in the same Task; independent Tasks may reuse an endpoint after Control-owned release.
+Do not add Actors, dependencies, relations, or weaker satisfaction evidence merely to fit this
+deployment declaration. If the exact verifier or capacity is insufficient for the grounded
+objective, preserve the objective and expose the evidence or deployment gap.
 
 ## Coordination mode and Group shared view
 

@@ -75,13 +75,13 @@ def render_deployment_configs(
         (source, f"node-{chr(97 + index)}.toml")
         for index, source in enumerate(node_configs or ("node-a.toml", "node-b.toml"))
     )
-    for source, target in (*sources, ("mission-service-b1.toml", "mission-service-b1.toml")):
-        text = (scenario / source).read_text(encoding="utf-8")
+    for source_name, target in (*sources, ("mission-service-b1.toml", "mission-service-b1.toml")):
+        text = (scenario / source_name).read_text(encoding="utf-8")
         for index, original in enumerate(substitutions):
             text = text.replace(original, f"B1_ENDPOINT_PLACEHOLDER_{index}")
         for index, replacement in enumerate(substitutions.values()):
             text = text.replace(f"B1_ENDPOINT_PLACEHOLDER_{index}", replacement)
-        if source == "mission-service-b1.toml":
+        if source_name == "mission-service-b1.toml":
             text = text.replace("listen_port = 8070", f"listen_port = {ports['MISSION_PORT']}")
         text = text.replace("NODE_STATE_PLACEHOLDER", str(run / ("node-state-" + target[5])))
         text = text.replace("STATE_DB_PLACEHOLDER", str(run / "mission-service.sqlite3"))
@@ -96,9 +96,12 @@ def render_deployment_configs(
         for placeholder, filename in (
             ("EXECUTION_PROFILE_PLACEHOLDER", "execution-profile.json"),
             ("PLANNING_PROFILE_PLACEHOLDER", "planning-profile.json"),
+            ("EXECUTION_PLANNING_EVIDENCE_PLACEHOLDER", "execution-planning-evidence.json"),
         ):
             if placeholder in text:
-                (run / filename).write_bytes((scenario / filename).read_bytes())
+                source_path = scenario / filename
+                if source_path.is_file():
+                    (run / filename).write_bytes(source_path.read_bytes())
                 text = text.replace(placeholder, str(run / filename))
         (run / target).write_text(text, encoding="utf-8")
 

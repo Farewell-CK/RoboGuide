@@ -52,6 +52,40 @@ def test_shared_world_service_configuration_selects_deployment_execution_profile
     assert settings.grounding_planning_world_evidence_required is True
 
 
+def test_execution_planning_evidence_requirement_is_explicit() -> None:
+    """Live templates can require reset evidence without changing legacy service defaults."""
+    perception = load_service_settings(
+        Path("scenarios/e1-shared-world-perception/mission-service-b1.toml"),
+        repository_root=Path.cwd(),
+    )
+    legacy = load_service_settings(Path("config/mission-service.toml"), repository_root=Path.cwd())
+    assert perception.execution_planning_evidence_path is not None
+    assert perception.execution_planning_evidence_required is False
+    assert legacy.execution_planning_evidence_path is None
+    assert legacy.execution_planning_evidence_required is False
+
+
+def test_required_execution_planning_evidence_needs_a_fixed_path(tmp_path: Path) -> None:
+    """A required declaration cannot be enabled without a source path."""
+    path = tmp_path / "service.toml"
+    path.write_text(
+        """
+[service]
+listen_host = "127.0.0.1"
+listen_port = 8070
+state_db = "requests.sqlite3"
+controller_endpoint = "http://127.0.0.1:8080"
+controller_timeout_seconds = 30
+max_request_bytes = 1024
+execution_planning_evidence_required = true
+approval_required_contracts = []
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(MissionServiceConfigError, match="needs a configured path"):
+        load_service_settings(path, repository_root=tmp_path)
+
+
 @pytest.mark.parametrize("raw", ["true", "false", '"true"', "1"])
 def test_controller_preflight_is_explicit_and_strictly_boolean(tmp_path: Path, raw: str) -> None:
     """Optional readiness cannot be silently enabled by truthy configuration values."""

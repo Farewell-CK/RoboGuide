@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 from typing import Any
+
+from mission.execution_planning_evidence import ExecutionPlanningEvidence
+from mission.semantic_evidence import AuthoritativeSemanticEvidence
 
 from roboguide_eval.b1_admission import FailureOwner, assess_b1_run
 from roboguide_eval.b1_event_archive import ARCHIVE_FILE, archive_evidence_error
@@ -38,11 +42,35 @@ B1_FILES = (
     "planning-world-source.json",
     "planning-world-source-required.json",
 )
+B1_OPTIONAL_FILES = ("execution-planning-evidence.json",)
 
 
 def _object(value: Any) -> dict[str, Any]:
     """Read optional mapping evidence without inventing fields."""
     return value if isinstance(value, dict) else {}
+
+
+def _execution_planning_error(run: Path, artifact: Any, semantic: Any) -> str | None:
+    """Validate a live-required deployment artifact without affecting legacy archives."""
+    service_path = run / "mission-service-b1.toml"
+    required = False
+    if service_path.is_file():
+        try:
+            service = tomllib.loads(service_path.read_text(encoding="utf-8")).get("service", {})
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            return "execution_planning_service_config_invalid"
+        required = (
+            isinstance(service, dict)
+            and service.get("execution_planning_evidence_required") is True
+        )
+    if artifact is None:
+        return "execution_planning_evidence_missing" if required else None
+    try:
+        evidence = ExecutionPlanningEvidence.from_json(artifact)
+        evidence.validate_world(AuthoritativeSemanticEvidence.from_json(semantic))
+    except (TypeError, ValueError, KeyError):
+        return "execution_planning_evidence_invalid"
+    return None
 
 
 def scoped_run_failure(run: Path, raw: Any, request: dict[str, Any]) -> dict[str, Any]:
@@ -90,6 +118,9 @@ def scoped_run_failure(run: Path, raw: Any, request: dict[str, Any]) -> dict[str
 def assess_b1_directory(run: Path) -> dict[str, Any]:
     """Verify archived execution evidence, then apply the one admission authority."""
     documents = {name: load_document(run / name) for name in B1_FILES}
+    for name in B1_OPTIONAL_FILES:
+        if (run / name).is_file():
+            documents[name] = load_document(run / name)
     verifier_source = load_document(run / "evidence/task-verifier-source.json")
     verifier_verdict = load_document(run / "evidence/task-verifier-verdict.json")
     if verifier_source is not None or verifier_verdict is not None:
@@ -111,6 +142,11 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
     ):
         planning_world = load_document(run / planning_world_key)
         documents[planning_world_key] = planning_world
+    execution_planning_error = _execution_planning_error(
+        run,
+        documents.get("execution-planning-evidence.json"),
+        documents["evidence/authoritative-semantic-evidence.json"],
+    )
     scoped = scoped_execution_evidence(
         str(request.get("mission_id") or ""),
         controller_submission_group(request),
@@ -140,6 +176,8 @@ def assess_b1_directory(run: Path) -> dict[str, Any]:
         shared_world_summary=documents["evidence/shared-world-summary.json"],
     )
     failures = [item.value for item in provenance.failures]
+    if execution_planning_error is not None:
+        failures.append(execution_planning_error)
     archive_error = archive_evidence_error(run, archive_status, documents["events.json"], request)
     if archive_error:
         failures.append(archive_error)

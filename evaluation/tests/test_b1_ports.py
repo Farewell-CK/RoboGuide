@@ -11,6 +11,7 @@ import pytest
 from mission.api import build_engine
 from mission.execution_profile import DeploymentExecutionProfile
 from mission.planning_profile import DeploymentPlanningProfile
+from mission.service_config import MissionServiceConfigError
 from roboguide_eval.b1_ports import (
     PORT_DEFAULTS,
     deployment_ports,
@@ -47,6 +48,30 @@ def test_prepared_templates_compose_the_real_mi_engine_offline(
     )
     assert engine is not None
     assert settings.state_db == tmp_path / "mission-service.sqlite3"
+
+
+def test_live_engine_fails_closed_when_required_planning_evidence_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A live configuration cannot silently fall back to the legacy MI grounding schema."""
+    source = SCENARIO.parent / "e1-shared-world-perception"
+    render_deployment_configs(
+        tmp_path, source, deployment_ports({}, 2), ("node-a.toml", "node-b.toml")
+    )
+    service = tmp_path / "mission-service-b1.toml"
+    service.write_text(
+        service.read_text(encoding="utf-8").replace(
+            "execution_planning_evidence_required = false",
+            "execution_planning_evidence_required = true",
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "mission.api.current_environment",
+        lambda: {"OPENAI_API_KEY": "offline-placeholder", "ROBOGUIDE_ALLOW_INSECURE_LLM_HTTP": "1"},
+    )
+    with pytest.raises(MissionServiceConfigError, match="required execution planning evidence"):
+        build_engine(source / "mission-config-b1.toml", service, SCENARIO.parents[1])
 
 
 @pytest.mark.parametrize("scenario", ["episode-51", "relocation", "perception", "rearrangement"])

@@ -20,6 +20,8 @@ grounding_planning_world_evidence_path = "PLANNING_WORLD_EVIDENCE_PLACEHOLDER"
 grounding_planning_world_evidence_required = true
 execution_profile_path = "EXECUTION_PROFILE_PLACEHOLDER"
 planning_profile_path = "PLANNING_PROFILE_PLACEHOLDER"
+execution_planning_evidence_path = "EXECUTION_PLANNING_EVIDENCE_PLACEHOLDER"
+execution_planning_evidence_required = false
 max_request_bytes = 1048576
 
 # Deployment decision for controlled simulation-only relocation: no approval risk gate;

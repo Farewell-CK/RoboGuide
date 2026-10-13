@@ -37,6 +37,35 @@ def test_actual_controller_post_digest_matches_captured_bytes(tmp_path: Path) ->
     assert assess_b1_directory(run)["checks"]["provenance_chain_passed"] is True
 
 
+def test_execution_planning_evidence_is_included_in_archive_digest(tmp_path: Path) -> None:
+    """The exact deployment declaration is retained as B1 evidence when present."""
+    run = make_run(tmp_path)
+    before = assess_b1_directory(run)
+    write_json(
+        run / "execution-planning-evidence.json",
+        {
+            "schema_version": "roboguide.execution-planning-evidence/v0.1",
+            "digest": "sha256:" + "a" * 64,
+        },
+    )
+    after = assess_b1_directory(run)
+    assert after["evidence_digest"] != before["evidence_digest"]
+
+
+def test_required_execution_planning_evidence_is_validated_before_admission(tmp_path: Path) -> None:
+    """A live-required missing or malformed artifact cannot retain formal admission."""
+    run = make_run(tmp_path)
+    (run / "mission-service-b1.toml").write_text(
+        "[service]\nexecution_planning_evidence_required = true\n", encoding="utf-8"
+    )
+    verdict = assess_b1_directory(run)
+    assert "execution_planning_evidence_missing" in verdict["context"]["provenance_failures"]
+    assert verdict["admission"]["provenance_valid"] is False
+    write_json(run / "execution-planning-evidence.json", {"tampered": True})
+    verdict = assess_b1_directory(run)
+    assert "execution_planning_evidence_invalid" in verdict["context"]["provenance_failures"]
+
+
 @pytest.mark.parametrize("version", ["v0.1", "v0.2", "v0.3"])
 def test_recovery_observation_versions_preserve_existing_b1_admission(
     tmp_path: Path, version: str

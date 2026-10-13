@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TypeGuard, cast
 
 from roboguide_eval.b1_admission import FailureOwner, assess_b1_run
-from roboguide_eval.b1_run import B1_FILES, consume_b1_verdict
+from roboguide_eval.b1_run import B1_FILES, B1_OPTIONAL_FILES, consume_b1_verdict
 from roboguide_eval.benchmark_evidence import (
     BenchmarkOutcome,
     assess_benchmark_evidence,
@@ -307,7 +307,7 @@ class RoboGuideRunner(ProcessSystemRunner):
         )
         evidence = list(base.raw_evidence)
         known = {item.path for item in evidence}
-        for name in (*B1_FILES, "b1-verdict.json"):
+        for name in (*B1_FILES, *B1_OPTIONAL_FILES, "b1-verdict.json"):
             if name not in known and (run_directory / name).is_file():
                 evidence.append(
                     RawEvidenceRef(name, "Formal B1 protocol evidence", "application/json")

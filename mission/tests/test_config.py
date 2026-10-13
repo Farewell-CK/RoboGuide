@@ -79,6 +79,9 @@ def test_prompts_reject_meta_tasks_and_keep_planning_authority_bounded() -> None
     assert "versioned relations" in planner_prompt
     assert "versioned relations" in reviewer_prompt
     assert "versioned relations" in repairer_prompt
+    assert "execution_planning_evidence" in planner_prompt
+    assert "execution_planning_evidence" in reviewer_prompt
+    assert "execution_planning_evidence" in repairer_prompt
 
 
 def test_prompts_share_mission_semantic_consistency_rules() -> None:

@@ -12,6 +12,7 @@ from typing import cast
 import pytest
 from mission.capability_catalog import CanonicalCapabilityCatalog, CapabilityCatalogError
 from mission.config import MissionSettings, load_settings
+from mission.execution_planning_evidence import ExecutionPlanningEvidence
 from mission.execution_profile import DeploymentExecutionProfile
 from mission.grounding_context import (
     PHYSICAL_ENTITY_REFERENCE_SCHEMA,
@@ -117,6 +118,20 @@ def _shared_world_execution_profile() -> DeploymentExecutionProfile:
     return DeploymentExecutionProfile.load(
         Path("scenarios/e1-shared-world-episode-51/execution-profile.json")
     )
+
+
+def _execution_planning_evidence() -> ExecutionPlanningEvidence:
+    """Load one synthetic deployment artifact without depending on a live run."""
+    from test_execution_planning_evidence import _evidence
+
+    return _evidence()[0]
+
+
+def _execution_planning_evidence_semantic() -> AuthoritativeSemanticEvidence:
+    """Return the semantic snapshot bound to the synthetic planning artifact."""
+    from test_execution_planning_evidence import _evidence
+
+    return _evidence()[1]
 
 
 def _provider_plan(plan: JSONObject) -> JSONObject:
@@ -579,6 +594,63 @@ def test_shared_world_profile_is_frozen_across_review_and_repair_inputs() -> Non
         )
         == profile.to_json()
     )
+
+
+def test_execution_planning_evidence_is_frozen_across_planner_reviewer_and_repairer() -> None:
+    """The exact deployment verifier/lifetime artifact reaches every model writer."""
+    plan_json = cast(
+        JSONObject,
+        json.loads(Path("scenarios/e1-shared-world-episode-51/mission-plan.json").read_text()),
+    )
+    plan = MissionPlan.from_json(plan_json)
+    mission = cast(JSONObject, plan_json["mission"])
+    intent = GroundedIntent(cast(str, mission["objective"]), (), ())
+    evidence = _execution_planning_evidence()
+    evidence_semantic = _execution_planning_evidence_semantic()
+    evidence_grounding = GroundingContextSnapshot.create(
+        request_id="request-test",
+        dialogue_digest="sha256:" + "0" * 64,
+        captured_at_ms=10,
+        semantic_evidence=evidence_semantic,
+    )
+    profile = _shared_world_execution_profile()
+    settings = _local_settings()
+    planner_transport = FakeTransport([_response(_provider_plan(plan_json))])
+    planner = ResponsesMissionPlanner(
+        settings,
+        {"OPENAI_API_KEY": "test-only-key"},
+        planner_transport,
+        execution_profile=profile,
+        execution_planning_evidence=evidence,
+    )
+    planner.plan(cast(str, mission["id"]), intent, _current_catalog(), evidence_grounding)
+    reviewer_transport = FakeTransport([_response(_review_output())])
+    reviewer = ResponsesMissionReviewer(
+        settings,
+        {"OPENAI_API_KEY": "test-only-key"},
+        reviewer_transport,
+        execution_profile=profile,
+        execution_planning_evidence=evidence,
+    )
+    reviewer.review(intent, plan, _current_catalog(), evidence_grounding)
+    repair_transport = FakeTransport([_response(_provider_plan(plan_json))])
+    ResponsesMissionRepairer(
+        settings,
+        {"OPENAI_API_KEY": "test-only-key"},
+        repair_transport,
+        execution_profile=profile,
+        execution_planning_evidence=evidence,
+    ).repair(
+        cast(str, mission["id"]),
+        intent,
+        plan,
+        MissionPlanReview.from_json(_review_output()),
+        _current_catalog(),
+        evidence_grounding,
+    )
+    for transport in (planner_transport, reviewer_transport, repair_transport):
+        payload = json.loads(cast(str, transport.requests[0][2]["input"]))
+        assert payload["execution_planning_evidence"] == evidence.to_json()
 
 
 def test_responses_reviewer_returns_structured_findings_with_independent_model() -> None:

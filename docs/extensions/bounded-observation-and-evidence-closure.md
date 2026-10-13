@@ -45,6 +45,16 @@ feasibility v0.6 的 `finality_profile` 固定三个中立字段：
 `resource_release=after-task-satisfaction`。Controller 在资源保留的 final slots 上进行
 有界候选匹配，并在创建 Group 前拒绝无法闭合的容量冲突；这不授予任何预留或释放权限。
 
+感知与重排的 live deployment 还在每次 reset 后、Mission Service 启动前发布
+`roboguide.execution-planning-evidence/v0.1`。该 artifact 将同一份 semantic evidence 的
+`run/episode/scene/dataset` identity、Habitat 官方 terminal verifier source，以及
+endpoint 数量、capacity-one、resource release 和 verifier publication 绑定到一个 digest。
+Planner、Reviewer 和 Repairer 看到的是这份不可变的 deployment declaration；它不是 live
+Node inventory，也不选择 Actor 或 Physical Entity。MI 只在同一 Task 的同时 Role 需求上
+应用容量边界，independent Tasks 在 Control 释放后仍可复用 endpoint。缺失、篡改或跨 reset
+的 artifact 会让 live Mission Service 在请求前 fail closed；offline prepare 可以只验证配置
+模板，不宣称已经拥有本次 reset 的 verifier evidence。
+
 真实验证必须同时保留 frozen input、精确源码/model/部署 identity、MI 请求与草案、
 Control assignments、实际动作和反馈、initial/reset/terminal diagnostics、官方结果和
 closure/provenance/admission。应分别汇报 true、false、unavailable，不能将本地 acquisition

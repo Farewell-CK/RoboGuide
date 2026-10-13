@@ -95,3 +95,13 @@ def test_shared_world_profile_does_not_add_semantic_executor_constraints() -> No
     assert profiled.tasks[1].depends_on == plan.tasks[1].depends_on
     assert all(role.resource_scope == "task" for task in profiled.tasks for role in task.roles)
     assert all(role.resources for task in profiled.tasks for role in task.roles)
+
+
+def test_perception_profile_declares_acquire_capacity_from_deployment() -> None:
+    """Active observation receives the same exclusive endpoint minimum as navigation."""
+    profile = DeploymentExecutionProfile.load(
+        Path("scenarios/e1-shared-world-perception/execution-profile.json")
+    )
+    acquire = next(item for item in profile.profiles if item.operation.name == "acquire")
+    assert acquire.operation.namespace == "observation"
+    assert [(resource.kind, resource.units) for resource in acquire.resources] == [("space", 1)]

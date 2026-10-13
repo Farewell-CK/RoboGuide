@@ -13,6 +13,7 @@ from typing import Any, cast
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import current_environment, load_settings
 from mission.controller import HttpMissionController
+from mission.execution_planning_evidence import ExecutionPlanningEvidence
 from mission.execution_profile import load_optional_execution_profile
 from mission.grounding_reader import HttpMissionGroundingReader
 from mission.models import JSONObject
@@ -24,7 +25,11 @@ from mission.responses import (
     ResponsesMissionRepairer,
     ResponsesMissionReviewer,
 )
-from mission.service_config import MissionServiceSettings, load_service_settings
+from mission.service_config import (
+    MissionServiceConfigError,
+    MissionServiceSettings,
+    load_service_settings,
+)
 
 LOG = logging.getLogger("roboguide.mission_service")
 
@@ -40,6 +45,18 @@ def build_engine(
     planning_profile = load_optional_planning_profile(service_settings.planning_profile_path)
     if planning_profile is not None:
         planning_profile.validate_catalog(capability_catalog)
+    execution_planning_evidence = None
+    if service_settings.execution_planning_evidence_path is not None:
+        if not service_settings.execution_planning_evidence_path.is_file():
+            if service_settings.execution_planning_evidence_required:
+                raise MissionServiceConfigError(
+                    "required execution planning evidence is unavailable: "
+                    f"{service_settings.execution_planning_evidence_path}"
+                )
+        else:
+            execution_planning_evidence = ExecutionPlanningEvidence.from_json(
+                json.loads(service_settings.execution_planning_evidence_path.read_bytes())
+            )
     environment = current_environment()
     controller = HttpMissionController(
         service_settings.controller_endpoint,
@@ -51,6 +68,7 @@ def build_engine(
             environment,
             execution_profile=execution_profile,
             planning_profile=planning_profile,
+            execution_planning_evidence=execution_planning_evidence,
         )
         if planner_settings.review_enabled
         else None
@@ -61,6 +79,7 @@ def build_engine(
             environment,
             execution_profile=execution_profile,
             planning_profile=planning_profile,
+            execution_planning_evidence=execution_planning_evidence,
         )
         if reviewer is not None
         and (
@@ -77,6 +96,7 @@ def build_engine(
             environment,
             execution_profile=execution_profile,
             planning_profile=planning_profile,
+            execution_planning_evidence=execution_planning_evidence,
         ),
         controller,
         capability_catalog,
@@ -99,6 +119,16 @@ def build_engine(
                     }
                 }
                 if planning_profile is not None
+                else {}
+            ),
+            **(
+                {
+                    "execution_planning_evidence": {
+                        "schema_version": execution_planning_evidence.to_json()["schema_version"],
+                        "digest": execution_planning_evidence.to_json()["digest"],
+                    }
+                }
+                if execution_planning_evidence is not None
                 else {}
             ),
         },

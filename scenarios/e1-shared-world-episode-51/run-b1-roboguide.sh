@@ -362,6 +362,7 @@ if [[ "$RELOCATION_ENABLED" == 1 ]]; then
         RELOCATION_ARGS+=(--relocation-completion-binding)
     fi
 fi
+
 if [[ "$INITIAL_SUPPORT_FLAG" == 1 ]]; then
     sed -i 's/^controller_preflight_enabled = false$/controller_preflight_enabled = true/' \
         "$RUN/mission-service-b1.toml"
@@ -457,6 +458,20 @@ PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" pyt
     --node-a "$RUN/node-a.toml" --node-b "$RUN/node-b.toml" \
     --output "$RUN/spatial-profile.json" --verify-sources \
     || { FAILURE_REASON=spatial_profile_source_mismatch; exit 1; }
+fi
+if [[ "$LIVE_ENDPOINT_PROFILE" == 1 ]]; then
+    # Freeze the official terminal verifier and configured endpoint lifetime
+    # after the child has published reset identity and before MI starts.
+    # This is deployment evidence, not live inventory or a plan rewrite.
+    PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \
+        habitat_local_eaios.execution_planning_artifact \
+        --semantic "$RUN/evidence/authoritative-semantic-evidence.json" \
+        --verifier-source "$RUN/evidence/task-verifier-source.json" \
+        --registry "$RUN/endpoint-registry.json" \
+        --output "$RUN/execution-planning-evidence.json" \
+        || { FAILURE_REASON=execution_planning_evidence_unavailable; exit 1; }
+    sed -i 's/^execution_planning_evidence_required = false$/execution_planning_evidence_required = true/' \
+        "$RUN/mission-service-b1.toml"
 fi
 if [[ "$RELOCATION_ENABLED" == 1 ]]; then
     PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \

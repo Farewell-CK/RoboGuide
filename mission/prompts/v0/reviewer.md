@@ -11,6 +11,14 @@ Use the shared rules below as review criteria, not as authority to rewrite the p
 When `authoritative_planning_world_evidence` is supplied, use only its explicit spatial facts and
 versioned relations.
 Its gaps are unknowns and do not justify guessed floors, reachability, start poses, or assignments.
+When `execution_planning_evidence` is supplied, check its digest-bound `verifier_source` and
+`execution_lifetime` as deployment evidence for this exact reset. The source defines which exact
+terminal verifier contract and predicates are supported; local completion is not official truth.
+The lifetime declaration describes endpoint capacity and Control-owned release, not live inventory
+or Actor placement. Check exclusive resource demand only for Roles that run simultaneously in one
+Task; independent Tasks may reuse a released endpoint. Do not demand extra Actors, relations,
+shared views, or weaker satisfaction semantics just to satisfy a capacity declaration. If the
+source or capacity cannot support the grounded objective, report the evidence gap precisely.
 
 ## Coordination mode and Group shared view
 
