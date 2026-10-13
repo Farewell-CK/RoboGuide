@@ -50,9 +50,30 @@ class CrabAgentBackendConfig(HabitatBackendConfig):
     relocation_completion_binding: bool = False
     endpoint_registry_path: Path | None = None
     enable_observation: bool = False
+    enable_observation_acquisition: bool = False
+    observation_acquisition_max_steps: int = 256
+    contract_recovery_attempts: int = 0
 
     def __post_init__(self) -> None:
         """Reject assignment modes that would silently change local semantics."""
+        if (
+            type(self.contract_recovery_attempts) is not int
+            or not 0 <= self.contract_recovery_attempts <= 3
+        ):
+            raise IntegrationError("contract recovery attempts must be in 0..3")
+        if self.contract_recovery_attempts and self.endpoint_registry_path is None:
+            raise IntegrationError("contract recovery requires explicit live deployment")
+        if self.enable_observation_acquisition and (
+            not self.enable_observation or self.endpoint_registry_path is None
+        ):
+            raise IntegrationError(
+                "active observation requires loaded observation and live endpoints"
+            )
+        if (
+            type(self.observation_acquisition_max_steps) is not int
+            or not 1 <= self.observation_acquisition_max_steps <= 4096
+        ):
+            raise IntegrationError("observation acquisition budget must be in 1..4096")
         if self.subtask_mode not in SUBTASK_MODES:
             raise IntegrationError(
                 f"subtask mode {self.subtask_mode!r} must be one of {SUBTASK_MODES}"

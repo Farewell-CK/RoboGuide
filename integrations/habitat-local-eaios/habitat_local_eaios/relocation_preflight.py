@@ -67,7 +67,11 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
         or required.get("deployment_sha256") != deployment_digest
         or required.get("frozen_input_sha256") != frozen_digest
         or used.get("schema_version")
-        not in ("roboguide.e1.b1-deployment-used/v0.2", "roboguide.e1.b1-deployment-used/v0.3")
+        not in (
+            "roboguide.e1.b1-deployment-used/v0.2",
+            "roboguide.e1.b1-deployment-used/v0.3",
+            "roboguide.e1.b1-deployment-used/v0.4",
+        )
         or used.get("frozen_input_sha256") != frozen_digest
         or used.get("relocation_completion_binding") is not enabled
     ):
@@ -81,6 +85,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.e1.b1-deployment/v0.1",
             "roboguide.e1.b1-deployment/v0.2",
             "roboguide.e1.b1-deployment/v0.3",
+            "roboguide.e1.b1-deployment/v0.4",
         )
         or (
             declaration.get("schema_version") != "roboguide.e1.b1-deployment/v0.1"
@@ -90,14 +95,37 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
         raise IntegrationError("frozen deployment and local execution profile choice differ")
     actual, actual_digest = _read_artifact(run / "evidence/local-how-profile.json")
     actual_schema = actual.get("schema_version")
-    live = declaration["schema_version"] == "roboguide.e1.b1-deployment/v0.3"
+    live = declaration["schema_version"] in {
+        "roboguide.e1.b1-deployment/v0.3",
+        "roboguide.e1.b1-deployment/v0.4",
+    }
     if live:
         from .endpoint_registry import LIVE_PROFILE, verify_endpoint_sources
 
         registry = verify_endpoint_sources(run / "endpoint-registry.json")
+        execution_options = {
+            "enable_observation_acquisition": declaration.get(
+                "enable_observation_acquisition", False
+            ),
+            "observation_acquisition_max_steps": declaration.get(
+                "observation_acquisition_max_steps", 256
+            ),
+            "contract_recovery_attempts": declaration.get("contract_recovery_attempts", 0),
+        }
+        extended = (
+            execution_options["enable_observation_acquisition"]
+            or execution_options["contract_recovery_attempts"] > 0
+        )
         if (
-            used["schema_version"] != "roboguide.e1.b1-deployment-used/v0.3"
-            or actual_schema != "roboguide.habitat-local-how-profile/v0.9"
+            used["schema_version"]
+            not in {"roboguide.e1.b1-deployment-used/v0.3", "roboguide.e1.b1-deployment-used/v0.4"}
+            or actual_schema
+            != (
+                "roboguide.habitat-local-how-profile/v0.10"
+                if extended
+                else "roboguide.habitat-local-how-profile/v0.9"
+            )
+            or (extended and actual.get("execution_options") != execution_options)
             or actual.get("execution_profile") != LIVE_PROFILE
             or actual.get("endpoint_registry_digest") != registry["digest"]
             or actual.get("observation_enabled") is not declaration.get("enable_observation")
@@ -199,7 +227,11 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
     ):
         raise IntegrationError("relocation reset differs from frozen workload or registration")
     if (
-        planning.get("schema_version") != "roboguide.authoritative-planning-world-evidence/v0.3"
+        planning.get("schema_version")
+        not in {
+            "roboguide.authoritative-planning-world-evidence/v0.3",
+            "roboguide.authoritative-planning-world-evidence/v0.4",
+        }
         or planning.get("authority") != "environment-authoritative"
         or planning.get("object_sources") != planning_object_sources(start, semantic)
     ):
@@ -214,13 +246,16 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
     ):
         raise IntegrationError("actual relocation skill readiness is unavailable")
     matrix = _read_object(evidence / "preassignment-feasibility.json")
-    live = matrix.get("schema_version") == "roboguide.deployment-intent-feasibility/v0.5"
+    live = matrix.get("schema_version") in {
+        "roboguide.deployment-intent-feasibility/v0.5",
+        "roboguide.deployment-intent-feasibility/v0.6",
+    }
     if not live and matrix.get("schema_version") != OPERATION_FEASIBILITY_SCHEMA:
         raise IntegrationError("relocation requires versioned deployment operation admission")
     navigation = {
         key: value
         for key, value in matrix.items()
-        if key not in {"digest", "operation_admission", "execution_profile"}
+        if key not in {"digest", "operation_admission", "execution_profile", "finality_profile"}
     }
     navigation["schema_version"] = PREASSIGNMENT_FEASIBILITY_SCHEMA
     navigation["digest"] = preassignment_digest(navigation)

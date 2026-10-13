@@ -21,6 +21,8 @@ from roboguide_eval.b1_workload import extract_b1_workload
 _SCHEMA = "roboguide.deployment-intent-feasibility/v0.3"
 _OPERATION_SCHEMA = "roboguide.deployment-intent-feasibility/v0.4"
 _LIVE_SCHEMA = "roboguide.deployment-intent-feasibility/v0.5"
+_FINALITY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.6"
+_LIVE_SCHEMAS = {_LIVE_SCHEMA, _FINALITY_SCHEMA}
 
 
 def _check_reset_source(document: dict[str, Any], schema: str) -> None:
@@ -47,7 +49,7 @@ def _validate_operation_sources(run: Path, document: dict[str, Any]) -> None:
     _check_reset_source(
         start,
         "roboguide.habitat-relocation-start/v0.2"
-        if document["schema_version"] == _LIVE_SCHEMA
+        if document["schema_version"] in _LIVE_SCHEMAS
         else "roboguide.habitat-relocation-start/v0.1",
     )
     _check_reset_source(profile, "roboguide.habitat-relocation-profile/v0.1")
@@ -142,9 +144,10 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         or registry.get("profile") != "independent-live/v0.1"
         or not isinstance(records, list)
         or not 1 <= len(records) <= 4
-        or deployment.get("schema_version") != "roboguide.e1.b1-deployment-used/v0.3"
+        or deployment.get("schema_version")
+        not in {"roboguide.e1.b1-deployment-used/v0.3", "roboguide.e1.b1-deployment-used/v0.4"}
         or deployment.get("declaration", {}).get("schema_version")
-        != "roboguide.e1.b1-deployment/v0.3"
+        not in {"roboguide.e1.b1-deployment/v0.3", "roboguide.e1.b1-deployment/v0.4"}
     ):
         raise ValueError("live deployment registry and declaration differ")
     declared = deployment["declaration"]
@@ -228,6 +231,17 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     }
     if matrix.get("execution_profile") != expected_profile:
         raise ValueError("live execution profile differs from frozen registry")
+    execution_options = {
+        "enable_observation_acquisition": declared.get("enable_observation_acquisition", False),
+        "observation_acquisition_max_steps": declared.get("observation_acquisition_max_steps", 256),
+        "contract_recovery_attempts": declared.get("contract_recovery_attempts", 0),
+    }
+    extended = (
+        execution_options["enable_observation_acquisition"]
+        or execution_options["contract_recovery_attempts"] > 0
+    )
+    if extended and how.get("execution_options") != execution_options:
+        raise ValueError("loaded execution options differ from declaration")
     bound_relocation = declared["relocation_completion_binding"]
     expected_base = {
         "schema_version": "roboguide.habitat-local-how-profile/v0.8"
@@ -252,8 +266,14 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             "observation_enabled",
             "unassigned_policy",
             "official_success_authority",
+            *({"execution_options"} if extended else set()),
         }
-        or how["schema_version"] != "roboguide.habitat-local-how-profile/v0.9"
+        or how["schema_version"]
+        != (
+            "roboguide.habitat-local-how-profile/v0.10"
+            if extended
+            else "roboguide.habitat-local-how-profile/v0.9"
+        )
         or how["execution_profile"] != registry["profile"]
         or how["endpoint_registry_digest"] != registry["digest"]
         or how["observation_enabled"] is not declared["enable_observation"]
@@ -267,7 +287,15 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         if (
             readiness.get("enabled") is not True
             or readiness.get("source") != "loaded-original-sensors-and-cameras"
-            or set(readiness.get("sensors", {})) != {str(agent) for agent in range(len(records))}
+            or set(readiness.get("sensors", {}))
+            != {
+                str(record["agent_id"])
+                for record in records
+                if any(
+                    operation in {"observation.verify@v1", "observation.acquire@v1"}
+                    for operation in record["operations"]
+                )
+            }
             or any(
                 key not in ("detected_objects", f"agent_{agent}_detected_objects")
                 for agent, key in readiness["sensors"].items()
@@ -347,12 +375,20 @@ def preflight_deployment_feasibility(run: Path) -> dict[str, Any]:
     }
     schema = document.get("schema_version")
     if schema == _OPERATION_SCHEMA or (
-        schema == _LIVE_SCHEMA and "operation_admission" in document
+        schema in _LIVE_SCHEMAS and "operation_admission" in document
     ):
         fields.add("operation_admission")
-    if schema == _LIVE_SCHEMA:
+    if schema in _LIVE_SCHEMAS:
         fields.add("execution_profile")
-    if set(document) != fields or schema not in {_SCHEMA, _OPERATION_SCHEMA, _LIVE_SCHEMA}:
+    if schema == _FINALITY_SCHEMA:
+        fields.add("finality_profile")
+        if document.get("finality_profile") != {
+            "verifier_publication": "after-all-session-slots",
+            "endpoint_capacity": 1,
+            "resource_release": "after-task-satisfaction",
+        }:
+            raise ValueError("live deployment finality profile is unsupported")
+    if set(document) != fields or schema not in {_SCHEMA, _OPERATION_SCHEMA, *_LIVE_SCHEMAS}:
         raise ValueError("preassignment feasibility schema is invalid")
     claimed = document["digest"]
     body = {key: value for key, value in document.items() if key != "digest"}
@@ -385,7 +421,7 @@ def preflight_deployment_feasibility(run: Path) -> dict[str, Any]:
     }
     if identity != expected:
         raise ValueError("preassignment feasibility differs from frozen B1 identity")
-    if schema == _LIVE_SCHEMA:
+    if schema in _LIVE_SCHEMAS:
         _validate_live_sources(run, document)
     if "operation_admission" in document:
         _validate_operation_sources(run, document)

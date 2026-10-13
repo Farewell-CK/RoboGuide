@@ -16,6 +16,7 @@ SUPPORTED_OPERATION = "mobility.navigate@v1"
 SUPPORTED_OPERATIONS = ("mobility.navigate@v1", "mobility.move@v1")
 RELOCATION_OPERATION = "object.relocate@v1"
 OBSERVATION_OPERATION = "observation.verify@v1"
+OBSERVATION_ACQUIRE_OPERATION = "observation.acquire@v1"
 EXECUTION_SESSION_SCHEMA = "roboguide.execution-session/v0.1"
 
 
@@ -392,7 +393,12 @@ class CanonicalObservationInvocation(CanonicalMobilityInvocation):
     @classmethod
     def from_request(cls, request: object) -> CanonicalObservationInvocation:
         """Validate the existing Catalog operation under a closed local condition profile."""
-        body = _parse_invocation(request, {OBSERVATION_OPERATION}, {"expected"})
+        operation = (
+            OBSERVATION_ACQUIRE_OPERATION
+            if issubclass(cls, CanonicalObservationAcquisitionInvocation)
+            else OBSERVATION_OPERATION
+        )
+        body = _parse_invocation(request, {operation}, {"expected"})
         parameters = body["parameters"]
         assert isinstance(parameters, dict)
         expected = parameters["expected"]
@@ -429,6 +435,15 @@ class CanonicalObservationInvocation(CanonicalMobilityInvocation):
         return self.object_ref
 
 
+class CanonicalObservationAcquisitionInvocation(CanonicalObservationInvocation):
+    """Acquire an exact condition through a declared bounded local motion/sensing profile.
+
+    This separate operation never upgrades read-only verify into motion. Its
+    local profile may navigate to the named entity and inspect the original
+    returned visual cache; it cannot substitute an entity or manipulate it.
+    """
+
+
 # Evaluated at import, including inside the Python 3.9 Habitat worker.
 CanonicalInvocation = Union[  # noqa: UP007
     CanonicalMobilityInvocation, CanonicalRelocationInvocation, CanonicalObservationInvocation
@@ -444,6 +459,8 @@ def parse_canonical_invocation(request: object) -> CanonicalInvocation:
         return CanonicalMobilityInvocation.from_request(request)
     if operation == OBSERVATION_OPERATION:
         return CanonicalObservationInvocation.from_request(request)
+    if operation == OBSERVATION_ACQUIRE_OPERATION:
+        return CanonicalObservationAcquisitionInvocation.from_request(request)
     if operation == RELOCATION_OPERATION:
         return CanonicalRelocationInvocation.from_request(request)
     if isinstance(operation, str):

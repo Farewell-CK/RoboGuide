@@ -1,6 +1,7 @@
 """Deployment-owned enforcement of canonical navigation at the EMOS tool boundary.
 
-The original model selects its action; this module never edits or retries it.
+The original model selects its action; this module never edits it. Explicit
+bounded recovery may request a new selection before any rejected tool dispatch.
 Only the selected action is admitted to CrabAgent and its local skill mapping.
 This profile is deliberately specific to EMOS's implemented navigation tools,
 while the binding is generic over canonical invocations and destination IDs.
@@ -19,6 +20,7 @@ from typing import Any, NoReturn
 from .diagnostics import BufferedJsonlWriter
 from .model import (
     CanonicalMobilityInvocation,
+    CanonicalObservationAcquisitionInvocation,
     CanonicalRelocationInvocation,
     IntegrationError,
 )
@@ -29,6 +31,7 @@ _MAX_RECORD_BYTES = 65_536
 _MISSING = object()
 _NAVIGATION_OPERATIONS = frozenset({"mobility.move@v1", "mobility.navigate@v1"})
 _RELOCATION_OPERATIONS = frozenset({"object.relocate@v1"})
+_ACQUISITION_OPERATIONS = frozenset({"observation.acquire@v1"})
 
 
 class Stage2ContractViolation(IntegrationError):
@@ -91,6 +94,15 @@ class Stage2ExecutionContract:
         cls, invocation: CanonicalMobilityInvocation | CanonicalRelocationInvocation
     ) -> Stage2ExecutionContract:
         """Freeze the exact semantic fields required by the operation profile."""
+        if invocation.operation in _ACQUISITION_OPERATIONS:
+            if not isinstance(invocation, CanonicalObservationAcquisitionInvocation):
+                raise IntegrationError("acquisition invocation has an incompatible type")
+            return cls(
+                invocation.operation,
+                invocation.object_ref,
+                invocation.request_key(),
+                attempt_id=invocation.attempt_id,
+            )
         if invocation.operation in _NAVIGATION_OPERATIONS:
             if not isinstance(invocation, CanonicalMobilityInvocation):
                 raise IntegrationError("navigation invocation has an incompatible type")
@@ -121,7 +133,11 @@ class Stage2ExecutionContract:
     def as_dict(self) -> dict[str, object]:
         """Expose the immutable semantic binding beside each action decision."""
         result: dict[str, object] = {
-            "profile": "emos-relocation/v0.1" if self.is_relocation else "emos-navigation/v0.1",
+            "profile": "emos-relocation/v0.1"
+            if self.is_relocation
+            else "bounded-visual-acquisition/v0.1"
+            if self.operation in _ACQUISITION_OPERATIONS
+            else "emos-navigation/v0.1",
             "operation": self.operation,
             "expected_destination": self.expected_destination,
             "invocation_digest": self.invocation_digest,
@@ -555,11 +571,13 @@ def _guard_agent(
     record: Callable[[dict[str, Any]], None],
     feedback: Stage2ExecutionFeedback | None,
     relocation_state: RelocationExecutionState | None,
+    recovery_attempts: int,
 ) -> Callable[[], None]:
     """Wrap one agent instance, deferring its model lookup until lazy initialization."""
     original_chat = agent.chat
     previous_chat = vars(agent).get("chat", _MISSING)
     agent_name = agent.name
+    remaining_recoveries = recovery_attempts
 
     def guarded_chat(observation: str) -> Any:
         """Validate raw model output before CrabAgent transforms or dispatches it."""
@@ -572,7 +590,7 @@ def _guard_agent(
         original_model_chat = model.chat
         previous_model_chat = vars(model).get("chat", _MISSING)
 
-        def guarded_model_chat(content: str, crab_planning: bool = False) -> Any:
+        def one_model_call(content: str, crab_planning: bool = False) -> Any:
             """Keep the original response intact and fence the selected execution tool."""
             if not crab_planning and feedback is not None:
                 content = feedback.before_call(agent_name, model, content)
@@ -698,6 +716,48 @@ def _guard_agent(
                 contract.advance(action, relocation_state)
             return result
 
+        def guarded_model_chat(content: str, crab_planning: bool = False) -> Any:
+            """Ask the same model to reselect only after a proven pre-dispatch violation.
+
+            The nonrenewable budget belongs to this exact bound attempt, not
+            one step or one rejection. Provider errors propagate unchanged.
+            No rejected action reaches CrabAgent and no phase is advanced.
+            """
+            nonlocal remaining_recoveries
+            while True:
+                try:
+                    return one_model_call(content, crab_planning)
+                except Stage2ContractViolation as error:
+                    if crab_planning or remaining_recoveries == 0:
+                        raise
+                    remaining_recoveries -= 1
+                    correction = {
+                        "schema_version": "roboguide.stage2-contract-recovery/v0.1",
+                        "contract": contract.as_dict(),
+                        "rejected_action": error.action,
+                        "reason": error.reason,
+                        "relocation_phase": relocation_state.phase
+                        if relocation_state is not None
+                        else None,
+                        "remaining_recoveries": remaining_recoveries,
+                        "action_executed": False,
+                    }
+                    try:
+                        record(
+                            dict(
+                                correction, decision="reselection_requested", agent_name=agent_name
+                            )
+                        )
+                    except Exception:
+                        _LOG.exception("Stage2 recovery evidence unavailable")
+                    try:
+                        encoded = json.dumps(correction, sort_keys=True, allow_nan=False)
+                    except (TypeError, ValueError):
+                        raise error from None
+                    if len(encoded.encode()) > 16_384:
+                        raise error
+                    content = content + "\n\nLocal execution contract feedback:\n" + encoded
+
         model.chat = guarded_model_chat
         try:
             return original_chat(observation)
@@ -720,6 +780,7 @@ def install_stage2_contract_guard(
     *,
     feedback: Stage2ExecutionFeedback | None = None,
     relocation_states: Mapping[str, RelocationExecutionState] | None = None,
+    recovery_attempts: int = 0,
 ) -> Callable[[], None]:
     """Bind all active agent instances without changing any vendor class or Prompt.
 
@@ -729,6 +790,8 @@ def install_stage2_contract_guard(
     before applying any hooks. Restoration occurs on every policy-loop exit.
     """
     names = [getattr(agent, "name", None) for agent in agents]
+    if type(recovery_attempts) is not int or not 0 <= recovery_attempts <= 3:
+        raise IntegrationError("Stage2 contract recovery attempts must be an integer in 0..3")
     if (
         not all(isinstance(name, str) for name in names)
         or len(set(names)) != len(names)
@@ -745,7 +808,11 @@ def install_stage2_contract_guard(
             state = states.get(agent.name) if contract.is_relocation else None
             if contract.is_relocation and state is None:
                 state = RelocationExecutionState()
-            callbacks.append(_guard_agent(agent, contract, peer_names, record, feedback, state))
+            callbacks.append(
+                _guard_agent(
+                    agent, contract, peer_names, record, feedback, state, recovery_attempts
+                )
+            )
     except BaseException:
         for callback in reversed(callbacks):
             callback()

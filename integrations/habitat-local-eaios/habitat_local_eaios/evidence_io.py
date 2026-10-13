@@ -55,7 +55,7 @@ def json_safe(
     tolist = getattr(value, "tolist", None)
     if callable(tolist):
         size = getattr(value, "size", None)
-        if isinstance(size, numbers.Integral) and size > _budget[0]:
+        if isinstance(size, numbers.Integral) and int(size) > _budget[0]:
             raise TypeError("evidence array exceeds the bounded value count")
         return json_safe(tolist(), _depth=_depth + 1, _max_depth=_max_depth, _budget=_budget)
     item = getattr(value, "item", None)

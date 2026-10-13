@@ -15,12 +15,15 @@ from typing import Any
 
 from .backend import LocalExecutionOutcome, _observation_true
 from .endpoint_registry import LIVE_PROFILE, load_endpoint_registry
+from .evidence_io import json_observation
 from .live_bindings import LivePolicyBindings as LivePolicyBindings
 from .live_coordinator import LiveWorldCoordinator as LiveWorldCoordinator
 from .live_session import LiveSlotLedger as LiveSlotLedger
 from .model import (
+    OBSERVATION_ACQUIRE_OPERATION,
     OBSERVATION_OPERATION,
     CanonicalInvocation,
+    CanonicalObservationAcquisitionInvocation,
     CanonicalObservationInvocation,
     CanonicalRelocationInvocation,
     IntegrationError,
@@ -31,7 +34,12 @@ from .preassignment_feasibility import preassignment_digest
 from .shared_world import SharedEmosStage2Runtime
 
 _LOG = logging.getLogger(__name__)
-LIVE_FEASIBILITY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.5"
+LIVE_FEASIBILITY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.6"
+FINALITY_PROFILE = {
+    "verifier_publication": "after-all-session-slots",
+    "endpoint_capacity": 1,
+    "resource_release": "after-task-satisfaction",
+}
 
 
 class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
@@ -75,11 +83,25 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             "registration_profile_digest": self.registry["digest"],
             "robot_types": robot_types,
         }
-        self._detection_sensors = (
-            inspect_perception(environment, self._agent_ids)
-            if self._config.enable_observation
-            else {}
+        observer_ids = tuple(
+            record["agent_id"]
+            for record in self.registry["endpoints"]
+            if any(
+                operation in {OBSERVATION_OPERATION, OBSERVATION_ACQUIRE_OPERATION}
+                for operation in record["operations"]
+            )
         )
+        self._detection_sensors = (
+            inspect_perception(environment, observer_ids) if self._config.enable_observation else {}
+        )
+        acquisition = getattr(self._config, "enable_observation_acquisition", False)
+        recoveries = getattr(self._config, "contract_recovery_attempts", 0)
+        if acquisition and any(
+            policy._skills.get(policy._name_to_idx.get("nav_to_obj")) is None
+            for agent, policy in enumerate(actor._active_policies)
+            if agent in observer_ids
+        ):
+            raise IntegrationError("active observation requires original navigation skills")
         self._write_json("endpoint-registry-used.json", self.registry)
         self._write_json(
             "perception-readiness.json",
@@ -100,6 +122,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             body = {key: value for key, value in matrix.items() if key != "digest"}
             body.update(
                 schema_version=LIVE_FEASIBILITY_SCHEMA,
+                finality_profile=FINALITY_PROFILE,
                 execution_profile={
                     "mode": LIVE_PROFILE,
                     "registry_digest": self.registry["digest"],
@@ -120,13 +143,28 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         self._write_json(
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.9",
+                "schema_version": "roboguide.habitat-local-how-profile/v0.10"
+                if acquisition or recoveries
+                else "roboguide.habitat-local-how-profile/v0.9",
                 "base_profile": how,
                 "execution_profile": LIVE_PROFILE,
                 "endpoint_registry_digest": self.registry["digest"],
                 "observation_enabled": self._config.enable_observation,
                 "unassigned_policy": "original-wait-model-free",
                 "official_success_authority": "habitat-pddl",
+                **(
+                    {
+                        "execution_options": {
+                            "enable_observation_acquisition": acquisition,
+                            "observation_acquisition_max_steps": (
+                                self._config.observation_acquisition_max_steps
+                            ),
+                            "contract_recovery_attempts": recoveries,
+                        }
+                    }
+                    if acquisition or recoveries
+                    else {}
+                ),
             },
         )
 
@@ -134,7 +172,11 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         """Advertise observation only after actual sensor readiness has been inspected."""
         operations = super().supported_operations()
         if getattr(self, "_detection_sensors", {}):
-            return (*operations, OBSERVATION_OPERATION)
+            return (
+                (*operations, OBSERVATION_OPERATION, OBSERVATION_ACQUIRE_OPERATION)
+                if getattr(self._config, "enable_observation_acquisition", False)
+                else (*operations, OBSERVATION_OPERATION)
+            )
         return operations
 
     def _initial_position(self, agent: int) -> tuple[float, float, float]:
@@ -182,7 +224,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                         "simulator_steps": self._live_completed_steps,
                         "episode_terminated": bool(self._habitat_env.episode_over),
                     },
-                    "final_info": self._live_final_info,
+                    "final_info": json_observation(self._live_final_info),
                     "action_trace_collection": self._action_trace_stats(),
                     "execution_profile": LIVE_PROFILE,
                     "termination_reason": f"execution_exception:{type(error).__name__}",
@@ -245,6 +287,8 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         pending = dict(initial)
         latest: dict[int, LocalExecutionOutcome] = {}
         history: list[dict[str, Any]] = []
+        acquisition_starts: dict[int, int] = {}
+        acquisition_digests: dict[int, str] = {}
         sequence: list[str] = []
         steps, done = 0, False
         info: dict[str, Any] = {}
@@ -276,7 +320,9 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                     running(
                         agent, f"Control assignment {invocation.task_id} activated at step {steps}"
                     )
-                    if isinstance(invocation, CanonicalObservationInvocation):
+                    if isinstance(invocation, CanonicalObservationInvocation) and not isinstance(
+                        invocation, CanonicalObservationAcquisitionInvocation
+                    ):
                         semantic = json.loads(
                             (
                                 self._evidence_dir() / "authoritative-semantic-evidence.json"
@@ -319,7 +365,17 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                             }
                         )
                         continue
-                    self._admit_spatial_feasibility(agent, invocation, environment)
+                    if isinstance(invocation, CanonicalObservationAcquisitionInvocation):
+                        if not getattr(self._config, "enable_observation_acquisition", False):
+                            raise IntegrationError("active observation profile is disabled")
+                        acquisition_starts[agent] = steps
+                        acquisition_digests[agent] = json.loads(
+                            (
+                                self._evidence_dir() / "authoritative-semantic-evidence.json"
+                            ).read_bytes()
+                        )["digest"]
+                    else:
+                        self._admit_spatial_feasibility(agent, invocation, environment)
                     self._admit_relocation_source(agent, invocation, environment)
                     self._write_text(
                         f"subtask-agent-{agent}-{invocation.request_key()[:16]}.txt",
@@ -405,8 +461,33 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 self._record_video(steps, observations, info)
                 for agent, invocation in list(ledger.active.items()):
                     current_feedback = bindings.feedbacks.get(agent)
+                    acquisition = isinstance(invocation, CanonicalObservationAcquisitionInvocation)
+                    acquisition_receipt = None
+                    acquisition_expired = False
+                    if isinstance(invocation, CanonicalObservationAcquisitionInvocation):
+                        acquisition_receipt = observe_detection(
+                            invocation,
+                            environment,
+                            cached_detection_observations(
+                                gym, observations, self._detection_sensors[agent]
+                            ),
+                            agent,
+                            self._detection_sensors[agent],
+                            steps,
+                            acquisition_digests[agent],
+                        )
+                        budget = self._config.observation_acquisition_max_steps
+                        acquisition_expired = steps - acquisition_starts[agent] >= budget
+                        acquisition_receipt.update(
+                            acquisition_profile="bounded-visual-acquisition/v0.1",
+                            acquisition_start_step=acquisition_starts[agent],
+                            acquisition_steps=steps - acquisition_starts[agent],
+                            acquisition_max_steps=budget,
+                        )
                     local_finished = (
-                        current_feedback.operation_completed(f"agent_{agent}")
+                        acquisition_receipt["condition_holds"] is True
+                        if acquisition_receipt is not None
+                        else current_feedback.operation_completed(f"agent_{agent}")
                         if isinstance(invocation, CanonicalRelocationInvocation)
                         and current_feedback is not None
                         else skills[agent]
@@ -418,12 +499,25 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                             or self._oracle_nav_finished_for(agent)
                         )
                     )
-                    if not local_finished and not done:
+                    if not local_finished and not done and not acquisition_expired:
                         continue
-                    successful = local_finished or info.get("pddl_success") is True
+                    successful = local_finished or (
+                        not acquisition and info.get("pddl_success") is True
+                    )
+                    if acquisition_receipt is not None:
+                        try:
+                            self._write_json(
+                                f"observation-{invocation.request_key()}.json", acquisition_receipt
+                            )
+                        except Exception:
+                            _LOG.exception("active observation receipt archival unavailable")
                     outcome = self._pair_outcome(
                         "COMPLETED" if successful else "FAILED",
-                        "original local skill completed"
+                        "condition detected from actual visual cache"
+                        if acquisition and successful
+                        else "active observation budget exhausted"
+                        if acquisition_expired
+                        else "original local skill completed"
                         if local_finished
                         else "original Habitat episode ended",
                         invocation,
@@ -432,9 +526,13 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                         self._initial_position(agent),
                         agent,
                         sequence,
-                        local_skill_completed=bool(local_finished),
+                        local_skill_completed=bool(local_finished) and not acquisition,
                         episode_terminated=done,
-                        terminal_basis="original-local-skill"
+                        terminal_basis="condition-observed-true"
+                        if acquisition and successful
+                        else "condition-acquisition-budget-exhausted"
+                        if acquisition_expired
+                        else "original-local-skill"
                         if local_finished
                         else "habitat-pddl-success"
                         if successful
@@ -443,7 +541,15 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                     completed(agent, ledger.finish(agent), outcome)
                     latest[agent] = outcome
                     history.append(
-                        {"invocation": invocation.as_dict(), "outcome": outcome.as_dict()}
+                        {
+                            "invocation": invocation.as_dict(),
+                            "outcome": outcome.as_dict(),
+                            **(
+                                {"observation": acquisition_receipt}
+                                if acquisition_receipt is not None
+                                else {}
+                            ),
+                        }
                     )
                     bindings.finish(agent)
                     self._bind_navigation_diagnostics(ledger.active)
@@ -497,7 +603,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 "simulator_steps": steps,
                 "episode_terminated": bool(done or environment.episode_over),
             },
-            "final_info": info,
+            "final_info": json_observation(info),
             "action_trace_collection": self._action_trace_stats(),
             "task_outcomes": history,
             "execution_profile": LIVE_PROFILE,

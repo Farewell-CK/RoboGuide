@@ -107,6 +107,92 @@ def _contracts() -> dict[str, Stage2ExecutionContract]:
     }
 
 
+class SequenceModel(FakeModel):
+    """Record original calls and return a fixed, preregistered sequence of model choices."""
+
+    def __init__(self, choices: list[Any]) -> None:
+        """Retain raw model responses without a repairer or action substitution."""
+        super().__init__(None)
+        self.choices = choices
+        self.contents: list[str] = []
+
+    def chat(self, content: str, crab_planning: bool = False) -> Any:
+        """Return the next original choice and record the actually offered feedback."""
+        self.contents.append(content)
+        self.response = deepcopy(self.choices[self.calls])
+        return super().chat(content, crab_planning)
+
+
+def test_bounded_recovery_requests_new_selection_before_any_dispatch() -> None:
+    """Only a subsequent model-selected valid action reaches the original agent."""
+    agent = FakeAgent("alpha", None)
+    model = SequenceModel(
+        [
+            ("nav_to_obj", {"target_obj": "wrong"}),
+            ("nav_to_obj", {"target_obj": "location:north"}),
+        ]
+    )
+    agent.llm_model = model
+    records: list[dict[str, Any]] = []
+    restore = install_stage2_contract_guard(
+        [agent], {"alpha": _contracts()["alpha"]}, records.append, recovery_attempts=1
+    )
+    try:
+        agent.chat("unchanged observation")
+    finally:
+        restore()
+    assert model.calls == 2
+    assert len(agent.dispatched) == 1
+    assert agent.dispatched[0][1]["target_obj"] == "location:north"
+    assert [record["decision"] for record in records] == [
+        "rejected",
+        "reselection_requested",
+        "allowed",
+    ]
+    assert records[1]["action_executed"] is False
+    assert records[1]["remaining_recoveries"] == 0
+    assert "unchanged observation" in model.contents[1]
+
+
+def test_recovery_budget_is_not_renewed_on_next_step() -> None:
+    """Each exact attempt retains one nonrenewable correction budget across chat calls."""
+    agent = FakeAgent("alpha", None)
+    model = SequenceModel(
+        [
+            ("nav_to_obj", {"target_obj": "wrong"}),
+            ("wait", {}),
+            ("nav_to_obj", {"target_obj": "wrong-again"}),
+        ]
+    )
+    agent.llm_model = model
+    restore = install_stage2_contract_guard(
+        [agent], {"alpha": _contracts()["alpha"]}, lambda row: None, recovery_attempts=1
+    )
+    try:
+        agent.chat("first step")
+        with pytest.raises(Stage2ContractViolation):
+            agent.chat("second step")
+        assert model.calls == 3
+        assert len(agent.dispatched) == 1
+    finally:
+        restore()
+
+
+def test_recovery_does_not_retry_provider_error() -> None:
+    """Infrastructure exceptions are not converted into model correction opportunities."""
+    agent = FakeAgent("alpha", TimeoutError("original provider failure"))
+    restore = install_stage2_contract_guard(
+        [agent], {"alpha": _contracts()["alpha"]}, lambda row: None, recovery_attempts=3
+    )
+    try:
+        with pytest.raises(TimeoutError, match="original provider"):
+            agent.chat("observation")
+        assert agent.llm_model.calls == 1
+        assert agent.dispatched == []
+    finally:
+        restore()
+
+
 @pytest.mark.parametrize("operation", ["mobility.move@v1", "mobility.navigate@v1"])
 def test_contract_freezes_exact_invocation_identity(operation: str) -> None:
     """Both supported operations bind the original destination and invocation digest."""

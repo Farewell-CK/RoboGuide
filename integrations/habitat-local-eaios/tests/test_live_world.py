@@ -934,6 +934,80 @@ def test_perception_negative_read_completes_only_observation(tmp_path: Path) -> 
     assert "pddl_success" not in observation
 
 
+@pytest.mark.parametrize(
+    "detected_at,expected_state,expected_steps", [(3, "COMPLETED", 3), (None, "FAILED", 4)]
+)
+def test_active_acquisition_requires_actual_detection_not_navigation_completion(
+    tmp_path: Path, detected_at: int | None, expected_state: str, expected_steps: int
+) -> None:
+    """Use original steps/cache; finished-navigation alone is insufficient."""
+
+    class DetectionGym(Gym):
+        """Update only the returned original sensor cache at a prescribed physical step."""
+
+        def step(self, action: Any) -> tuple[Any, float, bool, dict[str, bool]]:
+            """Count one original step and expose observed detection independently of navigation."""
+            result = super().step(action)
+            self._last_obs["detected_objects"] = [107] if self.steps == detected_at else []
+            return result
+
+    actor, gym = Actor(2), DetectionGym({0: 1})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    runtime._config.enable_observation_acquisition = True
+    runtime._config.observation_acquisition_max_steps = 4
+    runtime.registry["endpoints"][0]["operations"].append("observation.acquire@v1")
+    assert runtime._habitat_env is not None
+    simulator = SimpleNamespace(
+        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=list(range(8))
+    )
+    runtime._habitat_env.task.pddl_problem = SimpleNamespace(
+        get_ordered_entities_list=lambda: [SimpleNamespace(name="object-a")],
+        sim_info=SimpleNamespace(search_for_entity=lambda entity: 7, sim=simulator),
+    )
+    runtime._habitat_env.sim = simulator
+    request_body = invocation(0, ("observer",), observation=True).as_dict()
+    request_body.update(operation="observation.acquire@v1", objective="Navigate to object-a")
+    request = parse_canonical_invocation({"invocation": request_body})
+    terminal: list[LocalExecutionOutcome] = []
+    _, summary = runtime.execute_live(
+        {0: request},
+        lambda: {},
+        lambda: False,
+        lambda *args: None,
+        lambda agent, request, outcome: terminal.append(outcome),
+        0.1,
+    )
+    assert actor.calls == gym.steps == expected_steps
+    assert terminal[0].state == expected_state
+    assert terminal[0].local_skill_completed is False
+    assert summary["identity"]["episode_reset_count"] == 1
+    receipt = json.loads(next(tmp_path.glob("observation-*.json")).read_bytes())
+    assert receipt["condition_holds"] is (detected_at is not None)
+    assert receipt["acquisition_steps"] == expected_steps
+    assert actor.originals[1].initializations == 0
+
+
+def test_active_acquisition_guard_retains_exact_entity_binding() -> None:
+    """A new motion-permitting capability does not authorize another target or manipulation."""
+    from habitat_local_eaios.stage2_contract import Stage2ContractViolation, Stage2ExecutionContract
+
+    body = invocation(0, ("observer",), observation=True).as_dict()
+    body["operation"] = "observation.acquire@v1"
+    request = parse_canonical_invocation({"invocation": body})
+    contract = Stage2ExecutionContract.for_invocation(request)
+    contract.validate(
+        "observer", {"name": "nav_to_obj", "arguments": {"target_obj": "object-a"}}, frozenset()
+    )
+    for action in (
+        {"name": "nav_to_obj", "arguments": {"target_obj": "object-b"}},
+        {"name": "pick", "arguments": {"target_obj": "object-a"}},
+    ):
+        with pytest.raises(Stage2ContractViolation):
+            contract.validate("observer", action, frozenset())
+    with pytest.raises(IntegrationError, match="no Stage2 execution profile"):
+        Stage2ExecutionContract.for_invocation(invocation(0, ("observer",), observation=True))
+
+
 def test_live_coordinator_has_no_unused_endpoint_barrier(tmp_path: Path) -> None:
     """One of three registered endpoints can finish its one-slot session without peer dispatch."""
     import threading

@@ -12,7 +12,7 @@ runtime_version = "c1-s0"
 "roboguide.habitat-execution-profile" = "independent-live/v0.1"
 "roboguide.habitat-robot-type" = "SpotRobot"
 "roboguide.execution-session" = "roboguide.execution-session/v0.1"
-"roboguide.execution-recovery" = '''{"schema_version":"roboguide.local-execution-recovery/v0.1","operations":[{"operation":{"namespace":"mobility","name":"move","version":"v1"},"stop_scope":"execution-group","continuation":"unsupported"},{"operation":{"namespace":"mobility","name":"navigate","version":"v1"},"stop_scope":"execution-group","continuation":"unsupported"},{"operation":{"namespace":"observation","name":"verify","version":"v1"},"stop_scope":"execution-group","continuation":"unsupported"}]}'''
+"roboguide.execution-recovery" = "{\"schema_version\":\"roboguide.local-execution-recovery/v0.1\",\"operations\":[{\"operation\":{\"namespace\":\"mobility\",\"name\":\"move\",\"version\":\"v1\"},\"stop_scope\":\"execution-group\",\"continuation\":\"unsupported\"},{\"operation\":{\"namespace\":\"mobility\",\"name\":\"navigate\",\"version\":\"v1\"},\"stop_scope\":\"execution-group\",\"continuation\":\"unsupported\"},{\"operation\":{\"namespace\":\"observation\",\"name\":\"acquire\",\"version\":\"v1\"},\"stop_scope\":\"execution-group\",\"continuation\":\"unsupported\"},{\"operation\":{\"namespace\":\"observation\",\"name\":\"verify\",\"version\":\"v1\"},\"stop_scope\":\"execution-group\",\"continuation\":\"unsupported\"}]}"
 
 [local_systems.health]
 state_pointer = "/state"
@@ -92,7 +92,7 @@ base = {}
 contract = "observation.verify@v1"
 kind = "observation"
 owner = "habitat-local-eaios"
-attributes = {}
+attributes = { acquisition-mode = "snapshot", sensing-modality = "visual", moves-observer = false }
 
 [capability_profiles.readiness]
 state_pointer = "/state"
@@ -108,6 +108,30 @@ connection = "habitat-http"
 kind = "http"
 method = "GET"
 path = "/v1/capabilities/observation.verify@v1"
+
+[capability_profiles.readiness.step.request]
+base = {}
+
+[[capability_profiles]]
+contract = "observation.acquire@v1"
+kind = "observation"
+owner = "habitat-local-eaios"
+attributes = { acquisition-mode = "bounded-active", sensing-modality = "visual", moves-observer = true, max-observation-cycles = 256 }
+
+[capability_profiles.readiness]
+state_pointer = "/state"
+detail_pointer = "/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capability_profiles.readiness.step]
+id = "observation-acquisition-readiness"
+connection = "habitat-http"
+
+[capability_profiles.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/capabilities/observation.acquire@v1"
 
 [capability_profiles.readiness.step.request]
 base = {}
@@ -319,6 +343,93 @@ pointer = "/local_handle"
 
 [[operations]]
 operation = "observation.verify@v1"
+owner = "habitat-local-eaios"
+required_resources = ["habitat-slot-a"]
+local_locks = ["habitat-simulator-a"]
+
+[operations.workflow]
+poll_interval_ms = 50
+
+[operations.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/dispatch/execution_id"
+
+[operations.workflow.execution_state]
+state_pointer = "/steps/status/state"
+reason_pointer = "/steps/status/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+case_sensitive = false
+
+[[operations.workflow.execute]]
+id = "dispatch"
+connection = "habitat-http"
+
+[operations.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions"
+
+[operations.workflow.execute.request]
+base = {}
+
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation"
+
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation/attempt_id"
+
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/attempt_id"
+
+[[operations.workflow.status]]
+id = "status"
+connection = "habitat-http"
+
+[operations.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/status"
+
+[operations.workflow.status.request]
+base = {}
+
+[[operations.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[operations.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[operations.workflow.cancel]]
+id = "cancel"
+connection = "habitat-http"
+
+[operations.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/cancel"
+
+[operations.workflow.cancel.request]
+base = {}
+
+[[operations.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[operations.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[operations]]
+operation = "observation.acquire@v1"
 owner = "habitat-local-eaios"
 required_resources = ["habitat-slot-a"]
 local_locks = ["habitat-simulator-a"]

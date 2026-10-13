@@ -13,6 +13,7 @@ from .semantic_evidence import _dataset_identity, _expression
 _SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.1"
 _RESET_SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.2"
 _OBJECT_SOURCE_SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.3"
+_GEOMETRY_SCHEMA = "roboguide.authoritative-planning-world-evidence/v0.4"
 _SOURCE_REVISION = "habitat-local-eaios-episode-static-scene/v0.1"
 _RESET_SOURCE_REVISION = "habitat-local-eaios-reset-goal-geometry/v0.2"
 
@@ -29,6 +30,7 @@ def build_authoritative_planning_world_evidence(
     episode: Any | None = None,
     reset_goal_geometry: bool = False,
     object_sources: list[dict[str, str]] | None = None,
+    entity_geometry: bool = False,
 ) -> dict[str, Any]:
     """Read selected-episode facts and optional already-reset goal geometry.
 
@@ -36,7 +38,7 @@ def build_authoritative_planning_world_evidence(
     This builder neither resets nor steps the simulator. Missing geometric
     evidence remains an explicit gap and never becomes a guessed witness.
     """
-    if object_sources is not None and not reset_goal_geometry:
+    if (object_sources is not None or entity_geometry) and not reset_goal_geometry:
         raise PlanningWorldEvidenceBuildError("object sources require the already-reset world")
     if not run_id.strip() or not episode_id.strip():
         raise PlanningWorldEvidenceBuildError("run_id and episode_id must be nonblank")
@@ -75,7 +77,9 @@ def build_authoritative_planning_world_evidence(
     gaps = list({(item["code"], item["detail"]): item for item in gaps}.values())
     body: dict[str, Any] = {
         "schema_version": (
-            _OBJECT_SOURCE_SCHEMA
+            _GEOMETRY_SCHEMA
+            if entity_geometry
+            else _OBJECT_SOURCE_SCHEMA
             if object_sources is not None
             else _RESET_SCHEMA
             if reset_goal_geometry
@@ -108,7 +112,68 @@ def build_authoritative_planning_world_evidence(
     if object_sources is not None:
         body["identity"]["source_revision"] = "habitat-local-eaios-reset-object-locations/v0.3"
         body["object_sources"] = [dict(source) for source in object_sources]
+    if entity_geometry:
+        body["identity"]["source_revision"] = "habitat-local-eaios-reset-entity-geometry/v0.4"
+        body.setdefault("object_sources", [])
+        body["entity_geometry"] = _reset_entity_geometry(environment, scene_id, gaps)
+        body["gaps"] = sorted(gaps, key=lambda item: (item["code"], item["detail"]))
     return {**body, "digest": _digest(body)}
+
+
+def _reset_entity_geometry(
+    environment: Any, scene_id: str, gaps: list[dict[str, str]]
+) -> list[dict[str, Any]]:
+    """Read at most 64 goal entities from the already-reset PDDL position interface.
+
+    No Node inventory, route query, camera render, extra step or RNG sampling
+    is involved. A position is not a visibility or future satisfaction claim.
+    """
+    result = []
+    try:
+        problem = environment.task.pddl_problem
+        pending = [_expression(problem.goal)]
+        names: set[str] = set()
+        for _ in range(256):
+            if not pending:
+                break
+            expression = pending.pop()
+            if expression.get("kind") == "predicate":
+                names.update(
+                    name for name in expression.get("arguments", []) if isinstance(name, str)
+                )
+            else:
+                pending.extend(expression.get("operands", []))
+        if pending or len(names) > 64:
+            raise ValueError("goal geometry exceeds bounded entity/expression coverage")
+        for name in sorted(names):
+            try:
+                entity = problem.get_entity(name)
+                if entity is None:
+                    raise ValueError("goal entity is unresolved")
+                raw = problem.sim_info.get_entity_pos(entity)
+                position = tuple(float(value) for value in raw)
+                if len(position) != 3 or any(
+                    not math.isfinite(value) or abs(value) > 1_000_000 for value in position
+                ):
+                    raise ValueError("position is unavailable or outside the coordinate budget")
+                result.append(
+                    {
+                        "entity_id": name,
+                        "frame_id": "scene:" + scene_id,
+                        "position_mm": [int(round(value * 1000)) for value in position],
+                        "up_axis": "y",
+                    }
+                )
+            except Exception as error:
+                gaps.append(
+                    {
+                        "code": "entity_geometry_unavailable",
+                        "detail": f"{name}: {type(error).__name__}",
+                    }
+                )
+    except Exception as error:
+        gaps.append({"code": "entity_geometry_unavailable", "detail": type(error).__name__})
+    return result
 
 
 def _reset_goal_witnesses(environment: Any, gaps: list[dict[str, str]]) -> list[dict[str, Any]]:

@@ -130,7 +130,12 @@ class LivePolicyBindings:
         feedback.install([policy])
         try:
             guard = install_stage2_contract_guard(
-                [original], contracts, self.record, feedback=feedback, relocation_states=states
+                [original],
+                contracts,
+                self.record,
+                feedback=feedback,
+                relocation_states=states,
+                recovery_attempts=getattr(self.runtime._config, "contract_recovery_attempts", 0),
             )
         except BaseException:
             try:

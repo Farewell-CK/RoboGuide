@@ -12,8 +12,10 @@ from mission.grounding_context import GroundingContextSnapshot
 from mission.grounding_reader import GroundingReadError, HttpMissionGroundingReader
 from mission.models import JSONObject, JSONValue
 from mission.planning_world_evidence import (
+    GEOMETRY_PLANNING_WORLD_EVIDENCE_SCHEMA,
     RESET_PLANNING_WORLD_EVIDENCE_SCHEMA,
     AuthoritativePlanningWorldEvidence,
+    PlanningEntityGeometry,
     PlanningGoalWitness,
     PlanningSpatialFact,
     PlanningWorldEvidenceError,
@@ -56,6 +58,42 @@ def test_planning_world_evidence_round_trips_and_orders_facts() -> None:
     ]
     assert restored.gaps[0].code == "agent_start_state_pending_reset"
     assert restored.relations[0].relation == "different_floor"
+
+
+def test_reset_geometry_round_trip_has_no_node_or_visibility_claim() -> None:
+    """Typed reset coordinates survive freezing and reach MI as world evidence only."""
+    base = _evidence()
+    source = AuthoritativePlanningWorldEvidence.create(
+        run_id=base.run_id,
+        episode_id=base.episode_id,
+        scene_id=base.scene_id,
+        dataset_revision=base.dataset_revision,
+        dataset_sha256=base.dataset_sha256,
+        source_revision="reset-geometry",
+        schema_version=GEOMETRY_PLANNING_WORLD_EVIDENCE_SCHEMA,
+        entity_geometry=(PlanningEntityGeometry("object-upper", "scene:scene-51", (1, 7500, 3)),),
+    )
+    restored = AuthoritativePlanningWorldEvidence.from_json(source.to_json())
+    assert restored == source
+    payload = planning_world_review_payload(restored)
+    assert payload is not None
+    assert payload["entity_geometry"] == source.to_json()["entity_geometry"]
+    assert "node_id" not in json.dumps(payload)
+    assert payload["guidance"] is not None
+    tampered = source.to_json()
+    geometry = cast(list[JSONObject], tampered["entity_geometry"])
+    geometry[0]["position_mm"] = [1, 7000, 3]
+    with pytest.raises(PlanningWorldEvidenceError, match="digest"):
+        AuthoritativePlanningWorldEvidence.from_json(tampered)
+
+
+@pytest.mark.parametrize("position", [(1, True, 3), (1, 2, 3_000_000_000)])
+def test_reset_geometry_rejects_placeholder_or_unbounded_values(
+    position: tuple[int, int, int],
+) -> None:
+    """Boolean placeholders and unbounded coordinates are not spatial evidence."""
+    with pytest.raises(PlanningWorldEvidenceError, match="position"):
+        PlanningEntityGeometry("object", "scene:scene", position)
 
 
 def test_reset_goal_witness_round_trip_and_semantic_binding() -> None:

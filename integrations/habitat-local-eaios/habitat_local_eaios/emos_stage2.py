@@ -25,6 +25,7 @@ from .model import (
     RELOCATION_OPERATION,
     SUPPORTED_OPERATIONS,
     CanonicalInvocation,
+    CanonicalObservationAcquisitionInvocation,
     CanonicalRelocationInvocation,
     IntegrationError,
 )
@@ -113,6 +114,15 @@ def format_stage2_subtask(invocation: CanonicalInvocation, mode: str) -> str:
     """
     if mode not in {"entity-grounded", "natural-objective"}:
         raise IntegrationError(f"unsupported Stage2 subtask mode {mode!r}")
+    if isinstance(invocation, CanonicalObservationAcquisitionInvocation):
+        return (
+            f"{invocation.objective}\n\nCommitted observation condition: "
+            f"{json.dumps(invocation.parameters['expected'], ensure_ascii=False)}. "
+            "The local acquisition profile permits nav_to_obj only for "
+            f"{json.dumps(invocation.object_ref)} "
+            "and wait. Completion requires actual detection from the existing visual sensor; "
+            "navigation completion alone is not detection."
+        )
     if isinstance(invocation, CanonicalRelocationInvocation):
         object_ref = json.dumps(invocation.object_ref, ensure_ascii=False)
         source = json.dumps(invocation.source, ensure_ascii=False)

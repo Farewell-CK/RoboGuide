@@ -187,6 +187,23 @@ def _arguments() -> argparse.Namespace:
         action="store_true",
         help="shared backend: retain cancelled Group worlds for coordinated exact attempts",
     )
+    parser.add_argument(
+        "--enable-observation-acquisition",
+        action="store_true",
+        help="live profile: bounded approach and actual visual acquisition",
+    )
+    parser.add_argument(
+        "--observation-acquisition-max-steps",
+        type=int,
+        default=256,
+        help="live profile: per-attempt acquisition step bound",
+    )
+    parser.add_argument(
+        "--contract-recovery-attempts",
+        type=int,
+        default=0,
+        help="live profile: nonrenewable pre-dispatch model reselection bound (0..3)",
+    )
     return parser.parse_args()
 
 
@@ -237,6 +254,9 @@ def _run_shared_world(arguments: argparse.Namespace) -> None:
         progress_directory=arguments.progress_directory,
         endpoint_registry_path=arguments.endpoint_registry,
         enable_observation=arguments.enable_observation,
+        enable_observation_acquisition=arguments.enable_observation_acquisition,
+        observation_acquisition_max_steps=arguments.observation_acquisition_max_steps,
+        contract_recovery_attempts=arguments.contract_recovery_attempts,
     )
     if arguments.endpoint_registry is not None:
         _run_live_world(arguments, config)
@@ -317,7 +337,10 @@ def main() -> None:
     if arguments.host not in {"127.0.0.1", "localhost"}:
         raise SystemExit("Habitat Local EAIOS must bind a loopback host")
     if (
-        arguments.endpoint_registry is not None or arguments.enable_observation
+        arguments.endpoint_registry is not None
+        or arguments.enable_observation
+        or arguments.enable_observation_acquisition
+        or arguments.contract_recovery_attempts > 0
     ) and arguments.backend != "shared-emos-stage2":
         raise SystemExit("live endpoint/observation profile requires shared EMOS Stage2")
     if arguments.backend == "emos-crabagent" and arguments.evidence_dir is None:

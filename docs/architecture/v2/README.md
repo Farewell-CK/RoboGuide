@@ -221,6 +221,13 @@ source、source time 和 RoboGuide receive time 的 verdict。Runtime 只归约 
 verdict artifact 由 deployment 按 digest 保留，事件是 receipt。该 slice 不进行多源融合、
 争议裁决或宣称全局物理真值。详见 ADR-0033、ADR-0034 与 ADR-0093。
 
+显式的 Local EAIOS 主动观测能力 `observation.acquire@v1` 与缓存读取 `observation.verify@v1`
+分开。前者可在具名实体的受控范围内定位与采集，后者不授予运动权限。二者的本地完成均
+不能替代 Mission 声明的独立 satisfaction evidence。部署可发布 reset geometry 和 finality
+profile，阻止 verifier 资源存活期无法闭合的拓扑；这些事实不选择 Node、不预留资源，也不
+把联合终态变为 distinct physical executors。受限的执行前工具纠错只允许模型在原 canonical
+contract 下重新选择，不具有 MI 重规划或 Control 重绑定权限。见 ADR-0094。
+
 Mission Intelligence 的 verifier freshness 来自显式、版本化的系统 satisfaction policy；
 Planner、Reviewer、Repairer 消费同一不可变 policy 和 digest，不能为了填满 schema 猜测数值。
 该 policy 只规定已接收 verdict 在 satisfaction 判定时允许的年龄，不证明物理真值、source

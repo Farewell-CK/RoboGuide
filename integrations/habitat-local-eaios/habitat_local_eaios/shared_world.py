@@ -250,6 +250,7 @@ class SharedEmosStage2Runtime(EmosStage2Runtime):
                 episode=self._episode,
                 reset_goal_geometry=True,
                 object_sources=object_sources,
+                entity_geometry=getattr(config, "endpoint_registry_path", None) is not None,
             )
             self._write_json("authoritative-planning-world-evidence.json", planning_document)
             if (

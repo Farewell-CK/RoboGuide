@@ -34,6 +34,9 @@ RELOCATION_ARGS=()
 ENDPOINT_ARGS=()
 LIVE_ENDPOINT_PROFILE=0
 OBSERVATION_ENABLED=0
+ACTIVE_OBSERVATION_ENABLED=0
+ACTIVE_OBSERVATION_MAX_STEPS=256
+CONTRACT_RECOVERY_ATTEMPTS=0
 ENDPOINT_COUNT=2
 WORLD_CLOSURE_REQUIRED=0
 PREPARE_ONLY="${ROBOGUIDE_B1_PREPARE_ONLY:-0}"
@@ -335,6 +338,10 @@ if [[ "$LIVE_ENDPOINT_PROFILE" == 1 ]]; then
         || { FAILURE_REASON=endpoint_registry_invalid; exit 1; }
     ENDPOINT_ARGS=(--endpoint-registry "$RUN/endpoint-registry.json")
     if [[ "$OBSERVATION_ENABLED" == 1 ]]; then ENDPOINT_ARGS+=(--enable-observation); fi
+    if [[ "$ACTIVE_OBSERVATION_ENABLED" == 1 ]]; then
+        ENDPOINT_ARGS+=(--enable-observation-acquisition --observation-acquisition-max-steps "$ACTIVE_OBSERVATION_MAX_STEPS")
+    fi
+    ENDPOINT_ARGS+=(--contract-recovery-attempts "$CONTRACT_RECOVERY_ATTEMPTS")
 else
     ENDPOINT_ARGS=(--port-b "$HABITAT_PORT_B" --state-db-b "$RUN/bridge-b.sqlite3" --agent-b-id 1)
     PYTHONPATH="$REPO/integrations/habitat-local-eaios" uv run --project "$REPO" python -m \

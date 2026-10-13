@@ -1109,3 +1109,7 @@ ADR-0080 的有界事实批处理默认最多 8 条、单一合批窗口 2ms；r
 当前开源准备、锁定依赖清单、历史凭据风险与网络认证边界见
 [发布技术准备审计](docs/development/release-preparation-audit.md)。项目 LICENSE 与历史
 风险处置待负责人决定；此处的代码与合成检查不表示发布批准。
+
+Deployment-owned bounded active observation, pre-dispatch model reselection and evidence closure are
+documented in [the extension guide](docs/extensions/bounded-observation-and-evidence-closure.md),
+with authority and physical release limits in [ADR-0094](docs/decisions/0094-bounded-observation-and-local-contract-recovery.md).

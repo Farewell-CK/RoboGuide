@@ -17,6 +17,8 @@ from roboguide_eval.b1_workload import extract_b1_workload
 
 DEPLOYMENT_SCHEMA = "roboguide.e1.b1-deployment/v0.2"
 LIVE_DEPLOYMENT_SCHEMA = "roboguide.e1.b1-deployment/v0.3"
+EXECUTION_DEPLOYMENT_SCHEMA = "roboguide.e1.b1-deployment/v0.4"
+LIVE_DEPLOYMENT_SCHEMAS = (LIVE_DEPLOYMENT_SCHEMA, EXECUTION_DEPLOYMENT_SCHEMA)
 LEGACY_DEPLOYMENT_SCHEMA = "roboguide.e1.b1-deployment/v0.1"
 LOCAL_PROFILE_REQUIREMENT_SCHEMA = "roboguide.e1.b1-local-execution-profile-required/v0.1"
 MAX_DECLARATION_BYTES = 65536
@@ -33,6 +35,9 @@ class B1Deployment:
     schema_version: str
     endpoints: tuple[str, ...] = ()
     enable_observation: bool = False
+    enable_observation_acquisition: bool = False
+    observation_acquisition_max_steps: int = 256
+    contract_recovery_attempts: int = 0
 
 
 def load_deployment(scenario: Path, *, declaration_path: Path | None = None) -> B1Deployment:
@@ -46,16 +51,24 @@ def load_deployment(scenario: Path, *, declaration_path: Path | None = None) -> 
     fields = {"schema_version", "habitat_config", "max_steps", "enable_relocation"}
     if isinstance(document, dict) and document.get("schema_version") in (
         DEPLOYMENT_SCHEMA,
-        LIVE_DEPLOYMENT_SCHEMA,
+        *LIVE_DEPLOYMENT_SCHEMAS,
     ):
         fields.add("relocation_completion_binding")
-    if isinstance(document, dict) and document.get("schema_version") == LIVE_DEPLOYMENT_SCHEMA:
+    if isinstance(document, dict) and document.get("schema_version") in LIVE_DEPLOYMENT_SCHEMAS:
         fields.update({"endpoints", "enable_observation"})
+    if isinstance(document, dict) and document.get("schema_version") == EXECUTION_DEPLOYMENT_SCHEMA:
+        fields.update(
+            {
+                "enable_observation_acquisition",
+                "observation_acquisition_max_steps",
+                "contract_recovery_attempts",
+            }
+        )
     if (
         not isinstance(document, dict)
         or set(document) != fields
         or document["schema_version"]
-        not in (DEPLOYMENT_SCHEMA, LEGACY_DEPLOYMENT_SCHEMA, LIVE_DEPLOYMENT_SCHEMA)
+        not in (DEPLOYMENT_SCHEMA, LEGACY_DEPLOYMENT_SCHEMA, *LIVE_DEPLOYMENT_SCHEMAS)
     ):
         raise ValueError("B1 deployment declaration schema is invalid")
     config = document["habitat_config"]
@@ -81,7 +94,7 @@ def load_deployment(scenario: Path, *, declaration_path: Path | None = None) -> 
     observation = document.get("enable_observation", False)
     if not isinstance(observation, bool):
         raise ValueError("B1 observation selection must be boolean")
-    if document["schema_version"] == LIVE_DEPLOYMENT_SCHEMA:
+    if document["schema_version"] in LIVE_DEPLOYMENT_SCHEMAS:
         raw_endpoints = document["endpoints"]
         if (
             not isinstance(raw_endpoints, list)
@@ -98,8 +111,26 @@ def load_deployment(scenario: Path, *, declaration_path: Path | None = None) -> 
         ):
             raise ValueError("B1 live deployment needs one to four distinct relative Node configs")
         endpoints = tuple(raw_endpoints)
+    acquisition = document.get("enable_observation_acquisition", False)
+    acquisition_steps = document.get("observation_acquisition_max_steps", 256)
+    recovery = document.get("contract_recovery_attempts", 0)
+    if type(acquisition) is not bool or (acquisition and not observation):
+        raise ValueError("active observation requires loaded observation support")
+    if type(acquisition_steps) is not int or not 1 <= acquisition_steps <= 4096:
+        raise ValueError("acquisition budget must be in 1..4096")
+    if type(recovery) is not int or not 0 <= recovery <= 3:
+        raise ValueError("contract recovery attempts must be in 0..3")
     return B1Deployment(
-        config, steps, relocation, completion, document["schema_version"], endpoints, observation
+        config,
+        steps,
+        relocation,
+        completion,
+        document["schema_version"],
+        endpoints,
+        observation,
+        acquisition,
+        acquisition_steps,
+        recovery,
     )
 
 
@@ -133,20 +164,46 @@ def freeze_deployment(
     if not config.is_relative_to(emos_root.resolve()):
         raise ValueError("Habitat configuration resolves outside the EMOS checkout")
     node_ids = []
+    acquisition_endpoints = 0
     names = declaration.endpoints or ("node-a.toml", "node-b.toml")
     for name in names:
         node_path = (scenario / name).resolve(strict=True)
         if not node_path.is_relative_to(scenario.resolve()):
             raise ValueError("B1 Node config resolves outside the scenario")
         document = tomllib.loads(node_path.read_text(encoding="utf-8"))
+        acquired = any(
+            item.get("operation") == "observation.acquire@v1"
+            for item in document.get("operations", [])
+        )
+        if acquired:
+            acquisition_endpoints += 1
+            profile: dict[str, Any] = next(
+                (
+                    item
+                    for item in document.get("capability_profiles", [])
+                    if item.get("contract") == "observation.acquire@v1"
+                ),
+                {},
+            )
+            bound = profile.get("attributes", {}).get("max-observation-cycles")
+            if (
+                not declaration.enable_observation_acquisition
+                or type(bound) is not int
+                or bound < declaration.observation_acquisition_max_steps
+            ):
+                raise ValueError("active observation support/budget differs from Node declaration")
         node_id = document.get("node_id")
         if not isinstance(node_id, str) or not node_id.strip():
             raise ValueError("B1 deployment needs a nonblank configured Node identity")
         node_ids.append(node_id)
     if len(set(node_ids)) != len(names):
         raise ValueError("B1 deployment endpoints must have distinct Node identities")
+    if declaration.enable_observation_acquisition and acquisition_endpoints == 0:
+        raise ValueError("active observation has no configured capable endpoint")
     body: dict[str, Any] = {
-        "schema_version": "roboguide.e1.b1-deployment-used/v0.3"
+        "schema_version": "roboguide.e1.b1-deployment-used/v0.4"
+        if declaration.schema_version == EXECUTION_DEPLOYMENT_SCHEMA
+        else "roboguide.e1.b1-deployment-used/v0.3"
         if declaration.endpoints
         else "roboguide.e1.b1-deployment-used/v0.2",
         "declaration": {
@@ -154,6 +211,17 @@ def freeze_deployment(
             "habitat_config": declaration.habitat_config,
             "max_steps": declaration.max_steps,
             "enable_relocation": declaration.enable_relocation,
+            **(
+                {
+                    "enable_observation_acquisition": declaration.enable_observation_acquisition,
+                    "observation_acquisition_max_steps": (
+                        declaration.observation_acquisition_max_steps
+                    ),
+                    "contract_recovery_attempts": declaration.contract_recovery_attempts,
+                }
+                if declaration.schema_version == EXECUTION_DEPLOYMENT_SCHEMA
+                else {}
+            ),
             **(
                 {"relocation_completion_binding": declaration.relocation_completion_binding}
                 if declaration.schema_version != LEGACY_DEPLOYMENT_SCHEMA
@@ -206,6 +274,9 @@ def freeze_deployment(
             LIVE_ENDPOINT_PROFILE=1,
             OBSERVATION_ENABLED=int(declaration.enable_observation),
             ENDPOINT_COUNT=len(names),
+            ACTIVE_OBSERVATION_ENABLED=int(declaration.enable_observation_acquisition),
+            ACTIVE_OBSERVATION_MAX_STEPS=declaration.observation_acquisition_max_steps,
+            CONTRACT_RECOVERY_ATTEMPTS=declaration.contract_recovery_attempts,
         )
         for index, node_id in enumerate(node_ids):
             assignments[f"NODE_{chr(65 + index)}_ID"] = node_id

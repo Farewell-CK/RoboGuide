@@ -650,6 +650,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   schemas, or Catalog distribution/negotiation. Operation `required_capabilities` are direct
   provider-level feasibility baselines and never an expansion of integrated Local EAIOS steps.
 
+ADR-0094 adds deployment-owned bounded `observation.acquire@v1`, separate from
+read-only verify, and default-off pre-dispatch Stage2 model reselection (at most three per
+bound attempt; no Provider retry or action rewriting). Reset geometry v0.4 is neutral,
+source-bound world evidence, not inventory or a route guarantee. Feasibility v0.6 checks
+final-verifier resource lifetimes without selecting endpoints; closure observations record
+actual publication and preserve archival failures separately from SUT outcomes. See
+`docs/extensions/bounded-observation-and-evidence-closure.md`. Physical release gates remain explicit.
+
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add
 empty placeholders or a top-level `src/`.

@@ -121,6 +121,41 @@ def test_builder_reports_static_object_and_goal_floor_facts_without_reset(tmp_pa
     assert environment.sim.reset_calls == 0
 
 
+def test_reset_geometry_reads_exact_entities_without_reset_render_or_rng(tmp_path: Path) -> None:
+    """Geometry is actual position data and preserves missing entities as explicit gaps."""
+    dataset = tmp_path / "dataset.json.gz"
+    dataset.write_bytes(b"dataset")
+    environment = _environment(dataset)
+    problem = environment.task.pddl_problem
+    problem.get_entity = lambda name: SimpleNamespace(name=name)
+    problem.sim_info = SimpleNamespace(
+        robot_at_thresh=1.0,
+        get_entity_pos=lambda entity: [1.125, 7.5 if entity.name == "any_targets|0" else 2.0, -3.0],
+    )
+    document = build_authoritative_planning_world_evidence(
+        environment,
+        run_id="run-51",
+        episode_id="51",
+        reset_goal_geometry=True,
+        entity_geometry=True,
+    )
+    assert document["schema_version"] == "roboguide.authoritative-planning-world-evidence/v0.4"
+    geometry = {fact["entity_id"]: fact for fact in document["entity_geometry"]}
+    assert geometry["any_targets|0"]["position_mm"] == [1125, 7500, -3000]
+    assert geometry["TARGET_any_targets|0"]["position_mm"][1] == 2000
+    assert environment.sim.reset_calls == 0
+    problem.get_entity = lambda name: None
+    unavailable = build_authoritative_planning_world_evidence(
+        environment,
+        run_id="run-51",
+        episode_id="51",
+        reset_goal_geometry=True,
+        entity_geometry=True,
+    )
+    assert unavailable["entity_geometry"] == []
+    assert any(gap["code"] == "entity_geometry_unavailable" for gap in unavailable["gaps"])
+
+
 def test_reset_goal_witness_uses_official_tolerance_and_exact_entity_positions(
     tmp_path: Path,
 ) -> None:

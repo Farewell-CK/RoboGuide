@@ -91,6 +91,7 @@ def build_endpoint_registry(
                 "mobility.navigate@v1",
                 "object.relocate@v1",
                 "observation.verify@v1",
+                "observation.acquire@v1",
             }
             or name not in contracts
             for name in operation_names

@@ -1,0 +1,43 @@
+# 有界主动观测与证据封口
+
+本扩展由 deployment-owned Habitat Local EAIOS 实现。公共 MissionPlan v0.8、Core 的
+Proposal/Commit/Bind 与 Task satisfaction/release 权限保持原有边界。实现决策见
+[ADR-0094](../decisions/0094-bounded-observation-and-local-contract-recovery.md)。
+
+| 入口 | 可以执行 | 完成证据 |
+|---|---|---|
+| `observation.verify@v1` | 读取既有缓存，无模型/运动/额外 step | 正或负的有效读数；不证明 condition true |
+| `observation.acquire@v1` | 本地有界接近指定实体与观察 | 当前原始缓存明确检测到该实体 |
+| Contract recovery | 执行前要求模型重新选择 | 新返回的 action 独立通过相同 Guard |
+
+acquire 的唯一参数是 `expected=detected(entity-ref)`。当前 profile 没有独立相机云台、
+全场搜索或任意动作控制能力；预算也不证明超时目标不可能达到。新的 capability attributes
+只有来源明确的 acquisition mode、visual modality、允许移动与本地 cycle 上限。
+当前部署仍未提供 FOV、gimbal 或 visibility guarantee，MI 不得猜测。
+
+deployment v0.4 增加 `enable_observation_acquisition`、
+`observation_acquisition_max_steps`（1–4096）与 `contract_recovery_attempts`（0–3）。
+它们由声明冻结，子进程实际使用值须与 Local How v0.10 一致；acquire 还要求原始传感器、
+语义相机和导航技能可用。默认 Python adapter 开关关闭。新的感知/重排 deployment
+模板显式选择本轮开发配置，旧冻结运行继续使用自己的旧模板。
+
+planning world v0.4 的 `entity_geometry` 是最多 64 条 reset position，字段为
+`entity_id`、`frame_id`、三项 integer `position_mm` 和 `up_axis=y`；未知位置进入 `gaps`。
+它只是一个已观测快照，不能当作 route、future goal 或检测真值。
+
+live `GET /v1/executions/closure` 返回 Mission、session digest、producer phase 和实际
+publication flags。`closed` 表示发布尝试已经结束，只有 `evidence_flushed=true` 且无归档
+错误时才能声称必要终态证据已封口。实际执行失败仍可拥有完整的失败归档。
+Runner 最多观察 30 秒 / 64 页小状态响应，将每次读取保存在
+`evidence-closure-archive.json`；失败归属 `HARNESS_ARCHIVAL`，不覆盖 `run-failure.json`。
+legacy adapter 的 closure 为 unavailable；只有 live 的已接受 Request 启用该附加 barrier。
+
+feasibility v0.6 的 `finality_profile` 固定三个中立字段：
+`verifier_publication=after-all-session-slots`、`endpoint_capacity=1`、
+`resource_release=after-task-satisfaction`。Controller 在资源保留的 final slots 上进行
+有界候选匹配，并在创建 Group 前拒绝无法闭合的容量冲突；这不授予任何预留或释放权限。
+
+真实验证必须同时保留 frozen input、精确源码/model/部署 identity、MI 请求与草案、
+Control assignments、实际动作和反馈、initial/reset/terminal diagnostics、官方结果和
+closure/provenance/admission。应分别汇报 true、false、unavailable，不能将本地 acquisition
+完成当作联合官方成功，也不能把小规模诊断当成 E1 成绩。

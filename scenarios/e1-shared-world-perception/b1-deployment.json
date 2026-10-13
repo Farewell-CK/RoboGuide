@@ -1,5 +1,5 @@
 {
-  "schema_version": "roboguide.e1.b1-deployment/v0.3",
+  "schema_version": "roboguide.e1.b1-deployment/v0.4",
   "habitat_config": "habitat-baselines/habitat_baselines/config/multi_rearrange/llm_height_per.yaml",
   "max_steps": 4000,
   "enable_relocation": false,
@@ -8,5 +8,8 @@
   "endpoints": [
     "node-a.toml",
     "node-b.toml"
-  ]
+  ],
+  "enable_observation_acquisition": true,
+  "observation_acquisition_max_steps": 256,
+  "contract_recovery_attempts": 2
 }
