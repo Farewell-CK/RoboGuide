@@ -29,6 +29,8 @@ pub(crate) struct DeploymentFeasibility {
     operation_admission: Option<DeploymentOperationAdmission>,
     /// Opt-in live endpoint support; never a reservation or physical binding.
     live_operations: Option<BTreeMap<domain::NodeId, BTreeSet<String>>>,
+    /// Producer-owned final verdict barrier; no change to Mission semantics or Control release.
+    terminal_verifier_barrier: bool,
 }
 
 /// Check whether concurrent Roles of one Task can use distinct configured endpoints.
@@ -84,6 +86,7 @@ impl DeploymentFeasibility {
             assessment_enabled: false,
             operation_admission: snapshot.operation_admission,
             live_operations: snapshot.live_operations,
+            terminal_verifier_barrier: snapshot.terminal_verifier_barrier,
         })
     }
 
@@ -187,7 +190,10 @@ impl DeploymentFeasibility {
                 let intent = task
                     .execution_intent(role.role_id())
                     .ok_or("deployment role lacks canonical intent")?;
-                if intent.operation().to_string() == "observation.verify@v1" {
+                if matches!(
+                    intent.operation().to_string().as_str(),
+                    "observation.verify@v1" | "observation.acquire@v1"
+                ) {
                     let profiles = self
                         .live_operations
                         .as_ref()
@@ -217,7 +223,9 @@ impl DeploymentFeasibility {
                     }
                     let allowed = profiles
                         .iter()
-                        .filter(|(_, operations)| operations.contains("observation.verify@v1"))
+                        .filter(|(_, operations)| {
+                            operations.contains(&intent.operation().to_string())
+                        })
                         .map(|(node, _)| node.clone())
                         .collect::<BTreeSet<_>>();
                     candidates
@@ -314,6 +322,35 @@ impl DeploymentFeasibility {
                 return Err(
                     "live shared-world Task roles have no distinct endpoint assignment".into(),
                 );
+            }
+        }
+        if self.terminal_verifier_barrier {
+            let verifier_tasks = plan
+                .task_graph()
+                .tasks()
+                .iter()
+                .filter(|task| {
+                    matches!(
+                        task.satisfaction_basis(),
+                        domain::TaskSatisfactionBasis::VerifierEvidence(_)
+                    )
+                })
+                .map(|task| task.task_id())
+                .collect::<BTreeSet<_>>();
+            let retained = session
+                .slots
+                .iter()
+                .filter(|slot| verifier_tasks.contains(&slot.task_id))
+                .map(|slot| slot.actor_id.clone())
+                .collect::<Vec<_>>();
+            // A verifier-backed local terminal retains its endpoint until the
+            // producer has finished ALL slots. Reusing one Actor or oversubscribing
+            // endpoint capacity therefore has no possible release order. Other
+            // Tasks may reuse endpoints after ordinary satisfaction as before.
+            if retained.iter().collect::<BTreeSet<_>>().len() != retained.len()
+                || !has_distinct_endpoint_assignment(&retained, &candidates)
+            {
+                return Err("final verifier resource lifetime has no feasible shared-world endpoint assignment".into());
             }
         }
         let actors = session
@@ -2215,6 +2252,28 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary event directory");
         let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
             .expect("event log opens");
+        let verifier = document["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|task| {
+                task["satisfaction"]
+                    .get("verifier")
+                    .filter(|value| value.is_object())
+            });
+        let feed = verifier.map(|spec| {
+            let mut source = serde_json::json!({
+                "schema_version":"roboguide.task-verifier-source/v0.1",
+                "source_id":"synthetic-final-world", "source_revision": format!("sha256:{}", "a".repeat(64)),
+                "identity":{"run_id":"synthetic", "episode_id":"synthetic", "scene_id":"synthetic",
+                    "dataset_revision":"synthetic", "dataset_sha256":"a".repeat(64)},
+                "verifier":spec["contract"], "supported_predicates":[spec["predicate"]], "verdict_finality":"terminal"
+            });
+            source["digest"] = serde_json::json!(format!("sha256:{:x}", Sha256::digest(serde_json::to_vec(&source).unwrap())));
+            let source_path = directory.path().join("verifier-source.json");
+            std::fs::write(&source_path, source.to_string()).unwrap();
+            super::super::task_verifier::TaskVerifierFeed::load(&source_path, directory.path().join("verdict.json")).unwrap()
+        });
         let controller = Arc::new(Mutex::new(ControllerState {
             bridge: IntegrationRuntimeBridge::new(
                 control::ControlPlane::new(),
@@ -2225,7 +2284,9 @@ mod tests {
             orchestrator: MissionOrchestrator::new(),
             mission_admissions: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
-            verifier_source_digest: None,
+            verifier_source_digest: feed
+                .as_ref()
+                .map(|source| source.source_digest().to_string()),
         }));
         let gate = Arc::new(Mutex::new(()));
         let clock = runtime::SystemMonotonicClock::new();
@@ -2247,7 +2308,7 @@ mod tests {
                 &gate,
                 &clock,
                 Some(feasibility),
-                None,
+                feed.as_ref(),
             )
             .await
             .expect("deployment rejection is an HTTP response");
@@ -2297,6 +2358,71 @@ mod tests {
         seal(&mut document);
         std::fs::write(path, document.to_string()).unwrap();
         document
+    }
+
+    /// Freeze the producer's final-world barrier independently of goal syntax.
+    fn finality_snapshot(path: &Path, second_goal_on_b: bool) {
+        let mut document = live_snapshot(path, second_goal_on_b);
+        document["schema_version"] =
+            serde_json::json!("roboguide.deployment-intent-feasibility/v0.6");
+        document["finality_profile"] = serde_json::json!({
+            "verifier_publication": "after-all-session-slots",
+            "endpoint_capacity": 1, "resource_release": "after-task-satisfaction"
+        });
+        seal(&mut document);
+        std::fs::write(path, document.to_string()).unwrap();
+    }
+
+    /// Bind a final sink to an actual typed verifier requirement without changing execution.
+    fn final_satisfaction(document: &mut serde_json::Value, index: usize) {
+        document["tasks"][index]["satisfaction"] = serde_json::json!({
+            "expected_effect": "joint terminal goal", "basis": "verifier-evidence",
+            "verifier": {
+                "contract": {"namespace":"observation","name":"verify","version":"v1"},
+                "predicate":"joint-goal", "max_evidence_age_ms": 5000
+            }
+        });
+    }
+
+    /// Final verifier Tasks cannot retain more endpoints than the producer can close.
+    #[tokio::test]
+    async fn finality_rejects_retained_endpoint_cycles_before_admission() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("finality.json");
+        finality_snapshot(&path, true);
+        let evidence = DeploymentFeasibility::load(&path).unwrap();
+        let group = domain::ExecutionGroupId::new("finality-group").unwrap();
+        let mut document = plan_document(false, true);
+        final_satisfaction(&mut document, 0);
+        final_satisfaction(&mut document, 1);
+        let plan = orchestration::decode_mission_plan(&document.to_string()).unwrap();
+        assert!(evidence.restrictions_for_plan(&plan, &group).is_ok());
+        // More total Tasks are fine when predecessor satisfaction releases
+        // resources; only two final sinks retain slots at the publication barrier.
+        let mut serial = plan_document(true, true);
+        final_satisfaction(&mut serial, 1);
+        let plan = orchestration::decode_mission_plan(&serial.to_string()).unwrap();
+        assert!(evidence.restrictions_for_plan(&plan, &group).is_ok());
+        let mut repeated = bounded_plan_document(4, false);
+        for index in 0..4 {
+            final_satisfaction(&mut repeated, index);
+        }
+        let plan = orchestration::decode_mission_plan(&repeated.to_string()).unwrap();
+        assert!(
+            evidence
+                .restrictions_for_plan(&plan, &group)
+                .unwrap_err()
+                .contains("resource lifetime")
+        );
+        assert_http_topology_rejection(&evidence, repeated).await;
+        // Even two endpoints cannot close two retained slots on the same Actor.
+        final_satisfaction(&mut serial, 0);
+        let plan = orchestration::decode_mission_plan(&serial.to_string()).unwrap();
+        assert!(evidence.restrictions_for_plan(&plan, &group).is_err());
+        finality_snapshot(&path, false);
+        let restricted = DeploymentFeasibility::load(&path).unwrap();
+        let plan = orchestration::decode_mission_plan(&document.to_string()).unwrap();
+        assert!(restricted.restrictions_for_plan(&plan, &group).is_err());
     }
 
     /// Produce complete logical slots with either sequential reuse or independent Actors.

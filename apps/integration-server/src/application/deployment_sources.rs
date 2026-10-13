@@ -22,6 +22,8 @@ pub(super) struct FrozenFeasibilitySnapshot {
     pub(super) operation_admission: Option<DeploymentOperationAdmission>,
     /// Source-bound operation coverage for the explicit live profile.
     pub(super) live_operations: Option<BTreeMap<domain::NodeId, BTreeSet<String>>>,
+    /// Explicit producer finality; verifier-backed slots retain endpoints until world closure.
+    pub(super) terminal_verifier_barrier: bool,
 }
 
 impl FrozenFeasibilitySnapshot {
@@ -53,13 +55,23 @@ impl FrozenFeasibilitySnapshot {
             "records",
         ]);
         if schema == "roboguide.deployment-intent-feasibility/v0.4"
-            || (schema == "roboguide.deployment-intent-feasibility/v0.5"
-                && body.contains_key("operation_admission"))
+            || (matches!(
+                schema,
+                "roboguide.deployment-intent-feasibility/v0.5"
+                    | "roboguide.deployment-intent-feasibility/v0.6"
+            ) && body.contains_key("operation_admission"))
         {
             fields.insert("operation_admission");
         }
-        if schema == "roboguide.deployment-intent-feasibility/v0.5" {
+        if matches!(
+            schema,
+            "roboguide.deployment-intent-feasibility/v0.5"
+                | "roboguide.deployment-intent-feasibility/v0.6"
+        ) {
             fields.insert("execution_profile");
+        }
+        if schema == "roboguide.deployment-intent-feasibility/v0.6" {
+            fields.insert("finality_profile");
         }
         if body.keys().map(String::as_str).collect::<BTreeSet<_>>() != fields
             || !matches!(
@@ -67,6 +79,7 @@ impl FrozenFeasibilitySnapshot {
                 "roboguide.deployment-intent-feasibility/v0.3"
                     | "roboguide.deployment-intent-feasibility/v0.4"
                     | "roboguide.deployment-intent-feasibility/v0.5"
+                    | "roboguide.deployment-intent-feasibility/v0.6"
             )
             || body["authority"] != "deployment-observed-reset-state"
         {
@@ -338,7 +351,11 @@ impl FrozenFeasibilitySnapshot {
                     value,
                     &node_agents,
                     &node_sources,
-                    schema == "roboguide.deployment-intent-feasibility/v0.5",
+                    matches!(
+                        schema,
+                        "roboguide.deployment-intent-feasibility/v0.5"
+                            | "roboguide.deployment-intent-feasibility/v0.6"
+                    ),
                 )
             })
             .transpose()?;
@@ -346,6 +363,17 @@ impl FrozenFeasibilitySnapshot {
             .get("execution_profile")
             .map(|profile| load_live_endpoints(profile, &node_agents))
             .transpose()?;
+        let terminal_verifier_barrier = schema == "roboguide.deployment-intent-feasibility/v0.6";
+        if terminal_verifier_barrier
+            && body["finality_profile"]
+                != serde_json::json!({
+                    "verifier_publication": "after-all-session-slots",
+                    "endpoint_capacity": 1,
+                    "resource_release": "after-task-satisfaction"
+                })
+        {
+            return Err("live deployment finality profile is unsupported".into());
+        }
         Ok(Self {
             digest,
             entries,
@@ -354,6 +382,7 @@ impl FrozenFeasibilitySnapshot {
             node_agents,
             operation_admission,
             live_operations,
+            terminal_verifier_barrier,
         })
     }
 }
@@ -428,6 +457,7 @@ fn load_live_endpoints(
                     | "mobility.navigate@v1"
                     | "object.relocate@v1"
                     | "observation.verify@v1"
+                    | "observation.acquire@v1"
             ) || !operations.insert(name.to_owned())
             {
                 return Err("live operation coverage is invalid".into());
