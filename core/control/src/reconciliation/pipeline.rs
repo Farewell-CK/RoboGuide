@@ -767,6 +767,9 @@ impl ControlPlane {
             .nodes()
             .into_iter()
             .filter(|snapshot| {
+                self.node_tenant_allowed(requirement.mission_id(), snapshot.node_id())
+            })
+            .filter(|snapshot| {
                 stopped_owner_allowed || snapshot.node_id() != need.current_node_id()
             })
             .filter(|snapshot| {
@@ -854,6 +857,11 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<RecoveryAssignmentProposal, ControlError> {
+        if !self.node_tenant_allowed(requirement.mission_id(), &selected_node_id) {
+            return Err(ControlError::InvalidProposal(
+                "recovery candidate belongs to another tenant".into(),
+            ));
+        }
         let group = self
             .groups
             .get(candidates.group_id())
@@ -930,6 +938,11 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CommittedRecoveryAssignment, ControlError> {
+        if !self.node_tenant_allowed(requirement.mission_id(), proposal.replacement_node_id()) {
+            return Err(ControlError::InvalidProposal(
+                "recovery commitment belongs to another tenant".into(),
+            ));
+        }
         let group = self
             .groups
             .get(proposal.group_id())

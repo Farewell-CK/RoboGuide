@@ -25,6 +25,8 @@ impl ports::NodeLivenessReader for GrpcNodeRouter {
 /// Per-session immutable timing and observer dependencies selected at application startup.
 #[derive(Clone)]
 pub(super) struct GrpcSessionSettings {
+    /// Original TLS certificate validity, independent of heartbeat or observation clocks.
+    pub(super) certificate_expires_at_ms: Option<u64>,
     /// Startup-frozen lease and completion timing.
     pub(super) policy: NodeProtocolPolicy,
     /// Receive-time metadata and best-effort diagnostics.

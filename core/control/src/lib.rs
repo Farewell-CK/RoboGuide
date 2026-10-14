@@ -11,11 +11,13 @@ mod group;
 mod initial_preferences;
 mod matching;
 mod node;
+mod node_identity;
 mod node_session;
 mod proposal;
 mod reconciliation;
 mod registry_provenance;
 mod scheduler;
+mod tenant;
 
 pub use allocation::AllocationProjectionError;
 pub use calendar::{ScheduledTaskReservation, SchedulingReservationPhase};
@@ -36,6 +38,7 @@ pub use scheduler::{
     RoleSchedulingSelection, SchedulerError, SchedulingOccupancy, SchedulingRoleConstraint,
     SchedulingSnapshot, TaskSchedulingContext, TaskSchedulingDecision, TaskSchedulingOutcome,
 };
+pub use tenant::{MissionTenantMigration, MissionTenantMigrationReceipt};
 
 use coordination::Reservation;
 use domain::{
@@ -59,6 +62,18 @@ pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = ports::DEFAULT_NODE_LEASE_DURATION_MS
 /// authoritative after a process restart.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ControlCheckpoint {
+    /// Explicit source-bound migration receipts; normal admission never reassigns legacy owners.
+    #[serde(default)]
+    tenant_migrations: BTreeMap<String, tenant::MissionTenantMigrationReceipt>,
+    /// Durable revision/attribution watermark for operator HTTP authorization.
+    #[serde(default)]
+    operator_authorization: Option<domain::OperatorAuthorization>,
+    /// Immutable accepted Mission tenant ownership, independent of model output.
+    #[serde(default)]
+    mission_tenants: BTreeMap<MissionId, String>,
+    /// Optional deployment identity authority; absent for explicit legacy loopback/static profiles.
+    #[serde(default)]
+    node_identity_registry: Option<domain::NodeIdentityRegistry>,
     /// Latest admitted deployment provenance, containing no usable routing topology.
     #[serde(default)]
     registry_provenance: Option<RegistryProvenance>,
@@ -376,6 +391,14 @@ impl std::error::Error for ControlError {}
 /// Authoritative in-process Control Plane state for the bootstrap.
 #[derive(Debug, Clone)]
 pub struct ControlPlane {
+    /// Retained administrator attribution for explicit historical tenant migration.
+    tenant_migrations: BTreeMap<String, tenant::MissionTenantMigrationReceipt>,
+    /// HTTP authorization authority; transport receives only committed grants.
+    operator_authorization: Option<domain::OperatorAuthorization>,
+    /// Certificate-authorized Mission tenant namespaces retained after terminal execution.
+    mission_tenants: BTreeMap<MissionId, String>,
+    /// Durable deployment identity lifecycle; transport consumes only committed projections.
+    node_identity_registry: Option<domain::NodeIdentityRegistry>,
     /// Renewable lease authority pending later ownership review.
     pub(crate) leases: BTreeMap<NodeId, NodeLease>,
     /// Live session continuity anchors, cleared with leases after process restart.
@@ -427,6 +450,10 @@ impl ControlPlane {
     /// Creates an empty Control Plane with explicit receive-time freshness TTL.
     pub const fn with_status_ttl(max_status_age_ms: u64) -> Self {
         Self {
+            tenant_migrations: BTreeMap::new(),
+            operator_authorization: None,
+            node_identity_registry: None,
+            mission_tenants: BTreeMap::new(),
             leases: BTreeMap::new(),
             node_sessions: BTreeMap::new(),
             reservations: BTreeMap::new(),
@@ -448,6 +475,10 @@ impl ControlPlane {
     /// Captures durable Control authority without process-local lease timestamps.
     pub fn checkpoint(&self) -> ControlCheckpoint {
         ControlCheckpoint {
+            tenant_migrations: self.tenant_migrations.clone(),
+            operator_authorization: self.operator_authorization.clone(),
+            node_identity_registry: self.node_identity_registry.clone(),
+            mission_tenants: self.mission_tenants.clone(),
             registry_provenance: self.registry_provenance.clone(),
             reservations: self.reservations.clone(),
             scheduled_tasks: self.scheduled_tasks.values().cloned().collect(),
@@ -478,6 +509,25 @@ impl ControlPlane {
     ///
     /// Node leases start empty so every node must establish fresh authority in the new process.
     pub fn restore(checkpoint: ControlCheckpoint) -> Result<Self, ControlError> {
+        if let Some(authorization) = &checkpoint.operator_authorization {
+            authorization
+                .validate()
+                .map_err(ControlError::InvalidProposal)?;
+        }
+        if checkpoint
+            .mission_tenants
+            .values()
+            .any(|tenant| tenant.trim().is_empty() || tenant.len() > 128)
+        {
+            return Err(ControlError::InvalidProposal(
+                "invalid Mission tenant checkpoint".into(),
+            ));
+        }
+        if let Some(registry) = &checkpoint.node_identity_registry {
+            registry
+                .validate()
+                .map_err(|error| ControlError::InvalidLease(error.to_string()))?;
+        }
         if checkpoint.registry_provenance.is_none()
             && checkpoint
                 .actor_bindings
@@ -654,6 +704,10 @@ impl ControlPlane {
             }
         }
         let restored = Self {
+            tenant_migrations: checkpoint.tenant_migrations,
+            operator_authorization: checkpoint.operator_authorization,
+            mission_tenants: checkpoint.mission_tenants,
+            node_identity_registry: checkpoint.node_identity_registry,
             leases: BTreeMap::new(),
             node_sessions: BTreeMap::new(),
             reservations: checkpoint.reservations,
@@ -670,6 +724,7 @@ impl ControlPlane {
             pending_recovery_commitments,
             max_status_age_ms: checkpoint.max_status_age_ms,
         };
+        restored.validate_tenant_checkpoint()?;
         restored.validate_group_checkpoint_authority()?;
         restored.validate_scheduling_checkpoint_authority()?;
         restored.allocation_snapshot(TimestampMs::new(0))?;

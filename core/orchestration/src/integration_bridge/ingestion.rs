@@ -191,6 +191,8 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime.refresh_peer_channel_deadlines(decision_at);
         match event {
             GrpcNodeEvent::Registered {
+                certificate_expires_at_ms,
+                certificate_digest,
                 session_id,
                 lease_id,
                 registration,
@@ -226,10 +228,12 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     correlation_id,
                     &mut self.events,
                 )?;
-                self.control.register_node_session(
+                self.control.register_authenticated_node_session(
                     &node_id,
                     &session_id,
                     self.node_lease_policy.lease_duration_ms(),
+                    certificate_digest,
+                    certificate_expires_at_ms,
                 )?;
                 self.runtime.fence_peer_channels_for_node(&node_id);
                 self.runtime.fence_progress_for_node(&node_id);
@@ -253,7 +257,19 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 } else {
                     true
                 };
+                let current = current
+                    && (self.control.node_identity_registry().is_none()
+                        || self.control.source_session_is_current(
+                            &NodeId::new(&node_id)?,
+                            &session_id,
+                            decision_at,
+                        ));
                 if !current {
+                    if self.control.node_identity_registry().is_some() {
+                        return Err(IntegrationRuntimeError::FactRejected(
+                            "Node identity/session is no longer authorized".into(),
+                        ));
+                    }
                     return Ok(());
                 }
                 match message.message {

@@ -44,6 +44,8 @@ fn group_shared_view_uses_exact_export_schema_and_freshness() {
     bridge
         .consume(
             GrpcNodeEvent::Registered {
+                certificate_digest: None,
+                certificate_expires_at_ms: None,
                 session_id: "session-view".to_string(),
                 lease_id: "lease-view".to_string(),
                 registration: NodeRegistration {

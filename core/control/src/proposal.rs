@@ -100,6 +100,8 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<AssignmentProposal, ControlError> {
+        let scoped = self.tenant_state(state, requirement.mission_id());
+        let state = &scoped;
         if candidates.task_ref() != requirement.task_ref() {
             return Err(ControlError::InvalidProposal(
                 "candidate set belongs to another task".to_string(),

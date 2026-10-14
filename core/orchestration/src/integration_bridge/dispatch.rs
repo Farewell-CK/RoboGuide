@@ -32,6 +32,15 @@ pub struct RecoveryDeploymentSupport {
 }
 
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
+    /// Publishes only the application-committed Control identity authority to the transport.
+    pub fn publish_node_identity_registry(&self) -> Result<(), String> {
+        if let Some(registry) = self.control.node_identity_registry() {
+            self.router
+                .publish_identity_registry(registry.clone())
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
     /// Returns the current Control session anchor for exact stop and evidence admission.
     pub fn current_node_session(&self, node_id: &domain::NodeId) -> Option<&str> {
         self.control.current_node_session(node_id)

@@ -26,6 +26,7 @@ pub(super) fn activate_current_route(
     session_id: &str,
     lease_id: &str,
 ) -> Result<(), Status> {
+    router.validate_identity(node_id, session_id)?;
     let mut sessions = router
         .sessions
         .lock()
@@ -63,6 +64,11 @@ pub(super) fn remove_current_route(
         .is_some_and(|route| route.session_id == session_id)
     {
         sessions.remove(node_id);
+        router
+            .identity_peers
+            .lock()
+            .map_err(|_| Status::internal("identity attribution unavailable"))?
+            .remove(session_id);
         Ok(true)
     } else {
         Ok(false)
@@ -75,12 +81,17 @@ pub(super) fn route_is_expired(
     node_id: &str,
     session_id: &str,
 ) -> Result<bool, Status> {
+    if router.validate_identity(node_id, session_id).is_err() {
+        return Ok(true);
+    }
     let sessions = router
         .sessions
         .lock()
         .map_err(|_| Status::internal("session registry unavailable"))?;
     Ok(sessions.get(node_id).is_none_or(|route| {
-        route.session_id != session_id || route.last_heartbeat.elapsed() >= route.lease_duration
+        route.session_id != session_id
+            || router.validate_certificate_expiry(route).is_err()
+            || route.last_heartbeat.elapsed() >= route.lease_duration
     }))
 }
 
@@ -91,6 +102,7 @@ pub(super) fn accept_current_message(
     session_id: &str,
     message: &NodeMessage,
 ) -> Result<bool, Status> {
+    router.validate_identity(node_id, session_id)?;
     let mut sessions = router
         .sessions
         .lock()
@@ -101,6 +113,7 @@ pub(super) fn accept_current_message(
     if route.session_id != session_id {
         return Ok(false);
     }
+    router.validate_certificate_expiry(route)?;
     if route.active && route.last_heartbeat.elapsed() >= route.lease_duration {
         return Err(Status::deadline_exceeded(
             "expired Node route requires new registration",

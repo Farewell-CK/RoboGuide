@@ -133,6 +133,9 @@ pub(crate) fn validate_restored_verifier_source(
     if matches!(
         checkpoint.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
             | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
             | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA
@@ -463,6 +466,15 @@ mod tests {
         assert!(validate_restored_verifier_source(&checkpoint, Some("sha256:source-a")).is_ok());
         assert!(validate_restored_verifier_source(&checkpoint, Some("sha256:source-b")).is_err());
         assert!(validate_restored_verifier_source(&checkpoint, None).is_err());
+        for schema in [
+            PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA,
+            PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA,
+            PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA,
+        ] {
+            let mut legacy = checkpoint.clone();
+            legacy.schema = schema.into();
+            assert!(validate_restored_verifier_source(&legacy, Some("sha256:source-b")).is_err());
+        }
         let mut missing = checkpoint;
         missing.verifier_source_digest = None;
         missing

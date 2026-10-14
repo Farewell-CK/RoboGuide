@@ -220,6 +220,13 @@ impl ControlPlane {
             .get(group_id)
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
         let task_ref = plan.task_ref();
+        if plan.assignments().iter().any(|assignment| {
+            !self.node_tenant_allowed(task_ref.mission_id(), assignment.node_id())
+        }) {
+            return Err(ControlError::InvalidProposal(
+                "Task binding crosses tenant authority".into(),
+            ));
+        }
         if group.mission_id() != task_ref.mission_id() {
             return Err(ControlError::InvalidProposal(
                 "Task belongs to another Mission than its Execution Group".to_string(),

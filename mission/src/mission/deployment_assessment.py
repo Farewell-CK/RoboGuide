@@ -12,6 +12,8 @@ from mission.models import JSONObject, MissionPlan
 
 SCHEMA = "roboguide.initial-operation-assessment/v0.1"
 DIAGNOSTIC_SCHEMA = "roboguide.initial-operation-assessment/v0.2"
+IDENTITY_DIAGNOSTIC_SCHEMA = "roboguide.initial-operation-assessment/v0.3"
+DIAGNOSTIC_SCHEMAS = frozenset({DIAGNOSTIC_SCHEMA, IDENTITY_DIAGNOSTIC_SCHEMA})
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _UNAVAILABLE_REASONS = {
     "source_unconfigured",
@@ -25,6 +27,7 @@ _UNAVAILABLE_REASONS = {
 EXCLUSION_REASONS = frozenset(
     {
         "registration_missing",
+        "identity_unavailable",
         "health_unschedulable",
         "status_stale",
         "liveness_unreachable",
@@ -207,7 +210,7 @@ class InitialOperationAssessment:
             raise ValueError("assessment role summaries are invalid")
         if len({(role.task_id, role.role_id) for role in self.roles}) != len(self.roles):
             raise ValueError("assessment repeats a logical slot")
-        if self.schema_version not in {SCHEMA, DIAGNOSTIC_SCHEMA} or (
+        if self.schema_version not in {SCHEMA, *DIAGNOSTIC_SCHEMAS} or (
             self.schema_version == SCHEMA
             and (self.candidate_diagnostics or self.placement_failure is not None)
         ):
@@ -222,6 +225,12 @@ class InitialOperationAssessment:
             != len(self.candidate_diagnostics)
         ):
             raise ValueError("candidate diagnostic coverage is invalid")
+        if self.schema_version != IDENTITY_DIAGNOSTIC_SCHEMA and any(
+            reason == "identity_unavailable"
+            for item in self.candidate_diagnostics
+            for reason, _ in item.exclusions
+        ):
+            raise ValueError("identity diagnostics require assessment v0.3")
         if self.placement_failure not in {
             None,
             "deployment_contract_unavailable",
@@ -232,7 +241,7 @@ class InitialOperationAssessment:
         ):
             raise ValueError("placement failure contradicts assessment")
         reports = {(item.task_id, item.role_id): item for item in self.candidate_diagnostics}
-        if self.schema_version == DIAGNOSTIC_SCHEMA and any(
+        if self.schema_version in DIAGNOSTIC_SCHEMAS and any(
             (role.task_id, role.role_id) not in reports
             or reports[(role.task_id, role.role_id)].eligible_count
             != role.witness_count
@@ -331,7 +340,7 @@ class InitialOperationAssessment:
             "checked_combinations": self.checked_combinations,
             "roles": [role.to_json() for role in self.roles],
         }
-        if self.schema_version == DIAGNOSTIC_SCHEMA:
+        if self.schema_version in DIAGNOSTIC_SCHEMAS:
             output["candidate_diagnostics"] = [
                 item.to_json() for item in self.candidate_diagnostics
             ]
@@ -343,12 +352,12 @@ class InitialOperationAssessment:
         """Restore only the explicit assessment schema; no response text drives policy."""
         legacy = set(cls.__dataclass_fields__) - {"candidate_diagnostics", "placement_failure"}
         expected = legacy | {"scope"}
-        if isinstance(value, dict) and value.get("schema_version") == DIAGNOSTIC_SCHEMA:
+        if isinstance(value, dict) and value.get("schema_version") in DIAGNOSTIC_SCHEMAS:
             expected |= {"candidate_diagnostics", "placement_failure"}
         if (
             not isinstance(value, dict)
             or set(value) != expected
-            or value["schema_version"] not in {SCHEMA, DIAGNOSTIC_SCHEMA}
+            or value["schema_version"] not in {SCHEMA, *DIAGNOSTIC_SCHEMAS}
             or value["scope"] != "initial_static_world"
             or not isinstance(value["roles"], list)
         ):

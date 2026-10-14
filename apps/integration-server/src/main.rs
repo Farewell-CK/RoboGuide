@@ -34,6 +34,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper had typed stop authority but no durable Node identity lifecycle.
+const PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v28";
 /// Previous wrapper carried unverified relation stop strings without complete evidence authority.
 const PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v27";
 /// Previous wrapper did not require quorum-replicated authority command evidence.
@@ -419,9 +421,8 @@ fn configured_node_identity()
     let server_cert = std::fs::read(server_cert.expect("validated mTLS cert path"))?;
     let server_key = std::fs::read(server_key.expect("validated mTLS key path"))?;
     let client_ca = std::fs::read(client_ca.expect("validated mTLS CA path"))?;
-    let digests: BTreeMap<String, String> =
-        serde_json::from_str(&digest_json.expect("validated mTLS digest map"))?;
-    let policy = NodeIdentityPolicy::require_peer_certificates(digests)?;
+    let policy =
+        NodeIdentityPolicy::from_json(&digest_json.expect("validated mTLS identity profile"))?;
     let tls = ServerTlsConfig::new()
         .identity(Identity::from_pem(server_cert, server_key))
         .client_ca_root(Certificate::from_pem(client_ca));
@@ -659,6 +660,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err("ROBOGUIDE_INITIAL_OPERATION_ASSESSMENT must be 0 or 1".into()),
     }
     let deployment_feasibility = deployment_feasibility.map(Arc::new);
+    let bootstrap_identity_registry = match &node_identity_policy {
+        NodeIdentityPolicy::CertificateLifecycle(registry) => Some(registry.clone()),
+        _ => None,
+    };
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let (service, router) = GrpcIntegrationService::new_with_observer_and_identity(
         events,
@@ -677,6 +682,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
                     | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
@@ -707,6 +713,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
                     | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
@@ -773,7 +780,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
     controller.bridge.set_diagnostics(diagnostic_handle.clone());
+    let installed_identity_registry = match (
+        bootstrap_identity_registry,
+        controller.bridge.control().node_identity_registry(),
+    ) {
+        (Some(configured), Some(saved)) if configured.registry_id == saved.registry_id => false,
+        (Some(configured), None) => {
+            controller
+                .bridge
+                .control_mut()
+                .bootstrap_node_identity_registry(configured)?;
+            true
+        }
+        (None, None) => false,
+        _ => {
+            return Err(
+                "restored Node identity registry requires its original lifecycle mTLS profile"
+                    .into(),
+            );
+        }
+    };
     let restored_stop_holds = application::safety_stop::validate_restored(&controller)?;
+    application::attestation::validate_restored(&controller)?;
+    controller
+        .bridge
+        .control()
+        .validate_mission_tenant_authority()?;
     application::memory_import::validate_restored(&controller)?;
     controller
         .orchestrator
@@ -850,6 +882,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if initialize_checkpoint
         || migrate_checkpoint
         || restored_stop_holds
+        || installed_identity_registry
         || actor_placement_path.is_some()
         || physical_entity_registry_path.is_some()
         || restored_localization_evidence
@@ -875,6 +908,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(error.into());
         }
     }
+    controller.bridge.publish_node_identity_registry()?;
     let controller = Arc::new(Mutex::new(controller));
     let http_event_log = event_log.clone();
     let http_controller = controller.clone();

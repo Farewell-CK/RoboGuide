@@ -92,6 +92,11 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CommittedPlan, ControlError> {
+        if self.node_identity_registry().is_some() {
+            return Err(ControlError::InvalidProposal(
+                "lifecycle identity Commit requires current State".into(),
+            ));
+        }
         if proposal.requires_operation_validation() {
             return Err(ControlError::InvalidProposal(
                 "normalized Mission proposal requires operation-aware Commit".to_string(),
@@ -201,6 +206,11 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CommittedPlan, ControlError> {
+        if self.node_identity_registry().is_some() {
+            return Err(ControlError::InvalidProposal(
+                "lifecycle identity Group Commit requires current State".into(),
+            ));
+        }
         if proposal.requires_operation_validation() {
             return Err(ControlError::InvalidProposal(
                 "normalized Mission proposal requires operation-aware Group Commit".to_string(),
@@ -359,6 +369,8 @@ impl ControlPlane {
         proposal: &AssignmentProposal,
         timestamp: TimestampMs,
     ) -> Result<(), ControlError> {
+        let scoped = self.tenant_state(state, proposal.task_ref().mission_id());
+        let state = &scoped;
         for assignment in proposal.assignments() {
             if let Some(entity_id) = proposal.physical_entity_for_role(assignment.role_id()) {
                 let current = self

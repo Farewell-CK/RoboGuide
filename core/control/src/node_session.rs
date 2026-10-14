@@ -10,6 +10,10 @@ use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter};
 /// Process-local registration anchor; restore clears it with live lease authority.
 #[derive(Debug, Clone)]
 pub(crate) struct NodeSessionAnchor {
+    /// Actual X.509 expiry cannot be renewed with the transport lease.
+    pub(super) certificate_expires_at_ms: Option<u64>,
+    /// Exact TLS leaf accepted with registration; absent only for explicit legacy profiles.
+    pub(super) certificate_digest: Option<String>,
     /// Exact boot-unique session admitted by application registration.
     session_id: String,
     /// Exact lease admitted alongside the session.
@@ -41,15 +45,16 @@ impl ControlPlane {
         session_id: &str,
         now: TimestampMs,
     ) -> bool {
-        self.node_sessions.get(node_id).is_some_and(|session| {
-            !session.fenced
-                && session.session_id == session_id
-                && self.leases.get(node_id).is_some_and(|lease| {
-                    lease.lease_id() == &session.lease_id
-                        && now >= lease.issued_at()
-                        && now < lease.expires_at()
-                })
-        })
+        self.identity_transport_is_current(node_id, now)
+            && self.node_sessions.get(node_id).is_some_and(|session| {
+                !session.fenced
+                    && session.session_id == session_id
+                    && self.leases.get(node_id).is_some_and(|lease| {
+                        lease.lease_id() == &session.lease_id
+                            && now >= lease.issued_at()
+                            && now < lease.expires_at()
+                    })
+            })
     }
     /// Associates application-accepted registration with exact process-local session and lease authority.
     pub fn register_node_session(
@@ -57,6 +62,18 @@ impl ControlPlane {
         node_id: &NodeId,
         session_id: &str,
         duration_ms: u64,
+    ) -> Result<(), ControlError> {
+        self.register_authenticated_node_session(node_id, session_id, duration_ms, None, None)
+    }
+
+    /// Binds an authenticated registration to its original leaf and the current lease.
+    pub fn register_authenticated_node_session(
+        &mut self,
+        node_id: &NodeId,
+        session_id: &str,
+        duration_ms: u64,
+        certificate_digest: Option<String>,
+        certificate_expires_at_ms: Option<u64>,
     ) -> Result<(), ControlError> {
         let lease = self
             .leases
@@ -67,6 +84,22 @@ impl ControlPlane {
                 "Node session and duration must be valid".into(),
             ));
         }
+        if self.node_identity_registry().is_some_and(|registry| {
+            certificate_digest.as_deref().is_none_or(|digest| {
+                !registry.accepts(node_id.as_str(), digest, lease.issued_at().as_millis())
+            })
+        }) {
+            return Err(ControlError::InvalidLease(
+                "registration lacks current authenticated certificate authority".into(),
+            ));
+        }
+        if certificate_expires_at_ms.is_some_and(|until| lease.issued_at().as_millis() >= until)
+            || (self.node_identity_registry().is_some() && certificate_expires_at_ms.is_none())
+        {
+            return Err(ControlError::InvalidLease(
+                "registration lacks valid original X.509 expiry".into(),
+            ));
+        }
         if self.node_sessions.contains_key(node_id) {
             return Err(ControlError::InvalidLease(
                 "session anchor requires a fresh registration".into(),
@@ -75,6 +108,8 @@ impl ControlPlane {
         self.node_sessions.insert(
             node_id.clone(),
             NodeSessionAnchor {
+                certificate_expires_at_ms,
+                certificate_digest,
                 session_id: session_id.into(),
                 lease_id: lease.lease_id().clone(),
                 admitted_at: lease.issued_at(),

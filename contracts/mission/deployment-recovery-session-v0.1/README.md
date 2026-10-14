@@ -17,7 +17,8 @@ The session contains `request_id`, `mission_id`, `max_attempts` (1..3), original
 Each attempt freezes:
 
 - Complete `input_plan`, canonical `input_plan_digest`, `grounding_context_digest`
-  and exact [assessment v0.2](../initial-operation-assessment-v0.2/README.md).
+  and exact [assessment v0.2](../initial-operation-assessment-v0.2/README.md) or
+  [identity diagnostic v0.3](../initial-operation-assessment-v0.3/README.md).
 - MI-local start/finish times; `pending`, `decided`, `failed`, `interrupted` or
   `expired` outcome; error type when a call failed.
 - Complete bounded raw `provider_output` where available and canonical `decision`.

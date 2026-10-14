@@ -81,12 +81,16 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
     let controller = controller(&log);
     let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
     let viewer = OperatorPrincipal {
+        certificate: None,
+        tenants: None,
+        subject: Some("test:viewer".into()),
         role: Some("viewer".into()),
         mtls: true,
     };
     let plan = include_bytes!("../../../../scenarios/phase1-mission-v0.3/mission-plan.json");
     for path in [
         "/v1/missions",
+        "/v1/node-identities/commands",
         "/v1/missions/a/cancel",
         "/v1/missions/a/resume",
         "/v1/missions/a/review",
@@ -130,6 +134,9 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
     assert_eq!(log.len().unwrap(), 0);
     assert!(log.load_checkpoint().unwrap().is_none());
     let operator = OperatorPrincipal {
+        certificate: None,
+        tenants: None,
+        subject: Some("test:operator".into()),
         role: Some("operator".into()),
         mtls: true,
     };
@@ -159,6 +166,9 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
         .starts_with("HTTP/1.1 403")
     );
     let admin = OperatorPrincipal {
+        certificate: None,
+        tenants: None,
+        subject: Some("test:recovery-admin".into()),
         role: Some(RECOVERY_ADMIN_ROLE.into()),
         mtls: true,
     };
@@ -260,6 +270,9 @@ async fn review_sql_failure_preserves_quarantine_and_next_review_succeeds() {
     let sql = rusqlite::Connection::open(&path).unwrap();
     sql.execute_batch("CREATE TRIGGER reject_review_checkpoint BEFORE INSERT ON controller_checkpoint BEGIN SELECT RAISE(ABORT,'review checkpoint outage'); END").unwrap();
     let admin = OperatorPrincipal {
+        certificate: None,
+        tenants: None,
+        subject: Some("test:recovery-admin".into()),
         role: Some(RECOVERY_ADMIN_ROLE.into()),
         mtls: true,
     };
@@ -435,5 +448,424 @@ async fn actual_mtls_viewer_and_unmapped_certificate_cannot_submit() {
             .orchestrator
             .mission_ids()
             .is_empty()
+    );
+}
+
+/// Builds an empty application whose registry and transport use the same explicit lifecycle profile.
+fn identity_controller(log: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
+    let registry = domain::NodeIdentityRegistry::new("test-deployment");
+    let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (_service, router) = integration::GrpcIntegrationService::new_with_observer_and_identity(
+        events,
+        ports::NodeProtocolPolicy::default(),
+        Arc::new(runtime::SystemMonotonicClock::new()),
+        ports::DiagnosticHandle::default(),
+        integration::NodeIdentityPolicy::require_lifecycle(registry.clone()).unwrap(),
+    );
+    let mut control = control::ControlPlane::new();
+    control.bootstrap_node_identity_registry(registry).unwrap();
+    Arc::new(Mutex::new(ControllerState {
+        bridge: IntegrationRuntimeBridge::new(
+            control,
+            state::InMemorySharedNodeState::new(),
+            log.clone(),
+            router,
+        ),
+        orchestrator: MissionOrchestrator::new(),
+        mission_admissions: BTreeMap::new(),
+        memory_imports: BTreeMap::new(),
+        safety_stops: BTreeMap::new(),
+        verifier_seen: BTreeSet::new(),
+        verifier_source_digest: None,
+    }))
+}
+
+/// Public admin mutations persist revision/dedup/audit evidence and never synthesize a registered device.
+#[tokio::test]
+async fn node_identity_http_commands_are_authorized_durable_and_do_not_invent_nodes() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let controller = identity_controller(&log);
+    let admin = OperatorPrincipal {
+        certificate: None,
+        tenants: None,
+        subject: Some("sha256:admin-leaf".into()),
+        role: Some(RECOVERY_ADMIN_ROLE.into()),
+        mtls: true,
+    };
+    let operator = OperatorPrincipal {
+        certificate: None,
+        tenants: None,
+        subject: Some("sha256:operator-leaf".into()),
+        role: Some("operator".into()),
+        mtls: true,
+    };
+    let register = domain::IdentityCommand {
+        command_id: "initial-enrolment".into(),
+        node_id: "deployment-node".into(),
+        expected_revision: 0,
+        action: domain::IdentityAction::Register {
+            tenant_id: "tenant".into(),
+            domain_id: "domain".into(),
+            digest: "a".repeat(64),
+            expires_at_ms: 0,
+        },
+    };
+    let body = serde_json::to_vec(&register).unwrap();
+    let request_bytes = request("POST", "/v1/node-identities/commands", &body, None);
+    assert!(
+        route(&controller, &log, &operator, &request_bytes)
+            .await
+            .starts_with("HTTP/1.1 403")
+    );
+    assert!(log.load_checkpoint().unwrap().is_none());
+    let first = route(&controller, &log, &admin, &request_bytes).await;
+    assert!(first.starts_with("HTTP/1.1 200"), "{first}");
+    assert!(first.contains("sha256:admin-leaf"));
+    let second = route(&controller, &log, &admin, &request_bytes).await;
+    assert_eq!(
+        first.split("\r\n\r\n").nth(1),
+        second.split("\r\n\r\n").nth(1)
+    );
+    let registry = controller
+        .lock()
+        .unwrap()
+        .bridge
+        .control()
+        .node_identity_registry()
+        .unwrap()
+        .clone();
+    assert_eq!(registry.records["deployment-node"].revision, 1);
+    assert_eq!(registry.commands.len(), 1);
+    assert_eq!(controller.lock().unwrap().bridge.state().nodes().len(), 0);
+    let saved: ServerCheckpoint =
+        serde_json::from_str(&log.load_checkpoint().unwrap().unwrap().checkpoint_json).unwrap();
+    let bridge = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &saved.integration_json,
+        log.clone(),
+        integration::GrpcNodeRouter::default(),
+        domain::TimestampMs::new(1),
+    )
+    .unwrap();
+    assert_eq!(bridge.control().node_identity_registry(), Some(&registry));
+    let mut legacy = saved;
+    legacy.schema = PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA.into();
+    assert!(application::validate_isolation_checkpoint_schema(&legacy).is_err());
+    let revoke = domain::IdentityCommand {
+        command_id: "revoke".into(),
+        node_id: register.node_id,
+        expected_revision: 1,
+        action: domain::IdentityAction::Revoke,
+    };
+    assert!(
+        route(
+            &controller,
+            &log,
+            &admin,
+            &request(
+                "POST",
+                "/v1/node-identities/commands",
+                &serde_json::to_vec(&revoke).unwrap(),
+                None
+            )
+        )
+        .await
+        .starts_with("HTTP/1.1 200")
+    );
+    assert_eq!(
+        controller
+            .lock()
+            .unwrap()
+            .bridge
+            .control()
+            .node_identity_registry()
+            .unwrap()
+            .records["deployment-node"]
+            .phase,
+        domain::IdentityPhase::Revoked
+    );
+}
+
+/// A failed checkpoint commits neither live lifecycle authority nor its shared transport projection.
+#[tokio::test]
+async fn node_identity_sql_failure_preserves_the_original_registry() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("events.sqlite3");
+    let log = state::SqliteEventLog::open(&path).unwrap();
+    let controller = identity_controller(&log);
+    let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
+    rusqlite::Connection::open(&path).unwrap().execute_batch("CREATE TRIGGER reject_identity BEFORE INSERT ON controller_checkpoint BEGIN SELECT RAISE(ABORT,'injected identity checkpoint outage'); END").unwrap();
+    let admin = OperatorPrincipal {
+        certificate: None,
+        tenants: None,
+        subject: Some("admin".into()),
+        role: Some(RECOVERY_ADMIN_ROLE.into()),
+        mtls: true,
+    };
+    let command = domain::IdentityCommand {
+        command_id: "enrol".into(),
+        node_id: "node".into(),
+        expected_revision: 0,
+        action: domain::IdentityAction::Register {
+            tenant_id: "tenant".into(),
+            domain_id: "domain".into(),
+            digest: "a".repeat(64),
+            expires_at_ms: 0,
+        },
+    };
+    let response = route(
+        &controller,
+        &log,
+        &admin,
+        &request(
+            "POST",
+            "/v1/node-identities/commands",
+            &serde_json::to_vec(&command).unwrap(),
+            None,
+        ),
+    )
+    .await;
+    assert!(response.starts_with("HTTP/1.1 409"));
+    assert_eq!(
+        before,
+        server_checkpoint_json(&controller.lock().unwrap()).unwrap()
+    );
+    assert_eq!(log.control_command_count().unwrap(), 0);
+    log.begin_batch().unwrap();
+    log.rollback_batch().unwrap();
+}
+
+/// Public tenant projections and mutations consume durable ownership, including trusted legacy migration.
+#[tokio::test]
+async fn tenant_http_scope_and_legacy_migration_preserve_plan_and_ownership() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let controller = controller(&log);
+    let plan = decode_mission_plan(
+        std::str::from_utf8(include_bytes!(
+            "../../../../scenarios/phase1-mission-v0.3/mission-plan.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let mission = plan.goal().mission_id().clone();
+    {
+        let mut live = controller.lock().unwrap();
+        let ControllerState {
+            bridge,
+            orchestrator,
+            ..
+        } = &mut *live;
+        orchestrator
+            .submit(
+                plan,
+                domain::ExecutionGroupId::new("legacy-tenant-group").unwrap(),
+                bridge.control_mut(),
+                domain::TimestampMs::new(1),
+                &domain::CorrelationId::new("legacy").unwrap(),
+                &mut log.clone(),
+            )
+            .unwrap();
+    }
+    let admin = OperatorPrincipal {
+        certificate: None,
+        tenants: Some(BTreeSet::from(["*".into()])),
+        subject: Some("test:admin".into()),
+        role: Some(RECOVERY_ADMIN_ROLE.into()),
+        mtls: true,
+    };
+    let scoped = OperatorPrincipal {
+        certificate: None,
+        tenants: Some(BTreeSet::from(["a".into()])),
+        subject: Some("test:tenant-a".into()),
+        role: Some("operator".into()),
+        mtls: true,
+    };
+    assert!(
+        route(
+            &controller,
+            &log,
+            &scoped,
+            &request("GET", &format!("/v1/missions/{mission}/tenant"), b"", None)
+        )
+        .await
+        .starts_with("HTTP/1.1 403")
+    );
+    let digest = application::tenant::source_digest(&controller.lock().unwrap(), &mission).unwrap();
+    let command = control::MissionTenantMigration {
+        command_id: "migrate-legacy".into(),
+        mission_id: mission.clone(),
+        tenant_id: "a".into(),
+        source_plan_digest: digest,
+    };
+    let bytes = serde_json::to_vec(&command).unwrap();
+    let first = route(
+        &controller,
+        &log,
+        &admin,
+        &request("POST", "/v1/tenant-migrations", &bytes, None),
+    )
+    .await;
+    assert!(first.starts_with("HTTP/1.1 200"), "{first}");
+    assert!(first.contains("execution_repeated\":false"));
+    let replay = route(
+        &controller,
+        &log,
+        &admin,
+        &request("POST", "/v1/tenant-migrations", &bytes, None),
+    )
+    .await;
+    assert_eq!(
+        first.split("\r\n\r\n").nth(1),
+        replay.split("\r\n\r\n").nth(1)
+    );
+    assert!(
+        route(
+            &controller,
+            &log,
+            &scoped,
+            &request("GET", &format!("/v1/missions/{mission}/tenant"), b"", None)
+        )
+        .await
+        .starts_with("HTTP/1.1 200")
+    );
+    let mut forged = request("GET", &format!("/v1/missions/{mission}/tenant"), b"", None);
+    let end = forged.len() - 2;
+    forged.splice(end..end, b"X-RoboGuide-Tenant: b\r\n".iter().copied());
+    assert!(
+        route(&controller, &log, &scoped, &forged)
+            .await
+            .starts_with("HTTP/1.1 403")
+    );
+    let foreign = OperatorPrincipal {
+        tenants: Some(BTreeSet::from(["b".into()])),
+        ..scoped.clone()
+    };
+    for path in [
+        format!("/v1/missions/{mission}/cancel"),
+        "/v1/groups/legacy-tenant-group/recover".into(),
+    ] {
+        assert!(
+            route(
+                &controller,
+                &log,
+                &foreign,
+                &request("POST", &path, b"{}", None)
+            )
+            .await
+            .starts_with("HTTP/1.1 403")
+        );
+    }
+    assert!(
+        controller
+            .lock()
+            .unwrap()
+            .bridge
+            .attempt_history()
+            .is_empty()
+    );
+    let saved: ServerCheckpoint =
+        serde_json::from_str(&log.load_checkpoint().unwrap().unwrap().checkpoint_json).unwrap();
+    let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &saved.integration_json,
+        log.clone(),
+        integration::GrpcNodeRouter::default(),
+        domain::TimestampMs::new(1),
+    )
+    .unwrap();
+    assert_eq!(restored.control().mission_tenant(&mission), Some("a"));
+}
+
+/// Deployment revision changes are durable and a request parsed after revocation cannot retain its old grant.
+#[tokio::test]
+async fn operator_authorization_fences_captured_principal_and_restart_rollback() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let controller = controller(&log);
+    let path = directory.path().join("authorization.json");
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let mut profile = domain::OperatorAuthorization {
+        schema_version: "roboguide.operator-authorization/v0.1".into(),
+        registry_id: "deployment".into(),
+        revision: 1,
+        grants: BTreeMap::from([(
+            digest.clone(),
+            domain::OperatorCertificateGrant {
+                principal_id: "stable-operator".into(),
+                role: RECOVERY_ADMIN_ROLE.into(),
+                tenant_ids: BTreeSet::from(["*".into()]),
+                not_before_ms: 0,
+                expires_at_ms: 0,
+                revoked: false,
+            },
+        )]),
+    };
+    std::fs::write(&path, serde_json::to_vec(&profile).unwrap()).unwrap();
+    let principal = OperatorPrincipal {
+        certificate: Some(OperatorCertificateContext {
+            digest: digest.clone(),
+            expires_at_ms: u64::MAX,
+            path: path.clone(),
+        }),
+        tenants: Some(BTreeSet::from(["*".into()])),
+        subject: Some(digest.clone()),
+        role: Some(RECOVERY_ADMIN_ROLE.into()),
+        mtls: true,
+    };
+    let first = route(
+        &controller,
+        &log,
+        &principal,
+        &request("GET", "/v1/node-identities", b"", None),
+    )
+    .await;
+    assert!(first.starts_with("HTTP/1.1 200"), "{first}");
+    assert_eq!(
+        controller
+            .lock()
+            .unwrap()
+            .bridge
+            .control()
+            .operator_authorization(),
+        Some(&profile)
+    );
+    profile.revision = 2;
+    profile.grants.get_mut(&digest).unwrap().revoked = true;
+    std::fs::write(&path, serde_json::to_vec(&profile).unwrap()).unwrap();
+    let revoked = route(
+        &controller,
+        &log,
+        &principal,
+        &request("GET", "/v1/node-identities", b"", None),
+    )
+    .await;
+    assert!(revoked.starts_with("HTTP/1.1 401"), "{revoked}");
+    let saved: ServerCheckpoint =
+        serde_json::from_str(&log.load_checkpoint().unwrap().unwrap().checkpoint_json).unwrap();
+    let mut restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &saved.integration_json,
+        log.clone(),
+        integration::GrpcNodeRouter::default(),
+        domain::TimestampMs::new(1),
+    )
+    .unwrap();
+    profile.revision = 1;
+    profile.grants.get_mut(&digest).unwrap().revoked = false;
+    assert!(
+        restored
+            .control_mut()
+            .accept_operator_authorization(Some(profile.clone()))
+            .is_err()
+    );
+    std::fs::write(&path, serde_json::to_vec(&profile).unwrap()).unwrap();
+    assert!(
+        route(
+            &controller,
+            &log,
+            &principal,
+            &request("GET", "/v1/node-identities", b"", None)
+        )
+        .await
+        .starts_with("HTTP/1.1 401")
     );
 }

@@ -8,6 +8,8 @@ RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智�
 当前停止链路冻结 operation-owned State export、当前 attempt/session、receipt、TTL、confidence 和
 deadline；Mission hold 与释放/继续门禁保留未确认所有权，旧停止记录不会自动升级为确认。
 Mission HTTP 命令与 Request 进展原子关联，提供观察与中断恢复入口，不重复原命令。
+Node 生命周期、稳定证书主体、租户匹配/承诺/恢复门禁和原生签名测量校验已接入当前软件，
+参见[身份合同](docs/development/identity-lifecycle-v0.1.md)及[F2 验收](docs/development/acceptance/2026-10-15-f2.md)。
 当前实现拓扑与证据边界见[实现拓扑](docs/architecture/v2/implementation-topology.md)。
 软件测试不构成设备停止、硬实时或机器人执行连续性的证据。
 

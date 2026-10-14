@@ -31,6 +31,7 @@ from mission.planning_world_evidence import (
     PlanningWorldEvidenceError,
 )
 from mission.request_record import DialogueTurn
+from mission.security_context import authenticated_tenant
 from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticEvidenceError
 
 MAX_GROUNDING_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -154,7 +155,11 @@ class UrllibGroundingJsonTransport:
 
     def get_json(self, url: str, timeout_seconds: float) -> JSONObject:
         """Fetch one JSON document and distinguish retryable acquisition failures."""
-        request = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+        headers = {"Accept": "application/json"}
+        tenant = authenticated_tenant()
+        if tenant is not None:
+            headers["X-RoboGuide-Tenant"] = tenant
+        request = urllib.request.Request(url, headers=headers, method="GET")
         try:
             parsed = urllib.parse.urlsplit(url)
             opener = self._tls_openers.get(f"{parsed.scheme}://{parsed.netloc}", self._opener)

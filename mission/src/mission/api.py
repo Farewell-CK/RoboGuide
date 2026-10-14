@@ -9,6 +9,8 @@ import logging
 import sqlite3
 import ssl
 import threading
+import time
+from collections.abc import Mapping
 from contextlib import nullcontext
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,6 +18,7 @@ from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, cast
 
+from mission.authorization import CertificateGrant, load_authorization
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import current_environment, load_settings
 from mission.controller import HttpMissionController
@@ -301,6 +304,37 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
             else:
                 self._send(HTTPStatus.OK, result)
             return
+        if path == "/v1/tenant-migrations":
+            if set(body) != {"request_id", "tenant_id", "source_digest"} or not all(
+                isinstance(value, str) and value.strip() for value in body.values()
+            ):
+                self._send(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "tenant migration requires request_id, tenant_id and source_digest"},
+                )
+                return
+            principal = self._principal
+            if principal is None or principal[1] != "admin":
+                self._send(
+                    HTTPStatus.FORBIDDEN, {"error": "trusted administrator migration is required"}
+                )
+                return
+            if principal[2] != "*" and body["tenant_id"] != principal[2]:
+                self._send(
+                    HTTPStatus.FORBIDDEN, {"error": "administrator scope does not grant migration"}
+                )
+                return
+            self._run(
+                lambda: self.server.engine.migrate_request_tenant(
+                    str(body["request_id"]),
+                    str(body["tenant_id"]),
+                    str(body["source_digest"]),
+                    principal[0],
+                ),
+                HTTPStatus.OK,
+                body,
+            )
+            return
         if path == "/v1/mission-requests":
             if set(body) != {"instruction"} or not isinstance(body["instruction"], str):
                 self._send(
@@ -394,6 +428,23 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
         if not self.server.role_grants(principal, required):
             self._send(HTTPStatus.FORBIDDEN, {"error": "mission principal is not authorized"})
             return False
+        selector = self.headers.get("X-RoboGuide-Tenant")
+        if selector is not None:
+            if (
+                not selector.strip()
+                or len(selector) > 128
+                or (principal[2] != "*" and principal[2] != selector)
+            ):
+                self._send(
+                    HTTPStatus.FORBIDDEN, {"error": "certificate does not delegate this tenant"}
+                )
+                return False
+            principal = (principal[0], principal[1], selector)
+        if path == "/v1/mission-requests" and principal[2] == "*":
+            self._send(
+                HTTPStatus.BAD_REQUEST, {"error": "global administrator must select a tenant"}
+            )
+            return False
         self._principal = principal
         LOG.info(
             "mission HTTP request authorized principal=%s role=%s method=%s path=%s "
@@ -431,13 +482,13 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
         try:
             owner = self.server.engine.request_tenant(request_id)
             if owner is None:
-                if principal[1] == "admin":
+                if principal[1] == "admin" and self.command == "GET":
                     return True
                 if principal[0] == "loopback:operator":
                     return True
                 self._send(HTTPStatus.FORBIDDEN, {"error": "Mission Request tenant is unbound"})
                 return False
-            if owner != principal[2] and principal[1] != "admin":
+            if owner != principal[2] and not (principal[1] == "admin" and principal[2] == "*"):
                 self._send(
                     HTTPStatus.FORBIDDEN, {"error": "Mission Request belongs to another tenant"}
                 )
@@ -461,9 +512,18 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
             return
         try:
             principal = self._principal
+            effective_tenant = principal[2] if principal is not None else "local"
+            if (
+                principal is not None
+                and principal[1] == "admin"
+                and principal[2] == "*"
+                and self._path().startswith("/v1/mission-requests/")
+            ):
+                target = self._path().removeprefix("/v1/mission-requests/").split("/")[0]
+                effective_tenant = self.server.engine.request_tenant(target) or "*"
             context = (
                 self.server.engine.authenticated_command(
-                    principal[2],
+                    effective_tenant,
                     principal[1] == "admin",
                     (principal[0], principal[2], self.command, self._path(), self._idempotency_key)
                     if self._idempotency_key is not None
@@ -474,7 +534,7 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
             )
             with context:
                 record = operation()
-                response = record.to_json()
+                response = record if isinstance(record, dict) else record.to_json()
                 try:
                     self._complete_idempotency(success, response)
                 except (MissionRequestError, sqlite3.Error, OSError) as error:
@@ -612,8 +672,9 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
         address: tuple[str, int],
         engine: MissionRequestEngine,
         max_request_bytes: int,
-        role_map: dict[str, tuple[str, str]] | None = None,
+        role_map: Mapping[str, CertificateGrant | tuple[str, str]] | None = None,
         tls_context: ssl.SSLContext | None = None,
+        authorization_path: Path | None = None,
     ) -> None:
         """Bind the configured listener and expose immutable service dependencies."""
         try:
@@ -627,13 +688,24 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
         self._connections = threading.BoundedSemaphore(128)
         self._service_lock = engine.acquire_http_service_lock()
         try:
+            if authorization_path is not None:
+                profile = load_authorization(authorization_path)
+                engine.accept_authorization(profile)
+                role_map = profile.grants
             super().__init__(address, MissionRequestHandler)
         except BaseException:
             self._service_lock.close()
             raise
         self.engine = engine
         self.max_request_bytes = max_request_bytes
-        self.role_map = role_map or {}
+        self.role_map = {
+            digest: grant
+            if isinstance(grant, CertificateGrant)
+            else CertificateGrant(digest, *grant)
+            for digest, grant in (role_map or {}).items()
+        }
+        self.authorization_path = authorization_path
+        self._authorization_lock = threading.RLock()
         self.tls_context = tls_context
         self.mtls_enabled = tls_context is not None
 
@@ -687,6 +759,8 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
         """Return the minimum role required by one Mission Service route."""
         if method == "GET" and path == "/metrics":
             return "viewer"
+        if method == "POST" and path == "/v1/tenant-migrations":
+            return "admin"
         if method == "POST" and path == "/v1/http-commands/observe":
             return "viewer"
         if method == "POST" and path == "/v1/http-commands/reconcile":
@@ -710,8 +784,24 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
             if not certificate:
                 return None
             digest = f"sha256:{hashlib.sha256(certificate).hexdigest()}"
-            role = self.role_map.get(digest)
-            return (digest, role[0], role[1]) if role is not None else None
+            now_ms = int(time.time() * 1000)
+            with self._authorization_lock:
+                if self.authorization_path is not None:
+                    try:
+                        profile = load_authorization(self.authorization_path)
+                        self.engine.accept_authorization(profile)
+                    except (OSError, ValueError, MissionRequestError, sqlite3.Error):
+                        LOG.error("authorization revision could not be committed; request fenced")
+                        return None
+                    self.role_map = profile.grants
+                grant = self.role_map.get(digest)
+                decoded = connection.getpeercert()
+                if not decoded or "notAfter" not in decoded:
+                    return None
+                certificate_expiry = int(ssl.cert_time_to_seconds(str(decoded["notAfter"])) * 1000)
+                if grant is None or not grant.active(now_ms) or now_ms >= certificate_expiry:
+                    return None
+                return (grant.principal_id, grant.role, grant.tenant_id)
         if self.mtls_enabled:
             return None
         return ("loopback:operator", "operator", "local")
@@ -752,6 +842,7 @@ def main(argv: list[str] | None = None) -> int:
         settings.max_request_bytes,
         role_map=role_map,
         tls_context=tls_context,
+        authorization_path=settings.mtls_role_map,
     )
     LOG.info("listening on %s:%s", settings.listen_host, settings.listen_port)
     try:
@@ -763,43 +854,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _load_role_map(path: Path | None) -> dict[str, tuple[str, str]]:
+def _load_role_map(path: Path | None) -> dict[str, CertificateGrant]:
     """Load and validate certificate digest to Mission role mappings."""
-    if path is None:
-        return {}
-    value = json.loads(path.read_bytes())
-    if not isinstance(value, dict) or not value or not all(isinstance(key, str) for key in value):
-        raise MissionServiceConfigError("Mission Service mTLS role map must be a non-empty object")
-    allowed = {"viewer", "submitter", "approver", "operator", "admin"}
-    result: dict[str, tuple[str, str]] = {}
-    for key, raw in value.items():
-        if (
-            not key.startswith("sha256:")
-            or len(key) != 71
-            or any(character not in "0123456789abcdef" for character in key[7:])
-        ):
-            raise MissionServiceConfigError(
-                "Mission Service mTLS role map contains an invalid digest"
-            )
-        if isinstance(raw, str):
-            role, tenant_id = raw, "default"
-        elif isinstance(raw, dict) and set(raw) == {"role", "tenant_id"}:
-            role, tenant_id = raw["role"], raw["tenant_id"]
-        else:
-            raise MissionServiceConfigError(
-                "Mission Service mTLS role map contains an invalid principal"
-            )
-        if (
-            not isinstance(role, str)
-            or role not in allowed
-            or not isinstance(tenant_id, str)
-            or not tenant_id.strip()
-        ):
-            raise MissionServiceConfigError(
-                "Mission Service mTLS role map contains an invalid role or tenant"
-            )
-        result[key] = (role, tenant_id)
-    return result
+    return load_authorization(path).grants
 
 
 def _client_tls_context(

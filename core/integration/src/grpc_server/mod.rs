@@ -28,6 +28,8 @@ pub enum NodeIdentityPolicy {
     TrustedLoopback,
     /// Require a TLS client certificate whose SHA-256 DER digest is bound to the Node identity.
     RequirePeerCertificate(BTreeMap<String, String>),
+    /// Deployment-owned revisioned certificate lifecycle with bounded rotation overlap.
+    CertificateLifecycle(crate::NodeIdentityRegistry),
 }
 
 impl NodeIdentityPolicy {
@@ -47,8 +49,38 @@ impl NodeIdentityPolicy {
         Ok(Self::RequirePeerCertificate(identities))
     }
 
+    /// Builds a validated revisioned lifecycle identity policy.
+    pub fn require_lifecycle(registry: crate::NodeIdentityRegistry) -> Result<Self, String> {
+        registry.validate().map_err(|error| error.to_string())?;
+        Ok(Self::CertificateLifecycle(registry))
+    }
+
+    /// Parses either the legacy digest map or the versioned lifecycle registry.
+    pub fn from_json(value: &str) -> Result<Self, String> {
+        let raw: serde_json::Value =
+            serde_json::from_str(value).map_err(|error| error.to_string())?;
+        if raw.get("schema").is_some() {
+            return Self::require_lifecycle(
+                serde_json::from_value(raw).map_err(|error| error.to_string())?,
+            );
+        }
+        Self::require_peer_certificates(
+            serde_json::from_value(raw).map_err(|error| error.to_string())?,
+        )
+    }
+
     /// Verifies the peer certificate digest for one negotiated Node identity.
     fn validate_peer(&self, node_id: &str, certificate_digest: Option<&str>) -> Result<(), Status> {
+        self.validate_peer_at(node_id, certificate_digest, identity_wall_time())
+    }
+
+    /// Evaluates validity using the injected Controller receive clock when production provides it.
+    fn validate_peer_at(
+        &self,
+        node_id: &str,
+        certificate_digest: Option<&str>,
+        now: u64,
+    ) -> Result<(), Status> {
         match self {
             Self::TrustedLoopback => Ok(()),
             Self::RequirePeerCertificate(identities) => {
@@ -64,8 +96,27 @@ impl NodeIdentityPolicy {
                 }
                 Ok(())
             }
+            Self::CertificateLifecycle(registry) => {
+                let digest = certificate_digest
+                    .ok_or_else(|| Status::unauthenticated("Node certificate is required"))?;
+                if registry.accepts(node_id, digest, now) {
+                    Ok(())
+                } else {
+                    Err(Status::unauthenticated(
+                        "Node certificate is revoked, expired, or not admitted",
+                    ))
+                }
+            }
         }
     }
+}
+
+/// Supplies only the compatibility constructor's local clock; production injects its receive clock.
+fn identity_wall_time() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| u64::try_from(value.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 /// Returns the SHA-256 digest of the peer's leaf certificate when TLS transport metadata exists.
@@ -132,6 +183,10 @@ pub fn memory_import_authorization_digest(
 pub enum GrpcNodeEvent {
     /// A node completed registration in a new session.
     Registered {
+        /// Actual X.509 leaf expiry captured alongside TLS attribution.
+        certificate_expires_at_ms: Option<u64>,
+        /// Actual TLS leaf attribution captured by the transport, never supplied in Register.
+        certificate_digest: Option<String>,
         /// New authoritative session identity.
         session_id: String,
         /// Server-issued lease identity.
@@ -272,6 +327,12 @@ impl GrpcNodeEventCompletion {
 /// Cloneable command router for currently connected Node sessions.
 #[derive(Clone, Default)]
 pub struct GrpcNodeRouter {
+    /// Shared Controller receive clock; compatibility constructors use the local system clock.
+    identity_clock: Arc<Mutex<Option<Arc<dyn Clock + Send + Sync>>>>,
+    /// Shared committed identity projection, rechecked for every message and actual command send.
+    identity_policy: Arc<Mutex<NodeIdentityPolicy>>,
+    /// Original TLS leaf identity attributed to each route's boot-unique session.
+    identity_peers: Arc<Mutex<BTreeMap<String, String>>>,
     /// Shared optional epoch/quorum gate checked at each actual Execute/Cancel send.
     command_fence: Arc<Mutex<Option<Arc<dyn ports::CommandDeliveryFence>>>>,
     /// Node identities mapped to their current session and outbound stream.
@@ -280,6 +341,8 @@ pub struct GrpcNodeRouter {
 
 /// Current command route for one connected node.
 struct RoutedSession {
+    /// Original actual leaf expiry; heartbeat renewal cannot extend a certificate.
+    certificate_expires_at_ms: Option<u64>,
     /// Current-process continuous receive evidence, absent until the first valid heartbeat.
     liveness_evidence: Option<domain::NodeSessionLivenessEvidence>,
     /// Shared process-clock anchor established when Registered activates the route.
@@ -309,6 +372,88 @@ struct RoutedSession {
 }
 
 impl GrpcNodeRouter {
+    /// Publishes a committed lifecycle registry without changing execution or resource ownership.
+    pub fn publish_identity_registry(
+        &self,
+        registry: crate::NodeIdentityRegistry,
+    ) -> Result<(), Status> {
+        registry
+            .validate()
+            .map_err(|error| Status::failed_precondition(error.to_string()))?;
+        let mut policy = self
+            .identity_policy
+            .lock()
+            .map_err(|_| Status::internal("identity projection unavailable"))?;
+        if !matches!(*policy, NodeIdentityPolicy::CertificateLifecycle(_)) {
+            return Err(Status::failed_precondition(
+                "dynamic identity profile is not enabled",
+            ));
+        }
+        if let NodeIdentityPolicy::CertificateLifecycle(previous) = &*policy
+            && (previous.registry_id != registry.registry_id
+                || previous.records.iter().any(|(node, admitted)| {
+                    registry.records.get(node).is_none_or(|next| {
+                        next.revision < admitted.revision
+                            || (next.revision == admitted.revision && next != admitted)
+                    })
+                }))
+        {
+            return Err(Status::failed_precondition(
+                "Node identity projection rollback/conflict",
+            ));
+        }
+        *policy = NodeIdentityPolicy::CertificateLifecycle(registry);
+        Ok(())
+    }
+
+    /// Rechecks the exact TLS leaf against the current committed deployment identity projection.
+    fn validate_identity(&self, node_id: &str, session_id: &str) -> Result<(), Status> {
+        let policy = self
+            .identity_policy
+            .lock()
+            .map_err(|_| Status::internal("identity projection unavailable"))?;
+        let peers = self
+            .identity_peers
+            .lock()
+            .map_err(|_| Status::internal("identity attribution unavailable"))?;
+        self.validate_peer_policy(&policy, node_id, peers.get(session_id).map(String::as_str))
+    }
+
+    /// Checks certificate expiry on an existing route without renewing it from a heartbeat.
+    fn validate_certificate_expiry(&self, route: &RoutedSession) -> Result<(), Status> {
+        let clock = self
+            .identity_clock
+            .lock()
+            .map_err(|_| Status::internal("identity clock unavailable"))?;
+        let now = clock
+            .as_ref()
+            .map_or_else(identity_wall_time, |clock| clock.now().as_millis());
+        if route
+            .certificate_expires_at_ms
+            .is_some_and(|until| now >= until)
+        {
+            return Err(Status::unauthenticated("Node TLS certificate has expired"));
+        }
+        Ok(())
+    }
+
+    /// Binds all lifecycle validity checks to the same process receive clock as application admission.
+    fn validate_peer_policy(
+        &self,
+        policy: &NodeIdentityPolicy,
+        node_id: &str,
+        digest: Option<&str>,
+    ) -> Result<(), Status> {
+        let clock = self
+            .identity_clock
+            .lock()
+            .map_err(|_| Status::internal("identity clock unavailable"))?;
+        if let Some(clock) = clock.as_ref() {
+            policy.validate_peer_at(node_id, digest, clock.now().as_millis())
+        } else {
+            policy.validate_peer(node_id, digest)
+        }
+    }
     /// Installs one startup-owned delivery fence for every clone of this process's router.
     pub fn set_command_delivery_fence(
         &self,
@@ -454,12 +599,16 @@ impl GrpcNodeRouter {
 
     /// Returns whether one identity names the active, unexpired session for a Node.
     pub fn session_is_current(&self, node_id: &str, session_id: &str) -> Result<bool, Status> {
+        if self.validate_identity(node_id, session_id).is_err() {
+            return Ok(false);
+        }
         let sessions = self
             .sessions
             .lock()
             .map_err(|_| Status::internal("session registry unavailable"))?;
         Ok(sessions.get(node_id).is_some_and(|route| {
             route.active
+                && self.validate_certificate_expiry(route).is_ok()
                 && route.session_id == session_id
                 && route.last_heartbeat.elapsed() < route.lease_duration
         }))
@@ -540,6 +689,8 @@ impl GrpcNodeRouter {
         let route = sessions
             .get(node_id)
             .ok_or_else(|| Status::unavailable("node is not connected"))?;
+        self.validate_identity(node_id, &route.session_id)?;
+        self.validate_certificate_expiry(route)?;
         if !route.active {
             return Err(Status::unavailable("node registration is pending"));
         }
@@ -589,6 +740,8 @@ impl GrpcNodeRouter {
         let route = sessions
             .get(node_id)
             .ok_or_else(|| Status::unavailable("node is not connected"))?;
+        self.validate_identity(node_id, &route.session_id)?;
+        self.validate_certificate_expiry(route)?;
         if !route.active {
             return Err(Status::unavailable("node registration is pending"));
         }
@@ -647,6 +800,8 @@ impl GrpcNodeRouter {
         let route = sessions
             .get(node_id)
             .ok_or_else(|| Status::unavailable("node is not connected"))?;
+        self.validate_identity(node_id, &route.session_id)?;
+        self.validate_certificate_expiry(route)?;
         if !route.active {
             return Err(Status::unavailable("node registration is pending"));
         }
@@ -806,6 +961,11 @@ impl GrpcIntegrationService {
         identity_policy: NodeIdentityPolicy,
     ) -> (Self, GrpcNodeRouter) {
         let router = GrpcNodeRouter::default();
+        *router.identity_clock.lock().expect("new router clock lock") = observation.clock.clone();
+        *router
+            .identity_policy
+            .lock()
+            .expect("new router identity lock") = identity_policy.clone();
         (
             Self {
                 router: router.clone(),
@@ -839,6 +999,9 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
     ) -> Result<Response<Self::NodeSessionStream>, Status> {
         let (outbound, receiver) = mpsc::unbounded_channel();
         let certificate_digest = peer_certificate_digest(&request);
+        let certificate_expires_at_ms = request.extensions().get::<tonic::transport::server::TlsConnectInfo<tonic::transport::server::TcpConnectInfo>>()
+            .and_then(|info| info.peer_certs()).and_then(|certificates| certificates.first().cloned())
+            .map(|leaf| certificate::expires_at_ms(leaf.as_ref())).transpose()?;
         let inbound = request.into_inner();
         let router = self.router.clone();
         let events = self.events.clone();
@@ -860,6 +1023,7 @@ impl RoboGuideNodeProtocol for GrpcIntegrationService {
                     observation,
                     identity_policy,
                     certificate_digest,
+                    certificate_expires_at_ms,
                 },
             )
             .await
@@ -886,8 +1050,9 @@ async fn run_grpc_session(
 ) -> Result<(), Status> {
     let node_policy = settings.policy;
     let observation = settings.observation;
-    let identity_policy = settings.identity_policy;
+    let _startup_identity_policy = settings.identity_policy;
     let certificate_digest = settings.certificate_digest;
+    let certificate_expires_at_ms = settings.certificate_expires_at_ms;
     let lease_policy = node_policy.lease_policy();
     let first = inbound
         .next()
@@ -896,7 +1061,13 @@ async fn run_grpc_session(
     let Some(NodePayload::Hello(hello)) = first.message else {
         return Err(Status::invalid_argument("first message must be Hello"));
     };
-    identity_policy.validate_peer(&hello.node_id, certificate_digest.as_deref())?;
+    {
+        let policy = router
+            .identity_policy
+            .lock()
+            .map_err(|_| Status::internal("identity projection unavailable"))?;
+        router.validate_peer_policy(&policy, &hello.node_id, certificate_digest.as_deref())?;
+    }
     if !hello
         .protocol_versions
         .iter()
@@ -971,6 +1142,7 @@ async fn run_grpc_session(
         sessions.insert(
             registration.node_id.clone(),
             RoutedSession {
+                certificate_expires_at_ms,
                 liveness_evidence: None,
                 activated_at: None,
                 session_id: session_id.clone(),
@@ -1007,6 +1179,14 @@ async fn run_grpc_session(
             .send(Err(Status::aborted("session superseded by reconnect")));
     }
     let node_id = registration.node_id.clone();
+    if let Some(digest) = &certificate_digest {
+        router
+            .identity_peers
+            .lock()
+            .map_err(|_| Status::internal("identity attribution unavailable"))?
+            .insert(session_id.clone(), digest.clone());
+    }
+    router.validate_identity(&node_id, &session_id)?;
     let registration_metadata = observation.metadata(
         registration_received,
         &node_id,
@@ -1017,6 +1197,8 @@ async fn run_grpc_session(
     let registration_result = deliver_received_fact(
         &events,
         GrpcNodeEvent::Registered {
+            certificate_expires_at_ms,
+            certificate_digest,
             session_id: session_id.clone(),
             lease_id: lease_id.clone(),
             registration,
@@ -1292,6 +1474,7 @@ fn validate_scalar_map(
     Ok(())
 }
 
+pub(crate) mod certificate;
 mod diagnostics;
 mod session;
 

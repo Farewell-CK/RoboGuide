@@ -16,6 +16,7 @@ from urllib.parse import quote, urlparse
 
 from mission.deployment_assessment import InitialOperationAssessment
 from mission.models import JSONObject, MissionPlan
+from mission.security_context import authenticated_tenant
 from mission.submission_evidence import ControllerAdmissionEvidence, ControllerSubmissionEvidence
 
 MAX_CONTROLLER_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -445,6 +446,9 @@ class HttpMissionController:
         """Issue one bounded JSON request and return error responses without retrying."""
         payload = None
         headers = {"Accept": "application/json"}
+        tenant = authenticated_tenant()
+        if tenant is not None:
+            headers["X-RoboGuide-Tenant"] = tenant
         if body is not None:
             payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
             headers["Content-Type"] = "application/json"

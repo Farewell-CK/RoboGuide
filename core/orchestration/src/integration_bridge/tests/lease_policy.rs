@@ -30,6 +30,8 @@ fn register(bridge: &mut IntegrationRuntimeBridge<InMemoryEventLog>, at: u64, le
     bridge
         .consume(
             GrpcNodeEvent::Registered {
+                certificate_digest: None,
+                certificate_expires_at_ms: None,
                 session_id: "policy-session".into(),
                 lease_id: lease.into(),
                 registration: registration(),
@@ -163,6 +165,8 @@ fn queued_health_uses_original_receive_time_and_current_decision_time() {
     bridge
         .consume_received(
             GrpcNodeEvent::Registered {
+                certificate_digest: None,
+                certificate_expires_at_ms: None,
                 session_id: "delayed-session".into(),
                 lease_id: "delayed-lease".into(),
                 registration: registration(),

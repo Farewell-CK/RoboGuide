@@ -175,6 +175,8 @@ impl ControlPlane {
         requirement: &TaskRequirement,
         timestamp: TimestampMs,
     ) -> Result<Vec<RoleCandidateDiagnostics>, ControlError> {
+        let scoped = self.tenant_state(state, requirement.mission_id());
+        let state = &scoped;
         if mission.goal().mission_id() != requirement.mission_id()
             || mission.binding_semantics().requires_physical_entities()
             || self
@@ -296,6 +298,8 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CandidateSet, ControlError> {
+        let scoped = self.tenant_state(state, requirement.mission_id());
+        let state = &scoped;
         let mut roles = Vec::with_capacity(requirement.roles().len());
         for role in requirement.roles() {
             if let Some(actor_id) = role.actor_id()
@@ -391,6 +395,8 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CandidateSet, ControlError> {
+        let scoped = self.tenant_state(state, requirement.mission_id());
+        let state = &scoped;
         if mission.goal().mission_id() != requirement.mission_id() {
             return Err(ControlError::InvalidProposal(
                 "mission plan and task requirement belong to different missions".to_string(),
@@ -553,6 +559,8 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CandidateSet, ControlError> {
+        let scoped = self.tenant_state(state, requirement.mission_id());
+        let state = &scoped;
         let mut roles = Vec::with_capacity(requirement.roles().len());
         for role in requirement.roles() {
             let node_ids = state

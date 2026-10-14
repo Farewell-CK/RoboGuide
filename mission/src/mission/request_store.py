@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import sqlite3
@@ -15,12 +16,14 @@ from dataclasses import replace
 from pathlib import Path
 from typing import BinaryIO
 
+from mission.authorization import AUTHORIZATION_SCHEMA, AuthorizationProfile
 from mission.deployment_recovery import DeploymentRecoverySession
 from mission.grounding_context import GroundingContextSnapshot
 from mission.models import JSONObject
 from mission.recovery import RequestRecoveryEvidence
 from mission.rejected_draft import RejectedDraftEvidence
 from mission.request_record import MissionRequestError, MissionRequestRecord, _json_object
+from mission.security_context import HTTP_TENANT as _HTTP_TENANT
 from mission.submission_evidence import (
     COMPATIBLE_OBSERVATIONS_SCHEMAS,
     DEPLOYMENT_OBSERVATIONS_SCHEMA,
@@ -34,7 +37,6 @@ STORAGE_SCHEMA = "roboguide.mission-request-storage/v0.2"
 LEGACY_STORAGE_SCHEMA = "roboguide.mission-request-storage/v0.1"
 HTTP_IDEMPOTENCY_PENDING = "pending"
 HTTP_IDEMPOTENCY_COMPLETE = "complete"
-_HTTP_TENANT: ContextVar[tuple[str, bool] | None] = ContextVar("mission_http_tenant", default=None)
 HttpCommandIdentity = tuple[str, str, str, str, str]
 _HTTP_COMMAND: ContextVar[HttpCommandIdentity | None] = ContextVar(
     "mission_http_command", default=None
@@ -142,6 +144,14 @@ class MissionRequestStore:
         self._http_instance = str(uuid.uuid4())
         with self._connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS mission_authorization (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1), profile_id TEXT NOT NULL,
+                revision INTEGER NOT NULL, digest TEXT NOT NULL, document_json TEXT NOT NULL)"""
+            )
+            connection.execute("""CREATE TABLE IF NOT EXISTS mission_tenant_migrations (
+                request_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_digest TEXT NOT NULL,
+                authority_subject TEXT NOT NULL, accepted_at_ms INTEGER NOT NULL)""")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS mission_requests (
@@ -252,6 +262,65 @@ class MissionRequestStore:
         """Open one short-lived SQLite connection with bounded lock waiting."""
         return sqlite3.connect(self._database, timeout=30.0)
 
+    def accept_authorization(self, profile: AuthorizationProfile) -> None:
+        """Commit grants before publication, fencing rollback and attribution changes."""
+        with self._lock, self._connect() as connection:
+            prior = connection.execute(
+                "SELECT profile_id,revision,digest,document_json "
+                "FROM mission_authorization WHERE singleton=1"
+            ).fetchone()
+            if profile.profile_id is None:
+                if prior is not None:
+                    raise MissionRequestError(
+                        "revisioned authorization cannot downgrade to a static map"
+                    )
+                return
+            document = json.dumps(
+                profile.document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            digest = hashlib.sha256(document.encode()).hexdigest()
+            if prior is not None:
+                if (
+                    prior[0] != profile.profile_id
+                    or int(prior[1]) > profile.revision
+                    or int(prior[1]) == profile.revision
+                    and prior[2] != digest
+                ):
+                    raise MissionRequestError("authorization profile rollback or revision conflict")
+                previous = json.loads(str(prior[3]))
+                if previous.get("schema_version") != AUTHORIZATION_SCHEMA:
+                    raise MissionRequestError("stored authorization schema is invalid")
+                for certificate, grant in previous["grants"].items():
+                    current = profile.grants.get(certificate)
+                    if current is None:
+                        raise MissionRequestError(
+                            "retained certificate grants must be revoked, not removed"
+                        )
+                    if (
+                        current.principal_id != grant["principal_id"]
+                        or current.tenant_id != grant["tenant_id"]
+                    ):
+                        raise MissionRequestError("certificate attribution is immutable")
+                    if grant.get("revoked", False) and not current.revoked:
+                        raise MissionRequestError("revoked certificates cannot be reactivated")
+                previous_tenants = {
+                    grant["principal_id"]: grant["tenant_id"]
+                    for grant in previous["grants"].values()
+                }
+                if any(
+                    previous_tenants.get(grant.principal_id, grant.tenant_id) != grant.tenant_id
+                    for grant in profile.grants.values()
+                ):
+                    raise MissionRequestError("principal tenant attribution is immutable")
+                if prior[2] == digest:
+                    return
+            connection.execute(
+                """INSERT INTO mission_authorization VALUES (1,?,?,?,?)
+                ON CONFLICT(singleton) DO UPDATE SET revision=excluded.revision,
+                digest=excluded.digest,document_json=excluded.document_json""",
+                (profile.profile_id, profile.revision, digest, document),
+            )
+
     @contextmanager
     def authenticated_command(
         self,
@@ -315,7 +384,7 @@ class MissionRequestStore:
                 if owner is not None and str(owner[0]) != tenant and not administrator:
                     raise MissionRequestError("Mission Request belongs to another tenant")
                 if owner is None:
-                    if prior is not None and not administrator and tenant != "local":
+                    if prior is not None and tenant != "local":
                         raise MissionRequestError("Mission Request tenant is unbound")
                     connection.execute(
                         "INSERT INTO mission_request_tenants VALUES (?, ?, ?)",
@@ -572,6 +641,60 @@ class MissionRequestStore:
                 (request_id,),
             ).fetchone()
         return None if row is None else str(row[0])
+
+    def migrate_request_tenant(
+        self, request_id: str, tenant_id: str, source_digest: str, subject: str, now_ms: int
+    ) -> JSONObject:
+        """Migrate one legacy Request from its original document and administrator identity."""
+        if any(
+            not value.strip() or len(value) > 256
+            for value in (request_id, tenant_id, source_digest, subject)
+        ):
+            raise MissionRequestError("tenant migration fields are invalid")
+        with self._lock, self._connect() as connection:
+            previous = connection.execute(
+                "SELECT tenant_id,source_digest,authority_subject,accepted_at_ms "
+                "FROM mission_tenant_migrations WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if previous is not None:
+                if previous[:2] != (tenant_id, source_digest):
+                    raise MissionRequestError("tenant migration conflicts")
+                subject, now_ms = str(previous[2]), int(previous[3])
+            else:
+                row = connection.execute(
+                    "SELECT document_json FROM mission_requests WHERE request_id=?", (request_id,)
+                ).fetchone()
+                if row is None:
+                    raise MissionRequestError(f"unknown Mission Request {request_id}")
+                record = _restore_record(json.loads(str(row[0])))
+                if canonical_plan_digest(record.to_json()) != source_digest:
+                    raise MissionRequestError("tenant migration source digest conflicts")
+                if (
+                    connection.execute(
+                        "SELECT tenant_id FROM mission_request_tenants WHERE request_id=?",
+                        (request_id,),
+                    ).fetchone()
+                    is not None
+                ):
+                    raise MissionRequestError("Request already has immutable tenant ownership")
+                connection.execute(
+                    "INSERT INTO mission_request_tenants VALUES (?,?,?)",
+                    (request_id, tenant_id, now_ms),
+                )
+                connection.execute(
+                    "INSERT INTO mission_tenant_migrations VALUES (?,?,?,?,?)",
+                    (request_id, tenant_id, source_digest, subject, now_ms),
+                )
+            return {
+                "schema_version": "roboguide.request-tenant-migration/v0.1",
+                "request_id": request_id,
+                "tenant_id": tenant_id,
+                "source_digest": source_digest,
+                "authority_subject": subject,
+                "accepted_at_ms": now_ms,
+                "execution_repeated": False,
+            }
 
     def begin_http_idempotency(
         self,

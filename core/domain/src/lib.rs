@@ -9,6 +9,7 @@
 
 mod actor;
 mod allocation;
+mod attestation;
 mod capability;
 mod capability_requirement;
 mod context;
@@ -24,9 +25,13 @@ mod memory;
 mod mission;
 mod mission_plan;
 mod node_health;
+mod node_identity;
+#[cfg(test)]
+mod node_identity_tests;
 mod node_liveness_evidence;
 mod node_registration;
 mod node_state;
+mod operator_authorization;
 mod physical_entity;
 mod physical_safety;
 mod resource;
@@ -44,6 +49,9 @@ pub use actor::{ActorBinding, MissionActor, MissionBindingSemantics};
 pub use allocation::{
     AllocationOwner, AllocationPhase, AllocationViewSnapshot, ResourceAllocation,
     ResourceBindingScope,
+};
+pub use attestation::{
+    AttestationChallenge, AttestationEvidence, AttestationPolicy, AttestationReport,
 };
 pub use capability::{Capability, CapabilityKind, LocalRuntime};
 pub use capability_requirement::{
@@ -84,7 +92,12 @@ pub use memory::{
     MemorySelector, MemoryVisibility,
 };
 pub use mission::{MissionGoal, MissionPlan, PlannedTask, TaskGraph};
+pub use node_identity::{
+    IdentityAction, IdentityCommand, IdentityCommandReceipt, IdentityError, IdentityPhase,
+    NODE_IDENTITY_REGISTRY_SCHEMA, NodeIdentityRecord, NodeIdentityRegistry,
+};
 pub use node_liveness_evidence::NodeSessionLivenessEvidence;
+pub use operator_authorization::{OperatorAuthorization, OperatorCertificateGrant};
 pub use task_runtime_contract::TaskRuntimeContractViolation;
 
 /// Supplies the conservative identity used only when decoding pre-v7 replica evidence.

@@ -1063,11 +1063,13 @@ dependencies = [
 name = "integration"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "domain",
  "ports",
  "prost",
  "prost-build",
  "protoc-bin-vendored",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",
@@ -1091,6 +1093,7 @@ dependencies = [
  "node-service",
  "orchestration",
  "ports",
+ "ring",
  "runtime",
  "rusqlite",
  "rustls",

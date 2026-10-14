@@ -3,6 +3,7 @@
 use sha2::{Digest as _, Sha256};
 
 mod actor_placement;
+pub(crate) mod attestation;
 mod deployment_document;
 mod deployment_feasibility;
 mod deployment_operation_admission;
@@ -19,12 +20,14 @@ mod isolation;
 #[cfg(test)]
 pub(crate) use isolation::revalidate_mission_resume;
 pub(crate) mod memory_import;
+pub(crate) mod node_identity;
 mod outcomes;
 mod persistence;
 mod physical_entity_registry;
 mod recovery;
 pub(crate) mod safety_stop;
 mod task_verifier;
+pub(crate) mod tenant;
 mod timer;
 mod verifier_source;
 #[cfg(test)]

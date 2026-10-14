@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from mission.deployment_assessment import DIAGNOSTIC_SCHEMA, InitialOperationAssessment
+from mission.deployment_assessment import DIAGNOSTIC_SCHEMAS, InitialOperationAssessment
 from mission.models import JSONObject, MissionPlan
 from mission.submission_evidence import canonical_plan_digest
 
@@ -136,7 +136,7 @@ class DeploymentRecoveryAttempt:
         ):
             raise ValueError("deployment recovery feedback is detached from input plan")
         if (
-            self.assessment.schema_version != DIAGNOSTIC_SCHEMA
+            self.assessment.schema_version not in DIAGNOSTIC_SCHEMAS
             or self.assessment.decision == "not_blocked"
             or self.assessment.reason_code
             in {

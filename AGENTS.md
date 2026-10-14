@@ -40,6 +40,18 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Desired/Committed/Reported/Observed/Derived/Belief semantics, retain source/channel/time/TTL,
   and never collapse independent sources implicitly. The Controller State API is a read-only
   federation over existing authorities.
+- ADR-0103's current identity/entry slice uses Controller wrapper v29. Control persists the Node
+  registry, stable operator grants, immutable Mission tenants and explicit source-bound migration
+  receipts; Integration consumes committed lifecycle projections and captures the actual TLS leaf
+  digest/notAfter independently of optional diagnostics. Existing sessions recheck revocation and
+  expiry on ingress/commands. Matching/Proposal/Commit/Bind/Recovery/Rebind/continuation check tenant
+  ownership; lifecycle Commit requires current State. Attestation verifies real signatures, nonce,
+  exact PCR selection/digest and original budgets, retains full evidence and rechecks on restore;
+  pinned AK admission never establishes manufacturer/physical origin. Mission Service stores
+  revisioned grants with stable principals so certificate rotation does not repeat idempotent
+  commands; legacy tenant migration is explicit. Empty identity registration is not device facts.
+  `tools/quality/check_identity_processes.py` exercises real Controller mTLS/admin/restart with zero
+  registered Nodes. State/Memory scoped content and Replica rotation/upgrade remain F3/F4/F5 work.
 - Memory is separate from realtime State. Execution, Spatial, Semantic, Experience, and Artifact
   manifests retain local ownership and use shared discovery plus selective CAS-backed exchange;
   discoverable metadata may remain content-local and no full replication is implied.

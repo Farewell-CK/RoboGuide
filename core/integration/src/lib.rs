@@ -12,6 +12,10 @@
 pub mod grpc;
 mod grpc_server;
 
+pub use domain::{
+    IdentityError, IdentityPhase, NODE_IDENTITY_REGISTRY_SCHEMA, NodeIdentityRecord,
+    NodeIdentityRegistry,
+};
 pub use grpc_server::{
     EXECUTION_SESSION_METADATA_KEY, EXECUTION_SESSION_METADATA_VALUE, GrpcIntegrationService,
     GrpcLegacyV02Service, GrpcNodeEvent, GrpcNodeEventCompletion, GrpcNodeEventDelivery,
@@ -19,3 +23,8 @@ pub use grpc_server::{
     MEMORY_IMPORT_METADATA_VALUE, NodeIdentityPolicy, memory_import_authorization_digest,
 };
 pub use ports::{NodeLeasePolicy, NodeProtocolPolicy};
+
+/// Extracts an already TLS-verified leaf's exclusive expiry; this does not verify its signature/chain.
+pub fn verified_certificate_expires_at_ms(certificate: &[u8]) -> Result<u64, tonic::Status> {
+    grpc_server::certificate::expires_at_ms(certificate)
+}

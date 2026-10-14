@@ -165,6 +165,8 @@ fn integration_facts_update_control_and_shared_state() {
     bridge
         .consume(
             GrpcNodeEvent::Registered {
+                certificate_digest: None,
+                certificate_expires_at_ms: None,
                 session_id: "session-1".to_string(),
                 lease_id: "lease-1".to_string(),
                 registration: NodeRegistration {
@@ -305,6 +307,8 @@ fn state_observations_are_evidence_without_health_or_control_side_effects() {
     bridge
         .consume(
             GrpcNodeEvent::Registered {
+                certificate_digest: None,
+                certificate_expires_at_ms: None,
                 session_id: "session-state".to_string(),
                 lease_id: "lease-state".to_string(),
                 registration: NodeRegistration {

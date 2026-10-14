@@ -371,6 +371,8 @@ fn spatial_scenario_node_configs_cover_all_mission_roles() {
         bridge
             .consume(
                 integration::GrpcNodeEvent::Registered {
+                    certificate_digest: None,
+                    certificate_expires_at_ms: None,
                     session_id: format!("spatial-session-{index}"),
                     lease_id: format!("spatial-lease-{index}"),
                     registration,

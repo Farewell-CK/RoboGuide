@@ -11,9 +11,10 @@ from dataclasses import replace
 from typing import Protocol, cast
 
 from mission.approval import ApprovalPolicy
+from mission.authorization import AuthorizationProfile
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.controller import MissionControllerError, MissionPlanSubmitter, SubmissionReceipt
-from mission.deployment_assessment import DIAGNOSTIC_SCHEMA, InitialOperationAssessment
+from mission.deployment_assessment import DIAGNOSTIC_SCHEMAS, InitialOperationAssessment
 from mission.deployment_recovery import (
     MAX_ATTEMPTS,
     MAX_DURATION_MS,
@@ -279,6 +280,10 @@ class MissionRequestEngine:
         """Hold the declared single-process SQLite writer profile for one HTTP server."""
         return self._store.acquire_http_service_lock()
 
+    def accept_authorization(self, profile: AuthorizationProfile) -> None:
+        """Fence deployment grant rollback durably before the HTTP service publishes it."""
+        self._store.accept_authorization(profile)
+
     def http_command(self, identity: HttpCommandIdentity, *, reconcile: bool = False) -> JSONObject:
         """Expose durable progress or an interrupted outcome without replaying a command."""
         if reconcile:
@@ -304,6 +309,15 @@ class MissionRequestEngine:
     def request_tenant(self, request_id: str) -> str | None:
         """Return the durable tenant owner for HTTP access control."""
         return self._store.request_tenant(request_id)
+
+    def migrate_request_tenant(
+        self, request_id: str, tenant_id: str, source_digest: str, subject: str
+    ) -> JSONObject:
+        """Serialize explicit legacy ownership migration without deliberating again."""
+        with self._locked_request(request_id):
+            return self._store.migrate_request_tenant(
+                request_id, tenant_id, source_digest, subject, self._clock()
+            )
 
     def begin_http_idempotency(
         self,
@@ -1140,7 +1154,7 @@ class MissionRequestEngine:
             self._submission_attempted(record)
             or plan is None
             or intent_assessment is None
-            or assessment.schema_version != DIAGNOSTIC_SCHEMA
+            or assessment.schema_version not in DIAGNOSTIC_SCHEMAS
             or assessment.reason_code
             in {
                 "source_unconfigured",

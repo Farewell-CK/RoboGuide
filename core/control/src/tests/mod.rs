@@ -16,4 +16,5 @@ include!("registry_provenance.rs");
 include!("initial_preferences.rs");
 
 mod continuous_liveness;
+mod node_identity;
 mod ownership_model;

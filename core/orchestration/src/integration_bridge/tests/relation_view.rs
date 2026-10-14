@@ -100,6 +100,8 @@ fn peer_readiness_is_owner_checked_expires_and_restores_fenced() {
         bridge
             .consume(
                 GrpcNodeEvent::Registered {
+                    certificate_digest: None,
+                    certificate_expires_at_ms: None,
                     session_id: format!("session-{node}"),
                     lease_id: lease.to_string(),
                     registration: registration(node, local_system, contract, kind, resources),
@@ -411,6 +413,8 @@ fn state_observation_reconnect_epoch_accepts_reset_sequence() {
     bridge
         .consume(
             GrpcNodeEvent::Registered {
+                certificate_digest: None,
+                certificate_expires_at_ms: None,
                 session_id: "session-old".to_string(),
                 lease_id: "lease-old".to_string(),
                 registration: NodeRegistration {

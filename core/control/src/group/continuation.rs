@@ -157,6 +157,7 @@ impl ControlPlane {
                 task.lifecycle(),
                 TaskExecutionLifecycle::Ready | TaskExecutionLifecycle::Active
             ) || task.coupling_mode() != ExecutionCouplingMode::Independent
+                || !self.node_tenant_allowed(command.mission_id(), command.node_id())
                 || !self.node_is_eligible_for_role_operation(
                     state,
                     command.node_id(),

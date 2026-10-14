@@ -7,6 +7,8 @@
 ```mermaid
 flowchart TB
   Client[证书主体 / tenant / 幂等键] --> MI[Mission Service / MI / Request SQL]
+  ID[Control 持久身份 / 授权 revision / tenant / 测量] --> Entry
+  ID --> PROTO
   MI --> Entry[Controller 用户与高权限入口]
   Entry --> ORCH[Orchestration / DAG / Mission hold]
   ORCH --> CTRL[Control / commitment / binding / calendar]
@@ -43,3 +45,5 @@ Local EAIOS 掌握。SoftwareProcess、测试合成观察和设备观察的证�
 
 当前停止软件门禁见 ADR-0102。完整数据记录可由
 `GET /v1/executions/{execution_id}/safety-stop` 检查；这个查询不刷新 TTL 或 stop deadline。
+身份与 tenant 权威的当前调用链见 [ADR-0103](../../decisions/0103-http-command-reconciliation-and-node-identity-lifecycle.md)
+及[身份合同](../../development/identity-lifecycle-v0.1.md)；证书登记不会增加设备 inventory。

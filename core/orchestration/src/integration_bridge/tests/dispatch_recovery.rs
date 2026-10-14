@@ -15,6 +15,8 @@ fn checkpoint_restore_is_conservative_across_process_boundary() {
     bridge
         .consume(
             GrpcNodeEvent::Registered {
+                certificate_digest: None,
+                certificate_expires_at_ms: None,
                 session_id: "session-old".to_string(),
                 lease_id: "lease-old".to_string(),
                 registration: NodeRegistration {

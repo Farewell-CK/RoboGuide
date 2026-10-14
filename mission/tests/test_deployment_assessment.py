@@ -442,3 +442,39 @@ def test_diagnostic_feedback_is_closed_bound_and_backward_compatible(tmp_path: P
         CandidateDiagnostics.from_json(raw)
     with pytest.raises(ValueError, match="v0.2"):
         replace(upgraded, schema_version="roboguide.initial-operation-assessment/v0.1")
+
+
+def test_identity_exclusion_requires_its_versioned_contract(tmp_path: Path) -> None:
+    """Retain identity rejection without relabelling it as a capability failure in old codecs."""
+    from mission.deployment_assessment import IDENTITY_DIAGNOSTIC_SCHEMA
+
+    record = _engine(
+        tmp_path, FakeInterpreter([_assessment()]), FakePlanner(), AssessingController([])
+    ).create("declared work")
+    assert record.plan is not None
+    original = feedback(record.plan)
+    role = original.roles[0]
+    report = CandidateDiagnostics(role.task_id, role.role_id, 1, 0, (("identity_unavailable", 1),))
+    unavailable = replace(
+        original,
+        decision="unavailable",
+        reason_code="current_candidates_unavailable",
+        checked_combinations=0,
+        roles=(),
+    )
+    with pytest.raises(ValueError, match="v0.3"):
+        replace(unavailable, schema_version=DIAGNOSTIC_SCHEMA, candidate_diagnostics=(report,))
+    modern = replace(
+        unavailable, schema_version=IDENTITY_DIAGNOSTIC_SCHEMA, candidate_diagnostics=(report,)
+    )
+    assert InitialOperationAssessment.from_json(modern.to_json()) == modern
+    assert modern.matches_plan(record.plan)
+    schema = json.loads(
+        Path(
+            "contracts/mission/initial-operation-assessment-v0.3/assessment.schema.json"
+        ).read_text()
+    )
+    assert (
+        "identity_unavailable"
+        in schema["$defs"]["candidate_diagnostics"]["properties"]["exclusions"]["properties"]
+    )

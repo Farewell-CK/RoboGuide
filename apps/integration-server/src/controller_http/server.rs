@@ -18,6 +18,12 @@ use std::io::BufReader;
 use std::sync::Arc;
 use tokio_rustls::TlsAcceptor;
 
+#[path = "operator_authorization.rs"]
+mod authorization;
+use authorization::{
+    OperatorCertificateContext, load_grants, refresh_principal, synchronize_authority,
+};
+
 #[cfg(test)]
 #[path = "operator_tests.rs"]
 mod operator_tests;
@@ -28,6 +34,12 @@ const RECOVERY_ADMIN_ROLE: &str = "recovery-admin";
 /// Authenticated operator context attached to one HTTP connection.
 #[derive(Debug, Clone, Default)]
 struct OperatorPrincipal {
+    /// Original TLS leaf and trusted deployment path, if this is a real mTLS connection.
+    certificate: Option<OperatorCertificateContext>,
+    /// Certificate-configured tenant delegation; None is the explicit trusted local/test profile.
+    tenants: Option<BTreeSet<String>>,
+    /// Certificate-derived audit subject; absent only in explicitly trusted local mode.
+    subject: Option<String>,
     /// Role selected solely by a certificate map or explicit loopback deployment configuration.
     role: Option<String>,
     /// Whether the connection completed the configured mutual-TLS handshake.
@@ -54,6 +66,125 @@ fn operator_role(request: &ControlHttpRequest, principal: &OperatorPrincipal) ->
     }
 }
 
+/// Resolves a tenant selector only within certificate-configured delegation; headers never grant scope.
+fn authorized_tenant(
+    request: &ControlHttpRequest,
+    principal: &OperatorPrincipal,
+) -> Result<Option<String>, String> {
+    let requested = request.headers.get("x-roboguide-tenant").cloned();
+    if requested
+        .as_ref()
+        .is_some_and(|tenant| tenant.trim().is_empty() || tenant.len() > 128)
+    {
+        return Err("tenant selector is invalid".into());
+    }
+    let Some(allowed) = &principal.tenants else {
+        if requested.as_deref() == Some("local") {
+            return Ok(None);
+        }
+        return Ok(requested);
+    };
+    if allowed.contains("*") {
+        return Ok(requested);
+    }
+    let tenant = requested
+        .or_else(|| {
+            (allowed.len() == 1).then(|| allowed.iter().next().expect("one tenant").clone())
+        })
+        .ok_or("certificate delegation requires one explicit tenant selector")?;
+    if !allowed.contains(&tenant) {
+        return Err("certificate does not authorize this tenant".into());
+    }
+    Ok(Some(tenant))
+}
+
+/// Enforces persisted tenant ownership before any read, cancel, resume, recovery or mutation.
+fn authorize_tenant_path(
+    controller: &ControllerState,
+    tenant: Option<&str>,
+    path: &str,
+) -> Result<(), String> {
+    let Some(tenant) = tenant else {
+        return Ok(());
+    };
+    if path == "/metrics" {
+        return Err("global metrics require global delegation".into());
+    }
+    if path.starts_with("/v1/")
+        && !matches!(
+            path,
+            "/v1/missions" | "/v1/inventory" | "/v1/node-identities"
+        )
+        && !path.starts_with("/v1/missions/")
+        && !path.starts_with("/v1/executions/")
+        && !path.starts_with("/v1/groups/")
+    {
+        return Err("global projection requires explicit global delegation".into());
+    }
+    let scope = if let Some(suffix) = path.strip_prefix("/v1/missions/") {
+        if suffix == "assess-initial-support" {
+            return Ok(());
+        }
+        let id = suffix
+            .split('/')
+            .next()
+            .ok_or("Mission path has no identity")?;
+        domain::MissionId::new(id).ok()
+    } else if let Some(suffix) = path.strip_prefix("/v1/executions/") {
+        let id = suffix
+            .split('/')
+            .next()
+            .ok_or("execution path has no identity")?;
+        controller
+            .bridge
+            .attempt_history()
+            .into_iter()
+            .find(|attempt| attempt.execution_id() == id)
+            .map(|attempt| attempt.command().mission_id().clone())
+    } else if let Some(suffix) = path.strip_prefix("/v1/groups/") {
+        let id = suffix
+            .split('/')
+            .next()
+            .ok_or("Group path has no identity")?;
+        controller
+            .orchestrator
+            .mission_ids()
+            .into_iter()
+            .find(|mission| {
+                controller
+                    .orchestrator
+                    .execution(mission)
+                    .is_some_and(|execution| execution.group_id().as_str() == id)
+            })
+    } else {
+        None
+    };
+    if let Some(mission) = scope
+        && controller.orchestrator.execution(&mission).is_some()
+        && controller.bridge.control().mission_tenant(&mission) != Some(tenant)
+    {
+        return Err("Mission belongs to another tenant or lacks trusted migration".into());
+    }
+    if matches!(
+        path,
+        "/v1/events"
+            | "/v1/recovery"
+            | "/v1/execution-attempts"
+            | "/v1/scheduling-reservations"
+            | "/v1/maintenance/archive"
+            | "/v1/memory/imports"
+            | "/v1/attestation/challenges"
+            | "/v1/attestation/evidence"
+            | "/v1/node-identities/commands"
+    ) {
+        return Err(
+            "global administration/diagnostics require an explicitly delegated global principal"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 /// Central fail-closed route authorization; the immutable Mission contract remains independently checked.
 fn authorize_operator_request(
     request: &ControlHttpRequest,
@@ -66,6 +197,9 @@ fn authorize_operator_request(
         ("POST", "/v1/missions") => 1,
         ("POST", "/v1/maintenance/archive") => 2,
         ("POST", "/v1/memory/imports") => 2,
+        ("POST", "/v1/node-identities/commands") => 2,
+        ("POST", "/v1/tenant-migrations") => 2,
+        ("POST", "/v1/attestation/challenges" | "/v1/attestation/evidence") => 2,
         ("POST", path)
             if path.starts_with("/v1/missions/")
                 && [
@@ -131,6 +265,9 @@ fn local_operator_principal(
         );
     }
     Ok(OperatorPrincipal {
+        certificate: None,
+        tenants: None,
+        subject: None,
         role: Some(
             if enabled {
                 RECOVERY_ADMIN_ROLE
@@ -149,7 +286,17 @@ struct OperatorTlsProfile {
     /// Rustls acceptor requiring a client certificate signed by the configured CA.
     acceptor: TlsAcceptor,
     /// Digest-to-role mapping; the wire certificate never grants a role by itself.
-    roles: Arc<BTreeMap<String, String>>,
+    role_map_path: std::path::PathBuf,
+}
+
+/// Deployment-only grant; request headers may select within this scope but cannot grant it.
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OperatorGrant {
+    /// Authorized role.
+    role: String,
+    /// Explicit tenant delegation; global wildcard requires recovery administrator authority.
+    tenant_ids: BTreeSet<String>,
 }
 
 impl OperatorTlsProfile {
@@ -167,13 +314,23 @@ impl OperatorTlsProfile {
             .first()
             .ok_or("operator mTLS peer certificate chain is empty")?;
         let digest = format!("sha256:{:x}", Sha256::digest(certificate.as_ref()));
-        let role = self
-            .roles
+        let (roles, _) = load_grants(&self.role_map_path)?;
+        let role = roles
             .get(&digest)
             .cloned()
             .ok_or("operator certificate is not authorized")?;
         Ok(OperatorPrincipal {
-            role: Some(role),
+            certificate: Some(OperatorCertificateContext {
+                expires_at_ms: integration::verified_certificate_expires_at_ms(
+                    certificate.as_ref(),
+                )
+                .map_err(|error| error.to_string())?,
+                digest: digest.clone(),
+                path: self.role_map_path.clone(),
+            }),
+            tenants: Some(role.tenant_ids),
+            subject: Some(digest),
+            role: Some(role.role),
             mtls: true,
         })
     }
@@ -236,22 +393,7 @@ fn load_operator_tls(
     for certificate in ca {
         roots.add(certificate)?;
     }
-    let roles: BTreeMap<String, String> = serde_json::from_slice(&std::fs::read(role_map_path)?)?;
-    if roles.is_empty()
-        || roles
-            .values()
-            .any(|role| !matches!(role.as_str(), "viewer" | "operator" | "recovery-admin"))
-        || roles.keys().any(|digest| {
-            !digest.strip_prefix("sha256:").is_some_and(|hex| {
-                hex.len() == 64
-                    && hex
-                        .bytes()
-                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-            })
-        })
-    {
-        return Err("operator mTLS role map has an invalid digest or role".into());
-    }
+    load_grants(role_map_path)?;
     let _ = rustls::crypto::ring::default_provider().install_default();
     let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots)).build()?;
     let server = rustls::ServerConfig::builder()
@@ -259,7 +401,7 @@ fn load_operator_tls(
         .with_single_cert(server_cert, server_key)?;
     Ok(OperatorTlsProfile {
         acceptor: TlsAcceptor::from(Arc::new(server)),
-        roles: Arc::new(roles),
+        role_map_path: role_map_path.into(),
     })
 }
 /// Serves the local Phase 1 Mission and operator diagnostics API.
@@ -272,8 +414,14 @@ pub(crate) async fn serve_http(
     deployment_feasibility: Option<Arc<DeploymentFeasibility>>,
     verifier_feed: Option<Arc<TaskVerifierFeed>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let listener = tokio::net::TcpListener::bind(address).await?;
     let operator_tls = configured_operator_tls()?;
+    let profile = operator_tls
+        .as_ref()
+        .map(|tls| load_grants(&tls.role_map_path).map(|(_, profile)| profile))
+        .transpose()?
+        .flatten();
+    synchronize_authority(&controller, &event_log, &event_write_gate, profile)?;
+    let listener = tokio::net::TcpListener::bind(address).await?;
     let local_principal = local_operator_principal(address, operator_tls.is_some())?;
     loop {
         let (mut stream, _) = listener.accept().await?;
@@ -382,6 +530,9 @@ pub(crate) async fn handle_recovery_admin_test_connection(
         deployment_feasibility,
         verifier_feed,
         &OperatorPrincipal {
+            certificate: None,
+            tenants: None,
+            subject: Some("test:recovery-admin".into()),
             role: Some(RECOVERY_ADMIN_ROLE.into()),
             mtls: true,
         },
@@ -453,8 +604,60 @@ where
     let method = request.method.as_str();
     let target = request.target.as_str();
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let current_principal = match refresh_principal(
+        principal,
+        controller,
+        event_log,
+        event_write_gate,
+        clock.now(),
+    ) {
+        Ok(current) => current,
+        Err(error) => {
+            return write_http_response(
+                stream,
+                "401 Unauthorized",
+                serde_json::json!({"error":error}),
+            )
+            .await;
+        }
+    };
+    let principal = &current_principal;
     if let Err((status, error)) = authorize_operator_request(&request, principal, method, path) {
         return write_http_response(stream, status, serde_json::json!({"error":error})).await;
+    }
+    let tenant = match authorized_tenant(&request, principal) {
+        Ok(tenant) => tenant,
+        Err(error) => {
+            return write_http_response(
+                stream,
+                "403 Forbidden",
+                serde_json::json!({"error":error}),
+            )
+            .await;
+        }
+    };
+    let tenant_check = {
+        let live = controller
+            .lock()
+            .map_err(|_| "controller lock is poisoned")?;
+        authorize_tenant_path(&live, tenant.as_deref(), path)
+    };
+    if let Err(error) = tenant_check {
+        return write_http_response(stream, "403 Forbidden", serde_json::json!({"error":error}))
+            .await;
+    }
+    let missing_scoped_registry = tenant.is_some()
+        && method == "POST"
+        && matches!(path, "/v1/missions" | "/v1/missions/assess-initial-support")
+        && controller
+            .lock()
+            .map_err(|_| "controller lock is poisoned")?
+            .bridge
+            .control()
+            .node_identity_registry()
+            .is_none();
+    if missing_scoped_registry {
+        return write_http_response(stream,"503 Service Unavailable",serde_json::json!({"error":"tenant-scoped admission requires the lifecycle Node identity registry"})).await;
     }
     if method == "GET" && path == "/metrics" {
         let metrics = controller
@@ -485,6 +688,73 @@ where
             Ok(body) => write_http_response(stream, "202 Accepted", body).await,
             Err(error) => {
                 write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/node-identities/commands" {
+        let subject = principal
+            .subject
+            .as_deref()
+            .unwrap_or("trusted-loopback:recovery-admin");
+        let result = application::node_identity::submit(
+            controller,
+            event_log,
+            event_write_gate,
+            clock,
+            &request.body,
+            subject,
+        );
+        return match result {
+            Ok(body) => write_http_response(stream, "200 OK", body).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error": error}))
+                    .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/tenant-migrations" {
+        let result = application::tenant::migrate(
+            controller,
+            event_log,
+            event_write_gate,
+            clock,
+            request_body.as_bytes(),
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("loopback:recovery-admin"),
+        );
+        return match result {
+            Ok(receipt) => write_http_response(stream, "200 OK", receipt).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "POST"
+        && matches!(
+            path,
+            "/v1/attestation/challenges" | "/v1/attestation/evidence"
+        )
+    {
+        let result = application::attestation::submit(
+            controller,
+            event_log,
+            event_write_gate,
+            clock,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin"),
+            path.ends_with("/challenges"),
+        );
+        return match result {
+            Ok(body) => write_http_response(stream, "200 OK", body).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error": error}))
                     .await
             }
         };
@@ -533,6 +803,33 @@ where
                 .map_err(|_| "controller lock is poisoned")?;
             ("200 OK", recovery_view(&controller, clock.now()))
         }
+        ("GET", "/v1/node-identities") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            let mut registry = live.bridge.control().node_identity_registry().cloned();
+            if let (Some(registry), Some(tenant)) = (&mut registry, tenant.as_deref()) {
+                // The retired-leaf ledger is global administrative evidence, not tenant discovery.
+                registry.retired_digests.clear();
+                registry
+                    .records
+                    .retain(|_, identity| identity.tenant_id == tenant);
+                registry
+                    .commands
+                    .retain(|_, command| registry.records.contains_key(&command.node_id));
+                registry
+                    .attestation_challenges
+                    .retain(|_, challenge| registry.records.contains_key(&challenge.node_id));
+            }
+            (
+                "200 OK",
+                serde_json::json!({
+                    "schema_version": "roboguide.node-identity-view/v0.1",
+                    "registry": registry,
+                    "physical_identity": "HardwareEvidencePending",
+                }),
+            )
+        }
         ("GET", path) if path.starts_with("/v1/executions/") && path.ends_with("/safety-stop") => {
             let execution_id = path
                 .trim_start_matches("/v1/executions/")
@@ -560,10 +857,30 @@ where
             let controller = controller
                 .lock()
                 .map_err(|_| "controller lock is poisoned")?;
-            (
-                "200 OK",
-                inventory_json(controller.bridge.state(), clock.now()),
-            )
+            let mut view = inventory_json(controller.bridge.state(), clock.now());
+            if let Some(tenant) = tenant.as_deref()
+                && let Some(nodes) = view
+                    .get_mut("nodes")
+                    .and_then(serde_json::Value::as_array_mut)
+            {
+                nodes.retain(|node| {
+                    node.get("node_id")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|id| {
+                            controller
+                                .bridge
+                                .control()
+                                .node_identity_registry()
+                                .is_some_and(|registry| {
+                                    registry
+                                        .records
+                                        .get(id)
+                                        .is_some_and(|identity| identity.tenant_id == tenant)
+                                })
+                        })
+                });
+            }
+            ("200 OK", view)
         }
         ("GET", "/v1/state/providers") => {
             let controller = controller
@@ -759,13 +1076,30 @@ where
                     .await;
                 }
             };
+            let mut scoped_control = {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned")?;
+                live.bridge.control().clone()
+            };
+            if let Err(error) = scoped_control.register_mission_tenant(
+                plan.goal().mission_id().clone(),
+                tenant.as_deref().unwrap_or("local"),
+            ) {
+                return write_http_response(
+                    stream,
+                    "403 Forbidden",
+                    serde_json::json!({"error":error.to_string()}),
+                )
+                .await;
+            }
             let live = controller
                 .lock()
                 .map_err(|_| "controller lock is poisoned")?;
             let assessment = match deployment_feasibility {
                 Some(source) => source.assess_initial_plan(
                     &plan,
-                    live.bridge.control(),
+                    &scoped_control,
                     live.bridge.state(),
                     clock.now(),
                     live.orchestrator.mission_ids().is_empty(),
@@ -779,6 +1113,22 @@ where
                 ),
             };
             ("200 OK", assessment)
+        }
+        ("GET", path) if path.starts_with("/v1/missions/") && path.ends_with("/tenant") => {
+            let mission = domain::MissionId::new(
+                path.trim_start_matches("/v1/missions/")
+                    .trim_end_matches("/tenant"),
+            )?;
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            match application::tenant::source_digest(&live, &mission) {
+                Ok(digest) => (
+                    "200 OK",
+                    serde_json::json!({"mission_id":mission,"tenant_id":live.bridge.control().mission_tenant(&mission),"source_plan_digest":digest}),
+                ),
+                Err(error) => ("404 Not Found", serde_json::json!({"error":error})),
+            }
         }
         ("POST", "/v1/missions") => {
             let plan = match decode_mission_plan(request_body) {
@@ -861,6 +1211,13 @@ where
                         orchestrator,
                         ..
                     } = &mut candidate;
+                    bridge
+                        .control_mut()
+                        .register_mission_tenant(
+                            mission_id.clone(),
+                            tenant.as_deref().unwrap_or("local"),
+                        )
+                        .map_err(|error| error.to_string())?;
                     let first_mission = orchestrator.mission_ids().is_empty();
                     let eligibility = deployment_feasibility
                         .map(|snapshot| snapshot.restrictions_for_plan(&plan, &group_id))

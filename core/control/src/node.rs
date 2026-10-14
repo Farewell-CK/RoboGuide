@@ -14,6 +14,8 @@ use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter};
 pub enum CandidateExclusionReason {
     /// There is no registration in the supplied State view.
     RegistrationMissing,
+    /// The durable Node identity is absent, revoked or expired.
+    IdentityUnavailable,
     /// Reported health does not permit scheduling.
     HealthUnschedulable,
     /// Reported health has expired at the decision's receive-relative time.
@@ -116,6 +118,11 @@ impl ControlPlane {
                 "lease node does not match registration node".to_string(),
             ));
         }
+        if !self.identity_registration_allowed(registration.node_id(), timestamp) {
+            return Err(ControlError::InvalidLease(
+                "Node identity is absent, revoked or expired".into(),
+            ));
+        }
         if !lease.is_active_at(timestamp) {
             return Err(ControlError::LeaseExpired {
                 node_id: registration.node_id().clone(),
@@ -164,6 +171,11 @@ impl ControlPlane {
             .node(&node_id)
             .cloned()
             .ok_or_else(|| ControlError::UnknownNode(node_id.clone()))?;
+        if !self.identity_is_eligible(&node_id, timestamp) {
+            return Err(ControlError::InvalidLease(
+                "Node identity is absent, revoked or expired".into(),
+            ));
+        }
         let lease = self
             .leases
             .get(&node_id)
@@ -362,7 +374,9 @@ impl ControlPlane {
         let Some(snapshot) = state.node(node_id) else {
             return Some(CandidateExclusionReason::RegistrationMissing);
         };
-        if !snapshot.reported_status().health().is_schedulable() {
+        if !self.identity_is_eligible(node_id, timestamp) {
+            Some(CandidateExclusionReason::IdentityUnavailable)
+        } else if !snapshot.reported_status().health().is_schedulable() {
             Some(CandidateExclusionReason::HealthUnschedulable)
         } else if !is_fresh_at(
             snapshot.reported_status_received_at(),

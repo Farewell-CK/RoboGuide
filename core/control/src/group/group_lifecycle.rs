@@ -413,6 +413,14 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<RecoveryOutcome, ControlError> {
+        if !self.node_tenant_allowed(
+            committed.task_ref().mission_id(),
+            committed.replacement_node_id(),
+        ) {
+            return Err(ControlError::InvalidProposal(
+                "recovery binding crosses tenant authority".into(),
+            ));
+        }
         let group = self
             .groups
             .get(committed.group_id())

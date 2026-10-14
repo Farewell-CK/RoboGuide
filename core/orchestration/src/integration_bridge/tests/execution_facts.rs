@@ -123,6 +123,8 @@ fn readiness_update_changes_later_control_matching() {
     bridge
         .consume(
             GrpcNodeEvent::Registered {
+                certificate_digest: None,
+                certificate_expires_at_ms: None,
                 session_id: "session-a".to_string(),
                 lease_id: "lease-a".to_string(),
                 registration: wire_registration(false),
@@ -262,6 +264,8 @@ fn capability_profile_attributes_reach_control_matching() {
     bridge
         .consume(
             GrpcNodeEvent::Registered {
+                certificate_digest: None,
+                certificate_expires_at_ms: None,
                 session_id: "session-arm".to_string(),
                 lease_id: "lease-arm".to_string(),
                 registration,

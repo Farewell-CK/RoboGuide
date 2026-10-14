@@ -47,6 +47,8 @@ fn progress_state_batch_requires_registered_operation_owner() {
     bridge
         .consume(
             GrpcNodeEvent::Registered {
+                certificate_digest: None,
+                certificate_expires_at_ms: None,
                 session_id: "s1".into(),
                 lease_id: "l1".into(),
                 registration,

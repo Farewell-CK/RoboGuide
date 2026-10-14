@@ -306,23 +306,47 @@ pub(crate) fn flush_unisolated_commands(
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
     let missions: Vec<serde_json::Value> =
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
+    let integration: serde_json::Value =
+        serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
     if saved.schema != SERVER_CHECKPOINT_SCHEMA
-        && (missions.iter().any(|mission| {
-            mission
-                .get("isolation")
-                .and_then(|hold| hold.get("source"))
-                .and_then(serde_json::Value::as_str)
-                == Some("SafetyStop")
-        }) || saved
-            .safety_stops
-            .values()
-            .any(|purpose| purpose.is_current_authority()))
+        && integration.get("control").is_some_and(|control| {
+            ["node_identity_registry", "operator_authorization"]
+                .iter()
+                .any(|key| {
+                    control
+                        .get(key)
+                        .is_some_and(|authority| !authority.is_null())
+                })
+                || ["mission_tenants", "tenant_migrations"].iter().any(|key| {
+                    control
+                        .get(key)
+                        .and_then(serde_json::Value::as_object)
+                        .is_some_and(|authority| !authority.is_empty())
+                })
+        })
+    {
+        return Err("legacy wrapper contains identity/tenant lifecycle authority".into());
+    }
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
+    ) && (missions.iter().any(|mission| {
+        mission
+            .get("isolation")
+            .and_then(|hold| hold.get("source"))
+            .and_then(serde_json::Value::as_str)
+            == Some("SafetyStop")
+    }) || saved
+        .safety_stops
+        .values()
+        .any(|purpose| purpose.is_current_authority()))
     {
         return Err("legacy wrapper contains typed stop authority".into());
     }
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
     ) {
@@ -359,6 +383,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
             | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
@@ -376,6 +401,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
             | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA

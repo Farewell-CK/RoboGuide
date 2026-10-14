@@ -16,8 +16,11 @@ from typing import cast
 
 import pytest
 from mission.api import MissionRequestHttpServer, _build_mtls_context, _load_role_map
+from mission.authorization import AUTHORIZATION_SCHEMA
 from mission.models import JSONObject
+from mission.requests import MissionRequestError
 from mission.service_config import load_service_settings
+from mission.submission_evidence import canonical_plan_digest
 from test_requests import (
     FakeController,
     FakeInterpreter,
@@ -206,6 +209,145 @@ def test_mtls_identity_tenant_forgery_and_slow_handshake(tmp_path: Path) -> None
             )  # noqa: S310
     finally:
         slow.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_rotation_preserves_command_identity_and_revocation_is_durable(tmp_path: Path) -> None:
+    """Rotate actual TLS leaves without repeating a command, then fence revocation and rollback."""
+    directory = tmp_path / "pki"
+    digests = _pki(directory)
+    profile_path = tmp_path / "authorization.json"
+    grants: dict[str, JSONObject] = {
+        digests[name]: {"principal_id": "stable-user", "role": "operator", "tenant_id": "a"}
+        for name in ("tenant-a", "viewer")
+    }
+    profile = {
+        "schema_version": AUTHORIZATION_SCHEMA,
+        "profile_id": "deployment",
+        "revision": 1,
+        "grants": grants,
+    }
+    profile_path.write_text(json.dumps(profile))
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(directory / "server.crt", directory / "server.key")
+    context.load_verify_locations(directory / "ca.crt")
+    context.verify_mode = ssl.CERT_REQUIRED
+    interpreter = FakeInterpreter([_assessment()])
+    engine = _engine(tmp_path, interpreter, FakePlanner(), FakeController(_inventory()))
+    server = MissionRequestHttpServer(
+        ("127.0.0.1", 0),
+        engine,
+        65536,
+        role_map=_load_role_map(profile_path),
+        tls_context=context,
+        authorization_path=profile_path,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    endpoint = f"https://127.0.0.1:{server.server_port}"
+    request = urllib.request.Request(
+        endpoint + "/v1/mission-requests",
+        data=json.dumps({"instruction": "执行已声明的工作"}).encode(),
+        headers={"Content-Type": "application/json", "Idempotency-Key": "one-command"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(
+            request, context=_client(directory, "tenant-a"), timeout=2
+        ) as response:  # noqa: S310
+            original = json.loads(response.read())
+        with urllib.request.urlopen(
+            request, context=_client(directory, "viewer"), timeout=2
+        ) as response:  # noqa: S310
+            assert json.loads(response.read()) == original
+        assert len(interpreter.calls) == 1
+        grants[digests["tenant-a"]]["revoked"] = True
+        profile["revision"] = 2
+        profile_path.write_text(json.dumps(profile))
+        with pytest.raises(urllib.error.HTTPError) as revoked:
+            urllib.request.urlopen(request, context=_client(directory, "tenant-a"), timeout=2)  # noqa: S310
+        assert revoked.value.code == 401
+        with urllib.request.urlopen(
+            request, context=_client(directory, "viewer"), timeout=2
+        ) as response:  # noqa: S310
+            assert json.loads(response.read()) == original
+        profile["revision"] = 1
+        profile_path.write_text(json.dumps(profile))
+        with pytest.raises(urllib.error.HTTPError) as rollback:
+            urllib.request.urlopen(request, context=_client(directory, "viewer"), timeout=2)  # noqa: S310
+        assert rollback.value.code == 401
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+    with pytest.raises(MissionRequestError, match="rollback"):
+        MissionRequestHttpServer(
+            ("127.0.0.1", 0),
+            engine,
+            65536,
+            role_map=_load_role_map(profile_path),
+            tls_context=context,
+            authorization_path=profile_path,
+        )
+
+
+def test_legacy_tenant_migration_is_explicit_digest_bound_and_scope_checked(tmp_path: Path) -> None:
+    """Migrate a stored Request over mTLS without repeating deliberation or submission."""
+    directory = tmp_path / "pki"
+    digests = _pki(directory)
+    interpreter = FakeInterpreter([_assessment()])
+    engine = _engine(tmp_path, interpreter, FakePlanner(), FakeController(_inventory()))
+    record = engine.create("legacy declared work")
+    assert engine.request_tenant(record.request_id) is None
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(directory / "server.crt", directory / "server.key")
+    context.load_verify_locations(directory / "ca.crt")
+    context.verify_mode = ssl.CERT_REQUIRED
+    server = MissionRequestHttpServer(
+        ("127.0.0.1", 0),
+        engine,
+        65536,
+        role_map={digests["tenant-a"]: ("admin", "a")},
+        tls_context=context,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    endpoint = f"https://127.0.0.1:{server.server_port}"
+    body: JSONObject = {
+        "request_id": record.request_id,
+        "tenant_id": "a",
+        "source_digest": canonical_plan_digest(record.to_json()),
+    }
+
+    def migrate(document: JSONObject, key: str) -> tuple[int, JSONObject]:
+        """Send one real authenticated command and preserve its rejection for assertions."""
+        request = urllib.request.Request(
+            endpoint + "/v1/tenant-migrations",
+            data=json.dumps(document).encode(),
+            headers={"Idempotency-Key": key},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(
+                request, context=_client(directory, "tenant-a"), timeout=2
+            ) as response:  # noqa: S310
+                return response.status, cast(JSONObject, json.loads(response.read()))
+        except urllib.error.HTTPError as error:
+            return error.code, cast(JSONObject, json.loads(error.read()))
+
+    try:
+        assert migrate({**body, "tenant_id": "b"}, "foreign")[0] == 403
+        assert migrate({**body, "source_digest": "sha256:" + "0" * 64}, "wrong-source")[0] == 409
+        assert engine.request_tenant(record.request_id) is None
+        status, receipt = migrate(body, "source-bound")
+        assert status == 200 and receipt["execution_repeated"] is False
+        assert migrate(body, "source-bound") == (status, receipt)
+        assert engine.request_tenant(record.request_id) == "a"
+        assert engine.get(record.request_id).to_json() == record.to_json()
+        assert len(interpreter.calls) == 1
+    finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
