@@ -19,6 +19,18 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   source-aware State records, and generic/Spatial Memory catalog projections behind
   transport-neutral ports. Catalog metadata is rebuildable evidence; Memory blobs never live in
   State, Runtime checkpoints, or the Node Protocol.
+- ADR-0102's application stop authority freezes the exact operation-owned State export, current
+  attempt generation/session, policy and deadline. Durable Cancel receipt, terminal Cancelled and
+  independent fresh safe-state evidence are separate gates. Mission holds and release/resume gates
+  retain ownership; timer expiry works without Node input, confirmed evidence is monotonic, and
+  legacy unverified stop strings migrate to manual evidence inside a startup transaction.
+  SoftwareProcess assurance never establishes device stopping. The shared Controller wrapper
+  schema lives in `core/state`; both runnable binaries expose read-only `--application-schema`.
+- ADR-0103's Mission HTTP command journal atomically links Request saves to the exact authenticated
+  caller/tenant/method/path/key and immutable progress evidence. `/v1/http-commands/observe` and
+  `/v1/http-commands/reconcile` never re-execute create, model calls or Controller submission.
+  Interrupted outcomes remain explicitly uncertain. The local SQLite HTTP profile owns one process
+  lock; closing the server waits for its workers before releasing that lock.
 - ADR-0081 adds bounded opaque checkpoint deltas in `core/state/src/checkpoint_store.rs`.
   Exact schema/sequence/revision/digests, atomic compaction and transaction-pending cache rollback
   preserve the complete authority snapshot. Chain storage fences old binaries even for zero-event

@@ -73,6 +73,7 @@ pub(crate) fn drive_application_timer_with_clock(
         candidate.bridge.tick(now, &correlation)?;
         let mut events = event_log.clone();
         apply_runtime_events(&mut candidate, now, &correlation, &mut events)?;
+        safety_stop::tick(&mut candidate, now)?;
         begin_current_ambiguity_recoveries(&mut candidate, now, &correlation, &mut events)?;
         resume_pending_recoveries(&mut candidate, now, &correlation, &mut events)?;
         apply_pending_cancellations(&mut candidate, now, &correlation, &mut events)?;
@@ -107,6 +108,7 @@ pub(crate) fn drive_application_timer_with_clock(
             DiagnosticStage::Serialize,
             None,
         );
+        super::memory_import::prepare(&mut candidate, now);
         let checkpoint = server_checkpoint_json(&candidate)?;
         drop(serialization);
         diagnostics.value(
@@ -121,7 +123,20 @@ pub(crate) fn drive_application_timer_with_clock(
             DiagnosticStage::Save,
             None,
         );
-        event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint)?;
+        let event_sequence = event_log.current_batch_event_sequence()?;
+        let input = format!(
+            "timer:{}:verifier={}",
+            now.as_millis(),
+            verifier_feed.is_some()
+        );
+        let command = control_command_journal_entry(
+            format!("application-timer:{event_sequence}:{}", now.as_millis()),
+            Some("integration.application-timer".to_string()),
+            input.as_bytes(),
+            &checkpoint,
+            event_sequence,
+        );
+        event_log.save_checkpoint_with_command(SERVER_CHECKPOINT_SCHEMA, &checkpoint, command)?;
         drop(save);
         let commit = StageObservation::start(
             &diagnostics,
@@ -134,7 +149,11 @@ pub(crate) fn drive_application_timer_with_clock(
         let mut live = controller
             .lock()
             .map_err(|_| "controller lock is poisoned")?;
+        let has_memory_imports = !candidate.memory_imports.is_empty();
         *live = candidate;
+        if has_memory_imports {
+            super::memory_import::flush(&live, now, clock.now());
+        }
         let _outbox = StageObservation::start(
             &diagnostics,
             DiagnosticKind::Timer,

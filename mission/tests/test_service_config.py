@@ -86,6 +86,47 @@ approval_required_contracts = []
         load_service_settings(path, repository_root=tmp_path)
 
 
+def test_non_loopback_listener_requires_complete_mtls_profile(tmp_path: Path) -> None:
+    """A remotely bound Mission Service cannot silently run as an unauthenticated listener."""
+    path = tmp_path / "service.toml"
+    path.write_text(
+        """
+[service]
+listen_host = "192.0.2.10"
+listen_port = 8070
+state_db = "requests.sqlite3"
+controller_endpoint = "http://127.0.0.1:8080"
+controller_timeout_seconds = 30
+max_request_bytes = 1024
+approval_required_contracts = []
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(MissionServiceConfigError, match="non-loopback"):
+        load_service_settings(path, repository_root=tmp_path)
+
+
+def test_partial_mtls_profile_is_rejected(tmp_path: Path) -> None:
+    """A partial Mission Service mTLS declaration cannot create an ambiguous security mode."""
+    path = tmp_path / "service.toml"
+    path.write_text(
+        """
+[service]
+listen_host = "127.0.0.1"
+listen_port = 8070
+state_db = "requests.sqlite3"
+controller_endpoint = "http://127.0.0.1:8080"
+controller_timeout_seconds = 30
+max_request_bytes = 1024
+mtls_server_cert = "server.pem"
+approval_required_contracts = []
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(MissionServiceConfigError, match="mTLS requires"):
+        load_service_settings(path, repository_root=tmp_path)
+
+
 @pytest.mark.parametrize("raw", ["true", "false", '"true"', "1"])
 def test_controller_preflight_is_explicit_and_strictly_boolean(tmp_path: Path, raw: str) -> None:
     """Optional readiness cannot be silently enabled by truthy configuration values."""

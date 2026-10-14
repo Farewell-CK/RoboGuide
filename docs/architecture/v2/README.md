@@ -939,3 +939,21 @@ localization evidence 推导 `shared-spatial-reference`；它仍不解析 hazard
 V2 取代 V1.1，成为当前权威架构基线。V1.1 保存在
 [`../v1.1/README.md`](../v1.1/README.md)，用于历史比较。架构变化必须先更新
 基线，再同步总体架构图、README、PPT、论文和实现文档。
+
+## 2026-10-14 整改补充
+
+入口命令与动态 Node 身份的权威边界见 [ADR-0103](../../decisions/0103-http-command-reconciliation-and-node-identity-lifecycle.md)：
+命令进展与 Request 原子关联，恢复不重复副作用；注册表只经管理事务改变，运输层消费提交后的投影。
+
+2026-10-15 用户批准[全部非发布软件整改](../../development/roboguide-software-completion-plan-2026-10-15.md)，
+包含原先后置的运行期计划、抢占、quota、耦合交接、空间融合和 Federation。该批准不授予
+合成设备事实的权力；SoftwareComplete 与真实硬件证据分开。停止权威接入遵循
+[ADR-0102](../../decisions/0102-complete-software-remediation-and-stop-authority.md)，当前仍在实施中。
+
+[ADR-0099](../../decisions/0099-remediation-authority-transactions-and-recovery-fences.md) 将 Command Journal 纳入完整 Checkpoint 的原子提交、quorum 复制、snapshot 与恢复校验；State 仍不成为 Control 或设备副作用的重放权威。Mission HTTP 的 tenant 随首次 Request 存储提交，Artifact 证书主体的资源授权独立于 Node/session Header。Node Memory 导入使用有界 worker；Unknown 导入保持副作用恢复 fence。readiness 消费存储与 quorum 的实际状态，设备 Unknown 单独呈现 degraded。实验和物理连续性仍需独立证据。
+
+[ADR-0100](../../decisions/0100-selective-memory-import-authority.md) 定义 exact current binding 的 selective-import：Application 持久化有界 outbox/receipt，Control 与 Runtime 分别核对绑定和 attempt，Node 在本地 Execute journal 上核对消费身份。Group scope 只授予同 Group 当前参与者，不隐式授予 handoff 或自动复制。Local EAIOS 仍拥有内容语义。
+
+[ADR-0101](../../decisions/0101-relation-stop-and-explicit-safe-state-evidence.md) 要求 relation reconciliation 使用持久 Cancel outbox、Mission hold，以及 exact-session、schema、TTL 和来源受限的安全状态证据。当前 Application 只完成部分接入，Mission hold、完整证据校验、deadline 和全释放/恢复 gate 尚未闭合，RT-G9 仍未完成。Local EAIOS 的即时安全权威保持不变。
+
+当前工作树的分层剩余项和验收条件见[原审计剩余整改清单](../../development/roboguide-remediation-remaining-2026-10-14.md)。Controller v27 与 HA supervisor v26 的 composition 不一致也仍需整改；库级复制能力不能代替整套 HA 进程验收。

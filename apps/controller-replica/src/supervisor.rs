@@ -58,12 +58,13 @@ fn materialize(directory: &Path, view: &ReplicaView) -> Result<(), String> {
     {
         let log = state::SqliteEventLog::open(&temporary).map_err(|error| error.to_string())?;
         if let Some(checkpoint) = &view.checkpoint {
-            log.install_replica_view_with_history_floor(
+            log.install_replica_authority(
                 &view.events,
                 checkpoint,
                 view.history_anchor
                     .as_ref()
                     .map(|anchor| anchor.base_sequence),
+                &view.commands,
             )
             .map_err(|error| error.to_string())?;
         } else if !view.events.is_empty() {

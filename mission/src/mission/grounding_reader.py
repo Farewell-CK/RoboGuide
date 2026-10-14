@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -141,15 +142,23 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 class UrllibGroundingJsonTransport:
     """Read bounded JSON from fixed State and Memory HTTP origins."""
 
-    def __init__(self) -> None:
+    def __init__(self, tls_contexts: dict[str, ssl.SSLContext] | None = None) -> None:
         """Create a redirect-rejecting opener for all grounding reads."""
         self._opener = urllib.request.build_opener(_NoRedirectHandler())
+        self._tls_openers = {
+            origin: urllib.request.build_opener(
+                _NoRedirectHandler(), urllib.request.HTTPSHandler(context=context)
+            )
+            for origin, context in (tls_contexts or {}).items()
+        }
 
     def get_json(self, url: str, timeout_seconds: float) -> JSONObject:
         """Fetch one JSON document and distinguish retryable acquisition failures."""
         request = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
         try:
-            with self._opener.open(request, timeout=timeout_seconds) as response:
+            parsed = urllib.parse.urlsplit(url)
+            opener = self._tls_openers.get(f"{parsed.scheme}://{parsed.netloc}", self._opener)
+            with opener.open(request, timeout=timeout_seconds) as response:
                 if response.status != 200:
                     raise GroundingReadError(f"grounding endpoint returned HTTP {response.status}")
                 raw = response.read(MAX_GROUNDING_RESPONSE_BYTES + 1)

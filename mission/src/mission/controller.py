@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -299,7 +300,9 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 class HttpMissionController:
     """Use the bounded Controller HTTP API without owning execution lifecycle."""
 
-    def __init__(self, endpoint: str, timeout_seconds: float) -> None:
+    def __init__(
+        self, endpoint: str, timeout_seconds: float, tls_context: ssl.SSLContext | None = None
+    ) -> None:
         """Validate a fixed endpoint and retain bounded request settings."""
         parsed = urlparse(endpoint)
         if (
@@ -315,7 +318,14 @@ class HttpMissionController:
             raise MissionControllerError("Controller timeout must be finite and positive")
         self._endpoint = endpoint.rstrip("/")
         self._timeout_seconds = timeout_seconds
-        self._opener = urllib.request.build_opener(_NoRedirectHandler())
+        self._opener = urllib.request.build_opener(
+            _NoRedirectHandler(), urllib.request.HTTPSHandler(context=tls_context)
+        )
+
+    def readiness(self) -> bool:
+        """Check the Controller's current storage/quorum readiness without submitting work."""
+        status, decoded, _ = self._request("GET", "/readyz", None)
+        return status == 200 and decoded.get("ready") is True
 
     def inventory(self) -> InventorySnapshot:
         """Fetch and validate the current advisory Shared Node State projection."""

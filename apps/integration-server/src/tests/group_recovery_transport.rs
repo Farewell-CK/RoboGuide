@@ -411,6 +411,7 @@ async fn slow_commit_does_not_deliver_expired_continuation() {
             None,
         )
         .unwrap();
+        eprintln!("DBG timer");
         assert_eq!(
             scope
                 .fixture

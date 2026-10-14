@@ -80,7 +80,10 @@ pub(super) struct Request {
 
 impl RequestHead {
     /// Reads a bounded JSON body after the header parser has retained its prefix.
-    pub(super) async fn read_json(&mut self, stream: &mut TcpStream) -> Result<Request, HttpError> {
+    pub(super) async fn read_json<S>(&mut self, stream: &mut S) -> Result<Request, HttpError>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
         if self.content_length > MAX_JSON_BODY_BYTES {
             return Err(HttpError::too_large("JSON request body exceeds limit"));
         }
@@ -97,7 +100,7 @@ impl RequestHead {
     /// Streams the declared body into a CAS upload in bounded chunks.
     pub(super) async fn stream_body(
         &self,
-        stream: &mut TcpStream,
+        stream: &mut (impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin),
         upload: &mut ArtifactUpload,
     ) -> Result<(), HttpError> {
         let expected = usize::try_from(self.content_length)
@@ -135,7 +138,7 @@ impl RequestHead {
 
     /// Reads exactly the remaining body bytes into a bounded control-request buffer.
     pub(super) async fn read_remaining(
-        stream: &mut TcpStream,
+        stream: &mut (impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin),
         body: &mut Vec<u8>,
         expected: usize,
     ) -> Result<(), HttpError> {
@@ -162,7 +165,10 @@ impl RequestHead {
 }
 
 /// Reads and validates one HTTP request head while retaining only a small body prefix.
-pub(super) async fn read_request_head(stream: &mut TcpStream) -> Result<RequestHead, HttpError> {
+pub(super) async fn read_request_head<S>(stream: &mut S) -> Result<RequestHead, HttpError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let mut bytes = Vec::new();
     let mut chunk = [0_u8; 8192];
     loop {
@@ -328,7 +334,10 @@ pub(super) enum Response {
 
 impl Response {
     /// Writes a JSON response and closes the connection.
-    pub(super) async fn write(self, stream: &mut TcpStream) -> Result<(), HttpError> {
+    pub(super) async fn write<S>(self, stream: &mut S) -> Result<(), HttpError>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
         match self {
             Self::Json(status, body) => write_json(stream, status, &body).await,
         }
@@ -337,7 +346,7 @@ impl Response {
 
 /// Writes one JSON response with a fixed content length.
 pub(super) async fn write_json(
-    stream: &mut TcpStream,
+    stream: &mut (impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin),
     status: &str,
     body: &serde_json::Value,
 ) -> Result<(), HttpError> {

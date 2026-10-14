@@ -27,6 +27,30 @@ pub(crate) struct NodeSessionAnchor {
 }
 
 impl ControlPlane {
+    /// Returns the exact current session anchor for an application-side receipt fence.
+    pub fn current_node_session(&self, node_id: &NodeId) -> Option<&str> {
+        self.node_sessions
+            .get(node_id)
+            .filter(|session| !session.fenced)
+            .map(|session| session.session_id.as_str())
+    }
+    /// Checks a source epoch against current registration and unexpired lease without refreshing either.
+    pub fn source_session_is_current(
+        &self,
+        node_id: &NodeId,
+        session_id: &str,
+        now: TimestampMs,
+    ) -> bool {
+        self.node_sessions.get(node_id).is_some_and(|session| {
+            !session.fenced
+                && session.session_id == session_id
+                && self.leases.get(node_id).is_some_and(|lease| {
+                    lease.lease_id() == &session.lease_id
+                        && now >= lease.issued_at()
+                        && now < lease.expires_at()
+                })
+        })
+    }
     /// Associates application-accepted registration with exact process-local session and lease authority.
     pub fn register_node_session(
         &mut self,

@@ -73,6 +73,8 @@ pub(crate) fn server_checkpoint_json(
             .replication_profile()
             .map(str::to_string),
         mission_admissions: controller.mission_admissions.clone(),
+        memory_imports: controller.memory_imports.clone(),
+        safety_stops: controller.safety_stops.clone(),
         schema: SERVER_CHECKPOINT_SCHEMA.to_string(),
         integration_json,
         orchestration_json,

@@ -36,6 +36,9 @@ fn apply_selected_outcomes(
         if only_mission.is_some_and(|selected| selected != &mission_id) {
             continue;
         }
+        if safety_stop::blocks_release(controller, &mission_id) {
+            continue;
+        }
         if controller
             .orchestrator
             .execution(&mission_id)
@@ -50,6 +53,18 @@ fn apply_selected_outcomes(
             })
         {
             continue;
+        }
+        if matches!(outcome.result(), ObservedTaskExecutionResult::Failed) {
+            let group_id = controller
+                .orchestrator
+                .execution(&mission_id)
+                .ok_or("terminal outcome Mission is absent")?
+                .group_id()
+                .clone();
+            if safety_stop::has_live_group_attempts(controller, &group_id) {
+                safety_stop::admit_group_stop(controller, &group_id, timestamp, 10_000)?;
+                continue;
+            }
         }
         run_mission_transition(
             controller,
@@ -132,7 +147,8 @@ pub(crate) fn apply_pending_cancellations(
             (execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
                 && controller
                     .bridge
-                    .group_attempts_terminal(execution.group_id()))
+                    .group_attempts_terminal(execution.group_id())
+                && !safety_stop::blocks_release(controller, &mission_id))
             .then_some(mission_id)
         })
         .collect::<Vec<_>>();

@@ -1,16 +1,18 @@
 //! Formal Node Protocol v0.4 lifecycle around the generic Local Integration Engine.
 
+use crate::MemoryImportStatus;
 use crate::{EngineError, ExecuteDisposition, LocalIntegrationEngine};
 use integration::grpc::v0_4::node_message::Message as NodePayload;
 use integration::grpc::v0_4::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
 use integration::grpc::v0_4::server_message::Message as ServerPayload;
 use integration::grpc::v0_4::{
     Cancel, Capability, CapabilityProfile, ExecutionEvent, Heartbeat, Hello, LocalRuntime,
-    LocalSystemDescriptor, MemoryKind, MemoryProviderDescriptor, MemoryScopeKind, MemoryVisibility,
-    NodeMessage, NodeRegistration, OperationRef, OperationSupport, PROTOCOL_VERSION,
-    PeerChannelReadiness, ProtocolError, Register, RegistrationUpdate, Resource, ScalarValue,
-    Sensor, ServerMessage, StateExportDescriptor, StateObjectClass, StateObservation,
-    StateObservationBatch, StateSemantic,
+    LocalSystemDescriptor, MemoryImportReceipt, MemoryImportReceiptStatus, MemoryKind,
+    MemoryProviderDescriptor, MemoryScopeKind, MemoryVisibility, NodeMessage, NodeRegistration,
+    OperationRef, OperationSupport, PROTOCOL_VERSION, PeerChannelReadiness, ProtocolError,
+    Register, RegistrationUpdate, Resource, ScalarValue, Sensor, ServerMessage,
+    StateExportDescriptor, StateObjectClass, StateObservation, StateObservationBatch,
+    StateSemantic,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
@@ -32,6 +34,31 @@ const MAX_STATE_BATCH_BYTES: usize = 512 * 1024;
 pub struct NodeService {
     /// Generic local catalog, drivers, locks, journal, and workflow tasks.
     engine: LocalIntegrationEngine,
+}
+
+/// Fences interrupted provider side effects, including dropped futures and session teardown.
+struct MemoryImportGuard {
+    /// Shared local journal authority.
+    engine: LocalIntegrationEngine,
+    /// Stable selective-import identity.
+    import_id: String,
+    /// Immutable Controller command identity.
+    command_id: String,
+    /// Provider/workflow identity fence.
+    digest: String,
+}
+
+impl Drop for MemoryImportGuard {
+    /// Retains ambiguity unless a terminal outcome was already durably recorded.
+    fn drop(&mut self) {
+        let _ = self.engine.record_memory_import(
+            &self.import_id,
+            &self.command_id,
+            &self.digest,
+            MemoryImportStatus::Unknown,
+            "import processing interrupted; provider reconciliation is required",
+        );
+    }
 }
 
 impl NodeService {
@@ -140,6 +167,7 @@ impl NodeService {
             Arc::clone(&management_sequence),
         );
         let memory_task = self.spawn_memory_exports(registered.session_id.clone());
+        let mut imports = tokio::task::JoinSet::new();
         let session_result: Result<(), NodeServiceError> = async {
             loop {
                 tokio::select! {
@@ -147,12 +175,39 @@ impl NodeService {
                         let Some(message) = message.map_err(NodeServiceError::Status)? else {
                             return Ok(());
                         };
+                        if let Some(ServerPayload::MemoryImport(import)) = &message.message {
+                            if import.session_id != registered.session_id {
+                                return Err(NodeServiceError::Protocol("Memory import session differs".into()));
+                            }
+                            if imports.len() >= 4 {
+                                self.send_memory_import_receipt(
+                                    &registered.session_id, import,
+                                    MemoryImportReceiptStatus::MemoryImportRejected,
+                                    "bounded Memory import workers are busy; command was not admitted".into(),
+                                    &management_sequence, &outbound,
+                                ).await?;
+                            } else {
+                                let service = Self::new(self.engine.clone());
+                                let import = import.clone();
+                                let session = registered.session_id.clone();
+                                let sender = outbound.clone();
+                                let sequence = Arc::clone(&management_sequence);
+                                imports.spawn(async move {
+                                    service.handle_memory_import(import, &session, &sender, &sequence).await
+                                });
+                            }
+                            continue;
+                        }
                         self.handle_server_message(
                             message,
                             &registered.session_id,
                             &outbound,
                             &management_sequence,
                         ).await?;
+                    }
+                    result = imports.join_next(), if !imports.is_empty() => {
+                        result.ok_or(NodeServiceError::Closed)?
+                            .map_err(|error| NodeServiceError::Protocol(format!("Memory import worker failed: {error}")))??;
                     }
                     event = local_events.recv() => self.forward_execution_event(
                         event, &registered.session_id, &outbound,
@@ -611,6 +666,264 @@ impl NodeService {
                 "unexpected server message or session".to_string(),
             )),
         }
+    }
+
+    /// Admits and executes one Controller-authorized Memory import with a durable retry fence.
+    async fn handle_memory_import(
+        &self,
+        import: integration::grpc::v0_4::MemoryImport,
+        session_id: &str,
+        outbound: &mpsc::UnboundedSender<NodeMessage>,
+        management_sequence: &Arc<tokio::sync::Mutex<u64>>,
+    ) -> Result<(), NodeServiceError> {
+        if import.command_id != format!("memory-import-{}", import.import_id)
+            || import.consumer_provider_id.trim().is_empty()
+            || import.manifest_json.trim().is_empty()
+            || import.manifest_json.len() > integration::MAX_MEMORY_IMPORT_MANIFEST_BYTES
+            || import.mission_id.trim().is_empty()
+            || import.group_id.trim().is_empty()
+            || import.task_id.trim().is_empty()
+            || import.role_id.trim().is_empty()
+            || import.execution_id.trim().is_empty()
+        {
+            return self
+                .send_memory_import_receipt(
+                    session_id,
+                    &import,
+                    MemoryImportReceiptStatus::MemoryImportRejected,
+                    "Memory import identity or manifest is invalid".to_string(),
+                    management_sequence,
+                    outbound,
+                )
+                .await;
+        }
+        let expected = integration::memory_import_authorization_digest(
+            &import.import_id,
+            &import.command_id,
+            &import.consumer_provider_id,
+            &import.manifest_json,
+            &import.mission_id,
+            &import.group_id,
+            &import.task_id,
+            &import.role_id,
+            &import.execution_id,
+            &import.controller_epoch,
+        );
+        if import.authorization_digest != expected {
+            return self
+                .send_memory_import_receipt(
+                    session_id,
+                    &import,
+                    MemoryImportReceiptStatus::MemoryImportRejected,
+                    "Memory import authorization digest is invalid".to_string(),
+                    management_sequence,
+                    outbound,
+                )
+                .await;
+        }
+        if let Err(error) = self.engine.admit_controller_epoch(&import.controller_epoch) {
+            return self
+                .send_memory_import_receipt(
+                    session_id,
+                    &import,
+                    MemoryImportReceiptStatus::MemoryImportRejected,
+                    error.to_string(),
+                    management_sequence,
+                    outbound,
+                )
+                .await;
+        }
+        let identity_digest = match self.engine.memory_import_identity(&import) {
+            Ok(digest) => digest,
+            Err(error) => {
+                return self
+                    .send_memory_import_receipt(
+                        session_id,
+                        &import,
+                        MemoryImportReceiptStatus::MemoryImportRejected,
+                        error.to_string(),
+                        management_sequence,
+                        outbound,
+                    )
+                    .await;
+            }
+        };
+        let prepared = self.engine.prepare_memory_import(
+            &import.import_id,
+            &import.command_id,
+            &identity_digest,
+        )?;
+        if let crate::PrepareMemoryImport::Conflict(_) = prepared {
+            return self
+                .send_memory_import_receipt(
+                    session_id,
+                    &import,
+                    MemoryImportReceiptStatus::MemoryImportRejected,
+                    "Memory import identity was reused with different evidence".to_string(),
+                    management_sequence,
+                    outbound,
+                )
+                .await;
+        }
+        if let crate::PrepareMemoryImport::Existing(record) = &prepared {
+            let status = match record.status() {
+                crate::MemoryImportStatus::Completed => {
+                    MemoryImportReceiptStatus::MemoryImportCompleted
+                }
+                crate::MemoryImportStatus::Rejected => {
+                    MemoryImportReceiptStatus::MemoryImportRejected
+                }
+                crate::MemoryImportStatus::Pending => {
+                    MemoryImportReceiptStatus::MemoryImportPersisted
+                }
+                crate::MemoryImportStatus::Unknown => {
+                    MemoryImportReceiptStatus::MemoryImportUnknown
+                }
+            };
+            return self
+                .send_memory_import_receipt(
+                    session_id,
+                    &import,
+                    status,
+                    record.reason().to_string(),
+                    management_sequence,
+                    outbound,
+                )
+                .await;
+        }
+        let _guard = MemoryImportGuard {
+            engine: self.engine.clone(),
+            import_id: import.import_id.clone(),
+            command_id: import.command_id.clone(),
+            digest: identity_digest.clone(),
+        };
+        if let Err(error) = self.engine.validate_memory_consumer(&import) {
+            let reason = error.to_string();
+            self.engine.record_memory_import(
+                &import.import_id,
+                &import.command_id,
+                &identity_digest,
+                MemoryImportStatus::Rejected,
+                &reason,
+            )?;
+            return self
+                .send_memory_import_receipt(
+                    session_id,
+                    &import,
+                    MemoryImportReceiptStatus::MemoryImportRejected,
+                    reason,
+                    management_sequence,
+                    outbound,
+                )
+                .await;
+        }
+        self.send_memory_import_receipt(
+            session_id,
+            &import,
+            MemoryImportReceiptStatus::MemoryImportPersisted,
+            String::new(),
+            management_sequence,
+            outbound,
+        )
+        .await?;
+        let manifest: domain::MemoryArtifactManifest =
+            match serde_json::from_str(&import.manifest_json) {
+                Ok(manifest) => manifest,
+                Err(error) => {
+                    self.engine.record_memory_import(
+                        &import.import_id,
+                        &import.command_id,
+                        &identity_digest,
+                        crate::MemoryImportStatus::Rejected,
+                        &error.to_string(),
+                    )?;
+                    return self
+                        .send_memory_import_receipt(
+                            session_id,
+                            &import,
+                            MemoryImportReceiptStatus::MemoryImportRejected,
+                            error.to_string(),
+                            management_sequence,
+                            outbound,
+                        )
+                        .await;
+                }
+            };
+        let invocation = serde_json::json!({
+            "mission_id": import.mission_id,
+            "group_id": import.group_id,
+            "task_id": import.task_id,
+            "role_id": import.role_id,
+            "execution_id": import.execution_id,
+            "consumer_provider_id": import.consumer_provider_id,
+        });
+        let result = self
+            .engine
+            .exchange_memory(
+                &import.consumer_provider_id,
+                &manifest,
+                session_id,
+                invocation,
+            )
+            .await;
+        let (status, mut reason) = match result {
+            Ok(()) => (MemoryImportStatus::Completed, String::new()),
+            Err(error) if self.engine.memory_import_error_is_deterministic(&error) => {
+                (MemoryImportStatus::Rejected, error.to_string())
+            }
+            Err(error) => (MemoryImportStatus::Unknown, error.to_string()),
+        };
+        while reason.len() > 4_096 {
+            reason.pop();
+        }
+        self.engine.record_memory_import(
+            &import.import_id,
+            &import.command_id,
+            &identity_digest,
+            status,
+            &reason,
+        )?;
+        self.send_memory_import_receipt(
+            session_id,
+            &import,
+            match status {
+                MemoryImportStatus::Completed => MemoryImportReceiptStatus::MemoryImportCompleted,
+                MemoryImportStatus::Unknown => MemoryImportReceiptStatus::MemoryImportUnknown,
+                MemoryImportStatus::Pending | MemoryImportStatus::Rejected => {
+                    MemoryImportReceiptStatus::MemoryImportRejected
+                }
+            },
+            reason.to_string(),
+            management_sequence,
+            outbound,
+        )
+        .await
+    }
+
+    /// Sends one monotonic selective-import receipt after durable local admission/outcome.
+    async fn send_memory_import_receipt(
+        &self,
+        session_id: &str,
+        import: &integration::grpc::v0_4::MemoryImport,
+        status: MemoryImportReceiptStatus,
+        reason: String,
+        management_sequence: &Arc<tokio::sync::Mutex<u64>>,
+        outbound: &mpsc::UnboundedSender<NodeMessage>,
+    ) -> Result<(), NodeServiceError> {
+        let mut sequence = management_sequence.lock().await;
+        *sequence = sequence.saturating_add(1);
+        outbound
+            .send(NodeMessage {
+                message: Some(NodePayload::MemoryImportReceipt(MemoryImportReceipt {
+                    session_id: session_id.to_string(),
+                    sequence: *sequence,
+                    import_id: import.import_id.clone(),
+                    command_id: import.command_id.clone(),
+                    status: status as i32,
+                    reason,
+                })),
+            })
+            .map_err(|_| NodeServiceError::Closed)
     }
 
     /// Forwards local facts, recovering a lagged receiver from the journal without redispatch.

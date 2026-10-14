@@ -7,6 +7,7 @@ use domain::{
     MemorySelector, MemoryVisibility, MissionId, SpatialAnchorId,
 };
 use ports::MapCatalogReader;
+mod security;
 
 /// Opaque checkpoint schema used to prove Spatial Memory never rewrites controller content.
 const TEST_CHECKPOINT_SCHEMA: &str = "roboguide.test-controller/v1";

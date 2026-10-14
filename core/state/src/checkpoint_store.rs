@@ -3,7 +3,7 @@
 use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
+use sha2::Sha256;
 use std::collections::BTreeMap;
 
 /// Downgrade fence in the historical baseline table, including zero-event revisions.

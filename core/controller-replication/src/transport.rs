@@ -682,6 +682,10 @@ fn request_auth_digest(
 }
 
 impl state::ApplicationBatchReplicator for ReplicaFenceClient {
+    /// Binds durable command evidence to the exact supervisor-issued leader epoch.
+    fn controller_epoch(&self) -> Option<String> {
+        serde_json::to_string(&self.epoch).ok()
+    }
     /// Returns the immutable cluster/profile required by every child checkpoint.
     fn profile_identity(&self) -> &str {
         &self.profile

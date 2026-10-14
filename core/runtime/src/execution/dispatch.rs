@@ -3,6 +3,18 @@
 use super::*;
 
 impl RuntimeExecutionManager {
+    /// Returns the current logical slot's allocated generation; legacy explicit first attempts use one.
+    pub fn current_attempt_generation(
+        &self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+    ) -> Option<u64> {
+        let slot = (group_id.clone(), task_ref.clone(), role_id.clone());
+        self.active_executions
+            .contains_key(&slot)
+            .then(|| self.attempt_generations.get(&slot).copied().unwrap_or(1))
+    }
     /// Validates whether one committed execution needs a new Integration route.
     pub fn validate_dispatch(
         &self,

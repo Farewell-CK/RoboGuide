@@ -1,12 +1,15 @@
 //! Mission and operator HTTP request routing.
 
-use super::protocol::{parse_query, read_control_http_request, write_http_response};
+use super::protocol::{
+    parse_query, read_control_http_request, write_http_response, write_text_response,
+};
 use super::view::{
     inventory_json, memory_providers_json, relation_kind_name, state_providers_json,
     state_records_json,
 };
 use crate::diagnostics::StageObservation;
 use crate::*;
+use ports::SharedNodeStateReader;
 use ports::{DiagnosticHandle, DiagnosticKind, DiagnosticStage};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sha2::{Digest as _, Sha256};
@@ -62,6 +65,7 @@ fn authorize_operator_request(
         ("GET", _) | ("POST", "/v1/missions/assess-initial-support") => 0,
         ("POST", "/v1/missions") => 1,
         ("POST", "/v1/maintenance/archive") => 2,
+        ("POST", "/v1/memory/imports") => 2,
         ("POST", path)
             if path.starts_with("/v1/missions/")
                 && [
@@ -452,13 +456,105 @@ where
     if let Err((status, error)) = authorize_operator_request(&request, principal, method, path) {
         return write_http_response(stream, status, serde_json::json!({"error":error})).await;
     }
+    if method == "GET" && path == "/metrics" {
+        let metrics = controller
+            .lock()
+            .map_err(|_| "controller lock is poisoned".to_string())
+            .and_then(|live| controller_metrics(&live, event_log, clock.now()));
+        return match metrics {
+            Ok(metrics) => write_text_response(stream, "200 OK", &metrics).await,
+            Err(error) => {
+                write_http_response(
+                    stream,
+                    "503 Service Unavailable",
+                    serde_json::json!({"error": error}),
+                )
+                .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/memory/imports" {
+        let result = application::memory_import::submit(
+            controller,
+            event_log,
+            event_write_gate,
+            clock,
+            &request.body,
+        );
+        return match result {
+            Ok(body) => write_http_response(stream, "202 Accepted", body).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "GET" && path.starts_with("/v1/memory/imports/") {
+        let id = path.trim_start_matches("/v1/memory/imports/");
+        let response = controller
+            .lock()
+            .map_err(|_| "controller lock is poisoned")?
+            .memory_imports
+            .get(id)
+            .map(|intent| serde_json::to_value(intent).expect("typed durable Memory intent"));
+        return match response {
+            Some(body) => write_http_response(stream, "200 OK", body).await,
+            None => {
+                write_http_response(
+                    stream,
+                    "404 Not Found",
+                    serde_json::json!({"error":"unknown Memory import"}),
+                )
+                .await
+            }
+        };
+    }
     let (status, body) = match (method, path) {
         ("GET", "/healthz") => ("200 OK", serde_json::json!({"status": "ok"})),
+        ("GET", "/readyz") => match event_log.readiness() {
+            Ok(()) => {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned")?;
+                let unknown = live.bridge.current_unknown_attempts().len();
+                (
+                    "200 OK",
+                    serde_json::json!({"ready":true,"degraded":unknown>0,"unknown_attempts":unknown}),
+                )
+            }
+            Err(_) => (
+                "503 Service Unavailable",
+                serde_json::json!({"ready":false,"reason":"authority storage or quorum unavailable"}),
+            ),
+        },
         ("GET", "/v1/recovery") => {
             let controller = controller
                 .lock()
                 .map_err(|_| "controller lock is poisoned")?;
             ("200 OK", recovery_view(&controller, clock.now()))
+        }
+        ("GET", path) if path.starts_with("/v1/executions/") && path.ends_with("/safety-stop") => {
+            let execution_id = path
+                .trim_start_matches("/v1/executions/")
+                .trim_end_matches("/safety-stop")
+                .trim_end_matches('/');
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            match live.safety_stops.get(execution_id) {
+                Some(purpose) => (
+                    "200 OK",
+                    serde_json::json!({
+                        "schema_version": "roboguide.safety-stop-view/v0.1", "purpose": purpose,
+                        "command_receipt_is_stop_proof": false,
+                        "physical_device_validation": "HardwareEvidencePending",
+                    }),
+                ),
+                None => (
+                    "404 Not Found",
+                    serde_json::json!({"error": "stop purpose unavailable"}),
+                ),
+            }
         }
         ("GET", "/v1/inventory") => {
             let controller = controller
@@ -1363,6 +1459,20 @@ where
                 drop(clone_sample);
                 let mut events = event_log.clone();
                 let operation: Result<(), String> = (|| {
+                    let group_id = candidate
+                        .orchestrator
+                        .execution(&mission_id)
+                        .ok_or_else(|| "unknown Mission cancellation".to_string())?
+                        .group_id()
+                        .clone();
+                    application::safety_stop::admit_group_stop(
+                        &mut candidate,
+                        &group_id,
+                        now,
+                        10_000,
+                    )?;
+                    let safety_blocked =
+                        application::safety_stop::blocks_release(&candidate, &mission_id);
                     let ControllerState {
                         bridge,
                         orchestrator,
@@ -1386,7 +1496,7 @@ where
                     bridge
                         .request_group_cancellation(&group_id)
                         .map_err(|error| error.to_string())?;
-                    if bridge.group_attempts_terminal(&group_id) {
+                    if bridge.group_attempts_terminal(&group_id) && !safety_blocked {
                         orchestrator
                             .finalize_cancel(
                                 &mission_id,
@@ -1864,6 +1974,21 @@ where
                         )
                         .map_err(|error| error.to_string())?;
                 } else {
+                    let command = candidate
+                        .bridge
+                        .attempt_history()
+                        .into_iter()
+                        .find(|attempt| attempt.execution_id() == execution_id)
+                        .map(|attempt| attempt.command().clone())
+                        .ok_or_else(|| "unknown cancellation attempt".to_string())?;
+                    application::safety_stop::admit(
+                        &mut candidate,
+                        command.group_id(),
+                        command.task_ref(),
+                        command.role_id(),
+                        clock.now(),
+                        10_000,
+                    )?;
                     candidate
                         .bridge
                         .cancel(&execution_id)
@@ -1915,4 +2040,88 @@ where
         _ => ("404 Not Found", serde_json::json!({"error": "not found"})),
     };
     write_http_response(stream, status, body).await
+}
+
+/// Renders bounded process metrics without exposing instruction bodies or high-cardinality IDs.
+fn controller_metrics(
+    controller: &ControllerState,
+    event_log: &state::SqliteEventLog,
+    now: domain::TimestampMs,
+) -> Result<String, String> {
+    let missions = controller.orchestrator.mission_ids();
+    let active_missions = missions
+        .iter()
+        .filter(|mission| {
+            controller
+                .orchestrator
+                .execution(mission)
+                .is_some_and(|execution| {
+                    matches!(
+                        execution.lifecycle(),
+                        orchestration::MissionExecutionLifecycle::Accepted
+                            | orchestration::MissionExecutionLifecycle::Running
+                            | orchestration::MissionExecutionLifecycle::Cancelling
+                    )
+                })
+        })
+        .count();
+    let nodes = controller.bridge.state().nodes();
+    let unknown_attempts = controller.bridge.current_unknown_attempts().len();
+    let pending_groups = controller
+        .bridge
+        .group_recovery_ids()
+        .iter()
+        .filter(|group| {
+            matches!(
+                controller.bridge.group_recovery_disposition(group, now),
+                runtime::GroupRecoveryDisposition::AwaitingStop
+                    | runtime::GroupRecoveryDisposition::StopConfirmed
+                    | runtime::GroupRecoveryDisposition::ContinuationPrepared
+            )
+        })
+        .count();
+    let latest_sequence = event_log
+        .latest_sequence()
+        .map_err(|error| format!("event high-water unavailable: {error}"))?;
+    let journal_entries = event_log
+        .control_command_count()
+        .map_err(|error| format!("Control journal unavailable: {error}"))?;
+    let health_online = nodes
+        .iter()
+        .filter(|node| node.reported_status().health().is_schedulable())
+        .count();
+    Ok(format!(
+        "# HELP roboguide_missions_total Accepted Mission projections.\n\
+         # TYPE roboguide_missions_total gauge\n\
+         roboguide_missions_total {}\n\
+         # HELP roboguide_missions_active Active Mission executions.\n\
+         # TYPE roboguide_missions_active gauge\n\
+         roboguide_missions_active {}\n\
+         # HELP roboguide_nodes_total Registered Node projections.\n\
+         # TYPE roboguide_nodes_total gauge\n\
+         roboguide_nodes_total {}\n\
+         # HELP roboguide_nodes_schedulable Nodes with schedulable reported health.\n\
+         # TYPE roboguide_nodes_schedulable gauge\n\
+         roboguide_nodes_schedulable {}\n\
+         # HELP roboguide_runtime_unknown_attempts Physical attempts awaiting reconciliation.\n\
+         # TYPE roboguide_runtime_unknown_attempts gauge\n\
+         roboguide_runtime_unknown_attempts {}\n\
+         # HELP roboguide_recovery_groups_pending Groups awaiting stop/continuation evidence.\n\
+         # TYPE roboguide_recovery_groups_pending gauge\n\
+         roboguide_recovery_groups_pending {}\n\
+         # HELP roboguide_event_log_sequence Durable event high-water.\n\
+         # TYPE roboguide_event_log_sequence gauge\n\
+         roboguide_event_log_sequence {}\n\
+         # HELP roboguide_control_journal_entries Durable Control command evidence rows.\n\
+         # TYPE roboguide_control_journal_entries gauge\n\
+         roboguide_control_journal_entries {}\n",
+        missions.len(),
+        active_missions,
+        nodes.len(),
+        health_online,
+        unknown_attempts,
+        pending_groups,
+        latest_sequence,
+        journal_entries,
+    ))
 }

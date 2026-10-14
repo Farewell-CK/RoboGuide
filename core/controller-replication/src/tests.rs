@@ -3,6 +3,7 @@
 use super::*;
 use openraft::storage::RaftStateMachine;
 use openraft::{CommittedLeaderId, Entry, EntryPayload, LogId, RaftSnapshotBuilder};
+use sha2::Digest as _;
 use std::sync::atomic::Ordering;
 use store::io_error;
 
@@ -45,7 +46,7 @@ fn batch(
     revision: u64,
 ) -> state::ApplicationCommitBatch {
     let tail = previous.map_or(0, |checkpoint| checkpoint.event_sequence);
-    state::ApplicationCommitBatch {
+    let mut batch = state::ApplicationCommitBatch {
         schema: state::APPLICATION_COMMIT_SCHEMA.into(),
         previous_event_sequence: tail,
         previous_checkpoint_digest: previous.map(state::checkpoint_identity),
@@ -54,7 +55,24 @@ fn batch(
         events:vec![state::PersistedEvent { sequence:tail + 1, event_id:format!("event-{}", tail + 1), timestamp_ms:3,
             correlation_id:"mission".into(),causation_id:None,payload_schema:"domain.EventPayload.json/v16".into(),
             payload_json:serde_json::json!({"MissionSchedulingPriorityChanged":{"mission_id":"mission","priority":17}}).to_string() }],
-    }
+        commands: Vec::new(),
+    };
+    batch.commands.push(state::ControlCommandJournalEntry {
+        command_id: format!("command-{revision}"),
+        causation_id: None,
+        authority_revision: revision,
+        controller_epoch: Some("test".into()),
+        plan_digest: None,
+        input_digest: format!("input-{revision}"),
+        ownership_digest: None,
+        resulting_state_digest: format!(
+            "sha256:{:x}",
+            sha2::Sha256::digest(batch.checkpoint.checkpoint_json.as_bytes())
+        ),
+        checkpoint_event_sequence: batch.checkpoint.event_sequence,
+        checkpoint_schema: batch.checkpoint.schema.clone(),
+    });
+    batch
 }
 
 /// Direct apply/snapshot/reopen never refreshes evidence, loses history or admits a mismatching predecessor.
@@ -173,6 +191,44 @@ async fn compacted_history_reopens_and_materializes_from_checkpoint() {
         reopened.accepted_view().unwrap().checkpoint,
         Some(first.checkpoint)
     );
+}
+
+/// An actual child descriptor cannot outlive the final application writer lease or create a second owner.
+#[test]
+fn final_store_releases_lease_even_when_a_child_inherits_its_descriptor() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("writer.sqlite3");
+    let store = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap();
+    let retained = store.clone();
+    let mut child = Command::new("sh")
+        .args(["-c", "read token"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(store.writer_descriptor_for_test().unwrap()))
+        .spawn()
+        .unwrap();
+    drop(store);
+    assert!(SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").is_err());
+    drop(retained);
+    let reopened = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1");
+    child.stdin.take().unwrap().write_all(b"done\n").unwrap();
+    assert!(child.wait().unwrap().success());
+    assert!(reopened.is_ok());
+}
+
+/// Database symlink aliases share the same process lease and cannot fork consensus history.
+#[cfg(unix)]
+#[test]
+fn replica_database_alias_cannot_acquire_a_second_writer() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("writer.sqlite3");
+    let alias = directory.path().join("alias.sqlite3");
+    let store = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap();
+    std::os::unix::fs::symlink(&path, &alias).unwrap();
+    assert!(SqliteRaftStore::open(&alias, "identity", "test/checkpoint-v1").is_err());
+    drop(store);
+    assert!(SqliteRaftStore::open(&alias, "identity", "test/checkpoint-v1").is_ok());
 }
 
 /// Acquires three simultaneous ephemeral listeners so their released loopback ports are distinct.

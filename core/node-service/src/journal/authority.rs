@@ -3,6 +3,94 @@
 use super::*;
 
 impl ExecutionJournal {
+    /// Durably admits one exact Controller-authorized Memory import before local side effects.
+    pub fn prepare_memory_import(
+        &self,
+        import_id: &str,
+        command_id: &str,
+        identity_digest: &str,
+    ) -> Result<PrepareMemoryImport, JournalError> {
+        if import_id.trim().is_empty()
+            || command_id.trim().is_empty()
+            || identity_digest.trim().is_empty()
+        {
+            return Err(JournalError::InvalidSpec(
+                "Memory import identity fields must not be blank".to_string(),
+            ));
+        }
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(existing) = load_memory_import(&transaction, import_id)? {
+            let outcome = if existing.command_id() == command_id
+                && existing.identity_digest() == identity_digest
+            {
+                PrepareMemoryImport::Existing(existing)
+            } else {
+                PrepareMemoryImport::Conflict(existing)
+            };
+            transaction.commit()?;
+            return Ok(outcome);
+        }
+        transaction.execute(
+            "INSERT INTO memory_imports(import_id,command_id,identity_digest,status,reason)
+             VALUES (?1,?2,?3,'pending','')",
+            params![import_id, command_id, identity_digest],
+        )?;
+        transaction.commit()?;
+        Ok(PrepareMemoryImport::Start)
+    }
+
+    /// Persists a selective-import outcome while retaining its exact identity fence.
+    pub fn record_memory_import(
+        &self,
+        import_id: &str,
+        command_id: &str,
+        identity_digest: &str,
+        status: MemoryImportStatus,
+        reason: &str,
+    ) -> Result<MemoryImportRecord, JournalError> {
+        if reason.len() > 4_096 {
+            return Err(JournalError::InvalidSpec(
+                "Memory import reason exceeds 4096 bytes".to_string(),
+            ));
+        }
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing = load_memory_import(&transaction, import_id)?
+            .ok_or_else(|| JournalError::Corrupt("Memory import identity is missing".into()))?;
+        if existing.command_id() != command_id || existing.identity_digest() != identity_digest {
+            return Err(JournalError::MemoryImportConflict(import_id.to_string()));
+        }
+        if matches!(
+            existing.status(),
+            MemoryImportStatus::Completed | MemoryImportStatus::Rejected
+        ) && existing.status() != status
+        {
+            return Err(JournalError::InvalidTransition(
+                import_id.to_string(),
+                "terminal Memory import outcome cannot change".to_string(),
+            ));
+        }
+        transaction.execute(
+            "UPDATE memory_imports SET status = ?2, reason = ?3 WHERE import_id = ?1",
+            params![import_id, status.as_str(), reason],
+        )?;
+        let updated = load_memory_import(&transaction, import_id)?.ok_or_else(|| {
+            JournalError::Corrupt("Memory import disappeared after update".into())
+        })?;
+        transaction.commit()?;
+        Ok(updated)
+    }
+
+    /// Returns one durable selective-import identity for reconnect replay.
+    pub fn memory_import(
+        &self,
+        import_id: &str,
+    ) -> Result<Option<MemoryImportRecord>, JournalError> {
+        let connection = self.lock_connection()?;
+        load_memory_import(&connection, import_id)
+    }
+
     /// Durably advances the Node's Controller epoch before a replicated command is admitted.
     ///
     /// Epochs are compared lexicographically by `(term, replica_id)`. An equal epoch is

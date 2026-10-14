@@ -199,6 +199,65 @@ fn identity_tuple_is_idempotent_and_conflict_checked() {
     }
 }
 
+/// Selective Memory import admission is durable, exact-identity fenced, and replayable.
+#[test]
+fn memory_import_identity_is_durable_and_conflict_checked() {
+    let (directory, path, journal) = journal();
+    assert!(matches!(
+        journal.prepare_memory_import("import-a", "memory-import-import-a", "sha256:a"),
+        Ok(PrepareMemoryImport::Start)
+    ));
+    let replay = journal
+        .prepare_memory_import("import-a", "memory-import-import-a", "sha256:a")
+        .expect("same import identity replays");
+    assert!(
+        matches!(replay, PrepareMemoryImport::Existing(record) if record.status() == MemoryImportStatus::Pending)
+    );
+    assert!(matches!(
+        journal.prepare_memory_import("import-a", "memory-import-import-a", "sha256:b"),
+        Ok(PrepareMemoryImport::Conflict(_))
+    ));
+    journal
+        .record_memory_import(
+            "import-a",
+            "memory-import-import-a",
+            "sha256:a",
+            MemoryImportStatus::Completed,
+            "",
+        )
+        .expect("completion persists");
+    drop(journal);
+    let reopened = ExecutionJournal::open(&path).expect("journal reopens");
+    let record = reopened
+        .memory_import("import-a")
+        .expect("import lookup succeeds")
+        .expect("import survives restart");
+    assert_eq!(record.status(), MemoryImportStatus::Completed);
+    drop(reopened);
+    drop(directory);
+}
+
+/// A crash during provider side effects requires reconciliation rather than automatic re-execution.
+#[test]
+fn ambiguous_memory_import_never_restarts_provider_side_effects() {
+    let (_directory, path, journal) = journal();
+    journal
+        .prepare_memory_import("ambiguous", "memory-import-ambiguous", "sha256:original")
+        .expect("intent persists before provider call");
+    drop(journal);
+    let reopened = ExecutionJournal::open(&path).expect("restart recovers pending imports");
+    for _ in 0..2 {
+        assert!(matches!(
+            reopened.prepare_memory_import("ambiguous", "memory-import-ambiguous", "sha256:original"),
+            Ok(PrepareMemoryImport::Existing(record)) if record.status() == MemoryImportStatus::Unknown
+        ));
+    }
+    assert!(matches!(
+        reopened.prepare_memory_import("ambiguous", "memory-import-ambiguous", "sha256:changed"),
+        Ok(PrepareMemoryImport::Conflict(_))
+    ));
+}
+
 /// Terminal status, sequence, handle, and identity survive restart for replay.
 #[test]
 fn terminal_execution_replays_after_restart() {

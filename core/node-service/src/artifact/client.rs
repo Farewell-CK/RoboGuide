@@ -32,14 +32,47 @@ impl ArtifactClient {
                 "artifact size, chunk size, and timeout limits must be non-zero".to_string(),
             ));
         }
+        let mut builder = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_millis(connect_timeout_ms))
+            .read_timeout(Duration::from_millis(read_timeout_ms));
+        let mut upload_prefix = None;
+        if artifact_endpoint_requires_mtls(&endpoint) {
+            if endpoint.scheme() != "https" {
+                return Err(ArtifactError::Configuration(
+                    "remote Artifact endpoint must use https for mTLS".to_string(),
+                ));
+            }
+            let (certificate, key, ca) = artifact_client_tls_material()?;
+            let certificate_pem = std::fs::read(&certificate)?;
+            let leaf = rustls_pemfile::certs(&mut certificate_pem.as_slice())
+                .next()
+                .transpose()?
+                .ok_or_else(|| {
+                    ArtifactError::Configuration(
+                        "Artifact client leaf certificate is missing".into(),
+                    )
+                })?;
+            upload_prefix = Some(format!("cert-{:x}-", sha2::Sha256::digest(leaf.as_ref())));
+            let identity = reqwest::Identity::from_pem(
+                format!(
+                    "{}\n{}\n",
+                    std::fs::read_to_string(certificate)?,
+                    std::fs::read_to_string(key)?
+                )
+                .as_bytes(),
+            )
+            .map_err(|error| ArtifactError::Configuration(error.to_string()))?;
+            let root = reqwest::Certificate::from_pem(&std::fs::read(ca)?)
+                .map_err(|error| ArtifactError::Configuration(error.to_string()))?;
+            builder = builder.identity(identity).add_root_certificate(root);
+        }
         Ok(Self {
-            client: Client::builder()
-                .connect_timeout(Duration::from_millis(connect_timeout_ms))
-                .read_timeout(Duration::from_millis(read_timeout_ms))
-                .build()?,
+            client: builder.build()?,
             endpoint,
             chunk_size_bytes,
             max_artifact_bytes,
+            upload_prefix,
         })
     }
 
@@ -429,7 +462,11 @@ impl ArtifactClient {
         byte_size: u64,
     ) -> Result<(String, u64, String), ArtifactError> {
         let create_endpoint = self.path(&["v1", "artifact-uploads"])?;
-        let upload_id = new_upload_id();
+        let upload_id = format!(
+            "{}{}",
+            self.upload_prefix.as_deref().unwrap_or_default(),
+            new_upload_id()
+        );
         let create_payload = serde_json::json!({"upload_id": upload_id});
         let response = self
             .client
@@ -562,5 +599,67 @@ impl ArtifactClient {
             }
         });
         reqwest::Body::wrap_stream(ReceiverStream::new(receiver))
+    }
+}
+
+/// Return whether an Artifact endpoint is outside the trusted local development profile.
+fn artifact_endpoint_requires_mtls(endpoint: &Url) -> bool {
+    if endpoint.scheme() == "https" {
+        return true;
+    }
+    endpoint.host_str().is_some_and(|host| {
+        if host.eq_ignore_ascii_case("localhost") {
+            return false;
+        }
+        host.parse::<std::net::IpAddr>()
+            .map(|address| !address.is_loopback())
+            .unwrap_or(true)
+    })
+}
+
+/// Load a complete client certificate profile from deployment-owned environment variables.
+fn artifact_client_tls_material()
+-> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf), ArtifactError> {
+    let names = [
+        "ROBOGUIDE_ARTIFACT_CLIENT_CERT",
+        "ROBOGUIDE_ARTIFACT_CLIENT_KEY",
+        "ROBOGUIDE_ARTIFACT_CLIENT_CA",
+    ];
+    let values = names.iter().map(std::env::var_os).collect::<Vec<_>>();
+    let (Some(certificate), Some(key), Some(ca)) =
+        (values[0].as_ref(), values[1].as_ref(), values[2].as_ref())
+    else {
+        return Err(ArtifactError::Configuration(
+            "remote Artifact endpoint requires ROBOGUIDE_ARTIFACT_CLIENT_CERT, _KEY and _CA"
+                .to_string(),
+        ));
+    };
+    let certificate = std::path::PathBuf::from(certificate);
+    let key = std::path::PathBuf::from(key);
+    let ca = std::path::PathBuf::from(ca);
+    for path in [&certificate, &key, &ca] {
+        if !path.is_file() {
+            return Err(ArtifactError::Configuration(format!(
+                "Artifact client TLS file is unavailable: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok((certificate, key, ca))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Remote plaintext Artifact endpoints are rejected before a request can leave the process.
+    #[test]
+    fn remote_artifact_endpoint_requires_https() {
+        let error = match ArtifactClient::new("http://artifact.example:8090", 1024, 4096, 100, 100)
+        {
+            Ok(_) => panic!("remote plaintext endpoint must fail closed"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("must use https"));
     }
 }

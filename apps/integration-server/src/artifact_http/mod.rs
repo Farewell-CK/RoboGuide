@@ -12,14 +12,20 @@ use domain::{
 use ports::{
     EventSink, MapCatalogReader, MapCatalogWriter, MemoryCatalogReader, MemoryCatalogWriter,
 };
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use serde::Deserialize;
+use sha2::{Digest as _, Sha256};
 use state::{MapCatalogProjection, MemoryCatalogProjection, PersistedCheckpoint, SqliteEventLog};
 use std::collections::BTreeMap;
+use std::io::BufReader;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
+#[cfg(test)]
+use tokio::net::TcpStream;
 use tokio::time::{MissedTickBehavior, interval, timeout};
+use tokio_rustls::TlsAcceptor;
 
 /// Maximum HTTP header block accepted by the artifact listener.
 const MAX_HEADER_BYTES: usize = 64 * 1024;
@@ -38,7 +44,9 @@ const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Frequency at which idle sessions are removed even when no HTTP request arrives.
 const UPLOAD_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
+mod authorization;
 mod catalog;
+use authorization::*;
 mod protocol;
 mod server;
 mod upload_registry;
@@ -48,6 +56,7 @@ pub use catalog::{
     MemoryPublicationIdentity,
 };
 use protocol::*;
+pub use server::configured_artifact_tls;
 pub use server::serve_artifact_http;
 use upload_registry::*;
 

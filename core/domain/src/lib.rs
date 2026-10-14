@@ -28,6 +28,7 @@ mod node_liveness_evidence;
 mod node_registration;
 mod node_state;
 mod physical_entity;
+mod physical_safety;
 mod resource;
 mod role_assignment;
 mod spatial_memory;
@@ -98,6 +99,11 @@ pub use node_registration::{LocalSystemDescriptor, OperationSupport, SensorDescr
 pub use node_state::{NodeRegistration, NodeStateSnapshot};
 pub use physical_entity::{
     PhysicalEntityRegistration, PhysicalEntityRegistrySnapshot, PhysicalEntityRoutingProfile,
+};
+pub use physical_safety::{
+    EXECUTION_SAFETY_METADATA_KEY, ExecutionSafetyProfile, OperationSafetySupport,
+    PHYSICAL_STOP_CONTRACT_SCHEMA_V0_1, SAFE_STATE_OBSERVATION_SCHEMA, SafetyAssurance,
+    SafetyStopError, SafetyStopIdentity, SafetyStopPhase, SafetyStopRecord,
 };
 pub use resource::{Resource, ResourceKind, ResourceRequirement};
 pub use role_assignment::RoleAssignment;

@@ -32,6 +32,23 @@ from check_group_continuation_processes import (
 )
 
 
+def compiled_application_schema(binary: Path, environment: dict[str, str]) -> str:
+    """Read the compiled authority schema without opening storage or starting a service."""
+    completed = subprocess.run(
+        [str(binary), "--application-schema"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        cwd=ROOT,
+        env=environment,
+    )
+    schema = completed.stdout.strip()
+    if not schema.startswith("roboguide.controller-checkpoint/v") or "\n" in schema:
+        raise ValueError(f"invalid compiled application schema from {binary.name}")
+    return schema
+
+
 def run(
     directory: Path,
     tls_enabled: bool = False,
@@ -117,6 +134,12 @@ def run(
 
     try:
         binary = ROOT / "target/debug/integration-server"
+        application_schema = compiled_application_schema(binary, environment)
+        if application_schema != compiled_application_schema(
+            ROOT / "target/debug/controller-replica", environment
+        ):
+            raise ValueError("Controller and replica binaries use different authority schemas")
+        result["application_schema"] = application_schema
         result["controller_binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
         tls_profiles: list[dict[str, Any]] | None = None
         if tls_enabled:
@@ -229,7 +252,7 @@ def run(
                     "cluster_id": "synthetic-process-check",
                     "replica_id": index + 1,
                     "members": members,
-                    "application_schema": "roboguide.controller-checkpoint/v26",
+                    "application_schema": application_schema,
                     "application_policy_digest": "compute-before-start",
                 },
                 "storage_directory": str(directory / f"replica-{index + 1}"),

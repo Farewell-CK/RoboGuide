@@ -18,6 +18,8 @@ pub enum MissionIsolationSource {
     ReadyDispatch,
     /// Durable Runtime terminal-attempt outcome application.
     TaskOutcome,
+    /// Exact-attempt safety reconciliation, independent of contract failure accounting.
+    SafetyStop,
 }
 
 /// Typed local failure category retained for operator review and crash-loop accounting.
@@ -212,6 +214,67 @@ impl MissionIsolation {
 }
 
 impl MissionOrchestrator {
+    /// Holds a live Mission for retained safety evidence without counting a new execution failure.
+    pub fn hold_for_safety<E: EventSink>(
+        &mut self,
+        mission_id: &MissionId,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<(), OrchestrationError> {
+        let execution = self
+            .executions
+            .get_mut(mission_id)
+            .ok_or_else(|| OrchestrationError::Mission("unknown Mission safety scope".into()))?;
+        if execution.isolation.is_some()
+            || execution.lifecycle == MissionExecutionLifecycle::Cancelling
+        {
+            return Ok(());
+        }
+        if !matches!(
+            execution.lifecycle,
+            MissionExecutionLifecycle::Accepted | MissionExecutionLifecycle::Running
+        ) || timestamp < execution.accepted_at
+        {
+            return Err(OrchestrationError::Mission(
+                "safety hold requires a live Mission and valid receive time".into(),
+            ));
+        }
+        let generation = execution
+            .isolation_generation
+            .checked_add(1)
+            .ok_or_else(|| OrchestrationError::Mission("isolation generation exhausted".into()))?;
+        execution.isolation_generation = generation;
+        let failure = execution.failure_state.clone().unwrap_or_default();
+        execution.isolation = Some(MissionIsolation {
+            generation,
+            source: MissionIsolationSource::SafetyStop,
+            isolated_at: timestamp,
+            review_by: timestamp
+                .as_millis()
+                .checked_add(MISSION_HOLD_REVIEW_WINDOW_MS)
+                .map(TimestampMs::new),
+            escalation_level: 0,
+            failure,
+        });
+        events.append(
+            timestamp,
+            correlation_id,
+            None,
+            domain::EventPayload::MissionExecutionIsolated {
+                mission_id: mission_id.clone(),
+                generation,
+                source: "safety-stop".into(),
+                failure_class: None,
+                failure_fingerprint: None,
+                failure_count: 0,
+                crash_loop: false,
+                failure_window: Some(Vec::new()),
+            },
+        );
+        Ok(())
+    }
+
     /// Records only a caller-proven contract-local failure; caller must rollback the failed candidate.
     pub fn isolate_execution<E: EventSink>(
         &mut self,
@@ -304,6 +367,7 @@ impl MissionOrchestrator {
                 source: match source {
                     MissionIsolationSource::ReadyDispatch => "ready-dispatch",
                     MissionIsolationSource::TaskOutcome => "task-outcome",
+                    MissionIsolationSource::SafetyStop => "safety-stop",
                 }
                 .into(),
                 failure_class: Some(format!("{:?}", failure.class)),

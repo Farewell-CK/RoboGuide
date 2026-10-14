@@ -2,6 +2,127 @@
 
 use super::*;
 
+/// Certificate-to-role profile for a remotely bound Artifact HTTP listener.
+#[derive(Clone)]
+pub struct ArtifactTlsProfile {
+    /// Mutual-TLS acceptor requiring a client certificate signed by the configured CA.
+    acceptor: TlsAcceptor,
+    /// Certificate digest to bounded artifact role mapping.
+    roles: Arc<BTreeMap<String, ArtifactGrant>>,
+}
+
+impl ArtifactTlsProfile {
+    /// Resolve the certificate principal from one accepted TLS stream.
+    fn principal<S>(
+        &self,
+        stream: &tokio_rustls::server::TlsStream<S>,
+    ) -> Result<ArtifactPrincipal, String> {
+        let certificates = stream
+            .get_ref()
+            .1
+            .peer_certificates()
+            .ok_or("Artifact mTLS peer certificate is missing")?;
+        let certificate = certificates
+            .first()
+            .ok_or("Artifact mTLS peer certificate chain is empty")?;
+        let digest = format!("sha256:{:x}", Sha256::digest(certificate.as_ref()));
+        self.roles
+            .get(&digest)
+            .cloned()
+            .map(|grant| ArtifactPrincipal {
+                subject: digest,
+                grant,
+            })
+            .ok_or_else(|| "Artifact certificate is not authorized".to_string())
+    }
+}
+
+/// Load the optional Artifact mTLS profile from startup-owned environment variables.
+pub fn configured_artifact_tls() -> Result<Option<ArtifactTlsProfile>, Box<dyn std::error::Error>> {
+    let names = [
+        "ROBOGUIDE_ARTIFACT_MTLS_SERVER_CERT",
+        "ROBOGUIDE_ARTIFACT_MTLS_SERVER_KEY",
+        "ROBOGUIDE_ARTIFACT_MTLS_CLIENT_CA",
+        "ROBOGUIDE_ARTIFACT_MTLS_ROLE_MAP",
+    ];
+    let values = names.iter().map(std::env::var_os).collect::<Vec<_>>();
+    if values.iter().all(Option::is_none) {
+        return Ok(None);
+    }
+    if values.iter().any(Option::is_none) {
+        return Err(
+            "Artifact mTLS requires server cert, server key, client CA and role map".into(),
+        );
+    }
+    let certificate_path = std::path::Path::new(values[0].as_ref().expect("validated path"));
+    let key_path = std::path::Path::new(values[1].as_ref().expect("validated path"));
+    let ca_path = std::path::Path::new(values[2].as_ref().expect("validated path"));
+    let role_map_path = std::path::Path::new(values[3].as_ref().expect("validated path"));
+    load_artifact_tls(certificate_path, key_path, ca_path, role_map_path).map(Some)
+}
+
+/// Loads the same startup-frozen certificate grants without process-global environment mutation.
+pub(super) fn load_artifact_tls(
+    certificate_path: &std::path::Path,
+    key_path: &std::path::Path,
+    ca_path: &std::path::Path,
+    role_map_path: &std::path::Path,
+) -> Result<ArtifactTlsProfile, Box<dyn std::error::Error>> {
+    let server_cert = load_certificates(certificate_path)?;
+    let server_key = load_private_key(key_path)?;
+    let ca = load_certificates(ca_path)?;
+    let raw_roles: BTreeMap<String, serde_json::Value> =
+        serde_json::from_slice(&std::fs::read(role_map_path)?)?;
+    if raw_roles.is_empty() {
+        return Err("Artifact mTLS role map must not be empty".into());
+    }
+    let roles = raw_roles
+        .into_iter()
+        .map(|(digest, role)| {
+            let hex = digest.strip_prefix("sha256:").ok_or_else(|| {
+                "Artifact mTLS role map keys must use sha256:<64 lowercase hex>".to_string()
+            })?;
+            if hex.len() != 64
+                || !hex
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err("Artifact mTLS role map contains an invalid certificate digest".into());
+            }
+            Ok((digest, ArtifactGrant::parse(role)?))
+        })
+        .collect::<Result<BTreeMap<_, _>, String>>()?;
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mut roots = rustls::RootCertStore::empty();
+    for certificate in ca {
+        roots.add(certificate)?;
+    }
+    let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots)).build()?;
+    let server = rustls::ServerConfig::builder()
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(server_cert, server_key)?;
+    Ok(ArtifactTlsProfile {
+        acceptor: TlsAcceptor::from(Arc::new(server)),
+        roles: Arc::new(roles),
+    })
+}
+
+/// Load a bounded PEM certificate chain.
+pub(super) fn load_certificates(
+    path: &std::path::Path,
+) -> Result<Vec<CertificateDer<'static>>, Box<dyn std::error::Error>> {
+    let mut reader = BufReader::new(std::fs::File::open(path)?);
+    Ok(rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Load the first supported PEM private key.
+pub(super) fn load_private_key(
+    path: &std::path::Path,
+) -> Result<PrivateKeyDer<'static>, Box<dyn std::error::Error>> {
+    let mut reader = BufReader::new(std::fs::File::open(path)?);
+    Ok(rustls_pemfile::private_key(&mut reader)?.ok_or("Artifact mTLS private key is empty")?)
+}
+
 /// Accepts independent artifact HTTP connections from an already-bound listener forever.
 pub async fn serve_artifact_http(
     listener: TcpListener,
@@ -9,30 +130,59 @@ pub async fn serve_artifact_http(
     catalog: ArtifactCatalog,
     memory_admission: Arc<dyn MemoryProviderAdmission>,
     localization_observer: Arc<dyn LocalizationEvidenceObserver>,
+    tls: Option<ArtifactTlsProfile>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let uploads: Uploads = Arc::new(Mutex::new(UploadRegistry::production()));
+    let connections = Arc::new(tokio::sync::Semaphore::new(128));
     let mut sweep = interval(UPLOAD_SWEEP_INTERVAL);
     sweep.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 let (mut stream, _) = accepted?;
+                let Ok(permit) = Arc::clone(&connections).try_acquire_owned() else { continue; };
                 let shared_store = store.clone();
                 let shared_catalog = catalog.clone();
                 let shared_uploads = uploads.clone();
                 let shared_memory_admission = Arc::clone(&memory_admission);
                 let shared_localization_observer = Arc::clone(&localization_observer);
+                let tls = tls.clone();
                 tokio::spawn(async move {
-                    if let Err(error) =
-                        handle_connection(
-                            &mut stream,
-                            &shared_store,
-                            &shared_catalog,
-                            &shared_uploads,
-                            shared_memory_admission.as_ref(),
-                            shared_localization_observer.as_ref(),
-                        ).await
-                    {
+                    let _permit = permit;
+                    if let Some(profile) = tls {
+                        let Ok(accepted) = timeout(Duration::from_secs(5), profile.acceptor.accept(stream)).await else { return; };
+                        match accepted {
+                            Ok(mut tls_stream) => {
+                                let role = match profile.principal(&tls_stream) {
+                                    Ok(role) => role,
+                                    Err(error) => {
+                                        eprintln!("Artifact mTLS identity rejected: {error}");
+                                        return;
+                                    }
+                                };
+                                if let Err(error) = handle_authenticated_connection(
+                                    &mut tls_stream,
+                                    &shared_store,
+                                    &shared_catalog,
+                                    &shared_uploads,
+                                    shared_memory_admission.as_ref(),
+                                    shared_localization_observer.as_ref(),
+                                    role,
+                                ).await {
+                                    let _ = write_json(&mut tls_stream, error.status(), &error.body()).await;
+                                }
+                            }
+                            Err(error) => eprintln!("Artifact mTLS handshake failed: {error}"),
+                        }
+                    } else if let Err(error) = handle_authenticated_connection(
+                        &mut stream,
+                        &shared_store,
+                        &shared_catalog,
+                        &shared_uploads,
+                        shared_memory_admission.as_ref(),
+                        shared_localization_observer.as_ref(),
+                        ArtifactPrincipal::local(),
+                    ).await {
                         let _ = write_json(&mut stream, error.status(), &error.body()).await;
                     }
                 });
@@ -47,6 +197,7 @@ pub async fn serve_artifact_http(
 }
 
 /// Handles one request and closes the short-lived HTTP connection.
+#[cfg(test)]
 pub(super) async fn handle_connection(
     stream: &mut TcpStream,
     store: &FileSystemArtifactStore,
@@ -55,16 +206,59 @@ pub(super) async fn handle_connection(
     memory_admission: &dyn MemoryProviderAdmission,
     localization_observer: &dyn LocalizationEvidenceObserver,
 ) -> Result<(), HttpError> {
+    handle_authenticated_connection(
+        stream,
+        store,
+        catalog,
+        uploads,
+        memory_admission,
+        localization_observer,
+        ArtifactPrincipal::local(),
+    )
+    .await
+}
+
+/// Handles one authenticated Artifact request over raw or TLS transport.
+async fn handle_authenticated_connection<S>(
+    stream: &mut S,
+    store: &FileSystemArtifactStore,
+    catalog: &ArtifactCatalog,
+    uploads: &Uploads,
+    memory_admission: &dyn MemoryProviderAdmission,
+    localization_observer: &dyn LocalizationEvidenceObserver,
+    principal: ArtifactPrincipal,
+) -> Result<(), HttpError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let mut head = read_request_head(stream).await?;
     let method = head.method.clone();
     let path = head.path.clone();
+    let authorization = principal.authorize_head(&head, catalog);
+    catalog.audit_access(
+        &principal.subject,
+        &method,
+        &path,
+        if authorization.is_ok() {
+            "route_allowed"
+        } else {
+            "route_denied"
+        },
+    )?;
+    authorization?;
     let response = match (method.as_str(), path.as_str()) {
         ("GET", "/healthz") => {
             catalog.ensure_available()?;
             Response::Json("200 OK", serde_json::json!({"status": "ok"}))
         }
+        ("GET", "/readyz") => {
+            catalog.readiness()?;
+            Response::Json("200 OK", serde_json::json!({"status": "ok", "ready": true}))
+        }
+        ("GET", "/metrics") => artifact_metrics(catalog, uploads)?,
         ("POST", "/v1/artifact-uploads") => {
             let request = head.read_json(stream).await?;
+            principal.authorize_body(&request)?;
             start_upload(&request, store, uploads)?
         }
         ("GET", "/v1/maps") => {
@@ -89,6 +283,7 @@ pub(super) async fn handle_connection(
             if path.starts_with("/v1/artifact-uploads/") && path.ends_with("/finalize") =>
         {
             let request = head.read_json(stream).await?;
+            principal.authorize_body(&request)?;
             finalize_upload(&request, store, uploads)?
         }
         ("DELETE", path) if path.starts_with("/v1/artifact-uploads/") => {
@@ -98,6 +293,7 @@ pub(super) async fn handle_connection(
             if path.starts_with("/v1/maps/") && path.ends_with("/localization-evidence") =>
         {
             let request = head.read_json(stream).await?;
+            principal.authorize_body(&request)?;
             record_localization_evidence(
                 catalog,
                 memory_admission,
@@ -108,23 +304,46 @@ pub(super) async fn handle_connection(
         }
         ("POST", path) if path.starts_with("/v1/maps/") && path.ends_with("/replicas") => {
             let request = head.read_json(stream).await?;
+            principal.authorize_body(&request)?;
             record_replica(catalog, &request, path)?
         }
         ("POST", path) if path.starts_with("/v1/memories/") && path.ends_with("/replicas") => {
             let request = head.read_json(stream).await?;
+            principal.authorize_body(&request)?;
             record_memory_replica(catalog, store, memory_admission, &request, path)?
         }
         ("POST", path) if path.starts_with("/v1/memories/") && path.contains("/revisions/") => {
             let request = head.read_json(stream).await?;
+            principal.authorize_body(&request)?;
             publish_memory(catalog, store, memory_admission, &request, path)?
         }
         ("POST", path) if path.starts_with("/v1/maps/") && path.contains("/revisions/") => {
             let request = head.read_json(stream).await?;
+            principal.authorize_body(&request)?;
             publish_revision(catalog, store, &request, path)?
         }
         _ => return Err(HttpError::not_found("artifact endpoint not found")),
     };
     response.write(stream).await
+}
+
+/// Returns bounded Artifact/Memory catalog metrics for readiness and SLO collection.
+fn artifact_metrics(catalog: &ArtifactCatalog, uploads: &Uploads) -> Result<Response, HttpError> {
+    let memories = catalog.memories()?.len();
+    let maps = catalog.revisions()?.len();
+    let active_uploads = uploads
+        .lock()
+        .map_err(|_| HttpError::internal("artifact upload registry lock is poisoned"))?
+        .active_uploads();
+    Ok(Response::Json(
+        "200 OK",
+        serde_json::json!({
+            "schema": "roboguide.artifact-metrics/v0.1",
+            "memory_manifests": memories,
+            "map_revisions": maps,
+            "active_uploads": active_uploads,
+        }),
+    ))
 }
 
 /// Lists generic Memory plus a read-only adapter over typed Spatial map revisions.
@@ -427,7 +646,7 @@ pub(super) fn start_upload(
 
 /// Appends the streamed request body to one active upload without buffering the artifact.
 pub(super) async fn append_upload(
-    stream: &mut TcpStream,
+    stream: &mut (impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin),
     head: &RequestHead,
     uploads: &Uploads,
 ) -> Result<Response, HttpError> {
@@ -518,7 +737,7 @@ pub(super) fn abort_upload(path: &str, uploads: &Uploads) -> Result<Response, Ht
 
 /// Streams one immutable CAS blob to the caller without loading it into memory.
 pub(super) async fn stream_artifact(
-    stream: &mut TcpStream,
+    stream: &mut (impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin),
     store: &FileSystemArtifactStore,
     digest: &str,
 ) -> Result<(), HttpError> {

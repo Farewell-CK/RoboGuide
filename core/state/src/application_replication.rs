@@ -1,13 +1,13 @@
 //! Transport-neutral quorum acceptance and exact materialized event/checkpoint import.
 
 use super::*;
-use sha2::{Digest as _, Sha256};
+use sha2::Sha256;
 #[cfg(test)]
 #[path = "application_replication/tests.rs"]
 mod tests;
 
 /// Versioned exact application batch, independent of Node Protocol and physical lifecycle.
-pub const APPLICATION_COMMIT_SCHEMA: &str = "roboguide.application-commit/v1";
+pub const APPLICATION_COMMIT_SCHEMA: &str = "roboguide.application-commit/v2";
 
 /// Exact transaction candidate requiring one durable quorum decision before local Commit.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -23,10 +23,17 @@ pub struct ApplicationCommitBatch {
     pub checkpoint: PersistedCheckpoint,
     /// Exact consecutive immutable event rows accepted by existing application authorities.
     pub events: Vec<PersistedEvent>,
+    /// Exact new authority command rows, including changes producing no domain event.
+    #[serde(default)]
+    pub commands: Vec<ControlCommandJournalEntry>,
 }
 
 /// Composition-owned durability port; it grants no Task, matching or resource policy authority.
 pub trait ApplicationBatchReplicator: Send + Sync {
+    /// Supplies the immutable issuing epoch for audit and restore, independent of Node delivery.
+    fn controller_epoch(&self) -> Option<String> {
+        None
+    }
     /// Identifies the startup-frozen cluster/profile whose acceptance is required.
     fn profile_identity(&self) -> &str;
     /// Requires current epoch and quorum before the caller starts a private write transaction.
@@ -38,7 +45,8 @@ pub trait ApplicationBatchReplicator: Send + Sync {
 /// Hashes the complete application identity without coupling it to local storage representation.
 pub fn checkpoint_identity(checkpoint: &PersistedCheckpoint) -> String {
     let mut hash = Sha256::new();
-    hash.update(APPLICATION_COMMIT_SCHEMA.as_bytes());
+    // This hash domain is immutable across DTO versions so old accepted identities remain valid.
+    hash.update(b"roboguide.application-commit/v1");
     hash.update((checkpoint.schema.len() as u64).to_le_bytes());
     hash.update(checkpoint.schema.as_bytes());
     hash.update(checkpoint.event_sequence.to_le_bytes());
@@ -50,8 +58,10 @@ pub fn checkpoint_identity(checkpoint: &PersistedCheckpoint) -> String {
 impl ApplicationCommitBatch {
     /// Rejects wrong codecs, unbounded input, discontinuous evidence or an incomplete target.
     pub fn validate(&self) -> Result<(), SqliteEventLogError> {
-        if self.schema != APPLICATION_COMMIT_SCHEMA
-            || self.events.len() > 8192
+        if !matches!(
+            self.schema.as_str(),
+            APPLICATION_COMMIT_SCHEMA | "roboguide.application-commit/v1"
+        ) || self.events.len() > 8192
             || self.checkpoint.checkpoint_json.len() > 64 * 1024 * 1024
             || self.checkpoint.schema.trim().is_empty()
             || self
@@ -71,6 +81,40 @@ impl ApplicationCommitBatch {
             }
             validate_persisted_event(event)?;
         }
+        if self.schema == "roboguide.application-commit/v1" {
+            if !self.commands.is_empty()
+                || crate::checkpoint_requires_authority_journal(&self.checkpoint.schema)
+            {
+                return Err(SqliteEventLogError::Codec(
+                    "legacy replica codec cannot hide command authority".into(),
+                ));
+            }
+            return Ok(());
+        }
+        if self.commands.is_empty()
+            && self.previous_checkpoint_digest.as_deref()
+                == Some(checkpoint_identity(&self.checkpoint).as_str())
+            && self.events.is_empty()
+        {
+            return Ok(());
+        }
+        if self.commands.is_empty() || self.commands.len() > 8192 {
+            return Err(SqliteEventLogError::Codec(
+                "replica batch lacks bounded command authority".into(),
+            ));
+        }
+        for commands in self.commands.windows(2) {
+            if commands[0].authority_revision.checked_add(1) != Some(commands[1].authority_revision)
+            {
+                return Err(SqliteEventLogError::Codec(
+                    "replica command revisions are discontinuous".into(),
+                ));
+            }
+        }
+        self.commands
+            .last()
+            .expect("checked nonempty")
+            .validate_checkpoint(&self.checkpoint)?;
         Ok(())
     }
 }
@@ -91,6 +135,13 @@ pub fn validate_persisted_event(event: &PersistedEvent) -> Result<(), SqliteEven
 }
 
 impl SqliteEventLog {
+    /// Returns the current immutable issuing epoch for transaction-bound evidence.
+    pub fn issuing_controller_epoch(&self) -> String {
+        self.replicator
+            .as_ref()
+            .and_then(|replicator| replicator.controller_epoch())
+            .unwrap_or_else(|| "standalone".into())
+    }
     /// Returns the required cluster identity without exposing its network or consensus state.
     pub fn replication_profile(&self) -> Option<&str> {
         self.replicator
@@ -127,6 +178,17 @@ impl SqliteEventLog {
         checkpoint: &PersistedCheckpoint,
         history_floor: Option<u64>,
     ) -> Result<(), SqliteEventLogError> {
+        self.install_replica_authority(events, checkpoint, history_floor, &[])
+    }
+
+    /// Atomically materializes quorum-accepted command history beside its complete checkpoint.
+    pub fn install_replica_authority(
+        &self,
+        events: &[PersistedEvent],
+        checkpoint: &PersistedCheckpoint,
+        history_floor: Option<u64>,
+        commands: &[ControlCommandJournalEntry],
+    ) -> Result<(), SqliteEventLogError> {
         self.ensure_no_open_batch()?;
         if self.replicator.is_some()
             || history_floor.is_some_and(|floor| floor > checkpoint.event_sequence)
@@ -162,6 +224,19 @@ impl SqliteEventLog {
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute("DELETE FROM control_command_journal", [])?;
+        transaction.execute(
+            "DELETE FROM event_log_metadata WHERE key='journal_committed_revision'",
+            [],
+        )?;
+        for command in commands {
+            authority_journal::insert(&transaction, command)?;
+        }
+        if let Some(command) = commands.last() {
+            command.validate_checkpoint(checkpoint)?;
+            transaction.execute("INSERT INTO event_log_metadata(key,value) VALUES ('journal_committed_revision',?1)", [command.authority_revision.to_string()])?;
+        }
+        authority_journal::validate(&transaction, Some(checkpoint))?;
         transaction.execute("DELETE FROM events", [])?;
         transaction.execute("DELETE FROM controller_checkpoint_deltas", [])?;
         transaction.execute("DELETE FROM controller_checkpoint_head", [])?;

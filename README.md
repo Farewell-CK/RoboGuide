@@ -4,6 +4,13 @@ RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智�
 
 当前架构 source of truth 是 [`docs/architecture/v2/README.md`](docs/architecture/v2/README.md) 及其引用的已接受 ADR。它们记录当前实现对应的职责、协议语义、关键闭环和架构约束；原始 [`RoboGuide_Architecture_Baseline_V2.docx`](docs/architecture/v2/RoboGuide_Architecture_Baseline_V2.docx) 仅保留为最初 V2 基线快照，可能落后于后续演进。V1.1 作为历史基线保留。
 
+全部非发布软件整改正在按[实施计划](docs/development/roboguide-software-completion-plan-2026-10-15.md)执行。
+当前停止链路冻结 operation-owned State export、当前 attempt/session、receipt、TTL、confidence 和
+deadline；Mission hold 与释放/继续门禁保留未确认所有权，旧停止记录不会自动升级为确认。
+Mission HTTP 命令与 Request 进展原子关联，提供观察与中断恢复入口，不重复原命令。
+当前实现拓扑与证据边界见[实现拓扑](docs/architecture/v2/implementation-topology.md)。
+软件测试不构成设备停止、硬实时或机器人执行连续性的证据。
+
 ## V2 总体架构
 
 ![RoboGuide V2 Overall Architecture](docs/images/roboguide-v2-overall-architecture.png)
@@ -36,7 +43,7 @@ MVP 方向是以普通多机异构任务验证领域无关的最小闭环：
 见 [`docs/project-goals-and-mvp.md`](docs/project-goals-and-mvp.md)，当前决策状态
 见 [`docs/mvp-definition.md`](docs/mvp-definition.md)。
 
-当前已批准首个实现切片：Node A 执行运输与算力角色，Node B 作为运输替代节点，
+历史首个实现切片采用测试配置：Node A 执行运输与算力角色，Node B 作为运输替代节点，
 Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重绑定失败角色并
 继续执行。完整 MVP 仍未冻结。
 

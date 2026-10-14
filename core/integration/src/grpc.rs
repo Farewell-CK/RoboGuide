@@ -287,4 +287,37 @@ mod tests {
             .expect("v0.4 command receipt decodes");
         assert_eq!(decoded, receipt);
     }
+
+    /// Selective-import authorization digests bind every immutable identity field.
+    #[test]
+    fn memory_import_digest_changes_when_authorization_changes() {
+        let digest = crate::memory_import_authorization_digest(
+            "import-a",
+            "memory-import-import-a",
+            "experience",
+            "{\"selector\":\"run/r1\"}",
+            "mission-a",
+            "group-a",
+            "task-a",
+            "role-a",
+            "attempt-a",
+            "{\"term\":1,\"replica_id\":1}",
+        );
+        assert!(digest.starts_with("sha256:"));
+        assert_ne!(
+            digest,
+            crate::memory_import_authorization_digest(
+                "import-a",
+                "memory-import-import-a",
+                "experience",
+                "{\"selector\":\"run/r1\"}",
+                "mission-a",
+                "group-a",
+                "task-a",
+                "role-b",
+                "attempt-a",
+                "{\"term\":1,\"replica_id\":1}",
+            )
+        );
+    }
 }

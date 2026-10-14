@@ -113,6 +113,8 @@ impl ParallelMission {
             ),
             orchestrator,
             mission_admissions: BTreeMap::new(),
+            memory_imports: BTreeMap::new(),
+            safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: None,
         };
@@ -476,6 +478,107 @@ fn current_negative_verifier_verdict_fails_mission() {
         domain::EventPayload::TaskExecutionFailed { task_ref, .. }
             if task_ref.task_id().as_str() == "a"
     )));
+}
+
+/// A local Task failure cannot release another current attempt that is still running.
+#[test]
+fn failed_task_holds_live_peer_and_preserves_whole_group_ownership() {
+    let mut fixture = ParallelMission::new();
+    for index in 0..2 {
+        fixture.fact(index, 1, ExecutionPhase::Started);
+    }
+    let before = fixture
+        .controller
+        .bridge
+        .control()
+        .allocation_snapshot(TimestampMs::new(10))
+        .unwrap();
+    fixture.fact(0, 2, ExecutionPhase::Failed);
+    let mission = fixture
+        .controller
+        .orchestrator
+        .execution(fixture.attempts[0].command().mission_id())
+        .unwrap();
+    assert_eq!(
+        mission.lifecycle(),
+        orchestration::MissionExecutionLifecycle::Running
+    );
+    assert!(mission.isolation().is_some());
+    assert!(application::safety_stop::blocks_release(
+        &fixture.controller,
+        fixture.attempts[0].command().mission_id()
+    ));
+    assert_eq!(
+        before,
+        fixture
+            .controller
+            .bridge
+            .control()
+            .allocation_snapshot(TimestampMs::new(10))
+            .unwrap()
+    );
+    assert!(
+        fixture
+            .controller
+            .safety_stops
+            .contains_key(fixture.attempts[1].execution_id())
+    );
+}
+
+/// Final negative semantic evidence cannot release a peer whose execution is still live.
+#[test]
+fn negative_verifier_holds_running_peer_without_consuming_the_verdict() {
+    let mut fixture = ParallelMission::new_with_verifier(true);
+    for index in 0..2 {
+        fixture.fact(index, 1, ExecutionPhase::Started);
+    }
+    let verified = fixture
+        .attempts
+        .iter()
+        .position(|attempt| attempt.command().task_id().as_str() == "a")
+        .unwrap();
+    fixture.fact(verified, 2, ExecutionPhase::Completed);
+    let before = fixture
+        .controller
+        .bridge
+        .control()
+        .allocation_snapshot(TimestampMs::new(10))
+        .unwrap();
+    let feed = verifier_feed_for(&mut fixture, false, false);
+    let verdict = feed.read_verdict().unwrap().unwrap();
+    validate_task_verifier(&fixture.controller, &feed, &verdict).unwrap();
+    fixture.events.begin_batch().unwrap();
+    apply_task_verifier(
+        &mut fixture.controller,
+        &feed,
+        &verdict,
+        TimestampMs::new(12),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .unwrap();
+    fixture.events.commit_batch().unwrap();
+    let mission = fixture
+        .controller
+        .orchestrator
+        .execution(fixture.attempts[0].command().mission_id())
+        .unwrap();
+    assert!(mission.isolation().is_some());
+    assert!(fixture.controller.verifier_seen.is_empty());
+    assert_eq!(
+        fixture.task_lifecycle(verified),
+        TaskExecutionLifecycle::AwaitingSatisfaction
+    );
+    assert_eq!(
+        before.allocations(),
+        fixture
+            .controller
+            .bridge
+            .control()
+            .allocation_snapshot(TimestampMs::new(12))
+            .unwrap()
+            .allocations()
+    );
 }
 
 /// A late final-world verdict cannot reopen a Group released after physical failure.

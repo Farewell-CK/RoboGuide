@@ -11,6 +11,7 @@
 use domain::{CorrelationId, EventId, EventPayload, EventRecord, TimestampMs};
 use ports::EventSink;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -22,6 +23,8 @@ use checkpoint_store::StoredCheckpoint;
 mod application_replication;
 #[path = "archive.rs"]
 mod archive;
+#[path = "authority_journal.rs"]
+mod authority_journal;
 pub use application_replication::{
     APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch,
     checkpoint_identity, validate_persisted_event,
@@ -109,6 +112,50 @@ pub struct PersistedCheckpoint {
     pub schema: String,
     /// Serialized complete controller projection.
     pub checkpoint_json: String,
+}
+
+/// One idempotent Control authority mutation recorded beside its checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ControlCommandJournalEntry {
+    /// Stable caller-provided mutation identity.
+    pub command_id: String,
+    /// Immediate causal command or event identity.
+    pub causation_id: Option<String>,
+    /// Monotonic authority revision represented by this mutation.
+    pub authority_revision: u64,
+    /// Controller epoch that issued the mutation, when a replicated profile is active.
+    pub controller_epoch: Option<String>,
+    /// Accepted MissionPlan digest, when the mutation is plan-bound.
+    pub plan_digest: Option<String>,
+    /// Canonical digest of the command input.
+    pub input_digest: String,
+    /// Resource/ownership digest before the mutation, when available.
+    pub ownership_digest: Option<String>,
+    /// Canonical digest of the resulting authority snapshot.
+    pub resulting_state_digest: String,
+    /// Event sequence represented by the accompanying checkpoint.
+    pub checkpoint_event_sequence: u64,
+    /// Checkpoint schema persisted with the mutation.
+    pub checkpoint_schema: String,
+}
+
+impl ControlCommandJournalEntry {
+    /// Build a conservative checkpoint-bound journal entry for legacy save callers.
+    fn checkpoint(schema: &str, checkpoint_json: &str, event_sequence: u64) -> Self {
+        let digest = format!("sha256:{:x}", Sha256::digest(checkpoint_json.as_bytes()));
+        Self {
+            command_id: format!("checkpoint:{event_sequence}:{digest}"),
+            causation_id: None,
+            authority_revision: event_sequence,
+            controller_epoch: None,
+            plan_digest: None,
+            input_digest: digest.clone(),
+            ownership_digest: None,
+            resulting_state_digest: digest,
+            checkpoint_event_sequence: event_sequence,
+            checkpoint_schema: schema.to_string(),
+        }
+    }
 }
 
 /// Failures returned by the SQLite evidence store.
@@ -294,6 +341,23 @@ impl SqliteEventLog {
                 event_sequence INTEGER NOT NULL,
                 schema TEXT NOT NULL,
                 checkpoint_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS control_command_journal (
+                command_id TEXT PRIMARY KEY NOT NULL,
+                causation_id TEXT,
+                authority_revision INTEGER NOT NULL,
+                controller_epoch TEXT,
+                plan_digest TEXT,
+                input_digest TEXT NOT NULL,
+                ownership_digest TEXT,
+                resulting_state_digest TEXT NOT NULL,
+                checkpoint_event_sequence INTEGER NOT NULL,
+                checkpoint_schema TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_command_authority_revision ON control_command_journal(authority_revision);
+            CREATE TABLE IF NOT EXISTS service_access_audit (
+                sequence INTEGER PRIMARY KEY, service TEXT NOT NULL, principal TEXT NOT NULL,
+                method TEXT NOT NULL, path TEXT NOT NULL, decision TEXT NOT NULL
             );",
         )?;
         checkpoint_store::initialize(&connection)?;
@@ -456,8 +520,10 @@ impl SqliteEventLog {
             .connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
-        checkpoint_store::read(&connection)
-            .map(|stored| stored.map(|stored| (*stored.snapshot).clone()))
+        let checkpoint =
+            checkpoint_store::read(&connection)?.map(|stored| (*stored.snapshot).clone());
+        authority_journal::validate(&connection, checkpoint.as_ref())?;
+        Ok(checkpoint)
     }
 
     /// Reconstructs an existing checkpoint through a readonly connection without changing the database.
@@ -490,11 +556,47 @@ impl SqliteEventLog {
             }))
     }
 
+    /// Returns the event sequence represented by the next checkpoint in the open batch.
+    pub fn current_batch_event_sequence(&self) -> Result<u64, SqliteEventLogError> {
+        if self
+            .batch_start_number
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?
+            .is_none()
+        {
+            return Err(SqliteEventLogError::Codec(
+                "current batch event sequence requires an open event batch".to_string(),
+            ));
+        }
+        self.next_event_number
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)
+            .map(|sequence| *sequence)
+    }
+
     /// Saves a controller projection inside the currently open event batch.
     pub fn save_checkpoint(
         &self,
         schema: &str,
         checkpoint_json: &str,
+    ) -> Result<(), SqliteEventLogError> {
+        let event_sequence = *self
+            .next_event_number
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        self.save_checkpoint_with_command(
+            schema,
+            checkpoint_json,
+            ControlCommandJournalEntry::checkpoint(schema, checkpoint_json, event_sequence),
+        )
+    }
+
+    /// Saves a checkpoint and an idempotent Control authority journal entry in one batch.
+    pub fn save_checkpoint_with_command(
+        &self,
+        schema: &str,
+        checkpoint_json: &str,
+        mut command: ControlCommandJournalEntry,
     ) -> Result<(), SqliteEventLogError> {
         let batch_start = self
             .batch_start_number
@@ -509,6 +611,21 @@ impl SqliteEventLog {
             .next_event_number
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        if command.checkpoint_event_sequence != event_sequence {
+            return Err(SqliteEventLogError::Codec(
+                "Control command journal sequence does not match checkpoint".to_string(),
+            ));
+        }
+        if command.checkpoint_schema != schema {
+            return Err(SqliteEventLogError::Codec(
+                "Control command journal schema does not match checkpoint".to_string(),
+            ));
+        }
+        if command.command_id.trim().is_empty() || command.input_digest.trim().is_empty() {
+            return Err(SqliteEventLogError::Codec(
+                "Control command journal identity and input digest must be nonblank".to_string(),
+            ));
+        }
         let previous = self
             .pending_checkpoint_cache
             .lock()
@@ -523,6 +640,26 @@ impl SqliteEventLog {
             .connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        command.authority_revision =
+            match authority_journal::existing(&connection, &command.command_id)? {
+                Some(prior) => prior.authority_revision,
+                None => authority_journal::revision(&connection)?
+                    .checked_add(1)
+                    .ok_or_else(|| {
+                        SqliteEventLogError::Codec("Control authority revision exhausted".into())
+                    })?,
+            };
+        command.controller_epoch = self
+            .replicator
+            .as_ref()
+            .and_then(|port| port.controller_epoch())
+            .or_else(|| Some("standalone".into()));
+        command.validate_checkpoint(&PersistedCheckpoint {
+            event_sequence,
+            schema: schema.into(),
+            checkpoint_json: checkpoint_json.into(),
+        })?;
+        authority_journal::insert(&connection, &command)?;
         let candidate = checkpoint_store::write(
             &connection,
             previous.as_ref(),
@@ -547,6 +684,95 @@ impl SqliteEventLog {
             .pending_checkpoint_cache
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)? = Some(candidate);
+        Ok(())
+    }
+
+    /// Returns Control authority journal entries in authority revision order.
+    pub fn control_command_journal(
+        &self,
+    ) -> Result<Vec<ControlCommandJournalEntry>, SqliteEventLogError> {
+        self.ensure_no_open_batch()?;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        let mut statement = connection.prepare(
+            "SELECT command_id, causation_id, authority_revision, controller_epoch, plan_digest,
+                    input_digest, ownership_digest, resulting_state_digest,
+                    checkpoint_event_sequence, checkpoint_schema
+             FROM control_command_journal ORDER BY authority_revision, command_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(ControlCommandJournalEntry {
+                command_id: row.get(0)?,
+                causation_id: row.get(1)?,
+                authority_revision: row.get(2)?,
+                controller_epoch: row.get(3)?,
+                plan_digest: row.get(4)?,
+                input_digest: row.get(5)?,
+                ownership_digest: row.get(6)?,
+                resulting_state_digest: row.get(7)?,
+                checkpoint_event_sequence: row.get(8)?,
+                checkpoint_schema: row.get(9)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Reads aggregate cardinality without materializing historical command documents.
+    pub fn control_command_count(&self) -> Result<u64, SqliteEventLogError> {
+        self.ensure_no_open_batch()?;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        Ok(
+            connection.query_row("SELECT COUNT(*) FROM control_command_journal", [], |row| {
+                row.get(0)
+            })?,
+        )
+    }
+
+    /// Durably records bounded service admission metadata; bodies and secrets never enter this log.
+    pub fn record_service_access(
+        &self,
+        service: &str,
+        principal: &str,
+        method: &str,
+        path: &str,
+        decision: &str,
+    ) -> Result<(), SqliteEventLogError> {
+        self.ensure_no_open_batch()?;
+        if [service, principal, method, path, decision]
+            .iter()
+            .any(|field| field.is_empty() || field.len() > 1024)
+        {
+            return Err(SqliteEventLogError::Codec(
+                "invalid service audit metadata".into(),
+            ));
+        }
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        connection.execute("INSERT INTO service_access_audit(service,principal,method,path,decision) VALUES (?1,?2,?3,?4,?5)", params![service,principal,method,path,decision])?;
+        Ok(())
+    }
+
+    /// Verifies local authority coherence and the current quorum/epoch before advertising writes.
+    pub fn readiness(&self) -> Result<(), SqliteEventLogError> {
+        self.ensure_no_open_batch()?;
+        if let Some(replicator) = &self.replicator {
+            replicator
+                .assert_write_authority()
+                .map_err(SqliteEventLogError::Replication)?;
+        }
+        self.load_checkpoint()?;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        connection.execute_batch("BEGIN IMMEDIATE; ROLLBACK")?;
         Ok(())
     }
 
@@ -627,6 +853,21 @@ impl SqliteEventLog {
             let events = statement
                 .query_map([batch_start.expect("batch checked above")], event_from_row)?
                 .collect::<Result<Vec<_>, _>>()?;
+            let committed_revision = connection
+                .query_row(
+                    "SELECT value FROM event_log_metadata WHERE key='journal_committed_revision'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .map(|value| {
+                    value
+                        .parse::<u64>()
+                        .map_err(|error| SqliteEventLogError::Codec(error.to_string()))
+                })
+                .transpose()?
+                .unwrap_or(0);
+            let commands = authority_journal::since(&connection, committed_revision)?;
             let batch = ApplicationCommitBatch {
                 schema: APPLICATION_COMMIT_SCHEMA.into(),
                 previous_event_sequence: previous
@@ -637,12 +878,14 @@ impl SqliteEventLog {
                     .map(|stored| checkpoint_identity(&stored.snapshot)),
                 checkpoint: target,
                 events,
+                commands,
             };
             batch.validate()?;
             replicator
                 .confirm_batch(batch)
                 .map_err(SqliteEventLogError::Replication)?;
         }
+        connection.execute("INSERT INTO event_log_metadata(key,value) VALUES ('journal_committed_revision',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [authority_journal::revision(&connection)?.to_string()])?;
         connection.execute_batch("COMMIT")?;
         if let Some(candidate) = self
             .pending_checkpoint_cache

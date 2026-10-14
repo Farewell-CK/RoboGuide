@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import urllib.error
 import urllib.request
@@ -883,6 +884,9 @@ def test_http_api_accepts_only_instruction_and_returns_durable_projection(tmp_pa
         ) as response:
             historical = cast(JSONObject, json.loads(response.read()))
         assert historical == context
+        audit = MissionRequestStore(tmp_path / "requests.sqlite3").http_audit()
+        assert [entry["method"] for entry in audit] == ["POST", "POST", "GET", "GET"]
+        assert all(entry["principal_id"] == "loopback:operator" for entry in audit)
     finally:
         server.shutdown()
         server.server_close()
@@ -928,6 +932,116 @@ def test_http_message_accepts_explicit_clarification_question_identity(tmp_path:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_http_idempotency_replays_creation_and_rejects_conflicting_evidence(
+    tmp_path: Path,
+) -> None:
+    """A durable caller key returns the first Mission projection exactly once."""
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter([_assessment()]),
+        FakePlanner(),
+        FakeController(_inventory(*_fixture_contracts())),
+    )
+    server = MissionRequestHttpServer(("127.0.0.1", 0), engine, 1024 * 1024)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        endpoint = f"http://127.0.0.1:{server.server_port}/v1/mission-requests"
+        headers = {"Content-Type": "application/json", "Idempotency-Key": "create-1"}
+        payload = json.dumps({"instruction": "执行一次可重试的运输任务"}).encode()
+        request = urllib.request.Request(endpoint, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=2) as response:  # noqa: S310
+            first = cast(JSONObject, json.loads(response.read()))
+            assert response.status == 201
+        replay = urllib.request.Request(endpoint, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(replay, timeout=2) as response:  # noqa: S310
+            second = cast(JSONObject, json.loads(response.read()))
+            assert response.status == 201
+        assert second == first
+        conflict = urllib.request.Request(
+            endpoint,
+            data=json.dumps({"instruction": "另一条任务"}).encode(),
+            headers=headers,
+            method="POST",
+        )
+        with pytest.raises(urllib.error.HTTPError) as failure:
+            urllib.request.urlopen(conflict, timeout=2)  # noqa: S310
+        assert failure.value.code == 409
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_http_failure_after_commit_keeps_tenant_and_duplicate_fence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lost result after durable acceptance never permits a second create with the same key."""
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter([_assessment()]),
+        FakePlanner(),
+        FakeController(_inventory(*_fixture_contracts())),
+    )
+    create = engine.create
+
+    def lose_result(instruction: str) -> MissionRequestRecord:
+        """Simulate failure after the engine has committed the complete request."""
+        create(instruction)
+        raise RuntimeError("injected result loss")
+
+    monkeypatch.setattr(engine, "create", lose_result)
+    server = MissionRequestHttpServer(("127.0.0.1", 0), engine, 1024 * 1024)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for expected in (500, 409):
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/v1/mission-requests",
+                data=json.dumps({"instruction": "execute once"}).encode(),
+                headers={"Idempotency-Key": "ambiguous-create"},
+                method="POST",
+            )
+            with pytest.raises(urllib.error.HTTPError) as failure:
+                urllib.request.urlopen(request, timeout=2)  # noqa: S310
+            assert failure.value.code == expected
+        store = MissionRequestStore(tmp_path / "requests.sqlite3")
+        records = store.records()
+        assert len(records) == 1
+        assert store.request_tenant(records[0].request_id) == "local"
+        with sqlite3.connect(tmp_path / "requests.sqlite3") as connection:
+            connection.execute("DROP TABLE mission_request_tenants")
+        with pytest.raises(urllib.error.HTTPError) as not_ready:
+            urllib.request.urlopen(  # noqa: S310
+                f"http://127.0.0.1:{server.server_port}/readyz", timeout=2
+            )
+        assert not_ready.value.code == 503
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_tenant_is_durable_before_provider_execution(tmp_path: Path) -> None:
+    """Even interrupted processing has an owner and another tenant cannot adopt it."""
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter([_assessment()]),
+        FakePlanner(),
+        FakeController(_inventory(*_fixture_contracts())),
+    )
+    with engine.authenticated_command("tenant-a", False):
+        record = engine.create("transport")
+    store = MissionRequestStore(tmp_path / "requests.sqlite3")
+    assert store.request_tenant(record.request_id) == "tenant-a"
+    with store.authenticated_command("tenant-b", False):
+        with pytest.raises(MissionRequestError, match="another tenant"):
+            store.save(record)
+    with store.authenticated_command("tenant-b", True):
+        store.save(record)
+    assert store.request_tenant(record.request_id) == "tenant-a"
 
 
 def test_inventory_availability_requires_online_and_reachable() -> None:

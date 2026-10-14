@@ -32,6 +32,61 @@ pub struct RecoveryDeploymentSupport {
 }
 
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
+    /// Returns the current Control session anchor for exact stop and evidence admission.
+    pub fn current_node_session(&self, node_id: &domain::NodeId) -> Option<&str> {
+        self.control.current_node_session(node_id)
+    }
+    /// Exposes immutable original terminal receive time for exact-attempt safety policy.
+    pub fn terminal_received_at(&self, execution_id: &str) -> Option<TimestampMs> {
+        self.runtime.terminal_received_at(execution_id)
+    }
+
+    /// Exposes Runtime's current attempt generation without selecting or replacing a binding.
+    pub fn current_attempt_generation(
+        &self,
+        group_id: &ExecutionGroupId,
+        task_ref: &domain::TaskRef,
+        role_id: &domain::RoleId,
+    ) -> Option<u64> {
+        self.runtime
+            .current_attempt_generation(group_id, task_ref, role_id)
+    }
+    /// Delivers an application-committed Memory intent; the application revalidates Control ownership.
+    pub fn deliver_memory_import(
+        &self,
+        node_id: &str,
+        command: integration::grpc::v0_4::MemoryImport,
+    ) -> Result<(), IntegrationRuntimeError> {
+        self.router
+            .import_memory(
+                node_id,
+                command.import_id,
+                command.command_id,
+                command.consumer_provider_id,
+                command.manifest_json,
+                command.mission_id,
+                command.group_id,
+                command.task_id,
+                command.role_id,
+                command.execution_id,
+            )
+            .map_err(IntegrationRuntimeError::Route)
+    }
+    /// Evaluates one deployment-owned State policy at the Control composition boundary.
+    ///
+    /// The bridge passes the complete source-aware snapshot to the explicit policy evaluator;
+    /// no source fusion or implicit Control admission is performed here. Callers must treat every
+    /// non-accepted disposition as Unknown for their decision transaction.
+    pub fn evaluate_decision_evidence(
+        &self,
+        policy: &state::DecisionEvidencePolicy,
+        decision: state::DecisionKind,
+        now: domain::TimestampMs,
+    ) -> state::EvidenceEvaluation {
+        let records = self.state_records.records();
+        policy.evaluate(&records, decision, now)
+    }
+
     /// Prepares an existing Runtime command for durable application-level outbox delivery.
     ///
     /// This bridge deliberately performs no network side effect. The application must checkpoint

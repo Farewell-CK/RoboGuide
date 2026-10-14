@@ -179,7 +179,7 @@ pub(crate) fn apply_task_verifier(
         let Some(execution) = controller.orchestrator.execution(&mission_id) else {
             continue;
         };
-        if execution.isolation().is_some() {
+        if execution.isolation().is_some() || safety_stop::blocks_release(controller, &mission_id) {
             // Keep the original verdict unconsumed; the configured durable feed can present it
             // again after explicit resume, with current source and attempt validation intact.
             continue;
@@ -214,6 +214,10 @@ pub(crate) fn apply_task_verifier(
         else {
             continue;
         };
+        if !verdict.satisfied && safety_stop::has_live_group_attempts(controller, &group_id) {
+            safety_stop::admit_group_stop(controller, &group_id, now, 10_000)?;
+            continue;
+        }
         let evidence = domain::TaskSatisfactionEvidence::new(
             task_ref.clone(),
             spec.verifier().clone(),
@@ -451,6 +455,8 @@ mod tests {
             integration_json: String::new(),
             orchestration_json: String::new(),
             mission_admissions: BTreeMap::new(),
+            memory_imports: BTreeMap::new(),
+            safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: Some("sha256:source-a".to_string()),
         };

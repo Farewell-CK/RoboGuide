@@ -1085,3 +1085,25 @@ fn input_and_mission_savepoints_have_independent_event_rollback() {
         ]
     );
 }
+
+/// Checkpoint commits create an idempotent authority journal entry and rollback removes it.
+#[test]
+fn checkpoint_commit_records_control_command_journal() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    log.begin_batch().unwrap();
+    log.save_checkpoint("authority/v1", r#"{"ownership":"held"}"#)
+        .unwrap();
+    log.commit_batch().unwrap();
+    let entries = log.control_command_journal().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].authority_revision, 1);
+    assert_eq!(entries[0].checkpoint_schema, "authority/v1");
+    assert!(entries[0].command_id.starts_with("checkpoint:0:sha256:"));
+
+    log.begin_batch().unwrap();
+    log.save_checkpoint("authority/v1", r#"{"ownership":"changed"}"#)
+        .unwrap();
+    log.rollback_batch().unwrap();
+    assert_eq!(log.control_command_journal().unwrap().len(), 1);
+}

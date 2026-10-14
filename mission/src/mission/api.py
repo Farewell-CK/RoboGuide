@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import sqlite3
+import ssl
+import threading
+from contextlib import nullcontext
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,9 +21,10 @@ from mission.config import current_environment, load_settings
 from mission.controller import HttpMissionController
 from mission.execution_planning_evidence import ExecutionPlanningEvidence
 from mission.execution_profile import load_optional_execution_profile
-from mission.grounding_reader import HttpMissionGroundingReader
+from mission.grounding_reader import HttpMissionGroundingReader, UrllibGroundingJsonTransport
 from mission.models import JSONObject
 from mission.planning_profile import load_optional_planning_profile
+from mission.request_store import HTTP_IDEMPOTENCY_COMPLETE
 from mission.requests import MissionRequestEngine, MissionRequestError, MissionRequestStore
 from mission.responses import (
     ResponsesMissionInterpreter,
@@ -32,6 +39,7 @@ from mission.service_config import (
 )
 
 LOG = logging.getLogger("roboguide.mission_service")
+Principal = tuple[str, str, str]
 
 
 def build_engine(
@@ -61,6 +69,11 @@ def build_engine(
     controller = HttpMissionController(
         service_settings.controller_endpoint,
         service_settings.controller_timeout_seconds,
+        tls_context=_client_tls_context(
+            service_settings.controller_client_cert,
+            service_settings.controller_client_key,
+            service_settings.controller_client_ca,
+        ),
     )
     reviewer = (
         ResponsesMissionReviewer(
@@ -103,6 +116,7 @@ def build_engine(
         service_settings.approval_policy,
         prevalidation_recovery_attempts=planner_settings.prevalidation_recovery_attempts,
         controller_preflight_enabled=service_settings.controller_preflight_enabled,
+        readiness_probe=controller.readiness,
         max_deployment_recovery_attempts=service_settings.max_deployment_recovery_attempts,
         deployment_recovery_timeout_ms=service_settings.deployment_recovery_timeout_ms,
         provider_identity={
@@ -141,6 +155,30 @@ def build_engine(
             service_settings.grounding_timeout_seconds,
             service_settings.max_grounding_state_evidence,
             service_settings.max_grounding_memory_evidence,
+            transport=UrllibGroundingJsonTransport(
+                {
+                    origin: context
+                    for origin, context in (
+                        (
+                            service_settings.controller_endpoint,
+                            _client_tls_context(
+                                service_settings.controller_client_cert,
+                                service_settings.controller_client_key,
+                                service_settings.controller_client_ca,
+                            ),
+                        ),
+                        (
+                            service_settings.artifact_endpoint,
+                            _client_tls_context(
+                                service_settings.artifact_client_cert,
+                                service_settings.artifact_client_key,
+                                service_settings.artifact_client_ca,
+                            ),
+                        ),
+                    )
+                    if context is not None
+                }
+            ),
             admitted_world_payload_schemas=(service_settings.grounding_world_payload_schemas),
             max_gaps=service_settings.max_grounding_gaps,
             max_acquisition_attempts=service_settings.grounding_acquisition_attempts,
@@ -158,6 +196,8 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
     """Expose bounded Mission Request commands without owning execution state."""
 
     server: MissionRequestHttpServer
+    _principal: Principal | None = None
+    _idempotency_key: str | None = None
 
     def log_message(self, format: str, *args: Any) -> None:
         """Route request metadata through logging without recording instruction bodies."""
@@ -169,16 +209,42 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
         if path == "/healthz":
             self._send(HTTPStatus.OK, {"status": "ok"})
             return
+        if path == "/readyz":
+            try:
+                readiness = self.server.engine.readiness()
+            except (OSError, sqlite3.Error, MissionRequestError):
+                self._send(
+                    HTTPStatus.SERVICE_UNAVAILABLE, {"ready": False, "storage": "unavailable"}
+                )
+            else:
+                self._send(
+                    HTTPStatus.OK
+                    if readiness.get("ready") is True
+                    else HTTPStatus.SERVICE_UNAVAILABLE,
+                    readiness,
+                )
+            return
+        if not self._authorize(path, "GET"):
+            return
+        if path == "/metrics":
+            self._send(HTTPStatus.OK, self.server.engine.metrics())
+            return
         prefix = "/v1/mission-requests/"
         if path.startswith(prefix):
             parts = path[len(prefix) :].split("/")
             if len(parts) == 1 and parts[0]:
+                if not self._authorize_request_owner(parts[0]):
+                    return
                 self._run(lambda: self.server.engine.get(parts[0]), HTTPStatus.OK)
                 return
             if len(parts) == 2 and parts[0] and parts[1] == "observations":
+                if not self._authorize_request_owner(parts[0]):
+                    return
                 self._run(lambda: self.server.engine.get(parts[0]).observations(), HTTPStatus.OK)
                 return
             if len(parts) == 3 and all(parts) and parts[1] == "grounding-contexts":
+                if not self._authorize_request_owner(parts[0]):
+                    return
                 self._run(
                     lambda: self.server.engine.grounding_context(parts[0], parts[2]),
                     HTTPStatus.OK,
@@ -189,10 +255,51 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         """Create, clarify, approve, retry, or cancel one Mission Request."""
         path = self._path()
+        if not self._authorize(path, "POST"):
+            return
         try:
             body = self._read_json()
         except (MissionRequestError, UnicodeDecodeError, json.JSONDecodeError) as error:
             self._send(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        if path in {"/v1/http-commands/observe", "/v1/http-commands/reconcile"}:
+            if set(body) != {"method", "path", "idempotency_key"} or not all(
+                isinstance(value, str) and value.strip() for value in body.values()
+            ):
+                self._send(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "command lookup requires method, path and idempotency_key"},
+                )
+                return
+            principal = self._principal
+            if principal is None:
+                self._send(HTTPStatus.UNAUTHORIZED, {"error": "command principal is unavailable"})
+                return
+            identity = (
+                principal[0],
+                principal[2],
+                str(body["method"]),
+                str(body["path"]),
+                str(body["idempotency_key"]),
+            )
+            try:
+                result = self.server.engine.http_command(
+                    identity, reconcile=path.endswith("/reconcile")
+                )
+            except MissionRequestError as error:
+                self._send(
+                    HTTPStatus.NOT_FOUND
+                    if str(error).startswith("unknown HTTP")
+                    else HTTPStatus.CONFLICT,
+                    {"error": str(error)},
+                )
+            except (OSError, sqlite3.Error):
+                self._send(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": "command recovery storage unavailable"},
+                )
+            else:
+                self._send(HTTPStatus.OK, result)
             return
         if path == "/v1/mission-requests":
             if set(body) != {"instruction"} or not isinstance(body["instruction"], str):
@@ -204,6 +311,7 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
             self._run(
                 lambda: self.server.engine.create(body["instruction"]),
                 HTTPStatus.CREATED,
+                body,
             )
             return
         prefix = "/v1/mission-requests/"
@@ -214,6 +322,8 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
         request_id, separator, command = remainder.partition("/")
         if not separator or not request_id or "/" in command:
             self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            return
+        if not self._authorize_request_owner(request_id):
             return
         if command == "messages":
             if set(body) not in ({"text"}, {"text", "question_id"}) or not isinstance(
@@ -238,13 +348,14 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
                     request_id, cast(str, body["text"]), question_id
                 ),
                 HTTPStatus.OK,
+                body,
             )
         elif command == "approve":
             self._approve(request_id, body)
         elif command == "retry" and not body:
-            self._run(lambda: self.server.engine.retry(request_id), HTTPStatus.OK)
+            self._run(lambda: self.server.engine.retry(request_id), HTTPStatus.OK, body)
         elif command == "cancel" and not body:
-            self._run(lambda: self.server.engine.cancel(request_id), HTTPStatus.OK)
+            self._run(lambda: self.server.engine.cancel(request_id), HTTPStatus.OK, body)
         else:
             self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
@@ -268,24 +379,200 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
         self._run(
             lambda: self.server.engine.approve(request_id, revision, digest),
             HTTPStatus.OK,
+            body,
         )
 
-    def _run(self, operation: Any, success: HTTPStatus) -> None:
-        """Execute one engine command and map domain errors without exposing tracebacks."""
+    def _authorize(self, path: str, method: str) -> bool:
+        """Authorize one HTTP route from the TLS certificate principal or local profile."""
+        required = self.server.required_role(path, method)
+        if required is None:
+            return True
+        principal = self.server.principal_for(self.connection)
+        if principal is None:
+            self._send(HTTPStatus.UNAUTHORIZED, {"error": "mission principal is not authenticated"})
+            return False
+        if not self.server.role_grants(principal, required):
+            self._send(HTTPStatus.FORBIDDEN, {"error": "mission principal is not authorized"})
+            return False
+        self._principal = principal
+        LOG.info(
+            "mission HTTP request authorized principal=%s role=%s method=%s path=%s "
+            "correlation=%s idempotency=%s",
+            principal[0],
+            principal[1],
+            method,
+            path,
+            self.headers.get("X-RoboGuide-Correlation-Id", ""),
+            self.headers.get("Idempotency-Key", ""),
+        )
         try:
-            record = operation()
+            self.server.engine.record_http_audit(
+                principal_id=principal[0],
+                tenant_id=principal[2],
+                role=principal[1],
+                method=method,
+                path=path,
+                correlation_id=self.headers.get("X-RoboGuide-Correlation-Id", "").strip()
+                or "local-unknown",
+                idempotency_key=self.headers.get("Idempotency-Key", "").strip() or "none",
+            )
+        except (OSError, sqlite3.Error, MissionRequestError) as error:
+            LOG.error("Mission HTTP audit persistence failed: %s", error)
+            self._send(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "audit persistence unavailable"})
+            return False
+        return True
+
+    def _authorize_request_owner(self, request_id: str) -> bool:
+        """Reject cross-tenant access before reading or mutating a Mission Request."""
+        principal = self._principal
+        if principal is None:
+            self._send(HTTPStatus.UNAUTHORIZED, {"error": "mission principal is not authenticated"})
+            return False
+        try:
+            owner = self.server.engine.request_tenant(request_id)
+            if owner is None:
+                if principal[1] == "admin":
+                    return True
+                if principal[0] == "loopback:operator":
+                    return True
+                self._send(HTTPStatus.FORBIDDEN, {"error": "Mission Request tenant is unbound"})
+                return False
+            if owner != principal[2] and principal[1] != "admin":
+                self._send(
+                    HTTPStatus.FORBIDDEN, {"error": "Mission Request belongs to another tenant"}
+                )
+                return False
+            return True
+        except (MissionRequestError, sqlite3.Error, OSError) as error:
+            LOG.error("Mission Request tenant authorization failed: %s", error)
+            self._send(
+                HTTPStatus.SERVICE_UNAVAILABLE, {"error": "tenant authorization unavailable"}
+            )
+            return False
+
+    def _run(
+        self,
+        operation: Any,
+        success: HTTPStatus,
+        body: JSONObject | None = None,
+    ) -> None:
+        """Execute one engine command and map domain errors without exposing tracebacks."""
+        if self.command == "POST" and not self._begin_idempotency(body or {}):
+            return
+        try:
+            principal = self._principal
+            context = (
+                self.server.engine.authenticated_command(
+                    principal[2],
+                    principal[1] == "admin",
+                    (principal[0], principal[2], self.command, self._path(), self._idempotency_key)
+                    if self._idempotency_key is not None
+                    else None,
+                )
+                if self.command == "POST" and principal is not None
+                else nullcontext()
+            )
+            with context:
+                record = operation()
+                response = record.to_json()
+                try:
+                    self._complete_idempotency(success, response)
+                except (MissionRequestError, sqlite3.Error, OSError) as error:
+                    LOG.error("Mission HTTP response durability failed: %s", error)
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        {"error": "response durability unavailable"},
+                    )
+                    return
         except MissionRequestError as error:
             status = (
                 HTTPStatus.NOT_FOUND
                 if str(error).startswith("unknown Mission Request")
                 else HTTPStatus.CONFLICT
             )
-            self._send(status, {"error": str(error)})
-        except Exception as error:  # pragma: no cover - defensive process boundary
+            response = {"error": str(error)}
+            try:
+                self._complete_idempotency(status, response)
+            except (MissionRequestError, sqlite3.Error, OSError):
+                self._send(
+                    HTTPStatus.SERVICE_UNAVAILABLE, {"error": "response durability unavailable"}
+                )
+                return
+            self._send(status, response)
+        except Exception:  # pragma: no cover - defensive process boundary
             LOG.exception("Mission Request command failed")
-            self._send(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
+            self._send(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"error": "command outcome requires reconciliation"},
+            )
         else:
-            self._send(success, record.to_json())
+            self._send(success, response)
+
+    def _begin_idempotency(self, body: JSONObject) -> bool:
+        """Reserve a caller key or return its previously committed response."""
+        self._idempotency_key = None
+        principal = self._principal
+        key = self.headers.get("Idempotency-Key", "").strip()
+        if principal is not None and principal[0] != "loopback:operator" and not key:
+            self._send(HTTPStatus.BAD_REQUEST, {"error": "Idempotency-Key is required"})
+            return False
+        if principal is None or not key:
+            return True
+        digest = hashlib.sha256(
+            json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        try:
+            state, status, response = self.server.engine.begin_http_idempotency(
+                principal_id=principal[0],
+                tenant_id=principal[2],
+                method=self.command,
+                path=self._path(),
+                idempotency_key=key,
+                request_digest=f"sha256:{digest}",
+            )
+        except MissionRequestError as error:
+            self._send(HTTPStatus.CONFLICT, {"error": str(error)})
+            return False
+        except (OSError, sqlite3.Error):
+            self._send(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "idempotency storage unavailable"})
+            return False
+        if state == HTTP_IDEMPOTENCY_COMPLETE:
+            if status is None or response is None:
+                self._send(
+                    HTTPStatus.SERVICE_UNAVAILABLE, {"error": "idempotency response unavailable"}
+                )
+            else:
+                self._send(HTTPStatus(status), response)
+            return False
+        if state != "new":
+            self._send(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "the same Idempotency-Key requires observation or reconciliation",
+                    "reconciliation_endpoint": "/v1/http-commands/reconcile",
+                    "original_method": self.command,
+                    "original_path": self._path(),
+                    "idempotency_key": key,
+                },
+            )
+            return False
+        self._idempotency_key = key
+        return True
+
+    def _complete_idempotency(self, status: HTTPStatus, response: JSONObject) -> None:
+        """Publish a successful response for the current reserved caller key."""
+        if self._idempotency_key is None or self._principal is None:
+            return
+        self.server.engine.complete_http_idempotency(
+            principal_id=self._principal[0],
+            tenant_id=self._principal[2],
+            method=self.command,
+            path=self._path(),
+            idempotency_key=self._idempotency_key,
+            status_code=int(status),
+            response=response,
+        )
+        self._idempotency_key = None
 
     def _path(self) -> str:
         """Return an origin-form path while rejecting query-driven command semantics."""
@@ -325,11 +612,115 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
         address: tuple[str, int],
         engine: MissionRequestEngine,
         max_request_bytes: int,
+        role_map: dict[str, tuple[str, str]] | None = None,
+        tls_context: ssl.SSLContext | None = None,
     ) -> None:
         """Bind the configured listener and expose immutable service dependencies."""
-        super().__init__(address, MissionRequestHandler)
+        try:
+            loopback = ip_address(address[0]).is_loopback
+        except ValueError:
+            loopback = address[0] == "localhost"
+        if not loopback and (tls_context is None or not role_map):
+            raise MissionServiceConfigError(
+                "remote Mission listener requires mTLS and certificate grants"
+            )
+        self._connections = threading.BoundedSemaphore(128)
+        self._service_lock = engine.acquire_http_service_lock()
+        try:
+            super().__init__(address, MissionRequestHandler)
+        except BaseException:
+            self._service_lock.close()
+            raise
         self.engine = engine
         self.max_request_bytes = max_request_bytes
+        self.role_map = role_map or {}
+        self.tls_context = tls_context
+        self.mtls_enabled = tls_context is not None
+
+    def server_close(self) -> None:
+        """Wait for owned HTTP workers before releasing the single-writer process lock."""
+        try:
+            super().server_close()
+        finally:
+            self._service_lock.close()
+
+    def get_request(self) -> tuple[Any, Any]:
+        """Accept one TCP request and perform mTLS before HTTP parsing when configured."""
+        connection, address = super().get_request()
+        if self.tls_context is None:
+            return connection, address
+        try:
+            connection.settimeout(5.0)
+            return self.tls_context.wrap_socket(
+                connection, server_side=True, do_handshake_on_connect=False
+            ), address
+        except OSError:
+            connection.close()
+            raise
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        """Bound independent workers so unauthenticated clients cannot exhaust threads."""
+        if not self._connections.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._connections.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        """Release the worker slot after normal handling, timeout or handshake rejection."""
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._connections.release()
+
+    def finish_request(self, request: Any, client_address: Any) -> None:
+        """Perform the bounded TLS handshake in its worker before parsing HTTP."""
+        if isinstance(request, ssl.SSLSocket):
+            request.do_handshake()
+        request.settimeout(30.0)
+        super().finish_request(request, client_address)
+
+    def required_role(self, path: str, method: str) -> str | None:
+        """Return the minimum role required by one Mission Service route."""
+        if method == "GET" and path == "/metrics":
+            return "viewer"
+        if method == "POST" and path == "/v1/http-commands/observe":
+            return "viewer"
+        if method == "POST" and path == "/v1/http-commands/reconcile":
+            return "submitter"
+        if method == "GET" and path.startswith("/v1/mission-requests/"):
+            return "viewer"
+        if method == "POST" and path == "/v1/mission-requests":
+            return "submitter"
+        if method == "POST" and path.endswith("/messages"):
+            return "submitter"
+        if method == "POST" and path.endswith("/approve"):
+            return "approver"
+        if method == "POST" and path.endswith(("/retry", "/cancel")):
+            return "operator"
+        return None
+
+    def principal_for(self, connection: object) -> Principal | None:
+        """Resolve one request principal from a peer certificate or trusted local mode."""
+        if isinstance(connection, ssl.SSLSocket):
+            certificate = connection.getpeercert(binary_form=True)
+            if not certificate:
+                return None
+            digest = f"sha256:{hashlib.sha256(certificate).hexdigest()}"
+            role = self.role_map.get(digest)
+            return (digest, role[0], role[1]) if role is not None else None
+        if self.mtls_enabled:
+            return None
+        return ("loopback:operator", "operator", "local")
+
+    @staticmethod
+    def role_grants(principal: Principal, required: str) -> bool:
+        """Return whether a mapped role grants one bounded Mission Service permission."""
+        rank = {"viewer": 0, "submitter": 1, "approver": 2, "operator": 3, "admin": 4}
+        return rank.get(principal[1], -1) >= rank.get(required, 99)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -353,10 +744,14 @@ def main(argv: list[str] | None = None) -> int:
         arguments.service_config,
         arguments.repository_root.resolve(),
     )
+    role_map = _load_role_map(settings.mtls_role_map)
+    tls_context = _build_mtls_context(settings) if settings.mtls_server_cert is not None else None
     server = MissionRequestHttpServer(
         (settings.listen_host, settings.listen_port),
         engine,
         settings.max_request_bytes,
+        role_map=role_map,
+        tls_context=tls_context,
     )
     LOG.info("listening on %s:%s", settings.listen_host, settings.listen_port)
     try:
@@ -366,3 +761,75 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         server.server_close()
     return 0
+
+
+def _load_role_map(path: Path | None) -> dict[str, tuple[str, str]]:
+    """Load and validate certificate digest to Mission role mappings."""
+    if path is None:
+        return {}
+    value = json.loads(path.read_bytes())
+    if not isinstance(value, dict) or not value or not all(isinstance(key, str) for key in value):
+        raise MissionServiceConfigError("Mission Service mTLS role map must be a non-empty object")
+    allowed = {"viewer", "submitter", "approver", "operator", "admin"}
+    result: dict[str, tuple[str, str]] = {}
+    for key, raw in value.items():
+        if (
+            not key.startswith("sha256:")
+            or len(key) != 71
+            or any(character not in "0123456789abcdef" for character in key[7:])
+        ):
+            raise MissionServiceConfigError(
+                "Mission Service mTLS role map contains an invalid digest"
+            )
+        if isinstance(raw, str):
+            role, tenant_id = raw, "default"
+        elif isinstance(raw, dict) and set(raw) == {"role", "tenant_id"}:
+            role, tenant_id = raw["role"], raw["tenant_id"]
+        else:
+            raise MissionServiceConfigError(
+                "Mission Service mTLS role map contains an invalid principal"
+            )
+        if (
+            not isinstance(role, str)
+            or role not in allowed
+            or not isinstance(tenant_id, str)
+            or not tenant_id.strip()
+        ):
+            raise MissionServiceConfigError(
+                "Mission Service mTLS role map contains an invalid role or tenant"
+            )
+        result[key] = (role, tenant_id)
+    return result
+
+
+def _client_tls_context(
+    cert: Path | None, key: Path | None, ca: Path | None
+) -> ssl.SSLContext | None:
+    """Load an origin-specific client identity, trusting only its configured authority CA."""
+    if cert is None and key is None and ca is None:
+        return None
+    if cert is None or key is None or ca is None:
+        raise MissionServiceConfigError("service client mTLS identity is incomplete")
+    context = ssl.create_default_context(cafile=str(ca))
+    context.load_cert_chain(cert, key)
+    return context
+
+
+def _build_mtls_context(settings: MissionServiceSettings) -> ssl.SSLContext:
+    """Build a client-certificate-required TLS context from startup-owned files."""
+    if not all(
+        path is not None
+        for path in (
+            settings.mtls_server_cert,
+            settings.mtls_server_key,
+            settings.mtls_client_ca,
+        )
+    ):
+        raise MissionServiceConfigError("Mission Service mTLS profile is incomplete")
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.load_verify_locations(cafile=str(settings.mtls_client_ca))
+    context.load_cert_chain(
+        certfile=str(settings.mtls_server_cert), keyfile=str(settings.mtls_server_key)
+    )
+    return context

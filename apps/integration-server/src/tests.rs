@@ -5,9 +5,11 @@ mod dispatch_policy;
 mod event_snapshot;
 mod fact_batch;
 mod group_recovery;
+mod memory_import;
 mod mission_isolation;
 mod runtime_contract;
 mod runtime_replay;
+mod safety_stop;
 mod scheduling_disposition;
 mod stop_recovery;
 
@@ -27,6 +29,8 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
         ),
         orchestrator: MissionOrchestrator::new(),
         mission_admissions: BTreeMap::new(),
+        memory_imports: BTreeMap::new(),
+        safety_stops: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
         verifier_source_digest: None,
     }));
@@ -100,6 +104,8 @@ async fn verifier_plan_without_deployment_source_is_not_submitted() {
         ),
         orchestrator: MissionOrchestrator::new(),
         mission_admissions: BTreeMap::new(),
+        memory_imports: BTreeMap::new(),
+        safety_stops: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
         verifier_source_digest: None,
     }));
@@ -754,4 +760,79 @@ fn node_protocol_duration_configuration_is_strict() {
     for value in ["", "-1", "1.5", "18446744073709551616"] {
         assert!(parsed_duration("acceptance", Some(value), 30_000).is_err());
     }
+}
+
+/// Artifact HTTP remains loopback-only unless its explicit mTLS profile is configured.
+#[test]
+fn artifact_listener_security_gate_rejects_remote_without_mtls() {
+    let remote: std::net::SocketAddr = "192.0.2.10:8090".parse().unwrap();
+    let local: std::net::SocketAddr = "127.0.0.1:8090".parse().unwrap();
+    assert!(require_secure_artifact_binding(remote, false).is_err());
+    assert!(require_secure_artifact_binding(remote, true).is_ok());
+    assert!(require_secure_artifact_binding(local, false).is_ok());
+}
+
+/// Controller metrics are bounded, read-only and expose durability high-water values.
+#[tokio::test]
+async fn controller_metrics_expose_durable_high_water() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let directory = tempfile::tempdir().expect("temporary directory exists");
+    let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
+        .expect("event log opens");
+    let controller = Arc::new(Mutex::new(ControllerState {
+        bridge: IntegrationRuntimeBridge::new(
+            control::ControlPlane::new(),
+            state::InMemorySharedNodeState::new(),
+            event_log.clone(),
+            integration::GrpcNodeRouter::default(),
+        ),
+        orchestrator: MissionOrchestrator::new(),
+        mission_admissions: BTreeMap::new(),
+        memory_imports: BTreeMap::new(),
+        safety_stops: BTreeMap::new(),
+        verifier_seen: BTreeSet::new(),
+        verifier_source_digest: None,
+    }));
+    let gate = Arc::new(Mutex::new(()));
+    let clock = runtime::SystemMonotonicClock::new();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener binds");
+    let address = listener.local_addr().expect("listener has address");
+    let server = async {
+        let (mut stream, _) = listener.accept().await.expect("request connects");
+        handle_http_connection(
+            &mut stream,
+            &controller,
+            &event_log,
+            &gate,
+            &clock,
+            None,
+            None,
+        )
+        .await
+        .expect("metrics response succeeds");
+    };
+    let client = async {
+        let mut stream = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("client connects");
+        stream
+            .write_all(b"GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .expect("request writes");
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .await
+            .expect("response reads");
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("roboguide_event_log_sequence 0"));
+        assert!(response.contains("roboguide_control_journal_entries 0"));
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(server, client)
+    })
+    .await
+    .expect("metrics request completes");
 }

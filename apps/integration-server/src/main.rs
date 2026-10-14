@@ -33,7 +33,11 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 ///
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
-const SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v26";
+const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper carried unverified relation stop strings without complete evidence authority.
+const PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v27";
+/// Previous wrapper did not require quorum-replicated authority command evidence.
+const PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v26";
 /// Previous wrapper has legacy breaker counters but cannot carry the new rolling-window authority.
 const PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v25";
 /// Prior wrapper with durable scheduling policy but no required replication profile.
@@ -88,6 +92,10 @@ struct ControlHttpRequest {
 struct ControllerState {
     /// Immutable HTTP receipts; Orchestration still owns complete plan and Mission lifecycle.
     mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
+    /// Exact authorized selective-import intents and durable Node receipts.
+    memory_imports: BTreeMap<String, application::memory_import::MemoryImportIntent>,
+    /// Application safety policy over existing exact Runtime cancellation intents and raw evidence.
+    safety_stops: BTreeMap<String, application::safety_stop::SafetyStopPurpose>,
     /// Integration, Runtime, Control, and horizontal State projections.
     bridge: IntegrationRuntimeBridge<state::SqliteEventLog>,
     /// Complete MissionPlan and explicit Mission lifecycle authority.
@@ -169,7 +177,7 @@ impl artifact_http::LocalizationEvidenceObserver for ControllerLocalizationObser
                 ));
             }
         };
-        if let Err(error) = log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json) {
+        if let Err(error) = application::save_controller_checkpoint(&log, &checkpoint_json) {
             let _ = log.rollback_batch();
             return Err(format!(
                 "localization checkpoint persistence failed: {error}"
@@ -302,6 +310,15 @@ struct ServerCheckpoint {
     /// Actual accepted body digests; old checkpoints retain unavailable receipt evidence.
     #[serde(default)]
     mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
+    /// Exact authorized selective-import intents and durable Node receipts.
+    #[serde(default)]
+    memory_imports: BTreeMap<String, application::memory_import::MemoryImportIntent>,
+    /// Application safety policy over existing exact Runtime cancellation intents and raw evidence.
+    #[serde(
+        default,
+        deserialize_with = "application::safety_stop::deserialize_purposes"
+    )]
+    safety_stops: BTreeMap<String, application::safety_stop::SafetyStopPurpose>,
     /// Exact wrapper schema marker.
     schema: String,
     /// Existing Integration/Control/State/Runtime checkpoint JSON.
@@ -336,6 +353,20 @@ struct ActorPlacementEntry {
     actor_id: String,
     /// Physical node permitted for first-use matching.
     node_id: String,
+}
+
+/// Rejects a remotely bound Artifact listener unless its mTLS profile is complete.
+fn require_secure_artifact_binding(
+    address: std::net::SocketAddr,
+    mtls_configured: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !address.ip().is_loopback() && !mtls_configured {
+        return Err(
+            "Artifact HTTP must remain loopback unless the opt-in mTLS identity profile is enabled"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 /// Loads the shared Node transport lease policy from startup-owned configuration.
@@ -429,6 +460,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args().skip(1).peekable();
     if arguments
         .peek()
+        .is_some_and(|argument| argument == "--application-schema")
+    {
+        arguments.next();
+        if arguments.next().is_some() {
+            return Err("schema inspection accepts no configuration or storage path".into());
+        }
+        println!("{SERVER_CHECKPOINT_SCHEMA}");
+        return Ok(());
+    }
+    if arguments
+        .peek()
         .is_some_and(|argument| argument == "--inspect-checkpoint")
     {
         arguments.next();
@@ -476,6 +518,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let node_protocol_policy = configured_node_protocol_policy()?;
     let (node_identity_policy, node_tls) = configured_node_identity()?;
+    let artifact_tls = artifact_http::configured_artifact_tls()?;
     if node_tls.is_none() && !address.ip().is_loopback() {
         return Err(
             "Node Protocol must remain loopback unless the opt-in mTLS identity profile is enabled"
@@ -496,6 +539,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .into(),
         );
     }
+    require_secure_artifact_binding(artifact_address, artifact_tls.is_some())?;
     let node_lease_policy = node_protocol_policy.lease_policy();
     let fact_batch_limit = configured_duration("ROBOGUIDE_FACT_BATCH_LIMIT", 8)?;
     if !(1..=32).contains(&fact_batch_limit) {
@@ -576,6 +620,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let artifact_listener = tokio::net::TcpListener::bind(artifact_address).await?;
     let latest_sequence = event_log.latest_sequence()?;
     let checkpoint = event_log.load_checkpoint()?;
+    let migrate_checkpoint = checkpoint
+        .as_ref()
+        .is_some_and(|saved| saved.schema != SERVER_CHECKPOINT_SCHEMA);
     let initialize_checkpoint = checkpoint.is_none() && latest_sequence == 0;
     let initial_preference_path = std::env::var_os("ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_PATH")
         .filter(|path| !path.is_empty());
@@ -630,6 +677,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
+                    | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
                     | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
                     | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
@@ -658,6 +707,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
+                    | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
                     | PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA
                     | PRE_REPLICATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TIMING_SERVER_CHECKPOINT_SCHEMA
@@ -683,6 +734,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             application::validate_isolation_checkpoint_schema(&saved)?;
             ControllerState {
                 mission_admissions: saved.mission_admissions,
+                memory_imports: saved.memory_imports,
+                safety_stops: saved.safety_stops,
                 bridge: IntegrationRuntimeBridge::restore_from_checkpoint_with_lease_policy(
                     &saved.integration_json,
                     event_log.clone(),
@@ -703,6 +756,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => ControllerState {
             mission_admissions: BTreeMap::new(),
+            memory_imports: BTreeMap::new(),
+            safety_stops: BTreeMap::new(),
             bridge: IntegrationRuntimeBridge::new_with_lease_policy(
                 control::ControlPlane::new(),
                 state::InMemorySharedNodeState::new(),
@@ -718,6 +773,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
     controller.bridge.set_diagnostics(diagnostic_handle.clone());
+    let restored_stop_holds = application::safety_stop::validate_restored(&controller)?;
+    application::memory_import::validate_restored(&controller)?;
     controller
         .orchestrator
         .set_admission_limits(orchestration::MissionAdmissionLimits::try_new(
@@ -791,14 +848,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if initialize_checkpoint
+        || migrate_checkpoint
+        || restored_stop_holds
         || actor_placement_path.is_some()
         || physical_entity_registry_path.is_some()
         || restored_localization_evidence
     {
-        let checkpoint_json =
-            server_checkpoint_json(&controller).map_err(|error| error.to_string())?;
         event_log.begin_batch()?;
-        if let Err(error) = event_log.save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint_json) {
+        if let Err(error) = application::safety_stop::restore_holds(&mut controller) {
+            let _ = event_log.rollback_batch();
+            return Err(error.into());
+        }
+        let checkpoint_json = match server_checkpoint_json(&controller) {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                let _ = event_log.rollback_batch();
+                return Err(error.to_string().into());
+            }
+        };
+        if let Err(error) = application::save_controller_checkpoint(&event_log, &checkpoint_json) {
             let _ = event_log.rollback_batch();
             return Err(error.into());
         }
@@ -862,6 +930,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let timer_fatal_sender = fatal_sender.clone();
     let http_fatal_sender = fatal_sender.clone();
     let artifact_fatal_sender = fatal_sender.clone();
+    let artifact_tls_for_server = artifact_tls.clone();
     let timer_diagnostics = diagnostic_handle.clone();
     let receiver_diagnostics = diagnostic_handle.clone();
     tokio::spawn(async move {
@@ -886,6 +955,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             artifact_catalog_for_server,
             memory_admission,
             localization_observer,
+            artifact_tls_for_server,
         )
         .await
         {

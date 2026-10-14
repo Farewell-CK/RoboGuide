@@ -3,6 +3,127 @@
 use super::*;
 
 impl LocalIntegrationEngine {
+    /// Binds an import to immutable request content and the current provider/workflow configuration.
+    pub(crate) fn memory_import_identity(
+        &self,
+        import: &integration::grpc::v0_4::MemoryImport,
+    ) -> Result<String, EngineError> {
+        let provider = self
+            .catalog()
+            .memory_providers()
+            .get(&import.consumer_provider_id)
+            .ok_or_else(|| {
+                EngineError::Configuration("Memory consumer provider is unavailable".into())
+            })?;
+        let content = integration::memory_import_authorization_digest(
+            &import.import_id,
+            &import.command_id,
+            &import.consumer_provider_id,
+            &import.manifest_json,
+            &import.mission_id,
+            &import.group_id,
+            &import.task_id,
+            &import.role_id,
+            &import.execution_id,
+            "",
+        );
+        let mut identity = format!("{content}\n{provider:?}");
+        if let Some(workflow) = provider.import() {
+            let connections = workflow
+                .steps()
+                .iter()
+                .map(crate::CompiledWorkflowStep::connection)
+                .collect::<std::collections::BTreeSet<_>>();
+            for connection in connections {
+                identity.push_str(&format!(
+                    "\n{:?}",
+                    self.catalog()
+                        .connections()
+                        .get(connection)
+                        .ok_or_else(|| EngineError::Configuration(
+                            "Memory workflow connection is unavailable".into()
+                        ))?
+                ));
+            }
+        }
+        Ok(digest_text(&identity))
+    }
+
+    /// Requires an admitted exact Execute invocation before any Group-scoped provider side effect.
+    pub(crate) fn validate_memory_consumer(
+        &self,
+        import: &integration::grpc::v0_4::MemoryImport,
+    ) -> Result<(), EngineError> {
+        let execution = self
+            .inner
+            .journal
+            .get(&import.execution_id)?
+            .ok_or_else(|| {
+                EngineError::Configuration("Memory consumer Execute is not journaled".into())
+            })?;
+        if execution.status().is_terminal()
+            || execution.status() == crate::JournalStatus::ReconciliationRequired
+            || execution.cancellation_requested()
+            || self
+                .inner
+                .journal
+                .cancellation_pending(&import.execution_id)?
+        {
+            return Err(EngineError::Configuration(
+                "Memory consumer attempt is stopped, ambiguous or cancelling".into(),
+            ));
+        }
+        let invocation: serde_json::Value =
+            serde_json::from_slice(execution.spec().invocation_content())
+                .map_err(EngineError::Json)?;
+        for (field, value) in [
+            ("mission_id", &import.mission_id),
+            ("group_id", &import.group_id),
+            ("task_id", &import.task_id),
+            ("role_id", &import.role_id),
+        ] {
+            if invocation[field].as_str() != Some(value) {
+                return Err(EngineError::Configuration(format!(
+                    "Memory consumer {field} differs from admitted Execute"
+                )));
+            }
+        }
+        Ok(())
+    }
+    /// Classifies a Memory import error without parsing diagnostics; transport and local I/O stay
+    /// unknown while typed configuration/protocol failures may be rejected durably.
+    pub(crate) fn memory_import_error_is_deterministic(&self, error: &EngineError) -> bool {
+        memory_import_error_is_deterministic(error)
+    }
+
+    /// Persists one exact Controller-authorized Memory import identity before local side effects.
+    pub fn prepare_memory_import(
+        &self,
+        import_id: &str,
+        command_id: &str,
+        identity_digest: &str,
+    ) -> Result<crate::PrepareMemoryImport, EngineError> {
+        self.inner
+            .journal
+            .prepare_memory_import(import_id, command_id, identity_digest)
+            .map_err(EngineError::Journal)
+    }
+
+    /// Persists the latest outcome for one exact selective Memory import.
+    pub fn record_memory_import(
+        &self,
+        import_id: &str,
+        command_id: &str,
+        identity_digest: &str,
+        status: crate::MemoryImportStatus,
+        reason: &str,
+    ) -> Result<crate::MemoryImportRecord, EngineError> {
+        self.inner
+            .journal
+            .record_memory_import(import_id, command_id, identity_digest, status, reason)
+            .map_err(EngineError::Journal)
+    }
+
     /// Persists a replicated Controller epoch before any Execute or Cancel side effect is admitted.
     /// Empty epochs retain standalone Controller compatibility.
     pub fn admit_controller_epoch(&self, epoch: &str) -> Result<(), EngineError> {

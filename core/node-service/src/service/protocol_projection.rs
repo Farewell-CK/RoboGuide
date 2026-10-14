@@ -293,7 +293,16 @@ pub(super) fn registration_from_readiness(
         capabilities,
         sensors,
         resources,
-        metadata: Default::default(),
+        metadata: if current_contract {
+            [(
+                integration::MEMORY_IMPORT_METADATA_KEY.to_string(),
+                integration::MEMORY_IMPORT_METADATA_VALUE.to_string(),
+            )]
+            .into_iter()
+            .collect()
+        } else {
+            std::collections::HashMap::new()
+        },
         node_contract_version: catalog.node_contract_version().to_string(),
         state_exports,
         memory_providers,

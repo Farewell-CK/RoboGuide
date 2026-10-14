@@ -6,6 +6,12 @@
 [ADR 遗留项清单](development/adr-follow-up-register.md)。已由后续 ADR 实现的子集回写原
 文档；Software implemented、默认关闭、物理验证待补与一般研究扩展保持不同状态。
 
+2026-10-14 原分层审计的当前工作树复核见
+[剩余整改清单](development/roboguide-remediation-remaining-2026-10-14.md)。selective import 已有
+ADR-0100 的 exact-binding 软件路径，但 Unknown reconciliation 和完整生命周期仍未关闭；
+RT-G9 只是部分接入，且 HA composition 还有 Controller v27/supervisor v26 不一致。
+这些是软件剩余项，不能归为仅等待物理验收。
+
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |
@@ -44,9 +50,10 @@ Spatial v0 的已知后续工作：
 - Generic Memory replica evidence 已包含 exact consumer provider；下一版仍应补充 consumer
   `TaskRef`、execution identity 和 artifact binding，以便 State 与 Runtime 审计关联到具体
   TaskExecution。
-- Generic Memory 需要独立设计 Controller -> Node selective-import command，包括 exact consumer
-  provider/revision、application-accepted durable ACK、重试 fence 和可选 ExecutionGroup 关联；在
-  该协议冻结前不得由 discovery 自动触发全量复制，也不得借普通 Execute 隐式改变 Task lifecycle。
+- Generic Memory 已由 ADR-0098/ADR-0100 接入 exact current Group/Task/Role/attempt/provider 的
+  Controller -> Node selective-import command、durable receipt 和重试 fence；Unknown 的显式
+  reconciliation、完整成员授权与 retention/GC/revocation 仍未关闭。discovery 不授权全量复制，
+  import 不得隐式改变 Task lifecycle。
 - Staged evidence 的 durable pre-dispatch 时点、文件句柄级 TOCTOU 约束，以及临时 upload
 identity 的随机/单调生成仍需独立决策，不能在 v0 中隐式改变事件语义。
 
@@ -113,7 +120,7 @@ EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场�
 | RT-G6 Fault-injection evidence | 离线确定性矩阵已完成 | [`runtime-reliability-fault-matrix.md`](development/runtime-reliability-fault-matrix.md) 覆盖 crash/restart/disconnect/duplicate/cancel/rebind；真机断电与真实网络分区证据仍缺失 |
 | RT-G7 Capability readiness | 软件闭环已完成，真机证据待补 | Node/WebUI process health 与 exact canonical capability readiness 分离；真实 ROS/EAIOS probe 仍需部署验证 |
 | RT-G8 Verification evidence | 强类型链路已完成，field mapping 待真机验证 | localization evidence 包含 active map identity、mode、pose quality、frame、current attempt/Node/session provenance；`has_map=true` 仅为 legacy smoke |
-| RT-G9 Relation actuation | 未完成 | relation violation/unknown 在 progression fence 之外仍需版本化 pause/stop command、durable acknowledgement、deadline 与 completion race；Local Safety authority 不得被远程动作覆盖 |
+| RT-G9 Relation actuation | 部分接入，仍未完成 | 已有 stop purpose/Cancel outbox 和取消终结局部 gate；Mission hold、安全记录自身来源/时效校验、receipt 状态机、deadline timer、完整 release/resume gate 与专项竞态测试仍缺；物理/hard-realtime 验收独立 |
 
 RT-G7/RT-G8 的最小边界由
 [`ADR-0019`](decisions/0019-capability-readiness-and-localization-evidence.md) 已确定：RT-G7

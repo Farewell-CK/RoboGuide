@@ -474,7 +474,7 @@ pub(crate) fn http_save(
         DiagnosticStage::Save,
         None,
     );
-    log.save_checkpoint(crate::SERVER_CHECKPOINT_SCHEMA, checkpoint)
+    crate::application::save_controller_checkpoint(log, checkpoint)
 }
 
 /// Times an HTTP-owned SQLite commit, without converting or swallowing persistence failures.
@@ -589,6 +589,8 @@ mod tests {
         bridge.set_diagnostics(diagnostics);
         let controller = Arc::new(std::sync::Mutex::new(crate::ControllerState {
             mission_admissions: BTreeMap::new(),
+            memory_imports: BTreeMap::new(),
+            safety_stops: BTreeMap::new(),
             bridge,
             orchestrator: orchestration::MissionOrchestrator::new(),
             verifier_seen: Default::default(),

@@ -20,6 +20,8 @@ fn plan(mission: &str) -> domain::MissionPlan {
 fn fixture(log: &state::SqliteEventLog) -> ControllerState {
     let mut controller = ControllerState {
         mission_admissions: BTreeMap::new(),
+        memory_imports: BTreeMap::new(),
+        safety_stops: BTreeMap::new(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
             state::InMemorySharedNodeState::new(),
@@ -451,6 +453,8 @@ fn held_terminal_fact_is_retained_without_release_or_execute_replay() {
         .unwrap(),
         orchestrator: MissionOrchestrator::restore_json(&saved.orchestration_json).unwrap(),
         mission_admissions: saved.mission_admissions,
+        memory_imports: saved.memory_imports,
+        safety_stops: saved.safety_stops,
         verifier_seen: saved.verifier_seen,
         verifier_source_digest: saved.verifier_source_digest,
     };

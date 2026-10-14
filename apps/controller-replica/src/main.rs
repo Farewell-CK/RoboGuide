@@ -14,6 +14,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let first = arguments
         .next()
         .ok_or("usage: controller-replica [--policy-digest] <config.json>")?;
+    if first == "--application-schema" {
+        if arguments.next().is_some() {
+            return Err("schema inspection accepts no configuration or storage path".into());
+        }
+        println!("{}", state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA);
+        return Ok(());
+    }
     let digest_only = first == "--policy-digest";
     let path = if digest_only {
         arguments.next().ok_or("missing config.json")?

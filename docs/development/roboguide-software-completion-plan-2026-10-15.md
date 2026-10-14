@@ -1,0 +1,99 @@
+# RoboGuide 全部非发布整改实施与验收
+
+状态：Accepted，实施中。用户于 2026-10-15 要求执行完整计划。
+基线：`main@5285a92a6af8bf4a99bb0852b5cdb80728c9144c` 加已备份的未提交整改工作树。
+实施分支：`codex/remediation-complete-software-2026-10-15`。
+
+## 交付要求
+
+原审计 14 层、R01–R20 的全部非发布工作均为必需项，原 P2 不再是本轮的排除项。
+保留部署配置、升级迁移、回退保护、监控告警和故障演练；排除正式发版、公开分发、生产上线、
+项目许可证决策和外部安全认证办理。实验、E6 和模型效果评测不参与验收。
+
+交付状态为 `SoftwareComplete`：通用软件完整实现并验收。设备缺席时，真实停止、交接、
+硬实时、硬件身份和物理连续性保持 `HardwareEvidencePending`。测试替身、合成事实和
+软件进程不能冒充设备或物理证据。新设备由配置、正式注册和声明的 Local EAIOS 合同接入；
+Core 不按设备名、Node ID、固定节点数或固定任务图选择行为。
+
+Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑定，Runtime 管理 attempt
+和命令，State 保留来源，Local EAIOS 保留即时操作和最终安全权威。副作用前持久化；Unknown
+保留所有权；重启不续预算；原始 receive time 不刷新。模型只提候选，自动重规划、抢占和
+交接须有策略预授权并通过 Review、Control 和安全门禁。
+
+## 阶段与当前状态
+
+| 阶段 | 对应项 | 必需交付 | 当前状态 |
+| --- | --- | --- | --- |
+| F0 基线与合同 | R03、R19 的非发布部分 | 备份、独立分支、软件 profile、权威/支持/验收矩阵 | 进行中 |
+| F1 停止与当前 HA | R01、R02 | 类型化 stop、Mission hold、证据/receipt/deadline、全生命周期 gate、schema 接线 | 当前切片软件验收通过；后续 stop reconciliation/recovery 升级仍由 F7 验收 |
+| F2 身份与入口 | R04、R05、R14 | pending reconciliation、tenant、证书轮换/撤销、Node 生命周期、硬件证明验证 | 进行中：pending journal/恢复已接入；身份生命周期待实现 |
+| F3 State 与 MI | R06、R07、R08 | policy registry、authority consumer、Belief、provenance、verifier/持续验证 | 待完成 |
+| F4 Memory/Spatial | R10、R11、R12、R20 | reconciliation、Group 授权/handoff、active-map/GC/revocation、自动配准/融合/增量 | 待完成 |
+| F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | 待完成 |
+| F6 资源/调度 | R16、R20 | divisible quota、完整时间/空间承诺、真实成本 evidence 与确定性策略 | 待完成 |
+| F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | 待完成 |
+| F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 待完成 |
+| F9 层级/Federation | R20 | 控制域、跨域 prepare/commit、路由/授权与恢复 | 待完成 |
+| F10 运维与总验收 | R18、R19 的非发布部分 | 指标/告警、write-disabled 只读恢复、部署/迁移/回退、全功能验收 | 待完成 |
+
+每阶段通过对应验收后才进入依赖阶段。类型、文档、占位返回值、内部直调和通用测试通过
+不能独立关闭功能。阶段记录必须包含当前源码/配置 identity、复现命令、调用链、结果和剩余项。
+
+当前阶段记录：[F1 停止权威与当前 HA 软件验收](acceptance/2026-10-15-f1.md)。
+
+## 已接受的实现决定
+
+- Stop 冻结完整受影响 attempt 集合、operation-owned export、策略、owner/session 和 deadline。
+  receipt 仅证明接纳；实际停止证明和新鲜 safe-state 独立核对。旧观察、Unknown、自然
+  Completed/Failed 不能合成确认；确认后不回退；全 release/resume 路径共享门禁。
+- principal、tenant、domain、Node、LocalSystem、PhysicalEntity 分离。授权 revision 持久化，
+  撤销隔离已有连接；证书轮换具有准备、受限重叠、激活、撤销阶段。硬件证明校验可信密钥、
+  challenge、签名与测量策略；签名有效不自动证明物理身份。
+- State 不成为 Global Truth。原始 records 保留；布尔/枚举显式归约；有协方差的数值证据
+  提供保守融合，不把 confidence 当方差。持续 verifier 影响当前执行，终结后的争议为 incident。
+- Spatial provider 与 Rust Control 分离；独立 Python 3.11/Open3D 0.19.0 环境。PLY/PCD 和版本化
+  占用数据支持 FPFH/RANSAC、ICP、pose-graph、三维分块融合与增量 revision；阈值/预算由策略
+  配置，未观测空间保持 unknown。融合产物不证明当前设备已经定位。
+- Memory immutable scope 不原地改写。跨 Group 交换有显式授权和 lineage；GC 先 tombstone，
+  核对执行/import/active-map/snapshot/archive/副本引用后删除。Unknown 只凭原 provider 查询
+  合同 reconciliation，不换 import identity 重做。
+- OpenRaft 0.9.25 保留。动态成员使用 learner catch-up/joint consensus；handoff 使用 durable
+  barrier、旧 Leader drain、目标同步、租约到期后的定向选举和新 epoch/quorum 确认；尊重
+  多数派，处理线性读续租，超时恢复正常选举，不假设已有原生 transfer API。
+- 新资源合同区分 exclusive/divisible 与精确单位。旧 units 保留原语义；确定性有界 Scheduler
+  消费真实 evidence；缺 GPU/定位/交通数据为 unavailable。实际限额由声明支持的 Local EAIOS
+  实施，Controller 的逻辑分配不能伪装成物理强制保障。
+- 交接使用 prepare、完整 stop barrier、上下文导出/导入验证、Commit/Rebind、继续执行。
+  重规划替换未完成部分，保留既成事实、原目标和 grounded identity，预算不可因重启续期。
+- 根 Orchestration 管理全局 Mission/协调，子域 Control 管理本域资源。跨域持久 prepare/commit
+  全部完成后才 dispatch；不确定事务保留所有权。epoch 必须限定 cluster/domain。
+- 存储或复制不可写时进入 write-disabled/degraded，查询最后提交状态并提供恢复入口。
+  指标统一 Prometheus；采集/告警/runbook 必须实际验收，候选 SLO 不写成已达标。
+
+## 合同与兼容
+
+沿现有服务扩展可查询的管理操作：幂等 reconciliation、Memory/stop/recovery/handoff、计划
+revision、成员和 leader transfer。mutation 必须有幂等身份、期望 revision 和证书主体授权。
+verifier ingress 绑定 source、tenant、Mission/Task/Role/attempt、计划 revision、finality/freshness。
+
+Node Protocol 使用显式版本/协商扩展提供 stop receipt/certificate、查询恢复、上下文和 domain
+identity；bytes 仍走 Artifact。MissionPlan 新版本明确 quota/运行期策略/计划 revision；旧输入
+兼容读取但不能绕过新授权。共享 schema/version 检查防止 Controller/supervisor 分离。
+迁移保留预算/receive time/owner/attempt/history，缺证据进入 unavailable/hold；不安全降级拒绝。
+
+## 强制验收
+
+1. ID/拓扑/注册顺序/能力/provider 配置变化不修改 Core；扩展协议被真实业务消费。
+2. 正向软件进程通过公开 API/正式协议产生真实计算、文件、CAS 和恢复结果，由独立 verifier 检查。
+3. stop 覆盖旧 epoch/session、过期/冲突、无消息超时、取消/完成/失败/resume/release 竞态与多 Mission 隔离。
+4. 在持久化、发送、副作用、receipt、quorum、本地 Commit、snapshot、GC 和计划切换窗口注入故障。
+5. 独立 ownership/quota/生命周期模型验证无双重分配、超额、未授权迁移和危险重放。
+6. 空间算法使用可追溯文件和独立真值/误差检查，覆盖退化、低重叠、高度/单位、回环和增量损坏；
+   样本不伪装成当前设备观察。
+7. 隔离环境真实验证采集/告警、撤销、动态成员、handoff、archive、升级和拒绝不安全回退。
+8. Rust tests/fmt/Clippy/Rustdoc，Python format/lint/strict typing/函数文档/tests，跨语言 schema、
+   迁移和文档检查全部通过。软件 TEST GAP 未关闭时不得报告 SoftwareComplete。
+
+最终交付：逐项状态矩阵、完整合同与配置、扩展指南、部署恢复 runbook、复现命令和
+代码/配置/依赖 identity、独立验证结果、分阶段提交、同步架构/ADR/README/AGENTS/实现图。
+设备证据待验证清单独立保留；不通过删除要求或把 Unknown 改成成功关闭软件工作包。

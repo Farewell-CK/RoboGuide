@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import Protocol, cast
@@ -55,7 +55,7 @@ from mission.request_record import (
     MissionRequestLifecycle,
     MissionRequestRecord,
 )
-from mission.request_store import MissionRequestStore
+from mission.request_store import HttpCommandIdentity, HttpWriterLease, MissionRequestStore
 from mission.review import (
     MissionPlanRepairer,
     MissionPlanReview,
@@ -136,6 +136,7 @@ class MissionRequestEngine:
         controller_preflight_enabled: bool = False,
         max_deployment_recovery_attempts: int = 0,
         deployment_recovery_timeout_ms: int = 900_000,
+        readiness_probe: Callable[[], bool] | None = None,
     ) -> None:
         """Retain bounded dependencies and fail interrupted transitions closed on startup."""
         if max_repair_attempts < 0:
@@ -145,6 +146,7 @@ class MissionRequestEngine:
         if max_repair_attempts > 0 and (reviewer is None or repairer is None):
             raise MissionRequestError("automatic repair requires Reviewer and Repairer ports")
         self._store = store
+        self._readiness_probe = readiness_probe
         self._interpreter = interpreter
         self._planner = planner
         self._controller = controller
@@ -188,7 +190,11 @@ class MissionRequestEngine:
         self._identity_lock = threading.Lock()
         self._request_locks_guard = threading.Lock()
         self._request_locks: dict[str, _RequestLockEntry] = {}
-        self._recover_interrupted()
+        startup_lease = self._store.acquire_http_service_lock()
+        try:
+            self._recover_interrupted()
+        finally:
+            startup_lease.close()
 
     def create(self, instruction: str) -> MissionRequestRecord:
         """Create internal identities and drive a new instruction until its first stable state."""
@@ -233,6 +239,115 @@ class MissionRequestEngine:
         if record is None:
             raise MissionRequestError(f"unknown Mission Request {request_id}")
         return record
+
+    def record_http_audit(
+        self,
+        *,
+        principal_id: str,
+        tenant_id: str,
+        role: str,
+        method: str,
+        path: str,
+        correlation_id: str,
+        idempotency_key: str,
+    ) -> None:
+        """Persist one authenticated HTTP command without changing Mission lifecycle state."""
+        self._store.record_http_audit(
+            principal_id=principal_id,
+            tenant_id=tenant_id,
+            role=role,
+            method=method,
+            path=path,
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+            recorded_at_ms=self._clock(),
+        )
+
+    def metrics(self) -> JSONObject:
+        """Return aggregate Mission Service metrics without exposing request contents."""
+        return self._store.metrics()
+
+    @contextmanager
+    def authenticated_command(
+        self, tenant_id: str, administrator: bool, http_command: HttpCommandIdentity | None = None
+    ) -> Iterator[None]:
+        """Carry authenticated ownership through all intermediate durable command transitions."""
+        with self._store.authenticated_command(tenant_id, administrator, http_command):
+            yield
+
+    def acquire_http_service_lock(self) -> HttpWriterLease:
+        """Hold the declared single-process SQLite writer profile for one HTTP server."""
+        return self._store.acquire_http_service_lock()
+
+    def http_command(self, identity: HttpCommandIdentity, *, reconcile: bool = False) -> JSONObject:
+        """Expose durable progress or an interrupted outcome without replaying a command."""
+        if reconcile:
+            return self._store.reconcile_http_command(identity, self._clock())
+        return self._store.http_command(identity)
+
+    def readiness(self) -> JSONObject:
+        """Report writer availability after startup recovery has completed."""
+        result = self._store.readiness()
+        if self._readiness_probe is not None:
+            try:
+                ready = self._readiness_probe()
+            except MissionControllerError:
+                ready = False
+            result["controller"] = "ready" if ready else "unavailable"
+            result["ready"] = ready
+        return result
+
+    def bind_request_tenant(self, request_id: str, tenant_id: str) -> None:
+        """Bind one request to the authenticated tenant that created or first mutated it."""
+        self._store.bind_request_tenant(request_id, tenant_id, self._clock())
+
+    def request_tenant(self, request_id: str) -> str | None:
+        """Return the durable tenant owner for HTTP access control."""
+        return self._store.request_tenant(request_id)
+
+    def begin_http_idempotency(
+        self,
+        *,
+        principal_id: str,
+        tenant_id: str,
+        method: str,
+        path: str,
+        idempotency_key: str,
+        request_digest: str,
+    ) -> tuple[str, int | None, JSONObject | None]:
+        """Reserve or replay one authenticated HTTP mutation identity."""
+        return self._store.begin_http_idempotency(
+            principal_id=principal_id,
+            tenant_id=tenant_id,
+            method=method,
+            path=path,
+            idempotency_key=idempotency_key,
+            request_digest=request_digest,
+            created_at_ms=self._clock(),
+        )
+
+    def complete_http_idempotency(
+        self,
+        *,
+        principal_id: str,
+        tenant_id: str,
+        method: str,
+        path: str,
+        idempotency_key: str,
+        status_code: int,
+        response: JSONObject,
+    ) -> None:
+        """Persist one successful HTTP response after its domain transition commits."""
+        self._store.complete_http_idempotency(
+            principal_id=principal_id,
+            tenant_id=tenant_id,
+            method=method,
+            path=path,
+            idempotency_key=idempotency_key,
+            status_code=status_code,
+            response=response,
+            completed_at_ms=self._clock(),
+        )
 
     def grounding_context(self, request_id: str, context_digest: str) -> GroundingContextSnapshot:
         """Return one historical deliberation snapshot without refreshing its evidence."""

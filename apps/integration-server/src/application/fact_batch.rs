@@ -3,6 +3,7 @@
 use crate::*;
 use integration::{GrpcNodeEventCompletion, GrpcNodeEventDelivery};
 use ports::{DiagnosticHandle, NodeFactMetadata};
+use sha2::{Digest as _, Sha256};
 
 /// Shared or unclassified failures remain fatal to the application driver.
 type DriverError = Box<dyn std::error::Error + Send + Sync>;
@@ -152,7 +153,13 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             .map_err(|_| "event-log write gate is poisoned")?;
         drop(wait);
         self.events.begin_batch()?;
-        let result = self.apply_open_batch(inputs);
+        let input_digest = format!(
+            "sha256:{:x}",
+            Sha256::digest(serde_json::to_vec(&inputs.iter().map(|(event, metadata)| {
+                serde_json::json!({"event":event,"received_at_ms":metadata.as_ref().map(|meta| meta.received_at.as_millis())})
+            }).collect::<Vec<_>>())?)
+        );
+        let result = self.apply_open_batch(inputs, input_digest);
         if result.is_err() {
             let _ = self.events.rollback_batch();
         }
@@ -163,6 +170,7 @@ impl<C: Clock> NodeFactDriver<'_, C> {
     fn apply_open_batch(
         &self,
         inputs: Vec<(GrpcNodeEvent, Option<NodeFactMetadata>)>,
+        input_digest: String,
     ) -> Result<Vec<Result<(), String>>, DriverError> {
         let lock = StageObservation::start(
             self.diagnostics,
@@ -212,11 +220,70 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             let registration = matches!(event, GrpcNodeEvent::Registered { .. });
             let reduction =
                 StageObservation::start(self.diagnostics, kind, DiagnosticStage::Reduce, identity);
+            let safety_context = match &event {
+                GrpcNodeEvent::NodeMessage {
+                    node_id,
+                    session_id,
+                    ..
+                } => Some((node_id.clone(), session_id.clone())),
+                _ => None,
+            };
+            let stop_receipt = match &event {
+                GrpcNodeEvent::NodeMessage { message, .. } => match &message.message {
+                    Some(integration::grpc::v0_4::node_message::Message::CommandReceipt(
+                        receipt,
+                    )) => Some(receipt.clone()),
+                    _ => None,
+                },
+                _ => None,
+            };
             let transition = self.events.with_input_savepoint(|| {
+                if let GrpcNodeEvent::NodeMessage {
+                    node_id,
+                    session_id,
+                    message,
+                } = &event
+                    && let Some(
+                        integration::grpc::v0_4::node_message::Message::MemoryImportReceipt(
+                            receipt,
+                        ),
+                    ) = &message.message
+                {
+                    if receipt.session_id != *session_id {
+                        return Err(FactFailure::Rejected(
+                            "Memory receipt session differs".into(),
+                        ));
+                    }
+                    super::memory_import::receipt(&mut candidate, node_id, receipt, received)
+                        .map_err(FactFailure::Rejected)?;
+                }
                 candidate
                     .bridge
                     .consume_received(event, received, now, &correlation)
                     .map_err(classify_fact_error)?;
+                if let Some((node_id, session_id)) = &safety_context {
+                    let node_id = domain::NodeId::new(node_id).map_err(|error| {
+                        FactFailure::Fatal(Box::new(
+                            orchestration::IntegrationRuntimeError::Domain(error),
+                        ))
+                    })?;
+                    if let Some(receipt) = &stop_receipt {
+                        safety_stop::receipt(
+                            &mut candidate,
+                            &node_id,
+                            session_id,
+                            receipt,
+                            received,
+                            now,
+                        )
+                        .map_err(FactFailure::Rejected)?;
+                    }
+                }
+                safety_stop::tick(&mut candidate, now).map_err(|error| {
+                    FactFailure::Fatal(Box::new(orchestration::IntegrationRuntimeError::Protocol(
+                        error,
+                    )))
+                })?;
                 self.derive(&mut candidate, registration, now, &correlation)
                     .map_err(FactFailure::Fatal)
             })?;
@@ -255,6 +322,8 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             DiagnosticStage::Serialize,
             None,
         );
+        let import_prepared_at = self.clock.now();
+        super::memory_import::prepare(&mut working, import_prepared_at);
         let checkpoint = server_checkpoint_json(&working)?;
         drop(serialization);
         self.diagnostics.value(
@@ -269,8 +338,16 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             DiagnosticStage::Save,
             None,
         );
+        let event_sequence = self.events.current_batch_event_sequence()?;
+        let command = control_command_journal_entry_with_digest(
+            format!("node-fact-batch:{event_sequence}:{input_digest}"),
+            Some("integration.node-fact-batch".to_string()),
+            input_digest,
+            &checkpoint,
+            event_sequence,
+        );
         self.events
-            .save_checkpoint(SERVER_CHECKPOINT_SCHEMA, &checkpoint)?;
+            .save_checkpoint_with_command(SERVER_CHECKPOINT_SCHEMA, &checkpoint, command)?;
         drop(save);
         let commit = StageObservation::start(
             self.diagnostics,
@@ -287,7 +364,11 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             .controller
             .lock()
             .map_err(|_| "controller lock is poisoned after Commit")?;
+        let has_memory_imports = !working.memory_imports.is_empty();
         *live = working;
+        if has_memory_imports {
+            super::memory_import::flush(&live, import_prepared_at, self.clock.now());
+        }
         let _outbox = StageObservation::start(
             self.diagnostics,
             DiagnosticKind::Other,

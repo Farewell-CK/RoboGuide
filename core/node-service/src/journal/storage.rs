@@ -69,6 +69,13 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
              singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
              term INTEGER NOT NULL CHECK(term >= 0),
              replica_id INTEGER NOT NULL CHECK(replica_id > 0)
+         );
+         CREATE TABLE IF NOT EXISTS memory_imports (
+             import_id TEXT PRIMARY KEY NOT NULL,
+             command_id TEXT NOT NULL,
+             identity_digest TEXT NOT NULL,
+             status TEXT NOT NULL CHECK(status IN ('pending', 'completed', 'rejected', 'unknown')),
+             reason TEXT NOT NULL
          );",
     )?;
     if prior_version < 2 {
@@ -80,13 +87,20 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
             [],
         )?;
     }
-    transaction.pragma_update(None, "user_version", 5_i64)?;
+    transaction.pragma_update(None, "user_version", 6_i64)?;
     transaction.commit()?;
     Ok(())
 }
 
 /// Fences dispatches whose local side effect or acceptance fact cannot be proven after restart.
 pub(super) fn recover_ambiguous_dispatches(connection: &Connection) -> Result<(), JournalError> {
+    // A pending Memory import may have reached the Local EAIOS before a Node restart. The exact
+    // identity is retained, but its outcome is unknown and may only be retried with the same
+    // authorization digest.
+    connection.execute(
+        "UPDATE memory_imports SET status = 'unknown', reason = ?1 WHERE status = 'pending'",
+        ["Node Service restarted before Memory import outcome was recorded"],
+    )?;
     connection.execute(
         "UPDATE executions
          SET status = 'failed', reason = ?1
@@ -138,6 +152,33 @@ pub(super) fn load_execution(
              FROM executions WHERE execution_id = ?1",
             [execution_id],
             record_from_row,
+        )
+        .optional()
+        .map_err(JournalError::from)
+}
+
+/// Reads one optional durable selective-import identity.
+pub(super) fn load_memory_import(
+    connection: &Connection,
+    import_id: &str,
+) -> Result<Option<MemoryImportRecord>, JournalError> {
+    connection
+        .query_row(
+            "SELECT import_id, command_id, identity_digest, status, reason
+             FROM memory_imports WHERE import_id = ?1",
+            [import_id],
+            |row| {
+                let status: String = row.get(3)?;
+                Ok(MemoryImportRecord {
+                    import_id: row.get(0)?,
+                    command_id: row.get(1)?,
+                    identity_digest: row.get(2)?,
+                    status: MemoryImportStatus::parse(&status).map_err(|error| {
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                    })?,
+                    reason: row.get(4)?,
+                })
+            },
         )
         .optional()
         .map_err(JournalError::from)

@@ -4,8 +4,9 @@ use crate::grpc::v0_4::node_message::Message as NodePayload;
 use crate::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocol;
 use crate::grpc::v0_4::server_message::Message as ServerPayload;
 use crate::grpc::v0_4::{
-    Ack, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION, NODE_CONTRACT_VERSION, NodeMessage,
-    PREVIOUS_NODE_CONTRACT_VERSION, PROTOCOL_VERSION, Registered, ServerMessage, Welcome,
+    Ack, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION, MemoryImport, NODE_CONTRACT_VERSION,
+    NodeMessage, PREVIOUS_NODE_CONTRACT_VERSION, PROTOCOL_VERSION, Registered, ServerMessage,
+    Welcome,
 };
 use ports::{
     Clock, DiagnosticHandle, DiagnosticStage, NodeFactMetadata, NodeLeasePolicy, NodeProtocolPolicy,
@@ -82,13 +83,52 @@ fn peer_certificate_digest(request: &Request<tonic::Streaming<NodeMessage>>) -> 
 const SERVER_VERSION: &str = "roboguide.server/v0.4";
 /// Per-session bounded reader-to-application ingress capacity.
 const VALIDATED_INGRESS_CAPACITY: usize = 256;
+/// Maximum serialized Memory manifest carried by one selective-import command.
+pub const MAX_MEMORY_IMPORT_MANIFEST_BYTES: usize = 512 * 1024;
 /// Registration metadata that explicitly opts a Node into accepted-plan Session transport.
 pub const EXECUTION_SESSION_METADATA_KEY: &str = "roboguide.execution-session";
 /// The only Session schema currently understood by the Controller/Node pair.
 pub const EXECUTION_SESSION_METADATA_VALUE: &str = "roboguide.execution-session/v0.1";
+/// Registration metadata that explicitly opts a Node into Controller-authorized Memory import.
+pub const MEMORY_IMPORT_METADATA_KEY: &str = "roboguide.memory-import";
+/// The only selective-import command schema currently understood by the Controller/Node pair.
+pub const MEMORY_IMPORT_METADATA_VALUE: &str = "roboguide.memory-import/v0.1";
+
+/// Computes the digest binding one selective-import command to its immutable authorization tuple.
+#[allow(clippy::too_many_arguments)]
+pub fn memory_import_authorization_digest(
+    import_id: &str,
+    command_id: &str,
+    consumer_provider_id: &str,
+    manifest_json: &str,
+    mission_id: &str,
+    group_id: &str,
+    task_id: &str,
+    role_id: &str,
+    execution_id: &str,
+    controller_epoch: &str,
+) -> String {
+    let value = serde_json::json!({
+        "schema": MEMORY_IMPORT_METADATA_VALUE,
+        "import_id": import_id,
+        "command_id": command_id,
+        "consumer_provider_id": consumer_provider_id,
+        "manifest_json": manifest_json,
+        "mission_id": mission_id,
+        "group_id": group_id,
+        "task_id": task_id,
+        "role_id": role_id,
+        "execution_id": execution_id,
+        "controller_epoch": controller_epoch,
+    });
+    format!(
+        "sha256:{:x}",
+        Sha256::digest(serde_json::to_vec(&value).expect("digest tuple is serializable"))
+    )
+}
 
 /// Events received from all formal gRPC Node sessions.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub enum GrpcNodeEvent {
     /// A node completed registration in a new session.
     Registered {
@@ -264,6 +304,8 @@ struct RoutedSession {
     active: bool,
     /// Whether this Node explicitly advertises the additive execution-session field.
     supports_execution_session: bool,
+    /// Whether this Node explicitly advertises Controller-authorized Memory import.
+    supports_memory_import: bool,
 }
 
 impl GrpcNodeRouter {
@@ -562,6 +604,89 @@ impl GrpcNodeRouter {
                     execution_id,
                     command_id,
                     controller_epoch,
+                })),
+            }))
+            .map_err(|_| Status::unavailable("node session closed"))
+    }
+
+    /// Sends one Controller-authorized selective Memory import through the current Node session.
+    #[allow(clippy::too_many_arguments)]
+    pub fn import_memory(
+        &self,
+        node_id: &str,
+        import_id: String,
+        command_id: String,
+        consumer_provider_id: String,
+        manifest_json: String,
+        mission_id: String,
+        group_id: String,
+        task_id: String,
+        role_id: String,
+        execution_id: String,
+    ) -> Result<(), Status> {
+        self.check_command_delivery()?;
+        if import_id.trim().is_empty()
+            || command_id != format!("memory-import-{import_id}")
+            || consumer_provider_id.trim().is_empty()
+            || manifest_json.trim().is_empty()
+            || manifest_json.len() > MAX_MEMORY_IMPORT_MANIFEST_BYTES
+            || mission_id.trim().is_empty()
+            || group_id.trim().is_empty()
+            || task_id.trim().is_empty()
+            || role_id.trim().is_empty()
+            || execution_id.trim().is_empty()
+        {
+            return Err(Status::invalid_argument(
+                "Memory import identity and manifest fields must be valid",
+            ));
+        }
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        let route = sessions
+            .get(node_id)
+            .ok_or_else(|| Status::unavailable("node is not connected"))?;
+        if !route.active {
+            return Err(Status::unavailable("node registration is pending"));
+        }
+        if !route.supports_memory_import {
+            return Err(Status::failed_precondition(
+                "Node registration does not advertise roboguide.memory-import/v0.1",
+            ));
+        }
+        if route.last_heartbeat.elapsed() >= route.lease_duration {
+            return Err(Status::unavailable("node lease expired"));
+        }
+        let controller_epoch = self.controller_epoch()?;
+        let authorization_digest = memory_import_authorization_digest(
+            &import_id,
+            &command_id,
+            &consumer_provider_id,
+            &manifest_json,
+            &mission_id,
+            &group_id,
+            &task_id,
+            &role_id,
+            &execution_id,
+            &controller_epoch,
+        );
+        route
+            .sender
+            .send(Ok(ServerMessage {
+                message: Some(ServerPayload::MemoryImport(MemoryImport {
+                    session_id: route.session_id.clone(),
+                    import_id,
+                    command_id,
+                    consumer_provider_id,
+                    manifest_json,
+                    mission_id,
+                    group_id,
+                    task_id,
+                    role_id,
+                    execution_id,
+                    controller_epoch,
+                    authorization_digest,
                 })),
             }))
             .map_err(|_| Status::unavailable("node session closed"))
@@ -868,6 +993,11 @@ async fn run_grpc_session(
                         .map(String::as_str)
                         == Some(EXECUTION_SESSION_METADATA_VALUE)
                 }),
+                supports_memory_import: registration
+                    .metadata
+                    .get(MEMORY_IMPORT_METADATA_KEY)
+                    .map(String::as_str)
+                    == Some(MEMORY_IMPORT_METADATA_VALUE),
             },
         )
     };
@@ -1028,6 +1158,7 @@ async fn run_grpc_session(
                 Some(NodePayload::StateObservationBatch(value)) => value.sequence,
                 Some(NodePayload::PeerChannelReadiness(value)) => value.sequence,
                 Some(NodePayload::CommandReceipt(value)) => value.sequence,
+                Some(NodePayload::MemoryImportReceipt(value)) => value.sequence,
                 Some(NodePayload::ExecutionEvent(value)) => value.sequence,
                 Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
                 _ => 0,

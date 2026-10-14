@@ -80,6 +80,8 @@ async fn admission_http_and_checkpoint_preserve_exact_accepted_input() {
         ),
         orchestrator: MissionOrchestrator::new(),
         mission_admissions: BTreeMap::new(),
+        memory_imports: BTreeMap::new(),
+        safety_stops: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
         verifier_source_digest: None,
     }));
@@ -123,6 +125,8 @@ async fn admission_http_and_checkpoint_preserve_exact_accepted_input() {
         orchestrator: MissionOrchestrator::restore_json(&saved.orchestration_json)
             .expect("restores"),
         mission_admissions: saved.mission_admissions,
+        memory_imports: saved.memory_imports,
+        safety_stops: saved.safety_stops,
         verifier_seen: saved.verifier_seen,
         verifier_source_digest: saved.verifier_source_digest,
     }));

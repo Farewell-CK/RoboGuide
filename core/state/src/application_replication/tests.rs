@@ -95,7 +95,7 @@ fn accepted_response_loss_converges_without_event_or_checkpoint_loss() {
     let batch = replicator.accepted.lock().unwrap().clone().unwrap();
     let restored = SqliteEventLog::open(directory.path().join("promoted.sqlite3")).unwrap();
     restored
-        .install_replica_view(&batch.events, &batch.checkpoint)
+        .install_replica_authority(&batch.events, &batch.checkpoint, None, &batch.commands)
         .unwrap();
     assert_eq!(restored.load_checkpoint().unwrap(), Some(batch.checkpoint));
 }

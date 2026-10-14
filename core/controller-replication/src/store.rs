@@ -31,6 +31,9 @@ pub struct ReplicaView {
     pub checkpoint: Option<state::PersistedCheckpoint>,
     /// Immutable retained event metadata tail; a complete checkpoint covers any compacted prefix.
     pub events: Vec<state::PersistedEvent>,
+    /// Complete retained command evidence, independent of domain-event compaction.
+    #[serde(default)]
+    pub commands: Vec<state::ControlCommandJournalEntry>,
     /// Optional durable prefix anchor when old metadata rows were compacted.
     #[serde(default)]
     pub history_anchor: Option<HistoryAnchor>,
@@ -81,6 +84,27 @@ impl ReplicaView {
             }
         }
         let mut bytes = 0_u64;
+        if let Some(head) = self.commands.last() {
+            head.validate_checkpoint(
+                self.checkpoint
+                    .as_ref()
+                    .ok_or_else(|| io_error("commands lack checkpoint"))?,
+            )
+            .map_err(io_error)?;
+        } else if self.checkpoint.as_ref().is_some_and(|checkpoint| {
+            state::checkpoint_requires_authority_journal(&checkpoint.schema)
+        }) {
+            return Err(io_error("replica snapshot lost required command history"));
+        }
+        for pair in self.commands.windows(2) {
+            if pair[0].authority_revision.checked_add(1) != Some(pair[1].authority_revision) {
+                return Err(io_error("replica command history is discontinuous"));
+            }
+        }
+        let command_bytes = serde_json::to_vec(&self.commands).map_err(io_error)?.len();
+        if command_bytes > MAX_HISTORY_BYTES as usize {
+            return Err(io_error("replica command history exceeds snapshot bounds"));
+        }
         let mut identities = std::collections::BTreeSet::new();
         let first_sequence = self.events.first().map_or(0, |event| event.sequence);
         if let Some(anchor) = &self.history_anchor {
@@ -166,11 +190,24 @@ pub struct SqliteRaftStore {
     /// Atomic SQLite storage shared by log and state-machine traits.
     connection: Arc<Mutex<Connection>>,
     /// Lifetime process writer lease; a second owner cannot fork local consensus history.
-    _writer: Arc<File>,
+    _writer: Arc<ReplicaWriterLease>,
     /// Frozen network/application identity.
     profile: String,
     /// Exact admitted opaque application schema.
     application_schema: String,
+}
+
+/// Explicit application lease, independent of descriptors briefly inherited by child processes.
+struct ReplicaWriterLease {
+    /// Shared open-file description locked while at least one application Store owns it.
+    file: File,
+}
+
+impl Drop for ReplicaWriterLease {
+    /// Releases the lock at the final application owner, even if a child inherited a descriptor.
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
 }
 
 /// Binds exact snapshot bytes and applied pointers, detecting corruption before any installation.
@@ -256,13 +293,43 @@ fn read_view(connection: &Connection) -> Result<ReplicaView, StorageError<u64>> 
         checkpoint,
         events,
         history_anchor,
+        commands: read_commands(connection)?,
     })
+}
+
+/// Reads immutable command authority in revision order for snapshot transfer and promotion.
+fn read_commands(
+    connection: &Connection,
+) -> Result<Vec<state::ControlCommandJournalEntry>, StorageError<u64>> {
+    let mut statement = connection
+        .prepare("SELECT data FROM replica_commands ORDER BY revision")
+        .map_err(io_error)?;
+    statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(io_error)?
+        .map(|row| serde_json::from_str(&row.map_err(io_error)?).map_err(io_error))
+        .collect()
 }
 
 impl SqliteRaftStore {
     /// Opens a private consensus database and rejects a conflicting stored cluster/schema profile.
     pub fn open(path: &Path, profile: &str, application_schema: &str) -> Result<Self, String> {
-        let mut lease = path.as_os_str().to_os_string();
+        let canonical = if path.exists() {
+            path.canonicalize().map_err(|error| error.to_string())?
+        } else {
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            parent
+                .canonicalize()
+                .map_err(|error| error.to_string())?
+                .join(
+                    path.file_name()
+                        .ok_or("replica database path has no filename")?,
+                )
+        };
+        let mut lease = canonical.as_os_str().to_os_string();
         lease.push(".writer.lock");
         let writer = std::fs::OpenOptions::new()
             .read(true)
@@ -274,7 +341,8 @@ impl SqliteRaftStore {
         writer
             .try_lock()
             .map_err(|error| format!("replica database already owned: {error}"))?;
-        let connection = Connection::open(path).map_err(|error| error.to_string())?;
+        let writer = ReplicaWriterLease { file: writer };
+        let connection = Connection::open(canonical).map_err(|error| error.to_string())?;
         connection
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(|error| error.to_string())?;
@@ -282,6 +350,7 @@ impl SqliteRaftStore {
             .pragma_update(None, "synchronous", "FULL")
             .map_err(|error| error.to_string())?;
         connection.execute_batch("CREATE TABLE IF NOT EXISTS replica_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS replica_commands(revision INTEGER PRIMARY KEY,command_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS replica_log(log_index INTEGER PRIMARY KEY,data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS replica_events(sequence INTEGER PRIMARY KEY,event_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL,digest TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS replica_snapshot(singleton INTEGER PRIMARY KEY CHECK(singleton=1),meta TEXT NOT NULL,data BLOB NOT NULL);").map_err(|error| error.to_string())?;
@@ -304,6 +373,12 @@ impl SqliteRaftStore {
         view.validate(application_schema)
             .map_err(|error| error.to_string())?;
         Ok(store)
+    }
+
+    /// Duplicates the actual lease descriptor for a bounded inherited-descriptor regression test.
+    #[cfg(test)]
+    pub(crate) fn writer_descriptor_for_test(&self) -> std::io::Result<File> {
+        self._writer.file.try_clone()
     }
 
     /// Reads the complete already-applied view without evaluating Control or Runtime transitions.
@@ -353,10 +428,21 @@ impl SqliteRaftStore {
         let previous: Option<state::PersistedCheckpoint> = read_meta(connection, "checkpoint")?;
         let revision: u64 = read_meta(connection, "revision")?.unwrap_or(0);
         let current_digest = previous.as_ref().map(state::checkpoint_identity);
+        let command_revision: u64 = connection
+            .query_row(
+                "SELECT COALESCE(MAX(revision),0) FROM replica_commands",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(io_error)?;
         let rejection = if let Err(error) = batch.validate() {
             Some(error.to_string())
         } else if batch.checkpoint.schema != self.application_schema {
             Some("replica application schema differs".into())
+        } else if batch.commands.first().is_some_and(|command| {
+            command_revision.checked_add(1) != Some(command.authority_revision)
+        }) {
+            Some("replica command predecessor differs".into())
         } else if previous
             .as_ref()
             .map_or(0, |checkpoint| checkpoint.event_sequence)
@@ -406,6 +492,18 @@ impl SqliteRaftStore {
                 .execute(
                     "INSERT INTO replica_events(sequence,event_id,data,digest) VALUES (?1,?2,?3,?4)",
                     params![event.sequence, event.event_id, encoded, format!("{:x}",Sha256::digest(encoded.as_bytes()))],
+                )
+                .map_err(io_error)?;
+        }
+        for command in &batch.commands {
+            connection
+                .execute(
+                    "INSERT INTO replica_commands VALUES (?1,?2,?3)",
+                    params![
+                        command.authority_revision,
+                        command.command_id,
+                        serde_json::to_string(command).map_err(io_error)?
+                    ],
                 )
                 .map_err(io_error)?;
         }
@@ -793,6 +891,21 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
         transaction
             .execute("DELETE FROM replica_events", [])
             .map_err(io_error)?;
+        transaction
+            .execute("DELETE FROM replica_commands", [])
+            .map_err(io_error)?;
+        for command in &restored.view.commands {
+            transaction
+                .execute(
+                    "INSERT INTO replica_commands VALUES (?1,?2,?3)",
+                    params![
+                        command.authority_revision,
+                        command.command_id,
+                        serde_json::to_string(command).map_err(io_error)?
+                    ],
+                )
+                .map_err(io_error)?;
+        }
         let first_sequence = restored
             .view
             .events

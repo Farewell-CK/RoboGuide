@@ -174,6 +174,97 @@ pub struct JournalExecution {
     reason: String,
 }
 
+/// Durable lifecycle of one Controller-authorized selective Memory import.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryImportStatus {
+    /// The import identity was accepted before local side effects completed.
+    Pending,
+    /// The local provider import and replica evidence completed.
+    Completed,
+    /// A deterministic identity/provider validation rejected the import.
+    Rejected,
+    /// The local outcome is unknown and the exact identity may be retried.
+    Unknown,
+}
+
+impl MemoryImportStatus {
+    /// Encodes the stable SQLite representation.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Completed => "completed",
+            Self::Rejected => "rejected",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// Decodes a stable SQLite value or reports journal corruption.
+    fn parse(value: &str) -> Result<Self, JournalError> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "completed" => Ok(Self::Completed),
+            "rejected" => Ok(Self::Rejected),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err(JournalError::Corrupt(format!(
+                "unknown Memory import status {value}"
+            ))),
+        }
+    }
+}
+
+/// Exact durable identity and latest outcome for one selective Memory import.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemoryImportRecord {
+    /// Stable import identity supplied by Controller authority.
+    import_id: String,
+    /// Transport command identity bound to the import.
+    command_id: String,
+    /// Digest over the complete authorization tuple and immutable manifest JSON.
+    identity_digest: String,
+    /// Latest local outcome.
+    status: MemoryImportStatus,
+    /// Bounded diagnostic for rejected or unknown outcomes.
+    reason: String,
+}
+
+impl MemoryImportRecord {
+    /// Returns the stable import identity.
+    pub fn import_id(&self) -> &str {
+        &self.import_id
+    }
+
+    /// Returns the exact command identity.
+    pub fn command_id(&self) -> &str {
+        &self.command_id
+    }
+
+    /// Returns the authorization digest.
+    pub fn identity_digest(&self) -> &str {
+        &self.identity_digest
+    }
+
+    /// Returns the latest import outcome.
+    pub const fn status(&self) -> MemoryImportStatus {
+        self.status
+    }
+
+    /// Returns the retained bounded diagnostic.
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+}
+
+/// Result of admitting one exact Memory import identity to the Node journal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PrepareMemoryImport {
+    /// The caller may perform the local import exactly once for this pending identity.
+    Start,
+    /// The identity already exists and its durable outcome should be replayed or retried.
+    Existing(MemoryImportRecord),
+    /// The stable import identity was reused with different evidence.
+    Conflict(MemoryImportRecord),
+}
+
 impl JournalExecution {
     /// Returns the stable cross-session execution identity.
     pub fn execution_id(&self) -> &str {
@@ -387,6 +478,9 @@ pub enum JournalError {
     /// One execution was bound to different strong localization evidence or attempt identity.
     #[error("execution {0} has conflicting localization verification evidence")]
     LocalizationEvidenceConflict(String),
+    /// One Memory import identity was reused with different authorization evidence.
+    #[error("Memory import {0} has conflicting authorization evidence")]
+    MemoryImportConflict(String),
     /// The execution ID was empty.
     #[error("execution ID must not be empty")]
     InvalidExecutionId,

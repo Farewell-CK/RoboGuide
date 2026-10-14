@@ -11,6 +11,7 @@ prost = "0.14"
 ports = { path = "../ports" }
 domain = { path = "../domain" }
 serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 tonic = { version = "0.14.6", features = ["transport", "tls-ring"] }
 tonic-prost = "0.14.6"

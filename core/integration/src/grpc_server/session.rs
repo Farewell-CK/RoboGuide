@@ -203,6 +203,28 @@ pub(super) fn accept_current_message(
                 route.management_sequence = value.sequence;
                 &value.session_id
             }
+            Some(NodePayload::MemoryImportReceipt(value)) => {
+                if value.session_id != session_id || value.sequence <= route.management_sequence {
+                    return Ok(false);
+                }
+                if value.import_id.trim().is_empty() || value.command_id.trim().is_empty() {
+                    return Err(Status::invalid_argument(
+                        "MemoryImportReceipt requires import and command identities",
+                    ));
+                }
+                if crate::grpc::v0_4::MemoryImportReceiptStatus::try_from(value.status)
+                    .ok()
+                    .is_none_or(|status| {
+                        status == crate::grpc::v0_4::MemoryImportReceiptStatus::Unspecified
+                    })
+                {
+                    return Err(Status::invalid_argument(
+                        "MemoryImportReceipt status is invalid",
+                    ));
+                }
+                route.management_sequence = value.sequence;
+                &value.session_id
+            }
             Some(NodePayload::ExecutionEvent(value)) => &value.session_id,
             Some(NodePayload::ExecutionSnapshot(value)) => &value.session_id,
             Some(NodePayload::Error(value)) => &value.session_id,

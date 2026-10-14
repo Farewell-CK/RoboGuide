@@ -15,6 +15,7 @@ mod grpc_server;
 pub use grpc_server::{
     EXECUTION_SESSION_METADATA_KEY, EXECUTION_SESSION_METADATA_VALUE, GrpcIntegrationService,
     GrpcLegacyV02Service, GrpcNodeEvent, GrpcNodeEventCompletion, GrpcNodeEventDelivery,
-    GrpcNodeRouter, NodeIdentityPolicy,
+    GrpcNodeRouter, MAX_MEMORY_IMPORT_MANIFEST_BYTES, MEMORY_IMPORT_METADATA_KEY,
+    MEMORY_IMPORT_METADATA_VALUE, NodeIdentityPolicy, memory_import_authorization_digest,
 };
 pub use ports::{NodeLeasePolicy, NodeProtocolPolicy};

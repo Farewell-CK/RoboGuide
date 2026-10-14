@@ -99,6 +99,34 @@ pub struct ArtifactCatalog {
 }
 
 impl ArtifactCatalog {
+    /// Persists certificate admission before any data access under the existing writer ordering gate.
+    pub(super) fn audit_access(
+        &self,
+        principal: &str,
+        method: &str,
+        path: &str,
+        decision: &str,
+    ) -> Result<(), HttpError> {
+        let _guard = self
+            .write_gate
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("audit writer ordering unavailable"))?;
+        self.event_log
+            .record_service_access("artifact", principal, method, path, decision)
+            .map_err(|_| HttpError::service_unavailable("Artifact admission audit unavailable"))
+    }
+
+    /// Rechecks durable authority and quorum without manufacturing Node continuity.
+    pub(super) fn readiness(&self) -> Result<(), HttpError> {
+        self.ensure_available()?;
+        let _guard = self
+            .write_gate
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("Artifact writer ordering unavailable"))?;
+        self.event_log.readiness().map_err(|_| {
+            HttpError::service_unavailable("Artifact authority storage or quorum unavailable")
+        })
+    }
     /// Replays the catalog while sharing a process-local event-log write serializer.
     pub fn replay_with_gate(
         event_log: &SqliteEventLog,
@@ -371,7 +399,12 @@ impl ArtifactCatalog {
                 )));
             }
         }
-        if let Err(error) = log.save_checkpoint(&checkpoint.schema, &checkpoint.checkpoint_json) {
+        let saved = if checkpoint.schema == crate::SERVER_CHECKPOINT_SCHEMA {
+            crate::application::save_controller_checkpoint(&log, &checkpoint.checkpoint_json)
+        } else {
+            log.save_checkpoint(&checkpoint.schema, &checkpoint.checkpoint_json)
+        };
+        if let Err(error) = saved {
             return Err(self.rollback_failed_batch(
                 &log,
                 format!("controller checkpoint carry-forward failed: {error}"),

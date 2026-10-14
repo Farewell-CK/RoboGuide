@@ -1064,6 +1064,8 @@ mod tests {
                 ),
                 orchestrator: MissionOrchestrator::new(),
                 mission_admissions: BTreeMap::new(),
+                memory_imports: BTreeMap::new(),
+                safety_stops: BTreeMap::new(),
                 verifier_seen: BTreeSet::new(),
                 verifier_source_digest: None,
             }));
@@ -1994,6 +1996,8 @@ mod tests {
             ),
             orchestrator: MissionOrchestrator::new(),
             mission_admissions: BTreeMap::new(),
+            memory_imports: BTreeMap::new(),
+            safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: None,
         }));
@@ -2283,6 +2287,8 @@ mod tests {
             ),
             orchestrator: MissionOrchestrator::new(),
             mission_admissions: BTreeMap::new(),
+            memory_imports: BTreeMap::new(),
+            safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: feed
                 .as_ref()

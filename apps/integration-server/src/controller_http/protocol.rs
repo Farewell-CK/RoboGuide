@@ -133,6 +133,27 @@ where
     Ok(())
 }
 
+/// Writes one bounded Prometheus text response and closes the connection.
+pub(super) async fn write_text_response<S>(
+    stream: &mut S,
+    status: &str,
+    body: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    S: tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::AsyncWriteExt;
+    let body = body.as_bytes();
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/plain; version=0.0.4; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(response.as_bytes()).await?;
+    stream.write_all(body).await?;
+    stream.shutdown().await?;
+    Ok(())
+}
+
 /// Parses simple URL query pairs used by the bounded event page API.
 pub(crate) fn parse_query(query: &str) -> std::collections::BTreeMap<&str, &str> {
     query

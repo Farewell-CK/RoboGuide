@@ -227,6 +227,8 @@ pub struct ArtifactClient {
     chunk_size_bytes: usize,
     /// Maximum accepted artifact size.
     max_artifact_bytes: u64,
+    /// Exact client-certificate namespace for remotely hosted uploads.
+    upload_prefix: Option<String>,
 }
 
 #[cfg(test)]

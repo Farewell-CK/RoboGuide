@@ -883,6 +883,7 @@ fn gated_catalog_for_contract(
 
 mod artifact;
 mod execution;
+mod memory;
 mod protocol;
 mod snapshot_replay;
 mod workflow;

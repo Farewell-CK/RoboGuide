@@ -50,6 +50,16 @@ class MissionServiceSettings:
     controller_preflight_enabled: bool = False
     max_deployment_recovery_attempts: int = 0
     deployment_recovery_timeout_ms: int = 900_000
+    mtls_server_cert: Path | None = None
+    mtls_server_key: Path | None = None
+    mtls_client_ca: Path | None = None
+    mtls_role_map: Path | None = None
+    controller_client_cert: Path | None = None
+    controller_client_key: Path | None = None
+    controller_client_ca: Path | None = None
+    artifact_client_cert: Path | None = None
+    artifact_client_key: Path | None = None
+    artifact_client_ca: Path | None = None
 
     @property
     def approval_required_contracts(self) -> frozenset[str]:
@@ -80,8 +90,34 @@ def load_service_settings(
         service, "artifact_endpoint", _DEFAULT_ARTIFACT_ENDPOINT
     ).rstrip("/")
     _validate_origin(artifact_endpoint, "artifact_endpoint")
-    approval_policy = _approval_policy(service)
     root = repository_root if repository_root is not None else path.parent.parent
+    controller_tls = _client_profile(service, "controller", endpoint, root)
+    artifact_tls = _client_profile(service, "artifact", artifact_endpoint, root)
+    mtls_paths = tuple(
+        _optional_path(service, key, root=root)
+        for key in (
+            "mtls_server_cert",
+            "mtls_server_key",
+            "mtls_client_ca",
+            "mtls_role_map",
+        )
+    )
+    if any(item is not None for item in mtls_paths) and not all(
+        item is not None for item in mtls_paths
+    ):
+        raise MissionServiceConfigError(
+            "service mTLS requires mtls_server_cert, mtls_server_key, "
+            "mtls_client_ca and mtls_role_map"
+        )
+    if not _is_loopback_host(host) and not all(item is not None for item in mtls_paths):
+        raise MissionServiceConfigError(
+            "non-loopback Mission Service requires the complete mTLS profile"
+        )
+    if all(item is not None for item in mtls_paths) and any(
+        not item.is_file() for item in mtls_paths if item is not None
+    ):
+        raise MissionServiceConfigError("Mission Service mTLS profile contains a missing file")
+    approval_policy = _approval_policy(service)
     planning_world_path = _optional_path(service, "grounding_planning_world_evidence_path", root)
     planning_world_required = service.get("grounding_planning_world_evidence_required", False)
     if not isinstance(planning_world_required, bool):
@@ -154,7 +190,39 @@ def load_service_settings(
         controller_preflight_enabled=preflight,
         max_deployment_recovery_attempts=recovery_attempts,
         deployment_recovery_timeout_ms=recovery_timeout,
+        mtls_server_cert=mtls_paths[0],
+        mtls_server_key=mtls_paths[1],
+        mtls_client_ca=mtls_paths[2],
+        mtls_role_map=mtls_paths[3],
+        controller_client_cert=controller_tls[0],
+        controller_client_key=controller_tls[1],
+        controller_client_ca=controller_tls[2],
+        artifact_client_cert=artifact_tls[0],
+        artifact_client_key=artifact_tls[1],
+        artifact_client_ca=artifact_tls[2],
     )
+
+
+def _client_profile(
+    service: Mapping[str, object], prefix: str, endpoint: str, root: Path
+) -> tuple[Path | None, Path | None, Path | None]:
+    """Require an exact complete TLS identity for each HTTPS or remotely hosted authority."""
+    cert, key, ca = (
+        _optional_path(service, f"{prefix}_client_{field}", root) for field in ("cert", "key", "ca")
+    )
+    parsed = urlparse(endpoint)
+    remote = not _is_loopback_host(parsed.hostname or "")
+    configured = any(path is not None for path in (cert, key, ca))
+    if remote and parsed.scheme != "https":
+        raise MissionServiceConfigError(f"remote {prefix} endpoint requires HTTPS and mTLS")
+    if configured or parsed.scheme == "https":
+        if parsed.scheme != "https" or not all(
+            path is not None and path.is_file() for path in (cert, key, ca)
+        ):
+            raise MissionServiceConfigError(
+                f"{prefix} HTTPS requires client cert, key and CA files"
+            )
+    return cert, key, ca
 
 
 def _validate_origin(value: str, key: str) -> None:
@@ -170,6 +238,18 @@ def _validate_origin(value: str, key: str) -> None:
         or parsed.path not in {"", "/"}
     ):
         raise MissionServiceConfigError(f"service.{key} must be a fixed HTTP(S) origin")
+
+
+def _is_loopback_host(value: str) -> bool:
+    """Return whether a listener host is an explicitly local deployment endpoint."""
+    if value.lower() == "localhost":
+        return True
+    try:
+        import ipaddress
+
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
 
 
 def _table(value: object, path: str) -> dict[str, object]:

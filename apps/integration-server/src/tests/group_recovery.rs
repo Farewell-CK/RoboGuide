@@ -179,6 +179,8 @@ impl Fixture {
             bridge: IntegrationRuntimeBridge::new(control, state, events.clone(), router),
             orchestrator,
             mission_admissions: BTreeMap::new(),
+            memory_imports: BTreeMap::new(),
+            safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: None,
         };
@@ -779,7 +781,7 @@ fn retained_control_commit_rechecks_state_after_proposal_without_releasing_resou
     assert_eq!(fixture.reservations(), ownership);
 }
 
-/// Ordinary Mission cancellation overrides a pending or already prepared complete recovery round.
+/// Cancellation aborts recovery but terminal facts without declared safety evidence retain ownership.
 #[tokio::test]
 async fn mission_cancel_aborts_group_round_and_waits_for_all_actual_attempts_to_stop() {
     for prepared in [false, true] {
@@ -835,9 +837,13 @@ async fn mission_cancel_aborts_group_round_and_waits_for_all_actual_attempts_to_
                 .execution(&domain::MissionId::new("group-mission").unwrap())
                 .unwrap()
                 .lifecycle(),
-            orchestration::MissionExecutionLifecycle::Cancelled
+            orchestration::MissionExecutionLifecycle::Cancelling
         );
-        assert_eq!(fixture.reservations(), serde_json::json!({}));
+        assert_eq!(fixture.reservations(), ownership);
+        assert!(application::safety_stop::blocks_release(
+            &fixture.controller.lock().unwrap(),
+            &domain::MissionId::new("group-mission").unwrap()
+        ));
         assert_eq!(
             fixture
                 .controller

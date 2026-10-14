@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut prost = prost_build::Config::new();
     prost.protoc_executable(protoc);
+    prost.type_attribute(".", "#[derive(serde::Serialize)]");
     tonic_prost_build::configure().compile_with_config(
         prost,
         &protos,

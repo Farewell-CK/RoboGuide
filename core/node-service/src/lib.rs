@@ -45,7 +45,8 @@ pub use engine::{
 };
 pub use journal::{
     ArtifactFinalizationKind, ExecutionJournal, ExecutionSpec, JournalError, JournalExecution,
-    JournalStatus, PrepareArtifactFreeze, PrepareDispatch, PreparedArtifactRecord,
+    JournalStatus, MemoryImportRecord, MemoryImportStatus, PrepareArtifactFreeze, PrepareDispatch,
+    PrepareMemoryImport, PreparedArtifactRecord,
 };
 pub use local_engine::driver::{
     BoxDriverFuture, CompiledDriverRequest, DriverError, DriverEvent, DriverEventStream,

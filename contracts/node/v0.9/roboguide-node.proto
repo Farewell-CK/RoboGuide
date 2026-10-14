@@ -19,6 +19,7 @@ message NodeMessage {
     StateObservationBatch state_observation_batch = 8;
     PeerChannelReadiness peer_channel_readiness = 9;
     CommandReceipt command_receipt = 10;
+    MemoryImportReceipt memory_import_receipt = 11;
   }
 }
 
@@ -30,6 +31,7 @@ message ServerMessage {
     Cancel cancel = 4;
     Ack ack = 5;
     ProtocolError error = 6;
+    MemoryImport memory_import = 7;
   }
 }
 
@@ -275,6 +277,45 @@ message CommandReceipt {
   CommandKind kind = 5;
   CommandReceiptStatus status = 6;
   string reason = 7;
+}
+
+// Controller-authorized selective Memory import. Discovery never creates this command.
+message MemoryImport {
+  string session_id = 1;
+  string import_id = 2;
+  string command_id = 3;
+  string consumer_provider_id = 4;
+  string manifest_json = 5;
+  string mission_id = 6;
+  string group_id = 7;
+  string task_id = 8;
+  string role_id = 9;
+  string execution_id = 10;
+  string controller_epoch = 11;
+  // Digest over the immutable authorization tuple and manifest JSON.
+  string authorization_digest = 12;
+}
+
+enum MemoryImportReceiptStatus {
+  MEMORY_IMPORT_RECEIPT_STATUS_UNSPECIFIED = 0;
+  // The Node import identity was durably admitted before local side effects.
+  MEMORY_IMPORT_PERSISTED = 1;
+  // The local provider import completed and evidence was published.
+  MEMORY_IMPORT_COMPLETED = 2;
+  // The command was rejected by an immutable identity or provider check.
+  MEMORY_IMPORT_REJECTED = 3;
+  // The outcome is not known after a local or transport failure.
+  MEMORY_IMPORT_UNKNOWN = 4;
+}
+
+// Durable selective-import admission and completion evidence.
+message MemoryImportReceipt {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string import_id = 3;
+  string command_id = 4;
+  MemoryImportReceiptStatus status = 5;
+  string reason = 6;
 }
 
 message CanonicalInvocation {

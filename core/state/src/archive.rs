@@ -1,7 +1,7 @@
 //! Explicit append-only event archival and history compaction.
 
 use super::*;
-use sha2::{Digest as _, Sha256};
+use sha2::Sha256;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};

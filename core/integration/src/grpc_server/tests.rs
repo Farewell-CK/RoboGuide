@@ -419,6 +419,7 @@ fn peer_readiness_requires_current_session_identity_and_bounds() {
             state_export_ids: BTreeSet::new(),
             active: true,
             supports_execution_session: false,
+            supports_memory_import: false,
         },
     );
     let readiness = |session_id: &str, sequence: u64, valid_for_ms: u64| NodeMessage {
@@ -576,6 +577,7 @@ fn pending_registration_cannot_route_commands() {
             state_export_ids: BTreeSet::new(),
             active: false,
             supports_execution_session: false,
+            supports_memory_import: false,
         },
     );
     let error = router
@@ -619,6 +621,7 @@ fn execution_session_requires_registration_metadata() {
             state_export_ids: BTreeSet::new(),
             active: true,
             supports_execution_session: false,
+            supports_memory_import: false,
         },
     );
     let error = router
@@ -670,6 +673,7 @@ fn expired_lease_rejects_new_commands() {
             state_export_ids: BTreeSet::new(),
             active: true,
             supports_execution_session: false,
+            supports_memory_import: false,
         },
     );
     assert_eq!(
@@ -715,6 +719,7 @@ fn current_session_check_rejects_pending_wrong_and_expired_routes() {
             state_export_ids: BTreeSet::new(),
             active: false,
             supports_execution_session: false,
+            supports_memory_import: false,
         },
     );
     assert!(
@@ -775,6 +780,7 @@ fn newer_session_fences_late_old_heartbeat() {
             state_export_ids: BTreeSet::new(),
             active: true,
             supports_execution_session: false,
+            supports_memory_import: false,
         },
     );
     let message = NodeMessage {
