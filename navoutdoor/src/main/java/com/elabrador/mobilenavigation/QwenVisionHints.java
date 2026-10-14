@@ -15,6 +15,7 @@ import okhttp3.*;
 /** Independent RGB -> cloud -> text pipeline. No access to navigation state. */
 final class QwenVisionHints implements AutoCloseable {
     interface Listener {void show(String primary,String diagnostic,VisionHintSnapshot snapshot);}
+    private static final String DEFAULT_MODEL="qwen3-vl-plus";
     private static final long SAMPLE_MS=500,REQUEST_MS=2500;
     private final ScheduledExecutorService worker=Executors.newSingleThreadScheduledExecutor(r->{
         Thread t=new Thread(r,"qwen-vision-hints");t.setPriority(Thread.MIN_PRIORITY);return t;});
@@ -47,7 +48,12 @@ final class QwenVisionHints implements AutoCloseable {
         return text;
     }
     void configure(String key,String endpoint,String model,boolean enabled){
-        this.key=key.trim();this.endpoint=endpoint.trim();this.model=model.trim();this.enabled=enabled;
+        this.key=key.trim();this.endpoint=endpoint.trim();
+        // This build is wired to the verified model in the supplied business space.
+        // Do not let a stale/hand-edited SharedPreferences value send requests to a
+        // retired model and keep the UI stuck on HTTP 404.
+        this.model=DEFAULT_MODEL;
+        this.enabled=enabled;
         reset(enabled?"等待彩色画面":"已关闭",true);
     }
     void setForeground(boolean foreground){this.foreground=foreground;reset(foreground?"等待彩色画面":"后台暂停上传",false);}
@@ -119,8 +125,18 @@ final class QwenVisionHints implements AutoCloseable {
             public void onResponse(Call c,Response response){
                 try(Response owned=response){
                     if(!owned.isSuccessful()){
-                        int status=owned.code();execute(()->{if(g!=generation.get()||closed)return;activeCall=null;
-                            fail(status==401||status==403?"鉴权或模型权限失败，请检查设置":status==429?"额度或调用频率受限":"视觉服务暂不可用（HTTP "+status+"）");
+                        int status=owned.code();
+                        String errorBody=owned.body()==null?"":readBounded(owned.body().byteStream());
+                        boolean modelNotFound=status==404
+                                && (errorBody.contains("model_not_found")
+                                || errorBody.contains("Model not exist"));
+                        String message=modelNotFound
+                                ?"视觉模型不存在，请检查服务端模型权限"
+                                :status==401||status==403?"鉴权或模型权限失败，请检查设置"
+                                :status==429?"额度或调用频率受限"
+                                :"视觉服务暂不可用（HTTP "+status+"）";
+                        execute(()->{if(g!=generation.get()||closed)return;activeCall=null;
+                            fail(message);
                             nextRequest=SystemClock.elapsedRealtime()+((status==401||status==403)?60000:10000);});return;
                     }
                     if(owned.body()==null)throw new IOException("empty body");

@@ -173,6 +173,9 @@ class OutdoorNavController(
         private const val VISION_KEY = "key"
         private const val VISION_ENDPOINT = "endpoint"
         private const val VISION_MODEL = "model"
+        private const val DEFAULT_VISION_MODEL = "qwen3-vl-plus"
+        private const val DEFAULT_VISION_ENDPOINT =
+            "https://llm-kxnt0v5zfjcvnwzv.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"
         private const val AUTOMATIC_REROUTE_MIN_INTERVAL_MS = 15_000L
 
         private fun createDepthPalette(): IntArray {
@@ -453,21 +456,39 @@ class OutdoorNavController(
         })
     }
 
-    fun visionHintSettings(): VisionHintSettings = VisionHintSettings(
-        enabled = visionPreferences.getBoolean(VISION_ENABLED, true),
-        key = visionPreferences.getString(VISION_KEY, BuildConfig.QWEN_KEY).orEmpty().ifBlank { BuildConfig.LLM_VISUAL_API_KEY },
-        endpoint = visionPreferences.getString(VISION_ENDPOINT, BuildConfig.QWEN_ENDPOINT).orEmpty().ifBlank { "https://llm-kxnt0v5zfjcvnwzv.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions" },
-        model = visionPreferences.getString(VISION_MODEL, BuildConfig.QWEN_MODEL)
-            .orEmpty().ifBlank { "qwen3-vl-flash" }
-    )
+    fun visionHintSettings(): VisionHintSettings {
+        val storedModel = visionPreferences.getString(VISION_MODEL, BuildConfig.QWEN_MODEL)
+            .orEmpty().trim()
+        // The current business-space key was verified with qwen3-vl-plus. Always migrate
+        // old or manually entered model names so a stale preference cannot reintroduce 404.
+        val model = DEFAULT_VISION_MODEL
+        if (storedModel != DEFAULT_VISION_MODEL) {
+            visionPreferences.edit().putString(VISION_MODEL, DEFAULT_VISION_MODEL).apply()
+        }
+        val storedEndpoint = visionPreferences.getString(VISION_ENDPOINT, BuildConfig.QWEN_ENDPOINT)
+            .orEmpty().trim()
+        // The supplied business-space key is provisioned on this regional compatible endpoint.
+        // Migrate an endpoint saved by an older APK as well; otherwise a valid model can still
+        // produce a misleading HTTP 404 from the old route.
+        val endpoint = DEFAULT_VISION_ENDPOINT
+        if (storedEndpoint != endpoint) {
+            visionPreferences.edit().putString(VISION_ENDPOINT, endpoint).apply()
+        }
+        return VisionHintSettings(
+            enabled = visionPreferences.getBoolean(VISION_ENABLED, true),
+            key = visionPreferences.getString(VISION_KEY, BuildConfig.QWEN_KEY).orEmpty()
+                .ifBlank { BuildConfig.LLM_VISUAL_API_KEY },
+            endpoint = endpoint,
+            model = model
+        )
+    }
 
     fun updateVisionHintSettings(settings: VisionHintSettings) {
-        val endpoint = settings.endpoint.trim()
-        if (endpoint.isNotEmpty()) QwenVisionHints.normalizeEndpoint(endpoint)
+        val endpoint = DEFAULT_VISION_ENDPOINT
         val normalized = settings.copy(
             key = settings.key.trim(),
             endpoint = endpoint,
-            model = settings.model.trim().ifBlank { "qwen3-vl-flash" })
+            model = DEFAULT_VISION_MODEL)
         visionPreferences.edit()
             .putBoolean(VISION_ENABLED, normalized.enabled)
             .putString(VISION_KEY, normalized.key)
