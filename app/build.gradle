@@ -41,6 +41,7 @@ android {
         buildConfigField "String", "ASR_AUTH_TOKEN", "\"${System.getenv("ASR_AUTH_TOKEN") ?: localProperties.getProperty("ASR_AUTH_TOKEN", "")}\""
         buildConfigField "String", "DMWS_TOKEN", "\"${System.getenv("DMWS_TOKEN") ?: localProperties.getProperty("DMWS_TOKEN", "")}\""
         buildConfigField "String", "LLM_API_KEY", "\"${System.getenv("LLM_API_KEY") ?: localProperties.getProperty("LLM_API_KEY", "")}\""
+        buildConfigField "String", "LLM_VISUAL_API_KEY", "\"${System.getenv("LLM_VISUAL_API_KEY") ?: localProperties.getProperty("LLM_VISUAL_API_KEY", "")}\""
         buildConfigField "String", "AMAP_KEY", "\"${System.getenv("AMAP_KEY") ?: localProperties.getProperty("AMAP_KEY", "")}\""
     }
     buildFeatures {
