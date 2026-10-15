@@ -3,6 +3,46 @@
 use super::*;
 use integration::grpc::v0_4::{CanonicalInvocation, ExecutionPhase};
 
+/// A negotiated modern Cancel before Execute emits durable receipt only, never a terminal fact.
+#[tokio::test]
+async fn modern_cancel_without_execute_cannot_manufacture_a_stopped_execution() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config: NodeServiceConfig =
+        toml::from_str(include_str!("../../../../../config/node.toml")).unwrap();
+    config.schema = crate::CONFIG_SCHEMA_V0_11.into();
+    config.state_directory = directory.path().join("state");
+    let catalog = crate::CompiledLocalCatalog::compile(config, directory.path()).unwrap();
+    let engine = LocalIntegrationEngine::new(
+        catalog,
+        vec![Arc::new(GatedDriver::new(Arc::new(AtomicBool::new(true)))) as Arc<dyn LocalDriver>],
+    )
+    .unwrap();
+    let service = NodeService::new(engine.clone());
+    let (outbound, mut incoming) = mpsc::unbounded_channel();
+    service
+        .handle_server_message(
+            ServerMessage {
+                message: Some(ServerPayload::Cancel(integration::grpc::v0_4::Cancel {
+                    session_id: "unit-session".into(),
+                    execution_id: "unit-never-executed".into(),
+                    command_id: "cancel-unit-never-executed".into(),
+                    controller_epoch: String::new(),
+                })),
+            },
+            "unit-session",
+            &outbound,
+            &Arc::new(tokio::sync::Mutex::new(0)),
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(incoming.try_recv().unwrap().message, Some(NodePayload::CommandReceipt(receipt))
+        if receipt.status == integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted as i32)
+    );
+    assert!(incoming.try_recv().is_err());
+    assert!(engine.snapshots().unwrap().is_empty());
+}
+
 /// Holds one real engine dispatch before its local handle arrives, without wall-clock races.
 struct DispatchGate {
     /// Signals that the authorized local call was entered.

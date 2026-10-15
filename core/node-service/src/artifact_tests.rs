@@ -507,3 +507,56 @@ fn blob_path_strips_digest_prefix() {
         Some("bb")
     );
 }
+
+/// Existing exact metadata avoids repeated upload, while changed actual local bytes still reject.
+#[tokio::test]
+async fn exact_memory_publication_retry_verifies_bytes_without_another_upload() {
+    use sha2::{Digest as _, Sha256};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let directory = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let stager = client_at(
+        directory.path(),
+        &format!("http://{}", listener.local_addr().unwrap()),
+    );
+    let source = directory.path().join("actual-source");
+    tokio::fs::write(&source, b"real bytes").await.unwrap();
+    let manifest: domain::MemoryArtifactManifest = serde_json::from_value(serde_json::json!({
+        "schema":"roboguide.memory-manifest/v0.1",
+        "selector":{"memory_id":"unit-memory","revision_id":"original"},
+        "kind":"artifact","provider_id":"unit-files",
+        "owner":{"owner":"robo_guide","component":"unit-metadata"},
+        "scope":{"kind":"global"},"visibility":"exchangeable",
+        "payload_schema":"unit.file/v1","media_type":"application/octet-stream",
+        "artifact":{"content_digest":format!("sha256:{:x}",Sha256::digest(b"real bytes")),"byte_size":10},
+        "created_at":1
+    })).unwrap();
+    let body = serde_json::to_vec(&serde_json::json!({"manifest":manifest})).unwrap();
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let count = stream.read(&mut request).await.unwrap();
+            assert!(
+                String::from_utf8_lossy(&request[..count])
+                    .starts_with("GET /v1/memories/unit-memory/revisions/original ")
+            );
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(header.as_bytes()).await.unwrap();
+            stream.write_all(&body).await.unwrap();
+        }
+    });
+    stager
+        .upload_memory_output(&manifest, &source)
+        .await
+        .unwrap();
+    tokio::fs::write(&source, b"REAL bytes").await.unwrap();
+    assert!(matches!(
+        stager.upload_memory_output(&manifest, &source).await,
+        Err(ArtifactError::DigestMismatch { .. })
+    ));
+    server.await.unwrap();
+}

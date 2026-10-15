@@ -149,7 +149,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 .filter(|node| {
                     matches!(
                         node.registration().contract_version().as_str(),
-                        domain::NODE_CONTRACT_VERSION_V0_8 | domain::NODE_CONTRACT_VERSION_V0_9
+                        domain::NODE_CONTRACT_VERSION_V0_8
+                            | domain::NODE_CONTRACT_VERSION_V0_9
+                            | domain::NODE_CONTRACT_VERSION_V0_10
                     )
                 })
                 .map(|node| {

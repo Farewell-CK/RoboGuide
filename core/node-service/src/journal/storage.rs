@@ -15,7 +15,7 @@ pub(super) fn configure_connection(connection: &Connection) -> Result<(), Journa
 pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
     let prior_version =
         connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
-    if prior_version > 9 {
+    if prior_version > 10 {
         return Err(JournalError::Corrupt(
             "journal was written by a newer storage authority".into(),
         ));
@@ -30,7 +30,7 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
             |row| row.get(0),
         )
         .optional()?;
-    if marker.is_some_and(|version| !matches!(version, 7..=9))
+    if marker.is_some_and(|version| !matches!(version, 7..=10))
         || (prior_version >= 7 && marker.is_none())
     {
         return Err(JournalError::Corrupt(
@@ -132,7 +132,24 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
              receipt_json TEXT
          );
          CREATE INDEX IF NOT EXISTS memory_control_by_context
-             ON memory_control_receipts(preparation_id,operation,generation);",
+             ON memory_control_receipts(preparation_id,operation,generation);
+         CREATE TABLE IF NOT EXISTS memory_use_heads (
+             lease_id TEXT PRIMARY KEY, purpose_json TEXT NOT NULL,
+             highest_generation INTEGER NOT NULL CHECK(highest_generation>=0),
+             revoked INTEGER NOT NULL CHECK(revoked IN (0,1))
+         );
+         CREATE TABLE IF NOT EXISTS memory_use_commands (
+             command_id TEXT PRIMARY KEY, lease_id TEXT NOT NULL REFERENCES memory_use_heads(lease_id),
+             generation INTEGER NOT NULL CHECK(generation>=0), command_json TEXT NOT NULL,
+             budget_json TEXT NOT NULL, receipt_json TEXT
+         );
+         CREATE INDEX IF NOT EXISTS memory_use_by_lease ON memory_use_commands(lease_id,generation);
+         CREATE TABLE IF NOT EXISTS memory_use_effects (
+             command_id TEXT NOT NULL REFERENCES memory_use_commands(command_id) ON DELETE CASCADE,
+             provider_id TEXT NOT NULL, request_json TEXT NOT NULL,
+             query_count INTEGER NOT NULL DEFAULT 0 CHECK(query_count BETWEEN 0 AND 3),
+             receipt_json TEXT, PRIMARY KEY(command_id,provider_id)
+         );",
     )?;
     if prior_version < 2 {
         // Rows created by v1 could already have called Local EAIOS. Migrate them conservatively.
@@ -148,11 +165,11 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
         CREATE VIEW IF NOT EXISTS memory_imports AS SELECT * FROM memory_import_authority_v7;",
     )?;
     transaction.execute(
-        "INSERT INTO node_journal_storage_schema VALUES (1,9)
-         ON CONFLICT(singleton) DO UPDATE SET version=9",
+        "INSERT INTO node_journal_storage_schema VALUES (1,10)
+         ON CONFLICT(singleton) DO UPDATE SET version=10",
         [],
     )?;
-    transaction.pragma_update(None, "user_version", 9_i64)?;
+    transaction.pragma_update(None, "user_version", 10_i64)?;
     transaction.commit()?;
     Ok(())
 }

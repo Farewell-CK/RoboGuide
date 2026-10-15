@@ -3,6 +3,43 @@
 use super::*;
 
 impl GrpcNodeRouter {
+    /// Sends current-use authority only after quorum, certificate and exact original-session checks.
+    pub fn send_memory_use_control(
+        &self,
+        node_id: &str,
+        command: &domain::MemoryUseControl,
+        remaining_budget_ms: u64,
+    ) -> Result<(), Status> {
+        command.validate().map_err(Status::invalid_argument)?;
+        if command.operation == domain::MemoryUseOperation::Grant
+            && (remaining_budget_ms == 0 || remaining_budget_ms > command.valid_for_ms)
+        {
+            return Err(Status::invalid_argument(
+                "Memory-use original budget is unavailable",
+            ));
+        }
+        let command_json =
+            serde_json::to_string(command).map_err(|e| Status::invalid_argument(e.to_string()))?;
+        self.send_preparation_payload(node_id, |route, controller_epoch| {
+            if route.node_contract_version != MEMORY_USE_NODE_CONTRACT_VERSION
+                || command.node_id.as_str() != node_id
+                || (command.operation == domain::MemoryUseOperation::Grant
+                    && command.source_session_id != route.session_id)
+            {
+                return Err(Status::failed_precondition(
+                    "current Memory-use requires the original v0.10 Node/session",
+                ));
+            }
+            Ok(ServerPayload::MemoryUseControl(
+                crate::grpc::v0_4::MemoryUseControl {
+                    session_id: route.session_id.clone(),
+                    command_json,
+                    controller_epoch,
+                    valid_for_ms: remaining_budget_ms,
+                },
+            ))
+        })
+    }
     /// Sends metadata only after current quorum, identity, certificate, registration and lease checks.
     fn send_preparation_payload(
         &self,
@@ -19,7 +56,7 @@ impl GrpcNodeRouter {
             .ok_or_else(|| Status::unavailable("node is not connected"))?;
         self.validate_identity(node_id, &route.session_id)?;
         self.validate_certificate_expiry(route)?;
-        if route.node_contract_version != PREPARATION_NODE_CONTRACT_VERSION {
+        if !crate::grpc::v0_4::supports_memory_preparation(&route.node_contract_version) {
             return Err(Status::failed_precondition(
                 "prepared Memory commands require Node Contract v0.9",
             ));

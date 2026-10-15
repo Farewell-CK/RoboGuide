@@ -5,9 +5,9 @@ use crate::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocol;
 use crate::grpc::v0_4::server_message::Message as ServerPayload;
 use crate::grpc::v0_4::{
     Ack, CONTINUITY_NODE_CONTRACT_VERSION, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION,
-    MemoryImport, NODE_CONTRACT_VERSION, NodeMessage, PREPARATION_NODE_CONTRACT_VERSION,
-    PREVIOUS_NODE_CONTRACT_VERSION, PROTOCOL_VERSION, PROVIDER_MAP_NODE_CONTRACT_VERSION,
-    Registered, ServerMessage, Welcome,
+    MEMORY_USE_NODE_CONTRACT_VERSION, MemoryImport, NODE_CONTRACT_VERSION, NodeMessage,
+    PREPARATION_NODE_CONTRACT_VERSION, PREVIOUS_NODE_CONTRACT_VERSION, PROTOCOL_VERSION,
+    PROVIDER_MAP_NODE_CONTRACT_VERSION, Registered, ServerMessage, Welcome,
 };
 use ports::{
     Clock, DiagnosticHandle, DiagnosticStage, NodeFactMetadata, NodeLeasePolicy, NodeProtocolPolicy,
@@ -788,9 +788,9 @@ impl GrpcNodeRouter {
                     controller_epoch,
                     memory_preparation_id: String::new(),
                     memory_preparation_digest: String::new(),
-                    memory_requirements_json: if route.node_contract_version
-                        == PREPARATION_NODE_CONTRACT_VERSION
-                    {
+                    memory_requirements_json: if crate::grpc::v0_4::supports_memory_preparation(
+                        &route.node_contract_version,
+                    ) {
                         "[]".into()
                     } else {
                         String::new()
@@ -1160,6 +1160,7 @@ async fn run_grpc_session(
         ));
     }
     let node_contract = [
+        MEMORY_USE_NODE_CONTRACT_VERSION,
         PREPARATION_NODE_CONTRACT_VERSION,
         PROVIDER_MAP_NODE_CONTRACT_VERSION,
         CONTINUITY_NODE_CONTRACT_VERSION,
@@ -1428,6 +1429,7 @@ async fn run_grpc_session(
                 Some(NodePayload::MemoryImportReceipt(value)) => value.sequence,
                 Some(NodePayload::MemoryImportQueryReceipt(value)) => value.sequence,
                 Some(NodePayload::MemoryControlReceipt(value)) => value.sequence,
+                Some(NodePayload::MemoryUseReceipt(value)) => value.sequence,
                 Some(NodePayload::ExecutionEvent(value)) => value.sequence,
                 Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
                 _ => 0,
@@ -1476,7 +1478,8 @@ fn invocation_for_contract(
     node_contract_version: &str,
 ) -> Result<crate::grpc::v0_4::CanonicalInvocation, Status> {
     match node_contract_version {
-        PREPARATION_NODE_CONTRACT_VERSION
+        MEMORY_USE_NODE_CONTRACT_VERSION
+        | PREPARATION_NODE_CONTRACT_VERSION
         | PROVIDER_MAP_NODE_CONTRACT_VERSION
         | CONTINUITY_NODE_CONTRACT_VERSION
         | NODE_CONTRACT_VERSION

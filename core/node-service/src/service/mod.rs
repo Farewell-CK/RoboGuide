@@ -4,6 +4,7 @@ use crate::MemoryImportStatus;
 
 mod memory_continuity;
 mod memory_preparation;
+mod memory_use;
 use crate::{EngineError, ExecuteDisposition, LocalIntegrationEngine};
 use integration::grpc::v0_4::node_message::Message as NodePayload;
 use integration::grpc::v0_4::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
@@ -172,16 +173,38 @@ impl NodeService {
         );
         let memory_task = self.spawn_memory_exports(registered.session_id.clone());
         let mut imports = tokio::task::JoinSet::new();
+        let mut use_pending =
+            std::collections::BTreeMap::<(u8, String), domain::MemoryUseControl>::new();
         let session_result: Result<(), NodeServiceError> = async {
             loop {
+                while imports.len()<4 && let Some((_,command))=use_pending.pop_first() {
+                    let service=Self::new(self.engine.clone());let session=registered.session_id.clone();
+                    let sender=outbound.clone();let sequence=Arc::clone(&management_sequence);
+                    imports.spawn(async move {service.handle_memory_use_control(command,&session,&sender,&sequence).await});
+                }
                 tokio::select! {
                     message = inbound.message() => {
                         let Some(message) = message.map_err(NodeServiceError::Status)? else {
                             return Ok(());
                         };
+                        if let Some(ServerPayload::MemoryUseControl(frame))=&message.message {
+                            if frame.session_id!=registered.session_id || frame.command_json.len()>16*1024
+                                || self.engine.catalog().node_contract_version()!=integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION {
+                                return Err(NodeServiceError::Protocol("Memory-use control lacks its explicit current session/contract/bounds".into()));
+                            }
+                            let command:domain::MemoryUseControl=serde_json::from_str(&frame.command_json).map_err(|e|NodeServiceError::Protocol(e.to_string()))?;
+                            self.engine.admit_controller_epoch(&frame.controller_epoch)?;
+                            self.engine.admit_memory_use_control(&command,&registered.session_id,frame.valid_for_ms)?;
+                            let key=(u8::from(command.operation != domain::MemoryUseOperation::Revoke),command.command_id.clone());
+                            if use_pending.len()>=64 && !use_pending.contains_key(&key) {
+                                return Err(NodeServiceError::Protocol("bounded Memory-use queue is full; durable authority requires reconciliation".into()));
+                            }
+                            use_pending.insert(key,command);
+                            continue;
+                        }
                         if let Some(ServerPayload::MemoryControl(frame)) = &message.message {
                             if frame.session_id != registered.session_id || frame.command_json.len()>256*1024
-                                || self.engine.catalog().node_contract_version()!=integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION {
+                                || !integration::grpc::v0_4::supports_memory_preparation(self.engine.catalog().node_contract_version()) {
                                 return Err(NodeServiceError::Protocol("Memory control lacks its negotiated current session/bounds".into()));
                             }
                             let command:domain::MemoryControlCommand=serde_json::from_str(&frame.command_json).map_err(|e|NodeServiceError::Protocol(e.to_string()))?;
@@ -566,8 +589,9 @@ impl NodeService {
     ) -> Result<(), NodeServiceError> {
         match message.message {
             Some(ServerPayload::Execute(execute)) if execute.session_id == session_id => {
-                let modern = self.engine.catalog().node_contract_version()
-                    == integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION;
+                let modern = integration::grpc::v0_4::supports_memory_preparation(
+                    self.engine.catalog().node_contract_version(),
+                );
                 let prepared = if modern {
                     let requirements: Vec<domain::MemoryRequirement> =
                         serde_json::from_str(&execute.memory_requirements_json)
@@ -685,48 +709,58 @@ impl NodeService {
                     ));
                 }
                 let mut receipt_reason = String::new();
-                let receipt_status =
-                    if let Err(error) = self.engine.admit_controller_epoch(&controller_epoch) {
-                        receipt_reason = error.to_string();
-                        send_local_rejection(
-                            outbound,
-                            session_id,
-                            &execution_id,
-                            "cancel_epoch_rejected",
-                            &error,
-                        )?;
-                        integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
-                    } else if let Err(error) = self.engine.cancel(&execution_id) {
-                        receipt_reason = error.to_string();
-                        send_local_rejection(
-                            outbound,
-                            session_id,
-                            &execution_id,
-                            "cancel_rejected",
-                            &error,
-                        )?;
-                        integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
-                    } else {
-                        let mut snapshot = self
-                            .engine
-                            .snapshots()?
-                            .into_iter()
-                            .find(|snapshot| snapshot.execution_id == execution_id)
-                            .unwrap_or_else(|| integration::grpc::v0_4::ExecutionSnapshot {
+                let receipt_status = if let Err(error) =
+                    self.engine.admit_controller_epoch(&controller_epoch)
+                {
+                    receipt_reason = error.to_string();
+                    send_local_rejection(
+                        outbound,
+                        session_id,
+                        &execution_id,
+                        "cancel_epoch_rejected",
+                        &error,
+                    )?;
+                    integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
+                } else if let Err(error) = self.engine.cancel(&execution_id) {
+                    receipt_reason = error.to_string();
+                    send_local_rejection(
+                        outbound,
+                        session_id,
+                        &execution_id,
+                        "cancel_rejected",
+                        &error,
+                    )?;
+                    integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
+                } else {
+                    let snapshot = self
+                        .engine
+                        .snapshots()?
+                        .into_iter()
+                        .find(|snapshot| snapshot.execution_id == execution_id);
+                    let snapshot = snapshot.or_else(|| {
+                        (!integration::grpc::v0_4::supports_memory_preparation(
+                            self.engine.catalog().node_contract_version(),
+                        ))
+                        .then(|| {
+                            integration::grpc::v0_4::ExecutionSnapshot {
                                 execution_id: execution_id.clone(),
                                 session_id: session_id.to_string(),
                                 last_sequence: 1,
                                 phase: integration::grpc::v0_4::ExecutionPhase::Cancelled as i32,
                                 reason: "cancelled before Execute reached Node journal".to_string(),
-                            });
+                            }
+                        })
+                    });
+                    if let Some(mut snapshot) = snapshot {
                         snapshot.session_id = session_id.to_string();
                         outbound
                             .send(NodeMessage {
                                 message: Some(NodePayload::ExecutionSnapshot(snapshot)),
                             })
                             .map_err(|_| NodeServiceError::Closed)?;
-                        integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
-                    };
+                    }
+                    integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
+                };
                 send_command_receipt(
                     outbound,
                     session_id,

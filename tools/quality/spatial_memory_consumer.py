@@ -19,8 +19,9 @@ from typing import Any
 
 from check_artifact_authority_processes import grant
 from check_spatial_upgrade_gates import logical_digest
-from check_state_verifier_processes import ROOT, address, request, save, stop, wait_for
+from check_state_verifier_processes import ROOT, save, stop, wait_for
 from memory_preparation_profile import configuration, node_environment
+from memory_use_profile import request
 
 Exchange = Callable[[str, str, Any], tuple[int, Any]]
 Start = Callable[[list[str], str, dict[str, str] | None], subprocess.Popen[bytes]]
@@ -78,9 +79,9 @@ class SpatialMemoryConsumer:
         """Freeze real receiver credentials and configuration before Controller startup."""
         self.output, self.python, self.environment = output, python, environment
         self.node = "memory-" + uuid.uuid4().hex
-        self.backend = "http://" + address()
         self.root = output / "consumer"
         self.root.mkdir(mode=0o700)
+        self.backend = "unix://" + str(self.root / "backend/local.sock")
         self.profile = profile
         self.config = self.root / "node.toml"
         text = configuration(self.root, self.node, grpc, self.backend, cas, True)
@@ -200,8 +201,8 @@ class SpatialMemoryConsumer:
             "--max-bytes",
             "536870912",
             "--enable-file-jobs",
-            "--listen-port",
-            self.backend.rsplit(":", 1)[1],
+            "--listen-unix",
+            "--enable-use-leases",
         ]
         self.backend_process = start(
             self.backend_command,
@@ -228,7 +229,7 @@ class SpatialMemoryConsumer:
         node_database = Path(config["state_directory"]) / "execution-journal.sqlite3"
         databases = (
             (self.root / "backend/memory.sqlite3", ("identity", "imports")),
-            (self.root / "backend/file-jobs.sqlite3", ("jobs",)),
+            (self.root / "backend/file-jobs.sqlite3", ("jobs", "job_budgets")),
             (node_database, ("memory_preparations", "memory_import_authority_v7")),
         )
         before = {str(path): logical_digest(path, tables) for path, tables in databases}
@@ -312,6 +313,14 @@ class SpatialMemoryConsumer:
         records = exchange(origin, "/v1/memory/preparations", None)[1]["records"]
         record = records[attempt["execution_id"]]
         save(self.root / "preparation.json", record)
+        status, uses = exchange(origin, "/v1/memory/use-leases", None)
+        assert status == 200, uses
+        use = uses["records"][attempt["execution_id"]]
+        grants = [
+            value for value in use["controls"].values() if value["command"]["operation"] == "grant"
+        ]
+        assert grants and all(value["receipt"]["status"] == "granted" for value in grants)
+        save(self.root / "use-lease.json", use)
         checked = subprocess.run(
             [sys.executable, str(Path(__file__)), "--verify", str(self.output)],
             cwd=ROOT,

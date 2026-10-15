@@ -196,8 +196,27 @@ impl LocalIntegrationEngine {
                     "Execute differs from its immutable prepared invocation".into(),
                 ));
             }
-            invocation_json.as_object_mut().expect("canonical invocation object").insert(
-                "memory_preparation".into(),serde_json::json!({"preparation_id":preparation.preparation_id,"preparation_digest":preparation.digest().map_err(EngineError::Configuration)?, "inputs":preparation.inputs}));
+            let mut memory = serde_json::json!({"preparation_id":preparation.preparation_id,"preparation_digest":preparation.digest().map_err(EngineError::Configuration)?, "inputs":preparation.inputs});
+            if self.catalog().node_contract_version()
+                == integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
+            {
+                memory
+                    .as_object_mut()
+                    .expect("Memory context object")
+                    .extend([
+                        (
+                            "use_lease_id".into(),
+                            serde_json::json!(domain::memory_use_lease_id(
+                                &preparation.preparation_id
+                            )),
+                        ),
+                        ("tenant_id".into(), serde_json::json!(preparation.tenant_id)),
+                    ]);
+            }
+            invocation_json
+                .as_object_mut()
+                .expect("canonical invocation object")
+                .insert("memory_preparation".into(), memory);
         }
         let workflow_digest = workflow_digest(&self.inner.catalog, &capability, &invocation_json)?;
         let spec = ExecutionSpec::new(

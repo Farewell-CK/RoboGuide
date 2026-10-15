@@ -216,8 +216,42 @@ pub(super) fn accept_current_message(
                 route.management_sequence = value.sequence;
                 &value.session_id
             }
+            Some(NodePayload::MemoryUseReceipt(value)) => {
+                if route.node_contract_version != MEMORY_USE_NODE_CONTRACT_VERSION {
+                    return Err(Status::failed_precondition(
+                        "Memory-use receipts require explicit Node Contract v0.10",
+                    ));
+                }
+                if value.session_id != session_id || value.sequence <= route.management_sequence {
+                    return Ok(false);
+                }
+                if value.receipt_json.len() > 256 * 1024 {
+                    return Err(Status::invalid_argument(
+                        "Memory-use receipt exceeds its bound",
+                    ));
+                }
+                let receipt: domain::MemoryUseReceipt = serde_json::from_str(&value.receipt_json)
+                    .map_err(|_| {
+                    Status::invalid_argument("invalid typed Memory-use receipt")
+                })?;
+                if receipt.schema != "roboguide.memory-use-receipt/v0.1"
+                    || receipt.command_id.is_empty()
+                    || receipt.command_id.len() > 256
+                    || receipt.preparation_id.is_empty()
+                    || receipt.preparation_id.len() > 128
+                    || receipt.lease_id.len() > 128
+                    || receipt.providers.len() > 8
+                    || receipt.reason.len() > 1024
+                {
+                    return Err(Status::invalid_argument(
+                        "Memory-use receipt identity or provider bound is invalid",
+                    ));
+                }
+                route.management_sequence = value.sequence;
+                &value.session_id
+            }
             Some(NodePayload::MemoryControlReceipt(value)) => {
-                if route.node_contract_version != PREPARATION_NODE_CONTRACT_VERSION {
+                if !crate::grpc::v0_4::supports_memory_preparation(&route.node_contract_version) {
                     return Err(Status::failed_precondition(
                         "Memory control receipts require Node Contract v0.9",
                     ));
@@ -317,7 +351,8 @@ pub(super) fn validate_registration(
     if registration.node_id.trim().is_empty()
         || !matches!(
             registration.node_contract_version.as_str(),
-            PREPARATION_NODE_CONTRACT_VERSION
+            MEMORY_USE_NODE_CONTRACT_VERSION
+                | PREPARATION_NODE_CONTRACT_VERSION
                 | PROVIDER_MAP_NODE_CONTRACT_VERSION
                 | CONTINUITY_NODE_CONTRACT_VERSION
                 | NODE_CONTRACT_VERSION
@@ -331,11 +366,22 @@ pub(super) fn validate_registration(
     }
     if registration.memory_providers.iter().any(|provider| {
         !provider.preparation_contract.is_empty()
-            && (registration.node_contract_version != PREPARATION_NODE_CONTRACT_VERSION
-                || provider.preparation_contract != "roboguide.memory-provider-availability/v0.1")
+            && (!crate::grpc::v0_4::supports_memory_preparation(
+                &registration.node_contract_version,
+            ) || provider.preparation_contract != "roboguide.memory-provider-availability/v0.1")
     }) {
         return Err(Status::invalid_argument(
             "Memory availability declarations require the exact negotiated v0.9 contract",
+        ));
+    }
+    if registration.memory_providers.iter().any(|provider| {
+        !provider.use_contract.is_empty()
+            && (registration.node_contract_version != MEMORY_USE_NODE_CONTRACT_VERSION
+                || provider.use_contract != "roboguide.memory-use/shared-kernel/v0.1"
+                || provider.preparation_contract != "roboguide.memory-provider-availability/v0.1")
+    }) {
+        return Err(Status::invalid_argument(
+            "Memory-use declarations require explicit v0.10 and prepared-content support",
         ));
     }
     let mut local_system_ids = BTreeSet::new();
@@ -484,6 +530,7 @@ fn validate_operation_support(
             | CONTINUITY_NODE_CONTRACT_VERSION
             | PROVIDER_MAP_NODE_CONTRACT_VERSION
             | PREPARATION_NODE_CONTRACT_VERSION
+            | MEMORY_USE_NODE_CONTRACT_VERSION
     ) {
         if !registration.operation_support.is_empty() {
             return Err(Status::invalid_argument(

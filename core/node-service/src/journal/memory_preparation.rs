@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct ReceiverClockObservation {
     /// Actual Linux host boot identity, independently of the Node process lifetime.
     pub boot_id: String,
+    /// Actual Linux time namespace; one boot may contain several independent uptime offsets.
+    pub time_namespace: String,
     /// Conservative lower bound of the local boot-relative receive time.
     pub lower_ms: u64,
     /// Quantization uncertainty in the actual kernel observation.
@@ -22,6 +24,11 @@ impl ReceiverClockObservation {
         let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")?;
         let uptime = std::fs::read_to_string("/proc/uptime")?;
         let boot_id = boot.trim().to_string();
+        let time_namespace = std::fs::read_link("/proc/self/ns/time")?
+            .to_str()
+            .filter(|value| value.starts_with("time:[") && value.ends_with(']'))
+            .ok_or_else(|| JournalError::Corrupt("host time namespace is unavailable".into()))?
+            .to_string();
         if boot_id.len() != 36 || !boot_id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
             return Err(JournalError::Corrupt(
                 "host boot identity is unavailable".into(),
@@ -52,6 +59,7 @@ impl ReceiverClockObservation {
             .ok_or_else(|| JournalError::Corrupt("host boot clock overflow".into()))?;
         Ok(Self {
             boot_id,
+            time_namespace,
             lower_ms,
             uncertainty_ms,
         })
@@ -64,6 +72,9 @@ impl ReceiverClockObservation {
 pub struct MemoryReceiverBudget {
     /// Original actual host boot, never inferred from Node identity or a storage path.
     pub boot_id: String,
+    /// Missing historical namespace is unavailable; it is never inferred from the current process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_namespace: Option<String>,
     /// Original lower receive time preserves quantization conservatively.
     pub received_lower_ms: u64,
     /// Exclusive original boot-relative deadline.
@@ -74,6 +85,8 @@ impl MemoryReceiverBudget {
     /// Freezes a bounded original budget; current uncertainty cannot extend the permitted interval.
     pub fn admit(now: &ReceiverClockObservation, valid_for_ms: u64) -> Result<Self, JournalError> {
         if now.boot_id.is_empty()
+            || now.time_namespace.is_empty()
+            || now.time_namespace.len() > 128
             || !(1..=1000).contains(&now.uncertainty_ms)
             || !(1..=120_000).contains(&valid_for_ms)
             || valid_for_ms <= now.uncertainty_ms
@@ -88,6 +101,7 @@ impl MemoryReceiverBudget {
             .ok_or_else(|| JournalError::InvalidSpec("Memory receive deadline overflow".into()))?;
         Ok(Self {
             boot_id: now.boot_id.clone(),
+            time_namespace: Some(now.time_namespace.clone()),
             received_lower_ms: now.lower_ms,
             deadline_lower_ms,
         })
@@ -96,6 +110,8 @@ impl MemoryReceiverBudget {
     /// Returns a conservative remainder only on the original host boot and nondecreasing clock.
     pub fn remaining_ms(&self, now: &ReceiverClockObservation) -> u64 {
         if now.boot_id != self.boot_id
+            || self.time_namespace.as_deref() != Some(now.time_namespace.as_str())
+            || now.time_namespace.is_empty()
             || now.lower_ms < self.received_lower_ms
             || !(1..=1000).contains(&now.uncertainty_ms)
             || self
@@ -382,7 +398,7 @@ impl ExecutionJournal {
 }
 
 /// Reads retained original authority and its independent revoke-before-prepare fence.
-fn read_preparation(
+pub(super) fn read_preparation(
     connection: &Connection,
     id: &str,
 ) -> Result<Option<JournalMemoryPreparation>, JournalError> {

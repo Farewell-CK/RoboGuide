@@ -47,6 +47,7 @@ impl LocalIntegrationEngine {
         Ok(Self {
             inner: Arc::new(EngineInner {
                 memory_context_gate: Mutex::new(()),
+                memory_use_workers: Mutex::new(BTreeMap::new()),
                 publication_session: Mutex::new(None),
                 catalog: Arc::new(catalog),
                 journal: Arc::new(journal),

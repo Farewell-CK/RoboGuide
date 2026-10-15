@@ -30,6 +30,7 @@ mod localization_evidence;
 mod memory;
 mod memory_authority;
 mod memory_preparation;
+mod memory_use;
 pub use artifact_authorization::{
     ArtifactAccessRole, ArtifactAuthorizationRegistry, ArtifactCertificateGrant,
 };
@@ -41,6 +42,10 @@ pub use memory_authority::{
 pub use memory_preparation::{
     MemoryAvailabilityEvidence, MemoryControlCommand, MemoryControlKind, MemoryControlReceipt,
     MemoryControlStatus, MemoryPreparation, MemoryRequirement, PreparedMemoryInput,
+};
+pub use memory_use::{
+    MEMORY_USE_MAX_BUDGET_MS, MemoryUseControl, MemoryUseOperation,
+    MemoryUseProviderAcknowledgement, MemoryUseReceipt, MemoryUseStatus, memory_use_lease_id,
 };
 mod mission;
 mod mission_plan;
@@ -226,6 +231,9 @@ pub const NODE_CONTRACT_VERSION_V0_7: &str = "roboguide.node.v0.7";
 pub const NODE_CONTRACT_VERSION_V0_8: &str = "roboguide.node.v0.8";
 /// Node Contract with durable pre-execution Memory context and current backend observation.
 pub const NODE_CONTRACT_VERSION_V0_9: &str = "roboguide.node.v0.9";
+
+/// Node Contract with renewable, backend-enforced current Memory use permissions.
+pub const NODE_CONTRACT_VERSION_V0_10: &str = "roboguide.node.v0.10";
 
 #[cfg(test)]
 #[path = "domain_tests.rs"]

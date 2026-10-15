@@ -375,7 +375,8 @@ pub(crate) fn prepare(controller: &mut ControllerState, now: domain::TimestampMs
         let due = intent
             .last_delivery_ms
             .is_none_or(|last| now.as_millis().saturating_sub(last) >= 1000);
-        let exhausted = intent.deliveries >= 16;
+        let awaiting_admission = intent.phase == ImportPhase::Queued;
+        let exhausted = awaiting_admission && intent.deliveries >= 16;
         let intent = controller
             .memory_imports
             .get_mut(&id)
@@ -385,7 +386,7 @@ pub(crate) fn prepare(controller: &mut ControllerState, now: domain::TimestampMs
             intent.reason =
                 "import deadline, delivery budget or current binding requires reconciliation"
                     .into();
-        } else if due {
+        } else if due && awaiting_admission {
             intent.last_delivery_ms = Some(now.as_millis());
             intent.deliveries += 1;
         }
@@ -400,7 +401,7 @@ pub(crate) fn flush(
 ) {
     super::memory_query::flush(controller, prepared_at, now);
     for intent in controller.memory_imports.values() {
-        if intent.phase.terminal()
+        if intent.phase != ImportPhase::Queued
             || intent.last_delivery_ms != Some(prepared_at.as_millis())
             || now.as_millis() >= intent.request.deadline_ms
             || authorize(controller, &intent.request, now).is_err()

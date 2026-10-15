@@ -58,10 +58,27 @@ only explicit startup exports or exact previously admitted provider inputs, reta
 execution IDs in SQLite, independently hash actual opened regular files, and preserve interrupted
 outcomes as UNKNOWN. Cancellation acceptance is distinct from observed cancellation; shutdown
 requests cancellation then joins actual HTTP workers before closing storage. The cooperative
-five-second/worker bounds do not establish OS-enforced CPU quota, hardware safe-state or realtime.
+default five-second/worker bounds do not establish OS-enforced CPU quota, hardware safe-state or realtime.
+The HTTP compute route returns the original durable handle promptly; an owned bounded background
+worker performs actual reads/hashing and the status route reports its outcome. Original computation
+budgets persist before worker admission; `--max-job-seconds` is an explicit deployment bound from
+1 through 300 seconds, default 5. Restart never reruns interrupted work or renews that budget.
+`--max-job-rounds` separately bounds new requests (default 256, maximum 16777216); the actual
+requested count is part of the immutable invocation. Tightening admission does not rerun or hide
+historical results. The original computation budget still bounds actual work at every read phase.
 
 `tools/quality/check_memory_preparation_processes.py` uses this shipped code through actual TLS
 and two formally enrolled software Nodes. It proves the explicit pre-Execute permission barrier,
 actual final-import SQL failure/read-only reconciliation, current availability, two real hash
 jobs, two independent verifiers and no duplicated computation or renewed budget after restart.
 Schema and archived-binary checks are maintained separately. Devices, models and simulators are zero.
+
+Config v0.11 explicitly declares current Memory-use control/query on the same private Unix backend
+as original import/instance/availability. Start that profile with `--listen-unix --enable-use-leases`;
+the root is private to the current user and `local.sock` accepts only the same actual peer UID.
+POST `/v1/memory-use/control` persists a complete original grant or irreversible revoke;
+GET `/v1/memory-use/query` returns its original receipt plus current effectiveness, without renewal.
+Node and backend must share the actual Linux boot and time namespace. Namespace/boot changes and
+backend startup fence old permission. Each bounded file-read/compute phase checks current use;
+historical completed results remain readonly after revocation. The reference backend proves actual
+file computation only. It provides no device, hard-realtime or physical stop certificate.

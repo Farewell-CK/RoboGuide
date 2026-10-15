@@ -3,6 +3,10 @@
 use super::*;
 
 impl CompiledMemoryProvider {
+    /// Returns explicitly configured continuous-use permission workflows.
+    pub const fn use_lease(&self) -> Option<&CompiledMemoryUse> {
+        self.use_lease.as_ref()
+    }
     /// Returns explicit current-content observation support, independently of historical import status.
     pub const fn availability(&self) -> Option<&CompiledMemoryAvailability> {
         self.availability.as_ref()
@@ -29,12 +33,30 @@ impl CompiledMemoryProvider {
         if let Some(availability) = &self.availability {
             content.push_str(&format!("\navailability: {availability:?}"));
         }
+        if let Some(use_lease) = &self.use_lease {
+            content.push_str(&format!("\nuse_lease: {use_lease:?}"));
+        }
         content
     }
 
     /// Returns the explicitly configured readonly original-provider continuity contract.
     pub const fn continuity(&self) -> Option<&CompiledMemoryContinuity> {
         self.continuity.as_ref()
+    }
+}
+
+impl CompiledMemoryUse {
+    /// Returns the exact supported local receiver-budget profile.
+    pub fn profile(&self) -> &str {
+        &self.profile
+    }
+    /// Returns the configured once-admitted grant/revoke workflow.
+    pub const fn control(&self) -> &CompiledWorkflowStep {
+        &self.control
+    }
+    /// Returns the configured readonly original-command/effectiveness workflow.
+    pub const fn query(&self) -> &CompiledWorkflowStep {
+        &self.query
     }
 }
 

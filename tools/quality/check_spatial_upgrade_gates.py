@@ -139,7 +139,7 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
 
     with sqlite3.connect(f"file:{node_database}?mode=ro", uri=True) as connection:
         current_journal = connection.execute("PRAGMA user_version").fetchone()[0]
-        assert current_journal in {8, 9}
+        assert current_journal in {8, 9, 10}
         assert (
             connection.execute("SELECT version FROM node_journal_storage_schema").fetchone()[0]
             == current_journal
@@ -161,6 +161,51 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
         with sqlite3.connect(node_database) as connection:
             connection.execute(f"PRAGMA user_version={current_journal}")
     assert logical_digest(node_database, node_tables) == before_node
+    consumer_fence = False
+    if admitted.get("prepared_map_consumer") and current_journal == 10:
+        consumer_config = tomllib.loads((directory / "consumer/node.toml").read_text())
+        consumer_state = Path(consumer_config["state_directory"])
+        consumer_database = consumer_state / "execution-journal.sqlite3"
+        use_tables = (
+            "memory_preparations",
+            "memory_import_authority_v7",
+            "memory_use_heads",
+            "memory_use_commands",
+            "memory_use_effects",
+            "node_journal_storage_schema",
+        )
+        with sqlite3.connect(f"file:{consumer_database}?mode=ro", uri=True) as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            assert version == 10
+            assert connection.execute("SELECT COUNT(*) FROM memory_use_heads").fetchone()[0] > 0
+        original_use = logical_digest(consumer_database, use_tables)
+        receiver_probe = probe_root / "receiver-storage-probe.toml"
+        receiver_probe.write_text(
+            legacy.read_text()
+            .replace(
+                f'node_id = "{configuration["node_id"]}"',
+                f'node_id = "{consumer_config["node_id"]}"',
+            )
+            .replace(str(state_root), str(consumer_state))
+        )
+        rejected(
+            [str(old_node), str(receiver_probe)],
+            "journal was written by a newer storage authority",
+            "old-node-v9-use-authority",
+        )
+        with sqlite3.connect(consumer_database) as connection:
+            connection.execute("PRAGMA user_version=9")
+        try:
+            rejected(
+                [str(old_node), str(receiver_probe)],
+                "journal storage marker is unsupported",
+                "old-node-v9-use-authority-header-reset",
+            )
+        finally:
+            with sqlite3.connect(consumer_database) as connection:
+                connection.execute("PRAGMA user_version=10")
+        assert logical_digest(consumer_database, use_tables) == original_use
+        consumer_fence = True
     old_schema = (
         subprocess.check_output([str(old_controller), "--application-schema"], timeout=5)
         .decode()
@@ -171,6 +216,7 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
         "roboguide.controller-checkpoint/v33",
         "roboguide.controller-checkpoint/v34",
         "roboguide.controller-checkpoint/v35",
+        "roboguide.controller-checkpoint/v36",
     }
     grpc, operator, artifact = (address() for _ in range(3))
     rejected(
@@ -274,6 +320,7 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
         "zero_event_inventory": 0,
         "probe_root": str(probe_root),
         "node_journal_version": current_journal,
+        "populated_use_authority_fenced": consumer_fence,
         "controller_schema": checkpoint["schema"],
         "receipts": receipts,
         "archived_binary_sha256": {

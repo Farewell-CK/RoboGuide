@@ -75,6 +75,7 @@ pub(crate) fn server_checkpoint_json(
         mission_admissions: controller.mission_admissions.clone(),
         memory_imports: controller.memory_imports.clone(),
         memory_preparation: controller.memory_preparation.clone(),
+        memory_use: controller.memory_use.clone(),
         safety_stops: controller.safety_stops.clone(),
         schema: SERVER_CHECKPOINT_SCHEMA.to_string(),
         integration_json,

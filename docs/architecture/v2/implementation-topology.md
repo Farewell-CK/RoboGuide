@@ -69,6 +69,14 @@ flowchart TB
   CAT --> TYPED[完整原 map / provider-qualified 字节副本]
   TYPED --> PREP
   TYPED --> SQL
+  PREP --> USE[原 context 的当前使用租约 / generation / provider ACK]
+  MAUTH --> USE
+  USE --> SQL
+  USE --> PROTO
+  USE -->|全组当前许可| RT
+  MEM --> ULOCAL[同 kernel 与 time namespace / 私有 Unix / 每块读取复查]
+  ULOCAL --> PROTO
+  USE --> REVOKE
 ```
 
 Controller 中 Orchestration、Control、Runtime、State 和 Integration 当前共址，责任边界由

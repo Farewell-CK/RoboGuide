@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -111,6 +112,91 @@ def test_interrupted_original_computation_remains_unknown_on_restart(tmp_path: P
     try:
         assert jobs.compute(invocation)["state"] == "UNKNOWN"
         assert jobs.status(invocation["execution_id"])["result"] is None
+    finally:
+        jobs.close()
+        store.close()
+
+
+def test_async_admission_returns_original_handle_and_cancel_joins_actual_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pause a real worker to check durable admission, duplicate routing and cancellation."""
+    store, invocation, _ = declared_file(tmp_path)
+    jobs = FileJobs(store, max_job_seconds=120)
+    entered, release = threading.Event(), threading.Event()
+    perform = jobs._perform
+
+    def boundary(
+        call: dict[str, Any], admission: tuple[threading.Event, str | None, int, int]
+    ) -> dict[str, object]:
+        """Hold only the test's real worker boundary without fabricating any computation result."""
+        entered.set()
+        assert release.wait(timeout=5)
+        return perform(call, admission)
+
+    monkeypatch.setattr(jobs, "_perform", boundary)
+    try:
+        admitted = jobs.submit(invocation)
+        assert admitted["state"] == "RUNNING" and entered.wait(timeout=5)
+        original = jobs._db.execute("SELECT * FROM job_budgets").fetchall()
+        assert len(original) == 1 and original[0][2] == 120_000
+        assert jobs.submit(invocation) == admitted and len(jobs._workers) == 1
+        assert jobs._db.execute("SELECT * FROM job_budgets").fetchall() == original
+        jobs.cancel(invocation["execution_id"])
+        assert jobs.status(invocation["execution_id"])["state"] == "RUNNING"
+        release.set()
+        for worker in jobs._workers.values():
+            worker.join(timeout=5)
+            assert not worker.is_alive()
+        assert jobs.status(invocation["execution_id"])["state"] == "CANCELLED"
+        assert jobs.status(invocation["execution_id"])["result"] is None
+        assert jobs.health()["safe"] is True
+    finally:
+        release.set()
+        jobs.close()
+        store.close()
+
+
+def test_compute_budget_sql_failure_rolls_back_admission_before_worker_start(
+    tmp_path: Path,
+) -> None:
+    """An actual SQL failure cannot leave a job handle without its original budget or start work."""
+    store, invocation, _ = declared_file(tmp_path)
+    jobs = FileJobs(store)
+    try:
+        jobs._db.execute(
+            "CREATE TRIGGER reject_budget BEFORE INSERT ON job_budgets "
+            "BEGIN SELECT RAISE(ABORT,'unit budget commit failure'); END"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="budget commit failure"):
+            jobs.submit(invocation)
+        assert jobs._db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+        assert jobs._db.execute("SELECT COUNT(*) FROM job_budgets").fetchone()[0] == 0
+        assert jobs.health()["safe"] is True and not jobs._workers
+    finally:
+        jobs.close()
+        store.close()
+
+
+def test_round_limit_is_deployment_owned_and_historical_replay_never_recomputes(
+    tmp_path: Path,
+) -> None:
+    """A local bound change cannot renew completed work or admit a new excessive request."""
+    store, invocation, _ = declared_file(tmp_path)
+    invocation["parameters"]["rounds"] = 512
+    jobs = FileJobs(store, max_job_rounds=512)
+    try:
+        completed = jobs.compute(invocation)
+        assert completed["state"] == "COMPLETED"
+        budget = jobs._db.execute("SELECT * FROM job_budgets").fetchall()
+        jobs.close()
+        jobs = FileJobs(store)
+        assert jobs.submit(invocation) == completed
+        assert jobs._db.execute("SELECT * FROM job_budgets").fetchall() == budget
+        changed = {**invocation, "execution_id": uuid.uuid4().hex}
+        with pytest.raises(ValueError, match="deployment limit"):
+            jobs.submit(changed)
+        assert jobs._db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
     finally:
         jobs.close()
         store.close()

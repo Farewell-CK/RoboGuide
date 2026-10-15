@@ -67,6 +67,12 @@ journal v9 和旧版本拒绝已接线。完整 Group lifetime/handoff、typed-m
 重启。wrapper v36 / codec v25 保留完整原 map，provider-qualified 字节副本不产生第二 manifest
 权威。地图语义消费/激活、完整 Group lifetime/handoff、GC 和后续阶段仍须完成。
 
+[当前使用许可切片](acceptance/2026-10-16-f4-memory-use-leases.md)已接通原 context 的当前 Read
+授权、真实后台计算、续约、撤销确认、原期限到期及进程崩溃恢复，保留原预算与 Unknown。
+Node Contract v0.10/config v0.11/preparation v0.2、journal v10/wrapper v37 拒绝旧 authority。
+实际大文件准备窗口失败仍保留，继续优化有界逐块门禁和写锁内 I/O；不得放宽期限或删掉要求。
+active-map、完整 Group handoff/GC、动态 HA 与 F5–F10 仍为必需项，F4 不提前关闭。
+
 ## 已接受的实现决定
 
 - Stop 冻结完整受影响 attempt 集合、operation-owned export、策略、owner/session 和 deadline。

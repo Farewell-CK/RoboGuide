@@ -13,16 +13,32 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from .store import MemoryStore, canonical, content_digest
+from .use_leases import UseLeases, UsePermissionEnded
 
 
 class FileJobs:
     """Own software computations over declared files, without any robot or Task authority."""
 
-    def __init__(self, store: MemoryStore) -> None:
+    def __init__(
+        self,
+        store: MemoryStore,
+        leases: UseLeases | None = None,
+        max_job_seconds: int = 5,
+        max_job_rounds: int = 256,
+    ) -> None:
         """Reopen original outcomes and fence interrupted computations without repeating them."""
+        if type(max_job_seconds) is not int or not 1 <= max_job_seconds <= 300:
+            raise ValueError("deployment computation budget must be from one through 300 seconds")
+        if type(max_job_rounds) is not int or not 1 <= max_job_rounds <= 16_777_216:
+            raise ValueError("deployment hash-round bound is unavailable")
         self.store = store
+        self.leases = leases
+        self.max_job_ms = max_job_seconds * 1000
+        self.max_job_rounds = max_job_rounds
         self._mutex = threading.RLock()
         self._active: dict[str, threading.Event] = {}
+        self._workers: dict[str, threading.Thread] = {}
+        self._closing = False
         self._db = sqlite3.connect(store.root / "file-jobs.sqlite3", check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
@@ -31,13 +47,26 @@ class FileJobs:
             "invocation_json BLOB, state TEXT NOT NULL, result_json BLOB, reason TEXT NOT NULL)"
         )
         self._db.execute(
+            "CREATE TABLE IF NOT EXISTS job_budgets (execution_id TEXT PRIMARY KEY, "
+            "admitted_monotonic_ns INTEGER NOT NULL, budget_ms INTEGER NOT NULL "
+            "CHECK(budget_ms BETWEEN 1000 AND 300000))"
+        )
+        self._db.execute(
             "UPDATE jobs SET state='UNKNOWN',reason='original computation was interrupted' "
             "WHERE state='RUNNING'"
         )
         self._db.commit()
 
     def close(self) -> None:
-        """Close only after the HTTP owner has joined every actual request worker."""
+        """Fence admission and join owned workers before closing original outcome storage."""
+        with self._mutex:
+            self._closing = True
+            self.stop()
+            workers = list(self._workers.values())
+        for worker in workers:
+            worker.join(timeout=6)
+            if worker.is_alive():
+                raise RuntimeError("actual computation worker has not stopped")
         with self._mutex:
             if self._active:
                 raise RuntimeError("actual file computations are still active")
@@ -110,7 +139,10 @@ class FileJobs:
                 if row is None or json.loads(row[1]) != item["manifest"]:
                     raise ValueError("computation input differs from original imported metadata")
                 original = json.loads(row[0])
-                if self.store.availability(original)["available"] is not True:
+                if (
+                    self.leases is None
+                    and self.store.availability(original)["available"] is not True
+                ):
                     raise ValueError("computation input is not currently available")
                 manifest = item["manifest"]
                 scope = manifest.get("scope", {})
@@ -136,15 +168,17 @@ class FileJobs:
                 inputs.append((matches[0]["manifest"], self.store._export_path(matches[0])))
         return inputs
 
-    def compute(self, invocation: dict[str, Any]) -> dict[str, object]:
-        """Hash original file descriptors under once-only admission and report actual outcomes."""
+    def _admit(
+        self, invocation: dict[str, Any]
+    ) -> tuple[threading.Event, str | None, int, int] | None:
+        """Commit the exact invocation and compute budget before reads or worker admission."""
         execution = invocation.get("execution_id")
         if not isinstance(execution, str) or not execution or len(execution) > 1024:
             raise ValueError("actual computation requires an exact bounded execution identity")
         parameters = invocation.get("parameters", {})
         rounds = parameters.get("rounds", 1)
-        if isinstance(rounds, bool) or not isinstance(rounds, int) or not 1 <= rounds <= 256:
-            raise ValueError("file hashing rounds must be an integer from one through 256")
+        if isinstance(rounds, bool) or not isinstance(rounds, int) or not 1 <= rounds <= 16_777_216:
+            raise ValueError("file hashing rounds must be a bounded positive integer")
         encoded = canonical(invocation)
         if len(encoded) > 512 * 1024:
             raise ValueError("actual computation metadata exceeds its bound")
@@ -155,21 +189,87 @@ class FileJobs:
             if original is not None:
                 if original[0] is not None and original[0] != encoded:
                     raise ValueError("computation identity conflicts with its original invocation")
-                return self.status(execution)
+                return None
+            if rounds > self.max_job_rounds:
+                raise ValueError("file hashing rounds exceed the frozen deployment limit")
+            if self._closing:
+                raise ValueError("actual computation owner is closing")
             if len(self._active) >= 4:
                 raise ValueError("bounded actual computation workers are busy")
+            use_lease = self.leases.require(invocation) if self.leases is not None else None
             event = threading.Event()
-            self._db.execute(
-                "INSERT INTO jobs VALUES (?,?,'RUNNING',NULL,'')", (execution, encoded)
-            )
-            self._db.commit()
+            admitted_ns = time.monotonic_ns()
+            with self._db:
+                self._db.execute(
+                    "INSERT INTO jobs VALUES (?,?,'RUNNING',NULL,'')", (execution, encoded)
+                )
+                self._db.execute(
+                    "INSERT INTO job_budgets VALUES (?,?,?)",
+                    (execution, admitted_ns, self.max_job_ms),
+                )
             self._active[execution] = event
+            return event, use_lease, admitted_ns, self.max_job_ms
+
+    def submit(self, invocation: dict[str, Any]) -> dict[str, object]:
+        """Return a durable original handle promptly while a bounded owned worker does real work."""
+        with self._mutex:
+            admission = self._admit(invocation)
+            execution = invocation["execution_id"]
+            if admission is None:
+                return self.status(execution)
+            self._workers = {key: value for key, value in self._workers.items() if value.is_alive()}
+            worker = threading.Thread(
+                target=self._perform,
+                args=(invocation, admission),
+                name="memory-file-computation",
+            )
+            self._workers[execution] = worker
+            try:
+                worker.start()
+            except RuntimeError:
+                self._workers.pop(execution)
+                self._active.pop(execution)
+                with self._db:
+                    self._db.execute(
+                        "UPDATE jobs SET state='UNKNOWN',"
+                        "reason='original worker start was interrupted' "
+                        "WHERE execution_id=?",
+                        (execution,),
+                    )
+            return self.status(execution)
+
+    def compute(self, invocation: dict[str, Any]) -> dict[str, object]:
+        """Run the same once-admitted computation synchronously for direct local consumers."""
+        admission = self._admit(invocation)
+        return (
+            self.status(invocation["execution_id"])
+            if admission is None
+            else self._perform(invocation, admission)
+        )
+
+    def _perform(
+        self, invocation: dict[str, Any], admission: tuple[threading.Event, str | None, int, int]
+    ) -> dict[str, object]:
+        """Hash opened bytes under original persisted budgets and current lease boundaries."""
+        event, use_lease, admitted_ns, budget_ms = admission
+        execution = invocation["execution_id"]
+        rounds = invocation.get("parameters", {}).get("rounds", 1)
         opened: list[BinaryIO] = []
         state, reason, result = "FAILED", "", None
-        started = time.monotonic()
+
+        def current_permission() -> None:
+            """Fence each bounded actual read/compute phase on current local use authority."""
+            if self.leases is not None and use_lease is not None:
+                try:
+                    self.leases.guard(use_lease, execution)
+                except UsePermissionEnded as error:
+                    raise InterruptedError(str(error)) from error
+
         try:
+            current_permission()
             inputs = self._inputs(invocation)
             for manifest, path in inputs:
+                current_permission()
                 descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
                 stream: BinaryIO = os.fdopen(descriptor, "rb")
                 opened.append(stream)
@@ -179,18 +279,23 @@ class FileJobs:
                     raise ValueError("actual computation input size changed")
             digests: list[str] = []
             for _ in range(rounds):
+                current_permission()
                 if event.is_set():
                     raise InterruptedError("actual computation cancellation observed")
-                if time.monotonic() - started >= 5:
+                if time.monotonic_ns() - admitted_ns >= budget_ms * 1_000_000:
                     raise TimeoutError("original actual computation budget expired")
                 digests = []
                 for (manifest, _), stream in zip(inputs, opened, strict=True):
                     stream.seek(0)
                     hashed = hashlib.sha256()
-                    while chunk := stream.read(1024 * 1024):
+                    while True:
+                        current_permission()
+                        chunk = stream.read(1024 * 1024)
+                        if not chunk:
+                            break
                         if event.is_set():
                             raise InterruptedError("actual computation cancellation observed")
-                        if time.monotonic() - started >= 5:
+                        if time.monotonic_ns() - admitted_ns >= budget_ms * 1_000_000:
                             raise TimeoutError("original actual computation budget expired")
                         hashed.update(chunk)
                     digest = "sha256:" + hashed.hexdigest()
@@ -214,6 +319,11 @@ class FileJobs:
             for stream in opened:
                 stream.close()
             with self._mutex:
+                if state == "COMPLETED":
+                    try:
+                        current_permission()
+                    except InterruptedError as error:
+                        state, reason, result = "CANCELLED", str(error), None
                 if event.is_set() and state == "COMPLETED":
                     state, reason, result = (
                         "CANCELLED",

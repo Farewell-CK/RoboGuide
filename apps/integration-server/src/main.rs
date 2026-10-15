@@ -34,6 +34,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper without continuous Group Memory-use authority.
+const PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v36";
 /// Previous wrapper without provider-qualified byte evidence for the sole Spatial source.
 const PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA: &str =
     "roboguide.controller-checkpoint/v35";
@@ -111,6 +113,8 @@ struct ControllerState {
     mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
     /// Memory prerequisite authority plus a startup-reacquired read-only catalog federation.
     memory_preparation: application::memory_preparation::MemoryPreparationState,
+    /// Renewable current content permission, separate from immutable preparation/import budgets.
+    memory_use: application::memory_use::MemoryUseState,
     /// Exact authorized selective-import intents and durable Node receipts.
     memory_imports: BTreeMap<String, application::memory_import::MemoryImportIntent>,
     /// Application safety policy over existing exact Runtime cancellation intents and raw evidence.
@@ -579,6 +583,9 @@ struct ServerCheckpoint {
     /// Original prerequisite contexts, budgets, pending commands and immutable Node receipts.
     #[serde(default)]
     memory_preparation: application::memory_preparation::MemoryPreparationState,
+    /// Original use commands and fences; historical absence remains unavailable.
+    #[serde(default)]
+    memory_use: application::memory_use::MemoryUseState,
     /// Exact authorized selective-import intents and durable Node receipts.
     #[serde(default)]
     memory_imports: BTreeMap<String, application::memory_import::MemoryImportIntent>,
@@ -949,6 +956,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
@@ -987,6 +995,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
@@ -1024,6 +1033,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 mission_admissions: saved.mission_admissions,
                 memory_imports: saved.memory_imports,
                 memory_preparation: saved.memory_preparation,
+                memory_use: saved.memory_use,
                 safety_stops: saved.safety_stops,
                 bridge: IntegrationRuntimeBridge::restore_from_checkpoint_with_lease_policy(
                     &saved.integration_json,
@@ -1048,6 +1058,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             mission_admissions: BTreeMap::new(),
             memory_imports: BTreeMap::new(),
             memory_preparation: Default::default(),
+            memory_use: Default::default(),
             safety_stops: BTreeMap::new(),
             bridge: IntegrationRuntimeBridge::new_with_lease_policy(
                 control::ControlPlane::new(),
@@ -1094,6 +1105,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     application::memory_import::validate_restored(&controller)?;
     let restored_memory_fences =
         application::memory_preparation::restore(&mut controller, process_clock.now())?;
+    let restored_use_fences =
+        application::memory_use::restore(&mut controller, process_clock.now())?;
     controller
         .orchestrator
         .set_admission_limits(orchestration::MissionAdmissionLimits::try_new(
@@ -1170,6 +1183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         || migrate_checkpoint
         || restored_stop_holds
         || restored_memory_fences
+        || restored_use_fences
         || installed_identity_registry
         || actor_placement_path.is_some()
         || physical_entity_registry_path.is_some()

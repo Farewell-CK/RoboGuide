@@ -436,7 +436,7 @@ impl ControlPlane {
                             .operation_owner(operation)
                             .is_some_and(|owner| {
                                 registration.memory_providers().iter().any(|provider| {
-                                    provider.supports_preparation()
+                                    provider.supports_use_lease()
                                         && provider.local_system_id() == owner
                                         && requirement.matches_provider(provider)
                                 })

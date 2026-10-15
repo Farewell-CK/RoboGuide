@@ -41,6 +41,7 @@ def checker_identity() -> dict[str, str]:
         "spatial_content_policy.py",
         "spatial_memory_consumer.py",
         "memory_preparation_profile.py",
+        "memory_use_profile.py",
         "check_memory_processes.py",
         "check_spatial_upgrade_gates.py",
     )

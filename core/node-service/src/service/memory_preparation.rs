@@ -12,8 +12,9 @@ impl NodeService {
         sequence: &Arc<tokio::sync::Mutex<u64>>,
     ) -> Result<(), NodeServiceError> {
         if frame.session_id != session
-            || self.engine.catalog().node_contract_version()
-                != integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
+            || !integration::grpc::v0_4::supports_memory_preparation(
+                self.engine.catalog().node_contract_version(),
+            )
             || frame.command_json.len() > 256 * 1024
         {
             return Err(NodeServiceError::Protocol(

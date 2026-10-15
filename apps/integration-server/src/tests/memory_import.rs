@@ -469,3 +469,44 @@ fn expired_import_retains_late_receipt_and_never_renews_delivery() {
     assert_eq!(intent.deliveries, 1);
     assert_eq!(intent.request.deadline_ms, 1000);
 }
+
+/// Durable Node admission stops delivery retries while preserving the original completion deadline.
+#[test]
+fn persisted_import_waits_for_original_completion_without_spending_delivery_budget() {
+    let (mut fixture, request) = fixture();
+    memory_import::admit(
+        &mut fixture.controller,
+        request.clone(),
+        TimestampMs::new(5),
+    )
+    .unwrap();
+    memory_import::prepare(&mut fixture.controller, TimestampMs::new(5));
+    memory_import::receipt(
+        &mut fixture.controller,
+        request.node_id.as_str(),
+        &MemoryImportReceipt {
+            session_id: "current-session".into(),
+            sequence: 1,
+            import_id: request.import_id.clone(),
+            command_id: format!("memory-import-{}", request.import_id),
+            status: MemoryImportReceiptStatus::MemoryImportPersisted as i32,
+            reason: String::new(),
+        },
+        TimestampMs::new(6),
+    )
+    .unwrap();
+    for time in (10..950).step_by(10) {
+        memory_import::prepare(&mut fixture.controller, TimestampMs::new(time));
+    }
+    let intent = &fixture.controller.memory_imports[&request.import_id];
+    assert_eq!(intent.phase, ImportPhase::Persisted);
+    assert_eq!(intent.deliveries, 1);
+    assert_eq!(intent.last_delivery_ms, Some(5));
+    assert_eq!(intent.request.deadline_ms, 1000);
+    assert!(intent.reconciliation.is_none());
+    memory_import::prepare(&mut fixture.controller, TimestampMs::new(1000));
+    let intent = &fixture.controller.memory_imports[&request.import_id];
+    assert_eq!(intent.phase, ImportPhase::Unknown);
+    assert_eq!(intent.deliveries, 1);
+    assert_eq!(intent.request.deadline_ms, 1000);
+}

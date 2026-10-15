@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/memory/use-v0.1/control.schema.json",
+  "title": "Current Group Memory-use control v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "command_id",
+    "preparation_id",
+    "execution_id",
+    "node_id",
+    "source_session_id",
+    "tenant_id",
+    "group_id",
+    "registry_id",
+    "schema",
+    "lease_id",
+    "generation",
+    "operation",
+    "preparation_digest",
+    "configuration_digest",
+    "registry_revision",
+    "membership",
+    "valid_for_ms"
+  ],
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "preparation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "execution_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "source_session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "registry_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "schema": {
+      "const": "roboguide.memory-use-control/v0.1"
+    },
+    "lease_id": {
+      "type": "string",
+      "pattern": "^use-[0-9a-f]{64}$"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "operation": {
+      "enum": [
+        "grant",
+        "revoke"
+      ]
+    },
+    "preparation_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "configuration_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "registry_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775807
+    },
+    "membership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation",
+        "bindings_digest"
+      ],
+      "properties": {
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "bindings_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "valid_for_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 30000
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "grant"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "generation": {
+            "minimum": 1
+          },
+          "valid_for_ms": {
+            "minimum": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "generation": {
+            "const": 0
+          },
+          "valid_for_ms": {
+            "const": 0
+          }
+        }
+      }
+    }
+  ]
+}

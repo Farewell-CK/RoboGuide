@@ -30,15 +30,23 @@ def run(directory: Path) -> dict[str, Any]:
     admitted = json.loads((directory / "result.json").read_bytes())
     assert admitted["passed"] is True
     spatial = bool(admitted.get("prepared_map_consumer"))
+    consumer_config = tomllib.loads((directory / "consumer/node.toml").read_text())
+    has_use = consumer_config["schema"] == "roboguide.node-config/v0.11"
+    preparation_version = "preparation-v0.2" if has_use else "preparation-v0.1"
     schema_paths = {
         "mission": ROOT / "contracts/mission/v0.9/mission-plan.schema.json",
-        "config": ROOT / "contracts/node/v0.12/node-config.schema.json",
+        "config": ROOT
+        / f"contracts/node/{'v0.13' if has_use else 'v0.12'}/node-config.schema.json",
         "source_config": ROOT
         / f"contracts/node/{'v0.11' if spatial else 'v0.12'}/node-config.schema.json",
         "map": ROOT / "contracts/spatial/v0.2/map-manifest.schema.json",
         **{
-            name: ROOT / f"contracts/memory/preparation-v0.1/{name}.schema.json"
+            name: ROOT / f"contracts/memory/{preparation_version}/{name}.schema.json"
             for name in ("preparation", "control", "receipt", "availability")
+        },
+        **{
+            f"use_{name}": ROOT / f"contracts/memory/use-v0.1/{name}.schema.json"
+            for name in ("control", "receipt")
         },
     }
     validators = {}
@@ -86,6 +94,22 @@ def run(directory: Path) -> dict[str, Any]:
                     evidence["content_digest"] == original["manifest"]["artifact"]["content_digest"]
                 )
     assert len(observations) == len(preparation["inputs"])
+    use_commands = []
+    use_receipts = []
+    if has_use:
+        uses = (
+            [json.loads((directory / "consumer/use-lease.json").read_bytes())]
+            if spatial
+            else json.loads((directory / "use-leases.json").read_bytes()).values()
+        )
+        for use in uses:
+            for delivery in use["controls"].values():
+                validators["use_control"].validate(delivery["command"])
+                use_commands.append(delivery["command"])
+                if delivery["receipt"]:
+                    validators["use_receipt"].validate(delivery["receipt"])
+                    use_receipts.append(delivery["receipt"])
+        assert any(receipt["status"] == "granted" for receipt in use_receipts)
     rejected = []
 
     def reject(schema_name: str, case: str, value: dict[str, Any]) -> None:
@@ -141,12 +165,34 @@ def run(directory: Path) -> dict[str, Any]:
         changed = copy.deepcopy(preparation)
         del changed["inputs"][0]["typed_map"]["producer_provider_id"]
         reject("preparation", "typed map cannot strip original provider", changed)
+    if has_use:
+        for case in ("zero-grant-generation", "unbounded-grant", "revoke-cannot-grant"):
+            changed = copy.deepcopy(
+                next(value for value in use_commands if value["operation"] == "grant")
+            )
+            if case == "zero-grant-generation":
+                changed["generation"] = 0
+            elif case == "unbounded-grant":
+                changed["valid_for_ms"] = 30001
+            else:
+                changed["operation"] = "revoke"
+            reject("use_control", case, changed)
+        changed = copy.deepcopy(
+            next(value for value in use_receipts if value["status"] == "granted")
+        )
+        changed["providers"] = []
+        reject("use_receipt", "positive-use-needs-provider-proof", changed)
+        changed = copy.deepcopy(config)
+        changed["memory_providers"][0]["use_lease"]["query"]["operation"]["method"] = "POST"
+        reject("config", "use-query-cannot-mutate", changed)
     result = {
         "passed": True,
         "jsonschema": importlib.metadata.version("jsonschema"),
         "actual_preparations": len(records),
         "actual_observations": len(observations),
         "actual_typed_maps": len(typed),
+        "actual_use_commands": len(use_commands),
+        "actual_use_receipts": len(use_receipts),
         "rejected_cases": rejected,
         "schema_identity": {
             str(path.relative_to(ROOT)): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()

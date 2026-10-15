@@ -1,6 +1,9 @@
 //! Durable execution journal tests.
 
 use super::*;
+
+#[path = "memory_use_journal_tests.rs"]
+mod memory_use_cases;
 use domain::{
     ContentDigest, ExecutionGroupId, LocalizationFrames, LocalizationVerificationEvidence,
     MapArtifactRef, MapId, MapRevisionId, MapRevisionSelector, MissionId, NodeId,
@@ -87,7 +90,9 @@ fn preparation_command(
 fn memory_receiver_budget_preserves_original_deadline_and_boot_identity() {
     let actual = ReceiverClockObservation::read().unwrap();
     assert!(!actual.boot_id.is_empty());
+    assert!(!actual.time_namespace.is_empty());
     let initial = ReceiverClockObservation {
+        time_namespace: "unit-time-namespace".into(),
         boot_id: "boot-a".into(),
         lower_ms: 1000,
         uncertainty_ms: 10,
@@ -116,6 +121,17 @@ fn memory_receiver_budget_preserves_original_deadline_and_boot_identity() {
         0
     );
     assert!(MemoryReceiverBudget::admit(&initial, 10).is_err());
+    assert_eq!(
+        budget.remaining_ms(&ReceiverClockObservation {
+            time_namespace: "another-unit-time-namespace".into(),
+            ..initial.clone()
+        }),
+        0
+    );
+    let mut legacy = serde_json::to_value(&budget).unwrap();
+    legacy.as_object_mut().unwrap().remove("time_namespace");
+    let legacy: MemoryReceiverBudget = serde_json::from_value(legacy).unwrap();
+    assert_eq!(legacy.remaining_ms(&initial), 0);
 }
 
 /// Real SQLite reopen/replay preserves the first budget/configuration and irreversible revoke fence.
@@ -1329,7 +1345,7 @@ fn current_journal_keeps_legacy_inspection_but_refuses_legacy_writes() {
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        9
+        10
     );
 }
 
@@ -1339,7 +1355,7 @@ fn future_journal_and_dual_authorities_refuse_without_migration() {
     let (directory, path, journal) = journal();
     drop(journal);
     let connection = rusqlite::Connection::open(&path).unwrap();
-    connection.pragma_update(None, "user_version", 10).unwrap();
+    connection.pragma_update(None, "user_version", 11).unwrap();
     drop(connection);
     assert!(ExecutionJournal::open(&path).is_err());
     let connection = rusqlite::Connection::open(&path).unwrap();
@@ -1347,9 +1363,9 @@ fn future_journal_and_dual_authorities_refuse_without_migration() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        10
+        11
     );
-    connection.pragma_update(None, "user_version", 9).unwrap();
+    connection.pragma_update(None, "user_version", 10).unwrap();
     connection
         .execute_batch("DROP VIEW executions; CREATE TABLE executions (shadow INTEGER)")
         .unwrap();

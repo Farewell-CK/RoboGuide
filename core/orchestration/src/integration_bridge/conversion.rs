@@ -165,7 +165,8 @@ pub(super) fn registration_from_wire(
 ) -> Result<domain::NodeRegistration, IntegrationRuntimeError> {
     let semantic_profiles = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::NODE_CONTRACT_VERSION
@@ -173,7 +174,8 @@ pub(super) fn registration_from_wire(
     );
     let independent_operation_support = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::NODE_CONTRACT_VERSION
@@ -431,13 +433,24 @@ pub(super) fn memory_provider_from_wire(
         wire.payload_schema.clone(),
         wire.media_type.clone(),
     )?;
-    if wire.preparation_contract.is_empty() {
-        Ok(provider)
+    let provider = if wire.preparation_contract.is_empty() {
+        provider
     } else if wire.preparation_contract == "roboguide.memory-provider-availability/v0.1" {
-        Ok(provider.with_preparation_support())
+        provider.with_preparation_support()
+    } else {
+        return Err(IntegrationRuntimeError::Protocol(
+            "unsupported Memory preparation contract".into(),
+        ));
+    };
+    if wire.use_contract.is_empty() {
+        Ok(provider)
+    } else if wire.use_contract == "roboguide.memory-use/shared-kernel/v0.1"
+        && provider.supports_preparation()
+    {
+        Ok(provider.with_use_lease_support())
     } else {
         Err(IntegrationRuntimeError::Protocol(
-            "unsupported Memory preparation contract".into(),
+            "unsupported current Memory-use contract".into(),
         ))
     }
 }

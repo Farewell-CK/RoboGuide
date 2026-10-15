@@ -164,7 +164,7 @@ fn build(
         });
     }
     let preparation=MemoryPreparation {
-        schema:"roboguide.memory-preparation/v0.1".into(),preparation_id:id,
+        schema:"roboguide.memory-preparation/v0.2".into(),preparation_id:id,
         tenant_id:control.mission_tenant(command.mission_id()).unwrap_or("local").into(),
         group_id:command.group_id().clone(),task_ref:command.task_ref().clone(),role_id:command.role_id().clone(),
         execution_id:intent.execution_id.clone(),node_id:command.node_id().clone(),
@@ -393,8 +393,22 @@ pub(crate) fn prepare(
                 | MemoryPreparationPhase::Revoking
                 | MemoryPreparationPhase::Revoked
                 | MemoryPreparationPhase::Unknown
-        ) && let Err(error) = authorize(controller, &record, now)
+        ) && let Err(error) = if record.phase == MemoryPreparationPhase::Ready
+            && !pending.iter().any(|intent| intent.execution_id == id)
         {
+            record
+                .preparation
+                .as_ref()
+                .ok_or_else(|| "Memory source context is unavailable".to_string())
+                .and_then(|preparation| {
+                    controller
+                        .bridge
+                        .validate_memory_use_context(preparation, now)
+                        .map_err(|error| error.to_string())
+                })
+        } else {
+            authorize(controller, &record, now)
+        } {
             record.reason = bounded_reason(&error);
             record.available_until_ms = None;
             record.phase = MemoryPreparationPhase::Revoking;
@@ -649,6 +663,7 @@ pub(crate) fn ready(
                     .available_until_ms
                     .is_some_and(|until| now.as_millis() < until)
                 && authorize(controller, record, now).is_ok()
+                && super::memory_use::permits(controller, &record.execution_id, now)
         })
         .filter_map(|(id, record)| {
             record

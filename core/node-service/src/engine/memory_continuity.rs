@@ -82,6 +82,10 @@ impl LocalIntegrationEngine {
         if let Some(availability) = provider.availability() {
             connections.insert(availability.observation().connection());
         }
+        if let Some(usage) = provider.use_lease() {
+            connections.insert(usage.control().connection());
+            connections.insert(usage.query().connection());
+        }
         for id in connections {
             content.push_str(&format!(
                 "\n{:?}",

@@ -26,10 +26,10 @@ pub use config::{
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityProfileConfig,
     CapabilityReadinessConfig, ConnectionConfig, CredentialSourceConfig,
     ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
-    MemoryAvailabilityConfig, MemoryContinuityConfig, MemoryProviderConfig, MemoryWorkflowConfig,
-    NodeServiceConfig, OperationBindingConfig, PeerChannelObserverConfig, RequestBindingConfig,
-    RequestMappingConfig, ResourceConfig, SensorConfig, StateExportConfig, ValueExpressionConfig,
-    ValueFunction, WorkflowConfig, WorkflowStepConfig,
+    MemoryAvailabilityConfig, MemoryContinuityConfig, MemoryProviderConfig, MemoryUseConfig,
+    MemoryWorkflowConfig, NodeServiceConfig, OperationBindingConfig, PeerChannelObserverConfig,
+    RequestBindingConfig, RequestMappingConfig, ResourceConfig, SensorConfig, StateExportConfig,
+    ValueExpressionConfig, ValueFunction, WorkflowConfig, WorkflowStepConfig,
 };
 pub use conformance::{
     CapabilityConformance, CapabilityProfileConformance, ConformanceChecks, ConformanceDiagnostic,
@@ -47,9 +47,10 @@ pub use engine::{
 pub use journal::{
     ArtifactFinalizationKind, BeginMemoryObservation, ExecutionJournal, ExecutionSpec,
     ImportContinuity, ImportQueryRecord, ImportQueryResult, ImportQuerySpec, JournalError,
-    JournalExecution, JournalMemoryPreparation, JournalStatus, MemoryImportRecord,
-    MemoryImportStatus, MemoryReceiverBudget, PrepareArtifactFreeze, PrepareDispatch,
-    PrepareMemoryImport, PreparedArtifactRecord, ReceiverClockObservation,
+    JournalExecution, JournalMemoryPreparation, JournalMemoryUseCommand, JournalMemoryUseEffect,
+    JournalStatus, MemoryImportRecord, MemoryImportStatus, MemoryReceiverBudget,
+    PrepareArtifactFreeze, PrepareDispatch, PrepareMemoryImport, PreparedArtifactRecord,
+    ReceiverClockObservation,
 };
 pub use local_engine::driver::{
     BoxDriverFuture, CompiledDriverRequest, DriverError, DriverEvent, DriverEventStream,
@@ -62,10 +63,11 @@ pub use local_engine::mcp_driver::McpDriver;
 pub use local_engine::{
     CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CONFIG_SCHEMA_V0_5,
     CONFIG_SCHEMA_V0_6, CONFIG_SCHEMA_V0_7, CONFIG_SCHEMA_V0_8, CONFIG_SCHEMA_V0_9,
-    CONFIG_SCHEMA_V0_10, CapabilityReadinessFact, CatalogError, CompiledArtifactService,
-    CompiledCapability, CompiledCapabilityProfile, CompiledCapabilityReadiness, CompiledConnection,
-    CompiledHealthCheck, CompiledLocalCatalog, CompiledLocalSystem, CompiledMemoryAvailability,
-    CompiledMemoryContinuity, CompiledMemoryProvider, CompiledMemoryWorkflow, CompiledOperation,
+    CONFIG_SCHEMA_V0_10, CONFIG_SCHEMA_V0_11, CapabilityReadinessFact, CatalogError,
+    CompiledArtifactService, CompiledCapability, CompiledCapabilityProfile,
+    CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog,
+    CompiledLocalSystem, CompiledMemoryAvailability, CompiledMemoryContinuity,
+    CompiledMemoryProvider, CompiledMemoryUse, CompiledMemoryWorkflow, CompiledOperation,
     CompiledPeerChannelObserver, CompiledResource, CompiledSensor, CompiledStateExport,
     CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact, LocalHealthState, MappedExecutionFact,
     MappedExecutionPhase, PeerChannelReadinessFact, StateExportFact,

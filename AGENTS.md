@@ -98,6 +98,15 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   replay require the exact published source; no generic manifest alias is created. Memory API byte
   `replicas` and map-workflow `map_replicas` are separate evidence. Controller wrapper v36 / event
   codec v25 fence old writers. Byte placement never proves active-map selection or localization.
+- ADR-0106's current-use implementation negotiates Node Contract v0.10/config v0.11/catalog v0.13
+  with preparation v0.2; original v0.1 never carries hidden use authority. Controller wrapper v37
+  and Node journal v10 retain separate renewable use commands, original issue/receive budgets,
+  provider proofs and irreversible revocation. Node/backend share an explicitly configured actual
+  Linux kernel/time namespace and private same-user Unix endpoint. Backend restart fences old
+  grants without replacing their original receipts. File jobs durably admit their original compute
+  budgets before bounded owned background workers; duplicate HTTP commands do not start another.
+  Current-use receipts are not physical stop proof. Full lifecycle/handoff, active-map/GC and later
+  stages remain mandatory until their complete conformance records pass.
 - Generic replica durable identity is exact `(MemorySelector, NodeId, ConsumerProviderId)`; admission,
   event replay, projections, and APIs preserve that provider dimension, and accepted evidence remains
   monotonic after Imported. Explicit application-owned selective-import commands and bounded

@@ -499,6 +499,22 @@ impl ArtifactClient {
         source: &Path,
         expected: &domain::MemoryArtifactRef,
     ) -> Result<(), ArtifactError> {
+        let source_file = self.verify_memory_file(source, expected).await?;
+        self.upload_open_blob(
+            source_file,
+            expected.content_digest().as_str().to_string(),
+            expected.byte_size(),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Checks actual local bytes even when an exact immutable publication needs no repeated upload.
+    pub(super) async fn verify_memory_file(
+        &self,
+        source: &Path,
+        expected: &domain::MemoryArtifactRef,
+    ) -> Result<tokio::fs::File, ArtifactError> {
         let mut source_file = open_regular_file(source).await?;
         let (preflight_digest, preflight_size) = digest_open_file(
             &mut source_file,
@@ -519,9 +535,7 @@ impl ArtifactClient {
             });
         }
         source_file.seek(SeekFrom::Start(0)).await?;
-        self.upload_open_blob(source_file, preflight_digest, preflight_size)
-            .await?;
-        Ok(())
+        Ok(source_file)
     }
 
     /// Streams one opaque local file into the content-addressed Artifact store.

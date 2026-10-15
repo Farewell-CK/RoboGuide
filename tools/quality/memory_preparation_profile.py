@@ -13,6 +13,7 @@ from check_artifact_authority_processes import grant
 from check_identity_processes import client, pki
 from check_memory_processes import memory_config
 from check_state_verifier_processes import node_config, plan, save
+from memory_use_profile import configuration as use_configuration
 
 
 def tls(
@@ -144,6 +145,7 @@ target = "/memory_import"
 kind = "pointer"
 pointer = "/invocation/memory_import"
 """
+        text = use_configuration(text)
     return text
 
 

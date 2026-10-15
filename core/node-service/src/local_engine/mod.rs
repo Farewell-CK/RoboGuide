@@ -25,9 +25,9 @@ use crate::{
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityProfileConfig,
     CapabilityReadinessConfig, ConnectionConfig, ExecutionStateMappingConfig, HealthCheckConfig,
     LocalOperationConfig, LocalSystemConfig, MemoryAvailabilityConfig, MemoryContinuityConfig,
-    MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig, OperationBindingConfig,
-    PeerChannelObserverConfig, ResourceConfig, SensorConfig, StateExportConfig, WorkflowConfig,
-    WorkflowStepConfig,
+    MemoryProviderConfig, MemoryUseConfig, MemoryWorkflowConfig, NodeServiceConfig,
+    OperationBindingConfig, PeerChannelObserverConfig, ResourceConfig, SensorConfig,
+    StateExportConfig, WorkflowConfig, WorkflowStepConfig,
 };
 use driver::{CompiledDriverRequest, DriverKind};
 use mapping::{
@@ -62,6 +62,8 @@ pub const CONFIG_SCHEMA_V0_8: &str = "roboguide.node-config/v0.8";
 pub const CONFIG_SCHEMA_V0_9: &str = "roboguide.node-config/v0.9";
 /// Schema negotiating durable Memory preparation and current backend observation.
 pub const CONFIG_SCHEMA_V0_10: &str = "roboguide.node-config/v0.10";
+/// Schema negotiating continuous current-use permission and irreversible backend fencing.
+pub const CONFIG_SCHEMA_V0_11: &str = "roboguide.node-config/v0.11";
 /// Maximum peer endpoints accepted from one bounded local observation.
 const MAX_PEER_CHANNELS_PER_OBSERVATION: usize = 64;
 /// Maximum JSON bytes accepted from one local peer readiness response.
@@ -298,6 +300,19 @@ pub struct CompiledMemoryProvider {
     continuity: Option<CompiledMemoryContinuity>,
     /// Explicit readonly actual-content observation, absent from historical providers.
     availability: Option<CompiledMemoryAvailability>,
+    /// Explicit provider-local original-budget runtime use control and readonly reconciliation.
+    use_lease: Option<CompiledMemoryUse>,
+}
+
+/// Immutable local workflows implementing explicit current-use permission on the original backend.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledMemoryUse {
+    /// Exact supported cohosted receiver-clock contract.
+    profile: String,
+    /// Single configured POST, never reconstructed from caller strings.
+    control: CompiledWorkflowStep,
+    /// Single configured GET, never a repeated grant effect.
+    query: CompiledWorkflowStep,
 }
 
 /// Compiled provider-local current-content observation.

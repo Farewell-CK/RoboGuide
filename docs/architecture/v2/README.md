@@ -32,6 +32,11 @@ Memory API 的 `replicas` 表示字节导入，`map_replicas` 单独表示原地
 两者不能证明 active-map、定位或语义可用性。wrapper v36 / event codec v25 保护该演进；
 Node 的现有 v0.9 prepared input 继续保留完整 raw map，导入仍使用当前 Group 内容授权。
 
+[ADR-0106](../../decisions/0106-group-memory-use-leases-and-active-map.md) 规定独立于原准备窗口的
+运行期 Group 使用租约和 Local EAIOS active-map 权威，当前实施中。续约不能重置原 import/
+Execute 接纳预算；撤销/到期保留 stop/ownership 门禁。参考后端显式使用同 kernel 私有 Unix
+预算合同，不比较跨主机时钟；active-map 与设备定位保持独立证据。
+
 Control 活性与观测时间的已接受演进见 ADR-0076：Integration 仅提供当前精确 session/lease
 的连续接收证据，由 Control 在应用持久事务中决定续约/过期。原始 ingress receive time
 用于 State/health/peer/progress 的年龄；当前 decision time 用于资格、Commit、恢复与发送。

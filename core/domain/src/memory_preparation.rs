@@ -157,8 +157,10 @@ impl MemoryPreparation {
             crate::memory_authority::validate_text(value, 1024)?;
         }
         crate::memory_authority::validate_text(&self.preparation_id, 128)?;
-        if self.schema != "roboguide.memory-preparation/v0.1"
-            || !(1..=120_000).contains(&self.valid_for_ms)
+        if !matches!(
+            self.schema.as_str(),
+            "roboguide.memory-preparation/v0.1" | "roboguide.memory-preparation/v0.2"
+        ) || !(1..=120_000).contains(&self.valid_for_ms)
             || self.registry_revision == 0
             || !(1..=8).contains(&self.inputs.len())
             || !self.invocation.is_object()
@@ -170,6 +172,16 @@ impl MemoryPreparation {
         let mut imports = BTreeSet::new();
         for input in &self.inputs {
             input.validate(&self.node_id)?;
+            if (self.schema == "roboguide.memory-preparation/v0.2"
+                && !input.consumer.supports_use_lease())
+                || (self.schema == "roboguide.memory-preparation/v0.1"
+                    && input.consumer.use_contract().is_some())
+            {
+                return Err(
+                    "Memory preparation version differs from its declared current-use authority"
+                        .into(),
+                );
+            }
             if !selectors.insert(input.manifest.selector().clone())
                 || !imports.insert(&input.import_id)
             {

@@ -22,6 +22,29 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         preparation: &domain::MemoryPreparation,
         now: TimestampMs,
     ) -> Result<(), IntegrationRuntimeError> {
+        self.validate_memory_execution_context(preparation)?;
+        self.control
+            .validate_memory_preparation(&self.decision_state(), preparation, now)
+            .map_err(|e| IntegrationRuntimeError::Protocol(e.to_string()))
+    }
+
+    /// Requires the original attempt and current Read authority independently of import admission.
+    pub fn validate_memory_use_context(
+        &self,
+        preparation: &domain::MemoryPreparation,
+        now: TimestampMs,
+    ) -> Result<(), IntegrationRuntimeError> {
+        self.validate_memory_execution_context(preparation)?;
+        self.control
+            .validate_memory_use_context(&self.decision_state(), preparation, now)
+            .map_err(|e| IntegrationRuntimeError::Protocol(e.to_string()))
+    }
+
+    /// Retains a single Runtime/registration/invocation check for both permission lifetimes.
+    fn validate_memory_execution_context(
+        &self,
+        preparation: &domain::MemoryPreparation,
+    ) -> Result<(), IntegrationRuntimeError> {
         if self.current_task_attempt_id(
             &preparation.group_id,
             &preparation.task_ref,
@@ -55,9 +78,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 "Memory context changed its original dispatch declaration or invocation".into(),
             ));
         }
-        self.control
-            .validate_memory_preparation(&self.decision_state(), preparation, now)
-            .map_err(|e| IntegrationRuntimeError::Protocol(e.to_string()))
+        Ok(())
     }
 
     /// Encodes semantic invocation metadata, independently of vendor requests or Local How paths.
@@ -114,6 +135,18 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     ) -> Result<(), IntegrationRuntimeError> {
         self.router
             .send_memory_control(node.as_str(), command, remaining_budget_ms)
+            .map_err(IntegrationRuntimeError::Route)
+    }
+
+    /// Sends an already committed use intent without granting permission in the transport layer.
+    pub fn deliver_memory_use_control(
+        &self,
+        node: &NodeId,
+        command: &domain::MemoryUseControl,
+        remaining_budget_ms: u64,
+    ) -> Result<(), IntegrationRuntimeError> {
+        self.router
+            .send_memory_use_control(node.as_str(), command, remaining_budget_ms)
             .map_err(IntegrationRuntimeError::Route)
     }
 }

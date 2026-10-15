@@ -15,14 +15,18 @@ import sqlite3
 import ssl
 import subprocess
 import sys
+import tarfile
 import time
 import uuid
 from pathlib import Path
 from typing import Any, BinaryIO
 
 from check_identity_processes import request as tls_request
-from check_state_verifier_processes import ROOT, address, request, save, stop, wait_for
+from check_state_verifier_processes import ROOT, address, save, stop, wait_for
 from memory_preparation_profile import configuration, mission, node_environment, tls
+from memory_use_lifecycle import ActualUseScenario
+from memory_use_lifecycle import run as run_use_interruption
+from memory_use_profile import request
 from spatial_content_policy import digest
 
 
@@ -39,6 +43,8 @@ def identity() -> dict[str, str]:
             "check_identity_processes.py",
             "check_artifact_authority_processes.py",
             "spatial_content_policy.py",
+            "memory_use_profile.py",
+            "memory_use_lifecycle.py",
         )
     ]
     result = {
@@ -67,10 +73,12 @@ def verify(directory: Path, index: int) -> dict[str, Any]:
     assert source.stat().st_size == manifest["artifact"]["byte_size"]
     assert result["schema"] == "roboguide.file-hash-result/v0.1"
     assert result["execution_id"] == attempt["execution_id"]
-    assert result["input_digests"] == [observed] and result["rounds"] == 2
+    accepted = json.loads((directory / "mission.json").read_bytes())
+    rounds = accepted["tasks"][index]["roles"][0]["execution_intent"]["parameters"]["rounds"]
+    assert result["input_digests"] == [observed] and result["rounds"] == rounds
     # This verifier intentionally does not import the provider's hashing/result helper.
     encoded = json.dumps(
-        {"input_digests": [observed], "rounds": 2}, sort_keys=True, separators=(",", ":")
+        {"input_digests": [observed], "rounds": rounds}, sort_keys=True, separators=(",", ":")
     ).encode()
     assert result["output_digest"] == "sha256:" + hashlib.sha256(encoded).hexdigest()
     return {
@@ -81,8 +89,14 @@ def verify(directory: Path, index: int) -> dict[str, Any]:
     }
 
 
-def run(directory: Path) -> dict[str, Any]:
+def run(
+    directory: Path,
+    use_lifecycle: bool = False,
+    use_case: str | None = None,
+    large_transfer: bool = False,
+) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
+    use_lifecycle = use_lifecycle or use_case is not None
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     directory = directory.resolve()
     initial_identity = identity()
@@ -92,6 +106,7 @@ def run(directory: Path) -> dict[str, Any]:
     grpc, operator, artifact = (address() for _ in range(3))
     origin, cas = "https://" + operator, "https://" + artifact
     backends = ["http://" + address() for _ in range(2)]
+    backends[1] = "unix://" + str(directory / "consumer/backend/local.sock")
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -99,11 +114,20 @@ def run(directory: Path) -> dict[str, Any]:
     }
     environment["PYTHONPATH"] = str(ROOT / "integrations/memory-provider")
     contexts, leaves = tls(directory, nodes, memory_id, environment)
+    environment["ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS"] = "1000"
     source_root = directory / "source/node-state/memory/files"
     source_root.mkdir(parents=True)
     source = ROOT / "core/domain/src/memory.rs"
-    shutil.copyfile(source, source_root / "source.bin")
-    payload = source.read_bytes()
+    if large_transfer:
+        source = source_root / "source.bin"
+        with tarfile.open(source, "w") as archive:
+            for name in ("integration-server", "roboguide-node"):
+                archive.add(ROOT / "target/debug" / name, arcname=name, recursive=False)
+    else:
+        shutil.copyfile(source, source_root / "source.bin")
+    with source.open("rb") as stream:
+        source_digest = "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
+    source_size = source.stat().st_size
     manifest: dict[str, Any] = {
         "schema": "roboguide.memory-manifest/v0.1",
         "selector": {"memory_id": memory_id, "revision_id": revision},
@@ -115,8 +139,8 @@ def run(directory: Path) -> dict[str, Any]:
         "payload_schema": "roboguide.software-source-file/v0.1",
         "media_type": "application/octet-stream",
         "artifact": {
-            "content_digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
-            "byte_size": len(payload),
+            "content_digest": source_digest,
+            "byte_size": source_size,
         },
         "source_mission_id": None,
         "source_task_ref": None,
@@ -179,9 +203,16 @@ def run(directory: Path) -> dict[str, Any]:
             owned = directory / name
             owned.mkdir(exist_ok=True)
             config = owned / "node.toml"
-            config.write_text(
-                configuration(owned, nodes[index], grpc, backends[index], cas, index == 1)
-            )
+            configured = configuration(owned, nodes[index], grpc, backends[index], cas, index == 1)
+            if large_transfer:
+                configured = configured.replace(
+                    "max_artifact_bytes = 1048576", "max_artifact_bytes = 1073741824"
+                )
+                configured = configured.replace(
+                    "chunk_size_bytes = 32768", "chunk_size_bytes = 1048576"
+                )
+                configured = configured.replace("read_timeout_ms = 3000", "read_timeout_ms = 30000")
+            config.write_text(configured)
             command = [
                 sys.executable,
                 "-m",
@@ -193,9 +224,16 @@ def run(directory: Path) -> dict[str, Any]:
                 "--input-root",
                 str(owned),
                 "--enable-file-jobs",
-                "--listen-port",
-                backends[index].rsplit(":", 1)[1],
             ]
+            if use_lifecycle:
+                command += ["--max-job-seconds", "120", "--max-job-rounds", "2000000"]
+            if large_transfer:
+                command += ["--max-bytes", "1073741824"]
+            command += (
+                ["--listen-unix", "--enable-use-leases"]
+                if index
+                else ["--listen-port", backends[index].rsplit(":", 1)[1]]
+            )
             if index == 0:
                 command += [
                     "--export-config",
@@ -286,7 +324,22 @@ def run(directory: Path) -> dict[str, Any]:
             },
         )
         assert status == 200, response
+        save(
+            directory / "deployment.json",
+            {
+                "backend_commands": backend_commands,
+                "node_protocol_timing_ms": {
+                    "heartbeat": 1000,
+                    "lease": 15000,
+                    "health_freshness": 5000,
+                },
+                "use_lifecycle": use_lifecycle,
+                "use_case": use_case,
+                "large_transfer": large_transfer,
+            },
+        )
         configuration_paths = [directory / name / "node.toml" for name in ("source", "consumer")]
+        configuration_paths.append(directory / "deployment.json")
         configuration_paths += [
             directory / "source/exports.json",
             directory / "manifest.json",
@@ -321,9 +374,15 @@ def run(directory: Path) -> dict[str, Any]:
         published = wait_for(
             lambda: exchange(path, context=contexts["viewer"], endpoint=cas)[1].get("manifest"),
             "actual source Node publication and CAS upload",
+            90 if large_transfer else 20,
         )
         assert published == manifest, published
         accepted = mission(mission_id, manifest)
+        if use_lifecycle:
+            accepted["tasks"][0]["roles"][0]["execution_intent"]["parameters"]["rounds"] = 1
+            accepted["tasks"][1]["roles"][0]["execution_intent"]["parameters"]["rounds"] = (
+                2000000 if use_case else 50000
+            )
         save(directory / "mission.json", accepted)
         status, response = exchange("/v1/missions", accepted)
         assert status == 202, response
@@ -369,14 +428,52 @@ def run(directory: Path) -> dict[str, Any]:
                     {"command_id": uuid.uuid4().hex, "expected_revision": 1, "registry": registry},
                 )
                 assert status == 200, response
+                if use_case:
+                    observed = run_use_interruption(
+                        ActualUseScenario(
+                            directory=directory,
+                            backend=backends[1],
+                            controller=controller,
+                            controller_command=controller_command,
+                            backend_process=backend_processes[1],
+                            backend_command=backend_commands[1],
+                            exchange=exchange,
+                            start=start,
+                        ),
+                        use_case,
+                    )
+                    assert identity() == initial_identity, "pinned source or binary changed"
+                    result = {
+                        **observed,
+                        "source_identity": initial_identity,
+                        "configuration_identity": configuration_identity,
+                        "independent_verifiers": 1,
+                    }
+                    save(directory / "result.json", result)
+                    return result
+
+            def completed_task(task_id: str = task_id) -> list[dict[str, Any]]:
+                """Retain actual failed or ambiguous outcomes immediately for review."""
+                attempts = exchange("/v1/execution-attempts")[1]["attempts"]
+                rejected = [
+                    value
+                    for value in attempts
+                    if value["task_id"] == task_id
+                    and value["status"] in {"Failed", "Cancelled", "Unknown"}
+                ]
+                if rejected:
+                    save(directory / (task_id + "-rejected-attempts.json"), rejected)
+                    raise RuntimeError("actual file computation failed or requires reconciliation")
+                return [
+                    value
+                    for value in attempts
+                    if value["task_id"] == task_id and value["status"] == "Completed"
+                ]
+
             completed = wait_for(
-                lambda task_id=task_id: [
-                    item
-                    for item in exchange("/v1/execution-attempts")[1]["attempts"]
-                    if item["task_id"] == task_id and item["status"] == "Completed"
-                ],
+                completed_task,
                 "actual original file computation completes",
-                35,
+                180 if use_lifecycle else 35,
             )
             assert len(completed) == 1
             attempt = completed[0]
@@ -431,12 +528,28 @@ def run(directory: Path) -> dict[str, Any]:
         )
         prepared = preparations()
         save(directory / "preparations.json", prepared)
+        uses = exchange("/v1/memory/use-leases")[1]["records"]
+        save(directory / "use-leases.json", uses)
+        assert len(uses) == 1
+        use = next(iter(uses.values()))
+        grants = [
+            delivery
+            for delivery in use["controls"].values()
+            if delivery["command"]["operation"] == "grant"
+        ]
+        assert grants and all(delivery["receipt"]["status"] == "granted" for delivery in grants)
+        if use_lifecycle:
+            assert use["generation"] >= 2, (
+                "actual long computation completed without testing a renewal"
+            )
         assert len(prepared) == 1
         record = next(iter(prepared.values()))
         assert (
             record["phase"] in {"ready", "revoking", "revoked"} and record["probe_generation"] == 1
         )
-        statuses = {item["receipt"]["status"] for item in record["controls"].values()}
+        statuses = {
+            item["receipt"]["status"] for item in record["controls"].values() if item["receipt"]
+        }
         assert {"prepared", "available"}.issubset(statuses)
         import_id = record["preparation"]["inputs"][0]["import_id"]
         original = exchange("/v1/memory/imports/" + import_id)[1]
@@ -449,6 +562,7 @@ def run(directory: Path) -> dict[str, Any]:
             )
         with sqlite3.connect(directory / "consumer/backend/file-jobs.sqlite3") as connection:
             original_jobs = connection.execute("SELECT * FROM jobs").fetchall()
+            original_job_budgets = connection.execute("SELECT * FROM job_budgets").fetchall()
             assert len(original_jobs) == 1 and original_jobs[0][2] == "COMPLETED"
         original_budget = record["deadline_ms"]
         stop(controller)
@@ -526,6 +640,9 @@ def run(directory: Path) -> dict[str, Any]:
             )
         with sqlite3.connect(directory / "consumer/backend/file-jobs.sqlite3") as connection:
             assert connection.execute("SELECT * FROM jobs").fetchall() == original_jobs
+            assert (
+                connection.execute("SELECT * FROM job_budgets").fetchall() == original_job_budgets
+            )
         assert next(iter(preparations().values()))["deadline_ms"] == original_budget
         assert exchange("/v1/memory/imports/" + import_id)[1]["phase"] == "completed"
         assert identity() == initial_identity, "pinned code or binary changed during conformance"
@@ -542,6 +659,16 @@ def run(directory: Path) -> dict[str, Any]:
             "software_nodes": 2,
             "actual_hash_jobs": 2,
             "actual_imports": 1,
+            "actual_use_grants": len(grants),
+            "actual_use_generation": use["generation"],
+            "use_lifecycle": use_lifecycle,
+            "large_transfer": large_transfer,
+            "memory_use_transport": "same-user-private-unix-socket",
+            "node_protocol_timing_ms": {
+                "heartbeat": 1000,
+                "lease": 15000,
+                "health_freshness": 5000,
+            },
             "original_import_completion_sql_failure": True,
             "readonly_reconciliations": 1,
             "independent_verifiers": 2,
@@ -592,11 +719,26 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--verify", nargs=2, metavar=("OUTPUT", "INDEX"))
+    parser.add_argument("--use-lifecycle", action="store_true")
+    parser.add_argument("--large-transfer", action="store_true")
+    parser.add_argument(
+        "--use-case", choices=("revoke", "expire", "backend-restart", "controller-restart")
+    )
     arguments = parser.parse_args()
     if arguments.verify:
         print(json.dumps(verify(Path(arguments.verify[0]), int(arguments.verify[1]))))
     elif arguments.output:
-        print(json.dumps(run(arguments.output), sort_keys=True))
+        print(
+            json.dumps(
+                run(
+                    arguments.output,
+                    arguments.use_lifecycle,
+                    arguments.use_case,
+                    arguments.large_transfer,
+                ),
+                sort_keys=True,
+            )
+        )
     else:
         parser.error("--output or --verify is required")
 

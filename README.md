@@ -405,7 +405,7 @@ physical attempt 保守恢复为 `Unknown` 并进入 reconciliation，而不是�
 journal、heartbeat/lease 与 session fencing 由 `roboguide-node` 和 `core/integration`/
 Integration Server 实现，Controller 组合 bridge 位于 `core/orchestration`。Artifact bytes 则
 由独立的 `core/artifact-store` filesystem CAS 提供，不参与设备执行生命周期。
-当前合同与版本关系见 [`contracts/node/v0.12/`](contracts/node/v0.12/README.md) 和
+当前合同与版本关系见 [`contracts/node/v0.13/`](contracts/node/v0.13/README.md) 和
 [`contracts/node/README.md`](contracts/node/README.md)。Node config v0.7 为每个 exact
 canonical capability profile 提供固定 readiness observation 与 attributes，将 operation/workflow
 mapping 独立声明，并保留选择性的 State export、Memory provider、固定 discover/export/import

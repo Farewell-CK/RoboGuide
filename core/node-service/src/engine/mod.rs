@@ -28,6 +28,7 @@ mod execution;
 mod memory_continuity;
 mod memory_operations;
 mod memory_preparation;
+mod memory_use;
 mod observation;
 mod publication;
 mod validation;
@@ -132,6 +133,8 @@ pub struct LocalIntegrationEngine {
 struct EngineInner {
     /// Orders prepared Execute admission against irreversible context revocation.
     memory_context_gate: Mutex<()>,
+    /// Process-local serialization only; the journal remains the sole lease/effect authority.
+    memory_use_workers: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Current accepted Node route used only for Artifact publication, never immutable invocation identity.
     publication_session: Mutex<Option<String>>,
     /// Immutable startup-compiled local catalog.

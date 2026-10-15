@@ -430,6 +430,39 @@ pub(super) fn compile_memory_providers(
             format!("memory_providers.{}.availability", config.id),
             "requires actual instance/original-import continuity and import workflows",
         )?;
+        let use_lease =
+            compile_memory_use(config.use_lease, &config.id, &config.owner, connections)?;
+        if let Some(usage) = &use_lease {
+            require(
+                availability.is_some() && continuity.is_some() && import.is_some(),
+                format!("memory_providers.{}.use_lease", config.id),
+                "requires explicit current content, original instance/import continuity and import",
+            )?;
+            let endpoint = memory_use_endpoint(usage.control(), connections)?;
+            let mut steps = import
+                .as_ref()
+                .expect("checked import")
+                .steps()
+                .iter()
+                .collect::<Vec<_>>();
+            let continuity = continuity.as_ref().expect("checked continuity");
+            steps.extend([
+                continuity.instance(),
+                continuity.query(),
+                availability
+                    .as_ref()
+                    .expect("checked availability")
+                    .observation(),
+                usage.query(),
+            ]);
+            for step in steps {
+                require(
+                    memory_use_endpoint(step, connections)? == endpoint,
+                    format!("memory_providers.{}.use_lease", config.id),
+                    "shared-kernel original imports, observations and use control require one Unix backend",
+                )?;
+            }
+        }
         let provider = CompiledMemoryProvider {
             id: config.id,
             owner: config.owner,
@@ -445,6 +478,7 @@ pub(super) fn compile_memory_providers(
             import,
             continuity,
             availability,
+            use_lease,
         };
         insert_unique(&mut providers, id, provider, "memory_providers.id")?;
     }
@@ -641,5 +675,62 @@ fn compile_memory_availability(
     Ok(Some(CompiledMemoryAvailability {
         observation,
         result_pointer: config.result_pointer,
+    }))
+}
+
+/// Resolves only a fixed HTTP-over-Unix connection, never a caller-selected or cross-host route.
+fn memory_use_endpoint(
+    step: &CompiledWorkflowStep,
+    connections: &BTreeMap<String, CompiledConnection>,
+) -> Result<String, CatalogError> {
+    match connections.get(step.connection()) {
+        Some(CompiledConnection::Http { endpoint, .. }) if endpoint.starts_with("unix://") => {
+            Ok(endpoint.clone())
+        }
+        _ => Err(validation(
+            "memory_providers.use_lease",
+            "shared-kernel use requires fixed HTTP-over-Unix connections",
+        )),
+    }
+}
+
+/// Compiles explicit control/query operations without inferring runtime support from availability.
+fn compile_memory_use(
+    config: Option<MemoryUseConfig>,
+    provider_id: &str,
+    owner: &str,
+    connections: &BTreeMap<String, CompiledConnection>,
+) -> Result<Option<CompiledMemoryUse>, CatalogError> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    let field = format!("memory_providers.{provider_id}.use_lease");
+    require(
+        config.profile == "roboguide.memory-use/shared-kernel/v0.1",
+        &field,
+        "unsupported current-use receiver-budget contract",
+    )?;
+    for (step, expected) in [(&config.control, "POST"), (&config.query, "GET")] {
+        validate_step_sources(std::slice::from_ref(step), false, &field)?;
+        require(
+            matches!(&step.operation, LocalOperationConfig::Http { method, .. } if method == expected),
+            &field,
+            "use control requires POST and original-command reconciliation requires GET",
+        )?;
+    }
+    let mut steps = compile_steps(
+        vec![config.control, config.query],
+        owner,
+        connections,
+        &mut BTreeSet::new(),
+    )?;
+    let query = steps.pop().expect("compiled query");
+    let control = steps.pop().expect("compiled control");
+    memory_use_endpoint(&control, connections)?;
+    memory_use_endpoint(&query, connections)?;
+    Ok(Some(CompiledMemoryUse {
+        profile: config.profile,
+        control,
+        query,
     }))
 }

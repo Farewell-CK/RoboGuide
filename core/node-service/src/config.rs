@@ -15,7 +15,7 @@ const fn default_reconnect_delay_ms() -> u64 {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeServiceConfig {
-    /// Configuration schema identity; v0.2 through v0.9 are accepted by the compiler.
+    /// Configuration schema identity; v0.2 through v0.11 are accepted by the compiler.
     pub schema: String,
     /// Stable node identity advertised to RoboGuide.
     pub node_id: String,
@@ -154,6 +154,21 @@ pub struct MemoryProviderConfig {
     /// Optional v0.10 readonly current-content observation, separate from historical completion.
     #[serde(default)]
     pub availability: Option<MemoryAvailabilityConfig>,
+    /// Optional v0.11 continuous-use fencing, independent of original preparation/import effects.
+    #[serde(default)]
+    pub use_lease: Option<MemoryUseConfig>,
+}
+
+/// Explicit provider-local current-use control and original-command readonly reconciliation.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryUseConfig {
+    /// Supported cohosted original-kernel-budget contract, never inferred from a route.
+    pub profile: String,
+    /// Fixed POST over the same actual local Unix backend as original imports.
+    pub control: WorkflowStepConfig,
+    /// Fixed GET over that backend, returning the original receipt and current effectiveness.
+    pub query: WorkflowStepConfig,
 }
 
 /// Explicit readonly actual-content observation used by prepared consumers.

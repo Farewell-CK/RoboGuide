@@ -258,6 +258,9 @@ impl MemoryArtifactRef {
 /// Declares one Memory catalog provider exposed by a local system.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryProviderDescriptor {
+    /// Explicit continuous-use contract, absent from historical/import-only declarations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    use_contract: Option<String>,
     /// Explicit current-availability observation support, absent from legacy declarations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preparation_contract: Option<String>,
@@ -304,6 +307,7 @@ impl MemoryProviderDescriptor {
             payload_schema,
             media_type,
             preparation_contract: None,
+            use_contract: None,
         })
     }
 
@@ -321,6 +325,23 @@ impl MemoryProviderDescriptor {
     /// Checks supported explicit evidence instead of inferring availability from Imported history.
     pub fn supports_preparation(&self) -> bool {
         self.preparation_contract() == Some("roboguide.memory-provider-availability/v0.1")
+    }
+
+    /// Declares current use fencing without claiming content, execution or physical safety.
+    pub fn with_use_lease_support(mut self) -> Self {
+        self.use_contract = Some("roboguide.memory-use/shared-kernel/v0.1".into());
+        self
+    }
+
+    /// Returns the exact independently negotiated runtime content-use profile.
+    pub fn use_contract(&self) -> Option<&str> {
+        self.use_contract.as_deref()
+    }
+
+    /// Tests an explicit current-use declaration; Imported history never implies this support.
+    pub fn supports_use_lease(&self) -> bool {
+        self.use_contract() == Some("roboguide.memory-use/shared-kernel/v0.1")
+            && self.supports_preparation()
     }
 
     /// Returns the node-wide provider identity.

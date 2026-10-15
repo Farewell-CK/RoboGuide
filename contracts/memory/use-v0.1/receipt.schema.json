@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/memory/use-v0.1/receipt.schema.json",
+  "title": "Current Group Memory-use Node receipt v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "command_id",
+    "lease_id",
+    "generation",
+    "preparation_id",
+    "preparation_digest",
+    "configuration_digest",
+    "schema",
+    "status",
+    "remaining_budget_ms",
+    "providers",
+    "reason"
+  ],
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "lease_id": {
+      "type": "string",
+      "pattern": "^use-[0-9a-f]{64}$"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "preparation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "preparation_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "configuration_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "schema": {
+      "const": "roboguide.memory-use-receipt/v0.1"
+    },
+    "status": {
+      "enum": [
+        "granted",
+        "revoked",
+        "unknown",
+        "rejected"
+      ]
+    },
+    "remaining_budget_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 30000
+    },
+    "providers": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider_id",
+          "provider_instance_id",
+          "provider_contract_digest",
+          "import_ids",
+          "receipt_digest",
+          "original_receipt"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "provider_instance_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "provider_contract_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "import_ids": {
+            "type": "array",
+            "maxItems": 8,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "receipt_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "original_receipt": {
+            "type": "object",
+            "maxProperties": 32,
+            "description": "Opaque exact local-profile receipt; Node validates the negotiated profile before admitting it. Core checks canonical digest and a 16 KiB bound."
+          }
+        }
+      }
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 1024
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "granted"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "remaining_budget_ms": {
+            "minimum": 1
+          },
+          "providers": {
+            "minItems": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "remaining_budget_ms": {
+            "const": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "revoked"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "providers": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

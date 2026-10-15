@@ -112,6 +112,7 @@ pub(crate) fn drive_application_timer_with_clock(
             None,
         );
         super::memory_preparation::prepare(&mut candidate, now)?;
+        super::memory_use::prepare(&mut candidate, now)?;
         super::memory_import::prepare(&mut candidate, now);
         let checkpoint = server_checkpoint_json(&candidate)?;
         drop(serialization);
@@ -157,6 +158,9 @@ pub(crate) fn drive_application_timer_with_clock(
         *live = candidate;
         if !live.memory_preparation.records.is_empty() {
             super::memory_preparation::flush(&live, now, clock.now());
+        }
+        if !live.memory_use.records.is_empty() {
+            super::memory_use::flush(&live, now, clock.now());
         }
         if has_memory_imports {
             super::memory_import::flush(&live, now, clock.now());

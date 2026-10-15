@@ -69,14 +69,14 @@ impl LocalIntegrationEngine {
         Ok(())
     }
     /// Freezes actual operation, provider and connection identities without invoking a backend.
-    fn memory_preparation_configuration(
+    pub(super) fn memory_preparation_configuration(
         &self,
         preparation: &MemoryPreparation,
     ) -> Result<String, EngineError> {
         preparation.validate().map_err(EngineError::Configuration)?;
-        if self.catalog().node_contract_version()
-            != integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
-            || preparation.node_id.as_str() != self.catalog().node_id()
+        if !integration::grpc::v0_4::supports_memory_preparation(
+            self.catalog().node_contract_version(),
+        ) || preparation.node_id.as_str() != self.catalog().node_id()
         {
             return Err(EngineError::Configuration(
                 "prepared context requires the exact v0.9 receiver".into(),
@@ -141,7 +141,7 @@ impl LocalIntegrationEngine {
                     ));
                 }
             };
-            let descriptor = domain::MemoryProviderDescriptor::new(
+            let mut descriptor = domain::MemoryProviderDescriptor::new(
                 provider.id(),
                 domain::LocalSystemId::new(provider.owner())
                     .map_err(|e| EngineError::Configuration(e.to_string()))?,
@@ -153,6 +153,9 @@ impl LocalIntegrationEngine {
             )
             .map_err(|e| EngineError::Configuration(e.to_string()))?
             .with_preparation_support();
+            if provider.use_lease().is_some() {
+                descriptor = descriptor.with_use_lease_support();
+            }
             if provider.owner() != capability.owner() {
                 return Err(EngineError::Configuration(
                     "prepared content provider and operation have different Local EAIOS owners"
@@ -210,9 +213,9 @@ impl LocalIntegrationEngine {
         valid_for_ms: u64,
     ) -> Result<MemoryControlReceipt, EngineError> {
         command.validate().map_err(EngineError::Configuration)?;
-        if self.catalog().node_contract_version()
-            != integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
-        {
+        if !integration::grpc::v0_4::supports_memory_preparation(
+            self.catalog().node_contract_version(),
+        ) {
             return Err(EngineError::Configuration(
                 "Memory control was not negotiated".into(),
             ));
@@ -553,6 +556,12 @@ impl LocalIntegrationEngine {
         }
         if self.inner.journal.get(&execute.execution_id)?.is_none() {
             self.observe_prepared_memory(&record.preparation).await?;
+            if self.catalog().node_contract_version()
+                == integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
+            {
+                self.verify_memory_use_before_execute(&record.preparation)
+                    .await?;
+            }
         }
         let _gate = self.inner.memory_context_gate.lock().map_err(|_| {
             EngineError::Configuration("Memory context ordering is unavailable".into())
@@ -567,6 +576,7 @@ impl LocalIntegrationEngine {
                 "prepared Execute attempt differs".into(),
             ));
         }
+        self.authorize_current_memory_use(&current.preparation)?;
         self.execute_with_memory_context(
             execute.execution_id.clone(),
             execute
@@ -605,6 +615,7 @@ impl LocalIntegrationEngine {
                 EngineError::Configuration("prepared dispatch context disappeared".into())
             })?;
             self.current_memory_preparation(id, digest, &context.preparation.source_session_id)?;
+            self.authorize_current_memory_use(&context.preparation)?;
         }
         self.inner.journal.authorize_local_dispatch(execution_id)?;
         Ok(())

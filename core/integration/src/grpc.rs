@@ -35,6 +35,16 @@ pub mod v0_4 {
     pub const PROVIDER_MAP_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.8";
     /// Contract with durable pre-execution Memory preparation and actual backend observations.
     pub const PREPARATION_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.9";
+    /// Contract with continuous original-budget Group content-use authority and backend fencing.
+    pub const MEMORY_USE_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.10";
+
+    /// Checks explicit prepared-content support without inferring it from older provider declarations.
+    pub fn supports_memory_preparation(version: &str) -> bool {
+        matches!(
+            version,
+            PREPARATION_NODE_CONTRACT_VERSION | MEMORY_USE_NODE_CONTRACT_VERSION
+        )
+    }
 
     /// Checks explicitly negotiated original-provider query support across maintained contract versions.
     pub fn supports_memory_continuity(version: &str) -> bool {
@@ -43,6 +53,7 @@ pub mod v0_4 {
             CONTINUITY_NODE_CONTRACT_VERSION
                 | PROVIDER_MAP_NODE_CONTRACT_VERSION
                 | PREPARATION_NODE_CONTRACT_VERSION
+                | MEMORY_USE_NODE_CONTRACT_VERSION
         )
     }
     /// Prior profile-and-intent contract retained for explicit session compatibility.

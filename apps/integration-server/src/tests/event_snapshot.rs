@@ -38,6 +38,7 @@ async fn request_events(
         mission_admissions: BTreeMap::new(),
         memory_imports: BTreeMap::new(),
         memory_preparation: Default::default(),
+        memory_use: Default::default(),
         safety_stops: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
         verifier_artifact_store: None,

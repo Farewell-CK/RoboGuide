@@ -28,10 +28,11 @@ impl ControlPlane {
         let snapshot = state
             .node(node)
             .ok_or_else(|| denied("Memory receiver is absent"))?;
-        if snapshot.registration().contract_version().as_str() != domain::NODE_CONTRACT_VERSION_V0_9
+        if snapshot.registration().contract_version().as_str()
+            != domain::NODE_CONTRACT_VERSION_V0_10
         {
             return Err(denied(
-                "Memory preparation requires explicitly negotiated Node Contract v0.9",
+                "Memory preparation requires explicitly negotiated Node Contract v0.10",
             ));
         }
         let owner = snapshot
@@ -43,7 +44,7 @@ impl ControlPlane {
             .memory_providers()
             .iter()
             .filter(|provider| {
-                provider.supports_preparation()
+                provider.supports_use_lease()
                     && requirement.matches_provider(provider)
                     && provider.local_system_id() == owner
             })
@@ -373,6 +374,32 @@ impl ControlPlane {
         preparation: &domain::MemoryPreparation,
         now: domain::TimestampMs,
     ) -> Result<(), ControlError> {
+        self.validate_memory_context(
+            state,
+            preparation,
+            now,
+            &[MemoryAccessOperation::Import, MemoryAccessOperation::Read],
+        )
+    }
+
+    /// Revalidates ongoing use under current Read authority without renewing import permission.
+    pub fn validate_memory_use_context<S: ports::SharedNodeStateReader>(
+        &self,
+        state: &S,
+        preparation: &domain::MemoryPreparation,
+        now: domain::TimestampMs,
+    ) -> Result<(), ControlError> {
+        self.validate_memory_context(state, preparation, now, &[MemoryAccessOperation::Read])
+    }
+
+    /// Shares exact ownership checks while keeping initial import and ongoing read gates distinct.
+    fn validate_memory_context<S: ports::SharedNodeStateReader>(
+        &self,
+        state: &S,
+        preparation: &domain::MemoryPreparation,
+        now: domain::TimestampMs,
+        operations: &[MemoryAccessOperation],
+    ) -> Result<(), ControlError> {
         preparation
             .validate()
             .map_err(ControlError::InvalidProposal)?;
@@ -458,7 +485,7 @@ impl ControlPlane {
                 original.policy(&input.manifest, &preparation.tenant_id)
             }
             .map_err(ControlError::InvalidProposal)?;
-            for operation in [MemoryAccessOperation::Import, MemoryAccessOperation::Read] {
+            for &operation in operations {
                 if !old_policy.groups.iter().any(|grant| {
                     grant.group_id == preparation.group_id
                         && grant.operations.contains(&operation)

@@ -106,6 +106,14 @@ impl ArtifactStager {
                 "exchangeable Memory lacks an artifact reference".to_string(),
             )
         })?;
+        if self
+            .client
+            .memory_publication_already_exists(manifest)
+            .await?
+        {
+            self.client.verify_memory_file(source, artifact).await?;
+            return Ok(());
+        }
         self.client.upload_memory_file(source, artifact).await
     }
 

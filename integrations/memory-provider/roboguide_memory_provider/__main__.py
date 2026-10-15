@@ -5,16 +5,45 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import os
 import signal
+import socket
+import socketserver
+import stat
+import struct
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 from .jobs import FileJobs
 from .store import MAX_METADATA_BYTES, MemoryStore, canonical
+from .use_leases import UseLeases
 
 
-def handler_type(store: MemoryStore, jobs: FileJobs | None = None) -> type[BaseHTTPRequestHandler]:
+class UnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    """Serve only same-user local peers under the explicit shared-kernel budget profile."""
+
+    daemon_threads = False
+    block_on_close = True
+
+    def verify_request(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: Any
+    ) -> bool:
+        """Check actual kernel peer credentials before reading a lease or content request."""
+        if not isinstance(request, socket.socket):
+            return False
+        try:
+            _, uid, _ = struct.unpack(
+                "3i", request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
+            )
+            return bool(uid == os.getuid())
+        except (OSError, AttributeError):
+            return False
+
+
+def handler_type(
+    store: MemoryStore, jobs: FileJobs | None = None, leases: UseLeases | None = None
+) -> type[BaseHTTPRequestHandler]:
     """Bind an already configured actual backend to fixed readonly and import routes."""
 
     class Handler(BaseHTTPRequestHandler):
@@ -54,7 +83,9 @@ def handler_type(store: MemoryStore, jobs: FileJobs | None = None) -> type[BaseH
         def do_GET(self) -> None:  # noqa: N802 - stdlib HTTP dispatch contract.
             """Read actual backend identity or query an original operation without mutation."""
             try:
-                if jobs is not None and self.path == "/v1/file-jobs/health":
+                if leases is not None and self.path == "/v1/memory-use/query":
+                    self._respond(200, leases.query(self._body()))
+                elif jobs is not None and self.path == "/v1/file-jobs/health":
                     self._respond(200, jobs.health())
                 elif jobs is not None and self.path == "/v1/file-jobs/status":
                     self._respond(200, jobs.status(self._body()["execution_id"]))
@@ -80,6 +111,9 @@ def handler_type(store: MemoryStore, jobs: FileJobs | None = None) -> type[BaseH
         def do_POST(self) -> None:  # noqa: N802 - stdlib HTTP dispatch contract.
             """Import an exact actual staged file once under its complete original identity."""
             try:
+                if leases is not None and self.path == "/v1/memory-use/control":
+                    self._respond(200, leases.apply(self._body()))
+                    return
                 if jobs is not None and self.path == "/v1/file-jobs/compute":
                     body = self._body()
                     if set(body) == {"invocation", "attempt_id"}:
@@ -89,7 +123,7 @@ def handler_type(store: MemoryStore, jobs: FileJobs | None = None) -> type[BaseH
                                 "original software invocation cannot replace attempt identity"
                             )
                         body = {**invocation, "execution_id": body["attempt_id"]}
-                    self._respond(200, jobs.compute(body))
+                    self._respond(200, jobs.submit(body))
                     return
                 if jobs is not None and self.path == "/v1/file-jobs/cancel":
                     self._respond(200, jobs.cancel(self._body()["execution_id"]))
@@ -121,10 +155,18 @@ def main() -> None:
     parser.add_argument("--listen-port", type=int, default=0)
     parser.add_argument("--export-config", type=Path)
     parser.add_argument("--enable-file-jobs", action="store_true")
+    parser.add_argument("--max-job-seconds", type=int, default=5)
+    parser.add_argument("--max-job-rounds", type=int, default=256)
+    parser.add_argument("--enable-use-leases", action="store_true")
+    parser.add_argument("--listen-unix", action="store_true")
     parser.add_argument("--export-directory", type=Path)
     args = parser.parse_args()
     if not ipaddress.ip_address(args.listen_host).is_loopback:
         parser.error("this Local EAIOS facade requires a literal loopback address")
+    if args.enable_use_leases and not args.listen_unix:
+        parser.error("Memory-use leases require the explicit cohosted private Unix profile")
+    if args.listen_unix and args.listen_port:
+        parser.error("the Unix profile cannot bind a TCP port")
     store = MemoryStore(
         args.root,
         args.provider_id,
@@ -133,7 +175,10 @@ def main() -> None:
         args.export_config,
         args.export_directory,
     )
-    jobs = FileJobs(store) if args.enable_file_jobs else None
+    leases: UseLeases | None = None
+    jobs: FileJobs | None = None
+    socket_path = store.root / "local.sock"
+    socket_inode = None
     previous_sigterm = signal.getsignal(signal.SIGTERM)
 
     def terminate(_signal: int, _frame: object) -> None:
@@ -144,13 +189,33 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, terminate)
     try:
-        server = ThreadingHTTPServer(
-            (args.listen_host, args.listen_port), handler_type(store, jobs)
+        leases = UseLeases(store) if args.enable_use_leases else None
+        jobs = (
+            FileJobs(store, leases, args.max_job_seconds, args.max_job_rounds)
+            if args.enable_file_jobs
+            else None
         )
+        server: ThreadingHTTPServer | UnixServer
+        if args.listen_unix:
+            metadata = store.root.stat()
+            if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) & 0o077:
+                raise ValueError("Unix Memory backend root must be private and owned by this user")
+            if socket_path.exists() or socket_path.is_symlink():
+                metadata = socket_path.lstat()
+                if not stat.S_ISSOCK(metadata.st_mode) or metadata.st_uid != os.getuid():
+                    raise ValueError("existing Local Memory socket is not an owned socket")
+                socket_path.unlink()
+            server = UnixServer(str(socket_path), handler_type(store, jobs, leases))
+            socket_path.chmod(0o600)
+            socket_inode = socket_path.stat().st_ino
+            endpoint = "unix://" + str(socket_path)
+        else:
+            server = ThreadingHTTPServer(
+                (args.listen_host, args.listen_port), handler_type(store, jobs)
+            )
+            endpoint = f"http://{args.listen_host}:{server.server_port}"
         server.daemon_threads = False
-        print(
-            json.dumps({"endpoint": f"http://{args.listen_host}:{server.server_port}"}), flush=True
-        )
+        print(json.dumps({"endpoint": endpoint}), flush=True)
         try:
             server.serve_forever(poll_interval=0.2)
         finally:
@@ -159,6 +224,14 @@ def main() -> None:
         signal.signal(signal.SIGTERM, previous_sigterm)
         if jobs is not None:
             jobs.close()
+        if leases is not None:
+            leases.close()
+        if (
+            socket_inode is not None
+            and socket_path.exists()
+            and socket_path.stat().st_ino == socket_inode
+        ):
+            socket_path.unlink()
         store.close()
 
 

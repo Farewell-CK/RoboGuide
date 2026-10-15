@@ -7,6 +7,7 @@ use super::*;
 #[test]
 fn memory_provider_conversion_rejects_execution_group_scope() {
     let wire = integration::grpc::v0_4::MemoryProviderDescriptor {
+        use_contract: String::new(),
         preparation_contract: String::new(),
         provider_id: "experience".to_string(),
         local_system_id: "memory".to_string(),
