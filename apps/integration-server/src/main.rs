@@ -34,6 +34,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Last wrapper without complete typed-map content policy digests.
+const PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v33";
 /// Last wrapper without registered typed-map producer and current publishing-attempt authority.
 const PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v32";
 /// Last wrapper without Control-owned Memory membership and content authorization authority.
@@ -250,10 +252,9 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
             return Err("typed-map producer belongs to another tenant".into());
         }
         if control.memory_authorization_registry().is_some() {
-            let memory = artifact_http::map_authorization_manifest(manifest)?;
             control
-                .authorize_memory_principal(
-                    &memory,
+                .authorize_typed_map_principal(
+                    manifest,
                     &principal.tenant_id,
                     principal.subject(),
                     operation,
@@ -898,6 +899,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
@@ -933,6 +935,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA

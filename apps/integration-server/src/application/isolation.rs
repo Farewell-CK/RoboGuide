@@ -313,9 +313,24 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA
+        && integration.get("control").is_some_and(|control| {
+            [
+                "memory_authorization_registry",
+                "memory_authorization_history",
+            ]
+            .iter()
+            .filter_map(|key| control.get(key))
+            .any(contains_typed_map_policy)
+        })
+    {
+        return Err("legacy wrapper contains complete typed-map content authority".into());
+    }
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
     ) && (integration.get("control").is_some_and(|c| {
         [
             "memory_authorization_registry",
@@ -332,7 +347,9 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     }
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
     ) && integration
         .get("control")
         .and_then(|control| control.get("groups"))
@@ -350,6 +367,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
     ) && saved
@@ -362,6 +380,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
@@ -403,6 +422,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
@@ -427,6 +447,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
@@ -448,6 +469,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
@@ -489,6 +511,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
@@ -511,6 +534,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
@@ -560,4 +584,18 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy controller wrapper contains isolation authority".into());
     }
     Ok(())
+}
+
+/// Finds new policy authority in current registries and their retained immutable history.
+fn contains_typed_map_policy(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(fields) => fields.iter().any(|(key, value)| {
+            key == "typed_map_manifest_digest" && !value.is_null()
+                || key == "schema_version"
+                    && value.as_str() == Some(domain::MEMORY_AUTHORIZATION_SCHEMA)
+                || contains_typed_map_policy(value)
+        }),
+        serde_json::Value::Array(values) => values.iter().any(contains_typed_map_policy),
+        _ => false,
+    }
 }

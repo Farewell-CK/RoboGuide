@@ -1,7 +1,11 @@
 //! Spatial Memory domain invariant tests.
 
 use super::*;
-use crate::TaskId;
+use crate::{
+    MEMORY_AUTHORIZATION_SCHEMA, MEMORY_AUTHORIZATION_SCHEMA_V0_1, MemoryAccessOperation,
+    MemoryAccessPolicy, MemoryAuthorizationRegistry, TaskId, map_manifest_digest,
+    map_memory_manifest, memory_manifest_digest,
+};
 
 /// Constructs complete software provenance for schema checks, without asserting physical evidence.
 fn provider_map() -> MapArtifactManifest {
@@ -26,6 +30,107 @@ fn provider_map() -> MapArtifactManifest {
     .unwrap()
     .with_producer_provider("configured-provider", "source-content/v1")
     .unwrap()
+}
+
+/// Spatial-only metadata cannot be stripped through a generic projection with identical CAS bytes.
+#[test]
+fn typed_map_policy_binds_complete_metadata_and_refuses_projection_only_access() {
+    let map = provider_map();
+    let projection = map_memory_manifest(&map).unwrap();
+    let policy = MemoryAccessPolicy {
+        policy_id: "original-map".into(),
+        selector: projection.selector().clone(),
+        manifest_digest: memory_manifest_digest(&projection).unwrap(),
+        typed_map_manifest_digest: Some(map_manifest_digest(&map).unwrap()),
+        tenant_id: "local".into(),
+        principals: std::collections::BTreeMap::from([(
+            "reader".into(),
+            std::collections::BTreeSet::from([MemoryAccessOperation::Read]),
+        )]),
+        groups: vec![],
+        revoked: false,
+    };
+    let registry = MemoryAuthorizationRegistry {
+        schema_version: MEMORY_AUTHORIZATION_SCHEMA.into(),
+        registry_id: "map-authority".into(),
+        revision: 1,
+        policies: std::collections::BTreeMap::from([(policy.key(), policy)]),
+    };
+    registry.validate().unwrap();
+    registry.typed_map_policy(&map, "local").unwrap();
+    assert!(registry.policy(&projection, "local").is_err());
+    assert!(registry.typed_map_policy(&map, "foreign").is_err());
+    for (field, value) in [
+        ("root_frame", serde_json::json!("changed-frame")),
+        (
+            "coordinate_convention",
+            serde_json::json!("changed-convention"),
+        ),
+        (
+            "format",
+            serde_json::json!({"name":"changed-format", "version":"v1"}),
+        ),
+        ("resolution_meters", serde_json::json!(0.125)),
+        ("parent_revision_id", serde_json::json!("parent")),
+        (
+            "spatial_anchor",
+            serde_json::json!({"id":"changed-anchor", "kind":"fixed"}),
+        ),
+    ] {
+        let mut value_map = serde_json::to_value(&map).unwrap();
+        value_map[field] = value;
+        let changed: MapArtifactManifest =
+            serde_json::from_value(value_map).unwrap_or_else(|error| panic!("{field}: {error}"));
+        assert_eq!(
+            map_memory_manifest(&changed).unwrap(),
+            projection,
+            "{field}"
+        );
+        assert_ne!(
+            map_manifest_digest(&changed).unwrap(),
+            map_manifest_digest(&map).unwrap()
+        );
+        assert!(
+            registry.typed_map_policy(&changed, "local").is_err(),
+            "{field}"
+        );
+    }
+    let mut next = registry.clone();
+    next.revision += 1;
+    let key = next.policies.keys().next().unwrap().clone();
+    next.policies
+        .get_mut(&key)
+        .unwrap()
+        .typed_map_manifest_digest = None;
+    assert!(registry.validates_successor(&next).is_err());
+    next.policies
+        .get_mut(&key)
+        .unwrap()
+        .typed_map_manifest_digest = Some(format!("sha256:{}", "b".repeat(64)));
+    assert!(registry.validates_successor(&next).is_err());
+    next = registry.clone();
+    next.revision += 1;
+    next.schema_version = MEMORY_AUTHORIZATION_SCHEMA_V0_1.into();
+    assert!(next.validate().is_err());
+    next.policies
+        .get_mut(&key)
+        .unwrap()
+        .typed_map_manifest_digest = None;
+    assert!(registry.validates_successor(&next).is_err());
+    let legacy = next;
+    let mut narrowed = legacy.clone();
+    narrowed.revision += 1;
+    narrowed.schema_version = MEMORY_AUTHORIZATION_SCHEMA.into();
+    narrowed
+        .policies
+        .get_mut(&key)
+        .unwrap()
+        .typed_map_manifest_digest = Some(map_manifest_digest(&map).unwrap());
+    legacy.validates_successor(&narrowed).unwrap();
+    assert!(legacy.typed_map_policy(&map, "local").is_err());
+    let restored: MemoryAuthorizationRegistry =
+        serde_json::from_str(&serde_json::to_string(&narrowed).unwrap()).unwrap();
+    restored.typed_map_policy(&map, "local").unwrap();
 }
 
 /// Old metadata stays old; a new provider cannot be inferred or substituted during deserialization.

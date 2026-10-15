@@ -6,36 +6,7 @@ use super::*;
 pub(crate) fn map_authorization_manifest(
     map: &MapArtifactManifest,
 ) -> Result<MemoryArtifactManifest, String> {
-    let local_system_id = map
-        .producer_local_system_id()
-        .ok_or("typed-map original LocalSystem is unavailable")?;
-    MemoryArtifactManifest::new(
-        MemorySelector::new(
-            MemoryId::new(map.selector().map_id().as_str()).map_err(|e| e.to_string())?,
-            MemoryRevisionId::new(map.selector().revision_id().as_str())
-                .map_err(|e| e.to_string())?,
-        ),
-        domain::MemoryKind::Spatial,
-        map.producer_provider_id().unwrap_or("typed-map-catalog"),
-        MemoryOwner::Node {
-            node_id: map.producer_node_id().clone(),
-            local_system_id: local_system_id.clone(),
-        },
-        domain::MemoryScope::Global,
-        domain::MemoryVisibility::Exchangeable,
-        map.payload_schema()
-            .unwrap_or(domain::SPATIAL_MEMORY_SCHEMA_V0_1),
-        map.media_type(),
-        Some(domain::MemoryArtifactRef::new(
-            map.artifact().content_digest().clone(),
-            map.artifact().byte_size(),
-        )),
-        Some(map.source_mission_id().clone()),
-        map.source_execution_id().map(str::to_string),
-        map.source_task_ref().cloned(),
-        map.created_at(),
-    )
-    .map_err(|e| e.to_string())
+    domain::map_memory_manifest(map)
 }
 
 /// Checks typed resource bounds and its original producer namespace without inventing missing ownership.

@@ -119,3 +119,15 @@ actual leaf/notAfter、部署文件与已提交 registry、稳定 principal、ro
 startup/timer/Node 输入仍走同一真实 writer。Registry SQL 使用 Tokio 的同步事务 worker handoff，
 使真实排队检查可推进；这不声称全部存储阻塞或 degraded-read 问题已经关闭。见
 [实际排队撤权验收](../development/acceptance/2026-10-15-f4-operator-transactions.md)。
+
+## 完整 Spatial 内容策略
+
+Memory authorization v0.2 在通用 manifest digest 之外，显式固定原始 typed-map manifest 的
+完整 canonical JSON SHA-256，包括 frame、anchor、format、resolution、parent 和全部来源。
+Control 从原 map 自行构造通用投影，不接受调用者提供的替代投影。需要 typed-map 依据的
+策略不能由通用 Memory 路径读取或导入；后续 import 协议必须保留这份完整来源。
+
+v0.1 保持可恢复但不能包含新字段。管理者可用期望 revision 将历史策略显式收紧为绑定完整
+map 的 v0.2；不允许修改既有 digest、删除 typed digest 或降回 v0.1。缺失依据绝不从当前
+元数据静默补齐。wrapper v34 防止旧 Controller 忽略这条新权威，包括零事件策略更新。
+这是内容策略切片；Group grant、pre-Execute、可用性、handoff、active-map 和 GC 仍需闭环。

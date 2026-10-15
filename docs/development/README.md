@@ -122,10 +122,13 @@ import。Controller wrapper v31、Memory event codec v22 与 Node journal v7 分
 Typed-map producer 当前使用 [catalog v0.11](../../contracts/node/v0.11/README.md)、Node config
 v0.9 / Contract v0.8 和 [map v0.2](../../contracts/spatial/v0.2/README.md)。Runtime 冻结原 dispatch
 声明，旧字段不从新注册补齐；Node 通过实际当前 session 发布原 build 的 bytes/provenance。
-当前 wrapper v33、map codec v24、journal v8 保持旧 authority 读取并拒绝旧二进制写入。
+producer 切片的 wrapper v33、map codec v24、journal v8 保持旧 authority 读取并拒绝旧二进制写入。
 实际 mTLS、独立文件检查、重启与降级拒绝见
 [producer 验收](acceptance/2026-10-15-f4-map-provider-authority.md)。Memory consumer、preparation、
-完整 typed-map policy、handoff、active-map/GC 和其余阶段继续实施。
+handoff、active-map/GC 和其余阶段继续实施。
+[Memory authorization v0.2](../../contracts/memory/authorization-v0.2/README.md) 在 wrapper v34
+另外固定完整 typed-map digest；仅有通用 projection 不再授权这类内容。显式策略升级保留原始
+history，已有 digest 不可替换、删除或降级。
 
 Mission Request v0.4 由 Engine 显式编排 Dialogue -> Grounding Snapshot -> Draft -> Review ->
 bounded Repair；Reviewer

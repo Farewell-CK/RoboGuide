@@ -318,7 +318,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   wrapper v33 and map codec v24 independently fence old writers, including zero-event metadata.
   `tools/quality/check_spatial_upgrade_gates.py` checks actual archived binaries; the independent
   schema checker uses pinned jsonschema outside MI. Complete Group/pre-Execute/active-map/GC and
-  typed-map full-manifest content-policy binding remain required F4 work.
+  current availability and lineage remain required F4 work.
+- Memory authorization v0.2 additionally binds complete typed-map metadata; raw Spatial provenance
+  is checked by Control, and generic projection-only reads/imports cannot strip that requirement.
+  Explicit v0.1-to-v0.2 narrowing retains immutable original digests/history; removing or changing a
+  typed binding and schema downgrade reject. Wrapper v34 fences older writers, including zero-event
+  registry changes. Positive software conformance uses real mTLS, CPU files and independent readers;
+  it never establishes device identity, physical continuity, active-map or Group preparation.
 - The C1-S0 Habitat bridge supports existing `mobility.navigate@v1` without changing Core schemas.
   It keeps EMOS/Habitat dependencies in their independent Conda environment, maps semantic
   destination to the existing local Oracle navigation action, owns one persistent simulator process

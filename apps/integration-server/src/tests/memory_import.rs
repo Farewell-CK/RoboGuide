@@ -84,6 +84,7 @@ fn fixture() -> (stop_recovery::Fixture, MemoryImportRequest) {
         policy_id: "fixture-content-policy".into(),
         selector: request.manifest.selector().clone(),
         manifest_digest: memory_manifest_digest(&request.manifest).unwrap(),
+        typed_map_manifest_digest: None,
         tenant_id: "local".into(),
         principals: BTreeMap::new(),
         groups: vec![MemoryGroupPolicy {

@@ -47,6 +47,7 @@ def configure(
     )
     viewer = grant("independent-file-reader", "viewer", "local")
     viewer["map_ids"] = [map_id]
+    viewer["memory_ids"] = [map_id]
     artifact = {
         "schema_version": "roboguide.artifact-authorization/v0.1",
         "registry_id": "spatial-content-" + uuid.uuid4().hex,

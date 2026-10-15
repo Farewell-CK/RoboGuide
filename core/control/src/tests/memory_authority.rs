@@ -84,6 +84,7 @@ fn authority() -> (
         policy_id: "resource".into(),
         selector: manifest.selector().clone(),
         manifest_digest: domain::memory_manifest_digest(&manifest).unwrap(),
+        typed_map_manifest_digest: None,
         tenant_id: "local".into(),
         principals: BTreeMap::new(),
         groups: vec![domain::MemoryGroupPolicy {

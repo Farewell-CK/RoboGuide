@@ -144,6 +144,34 @@ impl ControlPlane {
             ));
         }
         let policy = self.memory_policy(manifest, tenant)?;
+        Self::authorize_memory_policy_principal(policy, principal, operation)
+    }
+
+    /// Checks complete Spatial provenance before granting a certificate-derived principal access.
+    pub fn authorize_typed_map_principal(
+        &self,
+        map: &domain::MapArtifactManifest,
+        tenant: &str,
+        principal: &str,
+        operation: MemoryAccessOperation,
+    ) -> Result<(), ControlError> {
+        let manifest = domain::map_memory_manifest(map).map_err(ControlError::InvalidProposal)?;
+        self.validate_memory_owner_tenant(&manifest, tenant)?;
+        let policy = self
+            .memory_authorization_registry
+            .as_ref()
+            .ok_or_else(|| denied("Memory content policy is unavailable"))?
+            .typed_map_policy(map, tenant)
+            .map_err(ControlError::InvalidProposal)?;
+        Self::authorize_memory_policy_principal(policy, principal, operation)
+    }
+
+    /// Applies explicit principal operations after source identity and scope were validated.
+    fn authorize_memory_policy_principal(
+        policy: &domain::MemoryAccessPolicy,
+        principal: &str,
+        operation: MemoryAccessOperation,
+    ) -> Result<(), ControlError> {
         if !policy
             .principals
             .get(principal)

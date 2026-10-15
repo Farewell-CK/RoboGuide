@@ -43,7 +43,9 @@ host monotonic deadline 的预算门禁，见[后续文件验收](docs/developme
 已通过实际软件进程验收，见[Node/Spatial 验收](docs/development/acceptance/2026-10-15-f4-spatial-node.md)。
 原记录为显式 loopback 兼容配置。后续 [producer 权威验收](docs/development/acceptance/2026-10-15-f4-map-provider-authority.md)
 通过实际 mTLS、原始 dispatch/provider 快照及旧二进制拒绝检查；没有设备参与。
-完整 Group grant/preparation、typed-map 完整内容策略、active-map/GC 与其余阶段继续实施。
+完整 Group grant/preparation、active-map/GC 与其余阶段继续实施。
+[内容策略 v0.2](contracts/memory/authorization-v0.2/README.md) 另绑定完整 typed-map metadata，
+通用 projection 不能绕过来源；wrapper v34 保留显式升级 history 并拒绝旧 Controller 写入。
 
 ## 系统目标
 

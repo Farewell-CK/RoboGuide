@@ -1,14 +1,16 @@
 //! Exact Control-owned membership identity used by scoped Memory authorization.
 
 use crate::{
-    ExecutionGroupId, LocalSystemId, MemoryArtifactManifest, MemoryKind, MemoryProviderDescriptor,
-    MemorySelector,
+    ExecutionGroupId, LocalSystemId, MapArtifactManifest, MemoryArtifactManifest, MemoryKind,
+    MemoryProviderDescriptor, MemorySelector,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Current explicit content policy registry schema, independent of immutable manifest versions.
-pub const MEMORY_AUTHORIZATION_SCHEMA: &str = "roboguide.memory-authorization/v0.1";
+pub const MEMORY_AUTHORIZATION_SCHEMA: &str = "roboguide.memory-authorization/v0.2";
+/// Historical registry without a complete typed-map source binding.
+pub const MEMORY_AUTHORIZATION_SCHEMA_V0_1: &str = "roboguide.memory-authorization/v0.1";
 
 /// Closed Memory operations; discovery never silently grants content consumption or replication.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -98,6 +100,10 @@ pub struct MemoryAccessPolicy {
     pub selector: MemorySelector,
     /// Complete immutable manifest digest; it does not substitute for content SHA-256.
     pub manifest_digest: String,
+    /// Complete typed-map metadata when this resource originated in the Spatial catalog.
+    /// An absent historical value cannot authorize a typed-map read or generic import.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typed_map_manifest_digest: Option<String>,
     /// Original trusted namespace; a later Node reenrollment cannot reassign old content.
     pub tenant_id: String,
     /// Explicit certificate-derived human/service principals and their operation subsets.
@@ -123,6 +129,9 @@ impl MemoryAccessPolicy {
         validate_text(&self.policy_id, 128)?;
         validate_text(&self.tenant_id, 128)?;
         validate_digest(&self.manifest_digest)?;
+        if let Some(digest) = &self.typed_map_manifest_digest {
+            validate_digest(digest)?;
+        }
         if self.principals.len() > 128
             || self.groups.len() > 128
             || (!self.revoked && self.principals.is_empty() && self.groups.is_empty())
@@ -181,8 +190,10 @@ impl MemoryAuthorizationRegistry {
     /// Validates bounded policy inputs without interpreting any payload as authorization.
     pub fn validate(&self) -> Result<(), String> {
         validate_text(&self.registry_id, 128)?;
-        if self.schema_version != MEMORY_AUTHORIZATION_SCHEMA
-            || self.revision == 0
+        if !matches!(
+            self.schema_version.as_str(),
+            MEMORY_AUTHORIZATION_SCHEMA | MEMORY_AUTHORIZATION_SCHEMA_V0_1
+        ) || self.revision == 0
             || self.policies.len() > 4096
         {
             return Err("Memory authorization schema, revision or policy count is invalid".into());
@@ -190,6 +201,11 @@ impl MemoryAuthorizationRegistry {
         let mut ids = BTreeSet::new();
         for (key, policy) in &self.policies {
             policy.validate()?;
+            if self.schema_version == MEMORY_AUTHORIZATION_SCHEMA_V0_1
+                && policy.typed_map_manifest_digest.is_some()
+            {
+                return Err("legacy Memory registry cannot contain typed-map authority".into());
+            }
             if key != &policy.key() || !ids.insert(&policy.policy_id) {
                 return Err("Memory authorization policy identity/key is ambiguous".into());
             }
@@ -201,6 +217,8 @@ impl MemoryAuthorizationRegistry {
     pub fn validates_successor(&self, next: &Self) -> Result<(), String> {
         next.validate()?;
         if self.registry_id != next.registry_id
+            || self.schema_version == MEMORY_AUTHORIZATION_SCHEMA
+                && next.schema_version != MEMORY_AUTHORIZATION_SCHEMA
             || next.revision < self.revision
             || next.revision == self.revision && next != self
         {
@@ -214,6 +232,12 @@ impl MemoryAuthorizationRegistry {
             if previous.policy_id != current.policy_id
                 || previous.tenant_id != current.tenant_id
                 || previous.manifest_digest != current.manifest_digest
+                || previous
+                    .typed_map_manifest_digest
+                    .as_ref()
+                    .is_some_and(|digest| {
+                        current.typed_map_manifest_digest.as_ref() != Some(digest)
+                    })
                 || previous.revoked && !current.revoked
             {
                 return Err(
@@ -226,6 +250,34 @@ impl MemoryAuthorizationRegistry {
 
     /// Returns one complete policy only for the exact immutable currently presented manifest.
     pub fn policy(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        tenant: &str,
+    ) -> Result<&MemoryAccessPolicy, String> {
+        let policy = self.exact_policy(manifest, tenant)?;
+        if policy.typed_map_manifest_digest.is_some() {
+            return Err("typed-map resource requires its complete original manifest".into());
+        }
+        Ok(policy)
+    }
+
+    /// Requires both the generic discovery projection and complete original Spatial metadata.
+    pub fn typed_map_policy(
+        &self,
+        map: &MapArtifactManifest,
+        tenant: &str,
+    ) -> Result<&MemoryAccessPolicy, String> {
+        let policy = self.exact_policy(&map_memory_manifest(map)?, tenant)?;
+        if policy.typed_map_manifest_digest.as_deref() != Some(map_manifest_digest(map)?.as_str()) {
+            return Err(
+                "typed-map policy lacks the exact original complete manifest digest".into(),
+            );
+        }
+        Ok(policy)
+    }
+
+    /// Resolves common immutable identity without allowing a caller to discard typed provenance.
+    fn exact_policy(
         &self,
         manifest: &MemoryArtifactManifest,
         tenant: &str,
@@ -253,8 +305,52 @@ impl MemoryAuthorizationRegistry {
 
 /// Hashes complete validated metadata, independently of the artifact content digest.
 pub fn memory_manifest_digest(manifest: &MemoryArtifactManifest) -> Result<String, String> {
-    use sha2::{Digest as _, Sha256};
     manifest.validate().map_err(|e| e.to_string())?;
+    metadata_digest(manifest)
+}
+
+/// Hashes every field of the immutable typed-map manifest, including frame, anchor and format.
+pub fn map_manifest_digest(manifest: &MapArtifactManifest) -> Result<String, String> {
+    metadata_digest(manifest)
+}
+
+/// Builds the semantic discovery projection without mistaking it for complete Spatial provenance.
+pub fn map_memory_manifest(map: &MapArtifactManifest) -> Result<MemoryArtifactManifest, String> {
+    let local_system_id = map
+        .producer_local_system_id()
+        .ok_or("typed-map original LocalSystem is unavailable")?;
+    MemoryArtifactManifest::new(
+        MemorySelector::new(
+            crate::MemoryId::new(map.selector().map_id().as_str()).map_err(|e| e.to_string())?,
+            crate::MemoryRevisionId::new(map.selector().revision_id().as_str())
+                .map_err(|e| e.to_string())?,
+        ),
+        MemoryKind::Spatial,
+        map.producer_provider_id().unwrap_or("typed-map-catalog"),
+        crate::MemoryOwner::Node {
+            node_id: map.producer_node_id().clone(),
+            local_system_id: local_system_id.clone(),
+        },
+        crate::MemoryScope::Global,
+        crate::MemoryVisibility::Exchangeable,
+        map.payload_schema()
+            .unwrap_or(crate::SPATIAL_MEMORY_SCHEMA_V0_1),
+        map.media_type(),
+        Some(crate::MemoryArtifactRef::new(
+            map.artifact().content_digest().clone(),
+            map.artifact().byte_size(),
+        )),
+        Some(map.source_mission_id().clone()),
+        map.source_execution_id().map(str::to_string),
+        map.source_task_ref().cloned(),
+        map.created_at(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Uses deterministic JSON object ordering for complete cross-language metadata digests.
+fn metadata_digest(manifest: &impl Serialize) -> Result<String, String> {
+    use sha2::{Digest as _, Sha256};
     let canonical = serde_json::to_value(manifest).map_err(|e| e.to_string())?;
     Ok(format!(
         "sha256:{:x}",

@@ -25,6 +25,20 @@ for path in sorted(root.glob("*.schema.json")):
  schemas[path.name]=value
 assert len(schemas)==2
 validators={name:Draft202012Validator(value,registry=registry) for name,value in schemas.items()}
+policy_schema_path=Path(sys.argv[3])
+policy_schema=json.loads(policy_schema_path.read_bytes())
+Draft202012Validator.check_schema(policy_schema)
+registry=registry.with_resource(policy_schema["$id"],Resource.from_contents(policy_schema))
+policy_validator=Draft202012Validator(policy_schema,registry=registry)
+policy_file=directory/"memory-authorization-v0.2.json"
+policy_count=0
+if policy_file.exists():
+ policy_value=json.loads(policy_file.read_bytes());policy_validator.validate(policy_value);policy_count=1
+ bad=copy.deepcopy(policy_value)
+ next(iter(bad["policies"].values()))["typed_map_manifest_digest"]="sha256:invalid"
+ try:policy_validator.validate(bad)
+ except ValidationError:pass
+ else:raise AssertionError("invalid typed-map digest")
 manifest=json.loads((directory/"catalog-manifest.json").read_bytes())["manifest"]
 receipt=json.loads((directory/"result.json").read_bytes())
 assert receipt["passed"] is True
@@ -48,13 +62,22 @@ for name in ("missing-provider","missing-content-schema","missing-original-attem
  try:validators["map-publication.schema.json"].validate(value)
  except ValidationError:cases.append(name)
  else:raise AssertionError(name)
-print(json.dumps({"passed":True,"validator":"jsonschema/4.26.0","actual_catalog_manifests":1,
+print(json.dumps({"passed":True,"validator":"jsonschema/4.26.0","actual_catalog_manifests":1,"actual_full_map_policies":policy_count,
  "context_derived_publication_envelopes":1,"rejected_cases":cases,
+ "policy_schema_sha256":hashlib.sha256(policy_schema_path.read_bytes()).hexdigest(),
+ "invalid_policy_digest_rejected":policy_count==1,
  "schema_sha256":{path.name:hashlib.sha256(path.read_bytes()).hexdigest()
                   for path in sorted(root.glob("*.schema.json"))}}))
 """
     completed = subprocess.run(
-        [str(python), "-c", program, str(ROOT / "contracts/spatial/v0.2"), str(directory)],
+        [
+            str(python),
+            "-c",
+            program,
+            str(ROOT / "contracts/spatial/v0.2"),
+            str(directory),
+            str(ROOT / "contracts/memory/authorization-v0.2/memory-registry.schema.json"),
+        ],
         cwd=ROOT,
         check=True,
         capture_output=True,

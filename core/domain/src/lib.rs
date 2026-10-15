@@ -33,8 +33,9 @@ pub use artifact_authorization::{
     ArtifactAccessRole, ArtifactAuthorizationRegistry, ArtifactCertificateGrant,
 };
 pub use memory_authority::{
-    GroupMembershipVersion, MEMORY_AUTHORIZATION_SCHEMA, MemoryAccessOperation, MemoryAccessPolicy,
-    MemoryAuthorizationRegistry, MemoryConsumerPolicy, MemoryGroupPolicy, memory_manifest_digest,
+    GroupMembershipVersion, MEMORY_AUTHORIZATION_SCHEMA, MEMORY_AUTHORIZATION_SCHEMA_V0_1,
+    MemoryAccessOperation, MemoryAccessPolicy, MemoryAuthorizationRegistry, MemoryConsumerPolicy,
+    MemoryGroupPolicy, map_manifest_digest, map_memory_manifest, memory_manifest_digest,
 };
 mod mission;
 mod mission_plan;

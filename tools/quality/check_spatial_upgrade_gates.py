@@ -164,7 +164,10 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
         .decode()
         .strip()
     )
-    assert old_schema == "roboguide.controller-checkpoint/v32"
+    assert old_schema in {
+        "roboguide.controller-checkpoint/v32",
+        "roboguide.controller-checkpoint/v33",
+    }
     grpc, operator, artifact = (address() for _ in range(3))
     rejected(
         [
@@ -176,10 +179,10 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
             str(directory / "cas"),
         ],
         (
-            "unsupported checkpoint schema roboguide.controller-checkpoint/v33",
+            "unsupported checkpoint schema " + checkpoint["schema"],
             "unsupported event payload schema domain.EventPayload.json/v24",
         ),
-        "old-controller-v32",
+        "old-controller-" + old_schema.rsplit("/", 1)[1],
     )
     assert (
         logical_digest(
@@ -221,7 +224,7 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
                 "command_id": uuid.uuid4().hex,
                 "expected_revision": 0,
                 "registry": {
-                    "schema_version": "roboguide.memory-authorization/v0.1",
+                    "schema_version": "roboguide.memory-authorization/v0.2",
                     "registry_id": "zero-event-" + uuid.uuid4().hex,
                     "revision": 1,
                     "policies": {},
@@ -238,15 +241,15 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
         fresh_checkpoint = json.loads(
             connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()[0]
         )
-        assert fresh_checkpoint["schema"] == "roboguide.controller-checkpoint/v33"
+        assert fresh_checkpoint["schema"] == checkpoint["schema"]
     before_fresh = logical_digest(
         fresh_database, ("events", "controller_checkpoint", "control_command_journal")
     )
     legacy_arguments = [str(old_controller), *current_arguments[1:]]
     rejected(
         legacy_arguments,
-        "unsupported checkpoint schema roboguide.controller-checkpoint/v33",
-        "old-controller-v32-zero-events",
+        "unsupported checkpoint schema " + checkpoint["schema"],
+        "old-controller-" + old_schema.rsplit("/", 1)[1] + "-zero-events",
     )
     assert (
         logical_digest(

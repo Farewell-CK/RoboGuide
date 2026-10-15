@@ -76,6 +76,11 @@ Runtime 在实际 dispatch preparation 冻结原 Node contract、session 和 pro
 不从新注册补旧证据。来源改变时 pending Execute 保留所有权并等待显式对账。模型参数不携带
 这份内部注册证据，不能用来选择 provider 或 Node。
 
+内容策略 v0.2 另外固定原 typed-map 全部 metadata 的 canonical digest；Control 重新构造投影
+并同时核对通用与完整 Spatial 两份 digest。通用读取/import 不能丢弃 typed provenance；
+旧策略缺依据时拒绝 map 读取，只有显式收紧升级可以增加 binding，已有 binding 不可替换或
+移除。wrapper v34 拒绝旧 Controller 忽略新策略，包括无事件的策略事务。
+
 副作用只在应用事务持久化并取得当前 quorum/epoch 后发出。副本只复制元数据和命令证据，
 CAS 内容及 Local EAIOS 执行连续性需要独立恢复合同。Unknown 保留所有权；本地安全仍由
 Local EAIOS 掌握。SoftwareProcess、测试合成观察和设备观察的证据等级不能混用。

@@ -24,6 +24,7 @@ from typing import Any, BinaryIO
 from check_artifact_authority_processes import call as tls_call
 from check_spatial_local_processes import request as local_request
 from check_state_verifier_processes import ROOT, address, request, save, stop, wait_for
+from spatial_content_policy import check as check_content_policy
 from spatial_process_tls import configure as configure_tls
 
 
@@ -36,6 +37,7 @@ def checker_identity() -> dict[str, str]:
         "check_identity_processes.py",
         "check_artifact_authority_processes.py",
         "spatial_process_tls.py",
+        "spatial_content_policy.py",
     )
     return {
         name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
@@ -526,6 +528,11 @@ def run(
             assert len(exchange(cas, "/v1/maps")[1]["revisions"]) == 1
             assert exchange(cas, path)[1] == snapshot
             save(output / "admission-rejections.json", rejected_claims)
+        content_policy = (
+            check_content_policy(exchange, origin, cas, contexts, manifest, output)
+            if mtls
+            else None
+        )
         with urllib.request.urlopen(
             cas + "/v1/artifacts/" + manifest["content_digest"],
             timeout=5,
@@ -651,6 +658,7 @@ def run(
             "configuration_digest": "sha256:" + hashlib.sha256(config.read_bytes()).hexdigest(),
             "independent": independent,
             "rejected_remote_claims": rejected_claims,
+            "full_map_content_policy": content_policy,
             "verifier_receipt": receipt,
             "transport_profile": "actual-mutual-tls-and-enrolled-node"
             if mtls
