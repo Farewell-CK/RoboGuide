@@ -32,6 +32,21 @@ impl LocalizationEvidenceObserver for IgnoreTestLocalizationEvidence {
 }
 
 impl MemoryProviderAdmission for AllowTestMemoryAdmission {
+    /// Allows only the named metadata-only prepared-map fixture; production purpose lookup is separate.
+    fn authorize_map_access(
+        &self,
+        principal: &ArtifactPrincipal,
+        _manifest: &MapArtifactManifest,
+        _operation: domain::MemoryAccessOperation,
+        import_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.revalidate_artifact_principal(principal)?;
+        match import_id {
+            None | Some("typed-fixture-import") => Ok(()),
+            Some(_) => Err("fixture prepared map purpose is not admitted".into()),
+        }
+    }
+
     /// Accepts fixture manifests whose provider semantics are tested separately.
     fn admit_manifest(&self, _manifest: &MemoryArtifactManifest) -> Result<(), String> {
         Ok(())

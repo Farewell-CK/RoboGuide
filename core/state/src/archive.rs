@@ -58,6 +58,7 @@ fn requires_catalog_history(payload: &EventPayload) -> bool {
             | EventPayload::MemoryManifestPublished { .. }
             | EventPayload::MemoryArtifactStaged { .. }
             | EventPayload::MemoryArtifactImported { .. }
+            | EventPayload::MapMemoryReplicaRecorded { .. }
             | EventPayload::MemoryArtifactRejected { .. }
     )
 }

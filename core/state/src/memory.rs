@@ -15,6 +15,8 @@ use std::collections::BTreeMap;
 pub struct MemoryCatalogProjection {
     /// Immutable manifests in deterministic selector order.
     manifests: BTreeMap<MemorySelector, MemoryArtifactManifest>,
+    /// Complete original map identity for derived byte evidence; it creates no generic manifest.
+    typed_sources: BTreeMap<MemorySelector, String>,
     /// Per-provider exchange evidence in deterministic selector, node, and provider order.
     replicas: BTreeMap<MemorySelector, BTreeMap<(NodeId, String), MemoryReplicaSnapshot>>,
 }
@@ -24,6 +26,7 @@ impl MemoryCatalogProjection {
     pub const fn new() -> Self {
         Self {
             manifests: BTreeMap::new(),
+            typed_sources: BTreeMap::new(),
             replicas: BTreeMap::new(),
         }
     }
@@ -41,6 +44,7 @@ impl MemoryCatalogProjection {
                     | EventPayload::MemoryArtifactStaged { .. }
                     | EventPayload::MemoryArtifactImported { .. }
                     | EventPayload::MemoryArtifactRejected { .. }
+                    | EventPayload::MapMemoryReplicaRecorded { .. }
             ) {
                 projection.apply_memory_event(&event)?;
             }
@@ -53,6 +57,11 @@ impl MemoryCatalogProjection {
         manifest
             .validate()
             .map_err(|error| MemoryCatalogError::RevisionConflict(error.to_string()))?;
+        if self.typed_sources.contains_key(manifest.selector()) {
+            return Err(MemoryCatalogError::RevisionConflict(
+                "typed map evidence cannot become a generic manifest alias".into(),
+            ));
+        }
         if let Some(current) = self.manifests.get(manifest.selector()) {
             if current != manifest {
                 return Err(MemoryCatalogError::RevisionConflict(format!(
@@ -87,8 +96,28 @@ impl MemoryCatalogProjection {
                 manifest.selector()
             )));
         }
-        if current_manifest.visibility() != domain::MemoryVisibility::Exchangeable
-            || current_manifest.artifact().is_none()
+        self.record_known_replica(
+            manifest,
+            node_id,
+            consumer_provider_id,
+            status,
+            observed_at,
+            rejection_reason,
+        )
+    }
+
+    /// Retains provider-qualified evidence only after the caller proved its complete source identity.
+    fn record_known_replica(
+        &mut self,
+        manifest: &MemoryArtifactManifest,
+        node_id: &NodeId,
+        consumer_provider_id: &str,
+        status: MemoryReplicaStatus,
+        observed_at: TimestampMs,
+        rejection_reason: Option<String>,
+    ) -> Result<(), MemoryCatalogError> {
+        if manifest.visibility() != domain::MemoryVisibility::Exchangeable
+            || manifest.artifact().is_none()
         {
             return Err(MemoryCatalogError::InvalidReplicaTransition(format!(
                 "non-exchangeable memory {} cannot produce replica evidence",
@@ -172,6 +201,39 @@ impl MemoryCatalogWriter for MemoryCatalogProjection {
     ) -> Result<(), MemoryCatalogError> {
         match payload {
             EventPayload::MemoryManifestPublished { manifest } => self.publish(manifest),
+            EventPayload::MapMemoryReplicaRecorded {
+                manifest,
+                node_id,
+                consumer_provider_id,
+                status,
+                rejection_reason,
+            } => {
+                let generic = domain::map_memory_manifest(manifest)
+                    .map_err(MemoryCatalogError::RevisionConflict)?;
+                let digest = domain::map_manifest_digest(manifest)
+                    .map_err(MemoryCatalogError::RevisionConflict)?;
+                if self.manifests.contains_key(generic.selector())
+                    || self
+                        .typed_sources
+                        .get(generic.selector())
+                        .is_some_and(|original| original != &digest)
+                {
+                    return Err(MemoryCatalogError::RevisionConflict(
+                        "derived map replica conflicts with its original Spatial source".into(),
+                    ));
+                }
+                self.record_known_replica(
+                    &generic,
+                    node_id,
+                    consumer_provider_id,
+                    *status,
+                    timestamp,
+                    rejection_reason.clone(),
+                )?;
+                self.typed_sources
+                    .insert(generic.selector().clone(), digest);
+                Ok(())
+            }
             EventPayload::MemoryArtifactStaged {
                 manifest,
                 node_id,
@@ -229,6 +291,98 @@ fn valid_transition(current: MemoryReplicaStatus, incoming: MemoryReplicaStatus)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Supplies typed metadata for projection tests, without a registered Node or device observation.
+    fn typed_source() -> domain::MapArtifactManifest {
+        serde_json::from_value(serde_json::json!({
+            "schema":"roboguide.map-manifest/v0.2","map_id":"map-source","revision_id":"r1",
+            "producer_node_id":"source","producer_local_system_id":"map-files",
+            "producer_provider_id":"map-producer","payload_schema":"map-file/v1",
+            "content_digest":format!("sha256:{}","a".repeat(64)),"byte_size":20,
+            "media_type":"application/map","format":{"name":"points","version":"v1"},
+            "root_frame":"original-frame","coordinate_convention":"declared-file-frame",
+            "spatial_anchor":{"kind":"fixed","id":"original-anchor"},"resolution_meters":0.1,
+            "source_mission_id":"source-mission","source_task_ref":{"mission_id":"source-mission","task_id":"build"},
+            "source_execution_id":"original-build","created_at_ms":1
+        })).unwrap()
+    }
+
+    /// Typed bytes retain provider identity and raw-frame provenance while generic aliasing stays refused.
+    #[test]
+    fn typed_byte_replicas_preserve_source_without_creating_generic_manifest_authority() {
+        let source = typed_source();
+        let generic = domain::map_memory_manifest(&source).unwrap();
+        let mut projection = MemoryCatalogProjection::new();
+        let event = |manifest: domain::MapArtifactManifest, provider: &str, status| {
+            EventPayload::MapMemoryReplicaRecorded {
+                manifest,
+                node_id: NodeId::new("receiver").unwrap(),
+                consumer_provider_id: provider.into(),
+                status,
+                rejection_reason: None,
+            }
+        };
+        projection
+            .apply_memory_payload(
+                TimestampMs::new(10),
+                &event(source.clone(), "cache-a", MemoryReplicaStatus::Staged),
+            )
+            .unwrap();
+        projection
+            .apply_memory_payload(
+                TimestampMs::new(11),
+                &event(source.clone(), "cache-a", MemoryReplicaStatus::Imported),
+            )
+            .unwrap();
+        projection
+            .apply_memory_payload(
+                TimestampMs::new(12),
+                &event(source.clone(), "cache-b", MemoryReplicaStatus::Staged),
+            )
+            .unwrap();
+        assert!(projection.memory(generic.selector()).is_none());
+        assert!(projection.memories().is_empty());
+        let evidence = projection.memory_replicas(generic.selector());
+        assert_eq!(evidence.len(), 2);
+        assert_eq!(evidence[0].consumer_provider_id(), "cache-a");
+        assert_eq!(evidence[0].status(), MemoryReplicaStatus::Imported);
+        assert_eq!(evidence[1].consumer_provider_id(), "cache-b");
+        let mut value = serde_json::to_value(&source).unwrap();
+        value["root_frame"] = serde_json::json!("relabeled-frame");
+        let changed: domain::MapArtifactManifest = serde_json::from_value(value).unwrap();
+        assert_eq!(domain::map_memory_manifest(&changed).unwrap(), generic);
+        assert!(
+            projection
+                .apply_memory_payload(
+                    TimestampMs::new(13),
+                    &event(changed, "cache-a", MemoryReplicaStatus::Imported)
+                )
+                .is_err()
+        );
+        assert!(
+            projection
+                .apply_memory_payload(
+                    TimestampMs::new(13),
+                    &EventPayload::MemoryManifestPublished {
+                        manifest: generic.clone()
+                    }
+                )
+                .is_err()
+        );
+        assert!(
+            projection
+                .apply_memory_payload(
+                    TimestampMs::new(13),
+                    &event(source.clone(), "cache-a", MemoryReplicaStatus::Staged)
+                )
+                .is_err()
+        );
+        assert_eq!(projection.memory_replicas(generic.selector()), evidence);
+        assert_eq!(
+            projection.typed_sources.get(generic.selector()),
+            Some(&domain::map_manifest_digest(&source).unwrap())
+        );
+    }
     use domain::{
         ContentDigest, LocalSystemId, MemoryArtifactRef, MemoryId, MemoryKind, MemoryOwner,
         MemoryRevisionId, MemoryVisibility,

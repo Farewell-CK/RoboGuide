@@ -138,26 +138,28 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
         )
 
     with sqlite3.connect(f"file:{node_database}?mode=ro", uri=True) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
+        current_journal = connection.execute("PRAGMA user_version").fetchone()[0]
+        assert current_journal in {8, 9}
         assert (
-            connection.execute("SELECT version FROM node_journal_storage_schema").fetchone()[0] == 8
+            connection.execute("SELECT version FROM node_journal_storage_schema").fetchone()[0]
+            == current_journal
         )
     rejected(
         [str(old_node), str(legacy)],
         "journal was written by a newer storage authority",
-        "old-node-v7",
+        f"old-node-v{current_journal - 1}",
     )
     with sqlite3.connect(node_database) as connection:
-        connection.execute("PRAGMA user_version=7")
+        connection.execute(f"PRAGMA user_version={current_journal - 1}")
     try:
         rejected(
             [str(old_node), str(legacy)],
             "journal storage marker is unsupported",
-            "old-node-v7-header-reset",
+            f"old-node-v{current_journal - 1}-header-reset",
         )
     finally:
         with sqlite3.connect(node_database) as connection:
-            connection.execute("PRAGMA user_version=8")
+            connection.execute(f"PRAGMA user_version={current_journal}")
     assert logical_digest(node_database, node_tables) == before_node
     old_schema = (
         subprocess.check_output([str(old_controller), "--application-schema"], timeout=5)
@@ -167,6 +169,8 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
     assert old_schema in {
         "roboguide.controller-checkpoint/v32",
         "roboguide.controller-checkpoint/v33",
+        "roboguide.controller-checkpoint/v34",
+        "roboguide.controller-checkpoint/v35",
     }
     grpc, operator, artifact = (address() for _ in range(3))
     rejected(
@@ -181,6 +185,7 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
         (
             "unsupported checkpoint schema " + checkpoint["schema"],
             "unsupported event payload schema domain.EventPayload.json/v24",
+            "unsupported event payload schema domain.EventPayload.json/v25",
         ),
         "old-controller-" + old_schema.rsplit("/", 1)[1],
     )
@@ -268,7 +273,7 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
         "zero_event_wrapper_fence": True,
         "zero_event_inventory": 0,
         "probe_root": str(probe_root),
-        "node_journal_version": 8,
+        "node_journal_version": current_journal,
         "controller_schema": checkpoint["schema"],
         "receipts": receipts,
         "archived_binary_sha256": {

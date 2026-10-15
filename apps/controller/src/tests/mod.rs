@@ -131,6 +131,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         | EventPayload::MapArtifactPublished { .. }
         | EventPayload::MapArtifactStaged { .. }
         | EventPayload::MapArtifactImported { .. }
+        | EventPayload::MapMemoryReplicaRecorded { .. }
         | EventPayload::MapLocalizationVerified { .. }
         | EventPayload::MapArtifactRejected { .. }
         | EventPayload::NodeRegistered { .. }

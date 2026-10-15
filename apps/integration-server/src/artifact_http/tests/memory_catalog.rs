@@ -1,5 +1,143 @@
 use super::*;
 
+/// Typed byte imports retain one map authority, exact provenance and independent consumer providers.
+#[tokio::test]
+async fn typed_memory_replicas_preserve_published_source_across_http_and_replay() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = FileSystemArtifactStore::new(directory.path().join("cas")).unwrap();
+    let mut upload = store.begin_upload("map-bytes").unwrap();
+    upload.write_chunk(b"map").unwrap();
+    upload.finalize(&digest_bytes(b"map"), 3).unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    seed_controller_checkpoint(&log);
+    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let mut value = serde_json::to_value(fixture_manifest(&digest_bytes(b"map"), 3)).unwrap();
+    value["schema"] = serde_json::json!(domain::SPATIAL_MEMORY_SCHEMA_V0_2);
+    value["producer_local_system_id"] = serde_json::json!("map-files");
+    value["producer_provider_id"] = serde_json::json!("map-producer");
+    value["payload_schema"] = serde_json::json!("map-file/v1");
+    value["source_task_ref"] = serde_json::json!({"mission_id":"mission-a","task_id":"build"});
+    let source: MapArtifactManifest = serde_json::from_value(value).unwrap();
+    let generic = domain::map_memory_manifest(&source).unwrap();
+    let node = NodeId::new("consumer-node").unwrap();
+    let orphan = EventPayload::MapMemoryReplicaRecorded {
+        manifest: source.clone(),
+        node_id: node.clone(),
+        consumer_provider_id: "cache-a".into(),
+        status: domain::MemoryReplicaStatus::Staged,
+        rejection_reason: None,
+    };
+    assert_eq!(catalog.append(orphan).unwrap_err().status(), "409 Conflict");
+    assert!(log.is_empty().unwrap());
+    catalog
+        .append(EventPayload::MapArtifactPublished {
+            manifest: source.clone(),
+        })
+        .unwrap();
+    let uploads = test_uploads();
+    for (provider, status) in [
+        ("cache-a", "staged"),
+        ("cache-a", "imported"),
+        ("cache-b", "staged"),
+    ] {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "manifest": generic, "node_id": node,
+            "consumer_provider_id": provider, "status": status
+        }))
+        .unwrap();
+        let mut request = format!(
+            "POST /v1/memories/map-a/revisions/r1/replicas HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nX-RoboGuide-Memory-Import-Id: typed-fixture-import\r\nConnection: close\r\n\r\n",
+            body.len()
+        ).into_bytes();
+        request.extend_from_slice(&body);
+        response_body(
+            &request_once(&store, &catalog, &uploads, request).await,
+            "202 Accepted",
+        );
+    }
+    assert!(catalog.memory(generic.selector()).unwrap().is_none());
+    assert_eq!(
+        catalog
+            .append(EventPayload::MemoryManifestPublished {
+                manifest: generic.clone()
+            })
+            .unwrap_err()
+            .status(),
+        "409 Conflict"
+    );
+    let mut changed = serde_json::to_value(&source).unwrap();
+    changed["root_frame"] = serde_json::json!("relabelled-frame");
+    let changed: MapArtifactManifest = serde_json::from_value(changed).unwrap();
+    assert_eq!(domain::map_memory_manifest(&changed).unwrap(), generic);
+    assert_eq!(
+        catalog
+            .append(EventPayload::MapMemoryReplicaRecorded {
+                manifest: changed.clone(),
+                node_id: node.clone(),
+                consumer_provider_id: "cache-c".into(),
+                status: domain::MemoryReplicaStatus::Staged,
+                rejection_reason: None
+            })
+            .unwrap_err()
+            .status(),
+        "409 Conflict"
+    );
+    assert_eq!(log.len().unwrap(), 4);
+    let replayed = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let detail = request_once(
+        &store,
+        &replayed,
+        &uploads,
+        raw_request("GET", "/v1/memories/map-a/revisions/r1", &[], false),
+    )
+    .await;
+    let detail: serde_json::Value =
+        serde_json::from_slice(&response_body(&detail, "200 OK")).unwrap();
+    assert_eq!(detail["replicas"].as_array().unwrap().len(), 2);
+    assert_eq!(detail["replicas"][0]["consumer_provider_id"], "cache-a");
+    assert_eq!(detail["replicas"][0]["status"], "imported");
+    assert_eq!(detail["replicas"][1]["consumer_provider_id"], "cache-b");
+    assert_eq!(detail["map_replicas"].as_array().unwrap().len(), 0);
+    let events = log.decoded_events().unwrap();
+    assert!(events.iter().skip(1).all(|event| matches!(event.payload(),
+        EventPayload::MapMemoryReplicaRecorded { manifest, .. } if manifest == &source)));
+    let sink = state::FileArchiveSink::new(directory.path().join("archive"));
+    assert!(matches!(
+        log.archive_and_gc(4, &sink),
+        Err(state::SqliteEventLogError::ArchivePolicy(_))
+    ));
+    assert_eq!(log.history_floor().unwrap(), 0);
+
+    // A corrupted event sequence cannot bypass the exact-source check by restarting.
+    use ports::EventSink;
+    let broken = SqliteEventLog::open(directory.path().join("broken.sqlite3")).unwrap();
+    broken.begin_batch().unwrap();
+    let correlation = domain::CorrelationId::new("corrupt-source").unwrap();
+    broken.clone().append(
+        TimestampMs::new(1),
+        &correlation,
+        None,
+        EventPayload::MapArtifactPublished { manifest: source },
+    );
+    broken.clone().append(
+        TimestampMs::new(2),
+        &correlation,
+        None,
+        EventPayload::MapMemoryReplicaRecorded {
+            manifest: changed,
+            node_id: node,
+            consumer_provider_id: "cache-a".into(),
+            status: domain::MemoryReplicaStatus::Staged,
+            rejection_reason: None,
+        },
+    );
+    broken
+        .save_checkpoint(TEST_CHECKPOINT_SCHEMA, TEST_CHECKPOINT_JSON)
+        .unwrap();
+    broken.commit_batch().unwrap();
+    assert!(ArtifactCatalog::replay_with_gate(&broken, Arc::new(Mutex::new(()))).is_err());
+}
+
 /// An operator cutoff cannot delete generic Memory manifests or provider-qualified replica replay prerequisites.
 #[test]
 fn archive_gc_preserves_generic_memory_replay_evidence() {

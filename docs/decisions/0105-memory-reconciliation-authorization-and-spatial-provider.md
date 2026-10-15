@@ -161,3 +161,26 @@ barrier。精确原 import 的 manifest/副本历史 GET 使用其 Read 权限�
 原始预算和退避，重复 receipt 不更新时刻。Controller 重启在开放监听与恢复 outbox 前持久
 撤销原准备授权。当前 120 秒是原准备/导入/Execute 接纳窗口，尚不是可续约的运行中 Group
 内容租约。完整 Group lifetime/handoff、typed-map 消费、active-map/GC 继续实施，不由本切片关闭。
+
+## typed-map 的 provider-qualified 字节副本（当前切片已验收）
+
+实际消费暴露的问题是 typed map 的通用 projection 没有通用 manifest 行，已有副本写入因此
+拒绝 UnknownRevision。修复保留两个 namespace 的单一源所有权：原 map 仍只由 Spatial catalog
+发布；通用 Memory placement 只存 `(selector, Node, consumer provider)` 的独立证据与原 map
+完整 digest，不创建第二份通用 manifest alias。Prepared context 的 raw map 不能被剥离。
+
+新增事件明确保存完整原 map、接收 provider、staged/imported/rejected 与原 receive time。
+它证明 Memory backend 的字节导入，不产生 typed-map activation 或 localization 事实；旧
+map workflow 的副本/定位证据独立保留。Generic GET 的 `replicas` 返回 provider-qualified
+Memory 证据，原 map workflow evidence 放在单独的 `map_replicas`，不能相互替代。
+
+在实际 writer gate 内，API 将精确 generic projection 解析回已 Published 的原 map，验证
+当前证书、原 prepared purpose、完整 map 策略及当前 Node/session/provider 后才追加事件。
+Replay 核对完整源身份与 namespace，provider-qualified Imported 历史继续单调。
+Controller wrapper v36 与事件 codec v25 拒绝旧读写；Node Contract v0.9 已保留完整输入，
+该修复不放宽它的执行/预算门槛。正向验收必须经过 Native 文件建图、CAS、另一实际软件
+Node 导入和计算及独立 verifier，不能由内部直调代替。
+
+实际正向、消费后重启、完整 raw source 保留、15 项跨语言负向和旧二进制拒绝见
+[当前字节副本验收](../development/acceptance/2026-10-15-f4-typed-memory-replicas.md)。
+地图语义消费/激活、完整 Group lifetime/handoff、GC 和后续阶段仍为必需工作。

@@ -34,8 +34,11 @@ Artifact 稳定证书主体和实际 bytes 上传归属门禁，见
 先持久 Prepare、原导入/只读对账和当前 bytes observation，再发送带精确上下文的 Execute；
 撤销 ACK、原始 boot/monotonic 预算、整组 pending barrier 与重启 fence 均保留独立证据。
 [两软件节点验收](docs/development/acceptance/2026-10-15-f4-memory-preparation.md)使用真实文件、
-SQL 失败、TLS、CPU 计算和独立验证。完整 Group lifetime/handoff、typed-map 消费、active-map/GC
+SQL 失败、TLS、CPU 计算和独立验证。完整 Group lifetime/handoff、地图语义消费与 active-map/GC
 及后续阶段仍须完成。
+[typed-map 字节副本验收](docs/development/acceptance/2026-10-15-f4-typed-memory-replicas.md)
+另验证真实地图生成→另一 Node 准备/导入/计算→独立验证与消费后重启。原 Spatial manifest
+保持唯一权威，字节 placement 与地图激活/定位证据分开，wrapper v36 / codec v25 拒绝旧 writer。
 Operator 修改请求现在在实际事务写锁内复核证书和当前委托，见
 [排队撤权验收](docs/development/acceptance/2026-10-15-f4-operator-transactions.md)。
 
@@ -48,7 +51,7 @@ host monotonic deadline 的预算门禁，见[后续文件验收](docs/developme
 已通过实际软件进程验收，见[Node/Spatial 验收](docs/development/acceptance/2026-10-15-f4-spatial-node.md)。
 原记录为显式 loopback 兼容配置。后续 [producer 权威验收](docs/development/acceptance/2026-10-15-f4-map-provider-authority.md)
 通过实际 mTLS、原始 dispatch/provider 快照及旧二进制拒绝检查；没有设备参与。
-完整 Group lifetime、typed-map 消费与 active-map/GC 和其余阶段继续实施。
+完整 Group lifetime、地图语义消费与 active-map/GC 和其余阶段继续实施。
 [内容策略 v0.2](contracts/memory/authorization-v0.2/README.md) 另绑定完整 typed-map metadata，
 通用 projection 不能绕过来源；wrapper v34 保留显式升级 history 并拒绝旧 Controller 写入。
 

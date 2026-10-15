@@ -95,3 +95,11 @@ map v0.2, with config v0.9 / Contract v0.8. It rejects current route/provider/fo
 actual archived binaries. These are same-host software processes, with zero devices or models.
 Distributed Group grants/preparation, full typed-map content-policy binding, active-map and GC
 remain required F4 work.
+
+The subsequent [prepared consumer acceptance](../../docs/development/acceptance/2026-10-15-f4-typed-memory-replicas.md)
+uses explicit full-map Group read/import grants and another actual enrolled software Node. The
+receiver imports and computes over real map bytes after preparation/current availability; independent
+readers verify the complete source and results. Consumer/Controller/backend restart preserves original
+authority and byte replicas without another native worker. Byte placement remains separate from
+active-map selection, semantic spatial use and physical localization; those and complete Group
+lifetime/handoff/GC remain required.

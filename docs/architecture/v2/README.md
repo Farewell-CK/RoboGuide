@@ -26,6 +26,12 @@ journal v9 拒绝旧软件。真实两软件节点文件链路与证据边界见
 [当前实现拓扑](implementation-topology.md)。完整 Group lifetime/handoff、typed-map 消费、
 active-map/GC 与后续整改仍须完成；这些软件记录不建立设备安全结论。
 
+Typed-map 的字节副本以 `MapMemoryReplicaRecorded` 保存完整原 map 和
+`(selector, Node, consumer provider)`，由原 Spatial publication 校验；不另建通用 manifest。
+Memory API 的 `replicas` 表示字节导入，`map_replicas` 单独表示原地图工作流证据，
+两者不能证明 active-map、定位或语义可用性。wrapper v36 / event codec v25 保护该演进；
+Node 的现有 v0.9 prepared input 继续保留完整 raw map，导入仍使用当前 Group 内容授权。
+
 Control 活性与观测时间的已接受演进见 ADR-0076：Integration 仅提供当前精确 session/lease
 的连续接收证据，由 Control 在应用持久事务中决定续约/过期。原始 ingress receive time
 用于 State/health/peer/progress 的年龄；当前 decision time 用于资格、Commit、恢复与发送。

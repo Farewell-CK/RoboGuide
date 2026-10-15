@@ -93,6 +93,11 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   software Nodes, actual TLS/files/SQL failure/CPU hashes and independent verifiers; no device facts
   are fabricated. Full Group lifetime/handoff, typed-map consumption, active-map/GC and F5–F10 remain
   required; this slice does not establish hardware continuity or overall SoftwareComplete.
+- Typed-map byte imports retain complete original Spatial provenance in
+  `MapMemoryReplicaRecorded`, keyed by selector/Node/consumer provider. Artifact writer ordering and
+  replay require the exact published source; no generic manifest alias is created. Memory API byte
+  `replicas` and map-workflow `map_replicas` are separate evidence. Controller wrapper v36 / event
+  codec v25 fence old writers. Byte placement never proves active-map selection or localization.
 - Generic replica durable identity is exact `(MemorySelector, NodeId, ConsumerProviderId)`; admission,
   event replay, projections, and APIs preserve that provider dimension, and accepted evidence remains
   monotonic after Imported. Explicit application-owned selective-import commands and bounded

@@ -92,6 +92,19 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
                     self.import_id,
                 )?;
             }
+            EventPayload::MapMemoryReplicaRecorded { manifest, .. } => {
+                if self.import_id.is_none() {
+                    return Err(
+                        "typed-map byte placement requires its original prepared purpose".into(),
+                    );
+                }
+                self.authority.authorize_map_access(
+                    self.principal,
+                    manifest,
+                    domain::MemoryAccessOperation::Import,
+                    self.import_id,
+                )?;
+            }
             _ => {}
         }
         Ok(())

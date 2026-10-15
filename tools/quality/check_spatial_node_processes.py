@@ -25,6 +25,7 @@ from check_artifact_authority_processes import call as tls_call
 from check_spatial_local_processes import request as local_request
 from check_state_verifier_processes import ROOT, address, request, save, stop, wait_for
 from spatial_content_policy import check as check_content_policy
+from spatial_memory_consumer import SpatialMemoryConsumer
 from spatial_process_tls import configure as configure_tls
 
 
@@ -38,11 +39,24 @@ def checker_identity() -> dict[str, str]:
         "check_artifact_authority_processes.py",
         "spatial_process_tls.py",
         "spatial_content_policy.py",
+        "spatial_memory_consumer.py",
+        "memory_preparation_profile.py",
+        "check_memory_processes.py",
+        "check_spatial_upgrade_gates.py",
     )
-    return {
+    result = {
         name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
         for name in names
     }
+    result.update(
+        {
+            str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(
+                (ROOT / "integrations/memory-provider/roboguide_memory_provider").glob("*.py")
+            )
+        }
+    )
+    return result
 
 
 def verify(directory: Path) -> dict[str, Any]:
@@ -160,6 +174,7 @@ def plan(mission: str, profile: dict[str, Any]) -> dict[str, Any]:
         satisfaction: dict[str, Any] = {
             "expected_effect": "configured immutable file bundle was produced",
             "basis": "execution-report",
+            "verifier": None,
         }
         if name == "publish":
             satisfaction = {
@@ -228,9 +243,17 @@ def plan(mission: str, profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def run(
-    python: Path, profile_file: Path, source_root: Path, output: Path, *, mtls: bool = False
+    python: Path,
+    profile_file: Path,
+    source_root: Path,
+    output: Path,
+    *,
+    mtls: bool = False,
+    memory_consumer: bool = False,
 ) -> dict[str, Any]:
     """Start isolated maintained processes and verify restore without redispatch."""
+    if memory_consumer and not mtls:
+        raise ValueError("prepared map consumption requires the actual mTLS profile")
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     original_checker = checker_identity()
     save(output / "checker-identity.json", original_checker)
@@ -267,6 +290,12 @@ def run(
     contexts, node_leaf = (
         configure_tls(output, node, profile["map_id"], environment) if mtls else ({}, "")
     )
+    consumer = (
+        SpatialMemoryConsumer(output, python, grpc, cas, environment, profile)
+        if memory_consumer
+        else None
+    )
+    node_count = 2 if consumer else 1
 
     def exchange(endpoint: str, path: str, body: Any = None) -> tuple[int, Any]:
         """Use actual current client certificates for the owned HTTPS services, with no retry."""
@@ -323,7 +352,9 @@ def run(
     processes: list[subprocess.Popen[bytes]] = []
     logs: list[BinaryIO] = []
 
-    def start(command: list[str], name: str) -> subprocess.Popen[bytes]:
+    def start(
+        command: list[str], name: str, override_environment: dict[str, str] | None = None
+    ) -> subprocess.Popen[bytes]:
         """Pin actual binaries and track only the processes and diagnostics owned by this run."""
         assert checker_identity() == original_checker, "checker source changed during original run"
         for binary, checksum in binaries.items():
@@ -333,7 +364,13 @@ def run(
             )
         log = (output / (name + ".log")).open("xb")
         logs.append(log)
-        process = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=log, stderr=log)
+        process = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            env=environment if override_environment is None else override_environment,
+            stdout=log,
+            stderr=log,
+        )
         processes.append(process)
         return process
 
@@ -415,10 +452,18 @@ def run(
             },
         )
         assert status == 200, receipt
+        if consumer:
+            consumer.start(origin, exchange, start)
         node_process = start([str(ROOT / "target/debug/roboguide-node"), str(config)], "node")
-        wait_for(lambda: len(exchange(origin, "/v1/inventory")[1]["nodes"]) == 1, "actual CPU Node")
-        save(output / "mission.json", plan(mission, profile))
-        status, receipt = exchange(origin, "/v1/missions", plan(mission, profile))
+        wait_for(
+            lambda: len(exchange(origin, "/v1/inventory")[1]["nodes"]) == node_count,
+            "actual software Nodes",
+        )
+        accepted = plan(mission, profile)
+        if consumer:
+            accepted = consumer.plan(accepted)
+        save(output / "mission.json", accepted)
+        status, receipt = exchange(origin, "/v1/missions", accepted)
         assert status == 202, receipt
 
         def completed_publication() -> list[dict[str, Any]]:
@@ -533,6 +578,8 @@ def run(
             if mtls
             else None
         )
+        if consumer:
+            consumer.authorize(origin, exchange, attempt["group_id"])
         with urllib.request.urlopen(
             cas + "/v1/artifacts/" + manifest["content_digest"],
             timeout=5,
@@ -599,7 +646,10 @@ def run(
         controller = start(controller_command, "controller-restored")
         wait_for(lambda: exchange(origin, "/healthz")[0] == 200, "Controller restored")
         start([str(ROOT / "target/debug/roboguide-node"), str(config)], "node-restored")
-        wait_for(lambda: len(exchange(origin, "/v1/inventory")[1]["nodes"]) == 1, "Node restored")
+        wait_for(
+            lambda: len(exchange(origin, "/v1/inventory")[1]["nodes"]) == node_count,
+            "Nodes restored",
+        )
         time.sleep(0.3)
         assert exchange(cas, path)[1] == snapshot
         assert workers[0].read_bytes() == original_worker
@@ -628,10 +678,48 @@ def run(
         status, receipt = exchange(origin, "/v1/verifier-evidence", evidence)
         assert status == 200 and receipt["receipt"]["applied"] is True, receipt
         assert exchange(origin, "/v1/verifier-evidence", evidence)[1] == receipt
+        consumed = (
+            consumer.finish(origin, exchange, mission, "independent-file-reader")
+            if consumer
+            else None
+        )
         wait_for(
             lambda: exchange(origin, f"/v1/missions/{mission}")[1]["status"] == "Completed",
             "independent satisfaction",
         )
+        if consumer and consumed:
+            memory_path = f"/v1/memories/{profile['map_id']}/revisions/{profile['revision_id']}"
+            status, original_replicas = exchange(cas, memory_path)
+            assert status == 200 and len(original_replicas["replicas"]) == 1
+            assert original_replicas["replicas"][0]["consumer_provider_id"] == "files"
+            assert original_replicas["replicas"][0]["status"] == "imported"
+            received_before = {
+                item["node_id"]: item["received_at_ms"]
+                for item in exchange(origin, "/v1/inventory")[1]["nodes"]
+            }
+            stop(controller)
+            controller = start(controller_command, "controller-after-consumption")
+            wait_for(lambda: exchange(origin, "/healthz")[0] == 200, "typed replicas restored")
+            consumed["receiver_restart"] = consumer.restart(start)
+            wait_for(
+                lambda: (
+                    len(fresh := exchange(origin, "/v1/inventory")[1]["nodes"]) == node_count
+                    and all(
+                        item["liveness"] == "Reachable"
+                        and item["received_at_ms"] > received_before[item["node_id"]]
+                        for item in fresh
+                    )
+                ),
+                "new registration receipts from both software Nodes after consumption restart",
+            )
+            assert exchange(cas, memory_path) == (200, original_replicas)
+            assert workers[0].read_bytes() == original_worker
+            consumed["typed_replicas_restored"] = True
+            save(output / "consumer/replicas-restored.json", original_replicas)
+            save(
+                output / "consumer/registrations-restored.json",
+                exchange(origin, "/v1/inventory")[1],
+            )
         with sqlite3.connect(
             f"file:{output / 'controller.sqlite3'}?mode=ro", uri=True
         ) as connection:
@@ -644,12 +732,13 @@ def run(
         result = {
             "passed": True,
             "devices": 0,
-            "software_nodes": 1,
+            "software_nodes": node_count,
             "models": 0,
             "simulators": 0,
             "actual_native_workers": 1,
             "node_cas_publications": 1,
-            "independent_verifier_processes": 1,
+            "independent_verifier_processes": 2 if consumer else 1,
+            "prepared_map_consumer": consumed,
             "controller_and_node_restart_no_second_worker": True,
             "independent_corrupt_bundle_rejected": True,
             "wrong_worker_exit_identity_unavailable": True,
@@ -696,6 +785,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--verify", type=Path)
     parser.add_argument("--mtls", action="store_true")
+    parser.add_argument("--memory-consumer", action="store_true")
     arguments = parser.parse_args()
     if arguments.verify:
         print(json.dumps(verify(arguments.verify)))
@@ -709,6 +799,7 @@ def main() -> None:
                 arguments.source_root,
                 arguments.output,
                 mtls=arguments.mtls,
+                memory_consumer=arguments.memory_consumer,
             )
         except Exception as error:
             if arguments.output.is_dir():

@@ -2,6 +2,48 @@
 
 use super::*;
 
+/// Complete typed byte placement cannot be replayed under an old map-only or generic codec.
+#[test]
+fn typed_map_memory_replica_requires_its_own_codec_and_complete_source() {
+    let mut value = serde_json::to_value(manifest()).unwrap();
+    value["schema"] = serde_json::json!(domain::SPATIAL_MEMORY_SCHEMA_V0_2);
+    value["producer_local_system_id"] = serde_json::json!("original-files");
+    value["producer_provider_id"] = serde_json::json!("original-provider");
+    value["payload_schema"] = serde_json::json!("file-map-content/v1");
+    value["source_task_ref"] = serde_json::json!({"mission_id":"mission-build","task_id":"build"});
+    let source: MapArtifactManifest = serde_json::from_value(value).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("map-bytes.sqlite3")).unwrap();
+    let payload = EventPayload::MapMemoryReplicaRecorded {
+        manifest: source.clone(),
+        node_id: domain::NodeId::new("receiver").unwrap(),
+        consumer_provider_id: "file-cache".into(),
+        status: domain::MemoryReplicaStatus::Staged,
+        rejection_reason: None,
+    };
+    log.clone().append(
+        TimestampMs::new(10),
+        &CorrelationId::new("map-bytes").unwrap(),
+        None,
+        payload.clone(),
+    );
+    assert!(log.take_error().unwrap().is_none());
+    assert_eq!(
+        log.events().unwrap()[0].payload_schema,
+        EVENT_PAYLOAD_SCHEMA_V25
+    );
+    assert_eq!(log.decoded_events().unwrap()[0].payload(), &payload);
+    log.connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE events SET payload_schema=?1",
+            [EVENT_PAYLOAD_SCHEMA_V24],
+        )
+        .unwrap();
+    assert!(log.decoded_events().is_err());
+}
+
 /// Producer-bound maps cannot be relabeled as old metadata-only codecs during archive/replay.
 #[test]
 fn registered_map_codec_fences_original_provider_provenance() {

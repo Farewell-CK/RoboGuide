@@ -130,6 +130,11 @@ handoff、active-map/GC 和其余阶段继续实施。
 另外固定完整 typed-map digest；仅有通用 projection 不再授权这类内容。显式策略升级保留原始
 history，已有 digest 不可替换、删除或降级。
 
+Typed map 的字节导入使用相同 prepared Memory 协议；完整原始 map 保留在
+`MapMemoryReplicaRecorded`，消费端 provider 身份独立，原 Spatial publication 仍是唯一
+manifest 权威。事务与回放拒绝来源改变，HTTP 将字节 `replicas` 与地图工作流
+`map_replicas` 分开。wrapper v36 / event codec v25 保护该演进；active-map 和定位仍需各自证据。
+
 Mission Request v0.4 由 Engine 显式编排 Dialogue -> Grounding Snapshot -> Draft -> Review ->
 bounded Repair；Reviewer
 只产生结构化 evidence，Repairer 不得补写 GroundedIntent 之外的事实，需要用户信息时返回

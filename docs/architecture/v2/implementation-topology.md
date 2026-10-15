@@ -66,6 +66,9 @@ flowchart TB
   SP --> BUNDLE[不可变观测点 tile bundle / parent lineage / 计算证据]
   SP <-->|私有 Unix HTTP / 原 attempt 查询| NODE
   BUNDLE -->|Node 冻结并上传原 bytes| ART
+  CAT --> TYPED[完整原 map / provider-qualified 字节副本]
+  TYPED --> PREP
+  TYPED --> SQL
 ```
 
 Controller 中 Orchestration、Control、Runtime、State 和 Integration 当前共址，责任边界由
@@ -133,6 +136,12 @@ Node journal v9 拒绝旧版本，包括零事件快照和 SQLite 版本头回�
 实际两软件节点的 SQL 中断→原 provider 只读查询→当前可用性→真实计算→独立验证链路见
 [准备验收](../../development/acceptance/2026-10-15-f4-memory-preparation.md)。
 完整 Group lifetime/handoff、typed-map 消费、active-map/GC 仍属 F4 必需工作。
+
+地图字节导入复用 prepared Memory 链路。Artifact 在事务写锁内将通用副本请求绑定到
+原 published Spatial manifest，写 `MapMemoryReplicaRecorded`，包含完整原地图和消费端
+provider；回放同样核对原 publication，不创建第二份通用 manifest 权威。Memory API 分别
+返回字节 `replicas` 与原地图 `map_replicas`。wrapper v36 / event codec v25 拒绝旧 writer；
+字节导入不授予地图激活或当前定位，完整语义消费仍在实施。
 
 当前独立 Spatial 文件计算已通过[实际文件验收](../../development/acceptance/2026-10-15-f4-spatial-files.md)。
 这些计算只生成文件产物，不能证明当前定位。实际 Node workflow 已冻结并上传原 bundle 至 CAS，

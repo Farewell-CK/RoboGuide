@@ -318,12 +318,18 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
-    if saved.schema != SERVER_CHECKPOINT_SCHEMA && !saved.memory_preparation.records.is_empty() {
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
+    ) && !saved.memory_preparation.records.is_empty()
+    {
         return Err("legacy wrapper contains pre-execution Memory authority".into());
     }
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
     ) && integration.get("control").is_some_and(|control| {
         [
             "memory_authorization_registry",
@@ -338,6 +344,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
@@ -358,6 +365,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
@@ -378,6 +386,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
@@ -392,6 +401,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
@@ -435,6 +445,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
@@ -461,6 +472,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
@@ -484,6 +496,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
@@ -527,6 +540,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
@@ -551,6 +565,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA

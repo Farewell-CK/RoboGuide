@@ -34,6 +34,9 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper without provider-qualified byte evidence for the sole Spatial source.
+const PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA: &str =
+    "roboguide.controller-checkpoint/v35";
 /// Last wrapper without durable pre-execution Memory contexts and current backend observations.
 const PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v34";
 /// Last wrapper without complete typed-map content policy digests.
@@ -946,6 +949,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
@@ -983,6 +987,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA

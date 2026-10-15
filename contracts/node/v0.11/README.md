@@ -5,6 +5,9 @@ compatible; this catalog explicitly negotiates semantic `roboguide.node.v0.8` fo
 Old Controllers cannot admit the new profile by silently ignoring protobuf fields. Profiles v0.4–v0.7
 remain explicit compatibility inputs, including original-provider readonly Memory continuity.
 
+`node-config.schema.json` structurally validates config v0.9, including exact typed-map producer
+output bindings. Current-content availability is rejected by this version; config v0.10 is explicit.
+
 Config v0.9 requires every typed-map output binding to identify its original registered Spatial
 provider and exact content schema. Provider kind/scope/visibility/media/schema must match its
 declaration. Runtime use also checks the executing operation's LocalSystem owner before Local How.

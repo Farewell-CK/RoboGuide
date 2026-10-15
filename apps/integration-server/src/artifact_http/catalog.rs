@@ -196,6 +196,73 @@ pub struct ArtifactCatalog {
 }
 
 impl ArtifactCatalog {
+    /// Resolves one byte-replica claim to the sole published Spatial source under writer ordering.
+    fn resolve_typed_memory_replica(
+        &self,
+        payload: EventPayload,
+    ) -> Result<EventPayload, HttpError> {
+        let (generic, node, provider, status, reason) = match &payload {
+            EventPayload::MemoryArtifactStaged {
+                manifest,
+                node_id,
+                consumer_provider_id,
+            } => (
+                manifest,
+                node_id,
+                consumer_provider_id,
+                domain::MemoryReplicaStatus::Staged,
+                None,
+            ),
+            EventPayload::MemoryArtifactImported {
+                manifest,
+                node_id,
+                consumer_provider_id,
+            } => (
+                manifest,
+                node_id,
+                consumer_provider_id,
+                domain::MemoryReplicaStatus::Imported,
+                None,
+            ),
+            EventPayload::MemoryArtifactRejected {
+                manifest,
+                node_id,
+                consumer_provider_id,
+                reason,
+            } => (
+                manifest,
+                node_id,
+                consumer_provider_id,
+                domain::MemoryReplicaStatus::Rejected,
+                Some(reason.clone()),
+            ),
+            _ => return Ok(payload),
+        };
+        let selector = MapRevisionSelector::new(
+            domain::MapId::new(generic.selector().memory_id().as_str())
+                .map_err(|error| HttpError::bad_request(error.to_string()))?,
+            domain::MapRevisionId::new(generic.selector().revision_id().as_str())
+                .map_err(|error| HttpError::bad_request(error.to_string()))?,
+        );
+        let Some(source) = self.revision(&selector)? else {
+            return Ok(payload);
+        };
+        if source.status() != domain::MapRevisionStatus::Published
+            || domain::map_memory_manifest(source.manifest()).map_err(HttpError::conflict)?
+                != *generic
+        {
+            return Err(HttpError::conflict(
+                "typed Memory replica differs from its published Spatial source",
+            ));
+        }
+        Ok(EventPayload::MapMemoryReplicaRecorded {
+            manifest: source.manifest().clone(),
+            node_id: node.clone(),
+            consumer_provider_id: provider.clone(),
+            status,
+            rejection_reason: reason,
+        })
+    }
     /// Federates immutable admitted metadata for application prerequisites without granting content access.
     pub(crate) fn memory_source(
         &self,
@@ -266,12 +333,15 @@ impl ArtifactCatalog {
             if let Err(error) = projection.apply_event(&event) {
                 return Err(format!("spatial catalog replay failed: {error}").into());
             }
+            validate_typed_memory_source(&projection, event.payload())
+                .map_err(|error| format!("typed Memory source replay failed: {error}"))?;
             if matches!(
                 event.payload(),
                 EventPayload::MemoryManifestPublished { .. }
                     | EventPayload::MemoryArtifactStaged { .. }
                     | EventPayload::MemoryArtifactImported { .. }
                     | EventPayload::MemoryArtifactRejected { .. }
+                    | EventPayload::MapMemoryReplicaRecorded { .. }
             ) && let Err(error) = memory_projection.apply_memory_event(&event)
             {
                 return Err(format!("generic Memory catalog replay failed: {error}").into());
@@ -483,6 +553,7 @@ impl ArtifactCatalog {
             .lock()
             .map_err(|_| HttpError::internal("event-log write gate is poisoned"))?;
         self.ensure_available()?;
+        let payload = self.resolve_typed_memory_replica(payload)?;
         if let Some(admission) = admission {
             let authority = match &admission {
                 EvidenceWriteAdmission::Artifact { authority }
@@ -549,6 +620,7 @@ impl ArtifactCatalog {
         candidate
             .apply_payload(timestamp, &payload)
             .map_err(|error| HttpError::conflict(error.to_string()))?;
+        validate_typed_memory_source(&candidate, &payload).map_err(HttpError::conflict)?;
         let mut memory_projection = self
             .memory_projection
             .lock()
@@ -560,6 +632,7 @@ impl ArtifactCatalog {
                 | EventPayload::MemoryArtifactStaged { .. }
                 | EventPayload::MemoryArtifactImported { .. }
                 | EventPayload::MemoryArtifactRejected { .. }
+                | EventPayload::MapMemoryReplicaRecorded { .. }
         ) {
             memory_candidate
                 .apply_memory_payload(timestamp, &payload)
@@ -663,6 +736,20 @@ fn admit_memory_payload(
     publisher: Option<&MemoryPublicationIdentity>,
 ) -> Result<(), HttpError> {
     match payload {
+        EventPayload::MapMemoryReplicaRecorded {
+            manifest,
+            node_id,
+            consumer_provider_id,
+            ..
+        } => {
+            let generic = domain::map_memory_manifest(manifest).map_err(HttpError::conflict)?;
+            admission
+                .admit_replica(node_id, consumer_provider_id, &generic)
+                .map_err(HttpError::forbidden)?;
+            admission
+                .admit_publisher(publisher, node_id)
+                .map_err(HttpError::forbidden)
+        }
         EventPayload::MemoryManifestPublished { manifest } => {
             admission
                 .admit_manifest(manifest)
@@ -703,6 +790,26 @@ fn admit_memory_payload(
             "Memory admission was requested for unrelated evidence",
         )),
     }
+}
+
+/// Refuses orphan, unpublished or relabeled Spatial sources before durable evidence or replay.
+fn validate_typed_memory_source(
+    maps: &MapCatalogProjection,
+    payload: &EventPayload,
+) -> Result<(), String> {
+    if let EventPayload::MapMemoryReplicaRecorded { manifest, .. } = payload {
+        let current = maps
+            .revision(manifest.selector())
+            .ok_or("typed Memory replica has no original Spatial publication")?;
+        if current.status() != domain::MapRevisionStatus::Published
+            || current.manifest() != manifest
+        {
+            return Err(
+                "typed Memory replica changed its complete immutable Spatial source".into(),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Rejects selectors that would resolve to both a typed map and a generic Memory revision.

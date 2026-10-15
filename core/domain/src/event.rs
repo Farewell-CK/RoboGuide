@@ -201,6 +201,19 @@ pub enum EventPayload {
         /// Immutable map manifest retained by the catalog.
         manifest: MapArtifactManifest,
     },
+    /// Provider-qualified byte placement of an already published typed map, without localization.
+    MapMemoryReplicaRecorded {
+        /// Complete immutable Spatial source, never a second generic manifest publication.
+        manifest: MapArtifactManifest,
+        /// Actual receiving Node whose current prepared purpose admitted the evidence.
+        node_id: NodeId,
+        /// Exact semantic backend identity on that Node.
+        consumer_provider_id: String,
+        /// Monotonic byte-import history, independently of map activation or current availability.
+        status: MemoryReplicaStatus,
+        /// Bounded diagnostic only for rejected import evidence.
+        rejection_reason: Option<String>,
+    },
     /// A node began staging an immutable map artifact locally.
     MapArtifactStaged {
         /// Immutable map manifest being staged.

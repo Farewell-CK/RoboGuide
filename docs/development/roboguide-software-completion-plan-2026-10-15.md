@@ -62,6 +62,11 @@ Prepare ACK→原 import/SQL 中断只读对账→当前 bytes Probe→Execute�
 journal v9 和旧版本拒绝已接线。完整 Group lifetime/handoff、typed-map 消费、active-map/GC
 仍继续实施；F4 不提前关闭，F5–F10 继续为必需项。
 
+[typed-map 字节副本切片](acceptance/2026-10-15-f4-typed-memory-replicas.md)现通过实际 native
+地图生成→两软件 Node/CAS/prepared import→独立验证，以及消费后的 Controller/Node/backend
+重启。wrapper v36 / codec v25 保留完整原 map，provider-qualified 字节副本不产生第二 manifest
+权威。地图语义消费/激活、完整 Group lifetime/handoff、GC 和后续阶段仍须完成。
+
 ## 已接受的实现决定
 
 - Stop 冻结完整受影响 attempt 集合、operation-owned export、策略、owner/session 和 deadline。

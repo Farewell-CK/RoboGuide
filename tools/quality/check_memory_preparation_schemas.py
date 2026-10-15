@@ -27,9 +27,15 @@ def run(directory: Path) -> dict[str, Any]:
         if isinstance(value, dict) and "$schema" in value and "$id" in value:
             resources.append((value["$id"], draft.create_resource(value)))
     registry = referencing.Registry().with_resources(resources)
+    admitted = json.loads((directory / "result.json").read_bytes())
+    assert admitted["passed"] is True
+    spatial = bool(admitted.get("prepared_map_consumer"))
     schema_paths = {
         "mission": ROOT / "contracts/mission/v0.9/mission-plan.schema.json",
         "config": ROOT / "contracts/node/v0.12/node-config.schema.json",
+        "source_config": ROOT
+        / f"contracts/node/{'v0.11' if spatial else 'v0.12'}/node-config.schema.json",
+        "map": ROOT / "contracts/spatial/v0.2/map-manifest.schema.json",
         **{
             name: ROOT / f"contracts/memory/preparation-v0.1/{name}.schema.json"
             for name in ("preparation", "control", "receipt", "availability")
@@ -40,16 +46,24 @@ def run(directory: Path) -> dict[str, Any]:
         schema = json.loads(path.read_bytes())
         jsonschema.Draft202012Validator.check_schema(schema)
         validators[name] = jsonschema.Draft202012Validator(schema, registry=registry)
-    admitted = json.loads((directory / "result.json").read_bytes())
-    assert admitted["passed"] is True
     plan = json.loads((directory / "mission.json").read_bytes())
     validators["mission"].validate(plan)
-    for owner in ("source", "consumer"):
-        validators["config"].validate(tomllib.loads((directory / owner / "node.toml").read_text()))
-    records = json.loads((directory / "preparations.json").read_bytes())
+    source_config = directory / ("node.toml" if spatial else "source/node.toml")
+    validators["source_config"].validate(tomllib.loads(source_config.read_text()))
+    validators["config"].validate(tomllib.loads((directory / "consumer/node.toml").read_text()))
+    if spatial:
+        recorded = json.loads((directory / "consumer/preparation.json").read_bytes())
+        records = {recorded["execution_id"]: recorded}
+    else:
+        records = json.loads((directory / "preparations.json").read_bytes())
     record = next(iter(records.values()))
     preparation = record["preparation"]
     validators["preparation"].validate(preparation)
+    typed = [item["typed_map"] for item in preparation["inputs"] if item.get("typed_map")]
+    for source in typed:
+        validators["map"].validate(source)
+    if spatial:
+        assert typed == [json.loads((directory / "catalog-manifest.json").read_bytes())["manifest"]]
     observations = []
     controls = []
     for delivery in record["controls"].values():
@@ -82,9 +96,13 @@ def run(directory: Path) -> dict[str, Any]:
 
     for key in ("node_id", "consumer_provider_id", "artifact_path", "inventory"):
         changed = copy.deepcopy(plan)
-        changed["tasks"][1]["roles"][0]["requirements"]["memories"][0][key] = (
-            "not-semantic-authority"
+        required = next(
+            role["requirements"]["memories"]
+            for task in changed["tasks"]
+            for role in task["roles"]
+            if role["requirements"]["memories"]
         )
+        required[0][key] = "not-semantic-authority"
         reject("mission", "Mission requirement rejects " + key, changed)
     for generation in (0, 17):
         changed = copy.deepcopy(next(item for item in controls if item["operation"] == "probe"))
@@ -116,11 +134,19 @@ def run(directory: Path) -> dict[str, Any]:
     changed = copy.deepcopy(config)
     del changed["memory_providers"][0]["continuity"]
     reject("config", "availability requires original backend continuity", changed)
+    if spatial:
+        changed = copy.deepcopy(config)
+        changed["schema"] = "roboguide.node-config/v0.9"
+        reject("source_config", "legacy config cannot negotiate current availability", changed)
+        changed = copy.deepcopy(preparation)
+        del changed["inputs"][0]["typed_map"]["producer_provider_id"]
+        reject("preparation", "typed map cannot strip original provider", changed)
     result = {
         "passed": True,
         "jsonschema": importlib.metadata.version("jsonschema"),
         "actual_preparations": len(records),
         "actual_observations": len(observations),
+        "actual_typed_maps": len(typed),
         "rejected_cases": rejected,
         "schema_identity": {
             str(path.relative_to(ROOT)): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()

@@ -5,6 +5,13 @@ source session, Control policy/membership, canonical invocation/resources and or
 It carries metadata only. Typed-map inputs retain the full immutable raw map manifest beside its
 generic discovery projection. The receiver is the configured Local EAIOS owner of the operation.
 
+Typed-map byte replica writes resolve to the sole published Spatial manifest under the transaction
+writer gate. `MapMemoryReplicaRecorded` retains that complete source and the consumer provider;
+replay rejects missing or changed raw provenance. It creates no generic manifest alias. Memory
+detail returns byte-import `replicas` separately from semantic map-workflow `map_replicas`.
+Neither implies active-map selection or localization. Controller wrapper v36 and event codec v25
+fence older writers; the prepared Node input and journal contracts remain unchanged.
+
 `control.schema.json` defines Prepare/Probe/Revoke; `receipt.schema.json` separates their outcomes.
 `availability.schema.json` describes actual original-provider current bytes. JSON Schema checks
 structure; Rust additionally checks canonical digests, exact cross-field identity, complete input

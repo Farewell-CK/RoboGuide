@@ -571,10 +571,11 @@ pub(super) fn get_memory(catalog: &ArtifactCatalog, path: &str) -> Result<Respon
     let snapshot = catalog
         .revision(&map_selector)?
         .ok_or_else(|| HttpError::not_found("unknown Memory revision"))?;
-    let replicas = catalog.map_replicas(&map_selector)?;
+    let replicas = catalog.memory_replicas(&selector)?;
+    let map_replicas = catalog.map_replicas(&map_selector)?;
     Ok(Response::Json(
         "200 OK",
-        serde_json::json!({"manifest": map_memory_view(snapshot), "replicas": replicas}),
+        serde_json::json!({"manifest": map_memory_view(snapshot), "replicas": replicas, "map_replicas": map_replicas}),
     ))
 }
 
