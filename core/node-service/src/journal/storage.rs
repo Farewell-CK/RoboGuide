@@ -15,7 +15,7 @@ pub(super) fn configure_connection(connection: &Connection) -> Result<(), Journa
 pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
     let prior_version =
         connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
-    if prior_version > 8 {
+    if prior_version > 9 {
         return Err(JournalError::Corrupt(
             "journal was written by a newer storage authority".into(),
         ));
@@ -30,7 +30,7 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
             |row| row.get(0),
         )
         .optional()?;
-    if marker.is_some_and(|version| !matches!(version, 7 | 8))
+    if marker.is_some_and(|version| !matches!(version, 7..=9))
         || (prior_version >= 7 && marker.is_none())
     {
         return Err(JournalError::Corrupt(
@@ -110,7 +110,29 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
              spec_json TEXT NOT NULL,
              received_at_ms INTEGER NOT NULL,
              result_json TEXT
-         );",
+         );
+         CREATE TABLE IF NOT EXISTS memory_preparations (
+             preparation_id TEXT PRIMARY KEY NOT NULL,
+             execution_id TEXT UNIQUE NOT NULL,
+             preparation_digest TEXT NOT NULL,
+             preparation_json TEXT NOT NULL,
+             budget_json TEXT NOT NULL,
+             configuration_digest TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS memory_context_revocations (
+             preparation_id TEXT PRIMARY KEY NOT NULL,
+             preparation_digest TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS memory_control_receipts (
+             command_id TEXT PRIMARY KEY NOT NULL,
+             preparation_id TEXT NOT NULL,
+             operation TEXT NOT NULL CHECK(operation IN ('prepare','probe','revoke')),
+             generation INTEGER NOT NULL CHECK(generation BETWEEN 0 AND 16),
+             command_json TEXT NOT NULL,
+             receipt_json TEXT
+         );
+         CREATE INDEX IF NOT EXISTS memory_control_by_context
+             ON memory_control_receipts(preparation_id,operation,generation);",
     )?;
     if prior_version < 2 {
         // Rows created by v1 could already have called Local EAIOS. Migrate them conservatively.
@@ -126,11 +148,11 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
         CREATE VIEW IF NOT EXISTS memory_imports AS SELECT * FROM memory_import_authority_v7;",
     )?;
     transaction.execute(
-        "INSERT INTO node_journal_storage_schema VALUES (1,8)
-         ON CONFLICT(singleton) DO UPDATE SET version=8",
+        "INSERT INTO node_journal_storage_schema VALUES (1,9)
+         ON CONFLICT(singleton) DO UPDATE SET version=9",
         [],
     )?;
-    transaction.pragma_update(None, "user_version", 8_i64)?;
+    transaction.pragma_update(None, "user_version", 9_i64)?;
     transaction.commit()?;
     Ok(())
 }

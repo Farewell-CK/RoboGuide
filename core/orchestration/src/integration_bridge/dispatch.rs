@@ -66,6 +66,12 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         node_id: &str,
         command: integration::grpc::v0_4::MemoryImport,
     ) -> Result<(), IntegrationRuntimeError> {
+        if !command.memory_preparation_id.is_empty() {
+            return self
+                .router
+                .send_prepared_memory_import(node_id, command)
+                .map_err(IntegrationRuntimeError::Route);
+        }
         self.router
             .import_memory(
                 node_id,
@@ -112,6 +118,22 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         execution_id: &str,
         command: ExecutionCommand,
     ) -> Result<ExecutionCommand, IntegrationRuntimeError> {
+        let requirements = self
+            .control
+            .group(command.group_id())
+            .and_then(|group| group.role_requirement(command.task_ref(), command.role_id()))
+            .map(|role| role.memories().to_vec())
+            .unwrap_or_default();
+        if !command.memory_requirements().is_empty()
+            && command.memory_requirements() != requirements
+        {
+            return Err(IntegrationRuntimeError::Protocol(
+                "dispatch changes accepted Memory requirements".into(),
+            ));
+        }
+        let command = command
+            .with_memory_requirements(requirements)
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
         let evidence = if let Some(original) = self.runtime.execution_command(execution_id) {
             if command.registration_evidence().is_some()
                 && command.registration_evidence() != original.registration_evidence()
@@ -125,8 +147,10 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             self.state
                 .node(command.node_id())
                 .filter(|node| {
-                    node.registration().contract_version().as_str()
-                        == domain::NODE_CONTRACT_VERSION_V0_8
+                    matches!(
+                        node.registration().contract_version().as_str(),
+                        domain::NODE_CONTRACT_VERSION_V0_8 | domain::NODE_CONTRACT_VERSION_V0_9
+                    )
                 })
                 .map(|node| {
                     domain::ExecutionRegistrationEvidence::from_registration(
@@ -164,6 +188,11 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         Ok(())
     }
 
+    /// Exposes existing durable intents for application-owned prerequisite orchestration.
+    pub fn pending_dispatch_intents(&self) -> Vec<runtime::DispatchIntent> {
+        self.runtime.pending_dispatch_intents()
+    }
+
     /// Compares immutable dispatch declarations with the same accepted route before any new Execute.
     pub(super) fn dispatch_registration_is_current(&self, command: &ExecutionCommand) -> bool {
         let Some(original) = command.registration_evidence() else {
@@ -182,17 +211,52 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     }
 
     /// Delivers one already persisted Execute intent through the current Node route.
+    #[cfg(test)]
     pub(super) fn flush_dispatch_intent(
         &mut self,
         execution_id: &str,
         command: &ExecutionCommand,
         resource_ids: &mut Vec<ResourceId>,
     ) -> Result<(), IntegrationRuntimeError> {
+        self.flush_dispatch_intent_with_preparation(execution_id, command, resource_ids, None, None)
+    }
+
+    /// Delivers only an exact application-committed prepared context; old entrypoints cannot bypass it.
+    fn flush_dispatch_intent_with_preparation(
+        &mut self,
+        execution_id: &str,
+        command: &ExecutionCommand,
+        resource_ids: &mut Vec<ResourceId>,
+        preparation: Option<&domain::MemoryPreparation>,
+        now: Option<TimestampMs>,
+    ) -> Result<(), IntegrationRuntimeError> {
         if !self.dispatch_registration_is_current(command) {
             return Err(IntegrationRuntimeError::Route(
                 tonic::Status::failed_precondition(
                     "original dispatch registration/session changed; explicit reconciliation is required",
                 ),
+            ));
+        }
+        if !command.memory_requirements().is_empty() {
+            let context = preparation.ok_or_else(|| {
+                IntegrationRuntimeError::Protocol(
+                    "Memory prerequisites require a committed prepared-context permit".into(),
+                )
+            })?;
+            let now = now.ok_or_else(|| {
+                IntegrationRuntimeError::Protocol(
+                    "prepared dispatch requires current receive time".into(),
+                )
+            })?;
+            if context.execution_id != execution_id || context.node_id != *command.node_id() {
+                return Err(IntegrationRuntimeError::Protocol(
+                    "prepared dispatch names another original attempt".into(),
+                ));
+            }
+            self.validate_memory_preparation(context, now)?;
+        } else if preparation.is_some() {
+            return Err(IntegrationRuntimeError::Protocol(
+                "a command with no Memory requirements cannot borrow a prepared context".into(),
             ));
         }
         resource_ids.sort();
@@ -203,17 +267,41 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .transpose()
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
             .unwrap_or_default();
-        let route_result = self.router.execute_with_session(
-            command.node_id().as_str(),
-            format!("dispatch-{execution_id}"),
-            execution_id.to_string(),
-            invocation_from_command(command),
-            resource_ids
-                .iter()
-                .map(|resource_id| resource_id.as_str().to_string())
-                .collect(),
-            session_json,
-        );
+        let route_result = if let Some(preparation) = preparation {
+            self.router.execute_with_preparation(
+                command.node_id().as_str(),
+                integration::grpc::v0_4::Execute {
+                    session_id: String::new(),
+                    execution_id: execution_id.into(),
+                    invocation: Some(invocation_from_command(command)),
+                    resource_ids: resource_ids
+                        .iter()
+                        .map(|id| id.as_str().to_string())
+                        .collect(),
+                    command_id: format!("dispatch-{execution_id}"),
+                    execution_session_json: session_json,
+                    controller_epoch: String::new(),
+                    memory_preparation_id: preparation.preparation_id.clone(),
+                    memory_preparation_digest: preparation
+                        .digest()
+                        .map_err(IntegrationRuntimeError::Protocol)?,
+                    memory_requirements_json: serde_json::to_string(command.memory_requirements())
+                        .map_err(|e| IntegrationRuntimeError::Protocol(e.to_string()))?,
+                },
+            )
+        } else {
+            self.router.execute_with_session(
+                command.node_id().as_str(),
+                format!("dispatch-{execution_id}"),
+                execution_id.to_string(),
+                invocation_from_command(command),
+                resource_ids
+                    .iter()
+                    .map(|resource_id| resource_id.as_str().to_string())
+                    .collect(),
+                session_json,
+            )
+        };
         self.runtime.record_dispatch_attempt(execution_id);
         if let Err(error) = route_result {
             return Err(error.into());
@@ -223,7 +311,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
 
     /// Delivers every persisted Execute intent that is still waiting for a route.
     pub fn flush_dispatch_outbox(&mut self) -> Result<usize, IntegrationRuntimeError> {
-        self.flush_dispatch_outbox_using_clock(None, &BTreeSet::new())
+        self.flush_dispatch_outbox_using_clock(None, &BTreeSet::new(), None)
     }
 
     /// Rechecks current Group deadlines immediately before persisted Execute delivery.
@@ -234,6 +322,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.flush_dispatch_outbox_using_clock(
             Some(&runtime::FixedClock::new(now)),
             &BTreeSet::new(),
+            None,
         )
     }
 
@@ -242,7 +331,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         &mut self,
         clock: &impl ports::Clock,
     ) -> Result<usize, IntegrationRuntimeError> {
-        self.flush_dispatch_outbox_using_clock(Some(clock), &BTreeSet::new())
+        self.flush_dispatch_outbox_using_clock(Some(clock), &BTreeSet::new(), None)
     }
 
     /// Applies read-only Orchestration Group holds to delivery; no command is removed or rewritten.
@@ -251,7 +340,17 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         clock: &impl ports::Clock,
         held_groups: &BTreeSet<ExecutionGroupId>,
     ) -> Result<usize, IntegrationRuntimeError> {
-        self.flush_dispatch_outbox_using_clock(Some(clock), held_groups)
+        self.flush_dispatch_outbox_using_clock(Some(clock), held_groups, None)
+    }
+
+    /// Applies committed Memory readiness together with existing holds before dispatching any Group member.
+    pub fn flush_dispatch_outbox_with_memory(
+        &mut self,
+        clock: &impl ports::Clock,
+        held_groups: &BTreeSet<ExecutionGroupId>,
+        preparations: &BTreeMap<String, domain::MemoryPreparation>,
+    ) -> Result<usize, IntegrationRuntimeError> {
+        self.flush_dispatch_outbox_using_clock(Some(clock), held_groups, Some(preparations))
     }
 
     /// Applies an optional receive clock; absent time cannot deliver Group recovery.
@@ -259,12 +358,29 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         &mut self,
         clock: Option<&dyn ports::Clock>,
         held_groups: &BTreeSet<ExecutionGroupId>,
+        preparations: Option<&BTreeMap<String, domain::MemoryPreparation>>,
     ) -> Result<usize, IntegrationRuntimeError> {
         let intents = self.runtime.pending_dispatch_intents();
+        let memory_held = intents
+            .iter()
+            .filter(|intent| !intent.command.memory_requirements().is_empty())
+            .filter(|intent| {
+                preparations
+                    .and_then(|contexts| contexts.get(&intent.execution_id))
+                    .zip(clock.map(ports::Clock::now))
+                    .is_none_or(|(context, now)| {
+                        self.validate_memory_preparation(context, now).is_err()
+                    })
+            })
+            .map(|intent| intent.command.group_id().clone())
+            .collect::<BTreeSet<_>>();
         let state = self.decision_state();
         let mut delivered = 0;
         let mut first_error = None;
         for intent in intents {
+            if memory_held.contains(intent.command.group_id()) {
+                continue;
+            }
             if !self.dispatch_registration_is_current(&intent.command) {
                 continue;
             }
@@ -307,8 +423,17 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 continue;
             }
             let mut resources = intent.resource_ids.clone();
-            match self.flush_dispatch_intent(&intent.execution_id, &intent.command, &mut resources)
-            {
+            match self.flush_dispatch_intent_with_preparation(
+                &intent.execution_id,
+                &intent.command,
+                &mut resources,
+                preparations.and_then(|contexts| contexts.get(&intent.execution_id)),
+                if intent.command.memory_requirements().is_empty() {
+                    None
+                } else {
+                    clock.map(ports::Clock::now)
+                },
+            ) {
                 Ok(()) => delivered += 1,
                 Err(error) if first_error.is_none() => first_error = Some(error),
                 Err(_) => {}
@@ -417,7 +542,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         &mut self,
         clock: Option<&dyn ports::Clock>,
     ) -> Result<usize, IntegrationRuntimeError> {
-        let dispatches = self.flush_dispatch_outbox_using_clock(clock, &BTreeSet::new());
+        let dispatches = self.flush_dispatch_outbox_using_clock(clock, &BTreeSet::new(), None);
         let cancellations = self.flush_cancellation_outbox_using_clock(clock);
         match (dispatches, cancellations) {
             (Ok(dispatches), Ok(cancellations)) => Ok(dispatches.saturating_add(cancellations)),

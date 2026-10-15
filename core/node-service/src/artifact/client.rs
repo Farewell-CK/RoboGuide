@@ -68,6 +68,7 @@ impl ArtifactClient {
             builder = builder.identity(identity).add_root_certificate(root);
         }
         Ok(Self {
+            acquisition_guard: None,
             publication: None,
             memory_import_id: None,
             client: builder.build()?,
@@ -438,6 +439,7 @@ impl ArtifactClient {
         destination: &Path,
         expected_size: u64,
     ) -> Result<(), ArtifactError> {
+        self.check_acquisition()?;
         let digest = normalize_digest(digest)?;
         if expected_size > self.max_artifact_bytes {
             return Err(ArtifactError::Configuration(format!(
@@ -461,7 +463,8 @@ impl ArtifactClient {
         let temporary = temporary_path(destination);
         let result = self
             .download_response(response, &temporary, digest.clone(), expected_size)
-            .await;
+            .await
+            .and_then(|()| self.check_acquisition());
         if result.is_err() {
             let _ = remove_temporary_file(&temporary).await;
         }
@@ -631,9 +634,13 @@ impl ArtifactClient {
                     "download exceeds configured artifact limit".to_string(),
                 ));
             }
-            hasher.update(&chunk);
-            file.write_all(&chunk).await?;
+            for part in chunk.chunks(self.chunk_size_bytes) {
+                self.check_acquisition()?;
+                hasher.update(part);
+                file.write_all(part).await?;
+            }
         }
+        self.check_acquisition()?;
         file.flush().await?;
         if size != expected_size {
             return Err(ArtifactError::SizeMismatch {
@@ -649,6 +656,14 @@ impl ArtifactClient {
             });
         }
         file.sync_all().await?;
+        Ok(())
+    }
+
+    /// Rechecks original receiver authority without issuing requests or extending its lifetime.
+    fn check_acquisition(&self) -> Result<(), ArtifactError> {
+        if let Some(guard) = &self.acquisition_guard {
+            guard()?;
+        }
         Ok(())
     }
 

@@ -345,6 +345,13 @@ impl ExecutionGroup {
         self.task_executions.get(task_ref)
     }
 
+    /// Identifies prerequisite authority that older checkpoint readers must never silently ignore.
+    pub fn has_memory_requirements(&self) -> bool {
+        self.role_requirements
+            .values()
+            .any(|role| !role.memories().is_empty())
+    }
+
     /// Returns Control's immutable role metadata captured from the accepted MissionPlan.
     pub fn role_requirement(
         &self,

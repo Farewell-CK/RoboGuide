@@ -38,6 +38,7 @@ impl Fixture {
         let controller = Arc::new(Mutex::new(ControllerState {
             mission_admissions: BTreeMap::new(),
             memory_imports: BTreeMap::new(),
+            memory_preparation: Default::default(),
             safety_stops: BTreeMap::new(),
             bridge: IntegrationRuntimeBridge::new(
                 control,

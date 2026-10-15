@@ -12,6 +12,12 @@ pub struct ArtifactStager {
 }
 
 impl ArtifactStager {
+    /// Attaches a durable receiver fence to a transient acquisition facade, preserving TLS/cache.
+    pub(crate) fn with_acquisition_guard(&self, guard: AcquisitionGuard) -> Self {
+        let mut stager = self.clone();
+        stager.client.acquisition_guard = Some(guard);
+        stager
+    }
     /// Preserves exact cache/TLS ownership while attaching current Node publication routing context.
     pub(crate) fn for_publication(
         &self,

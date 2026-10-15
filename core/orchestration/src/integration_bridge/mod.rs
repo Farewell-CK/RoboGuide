@@ -32,6 +32,7 @@ mod execution_facts;
 mod group_recovery;
 mod ingestion;
 mod liveness;
+mod memory_preparation;
 mod relation_view;
 
 use conversion::*;
@@ -40,7 +41,10 @@ pub use dispatch::{RecoveryDeploymentSupport, RecoverySupportDisposition};
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
 /// Version 21 additionally fences exact Control-owned Memory membership authority.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v21";
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v22";
+/// Last inner wrapper without accepted Memory prerequisite command identity.
+const PRE_MEMORY_PREPARATION_CONTROLLER_CHECKPOINT_SCHEMA: &str =
+    "roboguide.controller-checkpoint/v21";
 /// Last inner authority checkpoint without exact Control-owned Group membership versions.
 const PRE_MEMORY_AUTHORITY_CONTROLLER_CHECKPOINT_SCHEMA: &str =
     "roboguide.controller-checkpoint/v20";

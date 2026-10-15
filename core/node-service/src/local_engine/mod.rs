@@ -24,9 +24,10 @@ use crate::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityProfileConfig,
     CapabilityReadinessConfig, ConnectionConfig, ExecutionStateMappingConfig, HealthCheckConfig,
-    LocalOperationConfig, LocalSystemConfig, MemoryContinuityConfig, MemoryProviderConfig,
-    MemoryWorkflowConfig, NodeServiceConfig, OperationBindingConfig, PeerChannelObserverConfig,
-    ResourceConfig, SensorConfig, StateExportConfig, WorkflowConfig, WorkflowStepConfig,
+    LocalOperationConfig, LocalSystemConfig, MemoryAvailabilityConfig, MemoryContinuityConfig,
+    MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig, OperationBindingConfig,
+    PeerChannelObserverConfig, ResourceConfig, SensorConfig, StateExportConfig, WorkflowConfig,
+    WorkflowStepConfig,
 };
 use driver::{CompiledDriverRequest, DriverKind};
 use mapping::{
@@ -59,6 +60,8 @@ pub const CONFIG_SCHEMA_V0_7: &str = "roboguide.node-config/v0.7";
 pub const CONFIG_SCHEMA_V0_8: &str = "roboguide.node-config/v0.8";
 /// Schema with explicitly registered typed-map producer provenance and publication attempts.
 pub const CONFIG_SCHEMA_V0_9: &str = "roboguide.node-config/v0.9";
+/// Schema negotiating durable Memory preparation and current backend observation.
+pub const CONFIG_SCHEMA_V0_10: &str = "roboguide.node-config/v0.10";
 /// Maximum peer endpoints accepted from one bounded local observation.
 const MAX_PEER_CHANNELS_PER_OBSERVATION: usize = 64;
 /// Maximum JSON bytes accepted from one local peer readiness response.
@@ -293,6 +296,17 @@ pub struct CompiledMemoryProvider {
     import: Option<CompiledMemoryWorkflow>,
     /// Explicit readonly backend continuity contract, never inferred from a ledger path.
     continuity: Option<CompiledMemoryContinuity>,
+    /// Explicit readonly actual-content observation, absent from historical providers.
+    availability: Option<CompiledMemoryAvailability>,
+}
+
+/// Compiled provider-local current-content observation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledMemoryAvailability {
+    /// Fixed read-only provider route under its registered Local EAIOS owner.
+    observation: CompiledWorkflowStep,
+    /// Response-relative versioned availability evidence pointer.
+    result_pointer: String,
 }
 
 /// Compiled fixed readonly backend identity and import-query endpoints.

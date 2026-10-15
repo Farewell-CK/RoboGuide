@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/memory/preparation-v0.1/control.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "preparation_id",
+    "preparation_digest",
+    "operation",
+    "generation",
+    "preparation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "roboguide.memory-control/v0.1"
+    },
+    "preparation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "preparation_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "operation": {
+      "enum": [
+        "prepare",
+        "probe",
+        "revoke"
+      ]
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 16
+    },
+    "preparation": {
+      "oneOf": [
+        {
+          "$ref": "preparation.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "prepare"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "generation": {
+            "const": 0
+          },
+          "preparation": {
+            "$ref": "preparation.schema.json"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "probe"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "generation": {
+            "minimum": 1
+          },
+          "preparation": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "revoke"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "generation": {
+            "const": 0
+          },
+          "preparation": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

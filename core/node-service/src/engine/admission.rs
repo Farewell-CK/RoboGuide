@@ -15,19 +15,8 @@ impl LocalIntegrationEngine {
             .ok_or_else(|| {
                 EngineError::Configuration("Memory consumer provider is unavailable".into())
             })?;
-        let content = integration::memory_import_authorization_digest(
-            &import.import_id,
-            &import.command_id,
-            &import.consumer_provider_id,
-            &import.manifest_json,
-            &import.mission_id,
-            &import.group_id,
-            &import.task_id,
-            &import.role_id,
-            &import.execution_id,
-            "",
-        );
-        let mut identity = format!("{content}\n{provider:?}");
+        let content = integration::memory_import_content_digest(import);
+        let mut identity = format!("{content}\n{}", provider.identity_content());
         if let Some(workflow) = provider.import() {
             let connections = workflow
                 .steps()
@@ -57,6 +46,9 @@ impl LocalIntegrationEngine {
         &self,
         import: &integration::grpc::v0_4::MemoryImport,
     ) -> Result<(), EngineError> {
+        if !import.memory_preparation_id.is_empty() {
+            return self.validate_prepared_memory_import(import);
+        }
         let execution = self
             .inner
             .journal
@@ -143,8 +135,26 @@ impl LocalIntegrationEngine {
         &self,
         execution_id: String,
         invocation: CanonicalInvocation,
+        resource_ids: Vec<String>,
+        execution_session_json: &str,
+    ) -> Result<ExecuteDisposition, EngineError> {
+        self.execute_with_memory_context(
+            execution_id,
+            invocation,
+            resource_ids,
+            execution_session_json,
+            None,
+        )
+    }
+
+    /// Admits the exact original invocation while retaining the prepared-context identity in SQL.
+    pub(super) fn execute_with_memory_context(
+        &self,
+        execution_id: String,
+        invocation: CanonicalInvocation,
         mut resource_ids: Vec<String>,
         execution_session_json: &str,
+        preparation: Option<&domain::MemoryPreparation>,
     ) -> Result<ExecuteDisposition, EngineError> {
         validate_invocation_identity(&execution_id, &invocation)?;
         let session = if execution_session_json.is_empty() {
@@ -179,6 +189,15 @@ impl LocalIntegrationEngine {
                     "execution_session".to_string(),
                     serde_json::to_value(session).map_err(EngineError::Json)?,
                 );
+        }
+        if let Some(preparation) = preparation {
+            if invocation_json != preparation.invocation {
+                return Err(EngineError::Configuration(
+                    "Execute differs from its immutable prepared invocation".into(),
+                ));
+            }
+            invocation_json.as_object_mut().expect("canonical invocation object").insert(
+                "memory_preparation".into(),serde_json::json!({"preparation_id":preparation.preparation_id,"preparation_digest":preparation.digest().map_err(EngineError::Configuration)?, "inputs":preparation.inputs}));
         }
         let workflow_digest = workflow_digest(&self.inner.catalog, &capability, &invocation_json)?;
         let spec = ExecutionSpec::new(

@@ -56,6 +56,12 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 拒绝剥离投影、撤除/修改/downgrade 和旧 v33 binary；Group grant/撤销、pre-Execute、handoff、
 active-map/GC 和其余阶段继续实施；不从文件测试推断设备能力。
 
+[执行前 Memory 准备切片](acceptance/2026-10-15-f4-memory-preparation.md)已通过实际两软件 Node 的
+Prepare ACK→原 import/SQL 中断只读对账→当前 bytes Probe→Execute→独立验证与重启检查。
+原 boot/monotonic 预算、不可逆撤销 ACK、整组 pending barrier、wrapper v35 / inner v22 /
+journal v9 和旧版本拒绝已接线。完整 Group lifetime/handoff、typed-map 消费、active-map/GC
+仍继续实施；F4 不提前关闭，F5–F10 继续为必需项。
+
 ## 已接受的实现决定
 
 - Stop 冻结完整受影响 attempt 集合、operation-owned export、策略、owner/session 和 deadline。

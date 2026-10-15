@@ -158,6 +158,7 @@ fn registration_rejects_execution_group_memory_provider_scope() {
         node_contract_version: LEGACY_NODE_CONTRACT_VERSION.to_string(),
         state_exports: Vec::new(),
         memory_providers: vec![crate::grpc::v0_4::MemoryProviderDescriptor {
+            preparation_contract: String::new(),
             provider_id: "experience".to_string(),
             local_system_id: "memory".to_string(),
             kind: crate::grpc::v0_4::MemoryKind::Experience as i32,

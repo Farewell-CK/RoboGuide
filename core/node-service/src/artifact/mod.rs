@@ -219,6 +219,8 @@ impl ArtifactError {
 /// HTTP client for the independent artifact data plane.
 #[derive(Clone)]
 pub struct ArtifactClient {
+    /// Optional current receiver authority, checked before acquisition and every bounded write.
+    acquisition_guard: Option<AcquisitionGuard>,
     /// Current Node session and exact publishing attempt, resolved by the Controller rather than trusted.
     publication: Option<(NodeId, String, String)>,
     /// Opaque original Controller import identity; the server resolves current permission independently.
@@ -234,6 +236,10 @@ pub struct ArtifactClient {
     /// Exact client-certificate namespace for remotely hosted uploads.
     upload_prefix: Option<String>,
 }
+
+/// Process-local reader of durable authority; it carries no credential or renewable deadline.
+pub(crate) type AcquisitionGuard =
+    std::sync::Arc<dyn Fn() -> Result<(), ArtifactError> + Send + Sync>;
 
 #[cfg(test)]
 #[path = "../artifact_tests.rs"]

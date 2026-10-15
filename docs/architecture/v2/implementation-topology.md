@@ -47,6 +47,17 @@ flowchart TB
   Entry --> MAUTH
   MAUTH --> MINT
   MAUTH --> ART
+  RT --> PREP[原 Memory context / Prepare ACK / Group pending barrier]
+  MAUTH --> PREP
+  CAT --> PREP
+  PREP --> SQL
+  PREP --> PROTO
+  MEM --> AVAIL[原 backend / 当前 bytes / 一次性 Probe]
+  AVAIL --> PROTO
+  PROTO --> PREP
+  PREP -->|当前许可与原预算通过才发送| RT
+  PREP --> REVOKE[durable Revoke ACK / 独立 stop hold]
+  REVOKE --> PROTO
   ART --> UPLOAD[原 upload / bytes 校验与 fsync / CAS 归属 receipt]
   UPLOAD --> SQL
   ART --> CAT[Memory / Spatial catalog 与 placement evidence]
@@ -107,12 +118,25 @@ v8 保留原 v7 table layout/readonly legacy views，并通过双版本 marker �
 [内容授权合同](../../../contracts/memory/authorization-v0.1/README.md)规定显式 policy、成员版本、
 稳定证书主体、当前 tenant 与实际 bytes 归属。Catalog/上传副作用重新核对当前权限，blob 流
 逐块检查；已有 CAS 哈希不能授权另建 manifest，旧成员版本不能因回到原 Node 而复活。
-Imported 历史不能授予当前可用性租约，Memory 对账不能满足 Task。完整 Node Group grant、
-撤销 ACK、pre-Execute 准备、handoff 和 active-map/GC 仍属 F4 必需工作。
+Imported 历史不能授予当前可用性租约，Memory 对账不能满足 Task。
+
+当前 pre-Execute 切片使用 MissionPlan v0.9 语义需求、Node config v0.10 / Contract v0.9，
+在实际 operation owner 下选择已注册 receiver。原上下文、source session、policy/membership、
+manifest/raw map 与 import ID 先持久化；Prepare ACK 之后才能导入，原实例当前 bytes 的
+一次性 observation 通过之后才放行 Group 中的 pending Execute。Node 再检查完整当前内容、
+配置、原预算和撤销 fence。接收预算取实际 Linux boot/monotonic，并保守扣除观察精度；
+Controller 保留自己的 receive/deadline，两者不跨主机比较。
+Revoke 先入 journal 再 ACK，先到也保留 tombstone。下载在每个有界写块检查 receiver 原预算，
+CAS 服务同时逐块核对当前授权；精确原导入的 manifest 查询使用其 Read 授权，不授予目录发现。
+Controller restart 撤销未结束的原准备授权，不重置时限或重做导入。wrapper v35 / inner v22 /
+Node journal v9 拒绝旧版本，包括零事件快照和 SQLite 版本头回退。
+实际两软件节点的 SQL 中断→原 provider 只读查询→当前可用性→真实计算→独立验证链路见
+[准备验收](../../development/acceptance/2026-10-15-f4-memory-preparation.md)。
+完整 Group lifetime/handoff、typed-map 消费、active-map/GC 仍属 F4 必需工作。
 
 当前独立 Spatial 文件计算已通过[实际文件验收](../../development/acceptance/2026-10-15-f4-spatial-files.md)。
 这些计算只生成文件产物，不能证明当前定位。实际 Node workflow 已冻结并上传原 bundle 至 CAS，
 独立 source/tile verifier、mTLS producer 校验与旧二进制拒绝见
 [producer 验收](../../development/acceptance/2026-10-15-f4-map-provider-authority.md)。
 显式 Occupancy profile 使用 SE(2)，free/occupied/conflict/unknown 保持分离；原始 monotonic
-deadline 不因 wall rollback 或换 host 续期。Group consumer/preparation、完整内容策略和地图激活仍需完成。
+deadline 不因 wall rollback 或换 host 续期。完整地图消费/激活、Group lifetime/handoff 与 GC 仍需完成。

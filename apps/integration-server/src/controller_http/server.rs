@@ -986,6 +986,19 @@ where
                 serde_json::json!({"ready":false,"reason":"authority storage or quorum unavailable"}),
             ),
         },
+        ("GET", "/v1/memory/preparations") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            (
+                "200 OK",
+                serde_json::json!({
+                    "schema_version":"roboguide.memory-preparation-view/v0.1",
+                    "records":live.memory_preparation.records,
+                    "receipt_is_physical_stop_proof":false,
+                }),
+            )
+        }
         ("GET", "/v1/recovery") => {
             let controller = controller
                 .lock()

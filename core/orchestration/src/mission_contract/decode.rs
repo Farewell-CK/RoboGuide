@@ -8,11 +8,11 @@ use domain::{
     ExecutionRelationSpec, ExecutionRelationType, FreshnessPolicyRef, GroupSharedViewSpec,
     GroupViewBinding, GroupViewField, MISSION_PLAN_SCHEMA_V0_2, MISSION_PLAN_SCHEMA_V0_3,
     MISSION_PLAN_SCHEMA_V0_4, MISSION_PLAN_SCHEMA_V0_5, MISSION_PLAN_SCHEMA_V0_6,
-    MISSION_PLAN_SCHEMA_V0_7, MISSION_PLAN_SCHEMA_V0_8, MapId, MapRevisionId, MapRevisionSelector,
-    MissionActor, MissionGoal, MissionId, MissionPlan, OperationRef, PeerChannelSpec,
-    PhysicalEntityId, PlannedExecutionRef, PlannedTask, RelationStateRequirement,
-    ResourceRequirement, RoleId, RoleRequirement, SharedSpatialReference, TaskContinuity,
-    TaskGraph, TaskId, TaskRequirement, TaskSatisfactionBasis, TaskTiming,
+    MISSION_PLAN_SCHEMA_V0_7, MISSION_PLAN_SCHEMA_V0_8, MISSION_PLAN_SCHEMA_V0_9, MapId,
+    MapRevisionId, MapRevisionSelector, MissionActor, MissionGoal, MissionId, MissionPlan,
+    OperationRef, PeerChannelSpec, PhysicalEntityId, PlannedExecutionRef, PlannedTask,
+    RelationStateRequirement, ResourceRequirement, RoleId, RoleRequirement, SharedSpatialReference,
+    TaskContinuity, TaskGraph, TaskId, TaskRequirement, TaskSatisfactionBasis, TaskTiming,
     VerifierSatisfactionSpec,
 };
 use std::collections::BTreeMap;
@@ -43,6 +43,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_6
             | MISSION_PLAN_SCHEMA_V0_7
             | MISSION_PLAN_SCHEMA_V0_8
+            | MISSION_PLAN_SCHEMA_V0_9
     ) {
         return Err(OrchestrationError::Mission(format!(
             "unsupported MissionPlan schema {}",
@@ -57,6 +58,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_6
             | MISSION_PLAN_SCHEMA_V0_7
             | MISSION_PLAN_SCHEMA_V0_8
+            | MISSION_PLAN_SCHEMA_V0_9
     );
     let mode_contract = matches!(
         document.schema_version.as_str(),
@@ -65,6 +67,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_6
             | MISSION_PLAN_SCHEMA_V0_7
             | MISSION_PLAN_SCHEMA_V0_8
+            | MISSION_PLAN_SCHEMA_V0_9
     );
     let scheduling_contract = matches!(
         document.schema_version.as_str(),
@@ -72,16 +75,37 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_6
             | MISSION_PLAN_SCHEMA_V0_7
             | MISSION_PLAN_SCHEMA_V0_8
+            | MISSION_PLAN_SCHEMA_V0_9
     );
     let satisfaction_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_6 | MISSION_PLAN_SCHEMA_V0_7 | MISSION_PLAN_SCHEMA_V0_8
+        MISSION_PLAN_SCHEMA_V0_6
+            | MISSION_PLAN_SCHEMA_V0_7
+            | MISSION_PLAN_SCHEMA_V0_8
+            | MISSION_PLAN_SCHEMA_V0_9
     );
     let normalized_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_7 | MISSION_PLAN_SCHEMA_V0_8
+        MISSION_PLAN_SCHEMA_V0_7 | MISSION_PLAN_SCHEMA_V0_8 | MISSION_PLAN_SCHEMA_V0_9
     );
-    let binding_semantics_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_8;
+    let memory_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_9;
+    if !memory_contract
+        && document.tasks.iter().any(|task| {
+            task.roles.iter().any(|role| {
+                role.requirements
+                    .as_ref()
+                    .is_some_and(|r| r.memories.is_some())
+            })
+        })
+    {
+        return Err(OrchestrationError::Mission(
+            "Memory prerequisites require MissionPlan v0.9".into(),
+        ));
+    }
+    let binding_semantics_contract = matches!(
+        document.schema_version.as_str(),
+        MISSION_PLAN_SCHEMA_V0_8 | MISSION_PLAN_SCHEMA_V0_9
+    );
     let MissionDocument {
         id,
         objective,
@@ -158,7 +182,9 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
     if normalized_contract {
         MissionPlan::new_with_actors(goal, actors, graph, contexts)
             .map(|plan| {
-                if binding_semantics_contract {
+                if memory_contract {
+                    plan.with_v0_9_contract()
+                } else if binding_semantics_contract {
                     plan.with_v0_8_contract()
                 } else {
                     plan
@@ -576,6 +602,7 @@ fn normalized_role_from_document(
         .collect::<Result<Vec<_>, _>>()?;
     let requirement =
         RoleRequirement::new_normalized(role_id.clone(), Some(actor_id), capabilities, resources)
+            .and_then(|role| role.with_memories(requirements.memories.unwrap_or_default()))
             .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
     let intent = role.execution_intent.ok_or_else(|| {
         OrchestrationError::Mission("MissionPlan v0.7 Role lacks execution_intent".to_string())

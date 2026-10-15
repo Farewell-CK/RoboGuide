@@ -114,7 +114,10 @@ pub(crate) fn validate(
             "original dispatch provider declarations are unavailable; no automatic upgrade",
         )?;
         if evidence.node_id() != attempt.command().node_id()
-            || evidence.contract_version().as_str() != domain::NODE_CONTRACT_VERSION_V0_8
+            || !matches!(
+                evidence.contract_version().as_str(),
+                domain::NODE_CONTRACT_VERSION_V0_8 | domain::NODE_CONTRACT_VERSION_V0_9
+            )
             || evidence.source_session_id().is_none_or(str::is_empty)
             || evidence
                 .memory_providers()
@@ -125,9 +128,11 @@ pub(crate) fn validate(
             return Err("map provider differs from original dispatch declarations".into());
         }
     }
-    if registration.contract_version().as_str() != domain::NODE_CONTRACT_VERSION_V0_8
-        || registration.operation_owner(source.command().intent().operation())
-            != manifest.producer_local_system_id()
+    if !matches!(
+        registration.contract_version().as_str(),
+        domain::NODE_CONTRACT_VERSION_V0_8 | domain::NODE_CONTRACT_VERSION_V0_9
+    ) || registration.operation_owner(source.command().intent().operation())
+        != manifest.producer_local_system_id()
         || registration.operation_owner(command.intent().operation())
             != manifest.producer_local_system_id()
     {

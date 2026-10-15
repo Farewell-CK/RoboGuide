@@ -21,7 +21,7 @@ pub use grpc_server::{
     GrpcLegacyV02Service, GrpcNodeEvent, GrpcNodeEventCompletion, GrpcNodeEventDelivery,
     GrpcNodeRouter, MAX_MEMORY_IMPORT_MANIFEST_BYTES, MEMORY_IMPORT_METADATA_KEY,
     MEMORY_IMPORT_METADATA_VALUE, NodeIdentityPolicy, memory_import_authorization_digest,
-    memory_import_content_digest, memory_import_query_digest,
+    memory_import_content_digest, memory_import_query_digest, prepared_memory_import_digest,
 };
 pub use ports::{NodeLeasePolicy, NodeProtocolPolicy};
 

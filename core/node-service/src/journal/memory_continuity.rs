@@ -81,6 +81,16 @@ impl ImportContinuity {
             task_id: text("task_id")?,
             role_id: text("role_id")?,
             execution_id: text("execution_id")?,
+            memory_preparation_id: value
+                .get("memory_preparation_id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .into(),
+            typed_map_manifest_json: value
+                .get("typed_map_manifest_json")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .into(),
             ..Default::default()
         };
         if original.import_id != self.import_id
@@ -189,6 +199,44 @@ pub struct ImportQueryRecord {
 }
 
 impl ExecutionJournal {
+    /// Retains raw Unknown while recognizing a conclusive original query; this grants no current lease.
+    pub fn memory_import_completion_known(&self, import_id: &str) -> Result<bool, JournalError> {
+        let record = self.memory_import(import_id)?;
+        let Some(original) = self.import_continuity(import_id)? else {
+            return Ok(false);
+        };
+        let mut outcome = record.as_ref().and_then(|record| match record.status() {
+            crate::MemoryImportStatus::Completed => Some(crate::MemoryImportStatus::Completed),
+            crate::MemoryImportStatus::Rejected => Some(crate::MemoryImportStatus::Rejected),
+            _ => None,
+        });
+        let connection = self.lock_connection()?;
+        let mut query=connection.prepare("SELECT result_json FROM memory_import_queries_v7 WHERE import_id=?1 AND result_json IS NOT NULL ORDER BY query_id LIMIT 17")?;
+        let results = query
+            .query_map([import_id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if results.len() > 16 {
+            return Err(JournalError::Corrupt(
+                "original import query history exceeds its bound".into(),
+            ));
+        }
+        for encoded in results {
+            let result: ImportQueryResult = serde_json::from_str(&encoded)?;
+            let current = result.status(&original)?;
+            if matches!(
+                current,
+                crate::MemoryImportStatus::Completed | crate::MemoryImportStatus::Rejected
+            ) {
+                if outcome.is_some_and(|prior| prior != current) {
+                    return Err(JournalError::Corrupt(
+                        "original import conclusions conflict".into(),
+                    ));
+                }
+                outcome = Some(current);
+            }
+        }
+        Ok(outcome == Some(crate::MemoryImportStatus::Completed))
+    }
     /// Returns the original backend evidence, preserving absence for legacy imports.
     pub fn import_continuity(
         &self,

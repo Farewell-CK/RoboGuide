@@ -131,3 +131,33 @@ v0.1 保持可恢复但不能包含新字段。管理者可用期望 revision �
 map 的 v0.2；不允许修改既有 digest、删除 typed digest 或降回 v0.1。缺失依据绝不从当前
 元数据静默补齐。wrapper v34 防止旧 Controller 忽略这条新权威，包括零事件策略更新。
 这是内容策略切片；Group grant、pre-Execute、可用性、handoff、active-map 和 GC 仍需闭环。
+
+## 执行前准备与当前可用性（实施中）
+
+MissionPlan v0.9 的 Role requirements 可包含至多 8 个 semantic Memory selector、kind、
+payload schema 和 media；不含 consumer provider、Node、路径或当前 inventory。旧 v0.8
+及以前不能携带该字段。Control 在实际 binding 后根据当前注册 provider 选定精确消费者，
+验证内容策略与当前 Group membership，冻结完整原 manifest/typed-map 与 import identity。
+
+新 Node Contract v0.9 显式协商 Prepare / Probe / Revoke。Prepare 持久化原调用、provider
+声明、策略/membership、接收 session 和不可续期预算，只有 durable receipt 后允许 import；
+它不执行 Local How、不创建所有权、不证明内容可用。所有输入实际导入且原 backend 的只读
+availability 检查通过后，Controller 才发送带 exact preparation 的 Execute。Node 在调用
+Local How 前复核原 context、预算、当前 provider、完整 bytes 和 backend instance。
+
+Node 原始预算使用同 host boot 的 monotonic receive stamp；重复消息、连接/进程重启不续期，
+不同 host boot 拒绝。Controller 使用自己的 receive/deadline，不能比较两个主机的 wall clock。
+撤销先 durable fence 后 ACK；失联、无 ACK 或 backend 不可用保持未知与所有权，不用 Imported
+历史充当当前可用性。反复 probe 也有原始次数/时间预算，不允许无界缓存 lease。
+
+完整 raw typed-map 随 import context 保留；通用投影不能丢弃 frame/anchor 来源。wire 只传
+metadata 与 identity，bytes 仍走 CAS。准备权威以 wrapper v35 / inner v22 和 Node journal v9
+持久化，旧二进制拒绝；原有事件 payload 结构未变，保留 codec v24。命令/回执原文与完整
+checkpoint digest 仍在应用 authority journal 中提交，事件日志不取代该权威。
+所有正向证据使用真实 CPU 文件 provider 与正式 Node，不构造机器人、传感器或物理停止事实。
+
+当前文件进程切片已验证 Prepare ACK、原导入中断只读查询、当前 bytes Probe 和整组 pending
+barrier。精确原 import 的 manifest/副本历史 GET 使用其 Read 权限，不授予目录发现；重查有
+原始预算和退避，重复 receipt 不更新时刻。Controller 重启在开放监听与恢复 outbox 前持久
+撤销原准备授权。当前 120 秒是原准备/导入/Execute 接纳窗口，尚不是可续约的运行中 Group
+内容租约。完整 Group lifetime/handoff、typed-map 消费、active-map/GC 继续实施，不由本切片关闭。

@@ -167,6 +167,8 @@ async fn memory_provider_import_is_exact_once_across_receipt_loss_and_unknown() 
     )
     .unwrap();
     let mut command = integration::grpc::v0_4::MemoryImport {
+        memory_preparation_id: String::new(),
+        typed_map_manifest_json: String::new(),
         session_id: "session-a".into(),
         import_id: "import-a".into(),
         command_id: "memory-import-import-a".into(),

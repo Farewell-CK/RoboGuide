@@ -46,6 +46,7 @@ impl LocalIntegrationEngine {
         let (peer_readiness, _) = broadcast::channel(256);
         Ok(Self {
             inner: Arc::new(EngineInner {
+                memory_context_gate: Mutex::new(()),
                 publication_session: Mutex::new(None),
                 catalog: Arc::new(catalog),
                 journal: Arc::new(journal),
@@ -357,6 +358,14 @@ impl LocalIntegrationEngine {
         } else {
             stager.clone()
         };
+        self.check_prepared_import_invocation(&invocation)?;
+        let engine = self.clone();
+        let original = invocation.clone();
+        let stager = stager.with_acquisition_guard(std::sync::Arc::new(move || {
+            engine
+                .check_prepared_import_invocation(&original)
+                .map_err(|error| ArtifactError::Configuration(error.to_string()))
+        }));
         let node_id = NodeId::new(self.catalog().node_id().to_string())
             .map_err(|error| EngineError::Memory(error.to_string()))?;
         let ledger = self.inner.memory_ledgers.get(provider_id).ok_or_else(|| {
@@ -440,6 +449,7 @@ impl LocalIntegrationEngine {
         }
         // A mapping error can follow an earlier step's effects. Preserve staged/unknown evidence;
         // only a pre-effect check can prove rejection.
+        self.check_prepared_import_invocation(&invocation)?;
         self.import_memory(provider_id, manifest, &path, invocation)
             .await?;
         stager

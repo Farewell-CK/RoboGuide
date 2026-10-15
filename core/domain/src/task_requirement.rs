@@ -25,6 +25,9 @@ pub struct RoleRequirement {
     /// Quantitative resource requirements evaluated together by Scheduler v0.2.
     #[serde(default)]
     resources: Vec<ResourceRequirement>,
+    /// Accepted immutable Memory prerequisites; consumer provider selection remains Control-owned.
+    #[serde(default)]
+    memories: Vec<MemoryRequirement>,
 }
 
 impl RoleRequirement {
@@ -37,6 +40,7 @@ impl RoleRequirement {
         Self {
             role_id,
             legacy_capability: Some(capability),
+            memories: Vec::new(),
             actor_id: None,
             legacy_contract: None,
             capabilities: Vec::new(),
@@ -58,6 +62,7 @@ impl RoleRequirement {
         Self {
             role_id,
             legacy_capability: Some(capability),
+            memories: Vec::new(),
             actor_id: Some(actor_id),
             legacy_contract: Some(contract.clone()),
             capabilities: vec![CapabilityRequirement::exact(contract)],
@@ -88,6 +93,7 @@ impl RoleRequirement {
         Ok(Self {
             role_id,
             legacy_capability: Some(capability),
+            memories: Vec::new(),
             actor_id,
             legacy_contract: contract.clone(),
             capabilities: contract
@@ -136,6 +142,7 @@ impl RoleRequirement {
         Ok(Self {
             role_id,
             legacy_capability: None,
+            memories: Vec::new(),
             actor_id,
             legacy_contract: None,
             capabilities,
@@ -145,6 +152,19 @@ impl RoleRequirement {
             },
             resources,
         })
+    }
+
+    /// Attaches semantic prerequisites without choosing a receiver or authorizing replication.
+    pub fn with_memories(mut self, memories: Vec<MemoryRequirement>) -> Result<Self, DomainError> {
+        MemoryRequirement::validate_set(&memories)
+            .map_err(|reason| DomainError::InvalidMissionPlan { reason })?;
+        self.memories = memories;
+        Ok(self)
+    }
+
+    /// Returns original accepted Memory requirements, independently of current availability.
+    pub fn memories(&self) -> &[MemoryRequirement] {
+        &self.memories
     }
 
     /// Returns the role identity.

@@ -216,6 +216,38 @@ pub(super) fn accept_current_message(
                 route.management_sequence = value.sequence;
                 &value.session_id
             }
+            Some(NodePayload::MemoryControlReceipt(value)) => {
+                if route.node_contract_version != PREPARATION_NODE_CONTRACT_VERSION {
+                    return Err(Status::failed_precondition(
+                        "Memory control receipts require Node Contract v0.9",
+                    ));
+                }
+                if value.session_id != session_id || value.sequence <= route.management_sequence {
+                    return Ok(false);
+                }
+                if value.receipt_json.len() > 256 * 1024 {
+                    return Err(Status::invalid_argument(
+                        "Memory control receipt exceeds its bound",
+                    ));
+                }
+                let receipt: domain::MemoryControlReceipt =
+                    serde_json::from_str(&value.receipt_json).map_err(|_| {
+                        Status::invalid_argument("invalid typed Memory control receipt")
+                    })?;
+                if receipt.command_id.is_empty()
+                    || receipt.command_id.len() > 256
+                    || receipt.preparation_id.is_empty()
+                    || receipt.preparation_id.len() > 128
+                    || receipt.reason.len() > 1024
+                    || receipt.observations.len() > 8
+                {
+                    return Err(Status::invalid_argument(
+                        "Memory control receipt identity or observation bound is invalid",
+                    ));
+                }
+                route.management_sequence = value.sequence;
+                &value.session_id
+            }
             Some(NodePayload::MemoryImportReceipt(value)) => {
                 if value.session_id != session_id || value.sequence <= route.management_sequence {
                     return Ok(false);
@@ -285,7 +317,8 @@ pub(super) fn validate_registration(
     if registration.node_id.trim().is_empty()
         || !matches!(
             registration.node_contract_version.as_str(),
-            PROVIDER_MAP_NODE_CONTRACT_VERSION
+            PREPARATION_NODE_CONTRACT_VERSION
+                | PROVIDER_MAP_NODE_CONTRACT_VERSION
                 | CONTINUITY_NODE_CONTRACT_VERSION
                 | NODE_CONTRACT_VERSION
                 | PREVIOUS_NODE_CONTRACT_VERSION
@@ -294,6 +327,15 @@ pub(super) fn validate_registration(
     {
         return Err(Status::invalid_argument(
             "registration node and contract identities are invalid",
+        ));
+    }
+    if registration.memory_providers.iter().any(|provider| {
+        !provider.preparation_contract.is_empty()
+            && (registration.node_contract_version != PREPARATION_NODE_CONTRACT_VERSION
+                || provider.preparation_contract != "roboguide.memory-provider-availability/v0.1")
+    }) {
+        return Err(Status::invalid_argument(
+            "Memory availability declarations require the exact negotiated v0.9 contract",
         ));
     }
     let mut local_system_ids = BTreeSet::new();
@@ -441,6 +483,7 @@ fn validate_operation_support(
         NODE_CONTRACT_VERSION
             | CONTINUITY_NODE_CONTRACT_VERSION
             | PROVIDER_MAP_NODE_CONTRACT_VERSION
+            | PREPARATION_NODE_CONTRACT_VERSION
     ) {
         if !registration.operation_support.is_empty() {
             return Err(Status::invalid_argument(

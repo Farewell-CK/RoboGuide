@@ -12,7 +12,10 @@ pub(crate) fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
 
 /// Returns whether the plan carries v0.8 actor binding semantics.
 fn has_binding_semantics(plan: &MissionPlan) -> bool {
-    plan.schema_version() == domain::MISSION_PLAN_SCHEMA_V0_8
+    matches!(
+        plan.schema_version(),
+        domain::MISSION_PLAN_SCHEMA_V0_8 | domain::MISSION_PLAN_SCHEMA_V0_9
+    )
 }
 
 /// Serializes Mission semantics that require the normalized v0.7 wire contract.
@@ -78,7 +81,7 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
                         domain::ResourceBindingScope::Task => "task",
                         domain::ResourceBindingScope::Context => "context",
                     };
-                    serde_json::json!({
+                    let mut value = serde_json::json!({
                         "id": role.role_id().as_str(),
                         "context_role": task.continuity().context_role(role.role_id()).expect("normalized MissionPlan Role has a ContextRole").as_str(),
                         "requirements": {
@@ -94,7 +97,11 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
                             "objective": intent.objective(),
                             "parameters": intent.parameters().iter().map(|(key, value)| (key.clone(), execution_value_json(value))).collect::<serde_json::Map<_,_>>(),
                         }
-                    })
+                    });
+                    if plan.schema_version() == domain::MISSION_PLAN_SCHEMA_V0_9 {
+                        value["requirements"]["memories"] = serde_json::json!(role.memories());
+                    }
+                    value
                 })
                 .collect::<Vec<_>>();
             let mut value = serde_json::json!({
@@ -141,7 +148,7 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
         .collect::<Vec<_>>();
     if has_binding_semantics(plan) {
         serde_json::json!({
-            "schema_version": domain::MISSION_PLAN_SCHEMA_V0_8,
+            "schema_version": plan.schema_version(),
             "mission": {
                 "id": plan.goal().mission_id().as_str(),
                 "objective": plan.goal().objective(),
@@ -166,6 +173,12 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
 
 /// Returns whether the v0.6 compatibility contract can preserve every semantic field.
 fn is_v0_6_compatible(plan: &MissionPlan) -> bool {
+    if matches!(
+        plan.schema_version(),
+        domain::MISSION_PLAN_SCHEMA_V0_8 | domain::MISSION_PLAN_SCHEMA_V0_9
+    ) {
+        return false;
+    }
     plan.task_graph().tasks().iter().all(|task| {
         task.expected_effect() == task.description()
             && matches!(

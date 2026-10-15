@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/memory/preparation-v0.1/receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "configuration_digest",
+    "command_id",
+    "preparation_id",
+    "preparation_digest",
+    "status",
+    "remaining_budget_ms",
+    "observations",
+    "reason"
+  ],
+  "properties": {
+    "configuration_digest": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "command_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "preparation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "preparation_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "status": {
+      "enum": [
+        "prepared",
+        "available",
+        "unavailable",
+        "revoked",
+        "rejected"
+      ]
+    },
+    "remaining_budget_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 120000
+    },
+    "observations": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "$ref": "availability.schema.json"
+      }
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 1024
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "prepared",
+              "available"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "configuration_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "remaining_budget_ms": {
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "prepared"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "observations": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "available"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "observations": {
+            "minItems": 1,
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "availability.schema.json"
+                },
+                {
+                  "properties": {
+                    "available": {
+                      "const": true
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

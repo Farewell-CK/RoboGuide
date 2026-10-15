@@ -14,6 +14,24 @@ pub(crate) fn validate_plan(
     tenant: &str,
     feed: Option<&TaskVerifierFeed>,
 ) -> Result<bool, String> {
+    if plan.task_graph().tasks().iter().any(|task| {
+        task.requirement()
+            .roles()
+            .iter()
+            .any(|role| !role.memories().is_empty())
+    }) && (controller
+        .bridge
+        .control()
+        .node_identity_registry()
+        .is_none()
+        || controller
+            .bridge
+            .control()
+            .artifact_authorization_registry()
+            .is_none())
+    {
+        return Err("distributed Memory prerequisites require enrolled Node identities and committed Artifact certificate authority".into());
+    }
     let generic = plan
         .task_graph()
         .tasks()

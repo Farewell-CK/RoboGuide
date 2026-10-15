@@ -20,6 +20,7 @@ Artifact service and Controller authorization. The local facade exposes fixed ro
 | --- | --- |
 | GET `/v1/instance` | Read the actual persistent backend UUID/provider |
 | GET `/v1/import-query` | Read original durable operation metadata and rehash current bytes |
+| GET `/v1/availability` | Prove current original-backend bytes independently of Imported history |
 | POST `/v1/import` | Journal exact original identity, copy/hash/fsync bytes, then record completion |
 | GET `/v1/discover` | Return only explicit configured publish-eligible exports with verified bytes |
 | GET `/v1/export` | Resolve only an exact configured immutable manifest to its controlled handoff path |
@@ -45,3 +46,22 @@ content is removed. There is no automatic GC or repair by reimport in this slice
 injects an actual final SQL commit failure, queries through the formal protocol, verifies reboot
 budgets and an actual old binary's journal refusal, and independently hashes imported-file output.
 Its result is software process evidence with zero devices.
+
+Config v0.10 can additionally declare the fixed read-only availability route. Its response binds
+the original import, actual persistent backend instance, immutable workflow/manifest/content
+digests and byte size. Deletion or same-size corruption returns unavailable without rewriting
+historical import state. Prepared/Imported alone cannot authorize Execute.
+
+Optional `--enable-file-jobs` exposes actual bounded CPU hashing through `/v1/file-jobs/health`,
+GET `/v1/file-jobs/status`, POST `/v1/file-jobs/compute` and POST `/v1/file-jobs/cancel`. Jobs read
+only explicit startup exports or exact previously admitted provider inputs, retain once-only
+execution IDs in SQLite, independently hash actual opened regular files, and preserve interrupted
+outcomes as UNKNOWN. Cancellation acceptance is distinct from observed cancellation; shutdown
+requests cancellation then joins actual HTTP workers before closing storage. The cooperative
+five-second/worker bounds do not establish OS-enforced CPU quota, hardware safe-state or realtime.
+
+`tools/quality/check_memory_preparation_processes.py` uses this shipped code through actual TLS
+and two formally enrolled software Nodes. It proves the explicit pre-Execute permission barrier,
+actual final-import SQL failure/read-only reconciliation, current availability, two real hash
+jobs, two independent verifiers and no duplicated computation or renewed budget after restart.
+Schema and archived-binary checks are maintained separately. Devices, models and simulators are zero.

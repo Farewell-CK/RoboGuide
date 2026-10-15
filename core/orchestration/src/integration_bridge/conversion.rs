@@ -165,14 +165,16 @@ pub(super) fn registration_from_wire(
 ) -> Result<domain::NodeRegistration, IntegrationRuntimeError> {
     let semantic_profiles = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PREVIOUS_NODE_CONTRACT_VERSION
     );
     let independent_operation_support = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::NODE_CONTRACT_VERSION
     );
@@ -420,7 +422,7 @@ pub(super) fn memory_provider_from_wire(
             ));
         }
     };
-    Ok(MemoryProviderDescriptor::new(
+    let provider = MemoryProviderDescriptor::new(
         wire.provider_id.clone(),
         LocalSystemId::new(wire.local_system_id.clone())?,
         kind,
@@ -428,7 +430,16 @@ pub(super) fn memory_provider_from_wire(
         visibility,
         wire.payload_schema.clone(),
         wire.media_type.clone(),
-    )?)
+    )?;
+    if wire.preparation_contract.is_empty() {
+        Ok(provider)
+    } else if wire.preparation_contract == "roboguide.memory-provider-availability/v0.1" {
+        Ok(provider.with_preparation_support())
+    } else {
+        Err(IntegrationRuntimeError::Protocol(
+            "unsupported Memory preparation contract".into(),
+        ))
+    }
 }
 
 /// Converts current protocol health into Domain health.

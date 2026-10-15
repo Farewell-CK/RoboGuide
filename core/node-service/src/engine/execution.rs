@@ -20,6 +20,10 @@ impl LocalIntegrationEngine {
         tokio::spawn(async move {
             let mut context =
                 WorkflowContext::with_attempt_id(invocation.clone(), execution_id.clone());
+            if let Err(error) = engine.check_prepared_execution_invocation(&invocation) {
+                engine.record_pre_dispatch_failure(&execution_id, error.to_string());
+                return;
+            }
             let prepared_input = match engine
                 .prepare_artifacts(&invocation, &capability, &mut context)
                 .await
@@ -30,7 +34,8 @@ impl LocalIntegrationEngine {
                     return;
                 }
             };
-            if let Err(error) = engine.inner.journal.authorize_local_dispatch(&execution_id) {
+            if let Err(error) = engine.authorize_prepared_local_dispatch(&execution_id, &invocation)
+            {
                 engine.record_pre_dispatch_failure(&execution_id, error.to_string());
                 return;
             }

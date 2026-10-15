@@ -86,6 +86,7 @@ fn restore_and_register(fixture: &Fixture) {
         orchestrator: MissionOrchestrator::restore_json(&saved.orchestration_json).unwrap(),
         mission_admissions: saved.mission_admissions,
         memory_imports: saved.memory_imports,
+        memory_preparation: saved.memory_preparation,
         safety_stops: saved.safety_stops,
         verifier_seen: saved.verifier_seen,
         verifier_artifact_store: None,

@@ -258,6 +258,9 @@ impl MemoryArtifactRef {
 /// Declares one Memory catalog provider exposed by a local system.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryProviderDescriptor {
+    /// Explicit current-availability observation support, absent from legacy declarations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preparation_contract: Option<String>,
     /// Node-wide provider identity.
     provider_id: String,
     /// Local system that owns discovery and content policy.
@@ -300,7 +303,24 @@ impl MemoryProviderDescriptor {
             visibility,
             payload_schema,
             media_type,
+            preparation_contract: None,
         })
+    }
+
+    /// Declares a negotiated backend observation contract; a declaration alone proves no content.
+    pub fn with_preparation_support(mut self) -> Self {
+        self.preparation_contract = Some("roboguide.memory-provider-availability/v0.1".into());
+        self
+    }
+
+    /// Returns the original exact preparation/availability contract when explicitly declared.
+    pub fn preparation_contract(&self) -> Option<&str> {
+        self.preparation_contract.as_deref()
+    }
+
+    /// Checks supported explicit evidence instead of inferring availability from Imported history.
+    pub fn supports_preparation(&self) -> bool {
+        self.preparation_contract() == Some("roboguide.memory-provider-availability/v0.1")
     }
 
     /// Returns the node-wide provider identity.

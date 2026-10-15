@@ -105,6 +105,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         if !matches!(
             checkpoint.schema.as_str(),
             CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_MEMORY_PREPARATION_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_MEMORY_AUTHORITY_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_SATISFACTION_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA
@@ -121,6 +122,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         if !matches!(
             checkpoint.schema.as_str(),
             CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_MEMORY_PREPARATION_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_MEMORY_AUTHORITY_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_SATISFACTION_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA
@@ -133,6 +135,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         if !matches!(
             checkpoint.schema.as_str(),
             CONTROLLER_CHECKPOINT_SCHEMA
+                | PRE_MEMORY_PREPARATION_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_MEMORY_AUTHORITY_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_SATISFACTION_CONTROLLER_CHECKPOINT_SCHEMA
                 | PRE_TIMING_CONTROLLER_CHECKPOINT_SCHEMA
@@ -144,11 +147,24 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         }
         let control = ControlPlane::restore(checkpoint.control)?;
         if checkpoint.schema != CONTROLLER_CHECKPOINT_SCHEMA
-            && (control
-                .groups()
-                .any(|group| group.membership_version().is_some())
-                || control.memory_authorization_registry().is_some()
-                || control.artifact_authorization_registry().is_some())
+            && (checkpoint.runtime.has_memory_prerequisites()
+                || control
+                    .groups()
+                    .any(|group| group.has_memory_requirements()))
+        {
+            return Err(IntegrationRuntimeError::Checkpoint(
+                "legacy inner wrapper contains Memory prerequisite authority".into(),
+            ));
+        }
+
+        if !matches!(
+            checkpoint.schema.as_str(),
+            CONTROLLER_CHECKPOINT_SCHEMA | PRE_MEMORY_PREPARATION_CONTROLLER_CHECKPOINT_SCHEMA
+        ) && (control
+            .groups()
+            .any(|group| group.membership_version().is_some())
+            || control.memory_authorization_registry().is_some()
+            || control.artifact_authorization_registry().is_some())
         {
             return Err(IntegrationRuntimeError::Checkpoint(
                 "legacy checkpoint contains Memory membership authority".into(),

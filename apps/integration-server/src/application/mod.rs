@@ -21,6 +21,7 @@ mod isolation;
 pub(crate) use isolation::revalidate_mission_resume;
 pub(crate) mod map_publication;
 pub(crate) mod memory_import;
+pub(crate) mod memory_preparation;
 pub(crate) mod memory_query;
 pub(crate) mod node_identity;
 mod outcomes;

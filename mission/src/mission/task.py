@@ -10,6 +10,7 @@ from mission.contract_values import (
     MISSION_PLAN_ACTOR_VERSION,
     MISSION_PLAN_COMPAT_VERSION,
     MISSION_PLAN_COUPLING_VERSION,
+    MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
     MISSION_PLAN_SCHEDULING_VERSION,
     MISSION_PLAN_VERSION,
@@ -149,7 +150,11 @@ class TaskSatisfaction:
     def from_json(cls, value: JSONValue, path: str, version: str) -> TaskSatisfaction:
         """Parse v0.7 completion semantics or normalize the v0.6 compatibility basis."""
         item = _object(value, path)
-        if version in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}:
+        if version in {
+            MISSION_PLAN_ACTOR_VERSION,
+            MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
+        }:
             _exact_keys(item, {"expected_effect", "basis", "verifier"}, path)
         else:
             _exact_keys(item, {"basis"}, path)
@@ -158,7 +163,11 @@ class TaskSatisfaction:
             basis = TaskSatisfactionBasis(basis_value)
         except ValueError as error:
             raise MissionPlanError(f"{path}.basis is unsupported: {basis_value}") from error
-        if version not in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}:
+        if version not in {
+            MISSION_PLAN_ACTOR_VERSION,
+            MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
+        }:
             if basis is not TaskSatisfactionBasis.EXECUTION_REPORT:
                 raise MissionPlanError(f"{path}.basis is unsupported before MissionPlan v0.7")
             return cls("Legacy Task description defines the expected effect", basis)
@@ -180,7 +189,11 @@ class TaskSatisfaction:
 
     def to_json(self, version: str) -> JSONObject:
         """Serialize completion semantics without conflating execution and satisfaction."""
-        if version not in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}:
+        if version not in {
+            MISSION_PLAN_ACTOR_VERSION,
+            MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
+        }:
             return {"basis": self.basis.value}
         return {
             "expected_effect": self.expected_effect,
@@ -218,6 +231,7 @@ class MissionTask:
             MISSION_PLAN_SATISFACTION_VERSION,
             MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
         }:
             _bounded_keys(
                 item,
@@ -255,7 +269,11 @@ class MissionTask:
                 item["timing"],
                 f"{path}.timing",
                 duration_is_planner_evidence=version
-                not in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION},
+                not in {
+                    MISSION_PLAN_ACTOR_VERSION,
+                    MISSION_PLAN_VERSION,
+                    MISSION_PLAN_MEMORY_VERSION,
+                },
             )
             if version
             in {
@@ -263,6 +281,7 @@ class MissionTask:
                 MISSION_PLAN_SATISFACTION_VERSION,
                 MISSION_PLAN_ACTOR_VERSION,
                 MISSION_PLAN_VERSION,
+                MISSION_PLAN_MEMORY_VERSION,
             }
             else None
         )
@@ -270,6 +289,7 @@ class MissionTask:
             MISSION_PLAN_SATISFACTION_VERSION,
             MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
         }:
             satisfaction = TaskSatisfaction.from_json(
                 item["satisfaction"], f"{path}.satisfaction", version
@@ -299,7 +319,11 @@ class MissionTask:
             "roles": [role.to_json(version) for role in self.roles],
             "context_id": self.context_id,
         }
-        actor_contract = version in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}
+        actor_contract = version in {
+            MISSION_PLAN_ACTOR_VERSION,
+            MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
+        }
         if (
             version
             in {
@@ -308,6 +332,7 @@ class MissionTask:
                 MISSION_PLAN_SATISFACTION_VERSION,
                 MISSION_PLAN_ACTOR_VERSION,
                 MISSION_PLAN_VERSION,
+                MISSION_PLAN_MEMORY_VERSION,
             }
             and self.coupling_mode is not None
         ):
@@ -317,6 +342,7 @@ class MissionTask:
             MISSION_PLAN_SATISFACTION_VERSION,
             MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
         }:
             if self.timing is None:
                 raise MissionPlanError(f"task {self.task_id} lacks required scheduling timing")
@@ -325,6 +351,7 @@ class MissionTask:
             MISSION_PLAN_SATISFACTION_VERSION,
             MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
         }:
             result["satisfaction"] = self.satisfaction.to_json(version)
         return result

@@ -1,0 +1,526 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/memory/preparation-v0.1/preparation.schema.json",
+  "title": "Immutable original Memory prerequisite context",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "preparation_id",
+    "tenant_id",
+    "group_id",
+    "role_id",
+    "execution_id",
+    "node_id",
+    "source_session_id",
+    "registry_id",
+    "task_ref",
+    "membership",
+    "registry_revision",
+    "invocation",
+    "resource_ids",
+    "valid_for_ms",
+    "inputs"
+  ],
+  "properties": {
+    "schema": {
+      "const": "roboguide.memory-preparation/v0.1"
+    },
+    "preparation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "role_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "execution_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "source_session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "registry_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "task_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mission_id",
+        "task_id"
+      ],
+      "properties": {
+        "mission_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+        }
+      }
+    },
+    "membership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation",
+        "bindings_digest"
+      ],
+      "properties": {
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "bindings_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "registry_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615
+    },
+    "invocation": {
+      "type": "object",
+      "required": [
+        "mission_id",
+        "group_id",
+        "task_id",
+        "role_id"
+      ],
+      "properties": {
+        "mission_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+        },
+        "group_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+        },
+        "role_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+        }
+      }
+    },
+    "resource_ids": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+      }
+    },
+    "valid_for_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 120000
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requirement",
+          "manifest",
+          "consumer",
+          "import_id"
+        ],
+        "properties": {
+          "requirement": {
+            "$ref": "../../mission/v0.9/mission-plan.schema.json#/$defs/memory_requirement"
+          },
+          "manifest": {
+            "$ref": "#/$defs/manifest"
+          },
+          "typed_map": {
+            "oneOf": [
+              {
+                "$ref": "../../spatial/v0.2/map-manifest.schema.json"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "consumer": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "preparation_contract",
+              "provider_id",
+              "local_system_id",
+              "kind",
+              "scope",
+              "visibility",
+              "payload_schema",
+              "media_type"
+            ],
+            "properties": {
+              "preparation_contract": {
+                "const": "roboguide.memory-provider-availability/v0.1"
+              },
+              "provider_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+              },
+              "local_system_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+              },
+              "kind": {
+                "enum": [
+                  "execution",
+                  "spatial",
+                  "semantic",
+                  "experience",
+                  "artifact"
+                ]
+              },
+              "scope": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "local",
+                      "global"
+                    ]
+                  }
+                }
+              },
+              "visibility": {
+                "const": "exchangeable"
+              },
+              "payload_schema": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+              },
+              "media_type": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+              }
+            }
+          },
+          "import_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "selector",
+        "kind",
+        "provider_id",
+        "owner",
+        "scope",
+        "visibility",
+        "payload_schema",
+        "media_type",
+        "artifact",
+        "created_at"
+      ],
+      "properties": {
+        "schema": {
+          "const": "roboguide.memory-manifest/v0.1"
+        },
+        "selector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "memory_id",
+            "revision_id"
+          ],
+          "properties": {
+            "memory_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+            },
+            "revision_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+            }
+          }
+        },
+        "kind": {
+          "enum": [
+            "execution",
+            "spatial",
+            "semantic",
+            "experience",
+            "artifact"
+          ]
+        },
+        "provider_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+        },
+        "owner": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "owner",
+                "node_id",
+                "local_system_id"
+              ],
+              "properties": {
+                "owner": {
+                  "const": "node"
+                },
+                "node_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+                },
+                "local_system_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "owner",
+                "component"
+              ],
+              "properties": {
+                "owner": {
+                  "const": "robo_guide"
+                },
+                "component": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+                }
+              }
+            }
+          ]
+        },
+        "scope": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "local",
+                    "global"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "execution_group_id"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "execution_group"
+                },
+                "execution_group_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+                }
+              }
+            }
+          ]
+        },
+        "visibility": {
+          "const": "exchangeable"
+        },
+        "payload_schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+        },
+        "artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "content_digest",
+            "byte_size"
+          ],
+          "properties": {
+            "content_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "byte_size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          }
+        },
+        "source_mission_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_task_ref": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mission_id",
+                "task_id"
+              ],
+              "properties": {
+                "mission_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+                },
+                "task_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_execution_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        }
+      }
+    }
+  }
+}

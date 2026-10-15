@@ -3,6 +3,17 @@
 use super::*;
 
 impl RuntimeExecutionCheckpoint {
+    /// Identifies original command gates that an older wrapper cannot safely ignore.
+    pub fn has_memory_prerequisites(&self) -> bool {
+        self.executions
+            .values()
+            .any(|execution| !execution.command.memory_requirements().is_empty())
+            || self
+                .dispatch_outbox
+                .iter()
+                .any(|intent| !intent.command.memory_requirements().is_empty())
+    }
+
     /// Reports retained terminal timing authority so compatibility wrappers cannot silently ignore it.
     pub fn has_terminal_receive_times(&self) -> bool {
         !self.terminal_received_at.is_empty()

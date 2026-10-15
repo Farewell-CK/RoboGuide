@@ -111,6 +111,7 @@ pub(crate) fn drive_application_timer_with_clock(
             DiagnosticStage::Serialize,
             None,
         );
+        super::memory_preparation::prepare(&mut candidate, now)?;
         super::memory_import::prepare(&mut candidate, now);
         let checkpoint = server_checkpoint_json(&candidate)?;
         drop(serialization);
@@ -154,6 +155,9 @@ pub(crate) fn drive_application_timer_with_clock(
             .map_err(|_| "controller lock is poisoned")?;
         let has_memory_imports = !candidate.memory_imports.is_empty();
         *live = candidate;
+        if !live.memory_preparation.records.is_empty() {
+            super::memory_preparation::flush(&live, now, clock.now());
+        }
         if has_memory_imports {
             super::memory_import::flush(&live, now, clock.now());
         }

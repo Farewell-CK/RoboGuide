@@ -5,8 +5,9 @@ use crate::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocol;
 use crate::grpc::v0_4::server_message::Message as ServerPayload;
 use crate::grpc::v0_4::{
     Ack, CONTINUITY_NODE_CONTRACT_VERSION, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION,
-    MemoryImport, NODE_CONTRACT_VERSION, NodeMessage, PREVIOUS_NODE_CONTRACT_VERSION,
-    PROTOCOL_VERSION, PROVIDER_MAP_NODE_CONTRACT_VERSION, Registered, ServerMessage, Welcome,
+    MemoryImport, NODE_CONTRACT_VERSION, NodeMessage, PREPARATION_NODE_CONTRACT_VERSION,
+    PREVIOUS_NODE_CONTRACT_VERSION, PROTOCOL_VERSION, PROVIDER_MAP_NODE_CONTRACT_VERSION,
+    Registered, ServerMessage, Welcome,
 };
 use ports::{
     Clock, DiagnosticHandle, DiagnosticStage, NodeFactMetadata, NodeLeasePolicy, NodeProtocolPolicy,
@@ -147,18 +148,9 @@ pub const MEMORY_IMPORT_METADATA_VALUE: &str = "roboguide.memory-import/v0.1";
 
 /// Computes the original import content identity independently of replaceable transport epochs.
 pub fn memory_import_content_digest(import: &MemoryImport) -> String {
-    memory_import_authorization_digest(
-        &import.import_id,
-        &import.command_id,
-        &import.consumer_provider_id,
-        &import.manifest_json,
-        &import.mission_id,
-        &import.group_id,
-        &import.task_id,
-        &import.role_id,
-        &import.execution_id,
-        "",
-    )
+    let mut content = import.clone();
+    content.controller_epoch.clear();
+    prepared_memory_import_digest(&content)
 }
 
 /// Binds one readonly query to its exact original identity, generation, budget and leader epoch.
@@ -794,6 +786,15 @@ impl GrpcNodeRouter {
                     command_id,
                     execution_session_json,
                     controller_epoch,
+                    memory_preparation_id: String::new(),
+                    memory_preparation_digest: String::new(),
+                    memory_requirements_json: if route.node_contract_version
+                        == PREPARATION_NODE_CONTRACT_VERSION
+                    {
+                        "[]".into()
+                    } else {
+                        String::new()
+                    },
                 })),
             }))
             .map_err(|_| Status::unavailable("node session closed"))
@@ -921,6 +922,8 @@ impl GrpcNodeRouter {
                     execution_id,
                     controller_epoch,
                     authorization_digest,
+                    memory_preparation_id: String::new(),
+                    typed_map_manifest_json: String::new(),
                 })),
             }))
             .map_err(|_| Status::unavailable("node session closed"))
@@ -1157,6 +1160,7 @@ async fn run_grpc_session(
         ));
     }
     let node_contract = [
+        PREPARATION_NODE_CONTRACT_VERSION,
         PROVIDER_MAP_NODE_CONTRACT_VERSION,
         CONTINUITY_NODE_CONTRACT_VERSION,
         NODE_CONTRACT_VERSION,
@@ -1422,6 +1426,8 @@ async fn run_grpc_session(
                 Some(NodePayload::PeerChannelReadiness(value)) => value.sequence,
                 Some(NodePayload::CommandReceipt(value)) => value.sequence,
                 Some(NodePayload::MemoryImportReceipt(value)) => value.sequence,
+                Some(NodePayload::MemoryImportQueryReceipt(value)) => value.sequence,
+                Some(NodePayload::MemoryControlReceipt(value)) => value.sequence,
                 Some(NodePayload::ExecutionEvent(value)) => value.sequence,
                 Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
                 _ => 0,
@@ -1470,7 +1476,8 @@ fn invocation_for_contract(
     node_contract_version: &str,
 ) -> Result<crate::grpc::v0_4::CanonicalInvocation, Status> {
     match node_contract_version {
-        PROVIDER_MAP_NODE_CONTRACT_VERSION
+        PREPARATION_NODE_CONTRACT_VERSION
+        | PROVIDER_MAP_NODE_CONTRACT_VERSION
         | CONTINUITY_NODE_CONTRACT_VERSION
         | NODE_CONTRACT_VERSION
         | PREVIOUS_NODE_CONTRACT_VERSION => {
@@ -1560,7 +1567,9 @@ fn validate_scalar_map(
 
 pub(crate) mod certificate;
 mod diagnostics;
+mod memory_control;
 mod session;
+pub use memory_control::prepared_memory_import_digest;
 
 use diagnostics::{
     GrpcSessionObservation, GrpcSessionSettings, ReceivedNodeMessage, deliver_received_fact,

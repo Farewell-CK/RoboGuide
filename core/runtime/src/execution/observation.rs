@@ -357,6 +357,8 @@ pub(super) fn validate_checkpoint(
         ));
     }
     for (execution_id, context) in &checkpoint.executions {
+        domain::MemoryRequirement::validate_set(context.command.memory_requirements())
+            .map_err(ExecutionRuntimeError::InvalidCheckpoint)?;
         if context
             .command
             .recovery_support()

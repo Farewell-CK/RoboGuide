@@ -8,6 +8,12 @@ use ports::EventSink;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MemoryImportRequest {
+    /// Complete original prepared context for the explicitly negotiated pre-Execute path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) preparation_id: Option<String>,
+    /// Complete raw Spatial metadata; absence cannot authorize a typed-map projection import.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) typed_map: Option<domain::MapArtifactManifest>,
     /// Stable immutable caller identity, unique across retained Controller history.
     pub(crate) import_id: String,
     /// Existing Control Group containing the consumer.
@@ -155,6 +161,12 @@ pub(crate) fn authorize(
                 evidence.disposition
             ));
         }
+    }
+    if request.preparation_id.is_some() {
+        return super::memory_preparation::authorize_import(controller, request, now).map(Some);
+    }
+    if request.typed_map.is_some() {
+        return Err("typed Memory import requires its exact prepared context".into());
     }
     let mission = controller
         .orchestrator
@@ -399,6 +411,14 @@ pub(crate) fn flush(
         if let Err(error) = controller.bridge.deliver_memory_import(
             request.node_id.as_str(),
             integration::grpc::v0_4::MemoryImport {
+                memory_preparation_id: request.preparation_id.clone().unwrap_or_default(),
+                typed_map_manifest_json: request
+                    .typed_map
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .expect("validated original Spatial metadata")
+                    .unwrap_or_default(),
                 import_id: request.import_id.clone(),
                 command_id: format!("memory-import-{}", request.import_id),
                 consumer_provider_id: request.consumer_provider_id.clone(),
@@ -507,7 +527,14 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
                 .memory_authorization_revision(stamp.revision)
                 .filter(|r| r.registry_id == stamp.registry_id)
                 .ok_or("Memory command lacks its original policy history")?;
-            let policy = registry.policy(&intent.request.manifest, &stamp.tenant_id)?;
+            let policy = if let Some(map) = &intent.request.typed_map {
+                if domain::map_memory_manifest(map)? != intent.request.manifest {
+                    return Err("restored typed Memory source projection differs".into());
+                }
+                registry.typed_map_policy(map, &stamp.tenant_id)?
+            } else {
+                registry.policy(&intent.request.manifest, &stamp.tenant_id)?
+            };
             if stamp.consumer.provider_id() != intent.request.consumer_provider_id
                 || !policy.groups.iter().any(|g| {
                     g.group_id == intent.request.group_id

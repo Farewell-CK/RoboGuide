@@ -151,6 +151,19 @@ pub struct MemoryProviderConfig {
     /// Optional v0.8 readonly instance and original-import continuity contract.
     #[serde(default)]
     pub continuity: Option<MemoryContinuityConfig>,
+    /// Optional v0.10 readonly current-content observation, separate from historical completion.
+    #[serde(default)]
+    pub availability: Option<MemoryAvailabilityConfig>,
+}
+
+/// Explicit readonly actual-content observation used by prepared consumers.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryAvailabilityConfig {
+    /// Deployment-fixed GET observation of the original import's current full content.
+    pub observation: WorkflowStepConfig,
+    /// Response-relative typed availability evidence pointer.
+    pub result_pointer: String,
 }
 
 /// Fixed readonly Local EAIOS endpoints for identifying and reconciling an original import.

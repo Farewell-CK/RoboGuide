@@ -79,6 +79,20 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   retains semantic and backend-storage authority. `FilesystemMemoryLedger` is only the RoboGuide
   Node immutable-manifest ledger, rebuildable JSONL index, and workflow-free reference fallback;
   configured EAIOS imports do not copy payload bytes into that ledger.
+- ADR-0105's preparation slice adds MissionPlan v0.9 semantic-only Memory requirements and
+  Node Contract v0.9 / config v0.10 (catalog v0.12). Control selects only a current operation-owned
+  receiving provider after binding. Application retains the original context, policy/membership,
+  source session, imports, probe generations and budgets before outbox delivery. Node Prepare ACK
+  precedes import; actual original-backend availability precedes Execute, with a whole-Group pending
+  prerequisite barrier and final receiver checks. Node journal v9 / Controller wrapper v35 / inner
+  v22 fence old binaries. Receiver Linux boot/monotonic deadlines survive process restart without
+  renewal. Revocation persists before ACK, even before Prepare; streamed acquisition rechecks
+  current permission and receiver budget per bounded write. Restore fences original outstanding
+  grants. Unknown import reconciliation uses bounded read-only original-provider queries with
+  backoff and never reimports. `tools/quality/check_memory_preparation_processes.py` uses two real
+  software Nodes, actual TLS/files/SQL failure/CPU hashes and independent verifiers; no device facts
+  are fabricated. Full Group lifetime/handoff, typed-map consumption, active-map/GC and F5–F10 remain
+  required; this slice does not establish hardware continuity or overall SoftwareComplete.
 - Generic replica durable identity is exact `(MemorySelector, NodeId, ConsumerProviderId)`; admission,
   event replay, projections, and APIs preserve that provider dimension, and accepted evidence remains
   monotonic after Imported. Explicit application-owned selective-import commands and bounded
@@ -152,7 +166,8 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
 - Resource-bearing Commit requires current State and revalidates every selected ResourceId's
   Node, kind and capacity before any mutation. State-free compatibility Commit accepts only
   zero-resource proposals without independent operation constraints.
-- The current Mission boundary uses `roboguide.mission-plan/v0.8` (ADR-0040): Mission Actors are declared once,
+- The default MI output uses `roboguide.mission-plan/v0.8` (ADR-0040); explicit v0.9 adds semantic
+  Memory prerequisites with the preparation contract above. Mission Actors are declared once,
   ContextRoles reference Actors, and TaskRoles reference ContextRoles while declaring multiple exact
   capability requirements, independent semantic ExecutionIntent, resources, Mission timing
   constraints, expected effect, and satisfaction evidence basis. Runtime/State duration estimates

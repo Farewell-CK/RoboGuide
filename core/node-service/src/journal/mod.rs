@@ -9,6 +9,11 @@ use thiserror::Error;
 
 mod authority;
 mod memory_continuity;
+mod memory_preparation;
+pub use memory_preparation::{
+    BeginMemoryObservation, JournalMemoryPreparation, MemoryReceiverBudget,
+    ReceiverClockObservation,
+};
 mod storage;
 
 pub use memory_continuity::{
@@ -456,6 +461,9 @@ struct ControllerEpoch {
 /// Execution journal storage or invariant failure.
 #[derive(Debug, Error)]
 pub enum JournalError {
+    /// The original host boot/monotonic observation is unavailable; no budget may be inferred.
+    #[error("receiver clock observation unavailable: {0}")]
+    ReceiverClock(#[from] std::io::Error),
     /// SQLite could not complete a durable operation.
     #[error("execution journal SQLite failure: {0}")]
     Sqlite(#[from] rusqlite::Error),

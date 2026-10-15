@@ -477,6 +477,7 @@ mod tests {
             orchestration_json: String::new(),
             mission_admissions: BTreeMap::new(),
             memory_imports: BTreeMap::new(),
+            memory_preparation: Default::default(),
             safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: Some("sha256:source-a".to_string()),

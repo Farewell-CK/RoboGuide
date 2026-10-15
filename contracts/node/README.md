@@ -13,7 +13,10 @@ contract concern while retaining another, so the directory number is not a wire 
 | `v0.7` | durable command admission | v0.4 | v0.4 | v0.6 |
 | `v0.8` | capability profiles and semantic intent | v0.4 | v0.5 | v0.7 |
 | `v0.9` | explicit canonical operation support | v0.4 | v0.6 | v0.7 |
+| `v0.10` | original-provider Memory continuity | v0.4 | v0.7 | v0.8 |
+| `v0.11` | complete typed-map producer authority | v0.4 | v0.8 | v0.9 |
+| `v0.12` | pre-Execute Memory preparation and availability | v0.4 | v0.9 | v0.10 |
 
 Canonical operation versions are independent of every identity in this table. Current production
-wire/config sources are in [`v0.9/`](v0.9/README.md); older directories remain compatibility and
+wire/config sources are in [`v0.12/`](v0.12/README.md); older directories remain compatibility and
 historical inputs and are not modified in place.

@@ -16,6 +16,16 @@ RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任
 
 ## 2. 逻辑架构
 
+ADR-0105 的执行前 Memory 准备现已接入实际调用链。MissionPlan v0.9 只声明 selector/kind/
+payload/media，Control 在实际 binding 后选定 operation-owned provider；应用先持久原 context，
+Node Prepare ACK 后允许原导入，完整当前 bytes/原实例 Probe 通过后才放行整组 pending Execute。
+Node config v0.10 / Contract v0.9 明确协商；原 Linux boot/monotonic 预算与撤销 fence 逐块保护
+acquisition，并在 Local How 前复查。Controller 重启不续期或重做，wrapper v35 / inner v22 /
+journal v9 拒绝旧软件。真实两软件节点文件链路与证据边界见
+[准备验收](../../development/acceptance/2026-10-15-f4-memory-preparation.md)和
+[当前实现拓扑](implementation-topology.md)。完整 Group lifetime/handoff、typed-map 消费、
+active-map/GC 与后续整改仍须完成；这些软件记录不建立设备安全结论。
+
 Control 活性与观测时间的已接受演进见 ADR-0076：Integration 仅提供当前精确 session/lease
 的连续接收证据，由 Control 在应用持久事务中决定续约/过期。原始 ingress receive time
 用于 State/health/peer/progress 的年龄；当前 decision time 用于资格、Commit、恢复与发送。

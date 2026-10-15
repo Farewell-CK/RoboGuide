@@ -27,6 +27,7 @@ mod admission;
 mod execution;
 mod memory_continuity;
 mod memory_operations;
+mod memory_preparation;
 mod observation;
 mod publication;
 mod validation;
@@ -129,6 +130,8 @@ pub struct LocalIntegrationEngine {
 
 /// Process-owned engine state shared by workflow tasks.
 struct EngineInner {
+    /// Orders prepared Execute admission against irreversible context revocation.
+    memory_context_gate: Mutex<()>,
     /// Current accepted Node route used only for Artifact publication, never immutable invocation identity.
     publication_session: Mutex<Option<String>>,
     /// Immutable startup-compiled local catalog.

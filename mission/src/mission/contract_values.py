@@ -11,6 +11,7 @@ type JSONObject = dict[str, JSONValue]
 
 MISSION_PLAN_BINDING_VERSION: Final = "roboguide.mission-plan/v0.8"
 MISSION_PLAN_VERSION: Final = MISSION_PLAN_BINDING_VERSION
+MISSION_PLAN_MEMORY_VERSION: Final = "roboguide.mission-plan/v0.9"
 MISSION_PLAN_ACTOR_VERSION: Final = "roboguide.mission-plan/v0.7"
 MISSION_PLAN_COMPAT_VERSION: Final = "roboguide.mission-plan/v0.3"
 MISSION_PLAN_COUPLING_VERSION: Final = "roboguide.mission-plan/v0.4"

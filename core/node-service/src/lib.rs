@@ -26,10 +26,10 @@ pub use config::{
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityProfileConfig,
     CapabilityReadinessConfig, ConnectionConfig, CredentialSourceConfig,
     ExecutionStateMappingConfig, HealthCheckConfig, LocalOperationConfig, LocalSystemConfig,
-    MemoryContinuityConfig, MemoryProviderConfig, MemoryWorkflowConfig, NodeServiceConfig,
-    OperationBindingConfig, PeerChannelObserverConfig, RequestBindingConfig, RequestMappingConfig,
-    ResourceConfig, SensorConfig, StateExportConfig, ValueExpressionConfig, ValueFunction,
-    WorkflowConfig, WorkflowStepConfig,
+    MemoryAvailabilityConfig, MemoryContinuityConfig, MemoryProviderConfig, MemoryWorkflowConfig,
+    NodeServiceConfig, OperationBindingConfig, PeerChannelObserverConfig, RequestBindingConfig,
+    RequestMappingConfig, ResourceConfig, SensorConfig, StateExportConfig, ValueExpressionConfig,
+    ValueFunction, WorkflowConfig, WorkflowStepConfig,
 };
 pub use conformance::{
     CapabilityConformance, CapabilityProfileConformance, ConformanceChecks, ConformanceDiagnostic,
@@ -45,10 +45,11 @@ pub use engine::{
     LocalPeerChannelReadiness, NodeObservation, journal_path,
 };
 pub use journal::{
-    ArtifactFinalizationKind, ExecutionJournal, ExecutionSpec, ImportContinuity, ImportQueryRecord,
-    ImportQueryResult, ImportQuerySpec, JournalError, JournalExecution, JournalStatus,
-    MemoryImportRecord, MemoryImportStatus, PrepareArtifactFreeze, PrepareDispatch,
-    PrepareMemoryImport, PreparedArtifactRecord,
+    ArtifactFinalizationKind, BeginMemoryObservation, ExecutionJournal, ExecutionSpec,
+    ImportContinuity, ImportQueryRecord, ImportQueryResult, ImportQuerySpec, JournalError,
+    JournalExecution, JournalMemoryPreparation, JournalStatus, MemoryImportRecord,
+    MemoryImportStatus, MemoryReceiverBudget, PrepareArtifactFreeze, PrepareDispatch,
+    PrepareMemoryImport, PreparedArtifactRecord, ReceiverClockObservation,
 };
 pub use local_engine::driver::{
     BoxDriverFuture, CompiledDriverRequest, DriverError, DriverEvent, DriverEventStream,
@@ -61,13 +62,13 @@ pub use local_engine::mcp_driver::McpDriver;
 pub use local_engine::{
     CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CONFIG_SCHEMA_V0_5,
     CONFIG_SCHEMA_V0_6, CONFIG_SCHEMA_V0_7, CONFIG_SCHEMA_V0_8, CONFIG_SCHEMA_V0_9,
-    CapabilityReadinessFact, CatalogError, CompiledArtifactService, CompiledCapability,
-    CompiledCapabilityProfile, CompiledCapabilityReadiness, CompiledConnection,
-    CompiledHealthCheck, CompiledLocalCatalog, CompiledLocalSystem, CompiledMemoryContinuity,
-    CompiledMemoryProvider, CompiledMemoryWorkflow, CompiledOperation, CompiledPeerChannelObserver,
-    CompiledResource, CompiledSensor, CompiledStateExport, CompiledWorkflow, CompiledWorkflowStep,
-    LocalHealthFact, LocalHealthState, MappedExecutionFact, MappedExecutionPhase,
-    PeerChannelReadinessFact, StateExportFact,
+    CONFIG_SCHEMA_V0_10, CapabilityReadinessFact, CatalogError, CompiledArtifactService,
+    CompiledCapability, CompiledCapabilityProfile, CompiledCapabilityReadiness, CompiledConnection,
+    CompiledHealthCheck, CompiledLocalCatalog, CompiledLocalSystem, CompiledMemoryAvailability,
+    CompiledMemoryContinuity, CompiledMemoryProvider, CompiledMemoryWorkflow, CompiledOperation,
+    CompiledPeerChannelObserver, CompiledResource, CompiledSensor, CompiledStateExport,
+    CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact, LocalHealthState, MappedExecutionFact,
+    MappedExecutionPhase, PeerChannelReadinessFact, StateExportFact,
 };
 pub use memory::{FilesystemMemoryLedger, LocalMemoryLedger, MemoryLedgerError, MemoryQuery};
 pub use service::{NodeService, NodeServiceError};
@@ -81,6 +82,8 @@ mod boundary_tests {
             include_str!("config.rs"),
             include_str!("engine/mod.rs"),
             include_str!("engine/memory_operations.rs"),
+            include_str!("engine/memory_continuity.rs"),
+            include_str!("engine/memory_preparation.rs"),
             include_str!("engine/observation.rs"),
             include_str!("engine/admission.rs"),
             include_str!("engine/execution.rs"),
@@ -88,8 +91,10 @@ mod boundary_tests {
             include_str!("journal/mod.rs"),
             include_str!("journal/authority.rs"),
             include_str!("journal/storage.rs"),
+            include_str!("journal/memory_preparation.rs"),
             include_str!("service/mod.rs"),
             include_str!("service/protocol_projection.rs"),
+            include_str!("service/memory_preparation.rs"),
             include_str!("local_engine/mod.rs"),
             include_str!("local_engine/driver.rs"),
             include_str!("local_engine/grpc_driver.rs"),

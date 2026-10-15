@@ -8,6 +8,49 @@ use domain::{
 };
 
 impl ControlPlane {
+    /// Selects a compatible current receiver in stable provider identity order, without effects.
+    pub fn select_memory_provider<S: ports::SharedNodeStateReader>(
+        &self,
+        state: &S,
+        node: &NodeId,
+        requirement: &domain::MemoryRequirement,
+        operation: &domain::OperationRef,
+        now: domain::TimestampMs,
+    ) -> Result<MemoryProviderDescriptor, ControlError> {
+        requirement
+            .validate()
+            .map_err(ControlError::InvalidProposal)?;
+        if !self.memory_node_identity_is_current(node, now) {
+            return Err(denied(
+                "Memory receiver lacks a current accepted identity/session",
+            ));
+        }
+        let snapshot = state
+            .node(node)
+            .ok_or_else(|| denied("Memory receiver is absent"))?;
+        if snapshot.registration().contract_version().as_str() != domain::NODE_CONTRACT_VERSION_V0_9
+        {
+            return Err(denied(
+                "Memory preparation requires explicitly negotiated Node Contract v0.9",
+            ));
+        }
+        let owner = snapshot
+            .registration()
+            .operation_owner(operation)
+            .ok_or_else(|| denied("Memory consumer operation owner is unavailable"))?;
+        snapshot
+            .registration()
+            .memory_providers()
+            .iter()
+            .filter(|provider| {
+                provider.supports_preparation()
+                    && requirement.matches_provider(provider)
+                    && provider.local_system_id() == owner
+            })
+            .min_by(|left, right| left.provider_id().cmp(right.provider_id()))
+            .cloned()
+            .ok_or_else(|| denied("no registered receiver supports this Memory contract"))
+    }
     /// Requires an accepted live session/lease and current identity/attestation evidence.
     /// Enrollment or a data-plane certificate alone never creates a registered Node.
     pub fn memory_node_identity_is_current(&self, node: &NodeId, now: domain::TimestampMs) -> bool {
@@ -199,6 +242,64 @@ impl ControlPlane {
         operation: MemoryAccessOperation,
         expected_membership: Option<&GroupMembershipVersion>,
     ) -> Result<GroupMembershipVersion, ControlError> {
+        self.authorize_memory_consumer_inner(
+            manifest,
+            tenant,
+            group_id,
+            task,
+            role,
+            node,
+            provider,
+            operation,
+            expected_membership,
+            None,
+        )
+    }
+
+    /// Authorizes complete typed-map input for an exact current physical participant.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorize_typed_map_consumer(
+        &self,
+        map: &domain::MapArtifactManifest,
+        tenant: &str,
+        group_id: &ExecutionGroupId,
+        task: &TaskRef,
+        role: &RoleId,
+        node: &NodeId,
+        provider: &MemoryProviderDescriptor,
+        operation: MemoryAccessOperation,
+        expected_membership: Option<&GroupMembershipVersion>,
+    ) -> Result<GroupMembershipVersion, ControlError> {
+        let manifest = domain::map_memory_manifest(map).map_err(ControlError::InvalidProposal)?;
+        self.authorize_memory_consumer_inner(
+            &manifest,
+            tenant,
+            group_id,
+            task,
+            role,
+            node,
+            provider,
+            operation,
+            expected_membership,
+            Some(map),
+        )
+    }
+
+    /// Shares scope/binding checks while requiring complete typed provenance when policy names it.
+    #[allow(clippy::too_many_arguments)]
+    fn authorize_memory_consumer_inner(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        tenant: &str,
+        group_id: &ExecutionGroupId,
+        task: &TaskRef,
+        role: &RoleId,
+        node: &NodeId,
+        provider: &MemoryProviderDescriptor,
+        operation: MemoryAccessOperation,
+        expected_membership: Option<&GroupMembershipVersion>,
+        typed_map: Option<&domain::MapArtifactManifest>,
+    ) -> Result<GroupMembershipVersion, ControlError> {
         self.validate_memory_owner_tenant(manifest, tenant)?;
         let group = self
             .group(group_id)
@@ -237,7 +338,21 @@ impl ControlPlane {
         provider
             .admit_import(manifest, node)
             .map_err(|e| denied(&e.to_string()))?;
-        let policy = self.memory_policy(manifest, tenant)?;
+        let policy = if let Some(map) = typed_map {
+            if domain::map_memory_manifest(map).map_err(ControlError::InvalidProposal)? != *manifest
+            {
+                return Err(denied(
+                    "typed Memory source differs from its complete original projection",
+                ));
+            }
+            self.memory_authorization_registry
+                .as_ref()
+                .ok_or_else(|| denied("Memory policy is unavailable"))?
+                .typed_map_policy(map, tenant)
+                .map_err(ControlError::InvalidProposal)?
+        } else {
+            self.memory_policy(manifest, tenant)?
+        };
         if !policy.groups.iter().any(|grant| {
             &grant.group_id == group_id
                 && grant.operations.contains(&operation)
@@ -248,6 +363,126 @@ impl ControlPlane {
             ));
         }
         Ok(version.clone())
+    }
+
+    /// Revalidates source policies and the exact retained role without revoking unrelated participants.
+    /// Application must also prove the exact current Runtime attempt and original deadline.
+    pub fn validate_memory_preparation<S: ports::SharedNodeStateReader>(
+        &self,
+        state: &S,
+        preparation: &domain::MemoryPreparation,
+        now: domain::TimestampMs,
+    ) -> Result<(), ControlError> {
+        preparation
+            .validate()
+            .map_err(ControlError::InvalidProposal)?;
+        let group = self
+            .group(&preparation.group_id)
+            .ok_or_else(|| denied("prepared Memory Group is absent"))?;
+        let membership = group
+            .membership_version()
+            .ok_or_else(|| denied("prepared Memory membership is unavailable"))?;
+        let role = group
+            .role_requirement(&preparation.task_ref, &preparation.role_id)
+            .ok_or_else(|| denied("prepared Memory Role is absent"))?;
+        if membership.generation < preparation.membership.generation
+            || (membership.generation == preparation.membership.generation
+                && membership.bindings_digest != preparation.membership.bindings_digest)
+            || self.current_node_session(&preparation.node_id)
+                != Some(preparation.source_session_id.as_str())
+            || !self.node_is_eligible_for_role(state, &preparation.node_id, role, now)
+            || role.memories()
+                != preparation
+                    .inputs
+                    .iter()
+                    .map(|input| input.requirement.clone())
+                    .collect::<Vec<_>>()
+        {
+            return Err(denied(
+                "prepared Memory source session, role requirements or current eligibility changed",
+            ));
+        }
+        let assignment = group
+            .task_execution(&preparation.task_ref)
+            .and_then(|task| {
+                task.assignments().iter().find(|a| {
+                    a.role_id() == &preparation.role_id && a.node_id() == &preparation.node_id
+                })
+            })
+            .ok_or_else(|| denied("prepared Memory current physical assignment changed"))?;
+        let resources = assignment
+            .resource_ids()
+            .iter()
+            .map(|id| id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        if resources
+            != preparation
+                .resource_ids
+                .iter()
+                .map(String::as_str)
+                .collect()
+        {
+            return Err(denied("prepared Memory committed resources changed"));
+        }
+        let registry = self
+            .memory_authorization_registry
+            .as_ref()
+            .ok_or_else(|| denied("prepared Memory content authority is unavailable"))?;
+        if registry.registry_id != preparation.registry_id
+            || registry.revision < preparation.registry_revision
+        {
+            return Err(denied(
+                "prepared Memory content authority identity or revision changed",
+            ));
+        }
+        let original = self
+            .memory_authorization_history
+            .get(&preparation.registry_revision)
+            .ok_or_else(|| denied("original prepared Memory authority history is unavailable"))?;
+        let registered = state
+            .node(&preparation.node_id)
+            .ok_or_else(|| denied("prepared Memory receiver is absent"))?;
+        for input in &preparation.inputs {
+            if !registered
+                .registration()
+                .memory_providers()
+                .contains(&input.consumer)
+            {
+                return Err(denied(
+                    "prepared Memory original receiver declaration changed",
+                ));
+            }
+            let old_policy = if let Some(map) = &input.typed_map {
+                original.typed_map_policy(map, &preparation.tenant_id)
+            } else {
+                original.policy(&input.manifest, &preparation.tenant_id)
+            }
+            .map_err(ControlError::InvalidProposal)?;
+            for operation in [MemoryAccessOperation::Import, MemoryAccessOperation::Read] {
+                if !old_policy.groups.iter().any(|grant| {
+                    grant.group_id == preparation.group_id
+                        && grant.operations.contains(&operation)
+                        && grant.providers.iter().any(|p| p.matches(&input.consumer))
+                }) {
+                    return Err(denied(
+                        "original prepared Memory policy did not authorize this participant/provider operation",
+                    ));
+                }
+                self.authorize_memory_consumer_inner(
+                    &input.manifest,
+                    &preparation.tenant_id,
+                    &preparation.group_id,
+                    &preparation.task_ref,
+                    &preparation.role_id,
+                    &preparation.node_id,
+                    &input.consumer,
+                    operation,
+                    None,
+                    input.typed_map.as_ref(),
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// Resolves exact immutable metadata under the current retained policy authority.

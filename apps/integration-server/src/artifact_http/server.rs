@@ -328,6 +328,7 @@ where
                         &principal,
                         r.manifest(),
                         domain::MemoryAccessOperation::Discover,
+                        import_id.as_deref(),
                     )
                     .is_ok()
                 })
@@ -368,7 +369,12 @@ where
                 memory_admission,
                 &principal,
                 snapshot.manifest(),
-                domain::MemoryAccessOperation::Discover,
+                if import_id.is_some() {
+                    domain::MemoryAccessOperation::Read
+                } else {
+                    domain::MemoryAccessOperation::Discover
+                },
+                import_id.as_deref(),
             )?;
             response
         }
@@ -379,7 +385,11 @@ where
                     .authorize_memory_access(
                         &principal,
                         &manifest,
-                        domain::MemoryAccessOperation::Discover,
+                        if import_id.is_some() {
+                            domain::MemoryAccessOperation::Read
+                        } else {
+                            domain::MemoryAccessOperation::Discover
+                        },
                         import_id.as_deref(),
                     )
                     .map_err(HttpError::forbidden)?;
@@ -389,7 +399,12 @@ where
                     memory_admission,
                     &principal,
                     map.manifest(),
-                    domain::MemoryAccessOperation::Discover,
+                    if import_id.is_some() {
+                        domain::MemoryAccessOperation::Read
+                    } else {
+                        domain::MemoryAccessOperation::Discover
+                    },
+                    import_id.as_deref(),
                 )?;
             }
             get_memory(catalog, path)?

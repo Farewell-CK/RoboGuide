@@ -332,6 +332,9 @@ pub struct MissionPlan {
     /// Whether this plan was admitted under the explicit v0.8 binding contract.
     #[serde(default)]
     declared_binding_contract: bool,
+    /// Retains explicit v0.9 admission even when the initial prerequisite sets are empty.
+    #[serde(default)]
+    declared_memory_contract: bool,
 }
 
 impl MissionPlan {
@@ -497,6 +500,7 @@ impl MissionPlan {
             task_graph,
             contexts,
             declared_binding_contract,
+            declared_memory_contract: false,
         })
     }
 
@@ -506,11 +510,28 @@ impl MissionPlan {
         self
     }
 
+    /// Retains the explicit semantic Memory prerequisite contract after accepted-plan restore.
+    pub fn with_v0_9_contract(mut self) -> Self {
+        self.declared_binding_contract = true;
+        self.declared_memory_contract = true;
+        self
+    }
+
     /// Returns the minimum wire schema able to represent this domain shape.
     ///
     /// Retains an admitted v0.8 version even when optional binding semantics are empty.
     /// Legacy plans without them remain serializable as v0.7.
     pub fn schema_version(&self) -> &'static str {
+        if self.declared_memory_contract
+            || self.task_graph().tasks().iter().any(|task| {
+                task.requirement()
+                    .roles()
+                    .iter()
+                    .any(|role| !role.memories().is_empty())
+            })
+        {
+            return MISSION_PLAN_SCHEMA_V0_9;
+        }
         if self.declared_binding_contract
             || self.actors.iter().any(MissionActor::is_grounded)
             || self

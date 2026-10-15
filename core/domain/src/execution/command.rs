@@ -12,6 +12,9 @@ use super::ExecutionSessionDescriptor;
 /// A command sent through the runtime to a local node.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionCommand {
+    /// Original semantic Memory prerequisites; transport preparation remains outside model intent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    memory_requirements: Vec<crate::MemoryRequirement>,
     /// Original dispatch registration evidence; absent history never gains a later provider snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     registration_evidence: Option<ExecutionRegistrationEvidence>,
@@ -48,6 +51,7 @@ impl ExecutionCommand {
     ) -> Self {
         Self {
             registration_evidence: None,
+            memory_requirements: Vec::new(),
             task_ref: TaskRef::new(mission_id, task_id),
             group_id,
             role_id,
@@ -57,6 +61,22 @@ impl ExecutionCommand {
             recovery_support: None,
             correlation_id,
         }
+    }
+
+    /// Freezes accepted semantic inputs without allowing the model to choose a storage backend.
+    pub fn with_memory_requirements(
+        mut self,
+        requirements: Vec<crate::MemoryRequirement>,
+    ) -> Result<Self, crate::DomainError> {
+        crate::MemoryRequirement::validate_set(&requirements)
+            .map_err(|reason| crate::DomainError::InvalidMissionPlan { reason })?;
+        self.memory_requirements = requirements;
+        Ok(self)
+    }
+
+    /// Returns exact original semantic prerequisites retained across retry and restore.
+    pub fn memory_requirements(&self) -> &[crate::MemoryRequirement] {
+        &self.memory_requirements
     }
 
     /// Returns the complete mission-scoped task identity.

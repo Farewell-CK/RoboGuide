@@ -419,6 +419,17 @@ pub(super) fn compile_memory_providers(
             format!("memory_providers.{}.continuity", config.id),
             "requires an explicit Local EAIOS import workflow",
         )?;
+        let availability = compile_memory_availability(
+            config.availability,
+            &config.id,
+            &config.owner,
+            connections,
+        )?;
+        require(
+            availability.is_none() || continuity.is_some(),
+            format!("memory_providers.{}.availability", config.id),
+            "requires actual instance/original-import continuity and import workflows",
+        )?;
         let provider = CompiledMemoryProvider {
             id: config.id,
             owner: config.owner,
@@ -433,6 +444,7 @@ pub(super) fn compile_memory_providers(
             export,
             import,
             continuity,
+            availability,
         };
         insert_unique(&mut providers, id, provider, "memory_providers.id")?;
     }
@@ -596,4 +608,38 @@ pub(super) fn insert_health_states(
         )?;
     }
     Ok(())
+}
+
+/// Compiles only a fixed read-only actual-content observation owned by this exact provider.
+fn compile_memory_availability(
+    config: Option<MemoryAvailabilityConfig>,
+    provider_id: &str,
+    owner: &str,
+    connections: &BTreeMap<String, CompiledConnection>,
+) -> Result<Option<CompiledMemoryAvailability>, CatalogError> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    let field = format!("memory_providers.{provider_id}.availability");
+    validate_step_sources(std::slice::from_ref(&config.observation), false, &field)?;
+    validate_read_only_observation_operation(
+        &config.observation.operation,
+        &field,
+        "Memory availability",
+    )?;
+    validate_pointer(&config.result_pointer).map_err(|source| CatalogError::Mapping {
+        step: field,
+        source,
+    })?;
+    let observation = compile_steps(
+        vec![config.observation],
+        owner,
+        connections,
+        &mut BTreeSet::new(),
+    )?
+    .remove(0);
+    Ok(Some(CompiledMemoryAvailability {
+        observation,
+        result_pointer: config.result_pointer,
+    }))
 }

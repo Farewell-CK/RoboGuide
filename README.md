@@ -29,8 +29,13 @@ Memory 的原实例查询、导入中断对账和日志回退保护已有当前�
 复制、SQL 故障、正式协议与独立复算。当前还接入了 Control 内容策略、成员 generation、
 Artifact 稳定证书主体和实际 bytes 上传归属门禁，见
 [内容授权合同](contracts/memory/authorization-v0.1/README.md)及
-[内容门禁验收](docs/development/acceptance/2026-10-15-f4-content-authority.md)。完整 Node Group grant、撤销 ACK、
-执行前 Memory 准备、handoff、active-map/GC 及后续阶段仍须完成。
+[内容门禁验收](docs/development/acceptance/2026-10-15-f4-content-authority.md)。
+[执行前准备合同](contracts/memory/preparation-v0.1/README.md) 已接入当前 Control/Runtime/Node：
+先持久 Prepare、原导入/只读对账和当前 bytes observation，再发送带精确上下文的 Execute；
+撤销 ACK、原始 boot/monotonic 预算、整组 pending barrier 与重启 fence 均保留独立证据。
+[两软件节点验收](docs/development/acceptance/2026-10-15-f4-memory-preparation.md)使用真实文件、
+SQL 失败、TLS、CPU 计算和独立验证。完整 Group lifetime/handoff、typed-map 消费、active-map/GC
+及后续阶段仍须完成。
 Operator 修改请求现在在实际事务写锁内复核证书和当前委托，见
 [排队撤权验收](docs/development/acceptance/2026-10-15-f4-operator-transactions.md)。
 
@@ -43,7 +48,7 @@ host monotonic deadline 的预算门禁，见[后续文件验收](docs/developme
 已通过实际软件进程验收，见[Node/Spatial 验收](docs/development/acceptance/2026-10-15-f4-spatial-node.md)。
 原记录为显式 loopback 兼容配置。后续 [producer 权威验收](docs/development/acceptance/2026-10-15-f4-map-provider-authority.md)
 通过实际 mTLS、原始 dispatch/provider 快照及旧二进制拒绝检查；没有设备参与。
-完整 Group grant/preparation、active-map/GC 与其余阶段继续实施。
+完整 Group lifetime、typed-map 消费与 active-map/GC 和其余阶段继续实施。
 [内容策略 v0.2](contracts/memory/authorization-v0.2/README.md) 另绑定完整 typed-map metadata，
 通用 projection 不能绕过来源；wrapper v34 保留显式升级 history 并拒绝旧 Controller 写入。
 
@@ -376,12 +381,12 @@ exhaustion policy。
 TaskRole 显式关联；Matching 与 Scheduler 不解析 intent，Runtime 只路由，节点侧声明式
 Local Integration Engine 负责将 canonical What 映射为本地 HTTP、dynamic gRPC 或 MCP workflow。
 
-正式 gRPC Node Protocol v0.4 支持一个 Node 聚合多个 Local System。显式协商的 Node Contract
-v0.6 通过 exact capability profiles 上报 readiness 与 typed feasibility attributes，通过独立
+正式 gRPC Node Protocol v0.4 支持一个 Node 聚合多个 Local System。Node Contract v0.6 起
+通过 exact capability profiles 上报 readiness 与 typed feasibility attributes，通过独立
 `OperationSupport` 声明 Node 可接收的 canonical operation，并通过 canonical invocation 原样传递
 Operation、objective 和 scalar parameters。Capability profile 回答节点能够证明什么，operation
 support 回答是否能接收 semantic invocation，operation binding 决定哪个本地 workflow 接收
-intent；三者保持分层，后者只存在于 Node config v0.7。所有 Capability、
+intent；三者保持分层，后者存在于 Node config v0.7 及后续显式版本。所有 Capability、
 Sensor、Resource、State export 和 Memory provider 都保留唯一 owner；Execute 携带 Control
 已 Commit 的 resource IDs。它还承载带当前 session/management sequence 的 peer-channel
 readiness evidence；实际 peer transport 和高频控制仍完全属于 Local EAIOS。
@@ -397,7 +402,7 @@ physical attempt 保守恢复为 `Unknown` 并进入 reconciliation，而不是�
 journal、heartbeat/lease 与 session fencing 由 `roboguide-node` 和 `core/integration`/
 Integration Server 实现，Controller 组合 bridge 位于 `core/orchestration`。Artifact bytes 则
 由独立的 `core/artifact-store` filesystem CAS 提供，不参与设备执行生命周期。
-当前合同与版本关系见 [`contracts/node/v0.10/`](contracts/node/v0.10/README.md) 和
+当前合同与版本关系见 [`contracts/node/v0.12/`](contracts/node/v0.12/README.md) 和
 [`contracts/node/README.md`](contracts/node/README.md)。Node config v0.7 为每个 exact
 canonical capability profile 提供固定 readiness observation 与 attributes，将 operation/workflow
 mapping 独立声明，并保留选择性的 State export、Memory provider、固定 discover/export/import

@@ -244,6 +244,28 @@ impl<C: Clock> NodeFactDriver<'_, C> {
                     message,
                 } = &event
                     && let Some(
+                        integration::grpc::v0_4::node_message::Message::MemoryControlReceipt(
+                            receipt,
+                        ),
+                    ) = &message.message
+                {
+                    super::memory_preparation::receipt(
+                        &mut candidate,
+                        node_id,
+                        session_id,
+                        receipt,
+                        received,
+                        now,
+                    )
+                    .map_err(FactFailure::Rejected)?;
+                }
+
+                if let GrpcNodeEvent::NodeMessage {
+                    node_id,
+                    session_id,
+                    message,
+                } = &event
+                    && let Some(
                         integration::grpc::v0_4::node_message::Message::MemoryImportQueryReceipt(
                             receipt,
                         ),
@@ -348,6 +370,7 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             None,
         );
         let import_prepared_at = self.clock.now();
+        super::memory_preparation::prepare(&mut working, import_prepared_at)?;
         super::memory_import::prepare(&mut working, import_prepared_at);
         let checkpoint = server_checkpoint_json(&working)?;
         drop(serialization);
@@ -391,6 +414,9 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             .map_err(|_| "controller lock is poisoned after Commit")?;
         let has_memory_imports = !working.memory_imports.is_empty();
         *live = working;
+        if !live.memory_preparation.records.is_empty() {
+            super::memory_preparation::flush(&live, import_prepared_at, self.clock.now());
+        }
         if has_memory_imports {
             super::memory_import::flush(&live, import_prepared_at, self.clock.now());
         }

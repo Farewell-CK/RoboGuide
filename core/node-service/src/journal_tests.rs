@@ -9,6 +9,243 @@ use domain::{
 };
 use tempfile::TempDir;
 
+/// Supplies immutable metadata for deterministic journal tests, never registered device evidence.
+fn preparation() -> domain::MemoryPreparation {
+    let original = continuity("prepared-import");
+    let manifest: domain::MemoryArtifactManifest = serde_json::from_str(
+        original.original_invocation["manifest_json"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let requirement = domain::MemoryRequirement {
+        selector: manifest.selector().clone(),
+        kind: manifest.kind(),
+        payload_schema: manifest.payload_schema().into(),
+        media_type: manifest.media_type().into(),
+    };
+    domain::MemoryPreparation {
+        schema: "roboguide.memory-preparation/v0.1".into(),
+        preparation_id: "prepared-context".into(),
+        tenant_id: "journal-test".into(),
+        group_id: ExecutionGroupId::new("group").unwrap(),
+        task_ref: TaskRef::new(
+            MissionId::new("mission").unwrap(),
+            TaskId::new("task").unwrap(),
+        ),
+        role_id: RoleId::new("role").unwrap(),
+        execution_id: "attempt".into(),
+        node_id: NodeId::new("journal-node").unwrap(),
+        source_session_id: "original-session".into(),
+        membership: domain::GroupMembershipVersion {
+            generation: 1,
+            bindings_digest: format!("sha256:{}", "b".repeat(64)),
+        },
+        registry_id: "journal-registry".into(),
+        registry_revision: 1,
+        invocation: serde_json::json!({"mission_id":"mission","group_id":"group","task_id":"task","role_id":"role"}),
+        resource_ids: vec![],
+        valid_for_ms: 1000,
+        inputs: vec![domain::PreparedMemoryInput {
+            requirement,
+            manifest,
+            typed_map: None,
+            consumer: domain::MemoryProviderDescriptor::new(
+                "filesystem",
+                domain::LocalSystemId::new("files").unwrap(),
+                domain::MemoryKind::Artifact,
+                domain::MemoryScopeLimit::Global,
+                domain::MemoryVisibility::Exchangeable,
+                "example.bytes/v1",
+                "application/octet-stream",
+            )
+            .unwrap()
+            .with_preparation_support(),
+            import_id: original.import_id,
+        }],
+    }
+}
+
+/// Creates an exact once-only operation over the test context without a transport side effect.
+fn preparation_command(
+    context: &domain::MemoryPreparation,
+    operation: domain::MemoryControlKind,
+    generation: u64,
+) -> domain::MemoryControlCommand {
+    domain::MemoryControlCommand {
+        schema: "roboguide.memory-control/v0.1".into(),
+        preparation_id: context.preparation_id.clone(),
+        preparation_digest: context.digest().unwrap(),
+        operation,
+        generation,
+        preparation: (operation == domain::MemoryControlKind::Prepare).then(|| context.clone()),
+    }
+}
+
+/// Receiver budgets reject reboot/rollback/quantization uncertainty and never compare source clocks.
+#[test]
+fn memory_receiver_budget_preserves_original_deadline_and_boot_identity() {
+    let actual = ReceiverClockObservation::read().unwrap();
+    assert!(!actual.boot_id.is_empty());
+    let initial = ReceiverClockObservation {
+        boot_id: "boot-a".into(),
+        lower_ms: 1000,
+        uncertainty_ms: 10,
+    };
+    let budget = MemoryReceiverBudget::admit(&initial, 1000).unwrap();
+    assert_eq!(budget.remaining_ms(&initial), 990);
+    assert_eq!(
+        budget.remaining_ms(&ReceiverClockObservation {
+            lower_ms: 1990,
+            ..initial.clone()
+        }),
+        0
+    );
+    assert_eq!(
+        budget.remaining_ms(&ReceiverClockObservation {
+            lower_ms: 999,
+            ..initial.clone()
+        }),
+        0
+    );
+    assert_eq!(
+        budget.remaining_ms(&ReceiverClockObservation {
+            boot_id: "boot-b".into(),
+            ..initial.clone()
+        }),
+        0
+    );
+    assert!(MemoryReceiverBudget::admit(&initial, 10).is_err());
+}
+
+/// Real SQLite reopen/replay preserves the first budget/configuration and irreversible revoke fence.
+#[test]
+fn memory_preparation_restart_cannot_renew_or_replace_its_original_context() {
+    let (_directory, path, journal) = journal();
+    let context = preparation();
+    let config = format!("sha256:{}", "c".repeat(64));
+    let clock = ReceiverClockObservation::read().unwrap();
+    let first = journal
+        .prepare_memory_context(&context, &clock, 900, &config)
+        .unwrap();
+    drop(journal);
+    let journal = ExecutionJournal::open(&path).unwrap();
+    let later = ReceiverClockObservation {
+        lower_ms: clock.lower_ms + 500,
+        ..clock.clone()
+    };
+    let replay = journal
+        .prepare_memory_context(&context, &later, 1000, &config)
+        .unwrap();
+    assert_eq!(replay, first);
+    assert!(
+        journal
+            .prepare_memory_context(
+                &context,
+                &later,
+                1000,
+                &format!("sha256:{}", "d".repeat(64))
+            )
+            .is_err()
+    );
+    let mut changed = context.clone();
+    changed.invocation["objective"] = serde_json::json!("changed original intent");
+    assert!(
+        journal
+            .prepare_memory_context(&changed, &later, 1000, &config)
+            .is_err()
+    );
+    journal
+        .revoke_memory_context(&context.preparation_id, &context.digest().unwrap())
+        .unwrap();
+    drop(journal);
+    let journal = ExecutionJournal::open(&path).unwrap();
+    assert!(
+        journal
+            .memory_preparation(&context.preparation_id)
+            .unwrap()
+            .unwrap()
+            .revoked
+    );
+    assert!(
+        journal
+            .prepare_memory_context(&context, &later, 1000, &config)
+            .is_err()
+    );
+    let mut delayed = context.clone();
+    delayed.preparation_id = "delayed-original".into();
+    delayed.execution_id = "another-attempt".into();
+    journal
+        .revoke_memory_context(&delayed.preparation_id, &delayed.digest().unwrap())
+        .unwrap();
+    assert!(
+        journal
+            .prepare_memory_context(&delayed, &later, 1000, &config)
+            .is_err()
+    );
+}
+
+/// Interrupted IDs cannot re-read, skipped generations cannot arrive late, and receipts are immutable.
+#[test]
+fn prepared_memory_observations_are_once_only_across_sql_restart_and_reordering() {
+    let (_directory, path, journal) = journal();
+    let context = preparation();
+    journal
+        .prepare_memory_context(
+            &context,
+            &ReceiverClockObservation::read().unwrap(),
+            1000,
+            &format!("sha256:{}", "c".repeat(64)),
+        )
+        .unwrap();
+    let second = preparation_command(&context, domain::MemoryControlKind::Probe, 2);
+    assert_eq!(
+        journal.begin_memory_observation(&second).unwrap(),
+        BeginMemoryObservation::Start
+    );
+    drop(journal);
+    let journal = ExecutionJournal::open(&path).unwrap();
+    assert_eq!(
+        journal.begin_memory_observation(&second).unwrap(),
+        BeginMemoryObservation::Interrupted
+    );
+    let first = preparation_command(&context, domain::MemoryControlKind::Probe, 1);
+    assert!(journal.begin_memory_observation(&first).is_err());
+    let receipt = domain::MemoryControlReceipt {
+        configuration_digest: None,
+        command_id: second.command_id(),
+        preparation_id: context.preparation_id.clone(),
+        preparation_digest: context.digest().unwrap(),
+        status: domain::MemoryControlStatus::Unavailable,
+        remaining_budget_ms: 0,
+        observations: vec![],
+        reason: "original read interrupted".into(),
+    };
+    journal
+        .record_memory_control_receipt(&second, &receipt)
+        .unwrap();
+    assert_eq!(
+        journal.begin_memory_observation(&second).unwrap(),
+        BeginMemoryObservation::Existing(receipt.clone())
+    );
+    let mut changed = receipt.clone();
+    changed.reason = "new observation under an old ID".into();
+    assert!(
+        journal
+            .record_memory_control_receipt(&second, &changed)
+            .is_err()
+    );
+    assert!(
+        journal
+            .begin_memory_observation(&preparation_command(
+                &context,
+                domain::MemoryControlKind::Probe,
+                17
+            ))
+            .is_err()
+    );
+}
+
 /// Creates original-provider metadata for crash/identity conformance, without a physical device.
 fn continuity(import: &str) -> ImportContinuity {
     let manifest = domain::MemoryArtifactManifest::new(
@@ -1092,7 +1329,7 @@ fn current_journal_keeps_legacy_inspection_but_refuses_legacy_writes() {
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        8
+        9
     );
 }
 
@@ -1102,7 +1339,7 @@ fn future_journal_and_dual_authorities_refuse_without_migration() {
     let (directory, path, journal) = journal();
     drop(journal);
     let connection = rusqlite::Connection::open(&path).unwrap();
-    connection.pragma_update(None, "user_version", 9).unwrap();
+    connection.pragma_update(None, "user_version", 10).unwrap();
     drop(connection);
     assert!(ExecutionJournal::open(&path).is_err());
     let connection = rusqlite::Connection::open(&path).unwrap();
@@ -1110,9 +1347,9 @@ fn future_journal_and_dual_authorities_refuse_without_migration() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        9
+        10
     );
-    connection.pragma_update(None, "user_version", 8).unwrap();
+    connection.pragma_update(None, "user_version", 9).unwrap();
     connection
         .execute_batch("DROP VIEW executions; CREATE TABLE executions (shadow INTEGER)")
         .unwrap();

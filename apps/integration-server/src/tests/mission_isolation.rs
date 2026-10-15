@@ -21,6 +21,7 @@ fn fixture(log: &state::SqliteEventLog) -> ControllerState {
     let mut controller = ControllerState {
         mission_admissions: BTreeMap::new(),
         memory_imports: BTreeMap::new(),
+        memory_preparation: Default::default(),
         safety_stops: BTreeMap::new(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
@@ -456,6 +457,7 @@ fn held_terminal_fact_is_retained_without_release_or_execute_replay() {
         orchestrator: MissionOrchestrator::restore_json(&saved.orchestration_json).unwrap(),
         mission_admissions: saved.mission_admissions,
         memory_imports: saved.memory_imports,
+        memory_preparation: saved.memory_preparation,
         safety_stops: saved.safety_stops,
         verifier_seen: saved.verifier_seen,
         verifier_artifact_store: None,

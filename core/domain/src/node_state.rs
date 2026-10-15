@@ -493,6 +493,7 @@ impl NodeRegistration {
                 NODE_CONTRACT_VERSION_V0_6
                     | NODE_CONTRACT_VERSION_V0_7
                     | NODE_CONTRACT_VERSION_V0_8
+                    | crate::NODE_CONTRACT_VERSION_V0_9
             )
         {
             return Err(DomainError::InvalidMissionPlan {
@@ -723,7 +724,15 @@ impl NodeRegistration {
                 resource.kind() == required.kind() && resource.capacity() >= required.units()
             })
         });
-        has_capability && has_contract && has_resource
+        let has_memory = requirement.memories().is_empty()
+            || (self.contract_version().as_str() == crate::NODE_CONTRACT_VERSION_V0_9
+                && crate::MemoryRequirement::validate_set(requirement.memories()).is_ok()
+                && requirement.memories().iter().all(|required| {
+                    self.memory_providers().iter().any(|provider| {
+                        provider.supports_preparation() && required.matches_provider(provider)
+                    })
+                }));
+        has_capability && has_contract && has_resource && has_memory
     }
 
     /// Checks exact readiness and every feasibility predicate for one capability requirement.

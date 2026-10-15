@@ -22,7 +22,11 @@ pub trait MemoryProviderAdmission: Send + Sync {
         principal: &ArtifactPrincipal,
         _manifest: &MapArtifactManifest,
         _operation: domain::MemoryAccessOperation,
+        import_id: Option<&str>,
     ) -> Result<(), String> {
+        if import_id.is_some() {
+            return Err("prepared typed-map content authority is unavailable".into());
+        }
         self.revalidate_artifact_principal(principal)
     }
     /// Rechecks request authentication and content/byte authority inside the catalog writer ordering.
@@ -192,6 +196,30 @@ pub struct ArtifactCatalog {
 }
 
 impl ArtifactCatalog {
+    /// Federates immutable admitted metadata for application prerequisites without granting content access.
+    pub(crate) fn memory_source(
+        &self,
+        selector: &MemorySelector,
+    ) -> Result<Option<(MemoryArtifactManifest, Option<MapArtifactManifest>)>, String> {
+        let generic = self.memory(selector).map_err(|e| e.message)?;
+        let map_selector = MapRevisionSelector::new(
+            domain::MapId::new(selector.memory_id().as_str()).map_err(|e| e.to_string())?,
+            domain::MapRevisionId::new(selector.revision_id().as_str())
+                .map_err(|e| e.to_string())?,
+        );
+        let map = self.revision(&map_selector).map_err(|e| e.message)?;
+        match (generic, map) {
+            (Some(_), Some(_)) => {
+                Err("Memory source selector has ambiguous generic/typed metadata".into())
+            }
+            (Some(manifest), None) => Ok(Some((manifest, None))),
+            (None, Some(map)) if map.status() == domain::MapRevisionStatus::Published => {
+                let raw = map.manifest().clone();
+                Ok(Some((domain::map_memory_manifest(&raw)?, Some(raw))))
+            }
+            _ => Ok(None),
+        }
+    }
     /// Persists certificate admission before any data access under the existing writer ordering gate.
     pub(super) fn audit_access(
         &self,

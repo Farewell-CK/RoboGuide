@@ -40,6 +40,8 @@ fn fixture() -> (stop_recovery::Fixture, MemoryImportRequest) {
         .record_node(snapshot)
         .unwrap();
     let request = MemoryImportRequest {
+        preparation_id: None,
+        typed_map: None,
         import_id: "import-a".into(),
         group_id: command.group_id().clone(),
         task_ref: command.task_ref().clone(),

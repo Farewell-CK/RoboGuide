@@ -16,8 +16,10 @@ pub(super) fn authorized_map_read(
     principal: &ArtifactPrincipal,
     map: &MapArtifactManifest,
     operation: domain::MemoryAccessOperation,
+    import_id: Option<&str>,
 ) -> Result<(), HttpError> {
-    if principal.grant.role != ArtifactRole::Admin
+    if import_id.is_none()
+        && principal.grant.role != ArtifactRole::Admin
         && !principal
             .grant
             .map_ids
@@ -28,7 +30,7 @@ pub(super) fn authorized_map_read(
         ));
     }
     authority
-        .authorize_map_access(principal, map, operation)
+        .authorize_map_access(principal, map, operation, import_id)
         .map_err(HttpError::forbidden)
 }
 
@@ -67,6 +69,7 @@ pub(super) fn list_authorized_memories(
             principal,
             map.manifest(),
             domain::MemoryAccessOperation::Discover,
+            None,
         )
         .is_ok()
         {
@@ -140,6 +143,7 @@ pub(super) fn authorize_blob_read(
                 principal,
                 map.manifest(),
                 domain::MemoryAccessOperation::Read,
+                import_id,
             )?;
         }
     }

@@ -63,6 +63,14 @@ struct MemoryQueryIntent {
 /// Builds the complete original import content without a replaceable transport epoch.
 fn original_command(request: &MemoryImportRequest) -> MemoryImport {
     MemoryImport {
+        memory_preparation_id: request.preparation_id.clone().unwrap_or_default(),
+        typed_map_manifest_json: request
+            .typed_map
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .expect("original typed metadata")
+            .unwrap_or_default(),
         import_id: request.import_id.clone(),
         command_id: format!("memory-import-{}", request.import_id),
         consumer_provider_id: request.consumer_provider_id.clone(),
@@ -74,6 +82,73 @@ fn original_command(request: &MemoryImportRequest) -> MemoryImport {
         execution_id: request.execution_id.clone(),
         ..Default::default()
     }
+}
+
+/// Opens only bounded readonly original-provider reconciliation for an accepted prerequisite.
+pub(crate) fn drive_prerequisite(
+    controller: &mut ControllerState,
+    import_id: &str,
+    deadline: u64,
+    now: domain::TimestampMs,
+) -> Result<(), String> {
+    let import = controller
+        .memory_imports
+        .get(import_id)
+        .ok_or("original prerequisite import is absent")?;
+    if import.phase != ImportPhase::Unknown {
+        return Ok(());
+    }
+    super::memory_import::authorize(controller, &import.request, now)?;
+    let (generation, frozen_deadline) = match import.reconciliation.as_ref() {
+        Some(session) => {
+            if session.resolved_by.is_some() {
+                return Ok(());
+            }
+            if let Some(last) = session.queries.last_key_value().map(|(_, q)| q)
+                && last.receipt.is_none()
+                && now.as_millis() < last.authorized_at_ms.saturating_add(last.valid_for_ms)
+            {
+                return Ok(());
+            }
+            if let Some(last) = session.queries.last_key_value().map(|(_, query)| query) {
+                let backoff_ms = 1000_u64.saturating_mul(1 << session.queries.len().min(3));
+                if now.as_millis() < last.authorized_at_ms.saturating_add(backoff_ms) {
+                    return Ok(());
+                }
+            }
+            (session.queries.len() as u64, session.deadline_ms)
+        }
+        None => (0, deadline),
+    };
+    if generation >= 16 || now.as_millis() >= frozen_deadline {
+        return Err("original prerequisite reconciliation budget exhausted".into());
+    }
+    let query = MemoryQueryRequest {
+        import_id: import_id.into(),
+        expected_generation: generation,
+        deadline_ms: frozen_deadline,
+        query_timeout_ms: 30_000.min(frozen_deadline - now.as_millis()),
+    };
+    let generation = admit(
+        controller,
+        query,
+        "control:accepted-memory-prerequisite",
+        now,
+    )?;
+    let mut events = controller.bridge.event_sink().clone();
+    audit(
+        controller,
+        import_id,
+        generation,
+        "prerequisite_query_authorized",
+        "control:accepted-memory-prerequisite",
+        now,
+        &mut events,
+    );
+    if let Some(error) = events.take_error().map_err(|e| e.to_string())? {
+        return Err(error.to_string());
+    }
+    Ok(())
 }
 
 /// Admits explicit readonly queries on a private transaction candidate before any network delivery.

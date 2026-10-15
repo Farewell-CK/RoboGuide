@@ -158,3 +158,62 @@ def test_wrong_digest_never_publishes_and_writer_lock_is_exclusive(tmp_path: Pat
         assert not tuple((tmp_path / "backend/content").iterdir())
     finally:
         store.close()
+
+
+def test_current_availability_reads_bytes_despite_retained_completed_history(
+    tmp_path: Path,
+) -> None:
+    """A completed SQL row cannot hide deletion or same-size corruption of actual content."""
+    payload = Path(__file__).read_bytes()
+    source = tmp_path / "source"
+    source.write_bytes(payload)
+    store = MemoryStore(tmp_path / "backend", "file-content", (tmp_path,), len(payload) + 1)
+    try:
+        evidence, manifest = original(store, payload)
+        store.import_artifact(evidence, manifest, str(source))
+        before = store._db.total_changes
+        observed = store.availability(evidence)
+        assert observed["available"] is True
+        assert (
+            observed["manifest_digest"]
+            == "sha256:" + hashlib.sha256(canonical(manifest)).hexdigest()
+        )
+        content = tmp_path / "backend/content" / manifest["artifact"]["content_digest"][7:]
+        damaged = bytes([payload[0] ^ 1]) + payload[1:]
+        content.chmod(0o600)
+        content.write_bytes(damaged)
+        assert store.availability(evidence)["available"] is False
+        content.unlink()
+        assert store.availability(evidence)["available"] is False
+        content.write_bytes(payload)
+        content.chmod(0o400)
+        assert store.availability(evidence) == observed
+        assert store._db.total_changes == before
+
+    finally:
+        store.close()
+
+
+def test_prepared_import_cannot_replace_its_original_context(tmp_path: Path) -> None:
+    """A changed prepared ID rejects even with a recomputed content digest and the same bytes."""
+    payload = Path(__file__).read_bytes()
+    source = tmp_path / "source"
+    source.write_bytes(payload)
+    store = MemoryStore(tmp_path / "backend", "file-content", (tmp_path,), len(payload) + 1)
+    try:
+        evidence, manifest = original(store, payload)
+        evidence["original_invocation"]["memory_preparation_id"] = uuid.uuid4().hex
+        evidence["original_invocation"]["typed_map_manifest_json"] = ""
+        evidence["original_content_digest"] = original_content_digest(
+            evidence["original_invocation"]
+        )
+        store.import_artifact(evidence, manifest, str(source))
+        assert store.availability(evidence)["available"] is True
+        changed = json.loads(json.dumps(evidence))
+        changed["original_invocation"]["memory_preparation_id"] = uuid.uuid4().hex
+        changed["original_content_digest"] = original_content_digest(changed["original_invocation"])
+        with pytest.raises(ValueError, match="conflict"):
+            store.import_artifact(changed, manifest, str(source))
+        assert store.availability(evidence)["available"] is True
+    finally:
+        store.close()

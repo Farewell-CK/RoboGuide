@@ -97,6 +97,9 @@ async fn lagged_replay_during_dispatch_preserves_one_local_execution() {
     node.handle_server_message(
         ServerMessage {
             message: Some(ServerPayload::Execute(integration::grpc::v0_4::Execute {
+                memory_preparation_id: String::new(),
+                memory_preparation_digest: String::new(),
+                memory_requirements_json: String::new(),
                 session_id: "session-a".into(),
                 command_id: "dispatch-attempt-a".into(),
                 execution_id: "attempt-a".into(),

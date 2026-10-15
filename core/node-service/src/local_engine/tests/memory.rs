@@ -85,6 +85,7 @@ fn compiles_v0_6_memory_provider_workflows() {
     };
     config.memory_providers = vec![MemoryProviderConfig {
         continuity: None,
+        availability: None,
         id: "maps".to_string(),
         owner: "motion".to_string(),
         kind: "spatial".to_string(),
@@ -124,6 +125,7 @@ fn v0_5_rejects_memory_provider_workflows() {
     add_readiness(&mut config);
     config.memory_providers = vec![MemoryProviderConfig {
         continuity: None,
+        availability: None,
         id: "lessons".to_string(),
         owner: "motion".to_string(),
         kind: "experience".to_string(),
@@ -163,6 +165,7 @@ fn rejects_nested_memory_provider_storage_roots() {
     add_readiness(&mut config);
     let provider = |id: &str, storage: &str| MemoryProviderConfig {
         continuity: None,
+        availability: None,
         id: id.to_string(),
         owner: "motion".to_string(),
         kind: "semantic".to_string(),
@@ -196,6 +199,7 @@ fn rejects_typed_spatial_schema_in_generic_memory_provider() {
     add_readiness(&mut config);
     config.memory_providers = vec![MemoryProviderConfig {
         continuity: None,
+        availability: None,
         id: "maps".to_string(),
         owner: "motion".to_string(),
         kind: "spatial".to_string(),
@@ -229,6 +233,7 @@ fn filesystem_memory_ledger_round_trips_jsonl_metadata() {
     let directory = tempfile::tempdir().expect("temporary directory exists");
     let descriptor = CompiledMemoryProvider {
         continuity: None,
+        availability: None,
         id: "maps".to_string(),
         owner: "maps".to_string(),
         kind: "spatial".to_string(),

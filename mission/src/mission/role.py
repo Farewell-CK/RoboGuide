@@ -9,6 +9,7 @@ from enum import StrEnum
 from mission.contract_values import (
     CAPABILITIES,
     MISSION_PLAN_ACTOR_VERSION,
+    MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
     MISSION_PLAN_SCHEDULING_VERSION,
     MISSION_PLAN_VERSION,
@@ -18,10 +19,12 @@ from mission.contract_values import (
     JSONValue,
     MissionPlanError,
     _array,
+    _bounded_keys,
     _exact_keys,
     _object,
     _text,
 )
+from mission.memory_requirement import MemoryRequirement
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,19 +282,42 @@ class RoleRequirement:
     resource_scope: str
     legacy_actor_id: str | None = None
     legacy_capability: str | None = None
+    memories: tuple[MemoryRequirement, ...] = ()
 
     @classmethod
     def from_json(cls, value: JSONValue, path: str, version: str) -> RoleRequirement:
         """Parse and validate one role requirement from contract JSON."""
         item = _object(value, path)
-        if version in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}:
+        if version in {
+            MISSION_PLAN_ACTOR_VERSION,
+            MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
+        }:
             _exact_keys(
                 item,
                 {"id", "requirements", "execution_intent", "context_role", "resource_scope"},
                 path,
             )
             requirements = _object(item["requirements"], f"{path}.requirements")
-            _exact_keys(requirements, {"capabilities", "resources"}, f"{path}.requirements")
+            _bounded_keys(
+                requirements,
+                {"capabilities", "resources"},
+                {"memories"} if version == MISSION_PLAN_MEMORY_VERSION else set(),
+                f"{path}.requirements",
+            )
+            memory_values = _array(
+                requirements.get("memories", []), f"{path}.requirements.memories"
+            )
+            memories = tuple(
+                MemoryRequirement.from_json(value, f"{path}.requirements.memories[{index}]")
+                for index, value in enumerate(memory_values)
+            )
+            if len(memories) > 8 or len({(m.memory_id, m.revision_id) for m in memories}) != len(
+                memories
+            ):
+                raise MissionPlanError(
+                    f"{path}.requirements.memories exceeds its bound or repeats a selector"
+                )
             capabilities = tuple(
                 CapabilityRequirement.from_json(
                     capability, f"{path}.requirements.capabilities[{index}]"
@@ -321,6 +347,7 @@ class RoleRequirement:
                 role_id=_text(item["id"], f"{path}.id"),
                 capabilities=capabilities,
                 resources=resources,
+                memories=memories,
                 execution=ExecutionIntent.from_json(
                     item["execution_intent"], f"{path}.execution_intent"
                 ),
@@ -395,10 +422,14 @@ class RoleRequirement:
 
     def to_json(self, version: str) -> JSONObject:
         """Serialize the role requirement without provider-specific values."""
-        if version in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}:
+        if version in {
+            MISSION_PLAN_ACTOR_VERSION,
+            MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
+        }:
             if self.context_role is None:
                 raise MissionPlanError("normalized Role requires a ContextRole reference")
-            return {
+            result: JSONObject = {
                 "id": self.role_id,
                 "context_role": self.context_role,
                 "requirements": {
@@ -408,10 +439,16 @@ class RoleRequirement:
                 "execution_intent": self.execution.to_json(),
                 "resource_scope": self.resource_scope,
             }
+            if version == MISSION_PLAN_MEMORY_VERSION:
+                requirements = _object(result["requirements"], "requirements")
+                requirements["memories"] = [memory.to_json() for memory in self.memories]
+            elif self.memories:
+                raise MissionPlanError("Memory prerequisites require MissionPlan v0.9")
+            return result
         if self.legacy_actor_id is None or self.legacy_capability is None:
             raise MissionPlanError("normalized Role cannot be serialized as a legacy MissionPlan")
         contract = self.capabilities[0].contract
-        result: JSONObject = {
+        result = {
             "id": self.role_id,
             "actor": self.legacy_actor_id,
             "capability": self.legacy_capability,

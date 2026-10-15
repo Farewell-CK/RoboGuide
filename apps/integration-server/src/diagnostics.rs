@@ -590,6 +590,7 @@ mod tests {
         let controller = Arc::new(std::sync::Mutex::new(crate::ControllerState {
             mission_admissions: BTreeMap::new(),
             memory_imports: BTreeMap::new(),
+            memory_preparation: Default::default(),
             safety_stops: BTreeMap::new(),
             bridge,
             orchestrator: orchestration::MissionOrchestrator::new(),

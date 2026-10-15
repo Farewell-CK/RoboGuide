@@ -25,6 +25,7 @@ from mission.contract_values import (
     MISSION_PLAN_ACTOR_VERSION,
     MISSION_PLAN_COMPAT_VERSION,
     MISSION_PLAN_COUPLING_VERSION,
+    MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
     MISSION_PLAN_SCHEDULING_VERSION,
     MISSION_PLAN_VERSION,
@@ -85,6 +86,7 @@ __all__ = [
     "MISSION_PLAN_SATISFACTION_VERSION",
     "MISSION_PLAN_SCHEDULING_VERSION",
     "MISSION_PLAN_VERSION",
+    "MISSION_PLAN_MEMORY_VERSION",
     "MissionActor",
     "MissionContext",
     "MissionPlan",
@@ -126,7 +128,9 @@ class MissionActor:
         _bounded_keys(
             item,
             {"id"},
-            {"physical_entity"} if version == MISSION_PLAN_VERSION else set(),
+            {"physical_entity"}
+            if version in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION}
+            else set(),
             path,
         )
         entity = (
@@ -139,14 +143,21 @@ class MissionActor:
     def to_json(self, version: str) -> JSONObject:
         """Serialize one logical Actor declaration."""
         result: JSONObject = {"id": self.actor_id}
-        if self.physical_entity is not None and version == MISSION_PLAN_VERSION:
+        if self.physical_entity is not None and version in {
+            MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
+        }:
             result["physical_entity"] = self.physical_entity
         return result
 
 
 def _actor_contract(version: str) -> bool:
     """Return whether the version declares Mission actors (v0.7+)."""
-    return version in {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}
+    return version in {
+        MISSION_PLAN_ACTOR_VERSION,
+        MISSION_PLAN_VERSION,
+        MISSION_PLAN_MEMORY_VERSION,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +224,7 @@ class MissionPlan:
             MISSION_PLAN_SATISFACTION_VERSION,
             MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
         }:
             raise MissionPlanError(f"unsupported schema_version: {version}")
         tasks = tuple(
@@ -261,7 +273,7 @@ class MissionPlan:
             context_roles = {role.role_id: role for role in task_context.roles}
             for role in task.roles:
                 if role.context_role is None:
-                    if self.schema_version == MISSION_PLAN_VERSION:
+                    if self.schema_version in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION}:
                         raise MissionPlanError(
                             f"task {task.task_id} role {role.role_id} lacks context role"
                         )

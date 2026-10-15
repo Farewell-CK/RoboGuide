@@ -65,7 +65,7 @@ impl LocalIntegrationEngine {
             .ok_or_else(|| {
                 EngineError::Configuration("original Memory provider is unavailable".into())
             })?;
-        let mut content = format!("{provider:?}");
+        let mut content = provider.identity_content();
         let mut connections = BTreeSet::new();
         if let Some(import) = provider.import() {
             connections.extend(
@@ -78,6 +78,9 @@ impl LocalIntegrationEngine {
         if let Some(continuity) = provider.continuity() {
             connections.insert(continuity.instance().connection());
             connections.insert(continuity.query().connection());
+        }
+        if let Some(availability) = provider.availability() {
+            connections.insert(availability.observation().connection());
         }
         for id in connections {
             content.push_str(&format!(
@@ -94,7 +97,10 @@ impl LocalIntegrationEngine {
     }
 
     /// Reads the actual backend instance through its explicitly configured readonly contract.
-    async fn memory_provider_instance(&self, provider_id: &str) -> Result<String, EngineError> {
+    pub(super) async fn memory_provider_instance(
+        &self,
+        provider_id: &str,
+    ) -> Result<String, EngineError> {
         let continuity = self
             .catalog()
             .memory_providers()

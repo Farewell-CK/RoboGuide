@@ -59,6 +59,7 @@
         {"$ref": "../v0.6/mission-plan.schema.json"},
         {"$ref": "../v0.7/mission-plan.schema.json"},
         {"$ref": "../v0.8/mission-plan.schema.json"},
+        {"$ref": "../v0.9/mission-plan.schema.json"},
         {"type": "null"}
       ]
     },

@@ -29,6 +29,7 @@ mod lease;
 mod localization_evidence;
 mod memory;
 mod memory_authority;
+mod memory_preparation;
 pub use artifact_authorization::{
     ArtifactAccessRole, ArtifactAuthorizationRegistry, ArtifactCertificateGrant,
 };
@@ -36,6 +37,10 @@ pub use memory_authority::{
     GroupMembershipVersion, MEMORY_AUTHORIZATION_SCHEMA, MEMORY_AUTHORIZATION_SCHEMA_V0_1,
     MemoryAccessOperation, MemoryAccessPolicy, MemoryAuthorizationRegistry, MemoryConsumerPolicy,
     MemoryGroupPolicy, map_manifest_digest, map_memory_manifest, memory_manifest_digest,
+};
+pub use memory_preparation::{
+    MemoryAvailabilityEvidence, MemoryControlCommand, MemoryControlKind, MemoryControlReceipt,
+    MemoryControlStatus, MemoryPreparation, MemoryRequirement, PreparedMemoryInput,
 };
 mod mission;
 mod mission_plan;
@@ -195,6 +200,9 @@ pub const MISSION_PLAN_SCHEMA_V0_7: &str = "roboguide.mission-plan/v0.7";
 /// Mission-plan schema that can declare actor binding semantics.
 pub const MISSION_PLAN_SCHEMA_V0_8: &str = "roboguide.mission-plan/v0.8";
 
+/// Version with explicit semantic Memory prerequisites and Control-selected receivers.
+pub const MISSION_PLAN_SCHEMA_V0_9: &str = "roboguide.mission-plan/v0.9";
+
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
 
@@ -216,6 +224,8 @@ pub const NODE_CONTRACT_VERSION_V0_6: &str = "roboguide.node.v0.6";
 pub const NODE_CONTRACT_VERSION_V0_7: &str = "roboguide.node.v0.7";
 /// Node Contract with exact typed-map producer and current publication provenance.
 pub const NODE_CONTRACT_VERSION_V0_8: &str = "roboguide.node.v0.8";
+/// Node Contract with durable pre-execution Memory context and current backend observation.
+pub const NODE_CONTRACT_VERSION_V0_9: &str = "roboguide.node.v0.9";
 
 #[cfg(test)]
 #[path = "domain_tests.rs"]

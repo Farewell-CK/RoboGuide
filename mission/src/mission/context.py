@@ -11,6 +11,7 @@ from mission.contract_values import (
     MISSION_PLAN_ACTOR_VERSION,
     MISSION_PLAN_COMPAT_VERSION,
     MISSION_PLAN_COUPLING_VERSION,
+    MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
     MISSION_PLAN_SCHEDULING_VERSION,
     MISSION_PLAN_VERSION,
@@ -362,7 +363,7 @@ class MissionContext:
         """Parse one versioned Context and reject duplicate ContextRole identities."""
         item = _object(value, path)
         base_keys = {"id", "roles", "relations"}
-        if version == MISSION_PLAN_VERSION:
+        if version in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION}:
             base_keys.add("executor_constraints")
         if version == MISSION_PLAN_COMPAT_VERSION:
             _exact_keys(item, base_keys, path)
@@ -383,7 +384,7 @@ class MissionContext:
                     _array(item["executor_constraints"], f"{path}.executor_constraints")
                 )
             )
-            if version == MISSION_PLAN_VERSION
+            if version in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION}
             else ()
         )
         roles_by_id = {role.role_id: role for role in roles}
@@ -450,13 +451,14 @@ class MissionContext:
             MISSION_PLAN_SATISFACTION_VERSION,
             MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
         }:
             result["coupling_mode"] = self.coupling_mode
             if self.shared_view is not None:
                 result["shared_view"] = self.shared_view.to_json()
             if self.peer_channel is not None:
                 result["peer_channel"] = self.peer_channel.to_json()
-        if version == MISSION_PLAN_VERSION:
+        if version in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION}:
             result["executor_constraints"] = [
                 constraint.to_json() for constraint in self.executor_constraints
             ]

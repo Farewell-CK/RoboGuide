@@ -290,9 +290,14 @@ pub(crate) fn flush_unisolated_dispatch(
                 .map(|execution| execution.group_id().clone())
         })
         .collect::<BTreeSet<_>>();
+    let preparations = if controller.memory_preparation.records.is_empty() {
+        BTreeMap::new()
+    } else {
+        super::memory_preparation::ready(controller, clock.now())
+    };
     controller
         .bridge
-        .flush_dispatch_outbox_excluding_groups(clock, &held)
+        .flush_dispatch_outbox_with_memory(clock, &held, &preparations)
 }
 
 /// Flushes Cancel independently while a persisted Orchestration hold fences new Execute delivery.
@@ -313,22 +318,27 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
-    if saved.schema != SERVER_CHECKPOINT_SCHEMA
-        && integration.get("control").is_some_and(|control| {
-            [
-                "memory_authorization_registry",
-                "memory_authorization_history",
-            ]
-            .iter()
-            .filter_map(|key| control.get(key))
-            .any(contains_typed_map_policy)
-        })
-    {
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA && !saved.memory_preparation.records.is_empty() {
+        return Err("legacy wrapper contains pre-execution Memory authority".into());
+    }
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
+    ) && integration.get("control").is_some_and(|control| {
+        [
+            "memory_authorization_registry",
+            "memory_authorization_history",
+        ]
+        .iter()
+        .filter_map(|key| control.get(key))
+        .any(contains_typed_map_policy)
+    }) {
         return Err("legacy wrapper contains complete typed-map content authority".into());
     }
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
     ) && (integration.get("control").is_some_and(|c| {
@@ -348,6 +358,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
     ) && integration
@@ -367,6 +378,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
@@ -380,6 +392,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
@@ -422,6 +435,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
@@ -447,6 +461,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
@@ -469,6 +484,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
@@ -511,6 +527,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
@@ -534,6 +551,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA

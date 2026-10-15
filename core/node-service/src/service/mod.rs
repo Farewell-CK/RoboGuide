@@ -3,6 +3,7 @@
 use crate::MemoryImportStatus;
 
 mod memory_continuity;
+mod memory_preparation;
 use crate::{EngineError, ExecuteDisposition, LocalIntegrationEngine};
 use integration::grpc::v0_4::node_message::Message as NodePayload;
 use integration::grpc::v0_4::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
@@ -178,6 +179,32 @@ impl NodeService {
                         let Some(message) = message.map_err(NodeServiceError::Status)? else {
                             return Ok(());
                         };
+                        if let Some(ServerPayload::MemoryControl(frame)) = &message.message {
+                            if frame.session_id != registered.session_id || frame.command_json.len()>256*1024
+                                || self.engine.catalog().node_contract_version()!=integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION {
+                                return Err(NodeServiceError::Protocol("Memory control lacks its negotiated current session/bounds".into()));
+                            }
+                            let command:domain::MemoryControlCommand=serde_json::from_str(&frame.command_json).map_err(|e|NodeServiceError::Protocol(e.to_string()))?;
+                            command.validate().map_err(NodeServiceError::Protocol)?;
+                            if command.operation==domain::MemoryControlKind::Probe {
+                                if imports.len()>=4 {
+                                    self.send_memory_control_receipt(&registered.session_id,&domain::MemoryControlReceipt {
+                                        command_id:command.command_id(),preparation_id:command.preparation_id,
+                                        preparation_digest:command.preparation_digest,configuration_digest:None,
+                                        status:domain::MemoryControlStatus::Unavailable,remaining_budget_ms:0,
+                                        observations:vec![],reason:"bounded Memory workers are busy; observation was not admitted".into(),
+                                    },&outbound,&management_sequence).await?;
+                                } else {
+                                    let service=Self::new(self.engine.clone());let frame=frame.clone();
+                                    let session=registered.session_id.clone();let sender=outbound.clone();
+                                    let sequence=Arc::clone(&management_sequence);
+                                    imports.spawn(async move {service.handle_memory_control(frame,&session,&sender,&sequence).await});
+                                }
+                            } else {
+                                self.handle_memory_control(frame.clone(),&registered.session_id,&outbound,&management_sequence).await?;
+                            }
+                            continue;
+                        }
                         if let Some(ServerPayload::MemoryImport(import)) = &message.message {
                             if import.session_id != registered.session_id {
                                 return Err(NodeServiceError::Protocol("Memory import session differs".into()));
@@ -539,6 +566,37 @@ impl NodeService {
     ) -> Result<(), NodeServiceError> {
         match message.message {
             Some(ServerPayload::Execute(execute)) if execute.session_id == session_id => {
+                let modern = self.engine.catalog().node_contract_version()
+                    == integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION;
+                let prepared = if modern {
+                    let requirements: Vec<domain::MemoryRequirement> =
+                        serde_json::from_str(&execute.memory_requirements_json)
+                            .map_err(|e| NodeServiceError::Protocol(e.to_string()))?;
+                    domain::MemoryRequirement::validate_set(&requirements)
+                        .map_err(NodeServiceError::Protocol)?;
+                    if requirements.is_empty() {
+                        if !execute.memory_preparation_id.is_empty()
+                            || !execute.memory_preparation_digest.is_empty()
+                        {
+                            return Err(NodeServiceError::Protocol(
+                                "empty Memory prerequisites cannot name a prepared context".into(),
+                            ));
+                        }
+                        None
+                    } else {
+                        Some(self.engine.execute_prepared(&execute).await)
+                    }
+                } else {
+                    if !execute.memory_preparation_id.is_empty()
+                        || !execute.memory_preparation_digest.is_empty()
+                        || !execute.memory_requirements_json.is_empty()
+                    {
+                        return Err(NodeServiceError::Protocol(
+                            "prepared Execute was not negotiated".into(),
+                        ));
+                    }
+                    None
+                };
                 let invocation = execute.invocation.ok_or_else(|| {
                     NodeServiceError::Protocol("Execute lacks canonical invocation".to_string())
                 })?;
@@ -556,21 +614,25 @@ impl NodeService {
                 {
                     Err(error) => {
                         receipt_reason = error.to_string();
-                        send_local_rejection(
-                            outbound,
-                            session_id,
-                            &execution_id,
-                            "execute_epoch_rejected",
-                            &error,
-                        )?;
+                        if !modern {
+                            send_local_rejection(
+                                outbound,
+                                session_id,
+                                &execution_id,
+                                "execute_epoch_rejected",
+                                &error,
+                            )?;
+                        }
                         integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
                     }
-                    Ok(()) => match self.engine.execute_with_session(
-                        execution_id.clone(),
-                        invocation,
-                        execute.resource_ids,
-                        &execute.execution_session_json,
-                    ) {
+                    Ok(()) => match prepared.unwrap_or_else(|| {
+                        self.engine.execute_with_session(
+                            execution_id.clone(),
+                            invocation,
+                            execute.resource_ids,
+                            &execute.execution_session_json,
+                        )
+                    }) {
                         Ok(ExecuteDisposition::Started | ExecuteDisposition::DispatchPending) => {
                             integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
                         }
@@ -585,13 +647,15 @@ impl NodeService {
                         }
                         Err(error) => {
                             receipt_reason = error.to_string();
-                            send_local_rejection(
-                                outbound,
-                                session_id,
-                                &execution_id,
-                                "execute_rejected",
-                                &error,
-                            )?;
+                            if !modern {
+                                send_local_rejection(
+                                    outbound,
+                                    session_id,
+                                    &execution_id,
+                                    "execute_rejected",
+                                    &error,
+                                )?;
+                            }
                             integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
                         }
                     },
@@ -712,18 +776,7 @@ impl NodeService {
                 )
                 .await;
         }
-        let expected = integration::memory_import_authorization_digest(
-            &import.import_id,
-            &import.command_id,
-            &import.consumer_provider_id,
-            &import.manifest_json,
-            &import.mission_id,
-            &import.group_id,
-            &import.task_id,
-            &import.role_id,
-            &import.execution_id,
-            &import.controller_epoch,
-        );
+        let expected = integration::prepared_memory_import_digest(&import);
         if import.authorization_digest != expected {
             return self
                 .send_memory_import_receipt(

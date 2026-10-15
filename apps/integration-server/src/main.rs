@@ -34,6 +34,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Last wrapper without durable pre-execution Memory contexts and current backend observations.
+const PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v34";
 /// Last wrapper without complete typed-map content policy digests.
 const PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v33";
 /// Last wrapper without registered typed-map producer and current publishing-attempt authority.
@@ -104,6 +106,8 @@ struct ControlHttpRequest {
 struct ControllerState {
     /// Immutable HTTP receipts; Orchestration still owns complete plan and Mission lifecycle.
     mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
+    /// Memory prerequisite authority plus a startup-reacquired read-only catalog federation.
+    memory_preparation: application::memory_preparation::MemoryPreparationState,
     /// Exact authorized selective-import intents and durable Node receipts.
     memory_imports: BTreeMap<String, application::memory_import::MemoryImportIntent>,
     /// Application safety policy over existing exact Runtime cancellation intents and raw evidence.
@@ -122,6 +126,8 @@ struct ControllerState {
 
 /// Read-only admission adapter from Artifact HTTP into current Controller registration facts.
 struct ControllerMemoryAdmission {
+    /// Same Controller receive clock used by original Memory intent deadlines.
+    clock: Arc<runtime::SystemMonotonicClock>,
     /// Shared Controller composition whose State projection owns registration snapshots.
     controller: Arc<Mutex<ControllerState>>,
     /// Current gRPC routes used to bind Node-authored evidence to an active Node session.
@@ -237,8 +243,33 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
         principal: &artifact_http::ArtifactPrincipal,
         manifest: &domain::MapArtifactManifest,
         operation: domain::MemoryAccessOperation,
+        import_id: Option<&str>,
     ) -> Result<(), String> {
         self.revalidate_artifact_principal(principal)?;
+        if let Some(id) = import_id {
+            {
+                let live = self
+                    .controller
+                    .lock()
+                    .map_err(|_| "typed Memory purpose authority is unavailable")?;
+                if live
+                    .memory_imports
+                    .get(id)
+                    .and_then(|import| import.request.typed_map.as_ref())
+                    != Some(manifest)
+                {
+                    return Err(
+                        "typed Memory purpose lacks this complete original map manifest".into(),
+                    );
+                }
+            }
+            return self.authorize_memory_access(
+                principal,
+                &domain::map_memory_manifest(manifest)?,
+                operation,
+                Some(id),
+            );
+        }
         let live = self
             .controller
             .lock()
@@ -311,15 +342,7 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
             {
                 return Err("Memory purpose differs from actual certificate Node/provider or immutable manifest".into());
             }
-            let now = domain::TimestampMs::new(
-                u64::try_from(
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .map_err(|e| e.to_string())?
-                        .as_millis(),
-                )
-                .map_err(|e| e.to_string())?,
-            );
+            let now = ports::Clock::now(self.clock.as_ref());
             if now.as_millis() >= original.request.deadline_ms {
                 return Err("original Memory content access budget expired".into());
             }
@@ -335,19 +358,40 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
                         .find(|p| p.provider_id() == original.request.consumer_provider_id)
                 })
                 .ok_or("Memory consumer provider unavailable")?;
-            control
-                .authorize_memory_consumer(
-                    manifest,
-                    &principal.tenant_id,
-                    &original.request.group_id,
-                    &original.request.task_ref,
-                    &original.request.role_id,
-                    &original.request.node_id,
-                    provider,
-                    operation,
-                    original.authority.as_ref().map(|a| &a.membership),
-                )
-                .map_err(|e| e.to_string())?;
+            let expected = if original.request.preparation_id.is_some() {
+                None
+            } else {
+                original.authority.as_ref().map(|a| &a.membership)
+            };
+            if let Some(map) = original.request.typed_map.as_ref() {
+                control
+                    .authorize_typed_map_consumer(
+                        map,
+                        &principal.tenant_id,
+                        &original.request.group_id,
+                        &original.request.task_ref,
+                        &original.request.role_id,
+                        &original.request.node_id,
+                        provider,
+                        operation,
+                        expected,
+                    )
+                    .map_err(|e| e.to_string())?;
+            } else {
+                control
+                    .authorize_memory_consumer(
+                        manifest,
+                        &principal.tenant_id,
+                        &original.request.group_id,
+                        &original.request.task_ref,
+                        &original.request.role_id,
+                        &original.request.node_id,
+                        provider,
+                        operation,
+                        expected,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
             return Ok(());
         }
         control
@@ -529,6 +573,9 @@ struct ServerCheckpoint {
     /// Actual accepted body digests; old checkpoints retain unavailable receipt evidence.
     #[serde(default)]
     mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
+    /// Original prerequisite contexts, budgets, pending commands and immutable Node receipts.
+    #[serde(default)]
+    memory_preparation: application::memory_preparation::MemoryPreparationState,
     /// Exact authorized selective-import intents and durable Node receipts.
     #[serde(default)]
     memory_imports: BTreeMap<String, application::memory_import::MemoryImportIntent>,
@@ -899,6 +946,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
@@ -935,6 +983,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_MAP_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
@@ -969,6 +1018,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ControllerState {
                 mission_admissions: saved.mission_admissions,
                 memory_imports: saved.memory_imports,
+                memory_preparation: saved.memory_preparation,
                 safety_stops: saved.safety_stops,
                 bridge: IntegrationRuntimeBridge::restore_from_checkpoint_with_lease_policy(
                     &saved.integration_json,
@@ -992,6 +1042,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => ControllerState {
             mission_admissions: BTreeMap::new(),
             memory_imports: BTreeMap::new(),
+            memory_preparation: Default::default(),
             safety_stops: BTreeMap::new(),
             bridge: IntegrationRuntimeBridge::new_with_lease_policy(
                 control::ControlPlane::new(),
@@ -1036,6 +1087,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .control()
         .validate_mission_tenant_authority()?;
     application::memory_import::validate_restored(&controller)?;
+    let restored_memory_fences =
+        application::memory_preparation::restore(&mut controller, process_clock.now())?;
     controller
         .orchestrator
         .set_admission_limits(orchestration::MissionAdmissionLimits::try_new(
@@ -1111,6 +1164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if initialize_checkpoint
         || migrate_checkpoint
         || restored_stop_holds
+        || restored_memory_fences
         || installed_identity_registry
         || actor_placement_path.is_some()
         || physical_entity_registry_path.is_some()
@@ -1137,6 +1191,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(error.into());
         }
     }
+    controller.memory_preparation.catalog = Some(artifact_catalog.clone());
     controller.bridge.publish_node_identity_registry()?;
     let controller = Arc::new(Mutex::new(controller));
     application::state_policy::bootstrap_artifact(
@@ -1167,6 +1222,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let artifact_store_for_server = artifact_store.clone();
     let memory_admission: Arc<dyn artifact_http::MemoryProviderAdmission> =
         Arc::new(ControllerMemoryAdmission {
+            clock: Arc::clone(&process_clock),
             controller: Arc::clone(&controller),
             router: memory_session_router,
         });

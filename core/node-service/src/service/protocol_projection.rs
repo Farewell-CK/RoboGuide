@@ -164,7 +164,8 @@ pub(super) fn registration_from_readiness(
         .collect();
     let current_contract = matches!(
         catalog.node_contract_version(),
-        integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::NODE_CONTRACT_VERSION
     );
@@ -266,6 +267,11 @@ pub(super) fn registration_from_readiness(
         .memory_providers()
         .values()
         .map(|provider| MemoryProviderDescriptor {
+            preparation_contract: if provider.availability().is_some() {
+                "roboguide.memory-provider-availability/v0.1".into()
+            } else {
+                String::new()
+            },
             provider_id: provider.id().to_string(),
             local_system_id: provider.owner().to_string(),
             kind: match provider.kind() {

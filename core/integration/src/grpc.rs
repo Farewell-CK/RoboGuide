@@ -33,12 +33,16 @@ pub mod v0_4 {
     pub const CONTINUITY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.7";
     /// Contract with exact registered Spatial producer provenance and current publication attempts.
     pub const PROVIDER_MAP_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.8";
+    /// Contract with durable pre-execution Memory preparation and actual backend observations.
+    pub const PREPARATION_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.9";
 
     /// Checks explicitly negotiated original-provider query support across maintained contract versions.
     pub fn supports_memory_continuity(version: &str) -> bool {
         matches!(
             version,
-            CONTINUITY_NODE_CONTRACT_VERSION | PROVIDER_MAP_NODE_CONTRACT_VERSION
+            CONTINUITY_NODE_CONTRACT_VERSION
+                | PROVIDER_MAP_NODE_CONTRACT_VERSION
+                | PREPARATION_NODE_CONTRACT_VERSION
         )
     }
     /// Prior profile-and-intent contract retained for explicit session compatibility.
@@ -274,6 +278,9 @@ mod tests {
     #[test]
     fn v0_4_round_trip_preserves_command_receipt_identity() {
         let execute = super::v0_4::Execute {
+            memory_preparation_id: String::new(),
+            memory_preparation_digest: String::new(),
+            memory_requirements_json: String::new(),
             session_id: "session-1".to_string(),
             execution_id: "attempt-1".to_string(),
             invocation: None,

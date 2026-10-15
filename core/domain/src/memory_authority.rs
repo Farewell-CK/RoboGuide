@@ -349,7 +349,7 @@ pub fn map_memory_manifest(map: &MapArtifactManifest) -> Result<MemoryArtifactMa
 }
 
 /// Uses deterministic JSON object ordering for complete cross-language metadata digests.
-fn metadata_digest(manifest: &impl Serialize) -> Result<String, String> {
+pub(crate) fn metadata_digest(manifest: &impl Serialize) -> Result<String, String> {
     use sha2::{Digest as _, Sha256};
     let canonical = serde_json::to_value(manifest).map_err(|e| e.to_string())?;
     Ok(format!(
@@ -359,7 +359,7 @@ fn metadata_digest(manifest: &impl Serialize) -> Result<String, String> {
 }
 
 /// Rejects identifiers or contracts whose apparent wildcard would silently broaden authority.
-fn validate_text(value: &str, max: usize) -> Result<(), String> {
+pub(crate) fn validate_text(value: &str, max: usize) -> Result<(), String> {
     if value.trim().is_empty()
         || value.trim() != value
         || value.len() > max
@@ -372,7 +372,7 @@ fn validate_text(value: &str, max: usize) -> Result<(), String> {
 }
 
 /// Requires an explicit lowercase SHA-256 identity for immutable metadata and scope versions.
-fn validate_digest(value: &str) -> Result<(), String> {
+pub(crate) fn validate_digest(value: &str) -> Result<(), String> {
     if !value.strip_prefix("sha256:").is_some_and(|h| {
         h.len() == 64
             && h.bytes()

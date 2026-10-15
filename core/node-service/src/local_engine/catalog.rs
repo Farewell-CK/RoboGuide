@@ -8,6 +8,15 @@ impl CompiledLocalCatalog {
         config: NodeServiceConfig,
         config_directory: &Path,
     ) -> Result<Self, CatalogError> {
+        require(
+            config.schema == CONFIG_SCHEMA_V0_10
+                || config
+                    .memory_providers
+                    .iter()
+                    .all(|p| p.availability.is_none()),
+            "memory_providers.availability",
+            "current Memory availability requires config v0.10",
+        )?;
         let supports_artifacts = matches!(
             config.schema.as_str(),
             CONFIG_SCHEMA_V0_3
@@ -17,6 +26,7 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_7
                 | CONFIG_SCHEMA_V0_8
                 | CONFIG_SCHEMA_V0_9
+                | CONFIG_SCHEMA_V0_10
         );
         let requires_readiness = matches!(
             config.schema.as_str(),
@@ -26,6 +36,7 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_7
                 | CONFIG_SCHEMA_V0_8
                 | CONFIG_SCHEMA_V0_9
+                | CONFIG_SCHEMA_V0_10
         );
         let supports_state_memory = matches!(
             config.schema.as_str(),
@@ -34,14 +45,19 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_7
                 | CONFIG_SCHEMA_V0_8
                 | CONFIG_SCHEMA_V0_9
+                | CONFIG_SCHEMA_V0_10
         );
         let supports_peer_observers = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9
+            CONFIG_SCHEMA_V0_6
+                | CONFIG_SCHEMA_V0_7
+                | CONFIG_SCHEMA_V0_8
+                | CONFIG_SCHEMA_V0_9
+                | CONFIG_SCHEMA_V0_10
         );
         let separates_capabilities_and_operations = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9
+            CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9 | CONFIG_SCHEMA_V0_10
         );
         require(
             matches!(
@@ -54,10 +70,11 @@ impl CompiledLocalCatalog {
                     | CONFIG_SCHEMA_V0_7
                     | CONFIG_SCHEMA_V0_8
                     | CONFIG_SCHEMA_V0_9
+                    | CONFIG_SCHEMA_V0_10
             ),
             "schema",
             format!(
-                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, `{CONFIG_SCHEMA_V0_4}`, `{CONFIG_SCHEMA_V0_5}`, `{CONFIG_SCHEMA_V0_6}`, `{CONFIG_SCHEMA_V0_7}`, or `{CONFIG_SCHEMA_V0_8}`"
+                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, `{CONFIG_SCHEMA_V0_4}`, `{CONFIG_SCHEMA_V0_5}`, `{CONFIG_SCHEMA_V0_6}`, `{CONFIG_SCHEMA_V0_7}`, `{CONFIG_SCHEMA_V0_8}`, `{CONFIG_SCHEMA_V0_9}`, or `{CONFIG_SCHEMA_V0_10}`"
             ),
         )?;
         validate_identity(&config.node_id, "node_id")?;
@@ -66,7 +83,10 @@ impl CompiledLocalCatalog {
             config.fallback_server_endpoints.is_empty()
                 || matches!(
                     config.schema.as_str(),
-                    CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9
+                    CONFIG_SCHEMA_V0_7
+                        | CONFIG_SCHEMA_V0_8
+                        | CONFIG_SCHEMA_V0_9
+                        | CONFIG_SCHEMA_V0_10
                 ),
             "fallback_server_endpoints",
             "requires node-config/v0.7",
@@ -132,7 +152,7 @@ impl CompiledLocalCatalog {
         require(
             matches!(
                 config.schema.as_str(),
-                CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9
+                CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9 | CONFIG_SCHEMA_V0_10
             ) || config
                 .memory_providers
                 .iter()
@@ -147,7 +167,11 @@ impl CompiledLocalCatalog {
             &state_directory,
             matches!(
                 config.schema.as_str(),
-                CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9
+                CONFIG_SCHEMA_V0_6
+                    | CONFIG_SCHEMA_V0_7
+                    | CONFIG_SCHEMA_V0_8
+                    | CONFIG_SCHEMA_V0_9
+                    | CONFIG_SCHEMA_V0_10
             ),
         )?;
         let resources = compile_resources(config.resources, &local_systems)?;
@@ -235,7 +259,10 @@ impl CompiledLocalCatalog {
                     .as_ref()
                     .zip(binding.payload_schema.as_ref());
                 require(
-                    if config.schema == CONFIG_SCHEMA_V0_9 {
+                    if matches!(
+                        config.schema.as_str(),
+                        CONFIG_SCHEMA_V0_9 | CONFIG_SCHEMA_V0_10
+                    ) {
                         provenance.is_some()
                     } else {
                         binding.producer_provider_id.is_none() && binding.payload_schema.is_none()
@@ -354,7 +381,9 @@ impl CompiledLocalCatalog {
 
     /// Returns the semantic Node Contract selected by this configuration generation.
     pub fn node_contract_version(&self) -> &'static str {
-        if self.schema == CONFIG_SCHEMA_V0_9 {
+        if self.schema == CONFIG_SCHEMA_V0_10 {
+            integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
+        } else if self.schema == CONFIG_SCHEMA_V0_9 {
             integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
         } else if self.schema == CONFIG_SCHEMA_V0_8 {
             integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION

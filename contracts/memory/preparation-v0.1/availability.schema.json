@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/memory/preparation-v0.1/availability.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "import_id",
+    "identity_digest",
+    "provider_instance_id",
+    "provider_contract_digest",
+    "manifest_digest",
+    "content_digest",
+    "byte_size",
+    "available",
+    "reason"
+  ],
+  "properties": {
+    "schema": {
+      "const": "roboguide.memory-provider-availability/v0.1"
+    },
+    "import_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "identity_digest": {
+      "type": "string",
+      "pattern": "^(sha256:)?[0-9a-f]{64}$"
+    },
+    "provider_instance_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*[*\\x00-\\x1f\\x7f-\\x9f])\\S(?:.*\\S)?$"
+    },
+    "provider_contract_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "content_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "byte_size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "available": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 1024
+    }
+  }
+}

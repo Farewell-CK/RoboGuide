@@ -378,6 +378,9 @@ pub(super) struct IntentDocument {
 pub(super) struct RoleRequirementsDocument {
     /// Exact capability requirements evaluated together.
     pub(super) capabilities: Vec<CapabilityRequirementDocument>,
+    /// Semantic-only Memory prerequisites, explicitly negotiated by MissionPlan v0.9.
+    #[serde(default)]
+    pub(super) memories: Option<Vec<domain::MemoryRequirement>>,
     /// Exclusive resource requirements retained from v0.5.
     pub(super) resources: Vec<ResourceRequirementDocument>,
 }

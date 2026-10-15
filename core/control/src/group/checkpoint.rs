@@ -6,6 +6,10 @@ impl ControlPlane {
     /// Validates checkpointed Group role metadata against bindings and recovery authority.
     pub(crate) fn validate_group_checkpoint_authority(&self) -> Result<(), ControlError> {
         for group in self.groups.values() {
+            for role in group.role_requirements.values() {
+                domain::MemoryRequirement::validate_set(role.memories())
+                    .map_err(ControlError::InvalidProposal)?;
+            }
             if group.task_ref.mission_id() != &group.mission_id {
                 return Err(ControlError::InvalidProposal(
                     "checkpoint Group task belongs to another Mission".to_string(),

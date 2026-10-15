@@ -47,7 +47,23 @@ def original_content_digest(invocation: dict[str, Any]) -> str:
     if any(not isinstance(item, str) or not item for item in value.values()):
         raise ValueError("original import tuple is incomplete")
     value.update(schema="roboguide.memory-import/v0.1", controller_epoch="")
-    return content_digest(value)
+    legacy = content_digest(value)
+    preparation = invocation.get("memory_preparation_id", "")
+    typed_map = invocation.get("typed_map_manifest_json", "")
+    if not isinstance(preparation, str) or not isinstance(typed_map, str):
+        raise ValueError("prepared import provenance must retain exact encoded strings")
+    if not preparation and not typed_map:
+        return legacy
+    if not preparation:
+        raise ValueError("typed-map import requires its original prepared context")
+    return content_digest(
+        {
+            "schema": "roboguide.prepared-memory-import/v0.1",
+            "original_digest": legacy,
+            "preparation_id": preparation,
+            "typed_map_manifest_json": typed_map,
+        }
+    )
 
 
 def sync_directory(path: Path) -> None:
@@ -412,4 +428,24 @@ class MemoryStore:
                 "reason": ""
                 if complete
                 else "original operation or current content is unavailable",
+            }
+
+    def availability(self, original: dict[str, Any]) -> dict[str, object]:
+        """Read actual full bytes under original identity without writes or lease renewal."""
+        with self._mutex:
+            manifest = self._validate_original(original)
+            digest, size = self._artifact(manifest)
+            observed = self.query(original)
+            available = observed["outcome"] == "completed" and observed["durable"] is True
+            return {
+                "schema": "roboguide.memory-provider-availability/v0.1",
+                "import_id": original["import_id"],
+                "identity_digest": original["identity_digest"],
+                "provider_instance_id": self.instance_id,
+                "provider_contract_digest": original["provider_contract_digest"],
+                "manifest_digest": content_digest(manifest),
+                "content_digest": digest,
+                "byte_size": size,
+                "available": available,
+                "reason": "" if available else "original current bytes are unavailable",
             }

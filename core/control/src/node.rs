@@ -428,9 +428,21 @@ impl ControlPlane {
                 domain::DecisionKind::Match,
                 timestamp,
             )
-            && state
-                .node(node_id)
-                .is_some_and(|snapshot| snapshot.registration().supports_operation(operation))
+            && state.node(node_id).is_some_and(|snapshot| {
+                let registration = snapshot.registration();
+                registration.supports_operation(operation)
+                    && role.memories().iter().all(|requirement| {
+                        registration
+                            .operation_owner(operation)
+                            .is_some_and(|owner| {
+                                registration.memory_providers().iter().any(|provider| {
+                                    provider.supports_preparation()
+                                        && provider.local_system_id() == owner
+                                        && requirement.matches_provider(provider)
+                                })
+                            })
+                    })
+            })
     }
 
     /// Rejects resource identities already advertised by a different node.

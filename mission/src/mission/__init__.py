@@ -21,6 +21,7 @@ from mission.grounding_reader import (
     MissionGroundingReader,
 )
 from mission.intent import GroundedIntent
+from mission.memory_requirement import MemoryRequirement
 from mission.models import MissionPlan, MissionPlanError
 from mission.planners import FixturePlanner, MissionPlanner
 from mission.planning_profile import (
@@ -65,6 +66,7 @@ from mission.semantic_evidence import (
 )
 
 __all__ = [
+    "MemoryRequirement",
     "ApprovalDecision",
     "ApprovalPolicy",
     "ApprovalRule",

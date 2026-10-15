@@ -3,9 +3,49 @@
 use super::*;
 
 impl CompiledMemoryProvider {
+    /// Returns explicit current-content observation support, independently of historical import status.
+    pub const fn availability(&self) -> Option<&CompiledMemoryAvailability> {
+        self.availability.as_ref()
+    }
+
+    /// Preserves original v0.8/v0.9 provider fingerprints when new optional support is absent.
+    pub fn identity_content(&self) -> String {
+        let mut content = format!(
+            "CompiledMemoryProvider {{ id: {:?}, owner: {:?}, kind: {:?}, scope: {:?}, visibility: {:?}, payload_schema: {:?}, media_type: {:?}, operational: {:?}, storage_directory: {:?}, discover: {:?}, export: {:?}, import: {:?}, continuity: {:?} }}",
+            self.id,
+            self.owner,
+            self.kind,
+            self.scope,
+            self.visibility,
+            self.payload_schema,
+            self.media_type,
+            self.operational,
+            self.storage_directory,
+            self.discover,
+            self.export,
+            self.import,
+            self.continuity,
+        );
+        if let Some(availability) = &self.availability {
+            content.push_str(&format!("\navailability: {availability:?}"));
+        }
+        content
+    }
+
     /// Returns the explicitly configured readonly original-provider continuity contract.
     pub const fn continuity(&self) -> Option<&CompiledMemoryContinuity> {
         self.continuity.as_ref()
+    }
+}
+
+impl CompiledMemoryAvailability {
+    /// Returns the actual provider-local read-only observation.
+    pub const fn observation(&self) -> &CompiledWorkflowStep {
+        &self.observation
+    }
+    /// Returns the typed evidence pointer within the actual response.
+    pub fn result_pointer(&self) -> &str {
+        &self.result_pointer
     }
 }
 

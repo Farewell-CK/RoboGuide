@@ -37,6 +37,7 @@ async fn request_events(
         orchestrator: MissionOrchestrator::new(),
         mission_admissions: BTreeMap::new(),
         memory_imports: BTreeMap::new(),
+        memory_preparation: Default::default(),
         safety_stops: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
         verifier_artifact_store: None,
