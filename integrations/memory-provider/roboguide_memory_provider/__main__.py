@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from .active_map import ActiveMapLedger
 from .jobs import FileJobs
 from .store import MAX_METADATA_BYTES, MemoryStore, canonical
 from .use_leases import UseLeases
@@ -42,7 +43,10 @@ class UnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 
 def handler_type(
-    store: MemoryStore, jobs: FileJobs | None = None, leases: UseLeases | None = None
+    store: MemoryStore,
+    jobs: FileJobs | None = None,
+    leases: UseLeases | None = None,
+    active_maps: ActiveMapLedger | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     """Bind an already configured actual backend to fixed readonly and import routes."""
 
@@ -103,6 +107,8 @@ def handler_type(
                     self._respond(
                         200, {"artifact_path": store.export(self._body()["memory_manifest"])}
                     )
+                elif active_maps is not None and self.path == "/v1/active-map/state":
+                    self._respond(200, active_maps.state())
                 else:
                     self._respond(404, {"error": "unknown readonly Memory route"})
             except (ValueError, KeyError, TypeError, OSError) as error:
@@ -127,6 +133,24 @@ def handler_type(
                     return
                 if jobs is not None and self.path == "/v1/file-jobs/cancel":
                     self._respond(200, jobs.cancel(self._body()["execution_id"]))
+                    return
+                if active_maps is not None and self.path == "/v1/active-map/select":
+                    self._respond(200, active_maps.select(self._body()))
+                    return
+                if active_maps is not None and self.path == "/v1/active-map/query":
+                    self._respond(200, active_maps.query(self._body()))
+                    return
+                if active_maps is not None and self.path == "/v1/active-map/release":
+                    self._respond(200, active_maps.release(self._body()))
+                    return
+                if active_maps is not None and self.path == "/v1/active-map/gc":
+                    self._respond(200, active_maps.gc(self._body()))
+                    return
+                if active_maps is not None and self.path == "/v1/active-map/handoff/prepare":
+                    self._respond(200, active_maps.prepare_handoff(self._body()))
+                    return
+                if active_maps is not None and self.path == "/v1/active-map/handoff/commit":
+                    self._respond(200, active_maps.commit_handoff(self._body()))
                     return
                 if self.path != "/v1/import":
                     self._respond(404, {"error": "unknown Memory operation"})
@@ -160,11 +184,16 @@ def main() -> None:
     parser.add_argument("--enable-use-leases", action="store_true")
     parser.add_argument("--listen-unix", action="store_true")
     parser.add_argument("--export-directory", type=Path)
+    parser.add_argument("--enable-active-map", action="store_true")
     args = parser.parse_args()
     if not ipaddress.ip_address(args.listen_host).is_loopback:
         parser.error("this Local EAIOS facade requires a literal loopback address")
     if args.enable_use_leases and not args.listen_unix:
         parser.error("Memory-use leases require the explicit cohosted private Unix profile")
+    if args.enable_active_map and (not args.enable_use_leases or not args.listen_unix):
+        parser.error(
+            "active-map requires current-use leases on the explicit cohosted private Unix profile"
+        )
     if args.listen_unix and args.listen_port:
         parser.error("the Unix profile cannot bind a TCP port")
     store = MemoryStore(
@@ -177,6 +206,7 @@ def main() -> None:
     )
     leases: UseLeases | None = None
     jobs: FileJobs | None = None
+    active_maps: ActiveMapLedger | None = None
     socket_path = store.root / "local.sock"
     socket_inode = None
     previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -195,6 +225,11 @@ def main() -> None:
             if args.enable_file_jobs
             else None
         )
+        active_maps = (
+            ActiveMapLedger(store.root / "active-map", store, leases)
+            if args.enable_active_map
+            else None
+        )
         server: ThreadingHTTPServer | UnixServer
         if args.listen_unix:
             metadata = store.root.stat()
@@ -205,13 +240,13 @@ def main() -> None:
                 if not stat.S_ISSOCK(metadata.st_mode) or metadata.st_uid != os.getuid():
                     raise ValueError("existing Local Memory socket is not an owned socket")
                 socket_path.unlink()
-            server = UnixServer(str(socket_path), handler_type(store, jobs, leases))
+            server = UnixServer(str(socket_path), handler_type(store, jobs, leases, active_maps))
             socket_path.chmod(0o600)
             socket_inode = socket_path.stat().st_ino
             endpoint = "unix://" + str(socket_path)
         else:
             server = ThreadingHTTPServer(
-                (args.listen_host, args.listen_port), handler_type(store, jobs)
+                (args.listen_host, args.listen_port), handler_type(store, jobs, leases, active_maps)
             )
             endpoint = f"http://{args.listen_host}:{server.server_port}"
         server.daemon_threads = False
@@ -224,6 +259,8 @@ def main() -> None:
         signal.signal(signal.SIGTERM, previous_sigterm)
         if jobs is not None:
             jobs.close()
+        if active_maps is not None:
+            active_maps.close()
         if leases is not None:
             leases.close()
         if (

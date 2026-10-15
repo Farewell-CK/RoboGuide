@@ -13,6 +13,7 @@ import sys
 import time
 import tomllib
 import uuid
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,18 @@ def verify(output: Path) -> dict[str, Any]:
     assert checksum == source["content_digest"] and content.stat().st_size == source["byte_size"]
     assert job["state"] == "COMPLETED" and job["result"]["execution_id"] == attempt["execution_id"]
     assert job["result"]["input_digests"] == [checksum] and job["result"]["rounds"] == 2
+    active = json.loads((output / "consumer/active-map.json").read_bytes())
+    selection = active["selection"]
+    query = active["query"]
+    assert selection["schema"] == "roboguide.active-map-selection/v0.1"
+    assert selection["proof"]["assurance"] == "software-file-map"
+    assert query["schema"] == "roboguide.active-map-query/v0.1"
+    assert query["localization"] is None and query["unobserved_space"] == "unknown"
+    bundle = output / "consumer/backend/content" / source["content_digest"][7:]
+    with zipfile.ZipFile(bundle) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        tile_digests = {tile["content_digest"] for tile in manifest["tiles"]}
+    assert {hit["tile_digest"] for hit in query["hits"]} <= tile_digests
     result = {"input_digests": [checksum], "rounds": 2}
     expected = (
         "sha256:"
@@ -61,6 +74,8 @@ def verify(output: Path) -> dict[str, Any]:
         "actual_bytes": source["byte_size"],
         "complete_raw_map_retained": True,
         "execution_id": attempt["execution_id"],
+        "active_map_selected": True,
+        "active_map_query_verified": True,
     }
 
 
@@ -203,6 +218,7 @@ class SpatialMemoryConsumer:
             "--enable-file-jobs",
             "--listen-unix",
             "--enable-use-leases",
+            "--enable-active-map",
         ]
         self.backend_process = start(
             self.backend_command,
@@ -230,6 +246,10 @@ class SpatialMemoryConsumer:
         databases = (
             (self.root / "backend/memory.sqlite3", ("identity", "imports")),
             (self.root / "backend/file-jobs.sqlite3", ("jobs", "job_budgets")),
+            (
+                self.root / "backend/active-map/active-map.sqlite3",
+                ("queries", "handoffs", "history"),
+            ),
             (node_database, ("memory_preparations", "memory_import_authority_v7")),
         )
         before = {str(path): logical_digest(path, tables) for path, tables in databases}
@@ -248,6 +268,9 @@ class SpatialMemoryConsumer:
         after = {str(path): logical_digest(path, tables) for path, tables in databases}
         assert before == after
         assert request(self.backend, "/v1/file-jobs/health")[1] == health
+        active_state = request(self.backend, "/v1/active-map/state")[1]
+        assert all(item["state"] == "stale_after_restart" for item in active_state["heads"])
+        save(self.root / "active-map-restart.json", active_state)
         result = {"passed": True, "original_authority_digests": before}
         save(self.root / "restart.json", result)
         return result
@@ -321,6 +344,41 @@ class SpatialMemoryConsumer:
         ]
         assert grants and all(value["receipt"]["status"] == "granted" for value in grants)
         save(self.root / "use-lease.json", use)
+        latest = max(grants, key=lambda value: value["command"]["generation"])
+        map_manifest = json.loads((self.output / "catalog-manifest.json").read_bytes())["manifest"]
+        active_request = {
+            "schema": "roboguide.active-map/v0.1",
+            "map_id": map_manifest["map_id"],
+            "revision_id": map_manifest["revision_id"],
+            "content_digest": map_manifest["content_digest"],
+            "byte_size": map_manifest["byte_size"],
+            "frame_id": map_manifest["root_frame"],
+            "spatial_anchor_id": map_manifest["spatial_anchor"]["id"],
+            "attempt_id": attempt["execution_id"],
+            "execution_id": attempt["execution_id"],
+            "use_lease_id": latest["command"]["lease_id"],
+            "generation": 1,
+            "node_id": self.node,
+            "group_id": attempt["group_id"],
+        }
+        status, selection = request(self.backend, "/v1/active-map/select", active_request)
+        assert status == 200 and selection["state"] == "active", selection
+        query = {
+            **active_request,
+            "query_id": "active-map-query-" + attempt["execution_id"],
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "radius": 1000.0,
+        }
+        status, query_result = request(self.backend, "/v1/active-map/query", query)
+        assert status == 200 and query_result["localization"] is None, query_result
+        active_content = self.root / "backend/content" / map_manifest["content_digest"][7:]
+        with zipfile.ZipFile(active_content) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            known_tiles = {tile["content_digest"] for tile in manifest["tiles"]}
+        assert {hit["tile_digest"] for hit in query_result["hits"]} <= known_tiles
+        save(self.root / "active-map.json", {"selection": selection, "query": query_result})
         checked = subprocess.run(
             [sys.executable, str(Path(__file__)), "--verify", str(self.output)],
             cwd=ROOT,

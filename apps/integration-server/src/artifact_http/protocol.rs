@@ -1,6 +1,7 @@
 //! Bounded HTTP request parsing, response encoding, and transport errors.
 
 use super::*;
+
 /// Initial upload-control request body.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -164,7 +165,7 @@ impl RequestHead {
             write_chunk(upload, &self.prefetched_body[..prefetched])?;
         }
         let mut received = prefetched;
-        let mut buffer = [0_u8; 64 * 1024];
+        let mut buffer = vec![0_u8; 1024 * 1024];
         while received < expected {
             let remaining = expected - received;
             let read_limit = remaining.min(buffer.len());

@@ -8,6 +8,28 @@ use domain::{
 };
 
 impl LocalIntegrationEngine {
+    /// Validates immutable startup configuration once and rereads durable fences per bounded chunk.
+    pub(super) fn prepared_import_acquisition_guard(
+        &self,
+        invocation: &serde_json::Value,
+    ) -> Result<crate::artifact::AcquisitionGuard, EngineError> {
+        self.check_prepared_import_invocation(invocation)?;
+        let Some(id) = invocation
+            .pointer("/memory_import/original_invocation/memory_preparation_id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.is_empty())
+        else {
+            return Ok(std::sync::Arc::new(|| Ok(())));
+        };
+        let original = self.inner.journal.memory_preparation(id)?.ok_or_else(|| {
+            EngineError::Configuration("original import preparation is unavailable".into())
+        })?;
+        let guard = self.inner.journal.memory_acquisition_guard(&original)?;
+        Ok(std::sync::Arc::new(move || {
+            guard().map_err(|error| ArtifactError::Configuration(error.to_string()))
+        }))
+    }
+
     /// Rechecks the original prepared import before acquisition and each bounded streamed write.
     pub(super) fn check_prepared_import_invocation(
         &self,

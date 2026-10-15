@@ -115,6 +115,7 @@ def run(
     environment["PYTHONPATH"] = str(ROOT / "integrations/memory-provider")
     contexts, leaves = tls(directory, nodes, memory_id, environment)
     environment["ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS"] = "1000"
+    environment["ROBOGUIDE_DIAGNOSTICS_PATH"] = str(directory / "controller-diagnostics.jsonl")
     source_root = directory / "source/node-state/memory/files"
     source_root.mkdir(parents=True)
     source = ROOT / "core/domain/src/memory.rs"
@@ -336,6 +337,7 @@ def run(
                 "use_lifecycle": use_lifecycle,
                 "use_case": use_case,
                 "large_transfer": large_transfer,
+                "controller_diagnostics": "controller-diagnostics.jsonl",
             },
         )
         configuration_paths = [directory / name / "node.toml" for name in ("source", "consumer")]
@@ -381,7 +383,7 @@ def run(
         if use_lifecycle:
             accepted["tasks"][0]["roles"][0]["execution_intent"]["parameters"]["rounds"] = 1
             accepted["tasks"][1]["roles"][0]["execution_intent"]["parameters"]["rounds"] = (
-                2000000 if use_case else 50000
+                2000000 if use_case else (64 if large_transfer else 50000)
             )
         save(directory / "mission.json", accepted)
         status, response = exchange("/v1/missions", accepted)

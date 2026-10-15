@@ -201,6 +201,50 @@ fn memory_preparation_restart_cannot_renew_or_replace_its_original_context() {
     );
 }
 
+/// A live byte stream must observe later durable cancellation/revocation and any original-row change.
+#[test]
+fn memory_acquisition_guard_does_not_cache_permission_or_renew_original_budget() {
+    for fence in ["cancel", "revoke", "budget", "context", "configuration"] {
+        let (_directory, _path, journal) = journal();
+        let journal = std::sync::Arc::new(journal);
+        let mut context = preparation();
+        context.valid_for_ms = 120_000;
+        let config = format!("sha256:{}", "c".repeat(64));
+        let original = journal
+            .prepare_memory_context(
+                &context,
+                &ReceiverClockObservation::read().unwrap(),
+                120_000,
+                &config,
+            )
+            .unwrap();
+        let guard = journal.memory_acquisition_guard(&original).unwrap();
+        guard().unwrap();
+        match fence {
+            "cancel" => journal.request_cancellation(&context.execution_id).unwrap(),
+            "revoke" => journal
+                .revoke_memory_context(&context.preparation_id, &context.digest().unwrap())
+                .unwrap(),
+            _ => {
+                let column = match fence {
+                    "budget" => "budget_json",
+                    "context" => "preparation_json",
+                    _ => "configuration_digest",
+                };
+                journal
+                    .lock_connection()
+                    .unwrap()
+                    .execute(
+                        &format!("UPDATE memory_preparations SET {column}='changed-original'"),
+                        [],
+                    )
+                    .unwrap();
+            }
+        }
+        assert!(guard().is_err(), "fence {fence} was ignored");
+    }
+}
+
 /// Interrupted IDs cannot re-read, skipped generations cannot arrive late, and receipts are immutable.
 #[test]
 fn prepared_memory_observations_are_once_only_across_sql_restart_and_reordering() {

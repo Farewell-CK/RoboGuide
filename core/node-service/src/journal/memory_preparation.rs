@@ -151,6 +151,57 @@ pub enum BeginMemoryObservation {
 }
 
 impl ExecutionJournal {
+    /// Freezes validated immutable metadata once, but rereads cancellation/revocation for each chunk.
+    /// The returned guard neither caches current permission nor renews the original receive budget.
+    pub(crate) fn memory_acquisition_guard(
+        self: &std::sync::Arc<Self>,
+        original: &JournalMemoryPreparation,
+    ) -> Result<impl Fn() -> Result<(), JournalError> + Send + Sync + 'static, JournalError> {
+        let journal = std::sync::Arc::clone(self);
+        let id = original.preparation.preparation_id.clone();
+        let execution = original.preparation.execution_id.clone();
+        let digest = original
+            .preparation
+            .digest()
+            .map_err(JournalError::InvalidSpec)?;
+        let encoded = serde_json::to_string(&original.preparation)?;
+        let configuration = original.configuration_digest.clone();
+        let budget = original.budget.clone();
+        let encoded_budget = serde_json::to_string(&budget)?;
+        let guard = move || {
+            let connection = journal.lock_connection()?;
+            let current: bool = connection
+                .prepare_cached(
+                    "SELECT EXISTS(SELECT 1 FROM memory_preparations p WHERE preparation_id=?1
+                 AND execution_id=?2 AND preparation_digest=?3 AND preparation_json=?4
+                 AND configuration_digest=?5 AND budget_json=?6
+                 AND NOT EXISTS(SELECT 1 FROM memory_context_revocations r
+                                WHERE r.preparation_id=p.preparation_id)
+                 AND NOT EXISTS(SELECT 1 FROM cancellation_intents c
+                                WHERE c.execution_id=p.execution_id))",
+                )?
+                .query_row(
+                    params![
+                        id,
+                        execution,
+                        digest,
+                        encoded,
+                        configuration,
+                        encoded_budget
+                    ],
+                    |row| row.get(0),
+                )?;
+            if !current || budget.remaining_ms(&ReceiverClockObservation::read()?) == 0 {
+                return Err(JournalError::InvalidSpec(
+                    "original Memory acquisition is expired, revoked, cancelled or changed".into(),
+                ));
+            }
+            Ok(())
+        };
+        guard()?;
+        Ok(guard)
+    }
+
     /// Reads one immutable context without granting execution, import or current content availability.
     pub fn memory_preparation(
         &self,

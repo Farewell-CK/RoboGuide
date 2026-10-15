@@ -25,6 +25,11 @@ Node journal 写入拒绝。实际文件、SQL 提交失败、正式查询、重
 [Memory 连续性验收](development/acceptance/2026-10-15-f4-memory-continuity.md)。完整 Group 内容
 授权、active-map、retention/GC/revocation 与空间计算仍需继续完成 F4。
 
+2026-10-16 Active Map 软件切片已完成：实际 CAS 文件验证、当前使用租约绑定、选择/查询/释放、
+重启失活、软件 stop barrier handoff、历史代数和八类引用 GC 门禁均有实现与实际进程证据，见
+[F4 Active Map 验收](development/acceptance/2026-10-16-f4-active-map.md)。这不关闭物理定位、
+硬件连续性、完整 Group 生命周期、map fusion 或跨站点数据面恢复。
+
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |

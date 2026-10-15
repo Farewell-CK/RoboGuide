@@ -73,6 +73,11 @@ Node Contract v0.10/config v0.11/preparation v0.2、journal v10/wrapper v37 拒�
 实际大文件准备窗口失败仍保留，继续优化有界逐块门禁和写锁内 I/O；不得放宽期限或删掉要求。
 active-map、完整 Group handoff/GC、动态 HA 与 F5–F10 仍为必需项，F4 不提前关闭。
 
+[Active Map、交接与保留切片](acceptance/2026-10-16-f4-active-map.md)已在实际两软件 Node、真实
+CAS/SQLite、mTLS 和独立 verifier 链路通过。它验证了 active-map 选择、tile 查询、重启失活、
+软件 stop barrier handoff 与八类引用 GC 门禁；不提供物理定位或设备停止证明。大文件准备窗口、
+完整 Group 授权/撤销生命周期和 F5–F10 仍未关闭。
+
 ## 已接受的实现决定
 
 - Stop 冻结完整受影响 attempt 集合、operation-owned export、策略、owner/session 和 deadline。

@@ -359,14 +359,8 @@ impl LocalIntegrationEngine {
         } else {
             stager.clone()
         };
-        self.check_prepared_import_invocation(&invocation)?;
-        let engine = self.clone();
-        let original = invocation.clone();
-        let stager = stager.with_acquisition_guard(std::sync::Arc::new(move || {
-            engine
-                .check_prepared_import_invocation(&original)
-                .map_err(|error| ArtifactError::Configuration(error.to_string()))
-        }));
+        let stager =
+            stager.with_acquisition_guard(self.prepared_import_acquisition_guard(&invocation)?);
         let node_id = NodeId::new(self.catalog().node_id().to_string())
             .map_err(|error| EngineError::Memory(error.to_string()))?;
         let ledger = self.inner.memory_ledgers.get(provider_id).ok_or_else(|| {
