@@ -34,6 +34,12 @@ flowchart TB
   STATE --> SQL
   SQL -. 显式 HA profile .-> HA[静态三成员 quorum / epoch / materialization]
   NODE <--> ART[Artifact CAS / 内容授权]
+  NODE --> MEM[配置固定的 Local Memory provider]
+  MEM --> QUERY[原实例 GET query / 实际 bytes 与原始日志]
+  QUERY --> PROTO
+  Entry --> MINT[持久 Memory intent / 对账 generation 与预算]
+  MINT --> SQL
+  MINT --> PROTO
   ART --> CAT[Memory / Spatial catalog 与 placement evidence]
   CAT --> SQL
 ```
@@ -58,3 +64,9 @@ State 与 MI 的当前软件路径见 [ADR-0104](../../decisions/0104-state-cons
 及 [F3 进程验收](../../development/acceptance/2026-10-15-f3.md)。Belief 是命名 producer，Control
 只消费显式策略；它不取代原始 State 或成为 Global Truth。持续 verifier 的失效进入 stop/hold，
 不能跳过实际停止证据。模型返回字段与配置 identity 均保留，缺失不补成已证明。
+
+Memory 连续性的当前切片见 [ADR-0105](../../decisions/0105-memory-reconciliation-authorization-and-spatial-provider.md)
+及 [进程验收](../../development/acceptance/2026-10-15-f4-memory-continuity.md)。Node Contract v0.7 /
+config v0.8 显式协商原实例只读查询；导入原始身份先持久化，Unknown 不允许换 ID 重做。
+Controller wrapper v31、codec v22 和 Node journal v7 保留版本边界。Imported 历史不能授予
+当前可用性租约，Memory 对账不能满足 Task。Group 授权、active-map/GC 和空间计算仍属 F4 必需工作。

@@ -15,9 +15,30 @@ pub(super) fn configure_connection(connection: &Connection) -> Result<(), Journa
 pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
     let prior_version =
         connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
+    if prior_version > 7 {
+        return Err(JournalError::Corrupt(
+            "journal was written by a newer storage authority".into(),
+        ));
+    }
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    transaction.execute_batch("CREATE TABLE IF NOT EXISTS node_journal_storage_schema (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL CHECK(version>0))")?;
+    let marker: Option<i64> = transaction
+        .query_row(
+            "SELECT version FROM node_journal_storage_schema WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if marker.is_some_and(|version| version != 7) {
+        return Err(JournalError::Corrupt(
+            "journal storage marker is unsupported".into(),
+        ));
+    }
+    migrate_authority_table(&transaction, "executions", "execution_authority_v7")?;
+    migrate_authority_table(&transaction, "memory_imports", "memory_import_authority_v7")?;
     transaction.execute_batch(
-        "CREATE TABLE IF NOT EXISTS executions (
+        "CREATE TABLE IF NOT EXISTS execution_authority_v7 (
              execution_id TEXT PRIMARY KEY NOT NULL,
              invocation_content BLOB NOT NULL,
              invocation_digest TEXT NOT NULL,
@@ -41,26 +62,26 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
              frozen_path TEXT NOT NULL,
              manifest_json TEXT NOT NULL,
              UNIQUE(map_id, revision_id),
-             FOREIGN KEY(producer_execution_id) REFERENCES executions(execution_id)
+             FOREIGN KEY(producer_execution_id) REFERENCES execution_authority_v7(execution_id)
          );
          CREATE TABLE IF NOT EXISTS artifact_finalizations (
              execution_id TEXT PRIMARY KEY NOT NULL,
              kind TEXT NOT NULL CHECK(kind IN ('publish', 'import', 'verify')),
-             FOREIGN KEY(execution_id) REFERENCES executions(execution_id)
+             FOREIGN KEY(execution_id) REFERENCES execution_authority_v7(execution_id)
          );
          CREATE TABLE IF NOT EXISTS artifact_preparations (
              execution_id TEXT PRIMARY KEY NOT NULL,
              binding_id TEXT UNIQUE NOT NULL,
-             FOREIGN KEY(execution_id) REFERENCES executions(execution_id)
+             FOREIGN KEY(execution_id) REFERENCES execution_authority_v7(execution_id)
          );
          CREATE TABLE IF NOT EXISTS localization_evidence (
              execution_id TEXT PRIMARY KEY NOT NULL,
              evidence_json TEXT NOT NULL,
-             FOREIGN KEY(execution_id) REFERENCES executions(execution_id)
+             FOREIGN KEY(execution_id) REFERENCES execution_authority_v7(execution_id)
          );
          CREATE TABLE IF NOT EXISTS local_dispatch_authorizations (
              execution_id TEXT PRIMARY KEY NOT NULL,
-             FOREIGN KEY(execution_id) REFERENCES executions(execution_id)
+             FOREIGN KEY(execution_id) REFERENCES execution_authority_v7(execution_id)
          );
          CREATE TABLE IF NOT EXISTS cancellation_intents (
              execution_id TEXT PRIMARY KEY NOT NULL
@@ -70,25 +91,78 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
              term INTEGER NOT NULL CHECK(term >= 0),
              replica_id INTEGER NOT NULL CHECK(replica_id > 0)
          );
-         CREATE TABLE IF NOT EXISTS memory_imports (
+         CREATE TABLE IF NOT EXISTS memory_import_authority_v7 (
              import_id TEXT PRIMARY KEY NOT NULL,
              command_id TEXT NOT NULL,
              identity_digest TEXT NOT NULL,
              status TEXT NOT NULL CHECK(status IN ('pending', 'completed', 'rejected', 'unknown')),
              reason TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS memory_import_continuity_v7 (
+             import_id TEXT PRIMARY KEY REFERENCES memory_import_authority_v7(import_id),
+             evidence_json TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS memory_import_queries_v7 (
+             query_id TEXT PRIMARY KEY,
+             import_id TEXT NOT NULL REFERENCES memory_import_authority_v7(import_id),
+             spec_json TEXT NOT NULL,
+             received_at_ms INTEGER NOT NULL,
+             result_json TEXT
          );",
     )?;
     if prior_version < 2 {
         // Rows created by v1 could already have called Local EAIOS. Migrate them conservatively.
         transaction.execute(
             "INSERT OR IGNORE INTO local_dispatch_authorizations (execution_id)
-             SELECT execution_id FROM executions
+             SELECT execution_id FROM execution_authority_v7
              WHERE status = 'dispatching' AND local_handle IS NULL",
             [],
         )?;
     }
-    transaction.pragma_update(None, "user_version", 6_i64)?;
+    transaction.execute_batch(
+        "CREATE VIEW IF NOT EXISTS executions AS SELECT * FROM execution_authority_v7;
+        CREATE VIEW IF NOT EXISTS memory_imports AS SELECT * FROM memory_import_authority_v7;",
+    )?;
+    transaction.execute(
+        "INSERT OR IGNORE INTO node_journal_storage_schema VALUES (1,7)",
+        [],
+    )?;
+    transaction.pragma_update(None, "user_version", 7_i64)?;
     transaction.commit()?;
+    Ok(())
+}
+
+/// Renames legacy writable authority atomically while keeping readonly compatibility names for inspection.
+fn migrate_authority_table(
+    transaction: &rusqlite::Transaction<'_>,
+    legacy: &str,
+    current: &str,
+) -> Result<(), JournalError> {
+    let legacy_kind: Option<String> = transaction
+        .query_row(
+            "SELECT type FROM sqlite_master WHERE name=?1",
+            [legacy],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if legacy_kind.as_deref() == Some("table") {
+        let current_exists: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name=?1)",
+            [current],
+            |row| row.get(0),
+        )?;
+        if current_exists {
+            return Err(JournalError::Corrupt(
+                "journal contains conflicting legacy/current authorities".into(),
+            ));
+        }
+        // Both identifiers are fixed call-site constants, never input from a manifest or command.
+        transaction.execute_batch(&format!("ALTER TABLE {legacy} RENAME TO {current}"))?;
+    } else if legacy_kind.as_deref().is_some_and(|kind| kind != "view") {
+        return Err(JournalError::Corrupt(
+            "legacy journal authority is not a table/view".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -98,42 +172,42 @@ pub(super) fn recover_ambiguous_dispatches(connection: &Connection) -> Result<()
     // identity is retained, but its outcome is unknown and may only be retried with the same
     // authorization digest.
     connection.execute(
-        "UPDATE memory_imports SET status = 'unknown', reason = ?1 WHERE status = 'pending'",
+        "UPDATE memory_import_authority_v7 SET status = 'unknown', reason = ?1 WHERE status = 'pending'",
         ["Node Service restarted before Memory import outcome was recorded"],
     )?;
     connection.execute(
-        "UPDATE executions
+        "UPDATE execution_authority_v7
          SET status = 'failed', reason = ?1
          WHERE status = 'dispatching' AND local_handle IS NULL
            AND NOT EXISTS (
                SELECT 1 FROM local_dispatch_authorizations authorization
-               WHERE authorization.execution_id = executions.execution_id
+               WHERE authorization.execution_id = execution_authority_v7.execution_id
            )",
         [INTERRUPTED_PRE_DISPATCH_REASON],
     )?;
     connection.execute(
-        "UPDATE executions
+        "UPDATE execution_authority_v7
          SET status = 'reconciliation_required', reason = ?1
          WHERE status = 'dispatching' AND local_handle IS NOT NULL",
         [HANDLE_BEARING_DISPATCH_REASON],
     )?;
     connection.execute(
-        "UPDATE executions
+        "UPDATE execution_authority_v7
          SET status = 'reconciliation_required', reason = ?1
          WHERE status = 'dispatching' AND local_handle IS NULL
            AND EXISTS (
                SELECT 1 FROM local_dispatch_authorizations authorization
-               WHERE authorization.execution_id = executions.execution_id
+               WHERE authorization.execution_id = execution_authority_v7.execution_id
            )",
         [AMBIGUOUS_DISPATCH_REASON],
     )?;
     connection.execute(
-        "UPDATE executions
+        "UPDATE execution_authority_v7
          SET status = 'reconciliation_required', reason = ?1
          WHERE status NOT IN ('completed', 'failed', 'cancelled')
            AND EXISTS (
                SELECT 1 FROM artifact_preparations preparation
-               WHERE preparation.execution_id = executions.execution_id
+               WHERE preparation.execution_id = execution_authority_v7.execution_id
            )",
         [INTERRUPTED_ARTIFACT_PREPARATION_REASON],
     )?;
@@ -149,7 +223,7 @@ pub(super) fn load_execution(
         .query_row(
             "SELECT execution_id, invocation_content, invocation_digest, workflow_digest,
                     resource_ids, local_handle, cancellation_requested, sequence, status, reason
-             FROM executions WHERE execution_id = ?1",
+             FROM execution_authority_v7 WHERE execution_id = ?1",
             [execution_id],
             record_from_row,
         )
@@ -165,7 +239,7 @@ pub(super) fn load_memory_import(
     connection
         .query_row(
             "SELECT import_id, command_id, identity_digest, status, reason
-             FROM memory_imports WHERE import_id = ?1",
+             FROM memory_import_authority_v7 WHERE import_id = ?1",
             [import_id],
             |row| {
                 let status: String = row.get(3)?;

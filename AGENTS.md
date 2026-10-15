@@ -81,8 +81,19 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   configured EAIOS imports do not copy payload bytes into that ledger.
 - Generic replica durable identity is exact `(MemorySelector, NodeId, ConsumerProviderId)`; admission,
   event replay, projections, and APIs preserve that provider dimension, and accepted evidence remains
-  monotonic after Imported. Node Protocol v0.4 has no durable selective-import command; discovery
-  never authorizes automatic replication.
+  monotonic after Imported. Explicit application-owned selective-import commands and bounded
+  original-provider queries are durable; discovery never authorizes automatic replication.
+- ADR-0105's current continuity slice negotiates Node Contract v0.7 / config v0.8 over Protocol
+  v0.4 (contract catalog v0.10). Original workflow/connections, actual backend instance, complete
+  command and manifest metadata persist before import effects. Typed durable original-provider
+  completion is mandatory in this profile. Unknown fences replacement provider/selector IDs;
+  queries retain original generations/deadlines/counts and never repeat import or a query ID.
+  Node journal v7 uses readonly legacy views to reject actual v6 binary writers; Controller
+  wrapper v31 and event codec v22 fence earlier software. Late/changed-ownership query evidence is
+  history only. Replica Imported history never grants current availability or Task satisfaction.
+  The shipped immutable-file provider and process conformance use actual files/SQL/OS processes,
+  zero devices and no model/simulator. Full Group authorization, revocation/GC, active-map and
+  spatial fusion remain required F4 work; this slice is not overall completion.
 - ExecutionGroup-scoped Memory currently has a domain model and Node-local invocation validation
   only. Do not claim or implement complete distributed Group authorization/handoff until its
   Control, Runtime, Commit, Recovery, and Node Protocol authority is designed explicitly.

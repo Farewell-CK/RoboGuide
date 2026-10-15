@@ -157,18 +157,6 @@ pub(super) fn artifact_error_is_deterministic(error: &EngineError) -> bool {
     }
 }
 
-/// Returns whether import failure conclusively proves a semantic/configuration rejection.
-pub(super) fn memory_import_error_is_deterministic(error: &EngineError) -> bool {
-    matches!(
-        error,
-        EngineError::Configuration(_)
-            | EngineError::Catalog(_)
-            | EngineError::Mapping(_)
-            | EngineError::Json(_)
-            | EngineError::Protocol(_)
-    )
-}
-
 /// Validates canonical command identity before any lock or local side effect.
 pub(super) fn validate_invocation_identity(
     execution_id: &str,

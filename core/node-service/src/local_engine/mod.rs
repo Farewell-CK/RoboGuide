@@ -24,9 +24,9 @@ use crate::{
     ArtifactInputBindingConfig, ArtifactOperationConfig, ArtifactOutputBindingConfig,
     ArtifactServiceConfig, CapabilityBindingConfig, CapabilityProfileConfig,
     CapabilityReadinessConfig, ConnectionConfig, ExecutionStateMappingConfig, HealthCheckConfig,
-    LocalOperationConfig, LocalSystemConfig, MemoryProviderConfig, MemoryWorkflowConfig,
-    NodeServiceConfig, OperationBindingConfig, PeerChannelObserverConfig, ResourceConfig,
-    SensorConfig, StateExportConfig, WorkflowConfig, WorkflowStepConfig,
+    LocalOperationConfig, LocalSystemConfig, MemoryContinuityConfig, MemoryProviderConfig,
+    MemoryWorkflowConfig, NodeServiceConfig, OperationBindingConfig, PeerChannelObserverConfig,
+    ResourceConfig, SensorConfig, StateExportConfig, WorkflowConfig, WorkflowStepConfig,
 };
 use driver::{CompiledDriverRequest, DriverKind};
 use mapping::{
@@ -55,6 +55,8 @@ pub const CONFIG_SCHEMA_V0_5: &str = "roboguide.node-config/v0.5";
 pub const CONFIG_SCHEMA_V0_6: &str = "roboguide.node-config/v0.6";
 /// Schema identity separating capability profiles from executable operation workflows.
 pub const CONFIG_SCHEMA_V0_7: &str = "roboguide.node-config/v0.7";
+/// Schema with explicitly negotiated readonly Memory import reconciliation.
+pub const CONFIG_SCHEMA_V0_8: &str = "roboguide.node-config/v0.8";
 /// Maximum peer endpoints accepted from one bounded local observation.
 const MAX_PEER_CHANNELS_PER_OBSERVATION: usize = 64;
 /// Maximum JSON bytes accepted from one local peer readiness response.
@@ -287,6 +289,23 @@ pub struct CompiledMemoryProvider {
     export: Option<CompiledMemoryWorkflow>,
     /// Optional import workflow.
     import: Option<CompiledMemoryWorkflow>,
+    /// Explicit readonly backend continuity contract, never inferred from a ledger path.
+    continuity: Option<CompiledMemoryContinuity>,
+}
+
+/// Compiled fixed readonly backend identity and import-query endpoints.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledMemoryContinuity {
+    /// Workflow-context pointer to the typed original import's durable completion result.
+    import_result_pointer: String,
+    /// Instance identity observation.
+    instance: CompiledWorkflowStep,
+    /// Response-relative backend instance identity pointer.
+    instance_pointer: String,
+    /// Exact original import query.
+    query: CompiledWorkflowStep,
+    /// Response-relative versioned result pointer.
+    result_pointer: String,
 }
 
 /// Startup-validated Memory provider workflow.

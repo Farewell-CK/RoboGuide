@@ -2,6 +2,47 @@
 
 use super::*;
 
+/// A Memory authority/query event cannot be relabeled as a pre-query codec during restore.
+#[test]
+fn memory_command_codec_refuses_older_authority_marker() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("memory.sqlite3")).unwrap();
+    log.clone().append(
+        TimestampMs::new(5),
+        &CorrelationId::new("memory-codec").unwrap(),
+        None,
+        EventPayload::MemoryCommandEvidence {
+            group_id: domain::ExecutionGroupId::new("group").unwrap(),
+            task_ref: domain::TaskRef::new(
+                domain::MissionId::new("mission").unwrap(),
+                domain::TaskId::new("task").unwrap(),
+            ),
+            import_id: "original-import".into(),
+            command_id: "memory-query-original-import-1".into(),
+            generation: 1,
+            stage: "query_authorized".into(),
+            content_digest: format!("sha256:{}", "a".repeat(64)),
+            principal: "authenticated-test-principal".into(),
+            received_at: TimestampMs::new(5),
+        },
+    );
+    assert!(log.take_error().unwrap().is_none());
+    assert_eq!(
+        log.events().unwrap()[0].payload_schema,
+        EVENT_PAYLOAD_SCHEMA_V22
+    );
+    assert_eq!(log.decoded_events().unwrap().len(), 1);
+    log.connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE events SET payload_schema=?1",
+            [EVENT_PAYLOAD_SCHEMA_V21],
+        )
+        .unwrap();
+    assert!(log.decoded_events().is_err());
+}
+
 /// Rolling failure evidence cannot be relabeled as an old codec, while real old counter-only evidence remains readable.
 #[test]
 fn failure_window_codec_fences_downgrade_and_retains_legacy_unknown_window() {

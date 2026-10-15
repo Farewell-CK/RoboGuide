@@ -16,6 +16,8 @@ use std::path::Path;
 pub const EXTENSION_CONFORMANCE_SCHEMA_V0_1: &str = "roboguide.extension-conformance/v0.1";
 /// Current report schema separating capability evidence from operation workflow mappings.
 pub const EXTENSION_CONFORMANCE_SCHEMA_V0_2: &str = "roboguide.extension-conformance/v0.2";
+/// Report schema adding explicitly negotiated original-provider Memory continuity evidence.
+pub const EXTENSION_CONFORMANCE_SCHEMA_V0_3: &str = "roboguide.extension-conformance/v0.3";
 
 /// One diagnostic emitted when a configuration cannot be compiled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -196,6 +198,9 @@ pub struct MemoryProviderConformance {
     pub export_workflow: bool,
     /// Whether a provider-local import workflow is configured.
     pub import_workflow: bool,
+    /// Explicit v0.8 original-instance and readonly-query contract; never inferred from Imported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_provider_continuity: Option<bool>,
 }
 
 /// One Node Service implementation guarantee shared by every supported local driver family.
@@ -322,12 +327,12 @@ pub fn compile_extension_config(
     let config = NodeServiceConfig::load_compiled(path).map_err(catalog_error)?;
     if !matches!(
         config.schema(),
-        crate::CONFIG_SCHEMA_V0_6 | crate::CONFIG_SCHEMA_V0_7
+        crate::CONFIG_SCHEMA_V0_6 | crate::CONFIG_SCHEMA_V0_7 | crate::CONFIG_SCHEMA_V0_8
     ) {
         return Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
             location: "schema".to_string(),
             code: "state-memory-contract-required".to_string(),
-            message: "Extension Conformance requires node-config/v0.6 or v0.7 semantics"
+            message: "Extension Conformance requires node-config/v0.6, v0.7 or v0.8 semantics"
                 .to_string(),
         }));
     }
@@ -446,6 +451,8 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
     ExtensionConformanceReport {
         schema: if legacy {
             EXTENSION_CONFORMANCE_SCHEMA_V0_1
+        } else if catalog.schema() == crate::CONFIG_SCHEMA_V0_8 {
+            EXTENSION_CONFORMANCE_SCHEMA_V0_3
         } else {
             EXTENSION_CONFORMANCE_SCHEMA_V0_2
         },
@@ -492,6 +499,8 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
                 discovery_workflow: provider.discover().is_some(),
                 export_workflow: provider.export().is_some(),
                 import_workflow: provider.import().is_some(),
+                original_provider_continuity: (catalog.schema() == crate::CONFIG_SCHEMA_V0_8)
+                    .then_some(provider.continuity().is_some()),
             })
             .collect(),
         checks: ConformanceChecks {

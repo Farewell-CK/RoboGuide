@@ -5,6 +5,27 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// A bounded Memory command or readonly result was durably admitted without Task authority.
+    MemoryCommandEvidence {
+        /// Original Control Group; this event does not renew membership.
+        group_id: ExecutionGroupId,
+        /// Original exact consumer Task.
+        task_ref: TaskRef,
+        /// Original immutable import identity.
+        import_id: String,
+        /// Exact import/query command identity.
+        command_id: String,
+        /// Original readonly query generation, zero for an initial import.
+        generation: u64,
+        /// Closed application stage such as query_authorized or query_receipt.
+        stage: String,
+        /// Complete command/evidence canonical digest, excluding credentials.
+        content_digest: String,
+        /// Original certificate-derived principal or admitted exact Node session.
+        principal: String,
+        /// Original Controller-local admission time.
+        received_at: TimestampMs,
+    },
     /// Complete independently authenticated semantic evidence admitted before lifecycle consumption.
     SemanticVerifierEvidenceAdmitted {
         /// Original source contract, input and receive-time attribution.

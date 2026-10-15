@@ -81,6 +81,16 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             )
             .map_err(IntegrationRuntimeError::Route)
     }
+    /// Delivers only an application-committed readonly original-provider reconciliation query.
+    pub fn deliver_memory_import_query(
+        &self,
+        node_id: &str,
+        command: integration::grpc::v0_4::MemoryImportQuery,
+    ) -> Result<(), IntegrationRuntimeError> {
+        self.router
+            .send_memory_import_query(node_id, command)
+            .map_err(IntegrationRuntimeError::Route)
+    }
     /// Evaluates one deployment-owned State policy at the Control composition boundary.
     ///
     /// The bridge passes the complete source-aware snapshot to the explicit policy evaluator;

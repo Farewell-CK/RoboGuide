@@ -255,14 +255,3 @@ fn memory_export_path_is_confined_to_node_handoff_root() {
         Err(EngineError::Memory(_))
     ));
 }
-
-/// Ambiguous Local EAIOS transport failure remains retryable instead of terminal rejection.
-#[test]
-fn memory_import_transport_failure_is_not_conclusive_rejection() {
-    assert!(!memory_import_error_is_deterministic(&EngineError::Driver(
-        crate::DriverError::Transport("connection closed".to_string())
-    )));
-    assert!(memory_import_error_is_deterministic(
-        &EngineError::Configuration("invalid provider mapping".to_string())
-    ));
-}

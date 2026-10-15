@@ -84,6 +84,9 @@ pub(crate) struct MemoryImportIntent {
     /// Late or recovery-time receipt retained without renewing an expired authorization.
     #[serde(default)]
     pub(crate) recovery_receipt: Option<ImportPhase>,
+    /// Explicit bounded readonly reconciliation; no replacement import authorization.
+    #[serde(default)]
+    pub(crate) reconciliation: Option<super::memory_query::MemoryReconciliation>,
 }
 
 /// Revalidates Control, Runtime, provider and scope without changing any authority.
@@ -232,6 +235,20 @@ pub(crate) fn admit(
     {
         return Err("Memory import identity, deadline or retained-command bound is invalid".into());
     }
+    if controller.memory_imports.values().any(|prior| {
+        ((prior.request.node_id == request.node_id
+            && prior.request.consumer_provider_id == request.consumer_provider_id)
+            || (prior.request.group_id == request.group_id
+                && prior.request.task_ref == request.task_ref
+                && prior.request.role_id == request.role_id))
+            && prior.request.manifest.selector() == request.manifest.selector()
+            && !matches!(prior.phase, ImportPhase::Completed | ImportPhase::Rejected)
+    }) {
+        return Err(
+            "an unresolved original import fences replacement IDs/providers for this consumer/selector"
+                .into(),
+        );
+    }
     authorize(controller, &request, now)?;
     controller.memory_imports.insert(
         request.import_id.clone(),
@@ -244,6 +261,7 @@ pub(crate) fn admit(
             receipt_received_at_ms: None,
             reason: String::new(),
             recovery_receipt: None,
+            reconciliation: None,
         },
     );
     Ok(())
@@ -251,6 +269,7 @@ pub(crate) fn admit(
 
 /// Prepares bounded replay delivery inside the same transaction as the resulting checkpoint.
 pub(crate) fn prepare(controller: &mut ControllerState, now: domain::TimestampMs) {
+    super::memory_query::prepare(controller, now);
     let ids = controller
         .memory_imports
         .keys()
@@ -289,6 +308,7 @@ pub(crate) fn flush(
     prepared_at: domain::TimestampMs,
     now: domain::TimestampMs,
 ) {
+    super::memory_query::flush(controller, prepared_at, now);
     for intent in controller.memory_imports.values() {
         if intent.phase.terminal()
             || intent.last_delivery_ms != Some(prepared_at.as_millis())
@@ -391,6 +411,7 @@ pub(crate) fn receipt(
 
 /// Validates retained command identities before timer recovery can prepare another delivery.
 pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), String> {
+    super::memory_query::validate_restored(controller)?;
     if controller.memory_imports.len() > 4096 {
         return Err("Memory import checkpoint exceeds retained bound".into());
     }

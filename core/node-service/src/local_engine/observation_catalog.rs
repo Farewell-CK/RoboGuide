@@ -2,6 +2,36 @@
 
 use super::*;
 
+impl CompiledMemoryProvider {
+    /// Returns the explicitly configured readonly original-provider continuity contract.
+    pub const fn continuity(&self) -> Option<&CompiledMemoryContinuity> {
+        self.continuity.as_ref()
+    }
+}
+
+impl CompiledMemoryContinuity {
+    /// Returns the workflow-context pointer to the typed conclusive import result.
+    pub fn import_result_pointer(&self) -> &str {
+        &self.import_result_pointer
+    }
+    /// Returns the actual backend instance identity observation.
+    pub const fn instance(&self) -> &CompiledWorkflowStep {
+        &self.instance
+    }
+    /// Returns the response-relative backend identity pointer.
+    pub fn instance_pointer(&self) -> &str {
+        &self.instance_pointer
+    }
+    /// Returns the readonly original-import query.
+    pub const fn query(&self) -> &CompiledWorkflowStep {
+        &self.query
+    }
+    /// Returns the response-relative versioned query result pointer.
+    pub fn result_pointer(&self) -> &str {
+        &self.result_pointer
+    }
+}
+
 impl CompiledStateExport {
     /// Returns the node-wide export identity.
     pub fn id(&self) -> &str {

@@ -84,6 +84,18 @@ impl ArtifactStager {
         self.client.upload_memory_file(source, artifact).await
     }
 
+    /// Reads exact provider-qualified Imported history without granting current availability.
+    pub async fn memory_replica_was_imported(
+        &self,
+        selector: &MemorySelector,
+        node: &NodeId,
+        provider: &str,
+    ) -> Result<bool, ArtifactError> {
+        self.client
+            .memory_replica_was_imported(selector, node, provider)
+            .await
+    }
+
     /// Records generic Memory replica evidence using the active Node Protocol session identity.
     pub async fn record_memory_replica(
         &self,

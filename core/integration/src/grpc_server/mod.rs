@@ -4,9 +4,9 @@ use crate::grpc::v0_4::node_message::Message as NodePayload;
 use crate::grpc::v0_4::robo_guide_node_protocol_server::RoboGuideNodeProtocol;
 use crate::grpc::v0_4::server_message::Message as ServerPayload;
 use crate::grpc::v0_4::{
-    Ack, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION, MemoryImport, NODE_CONTRACT_VERSION,
-    NodeMessage, PREVIOUS_NODE_CONTRACT_VERSION, PROTOCOL_VERSION, Registered, ServerMessage,
-    Welcome,
+    Ack, CONTINUITY_NODE_CONTRACT_VERSION, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION,
+    MemoryImport, NODE_CONTRACT_VERSION, NodeMessage, PREVIOUS_NODE_CONTRACT_VERSION,
+    PROTOCOL_VERSION, Registered, ServerMessage, Welcome,
 };
 use ports::{
     Clock, DiagnosticHandle, DiagnosticStage, NodeFactMetadata, NodeLeasePolicy, NodeProtocolPolicy,
@@ -144,6 +144,37 @@ pub const EXECUTION_SESSION_METADATA_VALUE: &str = "roboguide.execution-session/
 pub const MEMORY_IMPORT_METADATA_KEY: &str = "roboguide.memory-import";
 /// The only selective-import command schema currently understood by the Controller/Node pair.
 pub const MEMORY_IMPORT_METADATA_VALUE: &str = "roboguide.memory-import/v0.1";
+
+/// Computes the original import content identity independently of replaceable transport epochs.
+pub fn memory_import_content_digest(import: &MemoryImport) -> String {
+    memory_import_authorization_digest(
+        &import.import_id,
+        &import.command_id,
+        &import.consumer_provider_id,
+        &import.manifest_json,
+        &import.mission_id,
+        &import.group_id,
+        &import.task_id,
+        &import.role_id,
+        &import.execution_id,
+        "",
+    )
+}
+
+/// Binds one readonly query to its exact original identity, generation, budget and leader epoch.
+pub fn memory_import_query_digest(query: &crate::grpc::v0_4::MemoryImportQuery) -> String {
+    let value = serde_json::json!({
+        "schema": "roboguide.memory-import-query/v0.1", "query_id": query.query_id,
+        "import_id": query.import_id, "command_id": query.command_id,
+        "consumer_provider_id": query.consumer_provider_id,
+        "original_content_digest": query.original_content_digest, "generation": query.generation,
+        "valid_for_ms": query.valid_for_ms, "controller_epoch": query.controller_epoch,
+    });
+    format!(
+        "sha256:{:x}",
+        Sha256::digest(serde_json::to_vec(&value).expect("query identity is serializable"))
+    )
+}
 
 /// Computes the digest binding one selective-import command to its immutable authorization tuple.
 #[allow(clippy::too_many_arguments)]
@@ -372,6 +403,54 @@ struct RoutedSession {
 }
 
 impl GrpcNodeRouter {
+    /// Sends an already committed readonly query only to an explicitly negotiated v0.7 route.
+    pub fn send_memory_import_query(
+        &self,
+        node_id: &str,
+        mut query: crate::grpc::v0_4::MemoryImportQuery,
+    ) -> Result<(), Status> {
+        self.check_command_delivery()?;
+        if query.query_id != format!("memory-query-{}-{}", query.import_id, query.generation)
+            || query.command_id != format!("memory-import-{}", query.import_id)
+            || query.consumer_provider_id.trim().is_empty()
+            || query.original_content_digest.len() != 71
+            || !(1..=16).contains(&query.generation)
+            || !(1..=30_000).contains(&query.valid_for_ms)
+        {
+            return Err(Status::invalid_argument(
+                "invalid original-import query identity or budget",
+            ));
+        }
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| Status::internal("session registry unavailable"))?;
+        let route = sessions
+            .get(node_id)
+            .ok_or_else(|| Status::unavailable("node is not connected"))?;
+        self.validate_identity(node_id, &route.session_id)?;
+        self.validate_certificate_expiry(route)?;
+        if route.node_contract_version != CONTINUITY_NODE_CONTRACT_VERSION
+            || !route.active
+            || !route.supports_memory_import
+        {
+            return Err(Status::failed_precondition(
+                "readonly Memory query requires an active negotiated v0.7 import route",
+            ));
+        }
+        if route.last_heartbeat.elapsed() >= route.lease_duration {
+            return Err(Status::unavailable("node lease expired"));
+        }
+        query.session_id = route.session_id.clone();
+        query.controller_epoch = self.controller_epoch()?;
+        query.authorization_digest = memory_import_query_digest(&query);
+        route
+            .sender
+            .send(Ok(ServerMessage {
+                message: Some(ServerPayload::MemoryImportQuery(query)),
+            }))
+            .map_err(|_| Status::unavailable("node session closed"))
+    }
     /// Publishes a committed lifecycle registry without changing execution or resource ownership.
     pub fn publish_identity_registry(
         &self,
@@ -1078,6 +1157,7 @@ async fn run_grpc_session(
         ));
     }
     let node_contract = [
+        CONTINUITY_NODE_CONTRACT_VERSION,
         NODE_CONTRACT_VERSION,
         PREVIOUS_NODE_CONTRACT_VERSION,
         LEGACY_NODE_CONTRACT_VERSION,
@@ -1389,7 +1469,9 @@ fn invocation_for_contract(
     node_contract_version: &str,
 ) -> Result<crate::grpc::v0_4::CanonicalInvocation, Status> {
     match node_contract_version {
-        NODE_CONTRACT_VERSION | PREVIOUS_NODE_CONTRACT_VERSION => {
+        CONTINUITY_NODE_CONTRACT_VERSION
+        | NODE_CONTRACT_VERSION
+        | PREVIOUS_NODE_CONTRACT_VERSION => {
             if !invocation.capability_contract.is_empty() || !invocation.parameters.is_empty() {
                 return Err(Status::invalid_argument(
                     "semantic Node Contract invocation cannot mix legacy fields with ExecutionIntent",

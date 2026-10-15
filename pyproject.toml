@@ -42,6 +42,7 @@ addopts = "-q"
 testpaths = [
     "mission/tests",
     "integrations/robonix-map-service/tests",
+    "integrations/memory-provider/tests",
     "integrations/habitat-local-eaios/tests",
     "evaluation/tests",
 ]
@@ -50,6 +51,8 @@ testpaths = [
 python_version = "3.13"
 strict = true
 files = [
+    "integrations/memory-provider/roboguide_memory_provider",
+    "integrations/memory-provider/tests",
     "mission/src",
     "mission/tests",
     "apps/mission-service",

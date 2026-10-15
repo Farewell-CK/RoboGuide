@@ -222,7 +222,7 @@ impl LocalIntegrationEngine {
     }
 
     /// Validates remote Memory against the consumer provider before local import side effects.
-    pub(super) fn validate_memory_import(
+    pub(crate) fn validate_memory_import(
         &self,
         provider_id: &str,
         manifest: &MemoryArtifactManifest,
@@ -298,6 +298,35 @@ impl LocalIntegrationEngine {
             }
             let mut context = WorkflowContext::new(value);
             self.run_steps(workflow.steps(), &mut context).await?;
+            if let Some(continuity) = self.catalog().memory_providers()[provider_id].continuity() {
+                let original: crate::ImportContinuity = serde_json::from_value(
+                    context
+                        .as_json()
+                        .pointer("/invocation/memory_import")
+                        .ok_or_else(|| {
+                            EngineError::Memory("import lost its original backend identity".into())
+                        })?
+                        .clone(),
+                )
+                .map_err(EngineError::Json)?;
+                let result: crate::ImportQueryResult = serde_json::from_value(
+                    context
+                        .as_json()
+                        .pointer(continuity.import_result_pointer())
+                        .ok_or_else(|| {
+                            EngineError::Memory(
+                                "import returned no typed original-provider outcome".into(),
+                            )
+                        })?
+                        .clone(),
+                )
+                .map_err(EngineError::Json)?;
+                if result.status(&original)? != crate::MemoryImportStatus::Completed {
+                    return Err(EngineError::Memory(
+                        "import lacks a conclusive durable original-provider completion".into(),
+                    ));
+                }
+            }
         }
         let reference_artifact = workflow.is_none().then_some(staged_artifact);
         ledger
@@ -358,19 +387,16 @@ impl LocalIntegrationEngine {
             }
             return Err(error);
         }
-        if existing.is_some() {
-            stager
-                .record_memory_replica(
-                    manifest,
-                    &node_id,
-                    session_id,
-                    provider_id,
-                    "imported",
-                    None,
-                )
-                .await?;
+        if existing.is_some()
+            && self.catalog().memory_providers()[provider_id]
+                .continuity()
+                .is_none()
+        {
+            // Legacy retry replays historical completion only. It publishes no new evidence and
+            // cannot grant a fresh availability lease without the explicit continuity contract.
             return Ok(());
         }
+        // A current-contract acquisition rechecks bytes and the actual original backend.
         let path = stager.memory_cache_path(manifest.selector());
         if let Err(error) = stager.stage_memory_input(manifest, &path).await {
             let error = EngineError::Artifact(error);
@@ -388,27 +414,25 @@ impl LocalIntegrationEngine {
             }
             return Err(error);
         }
-        stager
-            .record_memory_replica(manifest, &node_id, session_id, provider_id, "staged", None)
-            .await?;
-        if let Err(error) = self
-            .import_memory(provider_id, manifest, &path, invocation)
-            .await
+        let imported_history = if self.catalog().memory_providers()[provider_id]
+            .continuity()
+            .is_some()
         {
-            if memory_import_error_is_deterministic(&error) {
-                let _ = stager
-                    .record_memory_replica(
-                        manifest,
-                        &node_id,
-                        session_id,
-                        provider_id,
-                        "rejected",
-                        Some(&error.to_string()),
-                    )
-                    .await;
-            }
-            return Err(error);
+            stager
+                .memory_replica_was_imported(manifest.selector(), &node_id, provider_id)
+                .await?
+        } else {
+            existing.is_some()
+        };
+        if !imported_history {
+            stager
+                .record_memory_replica(manifest, &node_id, session_id, provider_id, "staged", None)
+                .await?;
         }
+        // A mapping error can follow an earlier step's effects. Preserve staged/unknown evidence;
+        // only a pre-effect check can prove rejection.
+        self.import_memory(provider_id, manifest, &path, invocation)
+            .await?;
         stager
             .record_memory_replica(
                 manifest,

@@ -24,6 +24,10 @@ State/MI 的当前整改见 [ADR-0104](docs/decisions/0104-state-consumers-belie
 证据与 TTL、通用 verifier 独立于本地完成、MI provenance 与 Request 同事务持久化。POSIX 文件
 计算已通过正式 Node/CAS/独立复算与重启验收；整体 Memory/HA/资源/协调/Federation 仍在实施。
 
+Memory 的原实例查询、导入中断对账和日志回退保护已有当前软件切片，见
+[验收记录](docs/development/acceptance/2026-10-15-f4-memory-continuity.md)。进程验收使用实际文件
+复制、SQL 故障、正式协议与独立复算；F4 的 Group 授权、GC、空间融合及后续阶段仍须完成。
+
 ## 系统目标
 
 RoboGuide 统一感知系统状态、物理世界状态和具身能力状态，并联合调度 Capability、Compute、Space、Time，使机器人、感知设备、交互终端、边缘算力和基础设施节点能够持续完成复杂现实任务。
@@ -374,7 +378,7 @@ physical attempt 保守恢复为 `Unknown` 并进入 reconciliation，而不是�
 journal、heartbeat/lease 与 session fencing 由 `roboguide-node` 和 `core/integration`/
 Integration Server 实现，Controller 组合 bridge 位于 `core/orchestration`。Artifact bytes 则
 由独立的 `core/artifact-store` filesystem CAS 提供，不参与设备执行生命周期。
-当前合同与版本关系见 [`contracts/node/v0.9/`](contracts/node/v0.9/README.md) 和
+当前合同与版本关系见 [`contracts/node/v0.10/`](contracts/node/v0.10/README.md) 和
 [`contracts/node/README.md`](contracts/node/README.md)。Node config v0.7 为每个 exact
 canonical capability profile 提供固定 readiness observation 与 attributes，将 operation/workflow
 mapping 独立声明，并保留选择性的 State export、Memory provider、固定 discover/export/import

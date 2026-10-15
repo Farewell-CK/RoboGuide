@@ -25,6 +25,7 @@ use tokio::sync::broadcast;
 
 mod admission;
 mod execution;
+mod memory_continuity;
 mod memory_operations;
 mod observation;
 mod validation;

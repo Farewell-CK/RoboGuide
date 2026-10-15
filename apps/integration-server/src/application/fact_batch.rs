@@ -244,6 +244,31 @@ impl<C: Clock> NodeFactDriver<'_, C> {
                     message,
                 } = &event
                     && let Some(
+                        integration::grpc::v0_4::node_message::Message::MemoryImportQueryReceipt(
+                            receipt,
+                        ),
+                    ) = &message.message
+                {
+                    if receipt.session_id != *session_id {
+                        return Err(FactFailure::Rejected(
+                            "Memory query receipt session differs".into(),
+                        ));
+                    }
+                    super::memory_query::receipt(
+                        &mut candidate,
+                        node_id,
+                        receipt,
+                        received,
+                        &mut self.events.clone(),
+                    )
+                    .map_err(FactFailure::Rejected)?;
+                }
+                if let GrpcNodeEvent::NodeMessage {
+                    node_id,
+                    session_id,
+                    message,
+                } = &event
+                    && let Some(
                         integration::grpc::v0_4::node_message::Message::MemoryImportReceipt(
                             receipt,
                         ),

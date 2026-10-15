@@ -112,6 +112,13 @@ Node Contract v0.6 将 canonical `OperationSupport` 与 Capability Profile、Nod
 Binding 分开。Normalized Mission 与 Recovery 在 Match、Proposal、Commit 边界验证 exact operation
 support；Scheduler 只消费已过滤 Candidate Set，不解析 Operation 或 Local How。
 
+Memory continuity 的当前配置使用 Node Contract v0.7 / config v0.8，见
+[合同 catalog v0.10](../../contracts/node/v0.10/README.md)。原始完整命令、workflow/connection
+digest 和实际 provider instance 在副作用前保留；readonly query 有独立持久预算，不重复
+import。Controller wrapper v31、Memory event codec v22 与 Node journal v7 分别 fence 回退；
+旧 Node binary 的写入拒绝已通过实际进程检查。当前 Imported 仍是历史证据，不授予可用性租约。
+完整 Group 授权、GC/active-map、空间计算和后续阶段继续按全部非发布计划实施。
+
 Mission Request v0.4 由 Engine 显式编排 Dialogue -> Grounding Snapshot -> Draft -> Review ->
 bounded Repair；Reviewer
 只产生结构化 evidence，Repairer 不得补写 GroundedIntent 之外的事实，需要用户信息时返回

@@ -15,20 +15,28 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_5
                 | CONFIG_SCHEMA_V0_6
                 | CONFIG_SCHEMA_V0_7
+                | CONFIG_SCHEMA_V0_8
         );
         let requires_readiness = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_4 | CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7
+            CONFIG_SCHEMA_V0_4
+                | CONFIG_SCHEMA_V0_5
+                | CONFIG_SCHEMA_V0_6
+                | CONFIG_SCHEMA_V0_7
+                | CONFIG_SCHEMA_V0_8
         );
         let supports_state_memory = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7
+            CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8
         );
         let supports_peer_observers = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7
+            CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8
         );
-        let separates_capabilities_and_operations = config.schema == CONFIG_SCHEMA_V0_7;
+        let separates_capabilities_and_operations = matches!(
+            config.schema.as_str(),
+            CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8
+        );
         require(
             matches!(
                 config.schema.as_str(),
@@ -38,16 +46,21 @@ impl CompiledLocalCatalog {
                     | CONFIG_SCHEMA_V0_5
                     | CONFIG_SCHEMA_V0_6
                     | CONFIG_SCHEMA_V0_7
+                    | CONFIG_SCHEMA_V0_8
             ),
             "schema",
             format!(
-                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, `{CONFIG_SCHEMA_V0_4}`, `{CONFIG_SCHEMA_V0_5}`, `{CONFIG_SCHEMA_V0_6}`, or `{CONFIG_SCHEMA_V0_7}`"
+                "expected `{CONFIG_SCHEMA_V0_2}`, `{CONFIG_SCHEMA_V0_3}`, `{CONFIG_SCHEMA_V0_4}`, `{CONFIG_SCHEMA_V0_5}`, `{CONFIG_SCHEMA_V0_6}`, `{CONFIG_SCHEMA_V0_7}`, or `{CONFIG_SCHEMA_V0_8}`"
             ),
         )?;
         validate_identity(&config.node_id, "node_id")?;
         validate_server_endpoint(&config.server_endpoint)?;
         require(
-            config.fallback_server_endpoints.is_empty() || config.schema == CONFIG_SCHEMA_V0_7,
+            config.fallback_server_endpoints.is_empty()
+                || matches!(
+                    config.schema.as_str(),
+                    CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8
+                ),
             "fallback_server_endpoints",
             "requires node-config/v0.7",
         )?;
@@ -109,6 +122,15 @@ impl CompiledLocalCatalog {
             &local_systems,
             &connections,
         )?;
+        require(
+            config.schema == CONFIG_SCHEMA_V0_8
+                || config
+                    .memory_providers
+                    .iter()
+                    .all(|p| p.continuity.is_none()),
+            "memory_providers.continuity",
+            "requires node-config/v0.8",
+        )?;
         let memory_providers = compile_memory_providers(
             config.memory_providers,
             &local_systems,
@@ -116,7 +138,7 @@ impl CompiledLocalCatalog {
             &state_directory,
             matches!(
                 config.schema.as_str(),
-                CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7
+                CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8
             ),
         )?;
         let resources = compile_resources(config.resources, &local_systems)?;
@@ -289,7 +311,9 @@ impl CompiledLocalCatalog {
 
     /// Returns the semantic Node Contract selected by this configuration generation.
     pub fn node_contract_version(&self) -> &'static str {
-        if self.schema == CONFIG_SCHEMA_V0_7 {
+        if self.schema == CONFIG_SCHEMA_V0_8 {
+            integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
+        } else if self.schema == CONFIG_SCHEMA_V0_7 {
             integration::grpc::v0_4::NODE_CONTRACT_VERSION
         } else {
             integration::grpc::v0_4::LEGACY_NODE_CONTRACT_VERSION

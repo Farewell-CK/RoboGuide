@@ -199,6 +199,8 @@ pub const NODE_CONTRACT_VERSION_V0_5: &str = "roboguide.node.v0.5";
 
 /// Version identifier carrying explicit canonical operation-support declarations.
 pub const NODE_CONTRACT_VERSION_V0_6: &str = "roboguide.node.v0.6";
+/// Node Contract with durable provider-qualified Memory continuity.
+pub const NODE_CONTRACT_VERSION_V0_7: &str = "roboguide.node.v0.7";
 
 #[cfg(test)]
 #[path = "domain_tests.rs"]

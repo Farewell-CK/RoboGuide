@@ -238,6 +238,34 @@ pub(super) fn accept_current_message(
                 route.management_sequence = value.sequence;
                 &value.session_id
             }
+            Some(NodePayload::MemoryImportQueryReceipt(value)) => {
+                if route.node_contract_version != CONTINUITY_NODE_CONTRACT_VERSION {
+                    return Err(Status::failed_precondition(
+                        "Memory query receipt requires negotiated Node Contract v0.7",
+                    ));
+                }
+                if value.session_id != session_id || value.sequence <= route.management_sequence {
+                    return Ok(false);
+                }
+                if value.query_id
+                    != format!("memory-query-{}-{}", value.import_id, value.generation)
+                    || value.command_id != format!("memory-import-{}", value.import_id)
+                    || !(1..=16).contains(&value.generation)
+                    || value.reason.len() > 4096
+                    || value.result_json.len() > 16 * 1024
+                    || crate::grpc::v0_4::MemoryImportReceiptStatus::try_from(value.status)
+                        .ok()
+                        .is_none_or(|s| {
+                            s == crate::grpc::v0_4::MemoryImportReceiptStatus::Unspecified
+                        })
+                {
+                    return Err(Status::invalid_argument(
+                        "invalid Memory query receipt identity or bounds",
+                    ));
+                }
+                route.management_sequence = value.sequence;
+                &value.session_id
+            }
             Some(NodePayload::ExecutionEvent(value)) => &value.session_id,
             Some(NodePayload::ExecutionSnapshot(value)) => &value.session_id,
             Some(NodePayload::Error(value)) => &value.session_id,
@@ -257,7 +285,10 @@ pub(super) fn validate_registration(
     if registration.node_id.trim().is_empty()
         || !matches!(
             registration.node_contract_version.as_str(),
-            NODE_CONTRACT_VERSION | PREVIOUS_NODE_CONTRACT_VERSION | LEGACY_NODE_CONTRACT_VERSION
+            CONTINUITY_NODE_CONTRACT_VERSION
+                | NODE_CONTRACT_VERSION
+                | PREVIOUS_NODE_CONTRACT_VERSION
+                | LEGACY_NODE_CONTRACT_VERSION
         )
     {
         return Err(Status::invalid_argument(
@@ -404,7 +435,10 @@ fn validate_operation_support(
     registration: &crate::grpc::v0_4::NodeRegistration,
     local_system_ids: &BTreeSet<&str>,
 ) -> Result<(), Status> {
-    if registration.node_contract_version != NODE_CONTRACT_VERSION {
+    if !matches!(
+        registration.node_contract_version.as_str(),
+        NODE_CONTRACT_VERSION | CONTINUITY_NODE_CONTRACT_VERSION
+    ) {
         if !registration.operation_support.is_empty() {
             return Err(Status::invalid_argument(
                 "Node Contracts before v0.6 cannot declare operation support",

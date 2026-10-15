@@ -19,6 +19,12 @@ Belief、MI provenance 与通用 verifier。实际 POSIX/正式 Node/CAS/独立�
 [F3 验收](development/acceptance/2026-10-15-f3.md)。Memory/Spatial、动态 HA、时空/quota、运行期
 协调/计划、Federation 及总验收仍为必需软件工作，不能视为只等设备。
 
+[ADR-0105](decisions/0105-memory-reconciliation-authorization-and-spatial-provider.md) 的首个当前
+切片补齐原实例/合同绑定的只读 import query、持久预算、迟到历史、完整 result 校验与旧二进制
+Node journal 写入拒绝。实际文件、SQL 提交失败、正式查询、重启及独立复算见
+[Memory 连续性验收](development/acceptance/2026-10-15-f4-memory-continuity.md)。完整 Group 内容
+授权、active-map、retention/GC/revocation 与空间计算仍需继续完成 F4。
+
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |
@@ -59,7 +65,8 @@ Spatial v0 的已知后续工作：
   TaskExecution。
 - Generic Memory 已由 ADR-0098/ADR-0100 接入 exact current Group/Task/Role/attempt/provider 的
   Controller -> Node selective-import command、durable receipt 和重试 fence；Unknown 的显式
-  reconciliation、完整成员授权与 retention/GC/revocation 仍未关闭。discovery 不授权全量复制，
+  reconciliation 已由 ADR-0105 接入原实例只读查询；完整成员授权与 retention/GC/revocation
+  仍未关闭。discovery 不授权全量复制，
   import 不得隐式改变 Task lifecycle。
 - Staged evidence 的 durable pre-dispatch 时点、文件句柄级 TOCTOU 约束，以及临时 upload
 identity 的随机/单调生成仍需独立决策，不能在 v0 中隐式改变事件语义。

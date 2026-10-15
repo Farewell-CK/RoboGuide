@@ -178,6 +178,7 @@ fn authorize_tenant_path(
             | "/v1/scheduling-reservations"
             | "/v1/maintenance/archive"
             | "/v1/memory/imports"
+            | "/v1/memory/import-queries"
             | "/v1/attestation/challenges"
             | "/v1/attestation/evidence"
             | "/v1/node-identities/commands"
@@ -202,6 +203,7 @@ fn authorize_operator_request(
         ("POST", "/v1/missions") => 1,
         ("POST", "/v1/maintenance/archive") => 2,
         ("POST", "/v1/memory/imports") => 2,
+        ("POST", "/v1/memory/import-queries") => 2,
         ("POST", "/v1/node-identities/commands") => 2,
         ("POST", "/v1/tenant-migrations") => 2,
         ("POST", "/v1/state-policies" | "/v1/verifier-sources" | "/v1/belief-policies") => 2,
@@ -684,6 +686,26 @@ where
                     serde_json::json!({"error": error}),
                 )
                 .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/memory/import-queries" {
+        let result = application::memory_query::submit(
+            controller,
+            event_log,
+            event_write_gate,
+            clock,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin"),
+        );
+        return match result {
+            Ok(body) => write_http_response(stream, "202 Accepted", body).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error": error}))
+                    .await
             }
         };
     }

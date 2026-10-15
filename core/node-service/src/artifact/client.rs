@@ -185,6 +185,26 @@ impl ArtifactClient {
         }
     }
 
+    /// Reads exact provider-qualified Imported history without granting current availability.
+    pub async fn memory_replica_was_imported(
+        &self,
+        selector: &MemorySelector,
+        node: &NodeId,
+        provider: &str,
+    ) -> Result<bool, ArtifactError> {
+        let (_, body) = self.fetch_memory_manifest(selector).await?;
+        let replicas: Vec<domain::MemoryReplicaSnapshot> =
+            serde_json::from_value(body.get("replicas").cloned().ok_or_else(|| {
+                ArtifactError::Configuration("Memory catalog response lacks replica history".into())
+            })?)?;
+        Ok(replicas.iter().any(|r| {
+            r.selector() == selector
+                && r.node_id() == node
+                && r.consumer_provider_id() == provider
+                && r.status() == domain::MemoryReplicaStatus::Imported
+        }))
+    }
+
     /// Records generic Memory staged/imported/rejected evidence through the shared catalog.
     pub async fn record_memory_replica(
         &self,

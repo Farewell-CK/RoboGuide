@@ -20,6 +20,7 @@ mod isolation;
 #[cfg(test)]
 pub(crate) use isolation::revalidate_mission_resume;
 pub(crate) mod memory_import;
+pub(crate) mod memory_query;
 pub(crate) mod node_identity;
 mod outcomes;
 mod persistence;

@@ -278,6 +278,13 @@ attributes、独立 canonical Operation Support，以及包含 canonical Operati
 operation/workflow mapping。旧 Node
 Contract v0.4 和 node-config/v0.2-v0.6 是显式兼容输入，不能混用表示或静默丢弃 objective。
 
+ADR-0105 增加 Node Contract v0.7 / config v0.8 的显式 Memory continuity profile；IDL catalog
+v0.10 保持 Protocol v0.4。原实例与工作流合同在副作用前保存，Unknown 通过独立持久命令查询
+原 provider，不能换 ID/实例重复导入。完整输入与 original digest 在 Node restore/查询时复核。
+Controller wrapper v31、event codec v22 与 Node journal v7 保留回退边界。实际文件与 SQL
+故障/重启/旧程序验收见 [Memory 连续性记录](../../development/acceptance/2026-10-15-f4-memory-continuity.md)；
+Group 授权、active-map/GC 与空间融合仍是当前计划中的必需后续工作。
+
 ### Capability 与 Resource
 
 Capability 描述 Node 可证明的执行能力与 feasibility envelope；Operation 描述对 Local EAIOS 的

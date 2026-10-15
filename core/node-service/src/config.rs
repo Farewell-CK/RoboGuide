@@ -15,7 +15,7 @@ const fn default_reconnect_delay_ms() -> u64 {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeServiceConfig {
-    /// Configuration schema identity; v0.2 through v0.7 are accepted by the compiler.
+    /// Configuration schema identity; v0.2 through v0.8 are accepted by the compiler.
     pub schema: String,
     /// Stable node identity advertised to RoboGuide.
     pub node_id: String,
@@ -148,6 +148,25 @@ pub struct MemoryProviderConfig {
     /// Optional provider-local import workflow.
     #[serde(default)]
     pub import: Option<MemoryWorkflowConfig>,
+    /// Optional v0.8 readonly instance and original-import continuity contract.
+    #[serde(default)]
+    pub continuity: Option<MemoryContinuityConfig>,
+}
+
+/// Fixed readonly Local EAIOS endpoints for identifying and reconciling an original import.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryContinuityConfig {
+    /// Workflow-context pointer to the typed conclusive original-import result after import.
+    pub import_result_pointer: String,
+    /// GET operation returning the actual persistent backend instance identity.
+    pub instance: WorkflowStepConfig,
+    /// Response-relative JSON Pointer to that identity.
+    pub instance_pointer: String,
+    /// GET operation querying the exact original immutable import identity.
+    pub query: WorkflowStepConfig,
+    /// Response-relative JSON Pointer to the versioned query result object.
+    pub result_pointer: String,
 }
 
 /// Declarative workflow hook for one heterogeneous Memory provider operation.

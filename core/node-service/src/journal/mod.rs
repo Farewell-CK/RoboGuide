@@ -8,7 +8,12 @@ use std::sync::{Mutex, MutexGuard};
 use thiserror::Error;
 
 mod authority;
+mod memory_continuity;
 mod storage;
+
+pub use memory_continuity::{
+    ImportContinuity, ImportQueryRecord, ImportQueryResult, ImportQuerySpec,
+};
 
 use storage::*;
 
@@ -175,7 +180,7 @@ pub struct JournalExecution {
 }
 
 /// Durable lifecycle of one Controller-authorized selective Memory import.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MemoryImportStatus {
     /// The import identity was accepted before local side effects completed.
     Pending,

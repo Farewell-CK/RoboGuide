@@ -29,6 +29,8 @@ pub mod v0_4 {
     pub const PROTOCOL_VERSION: &str = "roboguide.node-protocol/v0.4";
     /// Current semantic Node Contract version advertised during Hello negotiation.
     pub const NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.6";
+    /// Contract with explicitly negotiated durable Memory reconciliation.
+    pub const CONTINUITY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.7";
     /// Prior profile-and-intent contract retained for explicit session compatibility.
     pub const PREVIOUS_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.5";
     /// Legacy combined-declaration contract retained for explicit session compatibility.

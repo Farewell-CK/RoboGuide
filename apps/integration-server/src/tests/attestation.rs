@@ -368,7 +368,12 @@ async fn public_attestation_challenge_and_evidence_survive_replay_and_restore() 
     assert_eq!(registry.attestation_challenges.len(), 1);
     assert_eq!(controller.lock().unwrap().bridge.state().nodes().len(), 0);
     let mut corrupted = evidence;
-    corrupted.signature_hex.replace_range(0..2, "00");
+    let original_signature = corrupted.signature_hex.clone();
+    let changed = u8::from_str_radix(&corrupted.signature_hex[..2], 16).unwrap() ^ 1;
+    corrupted
+        .signature_hex
+        .replace_range(0..2, &format!("{changed:02x}"));
+    assert_ne!(corrupted.signature_hex, original_signature);
     assert!(
         request(
             &controller,

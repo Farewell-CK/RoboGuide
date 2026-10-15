@@ -106,7 +106,11 @@ pub(super) fn diagnostic_kind(message: &NodeMessage) -> DiagnosticKind {
         Some(NodePayload::RegistrationUpdate(_)) => DiagnosticKind::RegistrationUpdate,
         Some(NodePayload::StateObservationBatch(_)) => DiagnosticKind::State,
         Some(NodePayload::PeerChannelReadiness(_)) => DiagnosticKind::PeerReadiness,
-        Some(NodePayload::CommandReceipt(_)) => DiagnosticKind::Receipt,
+        Some(
+            NodePayload::CommandReceipt(_)
+            | NodePayload::MemoryImportReceipt(_)
+            | NodePayload::MemoryImportQueryReceipt(_),
+        ) => DiagnosticKind::Receipt,
         Some(NodePayload::ExecutionEvent(_) | NodePayload::ExecutionSnapshot(_)) => {
             DiagnosticKind::Execution
         }

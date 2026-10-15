@@ -34,6 +34,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Last wrapper without explicit original-provider Memory reconciliation authority.
+const PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v30";
 /// Previous wrapper had identity authority but no persistent State policy and generic verifier registry.
 const PRE_POLICY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v29";
 /// Previous wrapper had typed stop authority but no durable Node identity lifecycle.
@@ -686,6 +688,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
@@ -718,6 +721,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA

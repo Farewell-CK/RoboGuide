@@ -1,5 +1,74 @@
 use super::session::{validate_registration, validate_state_observation_batch};
 use super::*;
+
+/// Old protobuf clients cannot silently ignore a readonly query frame; negotiation and epoch gates apply.
+#[test]
+fn memory_query_requires_negotiated_contract_and_preserves_original_envelope() {
+    let router = GrpcNodeRouter::default();
+    let (sender, mut receiver) = mpsc::unbounded_channel();
+    router.sessions.lock().unwrap().insert(
+        "software-node".into(),
+        RoutedSession {
+            certificate_expires_at_ms: None,
+            liveness_evidence: None,
+            activated_at: None,
+            session_id: "session".into(),
+            sender,
+            lease_id: "lease".into(),
+            last_heartbeat: std::time::Instant::now(),
+            lease_duration: std::time::Duration::from_secs(15),
+            node_contract_version: NODE_CONTRACT_VERSION.into(),
+            management_sequence: 0,
+            state_export_ids: BTreeSet::new(),
+            active: true,
+            supports_execution_session: false,
+            supports_memory_import: true,
+        },
+    );
+    let query = crate::grpc::v0_4::MemoryImportQuery {
+        query_id: "memory-query-original-1".into(),
+        import_id: "original".into(),
+        command_id: "memory-import-original".into(),
+        consumer_provider_id: "provider".into(),
+        original_content_digest: format!("sha256:{}", "b".repeat(64)),
+        generation: 1,
+        valid_for_ms: 5000,
+        ..Default::default()
+    };
+    assert_eq!(
+        router
+            .send_memory_import_query("software-node", query.clone())
+            .unwrap_err()
+            .code(),
+        tonic::Code::FailedPrecondition
+    );
+    assert!(receiver.try_recv().is_err());
+    router
+        .sessions
+        .lock()
+        .unwrap()
+        .get_mut("software-node")
+        .unwrap()
+        .node_contract_version = CONTINUITY_NODE_CONTRACT_VERSION.into();
+    router
+        .send_memory_import_query("software-node", query.clone())
+        .unwrap();
+    let Some(ServerPayload::MemoryImportQuery(sent)) =
+        receiver.try_recv().unwrap().unwrap().message
+    else {
+        panic!("original query required");
+    };
+    assert_eq!(sent.generation, 1);
+    assert_eq!(sent.valid_for_ms, 5000);
+    assert_eq!(sent.original_content_digest, query.original_content_digest);
+    assert_eq!(sent.authorization_digest, memory_import_query_digest(&sent));
+    let mut rewritten = sent.clone();
+    rewritten.generation = 2;
+    assert_ne!(
+        memory_import_query_digest(&rewritten),
+        sent.authorization_digest
+    );
+}
 use std::collections::BTreeMap;
 
 mod identity_lifecycle;

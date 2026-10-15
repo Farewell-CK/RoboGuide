@@ -1,6 +1,8 @@
 //! Formal Node Protocol v0.4 lifecycle around the generic Local Integration Engine.
 
 use crate::MemoryImportStatus;
+
+mod memory_continuity;
 use crate::{EngineError, ExecuteDisposition, LocalIntegrationEngine};
 use integration::grpc::v0_4::node_message::Message as NodePayload;
 use integration::grpc::v0_4::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient;
@@ -195,6 +197,18 @@ impl NodeService {
                                 imports.spawn(async move {
                                     service.handle_memory_import(import, &session, &sender, &sequence).await
                                 });
+                            }
+                            continue;
+                        }
+                        if let Some(ServerPayload::MemoryImportQuery(query)) = &message.message {
+                            if query.session_id != registered.session_id { return Err(NodeServiceError::Protocol("Memory query session differs".into())); }
+                            if imports.len() >= 4 {
+                                self.send_memory_query_receipt(&registered.session_id, query, None, "bounded Memory workers are busy", &outbound, &management_sequence).await?;
+                            } else {
+                                let service = Self::new(self.engine.clone());
+                                let query = query.clone(); let session = registered.session_id.clone();
+                                let sender = outbound.clone(); let sequence = Arc::clone(&management_sequence);
+                                imports.spawn(async move { service.handle_memory_query(query, &session, &sender, &sequence).await });
                             }
                             continue;
                         }
@@ -748,11 +762,25 @@ impl NodeService {
                     .await;
             }
         };
-        let prepared = self.engine.prepare_memory_import(
-            &import.import_id,
-            &import.command_id,
-            &identity_digest,
-        )?;
+        let prepared = match self
+            .engine
+            .prepare_authorized_memory_import(&import, &identity_digest)
+            .await
+        {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return self
+                    .send_memory_import_receipt(
+                        session_id,
+                        &import,
+                        MemoryImportReceiptStatus::MemoryImportUnknown,
+                        error.to_string(),
+                        management_sequence,
+                        outbound,
+                    )
+                    .await;
+            }
+        };
         if let crate::PrepareMemoryImport::Conflict(_) = prepared {
             return self
                 .send_memory_import_receipt(
@@ -849,6 +877,28 @@ impl NodeService {
                         .await;
                 }
             };
+        if let Err(error) = self
+            .engine
+            .validate_memory_import(&import.consumer_provider_id, &manifest)
+        {
+            self.engine.record_memory_import(
+                &import.import_id,
+                &import.command_id,
+                &identity_digest,
+                MemoryImportStatus::Rejected,
+                &error.to_string(),
+            )?;
+            return self
+                .send_memory_import_receipt(
+                    session_id,
+                    &import,
+                    MemoryImportReceiptStatus::MemoryImportRejected,
+                    error.to_string(),
+                    management_sequence,
+                    outbound,
+                )
+                .await;
+        }
         let invocation = serde_json::json!({
             "mission_id": import.mission_id,
             "group_id": import.group_id,
@@ -856,6 +906,7 @@ impl NodeService {
             "role_id": import.role_id,
             "execution_id": import.execution_id,
             "consumer_provider_id": import.consumer_provider_id,
+            "memory_import": self.engine.original_import_continuity(&import.import_id)?,
         });
         let result = self
             .engine
@@ -868,9 +919,6 @@ impl NodeService {
             .await;
         let (status, mut reason) = match result {
             Ok(()) => (MemoryImportStatus::Completed, String::new()),
-            Err(error) if self.engine.memory_import_error_is_deterministic(&error) => {
-                (MemoryImportStatus::Rejected, error.to_string())
-            }
             Err(error) => (MemoryImportStatus::Unknown, error.to_string()),
         };
         while reason.len() > 4_096 {

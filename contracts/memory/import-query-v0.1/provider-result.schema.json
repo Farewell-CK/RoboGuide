@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/memory/import-query-v0.1/provider-result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "import_id",
+    "command_id",
+    "provider_id",
+    "identity_digest",
+    "original_content_digest",
+    "provider_instance_id",
+    "provider_contract_digest",
+    "outcome",
+    "durable",
+    "reason"
+  ],
+  "properties": {
+    "schema": {
+      "const": "roboguide.memory-import-query-result/v0.1"
+    },
+    "import_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "command_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "provider_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "identity_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "original_content_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "provider_instance_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "provider_contract_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "outcome": {
+      "enum": [
+        "completed",
+        "rejected_before_effect",
+        "unknown"
+      ]
+    },
+    "durable": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 4096
+    }
+  }
+}

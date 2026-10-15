@@ -412,6 +412,13 @@ pub(super) fn compile_memory_providers(
             "is required for an exchangeable provider export workflow",
         )?;
         let id = config.id.clone();
+        let continuity =
+            compile_memory_continuity(config.continuity, &config.id, &config.owner, connections)?;
+        require(
+            continuity.is_none() || import.is_some(),
+            format!("memory_providers.{}.continuity", config.id),
+            "requires an explicit Local EAIOS import workflow",
+        )?;
         let provider = CompiledMemoryProvider {
             id: config.id,
             owner: config.owner,
@@ -425,10 +432,65 @@ pub(super) fn compile_memory_providers(
             discover,
             export,
             import,
+            continuity,
         };
         insert_unique(&mut providers, id, provider, "memory_providers.id")?;
     }
     Ok(providers)
+}
+
+/// Compiles mechanically readonly continuity endpoints under the original provider owner.
+fn compile_memory_continuity(
+    config: Option<MemoryContinuityConfig>,
+    provider_id: &str,
+    owner: &str,
+    connections: &BTreeMap<String, CompiledConnection>,
+) -> Result<Option<CompiledMemoryContinuity>, CatalogError> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    let field = format!("memory_providers.{provider_id}.continuity");
+    validate_pointer(&config.import_result_pointer).map_err(|source| CatalogError::Mapping {
+        step: field.clone(),
+        source,
+    })?;
+    for (step, pointer) in [
+        (&config.instance, &config.instance_pointer),
+        (&config.query, &config.result_pointer),
+    ] {
+        validate_step_sources(std::slice::from_ref(step), false, &field)?;
+        validate_read_only_observation_operation(&step.operation, &field, "Memory continuity")?;
+        validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
+            step: field.clone(),
+            source,
+        })?;
+    }
+    require(
+        config
+            .instance
+            .request
+            .bindings
+            .iter()
+            .all(|binding| !contains_pointer_expression(&binding.value)),
+        &field,
+        "instance identity observation must use deployment constants only",
+    )?;
+    let instance = compile_steps(
+        vec![config.instance],
+        owner,
+        connections,
+        &mut BTreeSet::new(),
+    )?
+    .remove(0);
+    let query =
+        compile_steps(vec![config.query], owner, connections, &mut BTreeSet::new())?.remove(0);
+    Ok(Some(CompiledMemoryContinuity {
+        import_result_pointer: config.import_result_pointer,
+        instance,
+        instance_pointer: config.instance_pointer,
+        query,
+        result_pointer: config.result_pointer,
+    }))
 }
 
 /// Compiles one optional Memory workflow using the same fixed local routing as capabilities.

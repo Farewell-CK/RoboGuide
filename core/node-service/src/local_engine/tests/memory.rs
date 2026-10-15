@@ -2,6 +2,67 @@
 
 use super::*;
 
+/// Continuity requires explicit v0.8 negotiation and mechanically readonly fixed operations.
+#[test]
+fn memory_continuity_rejects_downgrade_and_mutating_identity_or_query() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config: NodeServiceConfig =
+        toml::from_str(include_str!("../../../../../config/node.toml")).unwrap();
+    config.schema = CONFIG_SCHEMA_V0_8.into();
+    let step = |id: &str, method: &str| WorkflowStepConfig {
+        id: id.into(),
+        connection: "local-http".into(),
+        operation: LocalOperationConfig::Http {
+            method: method.into(),
+            path: format!("/memory/{id}"),
+        },
+        request: RequestMappingConfig::default(),
+    };
+    config.memory_providers[0].import = Some(MemoryWorkflowConfig {
+        steps: vec![step("import", "POST")],
+        manifests_pointer: None,
+        artifact_path_pointer: None,
+    });
+    config.memory_providers[0].continuity = Some(MemoryContinuityConfig {
+        import_result_pointer: "/steps/import/result".into(),
+        instance: step("instance", "GET"),
+        instance_pointer: "/instance_id".into(),
+        query: step("query", "GET"),
+        result_pointer: "/result".into(),
+    });
+    let compiled = CompiledLocalCatalog::compile(config.clone(), directory.path()).unwrap();
+    assert_eq!(
+        compiled.node_contract_version(),
+        integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
+    );
+    assert!(
+        compiled
+            .memory_providers()
+            .values()
+            .next()
+            .unwrap()
+            .continuity()
+            .is_some()
+    );
+    let mut legacy = config.clone();
+    legacy.schema = CONFIG_SCHEMA_V0_7.into();
+    assert!(CompiledLocalCatalog::compile(legacy, directory.path()).is_err());
+    for query in [false, true] {
+        let mut invalid = config.clone();
+        let continuity = invalid.memory_providers[0].continuity.as_mut().unwrap();
+        let target = if query {
+            &mut continuity.query
+        } else {
+            &mut continuity.instance
+        };
+        target.operation = LocalOperationConfig::Http {
+            method: "POST".into(),
+            path: "/memory/unsafe".into(),
+        };
+        assert!(CompiledLocalCatalog::compile(invalid, directory.path()).is_err());
+    }
+}
+
 /// v0.6 compiles the Node ledger/handoff root and all fixed EAIOS Memory workflows.
 #[test]
 fn compiles_v0_6_memory_provider_workflows() {
@@ -23,6 +84,7 @@ fn compiles_v0_6_memory_provider_workflows() {
         artifact_path_pointer: None,
     };
     config.memory_providers = vec![MemoryProviderConfig {
+        continuity: None,
         id: "maps".to_string(),
         owner: "motion".to_string(),
         kind: "spatial".to_string(),
@@ -61,6 +123,7 @@ fn v0_5_rejects_memory_provider_workflows() {
     config.schema = CONFIG_SCHEMA_V0_5.to_string();
     add_readiness(&mut config);
     config.memory_providers = vec![MemoryProviderConfig {
+        continuity: None,
         id: "lessons".to_string(),
         owner: "motion".to_string(),
         kind: "experience".to_string(),
@@ -99,6 +162,7 @@ fn rejects_nested_memory_provider_storage_roots() {
     config.schema = CONFIG_SCHEMA_V0_6.to_string();
     add_readiness(&mut config);
     let provider = |id: &str, storage: &str| MemoryProviderConfig {
+        continuity: None,
         id: id.to_string(),
         owner: "motion".to_string(),
         kind: "semantic".to_string(),
@@ -131,6 +195,7 @@ fn rejects_typed_spatial_schema_in_generic_memory_provider() {
     config.schema = CONFIG_SCHEMA_V0_6.to_string();
     add_readiness(&mut config);
     config.memory_providers = vec![MemoryProviderConfig {
+        continuity: None,
         id: "maps".to_string(),
         owner: "motion".to_string(),
         kind: "spatial".to_string(),
@@ -163,6 +228,7 @@ fn filesystem_memory_ledger_round_trips_jsonl_metadata() {
 
     let directory = tempfile::tempdir().expect("temporary directory exists");
     let descriptor = CompiledMemoryProvider {
+        continuity: None,
         id: "maps".to_string(),
         owner: "maps".to_string(),
         kind: "spatial".to_string(),

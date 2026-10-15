@@ -46,6 +46,9 @@ impl LocalIntegrationEngine {
                 ));
             }
         }
+        if provider.continuity().is_some() {
+            identity.push_str(&self.memory_provider_contract_digest(&import.consumer_provider_id)?);
+        }
         Ok(digest_text(&identity))
     }
 
@@ -90,12 +93,6 @@ impl LocalIntegrationEngine {
         }
         Ok(())
     }
-    /// Classifies a Memory import error without parsing diagnostics; transport and local I/O stay
-    /// unknown while typed configuration/protocol failures may be rejected durably.
-    pub(crate) fn memory_import_error_is_deterministic(&self, error: &EngineError) -> bool {
-        memory_import_error_is_deterministic(error)
-    }
-
     /// Persists one exact Controller-authorized Memory import identity before local side effects.
     pub fn prepare_memory_import(
         &self,

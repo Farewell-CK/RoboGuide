@@ -9,6 +9,284 @@ use domain::{
 };
 use tempfile::TempDir;
 
+/// Creates original-provider metadata for crash/identity conformance, without a physical device.
+fn continuity(import: &str) -> ImportContinuity {
+    let manifest = domain::MemoryArtifactManifest::new(
+        domain::MemorySelector::new(
+            domain::MemoryId::new("fixture").unwrap(),
+            domain::MemoryRevisionId::new("r1").unwrap(),
+        ),
+        domain::MemoryKind::Artifact,
+        "producer",
+        domain::MemoryOwner::RoboGuide {
+            component: "journal-test".into(),
+        },
+        domain::MemoryScope::Global,
+        domain::MemoryVisibility::Exchangeable,
+        "example.bytes/v1",
+        "application/octet-stream",
+        Some(domain::MemoryArtifactRef::new(
+            domain::ContentDigest::new(format!("sha256:{}", "d".repeat(64))).unwrap(),
+            2,
+        )),
+        None,
+        None,
+        None,
+        TimestampMs::new(1),
+    )
+    .unwrap();
+    let command = integration::grpc::v0_4::MemoryImport {
+        import_id: import.into(),
+        command_id: format!("memory-import-{import}"),
+        consumer_provider_id: "filesystem".into(),
+        manifest_json: serde_json::to_string(&manifest).unwrap(),
+        mission_id: "mission".into(),
+        group_id: "group".into(),
+        task_id: "task".into(),
+        role_id: "role".into(),
+        execution_id: "attempt".into(),
+        ..Default::default()
+    };
+    ImportContinuity {
+        import_id: import.into(),
+        command_id: command.command_id.clone(),
+        provider_id: "filesystem".into(),
+        identity_digest: "a".repeat(64),
+        original_content_digest: integration::memory_import_content_digest(&command),
+        provider_instance_id: "original-persistent-backend".into(),
+        provider_contract_digest: format!("sha256:{}", "c".repeat(64)),
+        original_invocation: serde_json::to_value(command).unwrap(),
+        admitted_at_ms: 100,
+    }
+}
+
+/// Creates the exact positive original-provider result, independent of Task satisfaction.
+fn continuity_result(original: &ImportContinuity) -> ImportQueryResult {
+    ImportQueryResult {
+        schema: "roboguide.memory-import-query-result/v0.1".into(),
+        import_id: original.import_id.clone(),
+        command_id: original.command_id.clone(),
+        provider_id: original.provider_id.clone(),
+        identity_digest: original.identity_digest.clone(),
+        original_content_digest: original.original_content_digest.clone(),
+        provider_instance_id: original.provider_instance_id.clone(),
+        provider_contract_digest: original.provider_contract_digest.clone(),
+        outcome: "completed".into(),
+        durable: true,
+        reason: String::new(),
+    }
+}
+
+/// A provider side effect interrupted before its receipt never reruns import or the same query.
+#[test]
+fn original_memory_query_survives_crash_without_renewing_identity_or_budget() {
+    let (_directory, path, journal) = journal();
+    let original = continuity("import-crash");
+    journal
+        .prepare_memory_import_continuity(
+            &original.import_id,
+            &original.command_id,
+            &original.identity_digest,
+            Some(&original),
+        )
+        .unwrap();
+    drop(journal);
+    let journal = ExecutionJournal::open(&path).unwrap();
+    assert_eq!(
+        journal
+            .memory_import(&original.import_id)
+            .unwrap()
+            .unwrap()
+            .status(),
+        MemoryImportStatus::Unknown
+    );
+    let mut replacement = continuity("replacement");
+    replacement.provider_id = "another-provider".into();
+    replacement.original_invocation["consumer_provider_id"] = "another-provider".into();
+    let v = &replacement.original_invocation;
+    replacement.original_content_digest = integration::memory_import_authorization_digest(
+        v["import_id"].as_str().unwrap(),
+        v["command_id"].as_str().unwrap(),
+        v["consumer_provider_id"].as_str().unwrap(),
+        v["manifest_json"].as_str().unwrap(),
+        v["mission_id"].as_str().unwrap(),
+        v["group_id"].as_str().unwrap(),
+        v["task_id"].as_str().unwrap(),
+        v["role_id"].as_str().unwrap(),
+        v["execution_id"].as_str().unwrap(),
+        "",
+    );
+    assert!(
+        journal
+            .prepare_memory_import_continuity(
+                &replacement.import_id,
+                &replacement.command_id,
+                &replacement.identity_digest,
+                Some(&replacement)
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("unresolved original")
+    );
+    let query = ImportQuerySpec {
+        query_id: format!("memory-query-{}-1", original.import_id),
+        import_id: original.import_id.clone(),
+        command_id: original.command_id.clone(),
+        provider_id: original.provider_id.clone(),
+        original_content_digest: original.original_content_digest.clone(),
+        generation: 1,
+        valid_for_ms: 50,
+    };
+    assert!(journal.prepare_import_query(&query, 200).unwrap().1);
+    drop(journal);
+    let journal = ExecutionJournal::open(&path).unwrap();
+    let (replay, start) = journal.prepare_import_query(&query, 999_000).unwrap();
+    assert!(!start);
+    assert_eq!(replay.received_at_ms, 200);
+    assert!(replay.result.is_none());
+    assert!(
+        journal
+            .record_import_query(&query.query_id, &continuity_result(&original), 250)
+            .is_err()
+    );
+    let mut next = query.clone();
+    next.generation = 2;
+    next.query_id = format!("memory-query-{}-2", original.import_id);
+    assert!(journal.prepare_import_query(&next, 300).unwrap().1);
+    let mut changed = continuity_result(&original);
+    changed.provider_instance_id = "replacement-backend".into();
+    assert!(
+        journal
+            .record_import_query(&next.query_id, &changed, 310)
+            .is_err()
+    );
+    changed = continuity_result(&original);
+    changed.outcome = "not_found".into();
+    assert!(
+        journal
+            .record_import_query(&next.query_id, &changed, 310)
+            .is_err()
+    );
+    let result = continuity_result(&original);
+    let committed = journal
+        .record_import_query(&next.query_id, &result, 310)
+        .unwrap();
+    assert_eq!(committed.result, Some(result.clone()));
+    assert_eq!(
+        journal.prepare_import_query(&next, 500).unwrap().0,
+        committed
+    );
+    assert_eq!(
+        journal
+            .memory_import(&original.import_id)
+            .unwrap()
+            .unwrap()
+            .status(),
+        MemoryImportStatus::Completed
+    );
+    let mut contradicted = result;
+    contradicted.outcome = "rejected_before_effect".into();
+    assert!(
+        journal
+            .record_import_query(&next.query_id, &contradicted, 320)
+            .is_err()
+    );
+    let mut renewed = next.clone();
+    renewed.valid_for_ms = 100;
+    assert!(journal.prepare_import_query(&renewed, 500).is_err());
+    assert_eq!(
+        journal.import_continuity(&original.import_id).unwrap(),
+        Some(original)
+    );
+}
+
+/// Failure between original identity and continuity inserts rolls both back before provider effects.
+#[test]
+fn memory_original_provider_admission_is_one_sql_transaction() {
+    let (_directory, path, journal) = journal();
+    let connection = Connection::open(path).unwrap();
+    connection.execute_batch("CREATE TRIGGER fail_continuity BEFORE INSERT ON memory_import_continuity_v7 BEGIN SELECT RAISE(ABORT, 'injected continuity write failure'); END;").unwrap();
+    let original = continuity("atomic-import");
+    assert!(
+        journal
+            .prepare_memory_import_continuity(
+                &original.import_id,
+                &original.command_id,
+                &original.identity_digest,
+                Some(&original)
+            )
+            .is_err()
+    );
+    assert!(
+        journal
+            .memory_import(&original.import_id)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        journal
+            .import_continuity(&original.import_id)
+            .unwrap()
+            .is_none()
+    );
+    connection
+        .execute_batch("DROP TRIGGER fail_continuity;")
+        .unwrap();
+    assert!(matches!(
+        journal
+            .prepare_memory_import_continuity(
+                &original.import_id,
+                &original.command_id,
+                &original.identity_digest,
+                Some(&original)
+            )
+            .unwrap(),
+        PrepareMemoryImport::Start
+    ));
+}
+
+/// Restore/query cannot use a changed original invocation with a retained old content digest.
+#[test]
+fn changed_original_memory_tuple_is_rejected_before_readonly_query_admission() {
+    let (_directory, path, journal) = journal();
+    let original = continuity("original-tuple");
+    journal
+        .prepare_memory_import_continuity(
+            &original.import_id,
+            &original.command_id,
+            &original.identity_digest,
+            Some(&original),
+        )
+        .unwrap();
+    let mut changed = serde_json::to_value(&original).unwrap();
+    changed["original_invocation"]["execution_id"] = "another-attempt".into();
+    let db = Connection::open(path).unwrap();
+    db.execute(
+        "UPDATE memory_import_continuity_v7 SET evidence_json=?1",
+        [changed.to_string()],
+    )
+    .unwrap();
+    assert!(journal.import_continuity(&original.import_id).is_err());
+    let query = ImportQuerySpec {
+        query_id: format!("memory-query-{}-1", original.import_id),
+        import_id: original.import_id.clone(),
+        command_id: original.command_id.clone(),
+        provider_id: original.provider_id.clone(),
+        original_content_digest: original.original_content_digest.clone(),
+        generation: 1,
+        valid_for_ms: 100,
+    };
+    assert!(journal.prepare_import_query(&query, 200).is_err());
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM memory_import_queries_v7", [], |r| r
+            .get::<_, u64>(
+            0
+        ))
+        .unwrap(),
+        0
+    );
+}
+
 /// Creates a deterministic canonical identity fixture.
 fn spec(invocation: &str, workflow: &str, resources: &[&str]) -> ExecutionSpec {
     ExecutionSpec::new(
@@ -774,5 +1052,71 @@ fn controller_epoch_is_durable_and_monotonic() {
         .admit_controller_epoch(newer)
         .expect("newer Controller epoch advances the durable fence");
     drop(reopened);
+    drop(directory);
+}
+
+/// Readonly compatibility names fence old SQL writers even when no pending execution exists.
+#[test]
+fn current_journal_keeps_legacy_inspection_but_refuses_legacy_writes() {
+    let (_directory, path, journal) = journal();
+    journal
+        .prepare_memory_import("import", "command", "sha256:original")
+        .unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM memory_imports", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    for sql in [
+        "UPDATE executions SET reason='old-writer' WHERE 1=0",
+        "UPDATE memory_imports SET status='unknown' WHERE status='pending'",
+        "INSERT INTO memory_imports VALUES ('other','command','digest','pending','')",
+    ] {
+        assert!(
+            connection.execute(sql, []).is_err(),
+            "legacy write must be fenced: {sql}"
+        );
+    }
+    assert_eq!(
+        journal.memory_import("import").unwrap().unwrap().status(),
+        MemoryImportStatus::Pending
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT version FROM node_journal_storage_schema",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        7
+    );
+}
+
+/// A future journal or a conflicting shadow authority cannot be silently downgraded at startup.
+#[test]
+fn future_journal_and_dual_authorities_refuse_without_migration() {
+    let (directory, path, journal) = journal();
+    drop(journal);
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.pragma_update(None, "user_version", 8).unwrap();
+    drop(connection);
+    assert!(ExecutionJournal::open(&path).is_err());
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        8
+    );
+    connection.pragma_update(None, "user_version", 7).unwrap();
+    connection
+        .execute_batch("DROP VIEW executions; CREATE TABLE executions (shadow INTEGER)")
+        .unwrap();
+    drop(connection);
+    assert!(ExecutionJournal::open(&path).is_err());
     drop(directory);
 }

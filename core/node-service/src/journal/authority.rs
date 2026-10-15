@@ -10,6 +10,17 @@ impl ExecutionJournal {
         command_id: &str,
         identity_digest: &str,
     ) -> Result<PrepareMemoryImport, JournalError> {
+        self.prepare_memory_import_continuity(import_id, command_id, identity_digest, None)
+    }
+
+    /// Atomically retains original backend identity with an import before any provider side effect.
+    pub fn prepare_memory_import_continuity(
+        &self,
+        import_id: &str,
+        command_id: &str,
+        identity_digest: &str,
+        continuity: Option<&ImportContinuity>,
+    ) -> Result<PrepareMemoryImport, JournalError> {
         if import_id.trim().is_empty()
             || command_id.trim().is_empty()
             || identity_digest.trim().is_empty()
@@ -17,6 +28,9 @@ impl ExecutionJournal {
             return Err(JournalError::InvalidSpec(
                 "Memory import identity fields must not be blank".to_string(),
             ));
+        }
+        if let Some(evidence) = continuity {
+            evidence.validate(import_id, command_id, identity_digest)?;
         }
         let mut connection = self.lock_connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -31,11 +45,53 @@ impl ExecutionJournal {
             transaction.commit()?;
             return Ok(outcome);
         }
+        if let Some(original) = continuity {
+            let selector = serde_json::from_str::<serde_json::Value>(
+                original.original_invocation["manifest_json"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        JournalError::InvalidSpec("original manifest is absent".into())
+                    })?,
+            )?["selector"]
+                .clone();
+            let mut statement = transaction.prepare("SELECT c.evidence_json FROM memory_import_continuity_v7 c JOIN memory_import_authority_v7 i ON i.import_id=c.import_id WHERE i.status IN ('pending','unknown')")?;
+            for row in statement.query_map([], |row| row.get::<_, String>(0))? {
+                let prior: ImportContinuity = serde_json::from_str(&row?)?;
+                let prior_manifest: serde_json::Value = serde_json::from_str(
+                    prior.original_invocation["manifest_json"]
+                        .as_str()
+                        .ok_or_else(|| {
+                            JournalError::Corrupt("retained original manifest is absent".into())
+                        })?,
+                )?;
+                let same_consumer =
+                    ["mission_id", "group_id", "task_id", "role_id"]
+                        .iter()
+                        .all(|field| {
+                            prior.original_invocation[*field]
+                                == original.original_invocation[*field]
+                        });
+                if (prior.provider_id == original.provider_id || same_consumer)
+                    && prior_manifest["selector"] == selector
+                {
+                    return Err(JournalError::InvalidSpec(
+                        "unresolved original consumer/selector fences replacement import IDs/providers"
+                            .into(),
+                    ));
+                }
+            }
+        }
         transaction.execute(
-            "INSERT INTO memory_imports(import_id,command_id,identity_digest,status,reason)
+            "INSERT INTO memory_import_authority_v7(import_id,command_id,identity_digest,status,reason)
              VALUES (?1,?2,?3,'pending','')",
             params![import_id, command_id, identity_digest],
         )?;
+        if let Some(evidence) = continuity {
+            transaction.execute(
+                "INSERT INTO memory_import_continuity_v7(import_id,evidence_json) VALUES (?1,?2)",
+                params![import_id, serde_json::to_string(evidence)?],
+            )?;
+        }
         transaction.commit()?;
         Ok(PrepareMemoryImport::Start)
     }
@@ -72,7 +128,7 @@ impl ExecutionJournal {
             ));
         }
         transaction.execute(
-            "UPDATE memory_imports SET status = ?2, reason = ?3 WHERE import_id = ?1",
+            "UPDATE memory_import_authority_v7 SET status = ?2, reason = ?3 WHERE import_id = ?1",
             params![import_id, status.as_str(), reason],
         )?;
         let updated = load_memory_import(&transaction, import_id)?.ok_or_else(|| {
@@ -193,7 +249,7 @@ impl ExecutionJournal {
         }
         let resource_ids = serde_json::to_string(&spec.resource_ids)?;
         transaction.execute(
-            "INSERT INTO executions (
+            "INSERT INTO execution_authority_v7 (
                 execution_id, invocation_content, invocation_digest, workflow_digest,
                 resource_ids, local_handle, cancellation_requested, sequence, status, reason
              ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, 0, 'dispatching', '')",
@@ -211,7 +267,7 @@ impl ExecutionJournal {
             |row| row.get(0),
         )?;
         if cancelled {
-            transaction.execute("UPDATE executions SET status = 'cancelled', sequence = 1, reason = 'cancelled before local dispatch' WHERE execution_id = ?1", [execution_id])?;
+            transaction.execute("UPDATE execution_authority_v7 SET status = 'cancelled', sequence = 1, reason = 'cancelled before local dispatch' WHERE execution_id = ?1", [execution_id])?;
         }
         let record = load_execution(&transaction, execution_id)?.ok_or_else(|| {
             JournalError::Corrupt("new dispatch record could not be read".to_string())
@@ -235,7 +291,7 @@ impl ExecutionJournal {
             "INSERT OR IGNORE INTO cancellation_intents(execution_id) VALUES (?1)",
             [execution_id],
         )?;
-        transaction.execute("UPDATE executions SET status = 'cancelled', sequence = sequence + 1, reason = 'cancelled before local dispatch' WHERE execution_id = ?1 AND status = 'dispatching' AND NOT EXISTS(SELECT 1 FROM local_dispatch_authorizations WHERE execution_id = ?1)", [execution_id])?;
+        transaction.execute("UPDATE execution_authority_v7 SET status = 'cancelled', sequence = sequence + 1, reason = 'cancelled before local dispatch' WHERE execution_id = ?1 AND status = 'dispatching' AND NOT EXISTS(SELECT 1 FROM local_dispatch_authorizations WHERE execution_id = ?1)", [execution_id])?;
         transaction.commit()?;
         Ok(())
     }
@@ -276,7 +332,7 @@ impl ExecutionJournal {
             None => {}
         }
         transaction.execute(
-            "UPDATE executions SET local_handle = ?2 WHERE execution_id = ?1",
+            "UPDATE execution_authority_v7 SET local_handle = ?2 WHERE execution_id = ?1",
             params![execution_id, local_handle],
         )?;
         let updated = required_execution(&transaction, execution_id)?;
@@ -323,7 +379,7 @@ impl ExecutionJournal {
             return Ok(existing);
         }
         transaction.execute(
-            "UPDATE executions SET cancellation_requested = 1 WHERE execution_id = ?1",
+            "UPDATE execution_authority_v7 SET cancellation_requested = 1 WHERE execution_id = ?1",
             [execution_id],
         )?;
         let updated = required_execution(&transaction, execution_id)?;
@@ -371,7 +427,7 @@ impl ExecutionJournal {
             ));
         }
         transaction.execute(
-            "UPDATE executions SET sequence = ?2, status = ?3, reason = ?4
+            "UPDATE execution_authority_v7 SET sequence = ?2, status = ?3, reason = ?4
              WHERE execution_id = ?1",
             params![execution_id, sequence_i64, status.as_str(), reason],
         )?;
@@ -662,7 +718,7 @@ impl ExecutionJournal {
         self.query_records(
             "SELECT execution_id, invocation_content, invocation_digest, workflow_digest,
                     resource_ids, local_handle, cancellation_requested, sequence, status, reason
-             FROM executions ORDER BY execution_id",
+             FROM execution_authority_v7 ORDER BY execution_id",
         )
     }
 
@@ -671,7 +727,7 @@ impl ExecutionJournal {
         self.query_records(
             "SELECT execution_id, invocation_content, invocation_digest, workflow_digest,
                     resource_ids, local_handle, cancellation_requested, sequence, status, reason
-             FROM executions
+             FROM execution_authority_v7
              WHERE status IN ('completed', 'failed', 'cancelled')
              ORDER BY execution_id",
         )

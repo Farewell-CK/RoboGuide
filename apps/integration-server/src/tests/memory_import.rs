@@ -77,6 +77,240 @@ fn fixture() -> (stop_recovery::Fixture, MemoryImportRequest) {
     (fixture, request)
 }
 
+/// Upgrades only fixture-declared software registration to the explicit query contract.
+fn continuity_fixture() -> (stop_recovery::Fixture, MemoryImportRequest) {
+    let (mut fixture, request) = fixture();
+    let node = fixture
+        .controller
+        .bridge
+        .state()
+        .node(&request.node_id)
+        .unwrap()
+        .clone();
+    let old = node.registration();
+    let registration = NodeRegistration::new_with_local_systems(
+        old.node_id().clone(),
+        old.local_systems().to_vec(),
+        NodeContractVersion::v0_7(),
+        old.capabilities().to_vec(),
+        old.supported_contracts()
+            .iter()
+            .map(|c| (c.clone(), old.capability_owner(c).unwrap().clone()))
+            .collect(),
+        old.sensors().to_vec(),
+        old.resources().to_vec(),
+        old.resources()
+            .iter()
+            .map(|r| (r.id().clone(), old.resource_owner(r.id()).unwrap().clone()))
+            .collect(),
+    )
+    .unwrap()
+    .with_operation_support(
+        old.supported_contracts()
+            .iter()
+            .map(|c| {
+                OperationSupport::new(
+                    OperationRef::from(c.clone()),
+                    old.capability_owner(c).unwrap().clone(),
+                )
+            })
+            .collect(),
+    )
+    .unwrap()
+    .with_state_memory_exports(vec![], old.memory_providers().to_vec())
+    .unwrap();
+    fixture
+        .controller
+        .bridge
+        .state_mut()
+        .record_node(NodeStateSnapshot::new(
+            registration,
+            node.reported_status(),
+            node.reported_status_received_at(),
+            node.liveness(),
+        ))
+        .unwrap();
+    memory_import::admit(
+        &mut fixture.controller,
+        request.clone(),
+        TimestampMs::new(5),
+    )
+    .unwrap();
+    memory_import::prepare(&mut fixture.controller, TimestampMs::new(5));
+    memory_import::receipt(
+        &mut fixture.controller,
+        request.node_id.as_str(),
+        &MemoryImportReceipt {
+            import_id: request.import_id.clone(),
+            command_id: format!("memory-import-{}", request.import_id),
+            status: MemoryImportReceiptStatus::MemoryImportUnknown as i32,
+            session_id: "session".into(),
+            sequence: 1,
+            reason: "interrupted import".into(),
+        },
+        TimestampMs::new(6),
+    )
+    .unwrap();
+    (fixture, request)
+}
+
+/// Generates exact schema-bound protocol evidence solely for application authority unit tests.
+fn query_receipt(
+    request: &MemoryImportRequest,
+    generation: u64,
+) -> integration::grpc::v0_4::MemoryImportQueryReceipt {
+    let command_id = format!("memory-import-{}", request.import_id);
+    let digest = integration::memory_import_authorization_digest(
+        &request.import_id,
+        &command_id,
+        &request.consumer_provider_id,
+        &serde_json::to_string(&request.manifest).unwrap(),
+        request.task_ref.mission_id().as_str(),
+        request.group_id.as_str(),
+        request.task_ref.task_id().as_str(),
+        request.role_id.as_str(),
+        &request.execution_id,
+        "",
+    );
+    let result = serde_json::json!({"schema":"roboguide.memory-import-query-result/v0.1","import_id":request.import_id,"command_id":command_id,
+        "provider_id":request.consumer_provider_id,"identity_digest":"a".repeat(64),"original_content_digest":digest,
+        "provider_instance_id":"original-software-backend","provider_contract_digest":format!("sha256:{}","b".repeat(64)),"outcome":"completed","durable":true,"reason":""});
+    integration::grpc::v0_4::MemoryImportQueryReceipt {
+        session_id: "session".into(),
+        sequence: generation + 1,
+        query_id: format!("memory-query-{}-{generation}", request.import_id),
+        import_id: request.import_id.clone(),
+        command_id,
+        generation,
+        status: MemoryImportReceiptStatus::MemoryImportCompleted as i32,
+        reason: String::new(),
+        identity_digest: "a".repeat(64),
+        provider_instance_id: "original-software-backend".into(),
+        provider_contract_digest: format!("sha256:{}", "b".repeat(64)),
+        result_json: result.to_string(),
+    }
+}
+
+/// Query reconciliation persists original budgets but cannot release Control ownership or satisfy Tasks.
+#[test]
+fn original_provider_query_resolves_only_current_authorized_import_and_fences_old_wrapper() {
+    let (fixture, request) = continuity_fixture();
+    let events = fixture.events.clone();
+    let controller = Arc::new(Mutex::new(fixture.controller));
+    let gate = Arc::new(Mutex::new(()));
+    let body = serde_json::to_vec(&serde_json::json!({"import_id":request.import_id,"expected_generation":0,"deadline_ms":100,"query_timeout_ms":50})).unwrap();
+    let first = application::memory_query::submit(
+        &controller,
+        &events,
+        &gate,
+        &runtime::FixedClock::new(TimestampMs::new(7)),
+        &body,
+        "principal",
+    )
+    .unwrap();
+    let replay = application::memory_query::submit(
+        &controller,
+        &events,
+        &gate,
+        &runtime::FixedClock::new(TimestampMs::new(8)),
+        &body,
+        "principal",
+    )
+    .unwrap();
+    assert_eq!(first, replay);
+    let mut live = controller.lock().unwrap();
+    let bindings = live
+        .bridge
+        .control()
+        .group(&request.group_id)
+        .unwrap()
+        .task_execution(&request.task_ref)
+        .unwrap()
+        .assignments()
+        .to_vec();
+    application::memory_query::receipt(
+        &mut live,
+        request.node_id.as_str(),
+        &query_receipt(&request, 1),
+        TimestampMs::new(9),
+        &mut events.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        live.memory_imports[&request.import_id].phase,
+        ImportPhase::Completed
+    );
+    assert_eq!(
+        live.bridge
+            .control()
+            .group(&request.group_id)
+            .unwrap()
+            .task_execution(&request.task_ref)
+            .unwrap()
+            .assignments(),
+        bindings
+    );
+    memory_import::validate_restored(&live).unwrap();
+    let mut saved: ServerCheckpoint =
+        serde_json::from_str(&server_checkpoint_json(&live).unwrap()).unwrap();
+    saved.schema = PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA.into();
+    assert!(application::validate_isolation_checkpoint_schema(&saved).is_err());
+}
+
+/// A late query conclusion is history, and a new import ID cannot bypass the original Unknown.
+#[test]
+fn late_original_provider_query_does_not_renew_authorization_or_allow_replacement_import() {
+    let (fixture, request) = continuity_fixture();
+    let events = fixture.events.clone();
+    let controller = Arc::new(Mutex::new(fixture.controller));
+    let gate = Arc::new(Mutex::new(()));
+    let body = serde_json::to_vec(&serde_json::json!({"import_id":request.import_id,"expected_generation":0,"deadline_ms":100,"query_timeout_ms":20})).unwrap();
+    application::memory_query::submit(
+        &controller,
+        &events,
+        &gate,
+        &runtime::FixedClock::new(TimestampMs::new(7)),
+        &body,
+        "principal",
+    )
+    .unwrap();
+    let mut live = controller.lock().unwrap();
+    application::memory_query::receipt(
+        &mut live,
+        request.node_id.as_str(),
+        &query_receipt(&request, 1),
+        TimestampMs::new(28),
+        &mut events.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        live.memory_imports[&request.import_id].phase,
+        ImportPhase::Unknown
+    );
+    let mut replacement = request.clone();
+    replacement.import_id = "replacement".into();
+    assert!(memory_import::admit(&mut live, replacement, TimestampMs::new(29)).is_err());
+    let mut changed_provider = request.clone();
+    changed_provider.import_id = "replacement-provider".into();
+    changed_provider.consumer_provider_id = "another-provider".into();
+    assert!(
+        memory_import::admit(&mut live, changed_provider, TimestampMs::new(29))
+            .unwrap_err()
+            .contains("unresolved original")
+    );
+    let retained = serde_json::to_value(&live.memory_imports[&request.import_id]).unwrap();
+    assert_eq!(retained["reconciliation"]["opened_at_ms"], 7);
+    assert_eq!(
+        retained["reconciliation"]["queries"]["1"]["received_at_ms"],
+        28
+    );
+    assert_eq!(
+        retained["reconciliation"]["queries"]["1"]["current_authority_at_receipt"],
+        false
+    );
+    memory_import::validate_restored(&live).unwrap();
+}
+
 /// Wrong Group/attempt/provider and identity reuse cannot create a new import or reservation.
 #[test]
 fn imports_require_exact_binding_and_preserve_authorization_across_restore() {

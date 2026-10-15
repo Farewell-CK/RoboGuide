@@ -488,7 +488,10 @@ impl NodeRegistration {
         mut operation_support: Vec<OperationSupport>,
     ) -> Result<Self, DomainError> {
         if !operation_support.is_empty()
-            && self.contract_version.as_str() != NODE_CONTRACT_VERSION_V0_6
+            && !matches!(
+                self.contract_version.as_str(),
+                NODE_CONTRACT_VERSION_V0_6 | NODE_CONTRACT_VERSION_V0_7
+            )
         {
             return Err(DomainError::InvalidMissionPlan {
                 reason: "independent operation support requires Node Contract v0.6".to_string(),
