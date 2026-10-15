@@ -53,5 +53,34 @@ and [multiway registration](https://www.open3d.org/docs/0.19.0/tutorial/pipeline
 interfaces. [Current acceptance](../../docs/development/acceptance/2026-10-15-f4-spatial-files.md)
 contains actual source attribution, numerical errors, failure cases and reproduction commands.
 
-Configured Local EAIOS/Node workflow execution, authenticated CAS publication and active-map consumers
-remain required work. This CLI is not a completed distributed Spatial system.
+The private Unix HTTP service runs these same original jobs through the maintained Node HTTP driver.
+It listens on a deployment-owned `0600` socket, uses an exclusive backend writer and retains a real
+instance UUID plus immutable request/profile/code identity. Exact attempts only observe their original
+job; an ambiguous admission cannot launch again. Changed configuration/code makes the old backend
+observation-only. Interrupted native work keeps its original deadline across facade restart.
+
+```sh
+PYTHONPATH=integrations/spatial-provider /absolute/spatial-venv/bin/python \
+  -m roboguide_spatial_provider.http_service --root /absolute/backend \
+  --source-root /absolute/input --output-root /absolute/node-cache --config /absolute/profile.json
+PYTHONPATH=integrations/spatial-provider /absolute/spatial-venv/bin/python \
+  -m roboguide_spatial_provider.node_profile --profile /absolute/profile.json \
+  --node-id DEPLOYMENT_NODE_ID --server-endpoint https://CONTROLLER:50051 \
+  --artifact-endpoint https://ARTIFACT:8090 --state-root /absolute/node-state \
+  --cache-root /absolute/node-cache --socket-path /absolute/backend/local.sock \
+  --output /absolute/node.toml
+```
+
+The [local contract](../../contracts/spatial/local-service-v0.1/README.md) fixes routes and profile
+fields. Node identity, endpoints, profiles and all source files belong to deployment. The generator
+creates no processes, registration or device inventory. Multiple configured slots use the same
+canonical `spatial.map.build@v0` and `spatial.map.publish@v0` workflows. Local publication checks
+original bundle bytes; Node Service alone freezes prepared bytes, uploads CAS and publishes catalog
+metadata before reporting completion. A cancel acceptance remains RUNNING; CANCELLED needs the
+actual original native child exit. This is software-process evidence and supplies no Controller stop
+certificate or device safe-state observation.
+
+[Process acceptance](../../docs/development/acceptance/2026-10-15-f4-spatial-node.md) exercises actual
+computation, formal Node Protocol, CAS, independent verification and restart without another worker.
+It uses the explicit trusted-loopback compatibility profile. Remote typed-map producer/provider
+authority, distributed Group grants/preparation, active-map and GC remain required F4 work.

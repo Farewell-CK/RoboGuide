@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from . import occupancy, timing
-from .contracts import Job, canonical, digest
+from .contracts import Job, canonical, digest, integer
 from .geometry import code_digest, compute
 from .occupancy_contracts import OccupancyJob
 from .storage import immutable, read_json, read_source, save_json, snapshots, sync_directory
@@ -35,6 +35,35 @@ def parse_job(request: dict[str, Any]) -> Job | OccupancyJob:
     return Job.parse(request)
 
 
+def cancelled_proof(directory: Path, intent: dict[str, Any]) -> dict[str, Any]:
+    """Check original process-exit evidence; an accepted cancellation string is never sufficient."""
+    proof = read_json(directory / "cancelled.json")
+    if (
+        proof.get("schema_version") != "roboguide.spatial-process-stop/v0.1"
+        or proof.get("request_digest") != intent["request_digest"]
+        or proof.get("clock_id") != intent.get("clock_id")
+        or proof.get("assurance") != "software-process"
+    ):
+        raise ValueError("cancelled computation proof differs from its original work")
+    stopped = integer(proof.get("stopped_monotonic_ns"), "original stop time", 0, 2**63 - 1)
+    if stopped < intent["admitted_monotonic_ns"]:
+        raise ValueError("computation stop predates original admission")
+    if proof.get("dispatched") is True:
+        started = read_json(directory / "worker-started.json")
+        pid = integer(proof.get("worker_pid"), "original worker PID", 1, 2**31 - 1)
+        integer(proof.get("worker_returncode"), "original worker exit", -(2**31), 2**31 - 1)
+        if started.get("pid") != pid or started.get("request_digest") != intent["request_digest"]:
+            raise ValueError("stop proof does not name the actual original worker")
+    elif (
+        proof.get("dispatched") is not False
+        or (directory / "started.json").exists()
+        or proof.get("worker_pid") is not None
+        or proof.get("worker_returncode") is not None
+    ):
+        raise ValueError("unlaunched computation stop contradicts its original dispatch marker")
+    return proof
+
+
 def observe(directory: Path) -> dict[str, Any]:
     """Verify original computed proof without a worker launch or budget renewal."""
     intent = read_json(directory / "intent.json")
@@ -47,15 +76,41 @@ def observe(directory: Path) -> dict[str, Any]:
         "admitted_at_ms": intent["admitted_at_ms"],
         "deadline_ms": intent["deadline_ms"],
     }
+    base = dict(result)
     if (directory / "result.json").exists():
         result = read_json(directory / "result.json")
+        if result.get("request_digest") != intent["request_digest"]:
+            raise ValueError("stored outcome differs from original work identity")
     if not (directory / "computed.json").exists():
         if (directory / "unavailable.json").exists():
             unavailable = read_json(directory / "unavailable.json")
             if unavailable.get("request_digest") != intent["request_digest"]:
                 raise ValueError("unavailable evidence differs from original job")
-            return {**result, "status": "unavailable", "reason": unavailable["reason"]}
-        return result
+            return {**base, "status": "unavailable", "reason": unavailable["reason"]}
+        if (directory / "cancelled.json").exists():
+            proof = cancelled_proof(directory, intent)
+            return {
+                **base,
+                "status": "cancelled",
+                "reason": "original CPU work stopped",
+                "stop_assurance": proof["assurance"],
+            }
+        if result.get("status") in {"completed", "completed_late", "cancelled", "unavailable"}:
+            return {
+                **base,
+                "status": "unknown",
+                "reason": "original terminal proof is unavailable",
+            }
+        if (
+            result.get("status") == "rejected_before_compute"
+            and not (directory / "started.json").exists()
+        ):
+            return {
+                **base,
+                "status": "rejected_before_compute",
+                "reason": result.get("reason", "source rejected"),
+            }
+        return {**base, "reason": result.get("reason", base["reason"])}
     computed = read_json(directory / "computed.json")
     if (
         computed.get("request_digest") != intent["request_digest"]
@@ -139,6 +194,7 @@ def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, An
         }
         save_json(directory / "intent.json", intent)
         process: subprocess.Popen[bytes] | None = None
+        interrupted = False
         try:
             inputs = (
                 snapshots(job, source_root, directory)
@@ -194,7 +250,8 @@ def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, An
                 result["reason"] = (
                     "original native worker exited without a verified complete result"
                 )
-        except (ValueError, OSError, TimeoutError) as error:
+        except (ValueError, OSError, TimeoutError, KeyboardInterrupt) as error:
+            interrupted = isinstance(error, KeyboardInterrupt)
             result = {
                 "schema_version": "roboguide.spatial-file-result/v0.1",
                 "job_id": job.job_id,
@@ -210,6 +267,41 @@ def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, An
             if process is not None and process.poll() is None:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
+        if process is not None and process.returncode is not None:
+            save_json(
+                directory / "worker-exit.json",
+                {
+                    "schema_version": "roboguide.spatial-process-exit/v0.1",
+                    "request_digest": identity,
+                    "clock_id": intent["clock_id"],
+                    "worker_pid": process.pid,
+                    "worker_returncode": process.returncode,
+                    "observed_monotonic_ns": time.monotonic_ns(),
+                    "assurance": "software-process",
+                },
+            )
+        if interrupted and not any(
+            (directory / name).exists() for name in ("computed.json", "unavailable.json")
+        ):
+            dispatched = process is not None
+            if dispatched and not (directory / "worker-started.json").exists():
+                result["status"] = "unknown"
+            elif not dispatched and (directory / "started.json").exists():
+                result["status"] = "unknown"
+            else:
+                save_json(
+                    directory / "cancelled.json",
+                    {
+                        "schema_version": "roboguide.spatial-process-stop/v0.1",
+                        "request_digest": identity,
+                        "clock_id": intent["clock_id"],
+                        "stopped_monotonic_ns": time.monotonic_ns(),
+                        "assurance": "software-process",
+                        "dispatched": dispatched,
+                        "worker_pid": None if process is None else process.pid,
+                        "worker_returncode": None if process is None else process.returncode,
+                    },
+                )
         save_json(directory / "result.json", result)
         return observe(directory)
     finally:

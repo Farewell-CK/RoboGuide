@@ -304,7 +304,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   `contracts/spatial/file-provider-v0.1/` contains the five structural JSON schemas. The once-only
   worker binds the actual original Linux monotonic clock/boot before source acquisition; audit wall
   rollback, reboot and another host cannot renew work. Completed original proof remains readonly
-  after reboot. Formal Node/CAS workflow integration remains F4 work.
+  after reboot. Its private Unix HTTP service retains the actual backend UUID and original attempt
+  identity; cancellation needs actual original worker exit and remains software-process evidence.
+  The deployment generator declares arbitrary Node IDs and semantic output profiles, never devices.
+  `tools/quality/check_spatial_node_processes.py` exercises maintained Node workflows, actual CAS,
+  an independent source/tile verifier and Controller/Node restart without another worker under the
+  explicit trusted-loopback compatibility profile. Remote typed-map provider authority and complete
+  Group/pre-Execute/active-map/GC integration remain required F4 work.
 - The C1-S0 Habitat bridge supports existing `mobility.navigate@v1` without changing Core schemas.
   It keeps EMOS/Habitat dependencies in their independent Conda environment, maps semantic
   destination to the existing local Oracle navigation action, owns one persistent simulator process

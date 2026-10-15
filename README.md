@@ -39,7 +39,9 @@ FPFH/RANSAC、ICP、pose-graph、观测点分块融合和不可变增量 revisio
 [文件验收](docs/development/acceptance/2026-10-15-f4-spatial-files.md)包含独立坐标真值、单位转换、
 回环及失败检查；没有创建设备。当前还实现了单独的 Occupancy SE(2) profile，以及绑定原
 host monotonic deadline 的预算门禁，见[后续文件验收](docs/development/acceptance/2026-10-15-f4-planar-and-clock-budget.md)。
-正式 Node workflow/CAS publication 接线和 active-map 消费仍须继续完成。
+私有 Unix Local How、正式 Node workflow/CAS publication、独立文件验证与无重复计算重启链路
+已通过实际软件进程验收，见[Node/Spatial 验收](docs/development/acceptance/2026-10-15-f4-spatial-node.md)。
+本次是显式 loopback 兼容配置；远程 typed-map provider 权威、Group grant、active-map/GC 仍须完成。
 
 ## 系统目标
 

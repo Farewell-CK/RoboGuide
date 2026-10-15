@@ -53,6 +53,8 @@ flowchart TB
   CAT --> SQL
   FILES[来源固定的 PLY / PCD / planar occupancy 文件] --> SP[独立 CPU Spatial file provider]
   SP --> BUNDLE[不可变观测点 tile bundle / parent lineage / 计算证据]
+  SP <-->|私有 Unix HTTP / 原 attempt 查询| NODE
+  BUNDLE -->|Node 冻结并上传原 bytes| ART
 ```
 
 Controller 中 Orchestration、Control、Runtime、State 和 Integration 当前共址，责任边界由
@@ -61,6 +63,10 @@ Rust 模块及 transport-neutral ports 保持。Mission Service 是独立进程�
 默认单 Controller，显式静态三成员 HA profile 使用独立副本 SQL 和 Controller 子进程。
 动态成员、Federation、运行期重规划、完整时空/quota 和自动空间融合属于本轮必需目标，
 目前仍需按阶段实现和验收。
+
+实际 Spatial 文件计算已接入 Node Service 的正式 Local How、prepared-artifact 和 CAS
+发布链路。独立 verifier 检查来源文件与实际 tile bytes；Controller/Node 重启不再启动 worker。
+当前进程验收使用显式 trusted-loopback profile，不证明远程 typed-map provider 授权闭环。
 
 副作用只在应用事务持久化并取得当前 quorum/epoch 后发出。副本只复制元数据和命令证据，
 CAS 内容及 Local EAIOS 执行连续性需要独立恢复合同。Unknown 保留所有权；本地安全仍由

@@ -71,7 +71,15 @@ free 要求完整输出 cell 被显式输入 free square 覆盖；occupied footp
 两个文件 profile 共用原始 job intent/worker。实际 Linux CLOCK_MONOTONIC 与 boot identity
 在 source snapshot 前冻结；父子进程共用原 deadline，wall rollback 不延长预算，换 host/reboot
 不能重启旧 job。原始 completed proof 可在重启后只读核对，legacy wall-only 证据不补成新证明。
-这些 clock 身份只是软件进程域，不能证明硬件身份。正式 Node/CAS 接线仍待完成。
+这些 clock 身份只是软件进程域，不能证明硬件身份。
+
+私有 Unix HTTP Local How 以真实 backend UUID 和原 attempt admission 管理一次实际 worker，
+不创建 Node inventory。部署生成器只输出配置，多个语义 slot 共用 canonical build/publish。
+Node Service 冻结构建产物，再上传 CAS 和发布原 source provenance；Local How 不越权写 catalog。
+取消接纳仍为 RUNNING，实际原 worker 退出后才形成软件级 CANCELLED；不能代替 Controller 的
+独立 stop/safe-state 合同。[正式 Node/CAS 进程验收](../development/acceptance/2026-10-15-f4-spatial-node.md)
+已通过显式 loopback compatibility 路径和独立 verifier，并验证重启无第二 worker。
+远程 typed-map 的实际 provider/当前发布 attempt/session 仍须版本化接线；未据此关闭 F4。
 
 ## 当前内容门禁切片
 
