@@ -57,6 +57,7 @@ impl FederationSession {
     }
 }
 
+/// Checks one lowercase SHA-256 identity without accepting arbitrary provider text.
 fn valid_digest(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64

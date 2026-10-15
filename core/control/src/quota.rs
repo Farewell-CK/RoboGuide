@@ -210,6 +210,7 @@ impl QuotaLedger {
     }
 }
 
+/// Checks one bounded logical quota identity.
 fn validate_text(value: &str, name: &str) -> Result<(), QuotaError> {
     if value.trim().is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
         return Err(QuotaError::Invalid(format!("{name} is empty or unbounded")));
