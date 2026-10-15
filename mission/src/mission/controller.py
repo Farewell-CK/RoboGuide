@@ -15,7 +15,10 @@ from typing import Any, Protocol, cast
 from urllib.parse import quote, urlparse
 
 from mission.deployment_assessment import InitialOperationAssessment
+from mission.execution_planning_evidence import ExecutionPlanningEvidence
 from mission.models import JSONObject, MissionPlan
+from mission.plan_assessment import validate_assessment
+from mission.plan_validation import PlanValidationError
 from mission.security_context import authenticated_tenant
 from mission.submission_evidence import ControllerAdmissionEvidence, ControllerSubmissionEvidence
 
@@ -351,6 +354,22 @@ class HttpMissionController:
         if status != 200 or not assessment.matches_plan(plan):
             raise MissionControllerError("Controller initial assessment is unavailable or detached")
         return assessment
+
+    def validate_plan(
+        self, plan: MissionPlan, evidence: ExecutionPlanningEvidence | None = None
+    ) -> None:
+        """Query published contracts once; unavailable evidence never triggers draft repair."""
+        status, decoded, _ = self._request("POST", "/v1/missions/validate-plan", plan.to_json())
+        if status != 200:
+            raise MissionControllerError(f"Controller plan validation returned HTTP {status}")
+        try:
+            validate_assessment(decoded, plan, evidence)
+        except PlanValidationError:
+            raise
+        except (TypeError, ValueError, KeyError) as error:
+            raise MissionControllerError(
+                "Controller plan validation is invalid or detached"
+            ) from error
 
     def submit_plan_observed(
         self,

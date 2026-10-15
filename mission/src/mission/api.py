@@ -12,6 +12,7 @@ import threading
 import time
 from collections.abc import Mapping
 from contextlib import nullcontext
+from functools import partial
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
@@ -84,6 +85,11 @@ def build_engine(
             service_settings.controller_client_ca,
         ),
     )
+    plan_validator = (
+        partial(controller.validate_plan, evidence=execution_planning_evidence)
+        if execution_planning_evidence is not None
+        else None
+    )
     reviewer = (
         ResponsesMissionReviewer(
             planner_settings,
@@ -102,6 +108,7 @@ def build_engine(
             execution_profile=execution_profile,
             planning_profile=planning_profile,
             execution_planning_evidence=execution_planning_evidence,
+            plan_validator=plan_validator,
         )
         if reviewer is not None
         and (
@@ -119,6 +126,7 @@ def build_engine(
             execution_profile=execution_profile,
             planning_profile=planning_profile,
             execution_planning_evidence=execution_planning_evidence,
+            plan_validator=plan_validator,
         ),
         controller,
         capability_catalog,
