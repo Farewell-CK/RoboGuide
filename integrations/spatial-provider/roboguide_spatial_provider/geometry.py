@@ -15,6 +15,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, cast
 
+from . import timing
 from .contracts import Job, canonical, digest
 from .storage import immutable, point_count, read_json, read_source, save_json
 
@@ -491,6 +492,7 @@ def compute(directory: Path) -> dict[str, Any]:
         "request_digest": digest(canonical(request)),
         "status": "completed",
         "computed_at_ms": time.time_ns() // 1_000_000,
+        **timing.completion(directory),
         "artifact": {
             "content_digest": digest(payload),
             "byte_size": len(payload),

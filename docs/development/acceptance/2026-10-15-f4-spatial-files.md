@@ -54,5 +54,6 @@ uv run pytest -q integrations/spatial-provider/tests
 ```
 
 输出目录必须是新的私有目录。公开数据只是软件几何输入，误差不是设备定位精度。
-Occupancy、正式 Node/CAS workflow、Group grant/撤销、pre-Execute、active-map/handoff/GC
+本记录之后的 [Occupancy 与原始 monotonic 预算](2026-10-15-f4-planar-and-clock-budget.md)
+已有独立验收，保留本轮 source/code/results identity。正式 Node/CAS workflow、Group grant/撤销、pre-Execute、active-map/handoff/GC
 和后续 F5–F10 仍为必需工作；本记录不声称整体 SoftwareComplete。

@@ -299,7 +299,12 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   computation. `tools/quality/check_spatial_provider_files.py` verifies attributed actual files,
   independent coordinate truth, units/loop/incremental and adversarial failures with zero devices.
   The root environment tests pure contracts only; do not install native geometry into MI.
-  Occupancy and formal Node/CAS workflow integration remain F4 work.
+  The explicit planar occupancy profile has separate SE(2) search/ICP/graph and conservative cell
+  coverage policies; missing cells remain unknown and contradictory observations remain conflicts.
+  `contracts/spatial/file-provider-v0.1/` contains the five structural JSON schemas. The once-only
+  worker binds the actual original Linux monotonic clock/boot before source acquisition; audit wall
+  rollback, reboot and another host cannot renew work. Completed original proof remains readonly
+  after reboot. Formal Node/CAS workflow integration remains F4 work.
 - The C1-S0 Habitat bridge supports existing `mobility.navigate@v1` without changing Core schemas.
   It keeps EMOS/Habitat dependencies in their independent Conda environment, maps semantic
   destination to the existing local Oracle navigation action, owns one persistent simulator process

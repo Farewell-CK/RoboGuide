@@ -1,0 +1,355 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "roboguide.spatial-file-map/v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "revision_id",
+    "frame_id",
+    "units",
+    "parent",
+    "unobserved_space",
+    "covariance",
+    "current_node_localization",
+    "algorithm",
+    "schema_version",
+    "voxel_size_m",
+    "point_count",
+    "sources",
+    "tiles",
+    "transformations_to_anchor",
+    "registration"
+  ],
+  "properties": {
+    "revision_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "frame_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "units": {
+      "const": "m"
+    },
+    "parent": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "content_digest",
+            "revision_id",
+            "frame_id"
+          ],
+          "properties": {
+            "content_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "revision_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "frame_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      ]
+    },
+    "unobserved_space": {
+      "const": "unknown"
+    },
+    "covariance": {
+      "const": null
+    },
+    "current_node_localization": {
+      "const": null
+    },
+    "algorithm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "policy",
+        "versions",
+        "native_binary_digests",
+        "code_digest"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "fpfh-ransac-icp-posegraph-observed-voxel-tiles/v0.1",
+            "bounded-se2-correlative-icp-posegraph-conservative-tiles/v0.1"
+          ]
+        },
+        "policy": {
+          "type": "object"
+        },
+        "versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "numpy",
+            "open3d",
+            "scipy"
+          ],
+          "properties": {
+            "numpy": {
+              "const": "2.4.6"
+            },
+            "open3d": {
+              "const": "0.19.0"
+            },
+            "scipy": {
+              "const": "1.17.1"
+            }
+          }
+        },
+        "native_binary_digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "numpy._core._multiarray_umath",
+            "open3d.cpu.pybind",
+            "scipy.linalg._fblas"
+          ],
+          "properties": {
+            "numpy._core._multiarray_umath": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "open3d.cpu.pybind": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "scipy.linalg._fblas": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        },
+        "code_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "schema_version": {
+      "const": "roboguide.spatial-file-map/v0.1"
+    },
+    "voxel_size_m": {
+      "type": "number",
+      "minimum": 0.0001,
+      "maximum": 10
+    },
+    "point_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4000000
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "frame_id",
+          "content_digest",
+          "units",
+          "format",
+          "byte_size",
+          "point_count"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "frame_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "content_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "units": {
+            "enum": [
+              "m",
+              "cm",
+              "mm"
+            ]
+          },
+          "format": {
+            "enum": [
+              "pcd",
+              "ply"
+            ]
+          },
+          "byte_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 268435456
+          },
+          "point_count": {
+            "type": "integer",
+            "minimum": 3,
+            "maximum": 2000000
+          }
+        }
+      }
+    },
+    "tiles": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "content_digest",
+          "point_count",
+          "bounds"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^tiles/[0-9a-f]{64}\\.ply$"
+          },
+          "content_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "point_count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4000000
+          },
+          "bounds": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "min",
+              "max"
+            ],
+            "properties": {
+              "min": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                  "type": "number"
+                }
+              },
+              "max": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "transformations_to_anchor": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 9,
+      "items": {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "items": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "registration": {
+      "type": "array",
+      "maxItems": 36,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "target",
+          "bidirectional_fitness",
+          "max_direction_rmse_m",
+          "cycle_translation_m",
+          "cycle_angle_rad",
+          "information_matrix",
+          "information_is_covariance"
+        ],
+        "properties": {
+          "source": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8
+          },
+          "target": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8
+          },
+          "bidirectional_fitness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "max_direction_rmse_m": {
+            "type": "number",
+            "minimum": 0
+          },
+          "cycle_translation_m": {
+            "type": "number",
+            "minimum": 0
+          },
+          "cycle_angle_rad": {
+            "type": "number",
+            "minimum": 0
+          },
+          "information_is_covariance": {
+            "const": false
+          },
+          "information_matrix": {
+            "type": "array",
+            "minItems": 6,
+            "maxItems": 6,
+            "items": {
+              "type": "array",
+              "minItems": 6,
+              "maxItems": 6,
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -62,7 +62,16 @@ localization proof。外部文件/离线几何验收与实际设备定位保持�
 [文件验收](../development/acceptance/2026-10-15-f4-spatial-files.md)通过独立变换真值、
 三源回环、单位转换、不可变增量及退化/低重叠/损坏/超时检查。原始 source、代码、三个核心
 native binary digest 与版本均保留；这些 binary digest 不声称覆盖完整传递依赖。
-该文件切片不拥有 Node、地图激活或定位权威；Occupancy 和正式 Node/CAS 接线仍待完成。
+该文件切片不拥有 Node、地图激活或定位权威。后续显式 Occupancy profile 使用有界 SE(2)
+correlative search、rigid ICP 和固定 anchor pose graph，不将平面输入假扮成三维观察。
+free 要求完整输出 cell 被显式输入 free square 覆盖；occupied footprint overlap 和冲突保留，
+未观测/intermediate 保持 unknown，parent conflict 不成为无歧义配准点。结构合同见
+[file-provider schemas](../../contracts/spatial/file-provider-v0.1/README.md)。
+
+两个文件 profile 共用原始 job intent/worker。实际 Linux CLOCK_MONOTONIC 与 boot identity
+在 source snapshot 前冻结；父子进程共用原 deadline，wall rollback 不延长预算，换 host/reboot
+不能重启旧 job。原始 completed proof 可在重启后只读核对，legacy wall-only 证据不补成新证明。
+这些 clock 身份只是软件进程域，不能证明硬件身份。正式 Node/CAS 接线仍待完成。
 
 ## 当前内容门禁切片
 

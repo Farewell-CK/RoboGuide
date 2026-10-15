@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "roboguide.spatial-occupancy-map/v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "revision_id",
+    "frame_id",
+    "units",
+    "parent",
+    "unobserved_space",
+    "covariance",
+    "current_node_localization",
+    "algorithm",
+    "schema_version",
+    "geometry",
+    "resolution_meters",
+    "tile_cells",
+    "observed_cell_count",
+    "navigation_safety_assurance",
+    "cell_masks",
+    "free_coverage",
+    "sources",
+    "tiles",
+    "transformations_to_anchor",
+    "registration"
+  ],
+  "properties": {
+    "revision_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "frame_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "units": {
+      "const": "m"
+    },
+    "parent": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "content_digest",
+            "revision_id",
+            "frame_id"
+          ],
+          "properties": {
+            "content_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "revision_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "frame_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      ]
+    },
+    "unobserved_space": {
+      "const": "unknown"
+    },
+    "covariance": {
+      "const": null
+    },
+    "current_node_localization": {
+      "const": null
+    },
+    "algorithm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "policy",
+        "versions",
+        "native_binary_digests",
+        "code_digest"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "fpfh-ransac-icp-posegraph-observed-voxel-tiles/v0.1",
+            "bounded-se2-correlative-icp-posegraph-conservative-tiles/v0.1"
+          ]
+        },
+        "policy": {
+          "type": "object"
+        },
+        "versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "numpy",
+            "open3d",
+            "scipy"
+          ],
+          "properties": {
+            "numpy": {
+              "const": "2.4.6"
+            },
+            "open3d": {
+              "const": "0.19.0"
+            },
+            "scipy": {
+              "const": "1.17.1"
+            }
+          }
+        },
+        "native_binary_digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "numpy._core._multiarray_umath",
+            "open3d.cpu.pybind",
+            "scipy.linalg._fblas"
+          ],
+          "properties": {
+            "numpy._core._multiarray_umath": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "open3d.cpu.pybind": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "scipy.linalg._fblas": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        },
+        "code_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "schema_version": {
+      "const": "roboguide.spatial-occupancy-map/v0.1"
+    },
+    "geometry": {
+      "const": "SE(2)"
+    },
+    "resolution_meters": {
+      "type": "number",
+      "minimum": 0.001,
+      "maximum": 10
+    },
+    "tile_cells": {
+      "type": "integer",
+      "minimum": 4,
+      "maximum": 256
+    },
+    "observed_cell_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4000000
+    },
+    "navigation_safety_assurance": {
+      "const": null
+    },
+    "cell_masks": {
+      "const": {
+        "1": "free-full-cell-coverage",
+        "2": "occupied-footprint-overlap",
+        "3": "conflicting-observations"
+      }
+    },
+    "free_coverage": {
+      "const": "one-explicit-free-input-square-covers-complete-output-cell"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "frame_id",
+          "content_digest",
+          "units",
+          "format",
+          "byte_size",
+          "cell_count"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "frame_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "content_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "units": {
+            "enum": [
+              "m",
+              "cm",
+              "mm"
+            ]
+          },
+          "format": {
+            "enum": [
+              "occupancy-json"
+            ]
+          },
+          "byte_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 268435456
+          },
+          "cell_count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          }
+        }
+      }
+    },
+    "tiles": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "content_digest",
+          "cell_count"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^tiles/[0-9a-f]{64}\\.json$"
+          },
+          "content_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "cell_count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4000000
+          }
+        }
+      }
+    },
+    "transformations_to_anchor": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 9,
+      "items": {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 3,
+        "items": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "registration": {
+      "type": "array",
+      "maxItems": 36,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "target",
+          "overlap",
+          "rmse_m",
+          "cycle_translation_m",
+          "cycle_yaw_rad"
+        ],
+        "properties": {
+          "source": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8
+          },
+          "target": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8
+          },
+          "overlap": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "rmse_m": {
+            "type": "number",
+            "minimum": 0
+          },
+          "cycle_translation_m": {
+            "type": "number",
+            "minimum": 0
+          },
+          "cycle_yaw_rad": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

@@ -290,6 +290,7 @@ print(json.dumps({"original_to_derived":t.tolist()}))
     assert (timeout_directory / "intent.json").read_bytes() == timeout_intent
     assert (timeout_directory / "worker-started.json").read_bytes() == timeout_worker
     for result in (pair, incremental, coordinate, units, loop):
+        assert result["timing_assurance"] == "original-host-monotonic-budget"
         assert result["manifest"]["current_node_localization"] is None
         assert result["manifest"]["covariance"] is None
         assert result["manifest"]["unobserved_space"] == "unknown"
@@ -307,6 +308,7 @@ print(json.dumps({"original_to_derived":t.tolist()}))
         "loop_edges": len(loop["manifest"]["registration"]),
         "negative_cases": negative_results,
         "original_timeout_not_renewed": True,
+        "original_monotonic_budget": True,
         "original_worker_not_repeated": True,
         "algorithm_code_digest": coordinate["manifest"]["algorithm"]["code_digest"],
         "dependencies": coordinate["manifest"]["algorithm"]["versions"],

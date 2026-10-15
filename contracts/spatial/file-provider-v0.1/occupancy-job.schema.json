@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "roboguide.spatial-occupancy-job/v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "job_id",
+    "frame_id",
+    "inputs",
+    "policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.spatial-occupancy-job/v0.1"
+    },
+    "job_id": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    },
+    "frame_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "path",
+          "content_digest",
+          "frame_id",
+          "units",
+          "format"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "content_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "frame_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "units": {
+            "enum": [
+              "m",
+              "cm",
+              "mm"
+            ]
+          },
+          "format": {
+            "enum": [
+              "occupancy-json"
+            ]
+          }
+        }
+      }
+    },
+    "parent": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "content_digest",
+            "revision_id",
+            "frame_id"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "content_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "revision_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "frame_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resolution_meters",
+        "yaw_min",
+        "yaw_max",
+        "yaw_step",
+        "translation_bound_m",
+        "translation_step_m",
+        "max_pair_distance_m",
+        "min_overlap",
+        "max_rmse_m",
+        "min_shape_ratio",
+        "ambiguity_translation_m",
+        "ambiguity_yaw_rad",
+        "score_margin",
+        "max_cycle_translation_m",
+        "max_cycle_yaw_rad",
+        "free_coverage_margin_m",
+        "free_max",
+        "occupied_min",
+        "max_hypotheses",
+        "max_refinements",
+        "icp_iterations",
+        "pose_graph_evaluations",
+        "max_registration_points",
+        "max_occupied_points",
+        "max_cells",
+        "max_total_cells",
+        "tile_cells",
+        "max_input_bytes",
+        "max_output_bytes",
+        "max_tiles",
+        "timeout_s",
+        "memory_mb",
+        "threads"
+      ],
+      "properties": {
+        "resolution_meters": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 10
+        },
+        "yaw_min": {
+          "type": "number",
+          "minimum": -3.141592653589793,
+          "maximum": 3.141592653589793
+        },
+        "yaw_max": {
+          "type": "number",
+          "minimum": -3.141592653589793,
+          "maximum": 3.141592653589793
+        },
+        "yaw_step": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 3.141592653589793
+        },
+        "translation_bound_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "translation_step_m": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 10
+        },
+        "max_pair_distance_m": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 10
+        },
+        "min_overlap": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 1
+        },
+        "max_rmse_m": {
+          "type": "number",
+          "minimum": 1e-06,
+          "maximum": 10
+        },
+        "min_shape_ratio": {
+          "type": "number",
+          "minimum": 1e-08,
+          "maximum": 0.5
+        },
+        "ambiguity_translation_m": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 10
+        },
+        "ambiguity_yaw_rad": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 3.141592653589793
+        },
+        "score_margin": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "max_cycle_translation_m": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 10
+        },
+        "max_cycle_yaw_rad": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 3.141592653589793
+        },
+        "free_coverage_margin_m": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "free_max": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99
+        },
+        "occupied_min": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "max_hypotheses": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300000
+        },
+        "max_refinements": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "icp_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "pose_graph_evaluations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "max_registration_points": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 2048
+        },
+        "max_occupied_points": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 100000
+        },
+        "max_cells": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 1000000
+        },
+        "max_total_cells": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 4000000
+        },
+        "tile_cells": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 256
+        },
+        "max_input_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 268435456
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 536870912
+        },
+        "max_tiles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
+        },
+        "timeout_s": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        },
+        "memory_mb": {
+          "type": "integer",
+          "minimum": 2048,
+          "maximum": 32768
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        }
+      }
+    }
+  }
+}

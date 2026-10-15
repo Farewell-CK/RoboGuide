@@ -47,6 +47,10 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 [F4 实际空间文件切片](acceptance/2026-10-15-f4-spatial-files.md)、
 [F4 Operator 事务门禁](acceptance/2026-10-15-f4-operator-transactions.md)。F4 其余工作继续实施。
 
+文件计算后续：[Occupancy 与原始 monotonic 预算](acceptance/2026-10-15-f4-planar-and-clock-budget.md)。
+点云/平面文件计算已有实际验收，正式 Node/CAS、Group grant/撤销、pre-Execute、handoff、
+active-map/GC 和其余阶段继续实施；不从文件测试推断设备能力。
+
 ## 已接受的实现决定
 
 - Stop 冻结完整受影响 attempt 集合、operation-owned export、策略、owner/session 和 deadline。

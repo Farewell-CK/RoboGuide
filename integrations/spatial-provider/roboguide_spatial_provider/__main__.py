@@ -16,14 +16,23 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from . import occupancy, timing
 from .contracts import Job, canonical, digest
 from .geometry import code_digest, compute
+from .occupancy_contracts import OccupancyJob
 from .storage import immutable, read_json, read_source, save_json, snapshots, sync_directory
 
 
 def now_ms() -> int:
     """Read local audit time; other machines' clocks are never compared to it."""
     return time.time_ns() // 1_000_000
+
+
+def parse_job(request: dict[str, Any]) -> Job | OccupancyJob:
+    """Select an explicit dimensional contract before any file effect or native allocation."""
+    if request.get("schema_version") == "roboguide.spatial-occupancy-job/v0.1":
+        return OccupancyJob.parse(request)
+    return Job.parse(request)
 
 
 def observe(directory: Path) -> dict[str, Any]:
@@ -60,7 +69,7 @@ def observe(directory: Path) -> dict[str, Any]:
     if artifact.get("path") != "map.bundle":
         raise ValueError("computed artifact escaped its immutable result location")
     original_request = read_json(directory / "request.json")
-    policy = Job.parse(original_request).policy
+    policy = parse_job(original_request).policy
     payload = read_source(directory, "map.bundle", policy.max_output_bytes)
     if digest(payload) != artifact.get("content_digest") or len(payload) != artifact.get(
         "byte_size"
@@ -81,7 +90,8 @@ def observe(directory: Path) -> dict[str, Any]:
         or computed_at < intent["admitted_at_ms"]
     ):
         raise ValueError("original computation time is unavailable or contradictory")
-    if computed_at > intent["deadline_ms"]:
+    late = timing.completed_late(intent, computed)
+    if computed_at > intent["deadline_ms"] or late:
         computed = {**computed, "status": "completed_late"}
     canonical(computed)
     original_outcome = result.get("status")
@@ -91,12 +101,15 @@ def observe(directory: Path) -> dict[str, Any]:
         "deadline_ms": intent["deadline_ms"],
         "original_observation": original_outcome,
         "reconciliation": "readonly-original-computed-proof",
+        "timing_assurance": "legacy-wall-budget"
+        if late is None
+        else "original-host-monotonic-budget",
     }
 
 
 def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, Any]:
     """Admit once, freeze sources and retain the bounded worker outcome."""
-    job = Job.parse(request)
+    job = parse_job(request)
     store.mkdir(mode=0o700, parents=True, exist_ok=True)
     if store.is_symlink():
         raise ValueError("spatial store must not be a symlink")
@@ -115,27 +128,30 @@ def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, An
             return observe(directory)
         admitted = now_ms()
         save_json(directory / "request.json", request)
-        save_json(
-            directory / "intent.json",
-            {
-                "schema_version": "roboguide.spatial-file-intent/v0.1",
-                "job_id": job.job_id,
-                "request_digest": identity,
-                "code_digest": code_digest(),
-                "admitted_at_ms": admitted,
-                "deadline_ms": admitted + job.policy.timeout_s * 1000,
-            },
-        )
+        intent = {
+            "schema_version": "roboguide.spatial-file-intent/v0.1",
+            "job_id": job.job_id,
+            "request_digest": identity,
+            "code_digest": code_digest(),
+            "admitted_at_ms": admitted,
+            "deadline_ms": admitted + job.policy.timeout_s * 1000,
+            **timing.freeze(job.policy.timeout_s),
+        }
+        save_json(directory / "intent.json", intent)
         process: subprocess.Popen[bytes] | None = None
         try:
-            inputs = snapshots(job, source_root, directory)
+            inputs = (
+                snapshots(job, source_root, directory)
+                if isinstance(job, Job)
+                else occupancy.snapshots(job, source_root, directory)
+            )
             if job.parent is not None:
                 parent = read_source(source_root, job.parent["path"], job.policy.max_output_bytes)
                 if digest(parent) != job.parent["content_digest"]:
                     raise ValueError("parent source digest differs")
                 immutable(directory / "parent.bundle", parent)
             save_json(directory / "sources.json", {"inputs": inputs})
-            remaining = (admitted + job.policy.timeout_s * 1000 - now_ms()) / 1000
+            remaining = timing.remaining(intent, now_ms(), job.policy.timeout_s)
             if remaining <= 0:
                 raise TimeoutError("source acquisition exhausted the original job budget")
             save_json(
@@ -204,7 +220,7 @@ def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, An
 def worker(directory: Path) -> int:
     """Set hard process bounds before native imports and actual computation."""
     request = read_json(directory / "request.json")
-    job = Job.parse(request)
+    job = parse_job(request)
     intent = read_json(directory / "intent.json")
     if (
         intent.get("request_digest") != digest(canonical(request))
@@ -213,6 +229,9 @@ def worker(directory: Path) -> int:
         raise ValueError("worker source differs from original admitted authority")
     if (directory / "worker-started.json").exists():
         raise ValueError("original worker identity cannot run again")
+    remaining = timing.remaining(intent, now_ms(), job.policy.timeout_s)
+    if remaining <= 0:
+        raise ValueError("original worker budget expired before native work")
     save_json(
         directory / "worker-started.json",
         {
@@ -221,16 +240,16 @@ def worker(directory: Path) -> int:
             "received_at_ms": now_ms(),
         },
     )
-    remaining = min(float(job.policy.timeout_s), (intent["deadline_ms"] - now_ms()) / 1000)
-    if remaining <= 0:
-        raise ValueError("original worker budget expired before native work")
     signal.signal(signal.SIGALRM, signal.SIG_DFL)
     signal.setitimer(signal.ITIMER_REAL, remaining)
     resource.setrlimit(resource.RLIMIT_CPU, (job.policy.timeout_s, job.policy.timeout_s + 1))
     resource.setrlimit(resource.RLIMIT_AS, (job.policy.memory_mb * 1024**2,) * 2)
     resource.setrlimit(resource.RLIMIT_FSIZE, (job.policy.max_output_bytes,) * 2)
     try:
-        compute(directory)
+        if isinstance(job, Job):
+            compute(directory)
+        else:
+            occupancy.compute(directory)
         sync_directory(directory)
         return 0
     except Exception as error:

@@ -51,7 +51,7 @@ flowchart TB
   UPLOAD --> SQL
   ART --> CAT[Memory / Spatial catalog 与 placement evidence]
   CAT --> SQL
-  FILES[来源固定的 PLY / PCD 文件] --> SP[独立 CPU Spatial file provider]
+  FILES[来源固定的 PLY / PCD / planar occupancy 文件] --> SP[独立 CPU Spatial file provider]
   SP --> BUNDLE[不可变观测点 tile bundle / parent lineage / 计算证据]
 ```
 
@@ -92,4 +92,5 @@ Imported 历史不能授予当前可用性租约，Memory 对账不能满足 Tas
 
 当前独立 Spatial 文件计算已通过[实际文件验收](../../development/acceptance/2026-10-15-f4-spatial-files.md)。
 配准、回环和增量只生成计算产物，尚未通过正式 Node workflow 发布至 CAS；图中 bundle 与 CAS
-没有隐含写入边。Occupancy、发布接线和当前消费者授权仍需继续实施。
+没有隐含写入边。显式 Occupancy profile 使用 SE(2)，free/occupied/conflict/unknown 保持分离；
+原始 monotonic deadline 不因 wall rollback 或换 host 续期。发布接线和当前消费者授权仍需继续实施。
