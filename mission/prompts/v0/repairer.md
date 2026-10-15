@@ -18,11 +18,22 @@ versioned relations.
 Its gaps are unknowns and do not justify guessed floors, reachability, start poses, or assignments.
 When `execution_planning_evidence` is supplied, preserve its exact reset-bound verifier source and
 deployment lifetime facts. Use the source only to retain the supported terminal verifier contract
-and predicates, and use lifetime capacity only for simultaneous Role demand within one Task.
+and predicates, and account for simultaneous Role demand and resources retained pending satisfaction.
 Independent Tasks may reuse an endpoint after Control releases it. Never invent Actors, relations,
 shared views, endpoint bindings, or a weaker satisfaction basis to fit deployment evidence. If the
 published source or capacity is insufficient, keep the grounded objective intact and expose the
 deployment/evidence gap for admission or review.
+
+For each Task, check when its declared satisfaction evidence can become available and when its
+resources can be released. If the supplied source publishes only after all session slots have
+executed, a Task waiting for that verdict retains its endpoint until that publication. Check DAG
+prerequisites, Actor reuse, and retained capacity across Tasks for circular waits. Adding a DAG edge
+alone does not resolve a predecessor that still waits for the same final verdict. Timely per-Task
+verifiers and ordinary local completion keep their own declared release behavior. Preserve all
+required effects and evidence: do not downgrade verification, invent participants or relations, or
+change a topology merely to satisfy a validator. If the supplied contracts cannot express an
+executable plan with the required evidence, expose the specific contract gap. Recovery must
+address all supplied validation issues against the unchanged task and frozen evidence.
 
 ## Coordination mode and Group shared view
 

@@ -715,6 +715,14 @@ empty placeholders or a top-level `src/`.
 
 ## Build, Test, and Development Commands
 
+ADR-0106 adds the inventory-free, read-only Controller `POST /v1/missions/validate-plan`
+query (`roboguide.plan-validation/v0.1`). Published deployment/verifier checks are shared with
+submission; the query never creates Groups, events, bindings or reservations. Configured MI
+execution-planning evidence enables the query for every newly generated or repaired candidate.
+Source drift and HTTP failure are system failures, while exact-plan negative findings retain
+original output and use the existing bounded regeneration budget. Ordinary endpoint reuse and
+timely per-Task verifiers must not inherit a global terminal-world barrier. See ADR-0106.
+
 For documentation changes, run:
 
 ```bash

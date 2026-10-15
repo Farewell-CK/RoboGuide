@@ -152,6 +152,12 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 
 ### Mission Intelligence
 
+配置 execution-planning evidence 的部署在每个生成/恢复草案上调用 Controller 只读
+`POST /v1/missions/validate-plan`，绑定实际计划与冻结来源；已知合同冲突进入现有有界
+草案恢复，接口不可用或来源不匹配保留系统失败。前检不做资源承诺，也不证明物理可达。
+普通顺序复用与终态 verifier 持有资源使用各自的声明规则，见
+[ADR-0106](docs/decisions/0106-published-plan-validation-and-bounded-draft-recovery.md)。
+
 负责 Mission Understanding、Clarification、Task Planning、Task Graph 和 Execution
 Requirements，回答 `What needs to be achieved?`。外部用户只提交文本 instruction；仅当存在
 阻止 Mission semantic commitment 的 open questions 时停在 `NeedsClarification`，不会创建

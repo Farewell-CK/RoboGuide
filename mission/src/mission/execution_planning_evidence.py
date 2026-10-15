@@ -219,8 +219,9 @@ class ExecutionPlanningEvidence:
         """Reject only proven source/slot-lifetime incompatibilities before submission.
 
         This is a necessary deployment bound, not matching or a reservation.
-        Independent Tasks may reuse an endpoint after Control releases it;
-        only simultaneous Role demand within one Task is bounded here.
+        Independent Tasks may reuse an endpoint after Control releases it.
+        This explicit final-world source retains verifier-backed endpoints until
+        all slots execute. These necessary bounds do not replace Controller checks.
         Unknown physical route and current availability remain Control concerns.
         A rejected draft must be regenerated from its real semantics, never
         automatically rewritten into another Actor topology or weaker evidence.
@@ -299,3 +300,21 @@ class ExecutionPlanningEvidence:
                 f"only {capacity} capacity-one endpoints. Preserve the Context lifetime or use "
                 "a deployment with sufficient capacity; do not invent executors."
             )
+        retained = sum(
+            len(task.roles)
+            for task in plan.tasks
+            if task.satisfaction.basis is TaskSatisfactionBasis.VERIFIER_EVIDENCE
+        )
+        if retained > capacity:
+            raise MissionPlanError(
+                f"terminal verifier retains {retained} slots until all session slots execute, "
+                f"but the deployment publishes only {capacity} endpoints"
+            )
+        for index, task in enumerate(plan.tasks):
+            if task.satisfaction.basis is TaskSatisfactionBasis.VERIFIER_EVIDENCE and any(
+                task.task_id in other.depends_on for other in plan.tasks
+            ):
+                raise MissionPlanError(
+                    f"tasks[{index}].satisfaction waits for all session slots "
+                    "before a dependent Task can execute"
+                )

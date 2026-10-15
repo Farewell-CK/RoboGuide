@@ -20,6 +20,17 @@ Task; independent Tasks may reuse a released endpoint. Do not demand extra Actor
 shared views, or weaker satisfaction semantics just to satisfy a capacity declaration. If the
 source or capacity cannot support the grounded objective, report the evidence gap precisely.
 
+For each Task, check when its declared satisfaction evidence can become available and when its
+resources can be released. If the supplied source publishes only after all session slots have
+executed, a Task waiting for that verdict retains its endpoint until that publication. Check DAG
+prerequisites, Actor reuse, and retained capacity across Tasks for circular waits. Adding a DAG edge
+alone does not resolve a predecessor that still waits for the same final verdict. Timely per-Task
+verifiers and ordinary local completion keep their own declared release behavior. Preserve all
+required effects and evidence: do not downgrade verification, invent participants or relations, or
+change a topology merely to satisfy a validator. If the supplied contracts cannot express an
+executable plan with the required evidence, expose the specific contract gap. Recovery must
+address all supplied validation issues against the unchanged task and frozen evidence.
+
 ## Coordination mode and Group shared view
 
 Determine the required outcomes and execution conditions before selecting a mode or filling its
