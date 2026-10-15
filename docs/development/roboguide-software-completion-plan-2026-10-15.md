@@ -33,7 +33,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F6 资源/调度 | R16、R20 | divisible quota、完整时间/空间承诺、真实成本 evidence 与确定性策略 | cost evidence、逻辑 quota ledger 与 Prometheus 入口已通过；物理/OS 强制、完整时空和运行中抢占仍待完成 |
 | F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | 待完成 |
 | F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 待完成 |
-| F9 层级/Federation | R20 | 控制域、跨域 prepare/commit、路由/授权与恢复 | 待完成 |
+| F9 层级/Federation | R20 | 控制域、跨域 prepare/commit、路由/授权与恢复 | 持久 epoch/digest/deadline prepare/commit session 已通过；跨域 transport/授权/恢复部署仍待完成 |
 | F10 运维与总验收 | R18、R19 的非发布部分 | 指标/告警、write-disabled 只读恢复、部署/迁移/回退、全功能验收 | 待完成 |
 
 每阶段通过对应验收后才进入依赖阶段。类型、文档、占位返回值、内部直调和通用测试通过
@@ -81,6 +81,10 @@ CAS/SQLite、mTLS 和独立 verifier 链路通过。它验证了 active-map 选�
 [F6 成本/quota 与 F10 Prometheus 切片](acceptance/2026-10-16-f6-cost-quota-f10-metrics.md)已补齐
 来源/TTL 绑定的成本排序证据、持久逻辑 quota ledger 以及 Mission/Artifact 的 Prometheus
 scrape 入口；这些不等于物理/OS quota、真实 GPU/交通成本或告警 SLO 达标。
+
+[F9 Federation session](acceptance/2026-10-16-f9-federation-session.md)补齐了持久跨域
+prepare/commit 的 epoch、plan/ownership digest、deadline 和 dispatch-ready gate；真实跨域
+transport、证书路由和多域恢复仍未关闭。
 
 ## 已接受的实现决定
 

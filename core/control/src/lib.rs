@@ -9,6 +9,7 @@ mod belief;
 mod calendar;
 mod coordination;
 mod decision_policy;
+mod federation;
 mod group;
 mod initial_preferences;
 mod matching;
@@ -27,6 +28,7 @@ mod verifier_registry;
 pub use allocation::AllocationProjectionError;
 pub use calendar::{ScheduledTaskReservation, SchedulingReservationPhase};
 pub use coordination::CommittedPlan;
+pub use federation::{FederationSession, FederationSessionState};
 pub use group::{CommittedGroupContinuation, GroupContinuationProposal};
 pub use group::{ContextBinding, ExecutionGroup, GroupLifecycle, RoleRequirementView};
 pub use initial_preferences::{InitialCandidatePreferences, MAX_INITIAL_PREFERENCE_AGE_MS};
@@ -153,6 +155,9 @@ pub struct ControlCheckpoint {
     /// Explicit logical quota limits/claims; this never replaces physical reservation authority.
     #[serde(default)]
     quota_ledger: QuotaLedger,
+    /// Cross-domain prepare/commit sessions; only committed sessions can be dispatch-ready.
+    #[serde(default)]
+    federation_sessions: BTreeMap<String, FederationSession>,
 }
 
 /// Control-owned deployment constraint that narrows a logical actor to one physical node.
@@ -513,6 +518,8 @@ pub struct ControlPlane {
     pub(crate) max_status_age_ms: u64,
     /// Durable logical quota ledger kept separate from physical resource reservations.
     pub(crate) quota_ledger: QuotaLedger,
+    /// Durable cross-domain session authority.
+    pub(crate) federation_sessions: BTreeMap<String, FederationSession>,
 }
 
 impl Default for ControlPlane {
@@ -536,6 +543,97 @@ impl ControlPlane {
     /// Returns the quota mutation surface used by an authenticated application authority.
     pub fn quota_ledger_mut(&mut self) -> &mut QuotaLedger {
         &mut self.quota_ledger
+    }
+
+    /// Persists one exact cross-domain prepare; retries with the same identity are idempotent.
+    pub fn prepare_federation_session(
+        &mut self,
+        session: FederationSession,
+        now: TimestampMs,
+    ) -> Result<(), ControlError> {
+        session
+            .validate_at(now)
+            .map_err(ControlError::InvalidProposal)?;
+        if let Some(existing) = self.federation_sessions.get(&session.transaction_id) {
+            if existing == &session {
+                return Ok(());
+            }
+            return Err(ControlError::InvalidProposal(
+                "federation transaction identity conflicts".into(),
+            ));
+        }
+        self.federation_sessions
+            .insert(session.transaction_id.clone(), session);
+        Ok(())
+    }
+
+    /// Commits one prepared transaction only under the same source epoch and immutable digests.
+    pub fn commit_federation_session(
+        &mut self,
+        transaction_id: &str,
+        source_epoch: u64,
+        plan_digest: &str,
+        ownership_digest: &str,
+        now: TimestampMs,
+    ) -> Result<(), ControlError> {
+        let session = self
+            .federation_sessions
+            .get_mut(transaction_id)
+            .ok_or_else(|| {
+                ControlError::InvalidProposal("unknown federation transaction".into())
+            })?;
+        if session.state == FederationSessionState::Committed
+            && session.source_epoch == source_epoch
+            && session.plan_digest == plan_digest
+            && session.ownership_digest == ownership_digest
+        {
+            return Ok(());
+        }
+        if session.state != FederationSessionState::Prepared
+            || session.source_epoch != source_epoch
+            || session.plan_digest != plan_digest
+            || session.ownership_digest != ownership_digest
+            || now >= session.deadline
+        {
+            return Err(ControlError::InvalidProposal(
+                "federation commit is stale, expired or identity-mismatched".into(),
+            ));
+        }
+        session.state = FederationSessionState::Committed;
+        Ok(())
+    }
+
+    /// Aborts one prepared transaction without releasing unrelated Control ownership.
+    pub fn abort_federation_session(
+        &mut self,
+        transaction_id: &str,
+        now: TimestampMs,
+    ) -> Result<(), ControlError> {
+        let session = self
+            .federation_sessions
+            .get_mut(transaction_id)
+            .ok_or_else(|| {
+                ControlError::InvalidProposal("unknown federation transaction".into())
+            })?;
+        if session.state == FederationSessionState::Aborted {
+            return Ok(());
+        }
+        if session.state != FederationSessionState::Prepared || now >= session.deadline {
+            return Err(ControlError::InvalidProposal(
+                "federation abort is stale or no longer prepared".into(),
+            ));
+        }
+        session.state = FederationSessionState::Aborted;
+        Ok(())
+    }
+
+    /// Returns true only for a current, committed session; callers still gate physical dispatch.
+    pub fn federation_dispatch_ready(&self, transaction_id: &str, now: TimestampMs) -> bool {
+        self.federation_sessions
+            .get(transaction_id)
+            .is_some_and(|session| {
+                session.state == FederationSessionState::Committed && now < session.deadline
+            })
     }
 
     /// Creates an empty Control Plane with explicit receive-time freshness TTL.
@@ -575,6 +673,7 @@ impl ControlPlane {
             pending_recovery_commitments: BTreeMap::new(),
             max_status_age_ms,
             quota_ledger: QuotaLedger::new(),
+            federation_sessions: BTreeMap::new(),
         }
     }
 
@@ -623,6 +722,7 @@ impl ControlPlane {
                 .collect(),
             max_status_age_ms: self.max_status_age_ms,
             quota_ledger: self.quota_ledger.clone(),
+            federation_sessions: self.federation_sessions.clone(),
         }
     }
 
@@ -859,11 +959,17 @@ impl ControlPlane {
             pending_recovery_commitments,
             max_status_age_ms: checkpoint.max_status_age_ms,
             quota_ledger: checkpoint.quota_ledger,
+            federation_sessions: checkpoint.federation_sessions,
         };
         restored
             .quota_ledger
             .validate()
             .map_err(|error| ControlError::InvalidProposal(error.to_string()))?;
+        for session in restored.federation_sessions.values() {
+            session
+                .validate_at(TimestampMs::new(0))
+                .map_err(ControlError::InvalidProposal)?;
+        }
         restored.validate_tenant_checkpoint()?;
         restored.validate_memory_authority_checkpoint()?;
         restored.validate_belief_policy_checkpoint()?;

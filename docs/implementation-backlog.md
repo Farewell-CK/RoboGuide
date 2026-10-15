@@ -34,6 +34,11 @@ Node journal 写入拒绝。实际文件、SQL 提交失败、正式查询、重
 确定性排序、checkpointed logical `QuotaLedger`、以及 Mission/Artifact Prometheus 文本入口
 均已接入。它们不提供真实 GPU/交通成本、OS quota、物理执行时限或告警平台 SLO 达标证据。
 
+2026-10-16 Control 已增加持久 Federation prepare/commit session：epoch、plan/ownership digest、
+deadline 与 abort/dispatch-ready gate 均有 checkpoint 和回归，见
+[F9 Federation 验收](development/acceptance/2026-10-16-f9-federation-session.md)。跨域 transport、
+证书路由和真实多域恢复仍未关闭。
+
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |
