@@ -46,10 +46,16 @@ const UPLOAD_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 mod authorization;
 mod catalog;
+pub use authorization::ArtifactPrincipal;
 use authorization::*;
+mod access;
+mod authenticated;
 mod protocol;
 mod server;
+mod upload_authority;
 mod upload_registry;
+pub(crate) use access::map_authorization_manifest;
+use access::*;
 
 pub use catalog::{
     ArtifactCatalog, LocalizationEvidenceObserver, MemoryProviderAdmission,

@@ -339,6 +339,7 @@ fn pre_support_controller_checkpoint_preserves_history_without_recovery_permissi
             .expect("command")
             .remove("recovery_support");
     }
+    remove_legacy_membership_fixture(&mut checkpoint);
     fixture.controller.bridge = IntegrationRuntimeBridge::restore_from_checkpoint(
         &checkpoint.to_string(),
         fixture.events.clone(),

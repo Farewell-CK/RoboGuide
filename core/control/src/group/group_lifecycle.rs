@@ -255,6 +255,7 @@ impl ControlPlane {
                 assignment_index,
             },
         );
+        group.refresh_membership()?;
         events.append(
             timestamp,
             correlation_id,
@@ -346,6 +347,7 @@ impl ControlPlane {
                 assignment_index,
             },
         );
+        group.refresh_membership()?;
         events.append(
             timestamp,
             correlation_id,
@@ -615,6 +617,7 @@ impl ControlPlane {
             group.unbound_roles.remove(committed.role_id());
         }
         group.lifecycle = GroupLifecycle::Adapted;
+        group.refresh_membership()?;
         if let Some((key, binding, authorization)) = takeover {
             self.actor_bindings.insert(key, binding);
             events.append(
@@ -915,6 +918,7 @@ impl ControlPlane {
             *execution = execution.with_assignments(Vec::new());
         }
         group.lifecycle = GroupLifecycle::Released;
+        group.refresh_membership()?;
         events.append(
             timestamp,
             correlation_id,
@@ -929,6 +933,11 @@ impl ControlPlane {
     }
 
     /// Returns the current group snapshot for assertions and adapters.
+    pub fn groups(&self) -> impl Iterator<Item = &ExecutionGroup> {
+        self.groups.values()
+    }
+
+    /// Returns one current Control-owned Group without creating membership or reservations.
     pub fn group(&self, group_id: &ExecutionGroupId) -> Option<&ExecutionGroup> {
         self.groups.get(group_id)
     }

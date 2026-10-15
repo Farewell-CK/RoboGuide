@@ -234,7 +234,15 @@ async fn spatial_map_cross_node_exchange_reaches_strong_verification() {
         .load_checkpoint()
         .expect("checkpoint reads")
         .expect("checkpoint remains present");
-    assert_eq!(checkpoint.event_sequence, 4);
+    let events = reopened.decoded_events().unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e.payload(), EventPayload::ArtifactUploadTransition { .. }))
+            .count(),
+        3
+    );
+    assert_eq!(checkpoint.event_sequence, 7);
     assert_eq!(
         checkpoint.event_sequence,
         reopened.latest_sequence().expect("log head reads")

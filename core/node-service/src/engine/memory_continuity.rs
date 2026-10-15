@@ -40,6 +40,7 @@ impl LocalIntegrationEngine {
             .map_err(|e| EngineError::Memory(e.to_string()))?;
         self.artifact_stager()
             .ok_or_else(|| EngineError::Memory("original Artifact data plane is absent".into()))?
+            .for_memory_import(import_id)?
             .record_memory_replica(
                 &manifest,
                 &NodeId::new(self.catalog().node_id())

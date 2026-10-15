@@ -1,5 +1,24 @@
 use super::*;
 
+/// Builds an actual historical inner fixture without post-v20 Memory membership authority.
+fn remove_legacy_membership_fixture(checkpoint: &mut serde_json::Value) {
+    if let Some(groups) = checkpoint["control"]["groups"].as_array_mut() {
+        for group in groups {
+            group.as_object_mut().unwrap().remove("membership_version");
+        }
+    }
+}
+
+/// Removes only new membership metadata while testing independent historical wrapper fences.
+fn historical_membership_wrapper_fixture(saved: &mut ServerCheckpoint) {
+    let mut inner: serde_json::Value = serde_json::from_str(&saved.integration_json).unwrap();
+    remove_legacy_membership_fixture(&mut inner);
+    if inner["schema"] == INTEGRATION_CHECKPOINT_SCHEMA {
+        inner["schema"] = "roboguide.controller-checkpoint/v20".into();
+    }
+    saved.integration_json = inner.to_string();
+}
+
 mod admission;
 mod attestation;
 mod dispatch_policy;

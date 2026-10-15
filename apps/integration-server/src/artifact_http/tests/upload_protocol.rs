@@ -302,7 +302,21 @@ async fn upload_errors_abort_session_and_release_registry_quota() {
         body: br#"{"upload_id":"interrupted"}"#.to_vec(),
         memory_publisher: None,
     };
-    start_upload(&interrupted_start, &store, &uploads).expect("upload starts");
+    response_body(
+        &request_once(
+            &store,
+            &catalog,
+            &uploads,
+            raw_request(
+                "POST",
+                &interrupted_start.path,
+                &interrupted_start.body,
+                true,
+            ),
+        )
+        .await,
+        "201 Created",
+    );
     let interrupted = raw_request_with_declared_length(
         "PUT",
         "/v1/artifact-uploads/interrupted/content",

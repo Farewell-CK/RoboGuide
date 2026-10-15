@@ -2,6 +2,7 @@
 
 use crate::*;
 use integration::grpc::v0_4::{MemoryImportReceipt, MemoryImportReceiptStatus};
+use ports::EventSink;
 
 /// Bounded administrator request; no field selects or creates a physical binding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +68,12 @@ impl ImportPhase {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MemoryImportIntent {
+    /// Original authenticated stable submitter; historical absence is never fabricated on restore.
+    #[serde(default)]
+    pub(crate) authorized_by: Option<String>,
+    /// Exact source-bound content permission; legacy absence never becomes a current Group grant.
+    #[serde(default)]
+    pub(crate) authority: Option<MemoryAuthorityStamp>,
     /// Original immutable administrator request.
     pub(crate) request: MemoryImportRequest,
     /// Durable receipt phase.
@@ -89,12 +96,28 @@ pub(crate) struct MemoryImportIntent {
     pub(crate) reconciliation: Option<super::memory_query::MemoryReconciliation>,
 }
 
+/// Original Control policy and member generation frozen before an import can have side effects.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MemoryAuthorityStamp {
+    /// Original immutable tenant namespace consumed by this authorization decision.
+    pub(crate) tenant_id: String,
+    /// Complete receiving Local EAIOS/provider contract, separate from the producer's owner.
+    pub(crate) consumer: domain::MemoryProviderDescriptor,
+    /// Immutable content authority identity.
+    pub(crate) registry_id: String,
+    /// Original full policy interpretation, never refreshed by replay.
+    pub(crate) revision: u64,
+    /// Current exact physical bindings at admission.
+    pub(crate) membership: domain::GroupMembershipVersion,
+}
+
 /// Revalidates Control, Runtime, provider and scope without changing any authority.
 pub(crate) fn authorize(
     controller: &ControllerState,
     request: &MemoryImportRequest,
     now: domain::TimestampMs,
-) -> Result<(), String> {
+) -> Result<Option<MemoryAuthorityStamp>, String> {
     if let Some(gate) = &request.evidence_gate {
         gate.policy.validate().map_err(|error| error.to_string())?;
         if gate.policy.payload_schema.is_none() {
@@ -210,7 +233,60 @@ pub(crate) fn authorize(
             return Err("Group-scoped producer is not a current Group participant".into());
         }
     }
-    Ok(())
+    let current = if let Some(registry) =
+        controller.bridge.control().memory_authorization_registry()
+    {
+        if !controller
+            .bridge
+            .control()
+            .memory_node_identity_is_current(&request.node_id, now)
+        {
+            return Err("Memory consumer session, identity or attestation is not current".into());
+        }
+        let tenant = controller
+            .bridge
+            .control()
+            .mission_tenant(request.task_ref.mission_id())
+            .unwrap_or("local");
+        let membership = controller
+            .bridge
+            .control()
+            .authorize_memory_consumer(
+                &request.manifest,
+                tenant,
+                &request.group_id,
+                &request.task_ref,
+                &request.role_id,
+                &request.node_id,
+                provider,
+                domain::MemoryAccessOperation::Import,
+                None,
+            )
+            .map_err(|error| error.to_string())?;
+        Some(MemoryAuthorityStamp {
+            tenant_id: tenant.into(),
+            consumer: provider.clone(),
+            registry_id: registry.registry_id.clone(),
+            revision: registry.revision,
+            membership,
+        })
+    } else {
+        if matches!(
+            request.manifest.scope(),
+            domain::MemoryScope::ExecutionGroup(_)
+        ) {
+            return Err("Group Memory requires explicit distributed content authorization".into());
+        }
+        None
+    };
+    if controller
+        .memory_imports
+        .get(&request.import_id)
+        .is_some_and(|original| original.authority != current)
+    {
+        return Err("original Memory policy or membership generation is no longer current".into());
+    }
+    Ok(current)
 }
 
 /// Admits a stable command into the private transaction candidate before any network send.
@@ -249,10 +325,12 @@ pub(crate) fn admit(
                 .into(),
         );
     }
-    authorize(controller, &request, now)?;
+    let authority = authorize(controller, &request, now)?;
     controller.memory_imports.insert(
         request.import_id.clone(),
         MemoryImportIntent {
+            authorized_by: None,
+            authority,
             request,
             phase: ImportPhase::Queued,
             authorized_at_ms: now.as_millis(),
@@ -416,6 +494,35 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         return Err("Memory import checkpoint exceeds retained bound".into());
     }
     for (id, intent) in &controller.memory_imports {
+        if let Some(author) = &intent.authorized_by
+            && (author.trim().is_empty() || author.len() > 256)
+        {
+            return Err("Memory import original principal is invalid".into());
+        }
+        if let Some(stamp) = &intent.authority {
+            stamp.membership.validate()?;
+            let registry = controller
+                .bridge
+                .control()
+                .memory_authorization_revision(stamp.revision)
+                .filter(|r| r.registry_id == stamp.registry_id)
+                .ok_or("Memory command lacks its original policy history")?;
+            let policy = registry.policy(&intent.request.manifest, &stamp.tenant_id)?;
+            if stamp.consumer.provider_id() != intent.request.consumer_provider_id
+                || !policy.groups.iter().any(|g| {
+                    g.group_id == intent.request.group_id
+                        && g.operations
+                            .contains(&domain::MemoryAccessOperation::Import)
+                        && g.providers.iter().any(|p| p.matches(&stamp.consumer))
+                })
+            {
+                return Err("Memory command original consumer policy evidence differs".into());
+            }
+            stamp
+                .consumer
+                .admit_import(&intent.request.manifest, &intent.request.node_id)
+                .map_err(|e| e.to_string())?;
+        }
         if id != &intent.request.import_id
             || id.trim().is_empty()
             || id.len() > 128
@@ -454,9 +561,13 @@ pub(crate) fn submit(
     gate: &Arc<Mutex<()>>,
     clock: &impl Clock,
     body: &[u8],
+    subject: &str,
 ) -> Result<serde_json::Value, String> {
     let request: MemoryImportRequest =
         serde_json::from_slice(body).map_err(|error| error.to_string())?;
+    if subject.trim().is_empty() || subject.len() > 256 {
+        return Err("invalid original Memory import principal".into());
+    }
     let id = request.import_id.clone();
     let _guard = gate
         .lock()
@@ -468,7 +579,52 @@ pub(crate) fn submit(
             .map_err(|_| "Controller authority is unavailable")?;
         let mut candidate = live.clone();
         let now = clock.now();
+        if candidate
+            .memory_imports
+            .get(&id)
+            .and_then(|i| i.authorized_by.as_deref())
+            .is_some_and(|original| original != subject)
+        {
+            return Err("Memory import identity belongs to another authenticated principal".into());
+        }
+        let new = !candidate.memory_imports.contains_key(&id);
         admit(&mut candidate, request, now)?;
+        if new {
+            candidate
+                .memory_imports
+                .get_mut(&id)
+                .expect("admitted original import")
+                .authorized_by = Some(subject.into());
+            let correlation = domain::CorrelationId::new("memory-import-authorization")
+                .expect("static correlation");
+            let value =
+                serde_json::to_value(&candidate.memory_imports[&id]).map_err(|e| e.to_string())?;
+            use sha2::{Digest as _, Sha256};
+            let digest = format!(
+                "sha256:{:x}",
+                Sha256::digest(serde_json::to_vec(&value).map_err(|e| e.to_string())?)
+            );
+            let original = &candidate.memory_imports[&id].request;
+            events.clone().append(
+                now,
+                &correlation,
+                None,
+                domain::EventPayload::MemoryCommandEvidence {
+                    group_id: original.group_id.clone(),
+                    task_ref: original.task_ref.clone(),
+                    import_id: id.clone(),
+                    command_id: format!("memory-import-{id}"),
+                    generation: 0,
+                    stage: "import_authorized".into(),
+                    content_digest: digest,
+                    principal: subject.into(),
+                    received_at: now,
+                },
+            );
+        }
+        if let Some(error) = events.take_error().map_err(|e| e.to_string())? {
+            return Err(error);
+        }
         prepare(&mut candidate, now);
         let checkpoint = server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
         save_controller_checkpoint(events, &checkpoint).map_err(|error| error.to_string())?;

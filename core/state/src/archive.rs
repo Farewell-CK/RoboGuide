@@ -48,6 +48,7 @@ fn requires_catalog_history(payload: &EventPayload) -> bool {
     matches!(
         payload,
         EventPayload::MapArtifactDeclared { .. }
+            | EventPayload::ArtifactUploadTransition { .. }
             | EventPayload::MapArtifactPublished { .. }
             | EventPayload::MapArtifactStaged { .. }
             | EventPayload::MapArtifactImported { .. }

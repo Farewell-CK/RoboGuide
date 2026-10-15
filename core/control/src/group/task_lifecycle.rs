@@ -70,6 +70,7 @@ impl ControlPlane {
                 .collect();
             *execution = execution.with_assignments(remaining);
         }
+        group_mut.refresh_membership()?;
         events.append(
             timestamp,
             correlation_id,
@@ -444,6 +445,7 @@ impl ControlPlane {
         group
             .task_executions
             .insert(task_ref.clone(), execution.with_assignments(remaining));
+        group.refresh_membership()?;
         events.append(
             timestamp,
             correlation_id,

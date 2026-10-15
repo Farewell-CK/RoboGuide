@@ -712,6 +712,7 @@ fn versioned_restore_rejects_group_authorization_in_old_checkpoint_schema() {
     )
     .unwrap();
     checkpoint["schema"] = serde_json::json!("roboguide.controller-checkpoint/v17");
+    remove_legacy_membership_fixture(&mut checkpoint);
     assert!(
         IntegrationRuntimeBridge::restore_from_checkpoint(
             &checkpoint.to_string(),

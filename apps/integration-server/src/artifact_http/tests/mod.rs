@@ -1,4 +1,4 @@
-use super::server::{handle_connection, start_upload};
+use super::server::handle_connection;
 use super::*;
 use artifact_store::digest_bytes;
 use domain::{
@@ -439,4 +439,5 @@ fn response_body(response: &[u8], status: &str) -> Vec<u8> {
 
 mod memory_catalog;
 mod spatial_catalog;
+mod upload_authority;
 mod upload_protocol;

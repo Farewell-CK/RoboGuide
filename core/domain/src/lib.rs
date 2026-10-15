@@ -9,6 +9,9 @@
 
 mod actor;
 mod allocation;
+mod artifact_authorization;
+mod artifact_upload;
+pub use artifact_upload::{ArtifactUploadPhase, ArtifactUploadRecord};
 mod attestation;
 mod belief;
 mod capability;
@@ -25,6 +28,14 @@ mod identity;
 mod lease;
 mod localization_evidence;
 mod memory;
+mod memory_authority;
+pub use artifact_authorization::{
+    ArtifactAccessRole, ArtifactAuthorizationRegistry, ArtifactCertificateGrant,
+};
+pub use memory_authority::{
+    GroupMembershipVersion, MEMORY_AUTHORIZATION_SCHEMA, MemoryAccessOperation, MemoryAccessPolicy,
+    MemoryAuthorizationRegistry, MemoryConsumerPolicy, MemoryGroupPolicy, memory_manifest_digest,
+};
 mod mission;
 mod mission_plan;
 mod node_health;

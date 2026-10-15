@@ -26,7 +26,11 @@ State/MI 的当前整改见 [ADR-0104](docs/decisions/0104-state-consumers-belie
 
 Memory 的原实例查询、导入中断对账和日志回退保护已有当前软件切片，见
 [验收记录](docs/development/acceptance/2026-10-15-f4-memory-continuity.md)。进程验收使用实际文件
-复制、SQL 故障、正式协议与独立复算；F4 的 Group 授权、GC、空间融合及后续阶段仍须完成。
+复制、SQL 故障、正式协议与独立复算。当前还接入了 Control 内容策略、成员 generation、
+Artifact 稳定证书主体和实际 bytes 上传归属门禁，见
+[内容授权合同](contracts/memory/authorization-v0.1/README.md)及
+[内容门禁验收](docs/development/acceptance/2026-10-15-f4-content-authority.md)。完整 Node Group grant、撤销 ACK、
+执行前 Memory 准备、handoff、active-map/GC、空间融合及后续阶段仍须完成。
 
 ## 系统目标
 
@@ -513,12 +517,11 @@ Staged/Imported/Rejected evidence；replica durable identity 保留 exact
 [`contracts/memory/v0.1`](contracts/memory/v0.1/README.md) 和
 [`ADR-0024`](docs/decisions/0024-federated-state-and-selective-memory.md)。
 
-这仍不是完整 State & Memory Plane。可驱动 Control 的 Shared Belief/fusion policy、完整
-Execution/Task/Group 历史 projection、动态多 Controller membership、远端 archive 共识、长期
-容量治理以及面向具体 Mission 的 consumer selection/prefetch policy、Controller 到 Node 的 durable
-selective-import command 仍未实现。通用 Node Memory provider workflow、filesystem/JSONL 参考
-backend 和显式 data-plane CAS exchange operation 已由 ADR-0025 实现；Node 不会因为 discovery
-结果自动复制 Memory。
+这仍不是完整 State & Memory Plane。显式 State consumer policy、来源保守融合、独立 verifier、
+持久 selective-import 与原 provider 查询已接入当前软件；Imported 历史不代表当前可用性。
+完整 Group grant/revocation、执行前准备、active-map/GC、空间融合、完整历史重建与动态多
+Controller 内容恢复仍按 F4–F10 实施。通用 Node Memory provider workflow、filesystem/JSONL
+参考 backend 和显式 data-plane exchange 保持原职责；Node 不因 discovery 自动复制 Memory。
 
 这里的 Local Memory Provider 是统一操作合同：配置的 HTTP/gRPC/MCP workflow 把调用交给真实
 EAIOS，EAIOS 保留 Memory semantic 与 backend storage authority。Node 内部

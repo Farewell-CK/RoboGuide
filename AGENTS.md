@@ -94,9 +94,18 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   The shipped immutable-file provider and process conformance use actual files/SQL/OS processes,
   zero devices and no model/simulator. Full Group authorization, revocation/GC, active-map and
   spatial fusion remain required F4 work; this slice is not overall completion.
-- ExecutionGroup-scoped Memory currently has a domain model and Node-local invocation validation
-  only. Do not claim or implement complete distributed Group authorization/handoff until its
-  Control, Runtime, Commit, Recovery, and Node Protocol authority is designed explicitly.
+- ADR-0105's content gate adds explicit Control policy/history and stable Artifact certificate grants.
+  Actual binding changes advance Group membership generation; historical absence stays unavailable.
+  Import intents retain original tenant/provider/policy/membership and authenticated submitter.
+  Artifact writes recheck actual TLS/grant authority under writer ordering; blob reads recheck per
+  bounded chunk. Actual complete staged bytes are hashed/fsynced before a durable upload proof;
+  existing CAS hashes and new manifest aliases never establish byte ownership or broaden scope.
+  Wrapper v32, inner checkpoint v21 and event codec v23 fence old readers. Upload history remains
+  protected from archive deletion. `contracts/memory/authorization-v0.1/` and
+  `tools/quality/check_artifact_authority_processes.py` define the software/API slice; no Node or
+  device is invented by its certificate/upload check. Node-wide Group grants/revocation ACK,
+  pre-Execute Memory readiness, full handoff, active-map/GC and spatial computation remain required
+  F4 work. Do not claim complete distributed Group authorization from these current gates alone.
 - `core/orchestration/` owns complete MissionPlan acceptance, Mission-level Group
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - ADR-0092 fences the reviewed reliability slice: wrapper v26 and failure-window event codec v19

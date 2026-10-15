@@ -39,8 +39,11 @@ pub use dispatch::{RecoveryDeploymentSupport, RecoverySupportDisposition};
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 20 persists the source-aware Task satisfaction evidence projection.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v20";
+/// Version 21 additionally fences exact Control-owned Memory membership authority.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v21";
+/// Last inner authority checkpoint without exact Control-owned Group membership versions.
+const PRE_MEMORY_AUTHORITY_CONTROLLER_CHECKPOINT_SCHEMA: &str =
+    "roboguide.controller-checkpoint/v20";
 
 /// Previous checkpoint has no persisted Task satisfaction evidence projection.
 const PRE_SATISFACTION_CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v19";

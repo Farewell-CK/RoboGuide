@@ -200,6 +200,47 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
     );
 }
 
+/// A tenant administrator cannot replace a complete deployment authority for another namespace.
+#[tokio::test]
+async fn tenant_administrator_cannot_read_or_replace_global_source_and_content_authority() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let controller = controller(&log);
+    let principal = OperatorPrincipal {
+        certificate: None,
+        tenants: Some(BTreeSet::from(["tenant-a".into()])),
+        subject: Some("scoped-admin".into()),
+        role: Some("recovery-admin".into()),
+        mtls: true,
+    };
+    let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
+    for path in [
+        "/v1/state-policies",
+        "/v1/belief-policies",
+        "/v1/verifier-sources",
+        "/v1/memory-authorizations",
+        "/v1/artifact-authorizations",
+    ] {
+        for method in ["GET", "POST"] {
+            let response = route(
+                &controller,
+                &log,
+                &principal,
+                &request(method, path, b"{}", None),
+            )
+            .await;
+            assert!(
+                response.starts_with("HTTP/1.1 403"),
+                "{method} {path}: {response}"
+            );
+        }
+    }
+    assert_eq!(
+        server_checkpoint_json(&controller.lock().unwrap()).unwrap(),
+        before
+    );
+}
+
 /// Review distinguishes a SQL outage from contract rejection, rolls back clearing, and can be retried once.
 #[tokio::test]
 async fn review_sql_failure_preserves_quarantine_and_next_review_succeeds() {

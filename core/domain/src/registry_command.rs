@@ -12,6 +12,10 @@ pub enum RegistryCommandKind {
     StatePolicy,
     /// Independent semantic verification producers.
     SemanticVerifier,
+    /// Explicit immutable Memory content, consumer and exchange policy.
+    MemoryAuthorization,
+    /// Revisioned stable-principal Artifact certificate grants.
+    ArtifactAuthorization,
 }
 
 /// Original authenticated result of one idempotent registry change.

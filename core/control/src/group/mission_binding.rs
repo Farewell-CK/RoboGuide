@@ -436,6 +436,7 @@ impl ControlPlane {
         group
             .task_executions
             .insert(task_ref.clone(), execution.clone());
+        group.refresh_membership()?;
         events.append(
             timestamp,
             correlation_id,

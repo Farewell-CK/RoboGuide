@@ -150,6 +150,14 @@ impl ControlPlane {
                 .semantic_verifier_history
                 .get(&receipt.revision)
                 .map(serde_json::to_value),
+            domain::RegistryCommandKind::MemoryAuthorization => self
+                .memory_authorization_history
+                .get(&receipt.revision)
+                .map(serde_json::to_value),
+            domain::RegistryCommandKind::ArtifactAuthorization => self
+                .artifact_authorization_history
+                .get(&receipt.revision)
+                .map(serde_json::to_value),
         }
         .transpose()
         .map_err(|error| ControlError::InvalidProposal(error.to_string()))?

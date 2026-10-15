@@ -74,6 +74,49 @@ fn fixture() -> (stop_recovery::Fixture, MemoryImportRequest) {
         )
         .unwrap(),
     };
+    fixture
+        .controller
+        .bridge
+        .control_mut()
+        .register_node_session(&request.node_id, "fixture-admitted-session", 5_000)
+        .unwrap();
+    let policy = MemoryAccessPolicy {
+        policy_id: "fixture-content-policy".into(),
+        selector: request.manifest.selector().clone(),
+        manifest_digest: memory_manifest_digest(&request.manifest).unwrap(),
+        tenant_id: "local".into(),
+        principals: BTreeMap::new(),
+        groups: vec![MemoryGroupPolicy {
+            group_id: request.group_id.clone(),
+            operations: BTreeSet::from([
+                MemoryAccessOperation::Discover,
+                MemoryAccessOperation::Read,
+                MemoryAccessOperation::Import,
+            ]),
+            providers: vec![MemoryConsumerPolicy {
+                provider_id: Some("consumer".into()),
+                local_system_id: Some(LocalSystemId::new("fixture-runtime").unwrap()),
+                kind: MemoryKind::Semantic,
+                payload_schema: "example.semantic/v1".into(),
+                media_type: "application/json".into(),
+            }],
+        }],
+        revoked: false,
+    };
+    fixture
+        .controller
+        .bridge
+        .control_mut()
+        .accept_memory_authorization_registry(
+            MemoryAuthorizationRegistry {
+                schema_version: MEMORY_AUTHORIZATION_SCHEMA.into(),
+                registry_id: "fixture-memory-authority".into(),
+                revision: 1,
+                policies: BTreeMap::from([(policy.key(), policy)]),
+            },
+            0,
+        )
+        .unwrap();
     (fixture, request)
 }
 

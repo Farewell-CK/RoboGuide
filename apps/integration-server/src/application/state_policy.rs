@@ -15,6 +15,118 @@ struct RegistryUpdate<R> {
     registry: R,
 }
 
+/// Installs a trusted startup Artifact profile or refuses missing/stale deployment authority on restart.
+pub(crate) fn bootstrap_artifact(
+    controller: &Arc<Mutex<ControllerState>>,
+    log: &state::SqliteEventLog,
+    gate: &Arc<Mutex<()>>,
+    configured: Option<&domain::ArtifactAuthorizationRegistry>,
+    tls_enabled: bool,
+    now: domain::TimestampMs,
+) -> Result<(), String> {
+    let (current, identity_enabled) = {
+        let live = controller
+            .lock()
+            .map_err(|_| "Artifact bootstrap authority unavailable")?;
+        (
+            live.bridge
+                .control()
+                .artifact_authorization_registry()
+                .cloned(),
+            live.bridge.control().node_identity_registry().is_some(),
+        )
+    };
+    let Some(registry) = configured else {
+        if current.is_some() || identity_enabled && tls_enabled {
+            return Err("Node lifecycle/enrolled Artifact deployments require a versioned Artifact certificate profile".into());
+        }
+        return Ok(());
+    };
+    if current.as_ref() == Some(registry) {
+        return Ok(());
+    }
+    let input = RegistryUpdate {
+        command_id: format!(
+            "artifact-bootstrap-{}-{}",
+            registry.registry_id, registry.revision
+        ),
+        expected_revision: current.as_ref().map_or(0, |r| r.revision),
+        registry: registry.clone(),
+    };
+    commit_registry(
+        controller,
+        log,
+        gate,
+        &input,
+        "trusted-deployment:artifact-bootstrap",
+        now,
+        domain::RegistryCommandKind::ArtifactAuthorization,
+        |control| {
+            control.accept_artifact_authorization_registry(
+                input.registry.clone(),
+                input.expected_revision,
+            )
+        },
+    )?;
+    Ok(())
+}
+
+/// Commits actual TLS certificate delegations with stable principal and immutable tenant attribution.
+pub(crate) fn submit_artifact(
+    controller: &Arc<Mutex<ControllerState>>,
+    log: &state::SqliteEventLog,
+    gate: &Arc<Mutex<()>>,
+    body: &[u8],
+    subject: &str,
+    now: domain::TimestampMs,
+) -> Result<serde_json::Value, String> {
+    let input: RegistryUpdate<domain::ArtifactAuthorizationRegistry> =
+        serde_json::from_slice(body).map_err(|e| e.to_string())?;
+    commit_registry(
+        controller,
+        log,
+        gate,
+        &input,
+        subject,
+        now,
+        domain::RegistryCommandKind::ArtifactAuthorization,
+        |control| {
+            control.accept_artifact_authorization_registry(
+                input.registry.clone(),
+                input.expected_revision,
+            )
+        },
+    )
+}
+
+/// Commits exact immutable content, tenant and participant grants through the authority journal.
+pub(crate) fn submit_memory(
+    controller: &Arc<Mutex<ControllerState>>,
+    log: &state::SqliteEventLog,
+    gate: &Arc<Mutex<()>>,
+    body: &[u8],
+    subject: &str,
+    now: domain::TimestampMs,
+) -> Result<serde_json::Value, String> {
+    let input: RegistryUpdate<domain::MemoryAuthorizationRegistry> =
+        serde_json::from_slice(body).map_err(|error| error.to_string())?;
+    commit_registry(
+        controller,
+        log,
+        gate,
+        &input,
+        subject,
+        now,
+        domain::RegistryCommandKind::MemoryAuthorization,
+        |control| {
+            control.accept_memory_authorization_registry(
+                input.registry.clone(),
+                input.expected_revision,
+            )
+        },
+    )
+}
+
 /// Parses and commits State policy authority without treating payloads as policy declarations.
 pub(crate) fn submit(
     controller: &Arc<Mutex<ControllerState>>,

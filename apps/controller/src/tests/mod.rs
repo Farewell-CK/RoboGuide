@@ -76,7 +76,8 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         EventPayload::SemanticVerifierEvidenceAdmitted { receipt } => {
             Some(&receipt.evidence.task_ref)
         }
-        EventPayload::MissionSchedulingPriorityChanged { .. } => None,
+        EventPayload::MissionSchedulingPriorityChanged { .. }
+        | EventPayload::ArtifactUploadTransition { .. } => None,
         EventPayload::CandidatesMatched { task_ref }
         | EventPayload::SchedulingReservationPreempted { task_ref, .. }
         | EventPayload::MissionExecutionContractRejected { task_ref, .. }

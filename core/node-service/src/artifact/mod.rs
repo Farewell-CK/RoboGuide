@@ -219,6 +219,8 @@ impl ArtifactError {
 /// HTTP client for the independent artifact data plane.
 #[derive(Clone)]
 pub struct ArtifactClient {
+    /// Opaque original Controller import identity; the server resolves current permission independently.
+    memory_import_id: Option<String>,
     /// Reusable HTTP client with no map-specific protocol state.
     client: Client,
     /// Absolute artifact service endpoint.

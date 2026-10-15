@@ -57,3 +57,22 @@ localization proof。外部文件/离线几何验收与实际设备定位保持�
 
 与 F5 的 snapshot/archive/CAS restore、F7 的 stop/handoff 和 F10 的全栈运行验收共同闭环，
 不因阶段边界删除这些必需项。
+
+## 当前内容门禁切片
+
+Control 的完整 Memory resource policy 与 Artifact certificate registry 通过全局 recovery-admin
+管理 API 和原始 command receipt 持久化；租户管理员不能替换全部署权威。不可变 source/tenant、
+撤销与完整原 policy history 在 restore 时复核。Group binding digest 相同也不能复活旧 generation；
+旧快照缺少 membership 时不补新授权。Import intent 保留原接收 provider、tenant、policy、成员
+版本和已认证提交者，重试不更新这些依据。此处仍不是完整 Node Group lease/ACK 合同。
+
+Artifact 使用当前 Control 中的稳定证书主体及实际 TLS leaf/notAfter。写入前在现有 writer gate
+内复核；blob 每块发送前复核。Uploaded bytes 在完整 hash/size/fsync 后才得到 Prepared 证据，
+CAS 放置后形成 Completed 归属。最终 SQL 失败可以对原 CAS identity 做只读核对；Started 不
+证明内容曾完整写入。既有 CAS 哈希、另一个 selector、typed-map alias 或 read grant 均不能
+替代来源归属或显式 scope exchange。当前没有完成的 handoff 路径继续拒绝。
+
+本切片使用 wrapper v32、inner v21、upload codec v23，并保留旧 v31 连续性记录；Node journal
+v7 不变。上传归属事件在完整 snapshot/archive/replay 合同落地前不能 GC。原始工作流 context
+保持不变；Node 从既有 continuity identity 读取 opaque import purpose，通过当前 Controller
+查验其实际权限。该 purpose 不是 bearer credential，也不证明 Local EAIOS 已停止或执行完成。

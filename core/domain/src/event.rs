@@ -5,6 +5,11 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Durable original upload source and actual byte ownership; this is not Memory import success.
+    ArtifactUploadTransition {
+        /// Complete source-bound monotonic workflow evidence.
+        record: ArtifactUploadRecord,
+    },
     /// A bounded Memory command or readonly result was durably admitted without Task authority.
     MemoryCommandEvidence {
         /// Original Control Group; this event does not renew membership.

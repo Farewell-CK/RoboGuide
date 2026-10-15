@@ -5,6 +5,8 @@ use super::*;
 /// Certificate-to-role profile for a remotely bound Artifact HTTP listener.
 #[derive(Clone)]
 pub struct ArtifactTlsProfile {
+    /// Explicit deployment bootstrap; runtime changes use the durable Controller command API.
+    authority: Option<domain::ArtifactAuthorizationRegistry>,
     /// Mutual-TLS acceptor requiring a client certificate signed by the configured CA.
     acceptor: TlsAcceptor,
     /// Certificate digest to bounded artifact role mapping.
@@ -12,6 +14,10 @@ pub struct ArtifactTlsProfile {
 }
 
 impl ArtifactTlsProfile {
+    /// Returns the trusted deployment bootstrap without accepting identity declarations from clients.
+    pub(crate) fn authorization_registry(&self) -> Option<&domain::ArtifactAuthorizationRegistry> {
+        self.authority.as_ref()
+    }
     /// Resolve the certificate principal from one accepted TLS stream.
     fn principal<S>(
         &self,
@@ -26,14 +32,22 @@ impl ArtifactTlsProfile {
             .first()
             .ok_or("Artifact mTLS peer certificate chain is empty")?;
         let digest = format!("sha256:{:x}", Sha256::digest(certificate.as_ref()));
-        self.roles
-            .get(&digest)
-            .cloned()
-            .map(|grant| ArtifactPrincipal {
-                subject: digest,
-                grant,
-            })
-            .ok_or_else(|| "Artifact certificate is not authorized".to_string())
+        let certificate_expires_at_ms =
+            integration::verified_certificate_expires_at_ms(certificate.as_ref())
+                .map_err(|e| e.to_string())?;
+        let grant = self.roles.get(&digest).cloned();
+        Ok(ArtifactPrincipal {
+            subject: digest.clone(),
+            tenant_id: "local".into(),
+            certificate_digest: Some(digest),
+            certificate_expires_at_ms,
+            legacy_mapped: grant.is_some(),
+            registry_id: None,
+            registry_revision: None,
+            grant: grant.unwrap_or_else(|| {
+                ArtifactGrant::parse(serde_json::json!("viewer")).expect("static empty viewer")
+            }),
+        })
     }
 }
 
@@ -71,8 +85,32 @@ pub(super) fn load_artifact_tls(
     let server_cert = load_certificates(certificate_path)?;
     let server_key = load_private_key(key_path)?;
     let ca = load_certificates(ca_path)?;
-    let raw_roles: BTreeMap<String, serde_json::Value> =
-        serde_json::from_slice(&std::fs::read(role_map_path)?)?;
+    if std::fs::metadata(role_map_path)?.len() > 2 * 1024 * 1024 {
+        return Err("Artifact authorization file exceeds its bound".into());
+    }
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(role_map_path)?)?;
+    let authority = if value.get("schema_version").is_some() {
+        let registry: domain::ArtifactAuthorizationRegistry =
+            serde_json::from_value(value.clone())?;
+        registry.validate()?;
+        Some(registry)
+    } else {
+        None
+    };
+    let raw_roles: BTreeMap<String, serde_json::Value> = if let Some(registry) = &authority {
+        registry
+            .grants
+            .iter()
+            .map(|(leaf, grant)| {
+                Ok((
+                    leaf.clone(),
+                    serde_json::to_value(ArtifactGrant::from(grant))?,
+                ))
+            })
+            .collect::<Result<_, serde_json::Error>>()?
+    } else {
+        serde_json::from_value(value)?
+    };
     if raw_roles.is_empty() {
         return Err("Artifact mTLS role map must not be empty".into());
     }
@@ -102,6 +140,7 @@ pub(super) fn load_artifact_tls(
         .with_client_cert_verifier(verifier)
         .with_single_cert(server_cert, server_key)?;
     Ok(ArtifactTlsProfile {
+        authority,
         acceptor: TlsAcceptor::from(Arc::new(server)),
         roles: Arc::new(roles),
     })
@@ -153,7 +192,7 @@ pub async fn serve_artifact_http(
                         let Ok(accepted) = timeout(Duration::from_secs(5), profile.acceptor.accept(stream)).await else { return; };
                         match accepted {
                             Ok(mut tls_stream) => {
-                                let role = match profile.principal(&tls_stream) {
+                                let role = match profile.principal(&tls_stream).and_then(|p| shared_memory_admission.refresh_artifact_principal(&p)) {
                                     Ok(role) => role,
                                     Err(error) => {
                                         eprintln!("Artifact mTLS identity rejected: {error}");
@@ -232,6 +271,9 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     let mut head = read_request_head(stream).await?;
+    let principal = memory_admission
+        .refresh_artifact_principal(&principal)
+        .map_err(HttpError::forbidden)?;
     let method = head.method.clone();
     let path = head.path.clone();
     let authorization = principal.authorize_head(&head, catalog);
@@ -246,6 +288,13 @@ where
         },
     )?;
     authorization?;
+    let import_id = head.memory_import_id.clone();
+    let authenticated = super::authenticated::AuthenticatedAdmission {
+        authority: memory_admission,
+        principal: &principal,
+        catalog,
+        import_id: import_id.as_deref(),
+    };
     let response = match (method.as_str(), path.as_str()) {
         ("GET", "/healthz") => {
             catalog.ensure_available()?;
@@ -259,35 +308,139 @@ where
         ("POST", "/v1/artifact-uploads") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            start_upload(&request, store, uploads)?
+            super::upload_authority::start_authorized_upload(
+                &request,
+                store,
+                uploads,
+                catalog,
+                &authenticated,
+                &principal,
+            )?
         }
         ("GET", "/v1/maps") => {
-            let revisions = catalog.revisions()?;
+            let revisions = catalog
+                .revisions()?
+                .into_iter()
+                .filter(|r| {
+                    authorized_map_read(
+                        catalog,
+                        memory_admission,
+                        &principal,
+                        r.manifest(),
+                        domain::MemoryAccessOperation::Discover,
+                    )
+                    .is_ok()
+                })
+                .collect::<Vec<_>>();
             Response::Json("200 OK", serde_json::json!({"revisions": revisions}))
         }
-        ("GET", "/v1/memories") => list_memories(catalog)?,
+        ("GET", "/v1/memories") => list_authorized_memories(catalog, memory_admission, &principal)?,
         ("GET", path) if path.starts_with("/v1/artifacts/") => {
-            stream_artifact(stream, store, path.trim_start_matches("/v1/artifacts/")).await?;
+            let digest =
+                artifact_store::normalize_digest(path.trim_start_matches("/v1/artifacts/"))
+                    .map_err(map_cas_error)?;
+            authorize_blob_read(
+                catalog,
+                memory_admission,
+                &principal,
+                &digest,
+                import_id.as_deref(),
+            )?;
+            stream_artifact(stream, store, &digest, &mut || {
+                authorize_blob_read(
+                    catalog,
+                    memory_admission,
+                    &principal,
+                    &digest,
+                    import_id.as_deref(),
+                )
+            })
+            .await?;
             return Ok(());
         }
-        ("GET", path) if path.starts_with("/v1/maps/") => get_revision(catalog, path)?,
-        ("GET", path) if path.starts_with("/v1/memories/") => get_memory(catalog, path)?,
+        ("GET", path) if path.starts_with("/v1/maps/") => {
+            let response = get_revision(catalog, path)?;
+            let Response::Json(_, ref value) = response;
+            let snapshot: domain::MapRevisionSnapshot = serde_json::from_value(value.clone())
+                .map_err(|e| HttpError::internal(e.to_string()))?;
+            authorized_map_read(
+                catalog,
+                memory_admission,
+                &principal,
+                snapshot.manifest(),
+                domain::MemoryAccessOperation::Discover,
+            )?;
+            response
+        }
+        ("GET", path) if path.starts_with("/v1/memories/") => {
+            let selector = memory_selector_from_path(path, false)?;
+            if let Some(manifest) = catalog.memory(&selector)? {
+                memory_admission
+                    .authorize_memory_access(
+                        &principal,
+                        &manifest,
+                        domain::MemoryAccessOperation::Discover,
+                        import_id.as_deref(),
+                    )
+                    .map_err(HttpError::forbidden)?;
+            } else if let Some(map) = catalog.revision(&map_selector_from_memory(&selector)?)? {
+                authorized_map_read(
+                    catalog,
+                    memory_admission,
+                    &principal,
+                    map.manifest(),
+                    domain::MemoryAccessOperation::Discover,
+                )?;
+            }
+            get_memory(catalog, path)?
+        }
+        ("GET", path) if path.starts_with("/v1/artifact-uploads/") => {
+            let id = path.trim_start_matches("/v1/artifact-uploads/");
+            memory_admission
+                .revalidate_artifact_principal(&principal)
+                .map_err(HttpError::forbidden)?;
+            Response::Json(
+                "200 OK",
+                serde_json::json!({"schema_version":"roboguide.artifact-upload-observation/v0.1","record":catalog.owned_upload(id,&principal)?}),
+            )
+        }
         (method, path)
             if matches!(method, "POST" | "PUT")
                 && path.starts_with("/v1/artifact-uploads/")
                 && path.ends_with("/content") =>
         {
-            append_upload(stream, &head, uploads).await?
+            append_upload(
+                stream,
+                &head,
+                uploads,
+                catalog,
+                memory_admission,
+                &principal,
+            )
+            .await?
         }
         ("POST", path)
             if path.starts_with("/v1/artifact-uploads/") && path.ends_with("/finalize") =>
         {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            finalize_upload(&request, store, uploads)?
+            super::upload_authority::finalize_authorized_upload(
+                &request,
+                store,
+                uploads,
+                catalog,
+                &authenticated,
+                &principal,
+            )?
         }
         ("DELETE", path) if path.starts_with("/v1/artifact-uploads/") => {
-            abort_upload(path, uploads)?
+            super::upload_authority::abandon_authorized_upload(
+                path,
+                uploads,
+                catalog,
+                &authenticated,
+                &principal,
+            )?
         }
         ("POST", path)
             if path.starts_with("/v1/maps/") && path.ends_with("/localization-evidence") =>
@@ -296,7 +449,7 @@ where
             principal.authorize_body(&request)?;
             record_localization_evidence(
                 catalog,
-                memory_admission,
+                &authenticated,
                 localization_observer,
                 &request,
                 path,
@@ -305,22 +458,22 @@ where
         ("POST", path) if path.starts_with("/v1/maps/") && path.ends_with("/replicas") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            record_replica(catalog, &request, path)?
+            record_replica(catalog, &authenticated, &request, path)?
         }
         ("POST", path) if path.starts_with("/v1/memories/") && path.ends_with("/replicas") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            record_memory_replica(catalog, store, memory_admission, &request, path)?
+            record_memory_replica(catalog, store, &authenticated, &request, path)?
         }
         ("POST", path) if path.starts_with("/v1/memories/") && path.contains("/revisions/") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            publish_memory(catalog, store, memory_admission, &request, path)?
+            publish_memory(catalog, store, &authenticated, &request, path)?
         }
         ("POST", path) if path.starts_with("/v1/maps/") && path.contains("/revisions/") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            publish_revision(catalog, store, &request, path)?
+            publish_revision(catalog, store, &authenticated, &request, path)?
         }
         _ => return Err(HttpError::not_found("artifact endpoint not found")),
     };
@@ -649,6 +802,9 @@ pub(super) async fn append_upload(
     stream: &mut (impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin),
     head: &RequestHead,
     uploads: &Uploads,
+    catalog: &ArtifactCatalog,
+    authority: &dyn MemoryProviderAdmission,
+    principal: &ArtifactPrincipal,
 ) -> Result<Response, HttpError> {
     let upload_id = head
         .path
@@ -658,9 +814,20 @@ pub(super) async fn append_upload(
         return Err(HttpError::too_large("artifact exceeds v0 size limit"));
     }
     let mut in_flight = take_for_append(uploads, upload_id, head.content_length)?;
+    let mut write_chunk = |upload: &mut ArtifactUpload, bytes: &[u8]| {
+        let _gate = catalog
+            .write_gate
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("upload writer ordering unavailable"))?;
+        authority
+            .revalidate_artifact_principal(principal)
+            .map_err(HttpError::forbidden)?;
+        super::upload_authority::check_live_upload(catalog, upload_id, principal)?;
+        upload.write_chunk(bytes).map_err(map_cas_error)
+    };
     let stream_result = timeout(
         UPLOAD_BODY_TIMEOUT,
-        head.stream_body(stream, &mut in_flight.session.upload),
+        head.stream_body(stream, &mut in_flight.session.upload, &mut write_chunk),
     )
     .await;
     match stream_result {
@@ -677,47 +844,25 @@ pub(super) async fn append_upload(
         }
     }
     let size = in_flight.session.upload.size();
+    let final_check = (|| {
+        let _gate = catalog
+            .write_gate
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("upload writer ordering unavailable"))?;
+        authority
+            .revalidate_artifact_principal(principal)
+            .map_err(HttpError::forbidden)?;
+        super::upload_authority::check_live_upload(catalog, upload_id, principal)?;
+        Ok(())
+    })();
+    if let Err(error) = final_check {
+        abort_in_flight(uploads, in_flight)?;
+        return Err(error);
+    }
     restore_after_append(uploads, upload_id, in_flight)?;
     Ok(Response::Json(
         "202 Accepted",
         serde_json::json!({"upload_id": upload_id, "received_bytes": size}),
-    ))
-}
-
-/// Finalizes one upload after validating the expected digest and byte count.
-pub(super) fn finalize_upload(
-    request: &Request,
-    store: &FileSystemArtifactStore,
-    uploads: &Uploads,
-) -> Result<Response, HttpError> {
-    let upload_id = request
-        .path
-        .trim_start_matches("/v1/artifact-uploads/")
-        .trim_end_matches("/finalize");
-    let input: UploadFinalize = parse_json(&request.body)?;
-    let mut in_flight = take_for_terminal(uploads, upload_id)?;
-    let artifact = match in_flight
-        .session
-        .upload
-        .finalize(input.content_digest.as_str(), input.byte_size)
-    {
-        Ok(artifact) => artifact,
-        Err(error) => {
-            let response_error = map_cas_error(error);
-            abort_in_flight(uploads, in_flight)?;
-            return Err(response_error);
-        }
-    };
-    release_in_flight(uploads, in_flight.accounted_bytes)?;
-    let present = store.contains(artifact.digest()).map_err(map_cas_error)?;
-    if !present {
-        return Err(HttpError::internal(
-            "finalized artifact disappeared from CAS",
-        ));
-    }
-    Ok(Response::Json(
-        "201 Created",
-        serde_json::json!({"digest": artifact.digest(), "byte_size": artifact.size()}),
     ))
 }
 
@@ -740,7 +885,9 @@ pub(super) async fn stream_artifact(
     stream: &mut (impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin),
     store: &FileSystemArtifactStore,
     digest: &str,
+    authorize: &mut impl FnMut() -> Result<(), HttpError>,
 ) -> Result<(), HttpError> {
+    authorize()?;
     let file = store.open_artifact(digest).map_err(map_cas_error)?;
     let metadata = file
         .metadata()
@@ -763,6 +910,7 @@ pub(super) async fn stream_artifact(
         if count == 0 {
             break;
         }
+        authorize()?;
         stream
             .write_all(&buffer[..count])
             .await
@@ -799,6 +947,7 @@ pub(super) fn get_revision(catalog: &ArtifactCatalog, path: &str) -> Result<Resp
 pub(super) fn publish_revision(
     catalog: &ArtifactCatalog,
     store: &FileSystemArtifactStore,
+    authority: &dyn MemoryProviderAdmission,
     request: &Request,
     path: &str,
 ) -> Result<Response, HttpError> {
@@ -823,7 +972,7 @@ pub(super) fn publish_revision(
             manifest.artifact().byte_size(),
         )
         .map_err(map_cas_error)?;
-    catalog.append(EventPayload::MapArtifactPublished { manifest })?;
+    catalog.append_authorized(EventPayload::MapArtifactPublished { manifest }, authority)?;
     Ok(Response::Json(
         "201 Created",
         serde_json::json!({"status": "published"}),
@@ -833,6 +982,7 @@ pub(super) fn publish_revision(
 /// Records one node-local staged/imported/verified/rejected replica evidence event.
 pub(super) fn record_replica(
     catalog: &ArtifactCatalog,
+    authority: &dyn MemoryProviderAdmission,
     request: &Request,
     path: &str,
 ) -> Result<Response, HttpError> {
@@ -889,7 +1039,7 @@ pub(super) fn record_replica(
             ));
         }
     };
-    catalog.append(payload)?;
+    catalog.append_authorized(payload, authority)?;
     Ok(Response::Json(
         "202 Accepted",
         serde_json::json!({"status": input.status}),

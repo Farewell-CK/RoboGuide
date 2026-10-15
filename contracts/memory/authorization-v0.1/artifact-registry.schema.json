@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Control Artifact Certificate Authorization Registry v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_id",
+    "revision",
+    "grants"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.artifact-authorization/v0.1"
+    },
+    "registry_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "grants": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 4096,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^sha256:[0-9a-f]{64}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "principal_id",
+          "tenant_id",
+          "role",
+          "node_id",
+          "provider_ids",
+          "memory_ids",
+          "map_ids",
+          "artifact_digests",
+          "not_before_ms",
+          "expires_at_ms",
+          "revoked"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+          },
+          "tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+          },
+          "role": {
+            "enum": [
+              "viewer",
+              "writer",
+              "admin"
+            ]
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider_ids": {
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+            }
+          },
+          "memory_ids": {
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+            }
+          },
+          "map_ids": {
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+            }
+          },
+          "artifact_digests": {
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "not_before_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expires_at_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "revoked": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

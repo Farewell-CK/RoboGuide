@@ -9,6 +9,7 @@ flowchart TB
   Client[证书主体 / tenant / 幂等键] --> MI[Mission Service / MI / Request + provenance SQL]
   ID[Control 持久身份 / 授权 revision / tenant / 测量] --> Entry
   ID --> PROTO
+  ID --> ART
   MI --> Entry[Controller 用户与高权限入口]
   Entry --> ORCH[Orchestration / DAG / Mission hold]
   ORCH --> CTRL[Control / commitment / binding / calendar]
@@ -40,6 +41,12 @@ flowchart TB
   Entry --> MINT[持久 Memory intent / 对账 generation 与预算]
   MINT --> SQL
   MINT --> PROTO
+  CTRL --> MAUTH[Memory tenant / selector / provider / 成员 generation]
+  Entry --> MAUTH
+  MAUTH --> MINT
+  MAUTH --> ART
+  ART --> UPLOAD[原 upload / bytes 校验与 fsync / CAS 归属 receipt]
+  UPLOAD --> SQL
   ART --> CAT[Memory / Spatial catalog 与 placement evidence]
   CAT --> SQL
 ```
@@ -68,5 +75,10 @@ State 与 MI 的当前软件路径见 [ADR-0104](../../decisions/0104-state-cons
 Memory 连续性的当前切片见 [ADR-0105](../../decisions/0105-memory-reconciliation-authorization-and-spatial-provider.md)
 及 [进程验收](../../development/acceptance/2026-10-15-f4-memory-continuity.md)。Node Contract v0.7 /
 config v0.8 显式协商原实例只读查询；导入原始身份先持久化，Unknown 不允许换 ID 重做。
-Controller wrapper v31、codec v22 和 Node journal v7 保留版本边界。Imported 历史不能授予
-当前可用性租约，Memory 对账不能满足 Task。Group 授权、active-map/GC 和空间计算仍属 F4 必需工作。
+该连续性切片引入 wrapper v31 / codec v22。当前内容门禁使用 wrapper v32、inner v21、
+upload codec v23，Node journal 仍为 v7；
+[内容授权合同](../../../contracts/memory/authorization-v0.1/README.md)规定显式 policy、成员版本、
+稳定证书主体、当前 tenant 与实际 bytes 归属。Catalog/上传副作用重新核对当前权限，blob 流
+逐块检查；已有 CAS 哈希不能授权另建 manifest，旧成员版本不能因回到原 Node 而复活。
+Imported 历史不能授予当前可用性租约，Memory 对账不能满足 Task。完整 Node Group grant、
+撤销 ACK、pre-Execute 准备、handoff、active-map/GC 和空间计算仍属 F4 必需工作。

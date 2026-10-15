@@ -182,6 +182,12 @@ fn authorize_tenant_path(
             | "/v1/attestation/challenges"
             | "/v1/attestation/evidence"
             | "/v1/node-identities/commands"
+            | "/v1/tenant-migrations"
+            | "/v1/state-policies"
+            | "/v1/verifier-sources"
+            | "/v1/belief-policies"
+            | "/v1/memory-authorizations"
+            | "/v1/artifact-authorizations"
     ) {
         return Err(
             "global administration/diagnostics require an explicitly delegated global principal"
@@ -199,6 +205,14 @@ fn authorize_operator_request(
     path: &str,
 ) -> Result<(), (&'static str, &'static str)> {
     let required = match (method, path) {
+        (
+            "GET",
+            "/v1/state-policies"
+            | "/v1/verifier-sources"
+            | "/v1/belief-policies"
+            | "/v1/memory-authorizations"
+            | "/v1/artifact-authorizations",
+        ) => 2,
         ("GET", _) | ("POST", "/v1/missions/assess-initial-support") => 0,
         ("POST", "/v1/missions") => 1,
         ("POST", "/v1/maintenance/archive") => 2,
@@ -206,7 +220,14 @@ fn authorize_operator_request(
         ("POST", "/v1/memory/import-queries") => 2,
         ("POST", "/v1/node-identities/commands") => 2,
         ("POST", "/v1/tenant-migrations") => 2,
-        ("POST", "/v1/state-policies" | "/v1/verifier-sources" | "/v1/belief-policies") => 2,
+        (
+            "POST",
+            "/v1/state-policies"
+            | "/v1/verifier-sources"
+            | "/v1/belief-policies"
+            | "/v1/memory-authorizations",
+        ) => 2,
+        ("POST", "/v1/artifact-authorizations") => 2,
         ("POST", "/v1/verifier-evidence") => 1,
         ("POST", "/v1/attestation/challenges" | "/v1/attestation/evidence") => 2,
         ("POST", path)
@@ -716,6 +737,10 @@ where
             event_write_gate,
             clock,
             &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin"),
         );
         return match result {
             Ok(body) => write_http_response(stream, "202 Accepted", body).await,
@@ -742,6 +767,44 @@ where
             Ok(body) => write_http_response(stream, "200 OK", body).await,
             Err(error) => {
                 write_http_response(stream, "409 Conflict", serde_json::json!({"error": error}))
+                    .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/artifact-authorizations" {
+        return match application::state_policy::submit_artifact(
+            controller,
+            event_log,
+            event_write_gate,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin"),
+            clock.now(),
+        ) {
+            Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/memory-authorizations" {
+        return match application::state_policy::submit_memory(
+            controller,
+            event_log,
+            event_write_gate,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin"),
+            clock.now(),
+        ) {
+            Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
                     .await
             }
         };
@@ -938,6 +1001,25 @@ where
                     "registry": registry,
                     "physical_identity": "HardwareEvidencePending",
                 }),
+            )
+        }
+        ("GET", "/v1/artifact-authorizations") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            (
+                "200 OK",
+                serde_json::json!({"schema_version":"roboguide.artifact-authorization-view/v0.1", "registry":live.bridge.control().artifact_authorization_registry()}),
+            )
+        }
+        ("GET", "/v1/memory-authorizations") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            (
+                "200 OK",
+                serde_json::json!({"schema_version":"roboguide.memory-authorization-view/v0.1",
+                "registry":live.bridge.control().memory_authorization_registry()}),
             )
         }
         ("GET", "/v1/belief-policies") => {

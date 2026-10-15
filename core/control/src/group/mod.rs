@@ -17,6 +17,7 @@ mod checkpoint;
 mod continuation;
 pub use continuation::{CommittedGroupContinuation, GroupContinuationProposal};
 mod group_lifecycle;
+mod membership;
 mod mission_binding;
 mod task_lifecycle;
 
@@ -94,6 +95,9 @@ pub(crate) struct UnboundRole {
 /// A dynamic group of members, roles, and resource bindings.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionGroup {
+    /// Current Control-owned membership version; historical absence remains unavailable.
+    #[serde(default)]
+    pub(crate) membership_version: Option<domain::GroupMembershipVersion>,
     /// Dynamic execution-group identity.
     pub(crate) group_id: ExecutionGroupId,
     /// Mission owning the long-lived coordination context.
@@ -231,6 +235,7 @@ impl ExecutionGroup {
     #[cfg(test)]
     pub(crate) fn new(group_id: ExecutionGroupId, plan: &CommittedPlan) -> Self {
         Self {
+            membership_version: None,
             group_id,
             mission_id: plan.task_ref().mission_id().clone(),
             task_ref: plan.task_ref().clone(),
@@ -242,6 +247,7 @@ impl ExecutionGroup {
             role_requirements: BTreeMap::new(),
             context_bindings: BTreeMap::new(),
         }
+        .with_initial_membership()
     }
 
     /// Creates a Mission-level Group with its first Task execution unit.
@@ -251,6 +257,7 @@ impl ExecutionGroup {
         initial_task_ref: TaskRef,
     ) -> Self {
         Self {
+            membership_version: None,
             group_id,
             mission_id,
             task_ref: initial_task_ref,
@@ -262,6 +269,7 @@ impl ExecutionGroup {
             role_requirements: BTreeMap::new(),
             context_bindings: BTreeMap::new(),
         }
+        .with_initial_membership()
     }
 
     /// Returns the group identity.

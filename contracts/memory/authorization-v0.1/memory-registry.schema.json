@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Control Memory Authorization Registry v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_id",
+    "revision",
+    "policies"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.memory-authorization/v0.1"
+    },
+    "registry_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "policies": {
+      "type": "object",
+      "maxProperties": 4096,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policy_id",
+          "selector",
+          "manifest_digest",
+          "tenant_id",
+          "principals",
+          "groups",
+          "revoked"
+        ],
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+          },
+          "selector": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "memory_id",
+              "revision_id"
+            ],
+            "properties": {
+              "memory_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "revision_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            }
+          },
+          "manifest_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+          },
+          "principals": {
+            "type": "object",
+            "maxProperties": 128,
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+            },
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "discover",
+                  "read",
+                  "import",
+                  "export",
+                  "handoff",
+                  "activate"
+                ]
+              }
+            }
+          },
+          "groups": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "group_id",
+                "operations",
+                "providers"
+              ],
+              "properties": {
+                "group_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+                },
+                "operations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 6,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "discover",
+                      "read",
+                      "import",
+                      "export",
+                      "handoff",
+                      "activate"
+                    ]
+                  }
+                },
+                "providers": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 16,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "payload_schema",
+                      "media_type"
+                    ],
+                    "properties": {
+                      "provider_id": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "local_system_id": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "kind": {
+                        "enum": [
+                          "execution",
+                          "spatial",
+                          "semantic",
+                          "experience",
+                          "artifact"
+                        ]
+                      },
+                      "payload_schema": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+                      },
+                      "media_type": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[^*\\x00-\\x1f\\x7f]+$"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "revoked": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

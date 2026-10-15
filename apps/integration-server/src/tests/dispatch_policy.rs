@@ -786,6 +786,7 @@ fn checkpoint_schema_fences_policy_downgrade_and_omission() {
     )
     .unwrap();
     validate_isolation_checkpoint_schema(&saved).unwrap();
+    historical_membership_wrapper_fixture(&mut saved);
     saved.schema = PRE_DISPATCH_SERVER_CHECKPOINT_SCHEMA.into();
     assert!(validate_isolation_checkpoint_schema(&saved).is_err());
     let mut missions: Vec<serde_json::Value> =

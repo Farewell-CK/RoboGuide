@@ -314,16 +314,50 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
     if saved.schema != SERVER_CHECKPOINT_SCHEMA
-        && saved
+        && (integration.get("control").is_some_and(|c| {
+            [
+                "memory_authorization_registry",
+                "artifact_authorization_registry",
+            ]
+            .iter()
+            .any(|k| c.get(k).is_some_and(|v| !v.is_null()))
+        }) || saved
             .memory_imports
             .values()
-            .any(|intent| intent.reconciliation.is_some())
+            .any(|i| i.authority.is_some() || i.authorized_by.is_some()))
+    {
+        return Err("legacy wrapper contains distributed Memory content authority".into());
+    }
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA
+        && integration
+            .get("control")
+            .and_then(|control| control.get("groups"))
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|groups| {
+                groups.iter().any(|group| {
+                    group
+                        .get("membership_version")
+                        .is_some_and(|version| !version.is_null())
+                })
+            })
+    {
+        return Err("legacy wrapper contains Group Memory membership authority".into());
+    }
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
+    ) && saved
+        .memory_imports
+        .values()
+        .any(|intent| intent.reconciliation.is_some())
     {
         return Err("legacy wrapper contains Memory reconciliation authority".into());
     }
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
     ) && integration.get("control").is_some_and(|control| {
         control
             .get("decision_policy_registry")
@@ -362,6 +396,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
     ) && integration.get("control").is_some_and(|control| {
@@ -384,6 +419,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
@@ -403,6 +439,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
@@ -442,6 +479,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
@@ -462,6 +500,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA

@@ -16,6 +16,7 @@ impl ControlPlane {
             } else {
                 self.validate_legacy_group_checkpoint(group)?;
             }
+            group.validate_membership_version()?;
         }
         for commitment in self.pending_recovery_commitments.values() {
             let group = self.groups.get(commitment.group_id()).ok_or_else(|| {

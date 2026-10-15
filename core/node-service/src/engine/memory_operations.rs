@@ -348,6 +348,14 @@ impl LocalIntegrationEngine {
         let stager = self.artifact_stager().ok_or_else(|| {
             EngineError::Memory("Memory exchange requires the Artifact data plane".to_string())
         })?;
+        let stager = if let Some(id) = invocation
+            .pointer("/memory_import/import_id")
+            .and_then(serde_json::Value::as_str)
+        {
+            stager.for_memory_import(id)?
+        } else {
+            stager.clone()
+        };
         let node_id = NodeId::new(self.catalog().node_id().to_string())
             .map_err(|error| EngineError::Memory(error.to_string()))?;
         let ledger = self.inner.memory_ledgers.get(provider_id).ok_or_else(|| {

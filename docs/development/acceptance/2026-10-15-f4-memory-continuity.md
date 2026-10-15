@@ -1,5 +1,8 @@
 # F4 当前 Memory 连续性切片验收
 
+本记录对应 `0af2cc8` 的连续性快照；后续版本和当前内容门禁证据见
+[F4 内容门禁验收](2026-10-15-f4-content-authority.md)。以下数量、版本和 SHA 保留原件语义。
+
 状态：当前切片软件验收通过。F4 整体仍在实施：完整 tenant/Group 内容授权、active-map、
 tombstone/GC/revocation 和空间计算，以及 F5–F10 仍为必需工作，不能由该记录关闭。
 

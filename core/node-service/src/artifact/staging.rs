@@ -12,6 +12,13 @@ pub struct ArtifactStager {
 }
 
 impl ArtifactStager {
+    /// Retains an exact import purpose while preserving the actual endpoint, TLS and cache configuration.
+    pub(crate) fn for_memory_import(&self, id: &str) -> Result<Self, ArtifactError> {
+        Ok(Self {
+            client: self.client.for_memory_import(id)?,
+            cache_directory: self.cache_directory.clone(),
+        })
+    }
     /// Builds a stager from one startup configuration relative to its file directory.
     pub fn from_config(
         config: &ArtifactServiceConfig,

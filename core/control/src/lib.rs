@@ -12,6 +12,7 @@ mod decision_policy;
 mod group;
 mod initial_preferences;
 mod matching;
+mod memory_authority;
 mod node;
 mod node_identity;
 mod node_session;
@@ -65,6 +66,18 @@ pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = ports::DEFAULT_NODE_LEASE_DURATION_MS
 /// authoritative after a process restart.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ControlCheckpoint {
+    /// Current data-plane certificates; independent content scope is checked separately.
+    #[serde(default)]
+    artifact_authorization_registry: Option<domain::ArtifactAuthorizationRegistry>,
+    /// Immutable original Artifact certificate policy revisions.
+    #[serde(default)]
+    artifact_authorization_history: BTreeMap<u64, domain::ArtifactAuthorizationRegistry>,
+    /// Explicit content authority, retained independently of catalog discovery and placement.
+    #[serde(default)]
+    memory_authorization_registry: Option<domain::MemoryAuthorizationRegistry>,
+    /// Complete immutable interpretations used by original Memory command receipts.
+    #[serde(default)]
+    memory_authorization_history: BTreeMap<u64, domain::MemoryAuthorizationRegistry>,
     /// Authorized source contracts, retained interpretation revisions and original evidence receipts.
     #[serde(default)]
     semantic_verifier_registry: Option<domain::SemanticVerifierRegistry>,
@@ -424,6 +437,14 @@ impl std::error::Error for ControlError {}
 /// Authoritative in-process Control Plane state for the bootstrap.
 #[derive(Debug, Clone)]
 pub struct ControlPlane {
+    /// Current data-plane stable principal and certificate authority.
+    artifact_authorization_registry: Option<domain::ArtifactAuthorizationRegistry>,
+    /// Retained original certificate grants, including irrevocable retirement.
+    artifact_authorization_history: BTreeMap<u64, domain::ArtifactAuthorizationRegistry>,
+    /// Current tenant, content and participant policy; catalog metadata never grants this authority.
+    memory_authorization_registry: Option<domain::MemoryAuthorizationRegistry>,
+    /// Immutable original policy interpretations retained through revocation and restore.
+    memory_authorization_history: BTreeMap<u64, domain::MemoryAuthorizationRegistry>,
     /// Authenticated semantic measurement source authority, independent of execution success.
     semantic_verifier_registry: Option<domain::SemanticVerifierRegistry>,
     /// Source-attributed scalar/Gaussian derivation contracts.
@@ -503,6 +524,10 @@ impl ControlPlane {
     /// Creates an empty Control Plane with explicit receive-time freshness TTL.
     pub const fn with_status_ttl(max_status_age_ms: u64) -> Self {
         Self {
+            artifact_authorization_registry: None,
+            artifact_authorization_history: BTreeMap::new(),
+            memory_authorization_registry: None,
+            memory_authorization_history: BTreeMap::new(),
             semantic_verifier_registry: None,
             belief_policy_registry: None,
             belief_policy_history: BTreeMap::new(),
@@ -538,6 +563,10 @@ impl ControlPlane {
     /// Captures durable Control authority without process-local lease timestamps.
     pub fn checkpoint(&self) -> ControlCheckpoint {
         ControlCheckpoint {
+            artifact_authorization_registry: self.artifact_authorization_registry.clone(),
+            artifact_authorization_history: self.artifact_authorization_history.clone(),
+            memory_authorization_registry: self.memory_authorization_registry.clone(),
+            memory_authorization_history: self.memory_authorization_history.clone(),
             semantic_verifier_registry: self.semantic_verifier_registry.clone(),
             belief_policy_registry: self.belief_policy_registry.clone(),
             belief_policy_history: self.belief_policy_history.clone(),
@@ -777,6 +806,10 @@ impl ControlPlane {
             }
         }
         let restored = Self {
+            artifact_authorization_registry: checkpoint.artifact_authorization_registry,
+            artifact_authorization_history: checkpoint.artifact_authorization_history,
+            memory_authorization_registry: checkpoint.memory_authorization_registry,
+            memory_authorization_history: checkpoint.memory_authorization_history,
             semantic_verifier_registry: checkpoint.semantic_verifier_registry,
             belief_policy_registry: checkpoint.belief_policy_registry,
             belief_policy_history: checkpoint.belief_policy_history,
@@ -808,6 +841,7 @@ impl ControlPlane {
             max_status_age_ms: checkpoint.max_status_age_ms,
         };
         restored.validate_tenant_checkpoint()?;
+        restored.validate_memory_authority_checkpoint()?;
         restored.validate_belief_policy_checkpoint()?;
         restored.validate_decision_policy_checkpoint()?;
         restored.validate_semantic_verifier_checkpoint()?;

@@ -4,7 +4,7 @@ use super::*;
 use std::collections::BTreeSet;
 
 /// Explicit data-plane privileges; a writer does not gain administrator authority.
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(super) enum ArtifactRole {
     /// Read only explicitly granted resources.
@@ -16,7 +16,7 @@ pub(super) enum ArtifactRole {
 }
 
 /// Startup-frozen certificate grant; empty resource sets grant no data access.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ArtifactGrant {
     /// Bounded data-plane role.
@@ -36,6 +36,24 @@ pub(super) struct ArtifactGrant {
     /// Explicit blob grants, additional to blobs referenced by permitted manifests.
     #[serde(default)]
     pub(super) artifact_digests: BTreeSet<String>,
+}
+
+impl From<&domain::ArtifactCertificateGrant> for ArtifactGrant {
+    /// Projects only committed data-plane privileges; stable attribution stays on the request context.
+    fn from(grant: &domain::ArtifactCertificateGrant) -> Self {
+        Self {
+            role: match grant.role {
+                domain::ArtifactAccessRole::Viewer => ArtifactRole::Viewer,
+                domain::ArtifactAccessRole::Writer => ArtifactRole::Writer,
+                domain::ArtifactAccessRole::Admin => ArtifactRole::Admin,
+            },
+            node_id: grant.node_id.clone(),
+            provider_ids: grant.provider_ids.clone(),
+            memory_ids: grant.memory_ids.clone(),
+            map_ids: grant.map_ids.clone(),
+            artifact_digests: grant.artifact_digests.clone(),
+        }
+    }
 }
 
 impl ArtifactGrant {
@@ -72,20 +90,83 @@ impl ArtifactGrant {
 
 /// Authenticated subject retained through authorization and durable audit.
 #[derive(Clone)]
-pub(super) struct ArtifactPrincipal {
+pub struct ArtifactPrincipal {
     /// Exact TLS leaf digest, or the explicit local development identity.
     pub(super) subject: String,
     /// Certificate-mapped permissions; never taken from request headers.
     pub(super) grant: ArtifactGrant,
+    /// Original trusted namespace; compatibility grants use the explicit local deployment.
+    pub(crate) tenant_id: String,
+    /// Actual TLS identity; raw loopback has no peer leaf.
+    pub(crate) certificate_digest: Option<String>,
+    /// Original actual X.509 notAfter, independent of request headers and policy expiry.
+    pub(crate) certificate_expires_at_ms: u64,
+    /// Committed registry identity used for this request, if enrolled.
+    pub(crate) registry_id: Option<String>,
+    /// Exact grant interpretation checked again under the authority writer gate.
+    pub(crate) registry_revision: Option<u64>,
+    /// Whether a legacy startup role map explicitly contained this actual leaf.
+    pub(crate) legacy_mapped: bool,
 }
 
 impl ArtifactPrincipal {
+    /// Returns the certificate-mapped Node, independently of any publisher header.
+    pub(crate) fn node_id(&self) -> Option<&NodeId> {
+        self.grant.node_id.as_ref()
+    }
+    /// Checks an exact certificate-mapped provider rather than trusting a local request argument.
+    pub(crate) fn provider_allowed(&self, provider: &str) -> bool {
+        self.grant.provider_ids.contains(provider)
+    }
     /// Creates the loopback-only compatibility administrator.
     pub(super) fn local() -> Self {
         Self {
             subject: "loopback:artifact-admin".into(),
             grant: ArtifactGrant::parse(serde_json::json!("admin")).expect("static role"),
+            tenant_id: "local".into(),
+            certificate_digest: None,
+            certificate_expires_at_ms: u64::MAX,
+            registry_id: None,
+            registry_revision: None,
+            legacy_mapped: true,
         }
+    }
+
+    /// Creates current request evidence from a committed registry and the original verified TLS leaf.
+    pub(crate) fn with_committed_grant(
+        &self,
+        registry: &domain::ArtifactAuthorizationRegistry,
+        grant: &domain::ArtifactCertificateGrant,
+    ) -> Self {
+        Self {
+            subject: grant.principal_id.clone(),
+            grant: grant.into(),
+            tenant_id: grant.tenant_id.clone(),
+            registry_id: Some(registry.registry_id.clone()),
+            registry_revision: Some(registry.revision),
+            ..self.clone()
+        }
+    }
+
+    /// Fails closed for expired certificates and unmapped legacy leaves; current authority is separate.
+    pub(crate) fn validate_transport(&self) -> Result<(), String> {
+        if SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_millis()
+            >= u128::from(self.certificate_expires_at_ms)
+        {
+            return Err("Artifact actual TLS leaf expired".into());
+        }
+        if self.registry_id.is_none() && !self.legacy_mapped {
+            return Err("Artifact leaf is not explicitly enrolled".into());
+        }
+        Ok(())
+    }
+
+    /// Returns the stable authenticated audit identity without trusting body/header claims.
+    pub(crate) fn subject(&self) -> &str {
+        &self.subject
     }
 
     /// Checks route/resource ACLs before parsing a mutation body or streaming blob content.
@@ -106,7 +187,9 @@ impl ArtifactPrincipal {
             return Ok(());
         }
         let allowed = if let Some(digest) = path.strip_prefix("/v1/artifacts/") {
-            read && (self.grant.artifact_digests.contains(digest)
+            let digest = artifact_store::normalize_digest(digest).map_err(map_cas_error)?;
+            read && (head.memory_import_id.is_some()
+                || self.grant.artifact_digests.contains(&digest)
                 || catalog.memories()?.iter().any(|manifest| {
                     self.grant
                         .memory_ids
@@ -121,23 +204,30 @@ impl ArtifactPrincipal {
                         .contains(revision.manifest().selector().map_id().as_str())
                         && revision.manifest().artifact().content_digest().as_str() == digest
                 }))
+        } else if read && matches!(path, "/v1/memories" | "/v1/maps") {
+            true
         } else if let Some(resource) = path.strip_prefix("/v1/memories/") {
-            self.grant
-                .memory_ids
-                .contains(resource.split('/').next().unwrap_or_default())
+            (read && head.memory_import_id.is_some())
+                || self
+                    .grant
+                    .memory_ids
+                    .contains(resource.split('/').next().unwrap_or_default())
         } else if let Some(resource) = path.strip_prefix("/v1/maps/") {
             self.grant
                 .map_ids
                 .contains(resource.split('/').next().unwrap_or_default())
                 && (read || path.ends_with("/localization-evidence") || path.ends_with("/replicas"))
         } else if let Some(upload) = path.strip_prefix("/v1/artifact-uploads/") {
-            !read && upload.starts_with(&self.upload_prefix())
+            let id = upload.split('/').next().unwrap_or_default();
+            catalog
+                .upload_record(id)?
+                .is_some_and(|r| r.principal_id == self.subject && r.tenant_id == self.tenant_id)
         } else {
             !read && path == "/v1/artifact-uploads"
         };
         if !allowed {
             return Err(HttpError::forbidden(
-                "Artifact resource is not granted to this certificate",
+                "Artifact resource is not granted to this authenticated principal",
             ));
         }
         if !read
@@ -209,6 +299,12 @@ impl ArtifactPrincipal {
 
     /// Namespaces unfinished uploads by the exact certificate to prevent cross-principal mutation.
     fn upload_prefix(&self) -> String {
-        format!("cert-{}-", self.subject.trim_start_matches("sha256:"))
+        format!(
+            "cert-{}-",
+            self.certificate_digest
+                .as_deref()
+                .unwrap_or(&self.subject)
+                .trim_start_matches("sha256:")
+        )
     }
 }

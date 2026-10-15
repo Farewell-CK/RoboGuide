@@ -87,6 +87,8 @@ const EVENT_PAYLOAD_SCHEMA_V20: &str = "domain.EventPayload.json/v20";
 const EVENT_PAYLOAD_SCHEMA_V21: &str = "domain.EventPayload.json/v21";
 /// Codec retaining explicit original-provider Memory command and query admission evidence.
 const EVENT_PAYLOAD_SCHEMA_V22: &str = "domain.EventPayload.json/v22";
+/// Codec retaining durable actual-byte upload admission, preparation and ownership receipts.
+const EVENT_PAYLOAD_SCHEMA_V23: &str = "domain.EventPayload.json/v23";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1021,6 +1023,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V20 => Ok(20),
         EVENT_PAYLOAD_SCHEMA_V21 => Ok(21),
         EVENT_PAYLOAD_SCHEMA_V22 => Ok(22),
+        EVENT_PAYLOAD_SCHEMA_V23 => Ok(23),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -1034,6 +1037,7 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::ArtifactUploadTransition { .. } => 23,
         EventPayload::MemoryCommandEvidence { .. } => 22,
         EventPayload::StatePolicyDecision { .. }
         | EventPayload::SemanticVerifierEvidenceAdmitted { .. }
@@ -1226,6 +1230,7 @@ impl SqliteEventLog {
 /// Selects the newest codec marker only for payloads introduced by that codec.
 fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
     match payload {
+        EventPayload::ArtifactUploadTransition { .. } => EVENT_PAYLOAD_SCHEMA_V23,
         EventPayload::MemoryCommandEvidence { .. } => EVENT_PAYLOAD_SCHEMA_V22,
         EventPayload::StatePolicyDecision { .. }
         | EventPayload::SemanticVerifierEvidenceAdmitted { .. }

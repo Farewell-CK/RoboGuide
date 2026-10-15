@@ -3,6 +3,70 @@
 use super::*;
 /// Composition-owned admission for Node-authored typed evidence and generic Memory claims.
 pub trait MemoryProviderAdmission: Send + Sync {
+    /// Applies original typed-map producer tenant and full immutable content policy at the composition.
+    fn authorize_map_access(
+        &self,
+        principal: &ArtifactPrincipal,
+        _manifest: &MapArtifactManifest,
+        _operation: domain::MemoryAccessOperation,
+    ) -> Result<(), String> {
+        self.revalidate_artifact_principal(principal)
+    }
+    /// Rechecks request authentication and content/byte authority inside the catalog writer ordering.
+    fn admit_artifact_payload(&self, _payload: &EventPayload) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Checks content usage independently of metadata discovery, provider placement and hash knowledge.
+    fn authorize_memory_access(
+        &self,
+        principal: &ArtifactPrincipal,
+        manifest: &MemoryArtifactManifest,
+        operation: domain::MemoryAccessOperation,
+        _import_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.revalidate_artifact_principal(principal)?;
+        if operation != domain::MemoryAccessOperation::Discover
+            && matches!(manifest.scope(), domain::MemoryScope::ExecutionGroup(_))
+        {
+            return Err("Group content requires current distributed authorization".into());
+        }
+        Ok(())
+    }
+
+    /// Scope changes require an exact immutable parent/child exchange purpose, never a generic read grant.
+    fn authorize_memory_handoff(
+        &self,
+        _principal: &ArtifactPrincipal,
+        _parent: &MemoryArtifactManifest,
+        _child: &MemoryArtifactManifest,
+    ) -> Result<(), String> {
+        Err("Memory scope exchange requires an explicit source-bound handoff purpose".into())
+    }
+    /// Resolves current certificate authority after parsing; raw/static compatibility remains explicit.
+    fn refresh_artifact_principal(
+        &self,
+        principal: &ArtifactPrincipal,
+    ) -> Result<ArtifactPrincipal, String> {
+        principal.validate_transport()?;
+        if principal.registry_id.is_some() {
+            return Err("committed Artifact authority is unavailable".into());
+        }
+        Ok(principal.clone())
+    }
+
+    /// Rechecks the original actual leaf and complete grant interpretation at an effect boundary.
+    fn revalidate_artifact_principal(&self, principal: &ArtifactPrincipal) -> Result<(), String> {
+        let current = self.refresh_artifact_principal(principal)?;
+        if current.subject != principal.subject
+            || current.tenant_id != principal.tenant_id
+            || current.registry_id != principal.registry_id
+            || current.registry_revision != principal.registry_revision
+        {
+            return Err("Artifact authority changed while the request was in flight".into());
+        }
+        Ok(())
+    }
     /// Validates that one manifest is covered by a current provider declaration.
     fn admit_manifest(&self, manifest: &MemoryArtifactManifest) -> Result<(), String>;
 
@@ -49,6 +113,11 @@ pub struct MemoryPublicationIdentity {
 
 /// Admission check serialized with one durable catalog/evidence append.
 enum EvidenceWriteAdmission<'a> {
+    /// Revalidate an authenticated map/upload request without inventing Node-authored evidence.
+    Artifact {
+        /// Current request authentication and exact content/source policy.
+        authority: &'a dyn MemoryProviderAdmission,
+    },
     /// Validate the provider, semantic owner, and publishing session for generic Memory.
     Memory {
         /// Composition-owned provider and session authority.
@@ -84,6 +153,8 @@ impl MemoryPublicationIdentity {
 /// Shared catalog and evidence-log authority used by the artifact listener.
 #[derive(Clone)]
 pub struct ArtifactCatalog {
+    /// Rebuildable original byte ownership receipts; entries never authorize semantic consumption.
+    pub(super) upload_records: Arc<Mutex<BTreeMap<String, domain::ArtifactUploadRecord>>>,
     /// Rebuildable metadata projection guarded for concurrent HTTP requests.
     pub(super) projection: Arc<Mutex<MapCatalogProjection>>,
     /// Generic non-map Memory metadata sharing the same evidence log and CAS.
@@ -134,8 +205,13 @@ impl ArtifactCatalog {
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut projection = MapCatalogProjection::new();
         let mut memory_projection = MemoryCatalogProjection::new();
+        let mut upload_records = BTreeMap::new();
         let mut timestamp_high_water = TimestampMs::new(0);
         for event in event_log.decoded_events()? {
+            if let EventPayload::ArtifactUploadTransition { record } = event.payload() {
+                super::upload_authority::validate_record_transition(&upload_records, record)?;
+                upload_records.insert(record.upload_id.clone(), record.clone());
+            }
             timestamp_high_water = timestamp_high_water.max(event.timestamp());
             if let Err(error) = projection.apply_event(&event) {
                 return Err(format!("spatial catalog replay failed: {error}").into());
@@ -154,6 +230,7 @@ impl ArtifactCatalog {
         validate_disjoint_memory_namespace(&projection, &memory_projection)
             .map_err(|error| format!("Memory selector replay failed: {error}"))?;
         Ok(Self {
+            upload_records: Arc::new(Mutex::new(upload_records)),
             projection: Arc::new(Mutex::new(projection)),
             memory_projection: Arc::new(Mutex::new(memory_projection)),
             event_log: event_log.clone(),
@@ -274,8 +351,21 @@ impl ArtifactCatalog {
     }
 
     /// Appends and projects one map event atomically from the HTTP caller's perspective.
+    #[cfg(test)]
     pub(super) fn append(&self, payload: EventPayload) -> Result<TimestampMs, HttpError> {
         self.append_with_admission(payload, None)
+    }
+
+    /// Persists an authenticated map/upload transition after a final in-gate current-authority check.
+    pub(super) fn append_authorized(
+        &self,
+        payload: EventPayload,
+        authority: &dyn MemoryProviderAdmission,
+    ) -> Result<TimestampMs, HttpError> {
+        self.append_with_admission(
+            payload,
+            Some(EvidenceWriteAdmission::Artifact { authority }),
+        )
     }
 
     /// Appends one generic Memory event after admission under the shared Controller write gate.
@@ -326,7 +416,16 @@ impl ArtifactCatalog {
             .map_err(|_| HttpError::internal("event-log write gate is poisoned"))?;
         self.ensure_available()?;
         if let Some(admission) = admission {
+            let authority = match &admission {
+                EvidenceWriteAdmission::Artifact { authority }
+                | EvidenceWriteAdmission::Memory { authority, .. }
+                | EvidenceWriteAdmission::NodePublisher { authority, .. } => *authority,
+            };
+            authority
+                .admit_artifact_payload(&payload)
+                .map_err(HttpError::forbidden)?;
             match admission {
+                EvidenceWriteAdmission::Artifact { .. } => {}
                 EvidenceWriteAdmission::Memory {
                     authority,
                     publisher,
@@ -346,6 +445,18 @@ impl ArtifactCatalog {
                 }
             }
         }
+        let mut upload_records = self
+            .upload_records
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("upload evidence lock is poisoned"))?;
+        if let EventPayload::ArtifactUploadTransition { record } = &payload {
+            super::upload_authority::validate_record_transition(&upload_records, record)
+                .map_err(HttpError::conflict)?;
+        }
+        let upload_record = match &payload {
+            EventPayload::ArtifactUploadTransition { record } => Some(record.clone()),
+            _ => None,
+        };
         let timestamp = self.next_timestamp()?;
         let mut projection = self
             .projection
@@ -422,6 +533,9 @@ impl ArtifactCatalog {
         }
         *projection = candidate;
         *memory_projection = memory_candidate;
+        if let Some(record) = upload_record {
+            upload_records.insert(record.upload_id.clone(), record);
+        }
         Ok(timestamp)
     }
 

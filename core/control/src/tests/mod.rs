@@ -17,5 +17,6 @@ include!("initial_preferences.rs");
 
 mod continuous_liveness;
 mod decision_policy;
+mod memory_authority;
 mod node_identity;
 mod ownership_model;

@@ -297,6 +297,7 @@ fn breaker_wrapper_fences_omission_and_downgrade_after_resume() {
         assert!(validate_isolation_checkpoint_schema(&changed).is_err());
     }
     let mut downgraded = saved.clone();
+    historical_membership_wrapper_fixture(&mut downgraded);
     downgraded.schema = PRE_BREAKER_SERVER_CHECKPOINT_SCHEMA.into();
     assert!(validate_isolation_checkpoint_schema(&downgraded).is_err());
     // Actual v25 input has counter evidence but no rolling samples; migration retains unavailable samples.

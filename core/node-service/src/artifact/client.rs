@@ -68,12 +68,35 @@ impl ArtifactClient {
             builder = builder.identity(identity).add_root_certificate(root);
         }
         Ok(Self {
+            memory_import_id: None,
             client: builder.build()?,
             endpoint,
             chunk_size_bytes,
             max_artifact_bytes,
             upload_prefix,
         })
+    }
+
+    /// Scopes all acquisition/evidence requests to one immutable original import without granting rights.
+    pub(super) fn for_memory_import(&self, id: &str) -> Result<Self, ArtifactError> {
+        if id.is_empty() || id.len() > 128 || id.chars().any(char::is_control) {
+            return Err(ArtifactError::Configuration(
+                "invalid original Memory import identity".into(),
+            ));
+        }
+        let mut client = self.clone();
+        client.memory_import_id = Some(id.into());
+        Ok(client)
+    }
+
+    /// Carries an opaque original purpose through the existing mTLS client on every related request.
+    fn request(&self, method: reqwest::Method, endpoint: Url) -> reqwest::RequestBuilder {
+        let builder = self.client.request(method, endpoint);
+        if let Some(id) = &self.memory_import_id {
+            builder.header("X-RoboGuide-Memory-Import-Id", id)
+        } else {
+            builder
+        }
     }
 
     /// Fetches one immutable manifest and retains its catalog lifecycle status.
@@ -89,7 +112,10 @@ impl ArtifactClient {
         validate_segment(map_id, "map_id")?;
         validate_segment(revision_id, "revision_id")?;
         let endpoint = self.path(&["v1", "maps", map_id, "revisions", revision_id])?;
-        let response = self.client.get(endpoint.clone()).send().await?;
+        let response = self
+            .request(reqwest::Method::GET, endpoint.clone())
+            .send()
+            .await?;
         ensure_success(&response, &endpoint)?;
         let body = response.json::<Value>().await?;
         // The catalog wraps the typed manifest with its current lifecycle.  Keep that
@@ -119,7 +145,10 @@ impl ArtifactClient {
             "revisions",
             selector.revision_id().as_str(),
         ])?;
-        let response = self.client.get(endpoint.clone()).send().await?;
+        let response = self
+            .request(reqwest::Method::GET, endpoint.clone())
+            .send()
+            .await?;
         ensure_success(&response, &endpoint)?;
         let body = response.json::<Value>().await?;
         let manifest = serde_json::from_value(
@@ -149,8 +178,7 @@ impl ArtifactClient {
             return Ok(());
         }
         let response = self
-            .client
-            .post(endpoint.clone())
+            .request(reqwest::Method::POST, endpoint.clone())
             .header("X-RoboGuide-Node-Id", node_id.as_str())
             .header("X-RoboGuide-Session-Id", session_id)
             .json(manifest)
@@ -232,8 +260,7 @@ impl ArtifactClient {
             "reason": reason,
         });
         let response = self
-            .client
-            .post(endpoint.clone())
+            .request(reqwest::Method::POST, endpoint.clone())
             .header("X-RoboGuide-Node-Id", node_id.as_str())
             .header("X-RoboGuide-Session-Id", session_id)
             .json(&payload)
@@ -262,8 +289,7 @@ impl ArtifactClient {
         }
         let endpoint = self.path(&["v1", "maps", map_id, "revisions", revision_id])?;
         let response = match self
-            .client
-            .post(endpoint.clone())
+            .request(reqwest::Method::POST, endpoint.clone())
             .json(manifest)
             .send()
             .await
@@ -333,8 +359,7 @@ impl ArtifactClient {
             "reason": null,
         });
         let response = self
-            .client
-            .post(endpoint.clone())
+            .request(reqwest::Method::POST, endpoint.clone())
             .json(&payload)
             .send()
             .await
@@ -358,8 +383,7 @@ impl ArtifactClient {
             "localization-evidence",
         ])?;
         let response = self
-            .client
-            .post(endpoint.clone())
+            .request(reqwest::Method::POST, endpoint.clone())
             .header("X-RoboGuide-Node-Id", evidence.node_id().as_str())
             .header("X-RoboGuide-Session-Id", session_id)
             .json(evidence)
@@ -389,7 +413,10 @@ impl ArtifactClient {
             .strip_prefix("sha256:")
             .expect("normalize_digest always returns a sha256-prefixed digest");
         let endpoint = self.path(&["v1", "artifacts", raw_digest])?;
-        let response = self.client.get(endpoint.clone()).send().await?;
+        let response = self
+            .request(reqwest::Method::GET, endpoint.clone())
+            .send()
+            .await?;
         ensure_success(&response, &endpoint)?;
         if let Some(parent) = destination.parent() {
             ensure_directory_tree(parent)?;
@@ -489,8 +516,7 @@ impl ArtifactClient {
         );
         let create_payload = serde_json::json!({"upload_id": upload_id});
         let response = self
-            .client
-            .post(create_endpoint.clone())
+            .request(reqwest::Method::POST, create_endpoint.clone())
             .json(&create_payload)
             .send()
             .await
@@ -509,8 +535,7 @@ impl ArtifactClient {
         let content_endpoint = self.path(&["v1", "artifact-uploads", &upload_id, "content"])?;
         let body = self.stream_file(source_file);
         let response = self
-            .client
-            .post(content_endpoint.clone())
+            .request(reqwest::Method::POST, content_endpoint.clone())
             .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
             .header(reqwest::header::CONTENT_LENGTH, byte_size.to_string())
             .body(body)
@@ -525,8 +550,7 @@ impl ArtifactClient {
             "byte_size": byte_size,
         });
         let response = self
-            .client
-            .post(finalize_endpoint.clone())
+            .request(reqwest::Method::POST, finalize_endpoint.clone())
             .json(&finalize_payload)
             .send()
             .await

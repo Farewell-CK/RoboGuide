@@ -12,6 +12,37 @@ use std::io::{self, Write};
 use std::path::Path;
 
 impl ArtifactUpload {
+    /// Verifies and fsyncs the actual complete staged bytes before a durable finalization intent.
+    /// This never accepts CAS presence or a declared hash as proof that this uploader supplied bytes.
+    pub fn prepare_finalize(
+        &mut self,
+        expected_digest: &str,
+        expected_size: u64,
+    ) -> Result<(), ArtifactStoreError> {
+        self.ensure_active()?;
+        let expected_digest = normalize_digest(expected_digest)?;
+        if self.size != expected_size {
+            return Err(ArtifactStoreError::SizeMismatch {
+                expected: expected_size,
+                actual: self.size,
+            });
+        }
+        let actual_digest = digest_hasher(&self.hasher);
+        if actual_digest != expected_digest {
+            return Err(ArtifactStoreError::DigestMismatch {
+                expected: expected_digest,
+                actual: actual_digest,
+            });
+        }
+        self.file
+            .as_ref()
+            .ok_or_else(|| ArtifactStoreError::UploadClosed {
+                upload_id: self.upload_id.clone(),
+            })?
+            .sync_all()
+            .map_err(|e| io_error("sync actual prepared upload bytes", e))?;
+        Ok(())
+    }
     /// Returns the caller-supplied upload identifier.
     pub fn upload_id(&self) -> &str {
         &self.upload_id

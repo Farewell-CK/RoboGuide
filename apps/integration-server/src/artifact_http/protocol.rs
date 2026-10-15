@@ -64,6 +64,8 @@ pub(super) struct RequestHead {
     pub(super) content_length: u64,
     /// Optional Node/session identity used by Node-authored typed evidence and Memory mutations.
     pub(super) memory_publisher: Option<MemoryPublicationIdentity>,
+    /// Opaque original import purpose; only current Control lookup can authorize it.
+    pub(super) memory_import_id: Option<String>,
     /// Body prefix already read while locating the header delimiter.
     pub(super) prefetched_body: Vec<u8>,
 }
@@ -102,6 +104,7 @@ impl RequestHead {
         &self,
         stream: &mut (impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin),
         upload: &mut ArtifactUpload,
+        write_chunk: &mut impl FnMut(&mut ArtifactUpload, &[u8]) -> Result<(), HttpError>,
     ) -> Result<(), HttpError> {
         let expected = usize::try_from(self.content_length)
             .map_err(|_| HttpError::too_large("request body is too large"))?;
@@ -112,9 +115,7 @@ impl RequestHead {
         }
         let prefetched = self.prefetched_body.len();
         if prefetched > 0 {
-            upload
-                .write_chunk(&self.prefetched_body[..prefetched])
-                .map_err(map_cas_error)?;
+            write_chunk(upload, &self.prefetched_body[..prefetched])?;
         }
         let mut received = prefetched;
         let mut buffer = [0_u8; 64 * 1024];
@@ -128,9 +129,7 @@ impl RequestHead {
             if count == 0 {
                 return Err(HttpError::bad_request("request body ended early"));
             }
-            upload
-                .write_chunk(&buffer[..count])
-                .map_err(map_cas_error)?;
+            write_chunk(upload, &buffer[..count])?;
             received += count;
         }
         Ok(())
@@ -225,6 +224,7 @@ pub(super) fn parse_request_head(
     let mut has_transfer_encoding = false;
     let mut memory_node_id = None;
     let mut memory_session_id = None;
+    let mut memory_import_id = None;
     for line in lines.filter(|line| !line.is_empty()) {
         let (name, value) = line
             .split_once(':')
@@ -252,6 +252,14 @@ pub(super) fn parse_request_head(
             if memory_node_id.replace(value.trim().to_string()).is_some() {
                 return Err(HttpError::bad_request(
                     "duplicate X-RoboGuide-Node-Id header",
+                ));
+            }
+        } else if name.eq_ignore_ascii_case("x-roboguide-memory-import-id") {
+            let id = value.trim();
+            if id.is_empty() || id.len() > 128 || memory_import_id.replace(id.to_string()).is_some()
+            {
+                return Err(HttpError::bad_request(
+                    "Memory import purpose must be a single bounded identity",
                 ));
             }
         } else if name.eq_ignore_ascii_case("x-roboguide-session-id")
@@ -307,6 +315,7 @@ pub(super) fn parse_request_head(
         path,
         content_length,
         memory_publisher,
+        memory_import_id,
         prefetched_body,
     })
 }

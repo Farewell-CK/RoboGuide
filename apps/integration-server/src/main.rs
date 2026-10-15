@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 
 /// Schema marker for the Controller wrapper including deployment candidate restrictions.
@@ -34,6 +34,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Last wrapper without Control-owned Memory membership and content authorization authority.
+const PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v31";
 /// Last wrapper without explicit original-provider Memory reconciliation authority.
 const PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v30";
 /// Previous wrapper had identity authority but no persistent State policy and generic verifier registry.
@@ -203,6 +205,170 @@ impl artifact_http::LocalizationEvidenceObserver for ControllerLocalizationObser
 }
 
 impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
+    /// Typed-map reads retain original Node tenant; missing old LocalSystem never becomes new policy evidence.
+    fn authorize_map_access(
+        &self,
+        principal: &artifact_http::ArtifactPrincipal,
+        manifest: &domain::MapArtifactManifest,
+        operation: domain::MemoryAccessOperation,
+    ) -> Result<(), String> {
+        self.revalidate_artifact_principal(principal)?;
+        let live = self
+            .controller
+            .lock()
+            .map_err(|_| "typed map authority unavailable")?;
+        let control = live.bridge.control();
+        if control.node_identity_registry().is_some_and(|r| {
+            r.records
+                .get(manifest.producer_node_id().as_str())
+                .is_none_or(|id| id.tenant_id != principal.tenant_id)
+        }) {
+            return Err("typed-map producer belongs to another tenant".into());
+        }
+        if control.memory_authorization_registry().is_some() {
+            let memory = artifact_http::map_authorization_manifest(manifest)?;
+            control
+                .authorize_memory_principal(
+                    &memory,
+                    &principal.tenant_id,
+                    principal.subject(),
+                    operation,
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+    /// Resolves an opaque original import through current Control instead of treating headers as grants.
+    fn authorize_memory_access(
+        &self,
+        principal: &artifact_http::ArtifactPrincipal,
+        manifest: &domain::MemoryArtifactManifest,
+        operation: domain::MemoryAccessOperation,
+        import_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.revalidate_artifact_principal(principal)?;
+        let live = self
+            .controller
+            .lock()
+            .map_err(|_| "Memory content authority unavailable")?;
+        let control = live.bridge.control();
+        if operation != domain::MemoryAccessOperation::Discover
+            && matches!(manifest.scope(), domain::MemoryScope::Local)
+            && !matches!(manifest.owner(),domain::MemoryOwner::Node{node_id,..} if principal.node_id()==Some(node_id))
+        {
+            return Err("Local Memory consumption is confined to its original Node".into());
+        }
+        if control.memory_authorization_registry().is_none() {
+            if operation != domain::MemoryAccessOperation::Discover
+                && matches!(manifest.scope(), domain::MemoryScope::ExecutionGroup(_))
+            {
+                return Err("Group content requires explicit current Control authorization".into());
+            }
+            if let domain::MemoryOwner::Node { node_id, .. } = manifest.owner()
+                && control.node_identity_registry().is_some_and(|r| {
+                    r.records
+                        .get(node_id.as_str())
+                        .is_none_or(|id| id.tenant_id != principal.tenant_id)
+                })
+            {
+                return Err("Memory content belongs to another tenant".into());
+            }
+            return Ok(());
+        }
+        if let Some(import_id) = import_id {
+            let original = live
+                .memory_imports
+                .get(import_id)
+                .ok_or("content request has no original durable Memory purpose")?;
+            if &original.request.manifest != manifest
+                || principal.node_id() != Some(&original.request.node_id)
+                || !principal.provider_allowed(&original.request.consumer_provider_id)
+            {
+                return Err("Memory purpose differs from actual certificate Node/provider or immutable manifest".into());
+            }
+            let now = domain::TimestampMs::new(
+                u64::try_from(
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_err(|e| e.to_string())?
+                        .as_millis(),
+                )
+                .map_err(|e| e.to_string())?,
+            );
+            if now.as_millis() >= original.request.deadline_ms {
+                return Err("original Memory content access budget expired".into());
+            }
+            application::memory_import::authorize(&live, &original.request, now)?;
+            let provider = live
+                .bridge
+                .state()
+                .node(&original.request.node_id)
+                .and_then(|node| {
+                    node.registration()
+                        .memory_providers()
+                        .iter()
+                        .find(|p| p.provider_id() == original.request.consumer_provider_id)
+                })
+                .ok_or("Memory consumer provider unavailable")?;
+            control
+                .authorize_memory_consumer(
+                    manifest,
+                    &principal.tenant_id,
+                    &original.request.group_id,
+                    &original.request.task_ref,
+                    &original.request.role_id,
+                    &original.request.node_id,
+                    provider,
+                    operation,
+                    original.authority.as_ref().map(|a| &a.membership),
+                )
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        control
+            .authorize_memory_principal(
+                manifest,
+                &principal.tenant_id,
+                principal.subject(),
+                operation,
+            )
+            .map_err(|e| e.to_string())
+    }
+    /// Resolves current stable principal and exact actual certificate validity without role headers.
+    fn refresh_artifact_principal(
+        &self,
+        principal: &artifact_http::ArtifactPrincipal,
+    ) -> Result<artifact_http::ArtifactPrincipal, String> {
+        let live = self
+            .controller
+            .lock()
+            .map_err(|_| "Artifact identity authority is unavailable")?;
+        let control = live.bridge.control();
+        if let Some(registry) = control.artifact_authorization_registry() {
+            let leaf = principal
+                .certificate_digest
+                .as_deref()
+                .ok_or("enrolled Artifact authority requires actual mTLS")?;
+            let now = domain::TimestampMs::new(
+                u64::try_from(
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_err(|e| e.to_string())?
+                        .as_millis(),
+                )
+                .map_err(|e| e.to_string())?,
+            );
+            let grant = control
+                .authorize_artifact_certificate(leaf, principal.certificate_expires_at_ms, now)
+                .map_err(|e| e.to_string())?;
+            return Ok(principal.with_committed_grant(registry, grant));
+        }
+        if principal.registry_id.is_some() {
+            return Err("Artifact authority cannot downgrade to static grants".into());
+        }
+        principal.validate_transport()?;
+        Ok(principal.clone())
+    }
     /// Requires a Node-owned manifest to match one exact provider in its registration snapshot.
     fn admit_manifest(&self, manifest: &domain::MemoryArtifactManifest) -> Result<(), String> {
         let domain::MemoryOwner::Node { node_id, .. } = manifest.owner() else {
@@ -231,6 +397,26 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
                     manifest.provider_id()
                 )
             })?;
+        if let domain::MemoryScope::ExecutionGroup(group_id) = manifest.scope() {
+            let group = controller
+                .bridge
+                .control()
+                .group(group_id)
+                .ok_or("Group-scoped Memory owner Group is absent")?;
+            if group.lifecycle() == control::GroupLifecycle::Released
+                || group.membership_version().is_none()
+                || !group
+                    .task_executions()
+                    .any(|task| task.assignments().iter().any(|a| a.node_id() == node_id))
+                || manifest
+                    .source_mission_id()
+                    .is_some_and(|mission| mission != group.mission_id())
+            {
+                return Err(
+                    "Group-scoped Memory producer is not a current exact participant".into(),
+                );
+            }
+        }
         provider
             .admit_manifest(manifest)
             .map_err(|error| error.to_string())
@@ -688,6 +874,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
@@ -721,6 +908,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
@@ -922,6 +1110,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     controller.bridge.publish_node_identity_registry()?;
     let controller = Arc::new(Mutex::new(controller));
+    application::state_policy::bootstrap_artifact(
+        &controller,
+        &event_log,
+        &event_write_gate,
+        artifact_tls
+            .as_ref()
+            .and_then(|profile| profile.authorization_registry()),
+        artifact_tls.is_some(),
+        process_clock.now(),
+    )?;
     let http_event_log = event_log.clone();
     let http_controller = controller.clone();
     let http_deployment_feasibility = deployment_feasibility.clone();
