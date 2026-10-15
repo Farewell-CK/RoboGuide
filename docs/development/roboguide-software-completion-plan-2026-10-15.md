@@ -43,7 +43,8 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 后续记录：[F2 身份与入口软件验收](acceptance/2026-10-15-f2.md)、
 [身份软件合同](identity-lifecycle-v0.1.md)、[F3 State/MI 验收](acceptance/2026-10-15-f3.md)、
 [F4 当前 Memory 连续性切片](acceptance/2026-10-15-f4-memory-continuity.md)、
-[F4 内容门禁切片](acceptance/2026-10-15-f4-content-authority.md)。F4 其余工作继续实施。
+[F4 内容门禁切片](acceptance/2026-10-15-f4-content-authority.md)、
+[F4 实际空间文件切片](acceptance/2026-10-15-f4-spatial-files.md)。F4 其余工作继续实施。
 
 ## 已接受的实现决定
 

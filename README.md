@@ -30,7 +30,13 @@ Memory 的原实例查询、导入中断对账和日志回退保护已有当前�
 Artifact 稳定证书主体和实际 bytes 上传归属门禁，见
 [内容授权合同](contracts/memory/authorization-v0.1/README.md)及
 [内容门禁验收](docs/development/acceptance/2026-10-15-f4-content-authority.md)。完整 Node Group grant、撤销 ACK、
-执行前 Memory 准备、handoff、active-map/GC、空间融合及后续阶段仍须完成。
+执行前 Memory 准备、handoff、active-map/GC 及后续阶段仍须完成。
+
+独立 [Spatial file provider](integrations/spatial-provider/README.md) 已实现真实 PLY/PCD 的
+FPFH/RANSAC、ICP、pose-graph、观测点分块融合和不可变增量 revision。
+[文件验收](docs/development/acceptance/2026-10-15-f4-spatial-files.md)包含独立坐标真值、单位转换、
+回环及失败检查；没有创建设备。它当前是文件计算边界，Occupancy、正式 Node workflow/CAS
+publication 接线和 active-map 消费仍须继续完成。
 
 ## 系统目标
 

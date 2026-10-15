@@ -1,0 +1,4 @@
+# Independent CPU file-geometry runtime; do not install into RoboGuide's Python 3.13 environment.
+open3d==0.19.0
+numpy==2.4.6
+scipy==1.17.1

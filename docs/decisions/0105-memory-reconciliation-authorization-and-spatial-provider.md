@@ -58,6 +58,12 @@ localization proof。外部文件/离线几何验收与实际设备定位保持�
 与 F5 的 snapshot/archive/CAS restore、F7 的 stop/handoff 和 F10 的全栈运行验收共同闭环，
 不因阶段边界删除这些必需项。
 
+当前 `integrations/spatial-provider/` 已实施实际 PLY/PCD CPU 文件计算；
+[文件验收](../development/acceptance/2026-10-15-f4-spatial-files.md)通过独立变换真值、
+三源回环、单位转换、不可变增量及退化/低重叠/损坏/超时检查。原始 source、代码、三个核心
+native binary digest 与版本均保留；这些 binary digest 不声称覆盖完整传递依赖。
+该文件切片不拥有 Node、地图激活或定位权威；Occupancy 和正式 Node/CAS 接线仍待完成。
+
 ## 当前内容门禁切片
 
 Control 的完整 Memory resource policy 与 Artifact certificate registry 通过全局 recovery-admin

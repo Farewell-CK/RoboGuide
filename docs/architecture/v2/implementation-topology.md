@@ -49,6 +49,8 @@ flowchart TB
   UPLOAD --> SQL
   ART --> CAT[Memory / Spatial catalog 与 placement evidence]
   CAT --> SQL
+  FILES[来源固定的 PLY / PCD 文件] --> SP[独立 CPU Spatial file provider]
+  SP --> BUNDLE[不可变观测点 tile bundle / parent lineage / 计算证据]
 ```
 
 Controller 中 Orchestration、Control、Runtime、State 和 Integration 当前共址，责任边界由
@@ -81,4 +83,8 @@ upload codec v23，Node journal 仍为 v7；
 稳定证书主体、当前 tenant 与实际 bytes 归属。Catalog/上传副作用重新核对当前权限，blob 流
 逐块检查；已有 CAS 哈希不能授权另建 manifest，旧成员版本不能因回到原 Node 而复活。
 Imported 历史不能授予当前可用性租约，Memory 对账不能满足 Task。完整 Node Group grant、
-撤销 ACK、pre-Execute 准备、handoff、active-map/GC 和空间计算仍属 F4 必需工作。
+撤销 ACK、pre-Execute 准备、handoff 和 active-map/GC 仍属 F4 必需工作。
+
+当前独立 Spatial 文件计算已通过[实际文件验收](../../development/acceptance/2026-10-15-f4-spatial-files.md)。
+配准、回环和增量只生成计算产物，尚未通过正式 Node workflow 发布至 CAS；图中 bundle 与 CAS
+没有隐含写入边。Occupancy、发布接线和当前消费者授权仍需继续实施。

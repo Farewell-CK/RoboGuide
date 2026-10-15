@@ -39,10 +39,12 @@ convention = "google"
 
 [tool.pytest.ini_options]
 addopts = "-q"
+pythonpath = ["integrations/spatial-provider"]
 testpaths = [
     "mission/tests",
     "integrations/robonix-map-service/tests",
     "integrations/memory-provider/tests",
+    "integrations/spatial-provider/tests",
     "integrations/habitat-local-eaios/tests",
     "evaluation/tests",
 ]
@@ -53,6 +55,8 @@ strict = true
 files = [
     "integrations/memory-provider/roboguide_memory_provider",
     "integrations/memory-provider/tests",
+    "integrations/spatial-provider/roboguide_spatial_provider",
+    "integrations/spatial-provider/tests",
     "mission/src",
     "mission/tests",
     "apps/mission-service",

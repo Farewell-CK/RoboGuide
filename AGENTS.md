@@ -284,6 +284,15 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Robonix map adapter and Habitat Local EAIOS bridge); these adapters own vendor calls,
   simulator calls, and local file layout only,
   and must not become a second Control, Runtime, State, or Node Protocol authority.
+- `integrations/spatial-provider/` owns actual CPU file geometry in an independent Python 3.11 /
+  Open3D 0.19.0 runtime. Inputs freeze exact bytes/units/frames and original bounded process work;
+  verified FPFH/RANSAC, ICP and pose-graph transforms produce observed-point immutable tile bundles.
+  Parent revisions remain unchanged, unobserved space stays unknown, and metrics never become
+  covariance or current Node localization. Original-job retries are readonly and never rerun native
+  computation. `tools/quality/check_spatial_provider_files.py` verifies attributed actual files,
+  independent coordinate truth, units/loop/incremental and adversarial failures with zero devices.
+  The root environment tests pure contracts only; do not install native geometry into MI.
+  Occupancy and formal Node/CAS workflow integration remain F4 work.
 - The C1-S0 Habitat bridge supports existing `mobility.navigate@v1` without changing Core schemas.
   It keeps EMOS/Habitat dependencies in their independent Conda environment, maps semantic
   destination to the existing local Oracle navigation action, owns one persistent simulator process
