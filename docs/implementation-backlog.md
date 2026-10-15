@@ -39,6 +39,10 @@ deadline 与 abort/dispatch-ready gate 均有 checkpoint 和回归，见
 [F9 Federation 验收](development/acceptance/2026-10-16-f9-federation-session.md)。跨域 transport、
 证书路由和真实多域恢复仍未关闭。
 
+2026-10-16 F7 软件停止/恢复边界已由 integration-server 220 项生产回归重新核对，见
+[F7 停止与恢复验收](development/acceptance/2026-10-16-f7-stop-recovery-software.md)。物理
+stop certificate、硬实时 hazard、运行中抢占和异构 regrasp 仍保持独立部署 gate。
+
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |

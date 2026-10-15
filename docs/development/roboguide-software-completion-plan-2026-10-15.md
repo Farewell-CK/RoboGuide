@@ -31,7 +31,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F4 Memory/Spatial | R10、R11、R12、R20 | reconciliation、Group 授权/handoff、active-map/GC/revocation、自动配准/融合/增量 | 实施中，见 ADR-0105；不得提前报告完成 |
 | F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | 动态 learner/joint membership 与软件 leader transfer 已通过；升级/证书轮换/archive/CAS 数据面仍待完成 |
 | F6 资源/调度 | R16、R20 | divisible quota、完整时间/空间承诺、真实成本 evidence 与确定性策略 | cost evidence、逻辑 quota ledger 与 Prometheus 入口已通过；物理/OS 强制、完整时空和运行中抢占仍待完成 |
-| F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | 待完成 |
+| F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | 软件 stop/recovery/hold/rebind gate 回归通过；物理停止、运行中抢占、耦合迁移和 hazard 仍待部署 |
 | F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 待完成 |
 | F9 层级/Federation | R20 | 控制域、跨域 prepare/commit、路由/授权与恢复 | 持久 epoch/digest/deadline prepare/commit session 已通过；跨域 transport/授权/恢复部署仍待完成 |
 | F10 运维与总验收 | R18、R19 的非发布部分 | 指标/告警、write-disabled 只读恢复、部署/迁移/回退、全功能验收 | 待完成 |
@@ -85,6 +85,10 @@ scrape 入口；这些不等于物理/OS quota、真实 GPU/交通成本或告�
 [F9 Federation session](acceptance/2026-10-16-f9-federation-session.md)补齐了持久跨域
 prepare/commit 的 epoch、plan/ownership digest、deadline 和 dispatch-ready gate；真实跨域
 transport、证书路由和多域恢复仍未关闭。
+
+[F7 停止与恢复软件验收](acceptance/2026-10-16-f7-stop-recovery-software.md)记录了现有生产
+路径的 StopConfirmed、Mission hold、Unknown/recovery 和 whole-Group gate；不把软件测试或
+`SoftwareProcess` assurance 当作设备停止证明。
 
 ## 已接受的实现决定
 
