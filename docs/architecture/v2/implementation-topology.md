@@ -10,6 +10,9 @@ flowchart TB
   ID[Control 持久身份 / 授权 revision / tenant / 测量] --> Entry
   ID --> PROTO
   MI --> Entry[Controller 用户与高权限入口]
+  MI --> PREFLIGHT[只读发布合同前检 / exact plan + source digests]
+  PREFLIGHT --> FEEDBACK[有界草案错误 / 原始输出保留]
+  FEEDBACK --> MI
   Entry --> ORCH[Orchestration / DAG / Mission hold]
   ORCH --> CTRL[Control / commitment / binding / calendar]
   CTRL --> RT[Runtime / attempts / durable intents]
@@ -50,6 +53,10 @@ Rust 模块及 transport-neutral ports 保持。Mission Service 是独立进程�
 默认单 Controller，显式静态三成员 HA profile 使用独立副本 SQL 和 Controller 子进程。
 动态成员、Federation、运行期重规划、完整时空/quota 和自动空间融合属于本轮必需目标，
 目前仍需按阶段实现和验收。
+
+发布合同前检与提交复用应用校验，见 [ADR-0106](../../decisions/0106-published-plan-validation-and-bounded-draft-recovery.md)。
+前检不写入权威状态、不选择 Node，也不保证物理可达或当前资源可用；真实提交仍重新检查。
+终态 verifier 的资源持有限制来自显式部署来源，不成为通用单 Actor 或顺序执行禁令。
 
 副作用只在应用事务持久化并取得当前 quorum/epoch 后发出。副本只复制元数据和命令证据，
 CAS 内容及 Local EAIOS 执行连续性需要独立恢复合同。Unknown 保留所有权；本地安全仍由

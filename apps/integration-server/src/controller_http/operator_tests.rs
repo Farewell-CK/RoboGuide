@@ -3,6 +3,9 @@
 use super::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+#[path = "plan_validation_tests.rs"]
+mod plan_validation_tests;
+
 /// Creates an empty Controller using the existing application and SQLite authority only.
 fn controller(log: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
     Arc::new(Mutex::new(ControllerState {
@@ -43,6 +46,18 @@ async fn route(
     principal: &OperatorPrincipal,
     bytes: &[u8],
 ) -> String {
+    route_with_sources(controller, log, principal, bytes, None, None).await
+}
+
+/// Exercises the same HTTP handler with explicit immutable deployment/verifier sources.
+async fn route_with_sources(
+    controller: &Arc<Mutex<ControllerState>>,
+    log: &state::SqliteEventLog,
+    principal: &OperatorPrincipal,
+    bytes: &[u8],
+    deployment: Option<&DeploymentFeasibility>,
+    feed: Option<&TaskVerifierFeed>,
+) -> String {
     let (mut client, mut server) = tokio::io::duplex(128 * 1024);
     let gate = Arc::new(Mutex::new(()));
     let clock = runtime::SystemMonotonicClock::new();
@@ -53,8 +68,8 @@ async fn route(
             log,
             &gate,
             &clock,
-            None,
-            None,
+            deployment,
+            feed,
             principal,
         )
         .await

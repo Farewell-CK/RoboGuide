@@ -127,7 +127,7 @@ fn authorize_tenant_path(
         return Err("global projection requires explicit global delegation".into());
     }
     let scope = if let Some(suffix) = path.strip_prefix("/v1/missions/") {
-        if suffix == "assess-initial-support" {
+        if matches!(suffix, "assess-initial-support" | "validate-plan") {
             return Ok(());
         }
         let id = suffix
@@ -199,7 +199,8 @@ fn authorize_operator_request(
     path: &str,
 ) -> Result<(), (&'static str, &'static str)> {
     let required = match (method, path) {
-        ("GET", _) | ("POST", "/v1/missions/assess-initial-support") => 0,
+        ("GET", _)
+        | ("POST", "/v1/missions/assess-initial-support" | "/v1/missions/validate-plan") => 0,
         ("POST", "/v1/missions") => 1,
         ("POST", "/v1/maintenance/archive") => 2,
         ("POST", "/v1/memory/imports") => 2,
@@ -661,7 +662,10 @@ where
     }
     let missing_scoped_registry = tenant.is_some()
         && method == "POST"
-        && matches!(path, "/v1/missions" | "/v1/missions/assess-initial-support")
+        && matches!(
+            path,
+            "/v1/missions" | "/v1/missions/assess-initial-support" | "/v1/missions/validate-plan"
+        )
         && controller
             .lock()
             .map_err(|_| "controller lock is poisoned")?
@@ -1294,6 +1298,47 @@ where
                     serde_json::json!({"mission_id":mission,"tenant_id":live.bridge.control().mission_tenant(&mission),"source_plan_digest":digest}),
                 ),
                 Err(error) => ("404 Not Found", serde_json::json!({"error":error})),
+            }
+        }
+        ("POST", "/v1/missions/validate-plan") => {
+            let plan = match decode_mission_plan(request_body) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error":error.to_string()}),
+                    )
+                    .await;
+                }
+            };
+            let result = {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned")?;
+                let mut scoped = live.bridge.control().clone();
+                scoped
+                    .register_mission_tenant(
+                        plan.goal().mission_id().clone(),
+                        tenant.as_deref().unwrap_or("local"),
+                    )
+                    .map(|_| {
+                        application::plan_validation::assess(
+                            &live,
+                            &plan,
+                            tenant.as_deref().unwrap_or("local"),
+                            deployment_feasibility,
+                            verifier_feed,
+                            &request.body,
+                        )
+                    })
+            };
+            match result {
+                Ok(result) => ("200 OK", result),
+                Err(error) => (
+                    "403 Forbidden",
+                    serde_json::json!({"error":error.to_string()}),
+                ),
             }
         }
         ("POST", "/v1/missions") => {

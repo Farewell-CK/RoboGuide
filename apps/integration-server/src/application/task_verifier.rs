@@ -12,16 +12,37 @@ use sha2::{Digest, Sha256};
 impl TaskVerifierFeed {
     /// Requires every verifier-backed Task to have a real supported final source.
     pub(crate) fn validate_plan(&self, plan: &domain::MissionPlan) -> Result<(), String> {
-        for task in plan.task_graph().tasks() {
+        match self.plan_issues(plan).first() {
+            Some(issue) => Err(issue.message.clone()),
+            None => Ok(()),
+        }
+    }
+
+    /// Collects bounded independent final-feed conflicts without changing accepted plan semantics.
+    pub(crate) fn plan_issues(
+        &self,
+        plan: &domain::MissionPlan,
+    ) -> Vec<super::plan_validation::PlanIssue> {
+        use super::plan_validation::{MAX_PLAN_ISSUES, PlanIssue};
+        let mut issues = Vec::new();
+        for (index, task) in plan.task_graph().tasks().iter().enumerate() {
+            if issues.len() > MAX_PLAN_ISSUES {
+                break;
+            }
             let domain::TaskSatisfactionBasis::VerifierEvidence(spec) = task.satisfaction_basis()
             else {
                 continue;
             };
             if !self.supports(spec) {
-                return Err(format!(
-                    "Task {} requires verifier evidence absent from this deployment source",
-                    task.task_id()
-                ));
+                issues.push(PlanIssue {
+                    code: "verifier.source_unsupported",
+                    path: format!("/tasks/{index}/satisfaction"),
+                    message: format!(
+                        "Task {} requires verifier evidence absent from this deployment source",
+                        task.task_id()
+                    ),
+                });
+                continue;
             }
             if plan.task_graph().tasks().iter().any(|other| {
                 other
@@ -29,12 +50,22 @@ impl TaskVerifierFeed {
                     .iter()
                     .any(|dependency| dependency == task.task_id())
             }) {
-                return Err(format!(
-                    "Task {} requires a final verifier verdict before dependent Tasks can run",
-                    task.task_id()
-                ));
+                issues.push(PlanIssue {
+                    code: "verifier.blocks_dependent_work",
+                    path: format!("/tasks/{index}/satisfaction"),
+                    message: format!(
+                        "Task {} requires a final verifier verdict before dependent Tasks can run",
+                        task.task_id()
+                    ),
+                });
             }
-            if plan.actors().len() == 1 && plan.task_graph().tasks().len() > 1 {
+            let actors = task
+                .requirement()
+                .roles()
+                .iter()
+                .filter_map(|role| role.actor_id())
+                .collect::<BTreeSet<_>>();
+            if !actors.is_empty() && plan.task_graph().tasks().len() > 1 {
                 let mut prerequisites = BTreeSet::new();
                 let mut pending = task.dependencies().to_vec();
                 while let Some(dependency) = pending.pop() {
@@ -46,20 +77,31 @@ impl TaskVerifierFeed {
                         .tasks()
                         .iter()
                         .find(|candidate| candidate.task_id() == &dependency)
-                        .ok_or_else(|| "verifier Task has an unknown prerequisite".to_string())?;
+                        .expect("decoded plan has complete DAG references");
                     pending.extend_from_slice(predecessor.dependencies());
                 }
                 if plan.task_graph().tasks().iter().any(|other| {
-                    other.task_id() != task.task_id() && !prerequisites.contains(other.task_id())
+                    other.task_id() != task.task_id()
+                        && !prerequisites.contains(other.task_id())
+                        && other
+                            .requirement()
+                            .roles()
+                            .iter()
+                            .filter_map(|role| role.actor_id())
+                            .any(|actor| actors.contains(actor))
                 }) {
-                    return Err(format!(
-                        "Task {} needs a final verifier verdict but single-Actor execution has an unordered Task that could await the same terminal world",
+                    issues.push(PlanIssue {
+                        code: "verifier.blocks_actor_reuse",
+                        path: format!("/tasks/{index}/satisfaction"),
+                        message: format!(
+                            "Task {} needs a final verifier verdict but its Actor endpoint is needed by unordered work before the same terminal world can close",
                         task.task_id()
-                    ));
+                        ),
+                    });
                 }
             }
         }
-        Ok(())
+        issues
     }
 }
 
