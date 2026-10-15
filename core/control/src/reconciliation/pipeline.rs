@@ -1018,6 +1018,18 @@ impl ControlPlane {
                 proposal.replacement_node_id()
             )));
         }
+        if !self.decision_gates_allow(
+            state,
+            proposal.replacement_node_id(),
+            &role,
+            proposal.operation(),
+            domain::DecisionKind::Rebind,
+            timestamp,
+        ) {
+            return Err(ControlError::AssignmentUnavailable(
+                "replacement State policy evidence is unavailable".into(),
+            ));
+        }
         if proposal.stopped_owner_allowed
             && !proposal.operation().is_some_and(|operation| {
                 replacement

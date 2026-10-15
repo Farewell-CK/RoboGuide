@@ -147,7 +147,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             return None;
         }
         self.control
-            .group_continuation_admission(&self.state, group_id, &commands, now)
+            .group_continuation_admission(&self.decision_state(), group_id, &commands, now)
             .err()
             .map(|error| error.to_string())
     }
@@ -265,7 +265,12 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             let commands = self.pending_group_continuation_commands(intent);
             return self
                 .control
-                .group_continuation_admission(&self.state, &intent.group_id, &commands, now)
+                .group_continuation_admission(
+                    &self.decision_state(),
+                    &intent.group_id,
+                    &commands,
+                    now,
+                )
                 .is_ok();
         }
         true

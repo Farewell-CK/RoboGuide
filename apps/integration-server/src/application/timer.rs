@@ -71,6 +71,7 @@ pub(crate) fn drive_application_timer_with_clock(
         );
         let correlation = domain::CorrelationId::new("application-timer")?;
         candidate.bridge.tick(now, &correlation)?;
+        candidate.bridge.refresh_beliefs(now, &correlation)?;
         let mut events = event_log.clone();
         apply_runtime_events(&mut candidate, now, &correlation, &mut events)?;
         safety_stop::tick(&mut candidate, now)?;
@@ -78,6 +79,7 @@ pub(crate) fn drive_application_timer_with_clock(
         resume_pending_recoveries(&mut candidate, now, &correlation, &mut events)?;
         apply_pending_cancellations(&mut candidate, now, &correlation, &mut events)?;
         apply_runtime_outcomes(&mut candidate, now, &correlation, &mut events)?;
+        semantic_verifier::apply_pending(&mut candidate, now, &correlation, &mut events)?;
         if let Some(feed) = verifier_feed {
             match feed.read_verdict() {
                 Ok(Some(verdict)) => match validate_task_verifier(&candidate, feed, &verdict) {
@@ -97,6 +99,7 @@ pub(crate) fn drive_application_timer_with_clock(
         }
         drive_ready_tasks(&mut candidate, now, &correlation, &mut events)?;
         drive_rebound_attempts(&mut candidate, now, &correlation)?;
+        semantic_verifier::monitor_active(&mut candidate, now)?;
         if let Some(error) = event_log.take_error()? {
             return Err(format!("application timer event sink failed: {error}").into());
         }

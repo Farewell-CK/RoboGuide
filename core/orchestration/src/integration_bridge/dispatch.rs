@@ -194,11 +194,33 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         held_groups: &BTreeSet<ExecutionGroupId>,
     ) -> Result<usize, IntegrationRuntimeError> {
         let intents = self.runtime.pending_dispatch_intents();
+        let state = self.decision_state();
         let mut delivered = 0;
         let mut first_error = None;
         for intent in intents {
             if held_groups.contains(intent.command.group_id()) {
                 continue;
+            }
+            if self.control.decision_policy_registry().is_some() {
+                let Some(now) = clock.map(ports::Clock::now) else {
+                    continue;
+                };
+                if [
+                    domain::DecisionKind::Match,
+                    domain::DecisionKind::Commit,
+                    domain::DecisionKind::Readiness,
+                ]
+                .into_iter()
+                .any(|decision| {
+                    !self.control.bound_command_decision_allowed(
+                        &state,
+                        &intent.command,
+                        decision,
+                        now,
+                    )
+                }) {
+                    continue;
+                }
             }
             if !self.group_recovery_delivery_permitted(
                 &intent.execution_id,
@@ -787,6 +809,18 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     /// Returns independently attributed State records without cross-source fusion.
     pub const fn state_records(&self) -> &StateRecordProjection {
         &self.state_records
+    }
+    /// Captures the current read-only federation for transaction-local policy decisions.
+    pub fn decision_state(&self) -> state::DecisionStateSnapshot {
+        use ports::StateRecordReader;
+        state::DecisionStateSnapshot::new(
+            self.state.clone(),
+            self.state_records
+                .records()
+                .into_iter()
+                .filter(|record| self.verifier_state_is_current(record))
+                .collect(),
+        )
     }
     /// Records one independently attributed Task satisfaction verdict in the State projection.
     pub fn record_task_satisfaction_evidence(

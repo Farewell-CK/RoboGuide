@@ -165,6 +165,22 @@ impl ControlPlane {
                     command.intent().operation(),
                     now,
                 )
+                || !self.decision_gates_allow(
+                    state,
+                    command.node_id(),
+                    role,
+                    Some(command.intent().operation()),
+                    domain::DecisionKind::Rebind,
+                    now,
+                )
+                || !self.decision_gates_allow(
+                    state,
+                    command.node_id(),
+                    role,
+                    Some(command.intent().operation()),
+                    domain::DecisionKind::Readiness,
+                    now,
+                )
             {
                 return Err(invalid(
                     "continuation requires current eligibility and independent Task execution",

@@ -19,6 +19,11 @@ Node 生命周期、稳定证书主体、租户匹配/承诺/恢复门禁和原�
 
 独立原图位于 [`docs/images/roboguide-v2-overall-architecture.png`](docs/images/roboguide-v2-overall-architecture.png)，并已嵌入 V2 DOCX。仓库内的结构化摘要见 [`docs/architecture/v2/README.md`](docs/architecture/v2/README.md)。
 
+State/MI 的当前整改见 [ADR-0104](docs/decisions/0104-state-consumers-belief-and-semantic-verifier.md) 与
+[F3 验收](docs/development/acceptance/2026-10-15-f3.md)：显式来源策略进入 Control、Belief 保留原始
+证据与 TTL、通用 verifier 独立于本地完成、MI provenance 与 Request 同事务持久化。POSIX 文件
+计算已通过正式 Node/CAS/独立复算与重启验收；整体 Memory/HA/资源/协调/Federation 仍在实施。
+
 ## 系统目标
 
 RoboGuide 统一感知系统状态、物理世界状态和具身能力状态，并联合调度 Capability、Compute、Space、Time，使机器人、感知设备、交互终端、边缘算力和基础设施节点能够持续完成复杂现实任务。

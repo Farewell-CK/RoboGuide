@@ -155,6 +155,14 @@ pub(super) fn assess<S: ports::SharedNodeStateReader>(
     }) {
         result["schema_version"] = serde_json::json!("roboguide.initial-operation-assessment/v0.3");
     }
+    if diagnostics.iter().any(|report| {
+        report
+            .get("exclusions")
+            .and_then(|exclusions| exclusions.get("decision_evidence_unavailable"))
+            .is_some()
+    }) {
+        result["schema_version"] = serde_json::json!("roboguide.initial-operation-assessment/v0.4");
+    }
     result["candidate_diagnostics"] = serde_json::json!(diagnostics);
     for task in &roots {
         let role = &task.requirement().roles()[0];

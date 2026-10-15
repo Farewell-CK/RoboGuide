@@ -34,6 +34,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper had identity authority but no persistent State policy and generic verifier registry.
+const PRE_POLICY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v29";
 /// Previous wrapper had typed stop authority but no durable Node identity lifecycle.
 const PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v28";
 /// Previous wrapper carried unverified relation stop strings without complete evidence authority.
@@ -104,6 +106,8 @@ struct ControllerState {
     orchestrator: MissionOrchestrator,
     /// Durable exact verdict/Task receipts preventing replay after restart.
     verifier_seen: BTreeSet<(String, String, String)>,
+    /// CAS handle used to verify independent evidence bytes; never serialized into authority.
+    verifier_artifact_store: Option<artifact_store::FileSystemArtifactStore>,
     /// Startup-frozen verifier source identity, fenced across checkpoint restore.
     verifier_source_digest: Option<String>,
 }
@@ -682,6 +686,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
@@ -713,6 +718,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
@@ -752,6 +758,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )?,
                 orchestrator: MissionOrchestrator::restore_json(&saved.orchestration_json)?,
                 verifier_seen: saved.verifier_seen,
+                verifier_artifact_store: Some(artifact_store.clone()),
                 verifier_source_digest: configured_verifier_digest,
             }
         }
@@ -774,6 +781,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
             orchestrator: MissionOrchestrator::new(),
             verifier_seen: BTreeSet::new(),
+            verifier_artifact_store: Some(artifact_store.clone()),
             verifier_source_digest: verifier_feed
                 .as_ref()
                 .map(|feed| feed.source_digest().to_string()),

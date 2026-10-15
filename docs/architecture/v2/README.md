@@ -439,6 +439,19 @@ HTTP、dynamic gRPC 或 MCP workflow 实现 discovery/export/import；底层数�
 command identity 与 Node journal admission receipt；v0.2 endpoint 已退役并明确
 返回迁移错误。
 
+ADR-0104 冻结当前显式 State consumer 与 Belief/verifier 软件合同。Control 的来源策略覆盖
+Match、Commit、初始 Bind、Rebind、续执行和 outbox readiness；Orchestration 的 satisfaction
+门禁独立于 Runtime 本地完成。Belief producer 保留 raw lineage，使用显式 scalar 冲突规则或
+共同线性坐标系中的保守 Gaussian covariance intersection；不能由 confidence 发明方差，
+不能用旧 Node epoch、重启或重复输入刷新证据。可信 tenant/source 所有权控制 State 查询。
+
+通用 verifier 的来源随 accepted Task 冻结，报告必须覆盖完整当前 attempt、plan digest、
+predicate、freshness 和 finality；可要求实际 CAS proof。持续证据失效进入 stop/hold，
+终态后的争议是 incident。MI 将代码、配置、Prompt、Catalog、审批策略及真实 transport metadata
+与 Request 同事务持久化；历史缺失不补造。完整合同与软件/硬件边界见
+[ADR-0104](../../decisions/0104-state-consumers-belief-and-semantic-verifier.md) 及
+[F3 进程验收](../../development/acceptance/2026-10-15-f3.md)。
+
 ### Selective Memory Catalog v0.1
 
 Memory 与实时 State 分离。v0.1 支持 Execution、Spatial、Semantic、Experience、Artifact

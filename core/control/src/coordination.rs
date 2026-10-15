@@ -17,6 +17,10 @@ pub struct CommittedPlan {
     assignments: Vec<RoleAssignment>,
     /// Exact physical executor selections committed for v0.8 Roles.
     role_physical_entities: BTreeMap<RoleId, domain::PhysicalEntityId>,
+    /// Exact operation contracts carried from current-State Commit into Bind.
+    role_operations: BTreeMap<RoleId, domain::OperationRef>,
+    /// Policy generation admitted by Commit; initial Bind cannot use a different interpretation.
+    decision_policy_digest: Option<String>,
 }
 
 impl CommittedPlan {
@@ -27,6 +31,8 @@ impl CommittedPlan {
             task_ref,
             assignments,
             role_physical_entities: BTreeMap::new(),
+            role_operations: BTreeMap::new(),
+            decision_policy_digest: None,
         }
     }
 
@@ -40,7 +46,32 @@ impl CommittedPlan {
             task_ref,
             assignments,
             role_physical_entities,
+            role_operations: BTreeMap::new(),
+            decision_policy_digest: None,
         }
+    }
+
+    /// Freezes explicit current-State admission meaning without adding a second commitment authority.
+    pub(crate) fn with_decision_policy(
+        mut self,
+        control: &ControlPlane,
+        proposal: &AssignmentProposal,
+    ) -> Self {
+        self.decision_policy_digest = control
+            .decision_policy_registry()
+            .map(|registry| registry.digest().expect("validated registry"));
+        self.role_operations = proposal.role_operations().clone();
+        self
+    }
+
+    /// Returns the policy identity that initial binding must revalidate against current source evidence.
+    pub(crate) fn decision_policy_digest(&self) -> Option<&str> {
+        self.decision_policy_digest.as_deref()
+    }
+
+    /// Returns the exact current-State operation whose evidence Commit admitted.
+    pub(crate) fn operation_for_role(&self, role: &RoleId) -> Option<&domain::OperationRef> {
+        self.role_operations.get(role)
     }
 
     /// Returns the complete mission-scoped task identity.
@@ -92,7 +123,7 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CommittedPlan, ControlError> {
-        if self.node_identity_registry().is_some() {
+        if self.node_identity_registry().is_some() || self.decision_policy_registry().is_some() {
             return Err(ControlError::InvalidProposal(
                 "lifecycle identity Commit requires current State".into(),
             ));
@@ -129,6 +160,7 @@ impl ControlPlane {
             ));
         }
         self.validate_current_assignment_support(state, proposal, timestamp)?;
+        self.audit_committed_decision(state, proposal, timestamp, correlation_id, events);
         self.commit_validated(proposal, timestamp, correlation_id, events)
     }
 
@@ -185,7 +217,8 @@ impl ControlPlane {
             proposal.task_ref().clone(),
             proposal.assignments().to_vec(),
             proposal.role_physical_entities().clone(),
-        );
+        )
+        .with_decision_policy(self, proposal);
         events.append(
             timestamp,
             correlation_id,
@@ -206,7 +239,7 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CommittedPlan, ControlError> {
-        if self.node_identity_registry().is_some() {
+        if self.node_identity_registry().is_some() || self.decision_policy_registry().is_some() {
             return Err(ControlError::InvalidProposal(
                 "lifecycle identity Group Commit requires current State".into(),
             ));
@@ -240,6 +273,7 @@ impl ControlPlane {
         events: &mut E,
     ) -> Result<CommittedPlan, ControlError> {
         self.validate_current_assignment_support(state, proposal, timestamp)?;
+        self.audit_committed_decision(state, proposal, timestamp, correlation_id, events);
         self.commit_for_group_validated(group_id, proposal, timestamp, correlation_id, events)
     }
 
@@ -348,7 +382,8 @@ impl ControlPlane {
             proposal.task_ref().clone(),
             proposal.assignments().to_vec(),
             proposal.role_physical_entities().clone(),
-        );
+        )
+        .with_decision_policy(self, proposal);
         events.append(
             timestamp,
             correlation_id,
@@ -416,7 +451,16 @@ impl ControlPlane {
                     )
                 },
             );
-            if !eligible {
+            if !eligible
+                || !self.decision_gates_allow(
+                    state,
+                    assignment.node_id(),
+                    requirement,
+                    operation,
+                    domain::DecisionKind::Commit,
+                    timestamp,
+                )
+            {
                 return Err(ControlError::AssignmentUnavailable(format!(
                     "node {} no longer satisfies capability and operation {:?} for role {}",
                     assignment.node_id(),

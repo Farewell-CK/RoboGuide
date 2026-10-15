@@ -324,7 +324,7 @@ pub(crate) fn resume_role_recovery(
         .control()
         .pending_recovery_commitment_for_task(need.group_id(), need.task_ref(), need.role_id())
         .cloned();
-    let state = controller.bridge.state().clone();
+    let state = controller.bridge.decision_state();
     if let Some(committed) = committed {
         let supported = state
             .node(committed.replacement_node_id())
@@ -342,13 +342,17 @@ pub(crate) fn resume_role_recovery(
                 .abort_role_recovery_commitment(&committed, timestamp, correlation_id, events)?;
             return Ok(());
         }
-        controller.bridge.control_mut().rebind_role_with_state(
+        let rebind = controller.bridge.control_mut().rebind_role_with_state(
             &state,
             &committed,
             timestamp,
             correlation_id,
             events,
-        )?;
+        );
+        match rebind {
+            Ok(_) | Err(control::ControlError::AssignmentUnavailable(_)) => {}
+            Err(error) => return Err(error.into()),
+        }
         return Ok(());
     }
     let (requirement, operation) = controller

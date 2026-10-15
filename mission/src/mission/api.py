@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import parse_qs
 
 from mission.authorization import CertificateGrant, load_authorization
 from mission.capability_catalog import CanonicalCapabilityCatalog
@@ -43,6 +44,11 @@ from mission.service_config import (
 
 LOG = logging.getLogger("roboguide.mission_service")
 Principal = tuple[str, str, str]
+
+
+def _file_digest(path: Path) -> str:
+    """Freeze exact configured source bytes without persisting credentials or machine paths."""
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def build_engine(
@@ -123,7 +129,27 @@ def build_engine(
         max_deployment_recovery_attempts=service_settings.max_deployment_recovery_attempts,
         deployment_recovery_timeout_ms=service_settings.deployment_recovery_timeout_ms,
         provider_identity={
+            "mission_configuration_digest": _file_digest(mission_config),
+            "service_configuration_digest": _file_digest(service_config),
+            "catalog_source_digest": _file_digest(planner_settings.capability_catalog_path),
+            "output_schema_digest": _file_digest(planner_settings.schema_path),
+            "dependency_lock_digest": _file_digest(repository_root / "uv.lock")
+            if (repository_root / "uv.lock").is_file()
+            else None,
+            "prompt_digests": {
+                "interpreter": _file_digest(planner_settings.prompts.interpreter_path),
+                "planner": _file_digest(planner_settings.prompts.planner_path),
+                "reviewer": _file_digest(planner_settings.prompts.reviewer_path),
+                "repairer": _file_digest(planner_settings.prompts.repairer_path),
+            },
+            "satisfaction_policy_digest": planner_settings.satisfaction_policy.to_json()[
+                "policy_digest"
+            ]
+            if planner_settings.satisfaction_policy is not None
+            else None,
             "provider": planner_settings.llm.model_provider,
+            "resolved_endpoint_digest": "sha256:"
+            + hashlib.sha256(planner_settings.provider.endpoint(environment).encode()).hexdigest(),
             "model": planner_settings.llm.model,
             "review_model": planner_settings.llm.review_model,
             "reasoning_effort": planner_settings.llm.reasoning_effort,
@@ -244,6 +270,29 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
                 if not self._authorize_request_owner(parts[0]):
                     return
                 self._run(lambda: self.server.engine.get(parts[0]).observations(), HTTPStatus.OK)
+                return
+            if len(parts) == 2 and parts[0] and parts[1] == "provenance":
+                if not self._authorize_request_owner(parts[0]):
+                    return
+                try:
+                    query = parse_qs(
+                        self.path.partition("?")[2], keep_blank_values=True, max_num_fields=2
+                    )
+                    if set(query) - {"after_sequence", "limit"} or any(
+                        len(values) != 1 for values in query.values()
+                    ):
+                        raise ValueError("invalid provenance query")
+                    after_sequence = int(query.get("after_sequence", ["0"])[0])
+                    limit = int(query.get("limit", ["32"])[0])
+                except ValueError:
+                    self._send(HTTPStatus.BAD_REQUEST, {"error": "invalid provenance page"})
+                    return
+                self._run(
+                    lambda: self.server.engine.provenance(
+                        parts[0], after_sequence=after_sequence, limit=limit
+                    ),
+                    HTTPStatus.OK,
+                )
                 return
             if len(parts) == 3 and all(parts) and parts[1] == "grounding-contexts":
                 if not self._authorize_request_owner(parts[0]):

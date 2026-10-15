@@ -52,7 +52,8 @@
     "assessment": {
       "oneOf": [
         { "$ref": "../initial-operation-assessment-v0.2/assessment.schema.json" },
-        { "$ref": "../initial-operation-assessment-v0.3/assessment.schema.json" }
+        { "$ref": "../initial-operation-assessment-v0.3/assessment.schema.json" },
+        { "$ref": "../initial-operation-assessment-v0.4/assessment.schema.json" }
       ]
     },
     "decision": {

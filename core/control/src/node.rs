@@ -16,6 +16,8 @@ pub enum CandidateExclusionReason {
     RegistrationMissing,
     /// The durable Node identity is absent, revoked or expired.
     IdentityUnavailable,
+    /// Explicit source/freshness/conflict/condition policy did not admit current State evidence.
+    DecisionEvidenceUnavailable,
     /// Reported health does not permit scheduling.
     HealthUnschedulable,
     /// Reported health has expired at the decision's receive-relative time.
@@ -394,6 +396,15 @@ impl ControlPlane {
             Some(CandidateExclusionReason::LeaseInactive)
         } else if !snapshot.registration().supports_role(role) {
             Some(CandidateExclusionReason::RoleContractUnavailable)
+        } else if !self.decision_gates_allow(
+            state,
+            node_id,
+            role,
+            None,
+            domain::DecisionKind::Match,
+            timestamp,
+        ) {
+            Some(CandidateExclusionReason::DecisionEvidenceUnavailable)
         } else {
             None
         }
@@ -409,6 +420,14 @@ impl ControlPlane {
         timestamp: TimestampMs,
     ) -> bool {
         self.node_is_eligible_for_role(state, node_id, role, timestamp)
+            && self.decision_gates_allow(
+                state,
+                node_id,
+                role,
+                Some(operation),
+                domain::DecisionKind::Match,
+                timestamp,
+            )
             && state
                 .node(node_id)
                 .is_some_and(|snapshot| snapshot.registration().supports_operation(operation))

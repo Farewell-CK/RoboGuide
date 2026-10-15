@@ -25,6 +25,7 @@ use state::{InMemorySharedNodeState, InMemoryTaskSatisfactionState, StateRecordP
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::{Display, Formatter};
 
+mod belief;
 mod conversion;
 mod dispatch;
 mod execution_facts;

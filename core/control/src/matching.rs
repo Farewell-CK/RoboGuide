@@ -277,6 +277,16 @@ impl ControlPlane {
         if !registration.supports_operation(operation) {
             return Some(crate::CandidateExclusionReason::OperationUnsupported);
         }
+        if !self.decision_gates_allow(
+            state,
+            node,
+            role,
+            Some(operation),
+            domain::DecisionKind::Match,
+            timestamp,
+        ) {
+            return Some(crate::CandidateExclusionReason::DecisionEvidenceUnavailable);
+        }
         if role.actor_id().is_some_and(|actor| {
             actor_requirements.get(actor).is_none_or(|requirements| {
                 !requirements
@@ -302,6 +312,19 @@ impl ControlPlane {
         let state = &scoped;
         let mut roles = Vec::with_capacity(requirement.roles().len());
         for role in requirement.roles() {
+            for snapshot in state.nodes() {
+                self.audit_role_decision(
+                    state,
+                    requirement.task_ref(),
+                    snapshot.node_id(),
+                    role,
+                    None,
+                    domain::DecisionKind::Match,
+                    timestamp,
+                    correlation_id,
+                    events,
+                );
+            }
             if let Some(actor_id) = role.actor_id()
                 && let Some(binding) = self.actor_binding(requirement.mission_id(), actor_id)
             {
@@ -444,6 +467,19 @@ impl ControlPlane {
                 .iter_mut()
                 .find(|candidate| candidate.role_id() == role.role_id())
                 .expect("candidate exists");
+            for node in &role_candidates.node_ids {
+                self.audit_role_decision(
+                    state,
+                    requirement.task_ref(),
+                    node,
+                    role,
+                    Some(operation),
+                    domain::DecisionKind::Match,
+                    timestamp,
+                    correlation_id,
+                    events,
+                );
+            }
             if let Some(actor_id) = role.actor_id()
                 && let Some(restriction) =
                     self.actor_candidate_restriction(requirement.mission_id(), actor_id)
@@ -563,6 +599,19 @@ impl ControlPlane {
         let state = &scoped;
         let mut roles = Vec::with_capacity(requirement.roles().len());
         for role in requirement.roles() {
+            for snapshot in state.nodes() {
+                self.audit_role_decision(
+                    state,
+                    requirement.task_ref(),
+                    snapshot.node_id(),
+                    role,
+                    None,
+                    domain::DecisionKind::Match,
+                    timestamp,
+                    correlation_id,
+                    events,
+                );
+            }
             let node_ids = state
                 .nodes()
                 .into_iter()

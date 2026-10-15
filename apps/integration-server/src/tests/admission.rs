@@ -83,6 +83,7 @@ async fn admission_http_and_checkpoint_preserve_exact_accepted_input() {
         memory_imports: BTreeMap::new(),
         safety_stops: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
+        verifier_artifact_store: None,
         verifier_source_digest: None,
     }));
     let body = include_bytes!("../../../../scenarios/phase1-mission-v0.3/mission-plan.json");
@@ -128,6 +129,7 @@ async fn admission_http_and_checkpoint_preserve_exact_accepted_input() {
         memory_imports: saved.memory_imports,
         safety_stops: saved.safety_stops,
         verifier_seen: saved.verifier_seen,
+        verifier_artifact_store: None,
         verifier_source_digest: saved.verifier_source_digest,
     }));
     assert_eq!(

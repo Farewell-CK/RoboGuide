@@ -77,6 +77,7 @@ impl Fixture {
             memory_imports: BTreeMap::new(),
             safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
+            verifier_artifact_store: None,
             verifier_source_digest: None,
         };
         events.begin_batch().unwrap();
@@ -902,7 +903,7 @@ fn stopped_rebind_requires_current_support_and_aborts_invalidated_commit() {
     );
 }
 
-/// Reuses a committed replacement only with original stop proof, preserved through restart.
+/// Restore retains the original stop/commitment but cannot rebind using expired process-local eligibility.
 pub(super) fn committed_recovery_resumes() {
     let (mut fixture, need) = committed_fixture();
     let checkpoint = fixture
@@ -910,6 +911,7 @@ pub(super) fn committed_recovery_resumes() {
         .bridge
         .checkpoint_json()
         .expect("checkpoint");
+    let allocations = fixture.allocations();
     fixture.controller.bridge = IntegrationRuntimeBridge::restore_from_checkpoint(
         &checkpoint,
         fixture.events.clone(),
@@ -924,46 +926,28 @@ pub(super) fn committed_recovery_resumes() {
         &fixture.correlation,
         &mut fixture.events.clone(),
     )
-    .expect("existing commitment rebinds");
+    .expect("restored commitment waits for registration");
     assert!(
         fixture
             .controller
             .bridge
             .control()
             .pending_recovery_commitment_for_task(need.group_id(), need.task_ref(), need.role_id())
-            .is_none()
+            .is_some()
     );
-    assert_eq!(
+    assert_eq!(fixture.allocations(), allocations);
+    assert_eq!(fixture.controller.bridge.attempt_history().len(), 1);
+    assert!(
         fixture
             .controller
             .bridge
             .control()
             .group(need.group_id())
-            .expect("group")
+            .unwrap()
             .task_execution(need.task_ref())
-            .expect("task")
-            .assignments()[0]
-            .node_id()
-            .as_str(),
-        "node-a"
-    );
-    apply_recovery_required(
-        &mut fixture.controller,
-        fixture.attempt.command(),
-        TimestampMs::new(11),
-        &fixture.correlation,
-        &mut fixture.events.clone(),
-    )
-    .expect("old stopped binding cannot release replacement");
-    assert_eq!(
-        fixture
-            .controller
-            .bridge
-            .control()
-            .group(need.group_id())
-            .expect("group")
-            .lifecycle(),
-        control::GroupLifecycle::Adapted
+            .unwrap()
+            .assignments()
+            .is_empty()
     );
 }
 

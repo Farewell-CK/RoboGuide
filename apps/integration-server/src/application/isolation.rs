@@ -280,7 +280,12 @@ pub(crate) fn flush_unisolated_dispatch(
                 .orchestrator
                 .execution(&mission)
                 .filter(|execution| {
-                    execution.isolation().is_some() || execution.is_crash_loop_quarantined()
+                    execution.isolation().is_some()
+                        || execution.is_crash_loop_quarantined()
+                        || !super::semantic_verifier::delivery_permitted(
+                            controller,
+                            execution.group_id(),
+                        )
                 })
                 .map(|execution| execution.group_id().clone())
         })
@@ -310,26 +315,66 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
     if saved.schema != SERVER_CHECKPOINT_SCHEMA
         && integration.get("control").is_some_and(|control| {
-            ["node_identity_registry", "operator_authorization"]
+            control
+                .get("decision_policy_registry")
+                .is_some_and(|registry| !registry.is_null())
+                || control
+                    .get("semantic_verifier_registry")
+                    .is_some_and(|registry| !registry.is_null())
+                || control
+                    .get("belief_policy_registry")
+                    .is_some_and(|registry| !registry.is_null())
+                || control
+                    .get("belief_policy_registry")
+                    .is_some_and(|registry| !registry.is_null())
+                || [
+                    "semantic_verifier_history",
+                    "semantic_verifier_receipts",
+                    "mission_verifier_sources",
+                    "semantic_verifier_watches",
+                    "registry_command_receipts",
+                    "belief_policy_history",
+                ]
                 .iter()
                 .any(|key| {
                     control
                         .get(key)
-                        .is_some_and(|authority| !authority.is_null())
-                })
-                || ["mission_tenants", "tenant_migrations"].iter().any(|key| {
-                    control
-                        .get(key)
                         .and_then(serde_json::Value::as_object)
-                        .is_some_and(|authority| !authority.is_empty())
+                        .is_some_and(|map| !map.is_empty())
                 })
+                || control
+                    .get("decision_policy_history")
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|history| !history.is_empty())
         })
     {
+        return Err("legacy wrapper contains State policy authority".into());
+    }
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
+    ) && integration.get("control").is_some_and(|control| {
+        ["node_identity_registry", "operator_authorization"]
+            .iter()
+            .any(|key| {
+                control
+                    .get(key)
+                    .is_some_and(|authority| !authority.is_null())
+            })
+            || ["mission_tenants", "tenant_migrations"].iter().any(|key| {
+                control
+                    .get(key)
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|authority| !authority.is_empty())
+            })
+    }) {
         return Err("legacy wrapper contains identity/tenant lifecycle authority".into());
     }
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
     ) && (missions.iter().any(|mission| {
         mission
             .get("isolation")
@@ -346,6 +391,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
@@ -383,6 +429,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
@@ -401,6 +448,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA

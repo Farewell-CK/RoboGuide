@@ -390,6 +390,7 @@ impl<C: Clock> NodeFactDriver<'_, C> {
         correlation: &domain::CorrelationId,
     ) -> Result<(), DriverError> {
         let mut events = self.events.clone();
+        candidate.bridge.refresh_beliefs(now, correlation)?;
         apply_runtime_events(candidate, now, correlation, &mut events)?;
         if !registration {
             begin_current_ambiguity_recoveries(candidate, now, correlation, &mut events)?;
@@ -397,9 +398,11 @@ impl<C: Clock> NodeFactDriver<'_, C> {
         }
         apply_pending_cancellations(candidate, now, correlation, &mut events)?;
         apply_runtime_outcomes(candidate, now, correlation, &mut events)?;
+        semantic_verifier::apply_pending(candidate, now, correlation, &mut events)?;
         if !registration {
             drive_ready_tasks(candidate, now, correlation, &mut events)?;
             drive_rebound_attempts(candidate, now, correlation)?;
+            semantic_verifier::monitor_active(candidate, now)?;
         }
         Ok(())
     }

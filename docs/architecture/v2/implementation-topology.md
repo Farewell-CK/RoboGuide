@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart TB
-  Client[证书主体 / tenant / 幂等键] --> MI[Mission Service / MI / Request SQL]
+  Client[证书主体 / tenant / 幂等键] --> MI[Mission Service / MI / Request + provenance SQL]
   ID[Control 持久身份 / 授权 revision / tenant / 测量] --> Entry
   ID --> PROTO
   MI --> Entry[Controller 用户与高权限入口]
@@ -19,6 +19,12 @@ flowchart TB
   LOCAL --> OBS[注册中声明的 State / safe-state export]
   OBS --> PROTO
   PROTO --> STATE[来源联邦 / receive time / TTL]
+  STATE --> BELIEF[显式 Belief producer / 原始 lineage / 非续期 TTL]
+  BELIEF --> GATE[Control 来源策略 / Match Commit Bind Rebind Readiness]
+  STATE --> GATE
+  GATE --> CTRL
+  VERIFY[独立 verifier / 当前 plan + attempts / CAS proof] --> ORCH
+  VERIFY --> SQL
   STATE --> STOP[应用 stop 归约 / receipt + terminal + safe-state]
   STOP --> ORCH
   STOP --> CTRL
@@ -47,3 +53,8 @@ Local EAIOS 掌握。SoftwareProcess、测试合成观察和设备观察的证�
 `GET /v1/executions/{execution_id}/safety-stop` 检查；这个查询不刷新 TTL 或 stop deadline。
 身份与 tenant 权威的当前调用链见 [ADR-0103](../../decisions/0103-http-command-reconciliation-and-node-identity-lifecycle.md)
 及[身份合同](../../development/identity-lifecycle-v0.1.md)；证书登记不会增加设备 inventory。
+
+State 与 MI 的当前软件路径见 [ADR-0104](../../decisions/0104-state-consumers-belief-and-semantic-verifier.md)
+及 [F3 进程验收](../../development/acceptance/2026-10-15-f3.md)。Belief 是命名 producer，Control
+只消费显式策略；它不取代原始 State 或成为 Global Truth。持续 verifier 的失效进入 stop/hold，
+不能跳过实际停止证据。模型返回字段与配置 identity 均保留，缺失不补成已证明。

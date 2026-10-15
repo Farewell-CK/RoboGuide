@@ -478,3 +478,45 @@ def test_identity_exclusion_requires_its_versioned_contract(tmp_path: Path) -> N
         "identity_unavailable"
         in schema["$defs"]["candidate_diagnostics"]["properties"]["exclusions"]["properties"]
     )
+
+
+def test_state_evidence_exclusion_requires_policy_codec(tmp_path: Path) -> None:
+    """Preserve typed State gate shortages through serialization."""
+    from mission.deployment_assessment import POLICY_DIAGNOSTIC_SCHEMA
+
+    record = _engine(
+        tmp_path, FakeInterpreter([_assessment()]), FakePlanner(), AssessingController([])
+    ).create("declared work")
+    assert record.plan is not None
+    original = feedback(record.plan)
+    role = original.roles[0]
+    report = CandidateDiagnostics(
+        role.task_id, role.role_id, 1, 0, (("decision_evidence_unavailable", 1),)
+    )
+    unavailable = replace(
+        original,
+        decision="unavailable",
+        reason_code="current_candidates_unavailable",
+        checked_combinations=0,
+        roles=(),
+    )
+    with pytest.raises(ValueError, match="v0.4"):
+        replace(
+            unavailable,
+            schema_version="roboguide.initial-operation-assessment/v0.3",
+            candidate_diagnostics=(report,),
+        )
+    modern = replace(
+        unavailable, schema_version=POLICY_DIAGNOSTIC_SCHEMA, candidate_diagnostics=(report,)
+    )
+    assert InitialOperationAssessment.from_json(modern.to_json()) == modern
+    assert modern.matches_plan(record.plan)
+    schema = json.loads(
+        Path(
+            "contracts/mission/initial-operation-assessment-v0.4/assessment.schema.json"
+        ).read_text()
+    )
+    assert (
+        "decision_evidence_unavailable"
+        in schema["$defs"]["candidate_diagnostics"]["properties"]["exclusions"]["properties"]
+    )

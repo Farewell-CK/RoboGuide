@@ -12,6 +12,13 @@ ADR-0100 的 exact-binding 软件路径，但 Unknown reconciliation 和完整�
 RT-G9 只是部分接入，且 HA composition 还有 Controller v27/supervisor v26 不一致。
 这些是软件剩余项，不能归为仅等待物理验收。
 
+2026-10-15 的当前执行状态以[全部非发布整改计划](development/roboguide-software-completion-plan-2026-10-15.md)
+为准。F1/F2 已统一 supervisor/Controller schema 并补 stop、身份与入口门禁；
+[ADR-0104](decisions/0104-state-consumers-belief-and-semantic-verifier.md) 实现显式 State consumer、
+Belief、MI provenance 与通用 verifier。实际 POSIX/正式 Node/CAS/独立复算及重启链路见
+[F3 验收](development/acceptance/2026-10-15-f3.md)。Memory/Spatial、动态 HA、时空/quota、运行期
+协调/计划、Federation 及总验收仍为必需软件工作，不能视为只等设备。
+
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |

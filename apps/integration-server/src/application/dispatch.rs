@@ -137,7 +137,7 @@ fn drive_ready_task(
         .ok_or_else(|| "Ready TaskExecution disappeared".to_string())?;
     let unbound = current.assignments().is_empty();
     let prepared = if unbound {
-        let state = controller.bridge.state().clone();
+        let state = controller.bridge.decision_state();
         let ControllerState {
             bridge,
             orchestrator,

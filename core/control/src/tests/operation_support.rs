@@ -575,3 +575,29 @@ fn mission_task_recovery_rebinds_exact_task_scope() {
     );
     assert!(control.pending_role_recoveries().is_empty());
 }
+
+/// Initial Bind rechecks exact operation support even when capability and a prior Commit remain valid.
+#[test]
+fn initial_binding_rejects_operation_loss_after_commit() {
+    let (plan, requirement, role) = operation_support_plan();
+    let mut control = ControlPlane::new();
+    let mut state = InMemorySharedNodeState::new();
+    let mut events = TestEvents;
+    let correlation = CorrelationId::new("bind-current-operation").unwrap();
+    let group = ExecutionGroupId::new("bind-current-operation").unwrap();
+    control.register_node(&mut state, operation_support_node("configured-owner", "relocate"),
+        NodeStatus::new(NodeHealth::Online, TimestampMs::new(0)), TimestampMs::new(0), &correlation, &mut events).unwrap();
+    control.create_mission_group(group.clone(), &plan, TimestampMs::new(1), &correlation, &mut events).unwrap();
+    control.ready_task_execution(&group, requirement.task_ref(), TimestampMs::new(1), &correlation, &mut events).unwrap();
+    let candidates = control.match_capabilities_for_mission(&state, &plan, &requirement, TimestampMs::new(2), &correlation, &mut events).unwrap();
+    let proposal = control.propose(&state, &requirement, &candidates,
+        vec![RoleAssignment::new(role, NodeId::new("configured-owner").unwrap(), Vec::new())],
+        TimestampMs::new(2), &correlation, &mut events).unwrap();
+    let committed = control.commit_for_group_with_state(&state, &group, &proposal, TimestampMs::new(2), &correlation, &mut events).unwrap();
+    replace_operation_registration(&mut state, operation_support_node("configured-owner", "inspect"));
+    assert!(matches!(control.bind_task_execution_with_state(&state, &group, &committed, TimestampMs::new(3), &correlation, &mut events),
+        Err(ControlError::AssignmentUnavailable(_))));
+    assert!(control.group(&group).unwrap().task_execution(requirement.task_ref()).unwrap().assignments().is_empty());
+    replace_operation_registration(&mut state, operation_support_node("configured-owner", "relocate"));
+    control.bind_task_execution_with_state(&state, &group, &committed, TimestampMs::new(4), &correlation, &mut events).unwrap();
+}

@@ -12,6 +12,7 @@ mod runtime_contract;
 mod runtime_replay;
 mod safety_stop;
 mod scheduling_disposition;
+mod semantic_verifier;
 mod stop_recovery;
 
 /// A rejected execution cancellation closes its transaction and leaves the writer usable.
@@ -33,6 +34,7 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
         memory_imports: BTreeMap::new(),
         safety_stops: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
+        verifier_artifact_store: None,
         verifier_source_digest: None,
     }));
     let gate = Arc::new(Mutex::new(()));
@@ -108,6 +110,7 @@ async fn verifier_plan_without_deployment_source_is_not_submitted() {
         memory_imports: BTreeMap::new(),
         safety_stops: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
+        verifier_artifact_store: None,
         verifier_source_digest: None,
     }));
     let mut plan: serde_json::Value = serde_json::from_str(include_str!(
@@ -792,6 +795,7 @@ async fn controller_metrics_expose_durable_high_water() {
         memory_imports: BTreeMap::new(),
         safety_stops: BTreeMap::new(),
         verifier_seen: BTreeSet::new(),
+        verifier_artifact_store: None,
         verifier_source_digest: None,
     }));
     let gate = Arc::new(Mutex::new(()));

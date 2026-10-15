@@ -61,6 +61,11 @@ impl AssignmentProposal {
         self.role_operations.get(role_id)
     }
 
+    /// Carries every exact normalized operation from current-State Commit into initial Bind.
+    pub(crate) fn role_operations(&self) -> &BTreeMap<RoleId, OperationRef> {
+        &self.role_operations
+    }
+
     /// Returns the exact Role requirement retained for operation-aware Commit validation.
     pub(crate) fn requirement_for_role(&self, role_id: &RoleId) -> Option<&RoleRequirement> {
         self.role_requirements.get(role_id)
@@ -145,7 +150,15 @@ impl ControlPlane {
                 )));
             }
             if let Some(operation) = candidates.operation_for_role(role.role_id())
-                && !node.registration().supports_operation(operation)
+                && (!node.registration().supports_operation(operation)
+                    || !self.decision_gates_allow(
+                        state,
+                        assignment.node_id(),
+                        role,
+                        Some(operation),
+                        domain::DecisionKind::Match,
+                        timestamp,
+                    ))
             {
                 return Err(ControlError::AssignmentUnavailable(format!(
                     "node {} no longer supports operation {} for role {}",

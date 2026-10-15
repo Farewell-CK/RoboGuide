@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import urllib.error
@@ -31,6 +32,7 @@ from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.planning_profile import DeploymentPlanningProfile
 from mission.planning_world_evidence import planning_world_review_payload
+from mission.provenance import ensure_provider_budget, provider_call
 from mission.provider_errors import (
     MissionIdentityError,
 )
@@ -88,9 +90,12 @@ class UrllibJsonTransport:
         )
         try:
             with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
-                body = response.read().decode("utf-8")
+                raw = response.read(2 * 1024 * 1024 + 1)
+                if len(raw) > 2 * 1024 * 1024:
+                    raise MissionProviderError("provider response exceeds its byte limit")
+                body = raw.decode("utf-8")
         except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")[:1000]
+            detail = error.read(4096).decode("utf-8", errors="replace")[:1000]
             raise MissionProviderError(
                 f"provider returned HTTP {error.code}: {detail}", status_code=error.code
             ) from error
@@ -261,10 +266,32 @@ class _ResponsesClient:
         self._transport = transport if transport is not None else UrllibJsonTransport()
         self._endpoint = settings.provider.endpoint(environment)
         self._api_key = settings.provider.api_key(environment)
+        self._asset_digests = {
+            path: hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+            for path in (
+                settings.schema_path,
+                settings.prompts.interpreter_path,
+                settings.prompts.planner_path,
+                settings.prompts.reviewer_path,
+                settings.prompts.repairer_path,
+            )
+        }
+
+    def _read_frozen_asset(self, path: Path) -> str:
+        """Reject changed Prompt/schema bytes before a provider effect under the old identity."""
+        raw = path.read_bytes()
+        if (
+            len(raw) > 2 * 1024 * 1024
+            or self._asset_digests.get(path) != hashlib.sha256(raw).hexdigest()
+        ):
+            raise MissionProviderError(
+                "Mission Prompt/schema changed since startup", configuration_failure=True
+            )
+        return raw.decode("utf-8")
 
     def _load_schema(self) -> JSONObject:
         """Load the configured JSON Schema used for strict provider output."""
-        decoded: object = json.loads(self._settings.schema_path.read_text(encoding="utf-8"))
+        decoded: object = json.loads(self._read_frozen_asset(self._settings.schema_path))
         if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
             raise MissionProviderError(
                 "Mission Plan schema must be a JSON object", configuration_failure=True
@@ -279,7 +306,7 @@ class _ResponsesClient:
 
     def _load_prompt(self, path: Path) -> str:
         """Load a nonblank, versioned prompt asset without interpolating mission data."""
-        prompt = path.read_text(encoding="utf-8").strip()
+        prompt = self._read_frozen_asset(path).strip()
         if not prompt:
             raise MissionProviderError(
                 f"Mission prompt is empty: {path}", configuration_failure=True
@@ -302,6 +329,10 @@ class _ResponsesClient:
         timeout_seconds: float | None = None,
     ) -> JSONObject:
         """Send one bounded, non-streaming Responses request with strict structured output."""
+        if not model.strip() or len(model) > 256:
+            raise MissionProviderError(
+                "requested model identity is invalid or too long", configuration_failure=True
+            )
         headers = {"Content-Type": "application/json"}
         if self._api_key is not None:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -321,14 +352,21 @@ class _ResponsesClient:
                 }
             },
         }
-        response = self._transport.post_json(
-            self._endpoint,
-            headers,
-            payload,
-            self._settings.llm.timeout_seconds
-            if timeout_seconds is None
-            else min(self._settings.llm.timeout_seconds, timeout_seconds),
-        )
+        ensure_provider_budget()
+        started_at_ms = int(time.time() * 1000)
+        try:
+            response = self._transport.post_json(
+                self._endpoint,
+                headers,
+                payload,
+                self._settings.llm.timeout_seconds
+                if timeout_seconds is None
+                else min(self._settings.llm.timeout_seconds, timeout_seconds),
+            )
+        except Exception as error:
+            provider_call(payload, None, error, started_at_ms, int(time.time() * 1000))
+            raise
+        provider_call(payload, response, None, started_at_ms, int(time.time() * 1000))
         if response.get("error") is not None:
             raise MissionProviderError(f"provider returned an error: {response['error']}")
         if response.get("status") != "completed":

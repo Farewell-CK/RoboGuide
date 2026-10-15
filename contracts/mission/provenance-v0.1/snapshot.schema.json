@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "input_dialogue_digest",
+    "request_record_digest",
+    "configuration",
+    "configuration_digest",
+    "grounding_context_digest",
+    "draft_revision",
+    "lifecycle",
+    "provider_calls",
+    "deliberation_active"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.mission-provenance/v0.1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "input_dialogue_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "request_record_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "configuration": {
+      "type": "object"
+    },
+    "configuration_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "grounding_context_digest": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "draft_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "lifecycle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "provider_calls": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ordinal",
+          "call_id",
+          "requested_model",
+          "observed_model",
+          "response_id",
+          "request_digest",
+          "response_digest",
+          "started_at_ms",
+          "finished_at_ms",
+          "error_type"
+        ],
+        "properties": {
+          "ordinal": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64
+          },
+          "call_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "requested_model": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_model": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "response_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "response_digest": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "started_at_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "finished_at_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "error_type": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "deliberation_active": {
+      "type": "boolean"
+    }
+  }
+}

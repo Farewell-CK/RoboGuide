@@ -40,7 +40,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Desired/Committed/Reported/Observed/Derived/Belief semantics, retain source/channel/time/TTL,
   and never collapse independent sources implicitly. The Controller State API is a read-only
   federation over existing authorities.
-- ADR-0103's current identity/entry slice uses Controller wrapper v29. Control persists the Node
+- ADR-0103's identity/entry slice introduced Controller wrapper v29; ADR-0104 advances it to v30. Control persists the Node
   registry, stable operator grants, immutable Mission tenants and explicit source-bound migration
   receipts; Integration consumes committed lifecycle projections and captures the actual TLS leaf
   digest/notAfter independently of optional diagnostics. Existing sessions recheck revocation and
@@ -51,7 +51,23 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   revisioned grants with stable principals so certificate rotation does not repeat idempotent
   commands; legacy tenant migration is explicit. Empty identity registration is not device facts.
   `tools/quality/check_identity_processes.py` exercises real Controller mTLS/admin/restart with zero
-  registered Nodes. State/Memory scoped content and Replica rotation/upgrade remain F3/F4/F5 work.
+  registered Nodes. Memory scoped content and Replica rotation/upgrade remain F4/F5 work.
+- ADR-0104 adds explicit tenant/source/schema/TTL/conflict/condition consumer policies in Control.
+  Match/current-State Commit/Bind/Rebind/continuation/outbox readiness and application satisfaction use
+  current evidence; Bind checks Commit's policy identity and legacy State-free APIs cannot bypass it.
+  Registry commands retain expected revision, canonical digest, original principal and receive-time receipt
+  in the authority transaction. Wrapper v30 and event codec v21 fence earlier binaries.
+  Explicit scalar Belief and bounded linear-Gaussian CI preserve raw event evidence and lineage;
+  confidence never becomes variance, duplicate derivations never renew TTL, old Node epochs cannot
+  authorize restored Belief, and unavailable/conflicting/covariance-free data remains unknown.
+  Generic verifier sources freeze per accepted Task, bind complete current attempts/plan/predicate,
+  verify optional required CAS bytes, preserve original deadlines and keep local completion distinct.
+  Continuous expiry/revocation uses whole-Group stop/hold; late terminal reports remain incidents.
+  MI Request SQL atomically retains original code/config/Catalog/Prompt/dependency/provider-call
+  provenance, with bounded readonly pages and configuration fences before draft reuse. Legacy original
+  absence remains unavailable. The actual POSIX compute/CAS/independent-recompute/restart check in
+  `tools/quality/check_state_verifier_processes.py` proves software paths only, never device safety,
+  hardware identity, physical continuity or overall SoftwareComplete. F4–F10 remain mandatory.
 - Memory is separate from realtime State. Execution, Spatial, Semantic, Experience, and Artifact
   manifests retain local ownership and use shared discovery plus selective CAS-backed exchange;
   discoverable metadata may remain content-local and no full replication is implied.

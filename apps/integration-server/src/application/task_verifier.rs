@@ -133,6 +133,7 @@ pub(crate) fn validate_restored_verifier_source(
     if matches!(
         checkpoint.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_STOP_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_JOURNAL_SERVER_CHECKPOINT_SCHEMA
@@ -220,6 +221,23 @@ pub(crate) fn apply_task_verifier(
         if !verdict.satisfied && safety_stop::has_live_group_attempts(controller, &group_id) {
             safety_stop::admit_group_stop(controller, &group_id, now, 10_000)?;
             continue;
+        }
+        if verdict.satisfied {
+            if !super::semantic_verifier::task_policy_allows(
+                controller,
+                &task_ref,
+                domain::DecisionKind::Satisfaction,
+                now,
+            ) {
+                continue;
+            }
+            super::semantic_verifier::audit_satisfaction(
+                controller,
+                &task_ref,
+                now,
+                correlation_id,
+                events,
+            );
         }
         let evidence = domain::TaskSatisfactionEvidence::new(
             task_ref.clone(),

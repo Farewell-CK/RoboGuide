@@ -59,7 +59,10 @@ pub(crate) fn inventory_json(
 }
 
 /// Describes built-in read adapters and selectively registered node providers.
-pub(super) fn state_providers_json(controller: &ControllerState) -> serde_json::Value {
+pub(super) fn state_providers_json(
+    controller: &ControllerState,
+    tenant: Option<&str>,
+) -> serde_json::Value {
     let built_in = [
         ("mission-orchestrator", "desired"),
         ("control-plane", "committed"),
@@ -81,6 +84,18 @@ pub(super) fn state_providers_json(controller: &ControllerState) -> serde_json::
         .state()
         .snapshots()
         .into_iter()
+        .filter(|snapshot| {
+            tenant.is_none_or(|tenant| {
+                controller.bridge.control().state_source_visible_to_tenant(
+                    &domain::StateSource::Node {
+                        node_id: snapshot.node_id().clone(),
+                        local_system_id: domain::LocalSystemId::new("registration")
+                            .expect("fixed identity"),
+                    },
+                    tenant,
+                )
+            })
+        })
         .map(|snapshot| {
             let registration = snapshot.registration();
             serde_json::json!({
@@ -93,7 +108,11 @@ pub(super) fn state_providers_json(controller: &ControllerState) -> serde_json::
         "schema": "roboguide.state-provider-catalog/v0.1",
         "built_in": built_in,
         "nodes": nodes,
-        "belief_providers": [],
+        "belief_providers": controller.bridge.control().belief_policy_registry().into_iter()
+            .flat_map(|registry| registry.policies.values()).filter(|policy| tenant.is_none_or(|tenant| policy.tenant_id == tenant))
+            .map(|policy| serde_json::json!({"provider_id":format!("belief/{}/{}",policy.tenant_id,policy.policy_id),
+                "policy_id":policy.policy_id,"revision":policy.revision,"enabled":policy.enabled,"algorithm":policy.algorithm,
+                "minimum_sources":policy.minimum_sources,"payload_schema":"roboguide.belief/v0.1","writable_via_state_api":false})).collect::<Vec<_>>(),
     })
 }
 
@@ -123,14 +142,20 @@ pub(super) fn memory_providers_json(controller: &ControllerState) -> serde_json:
     })
 }
 
-/// Builds a read-only federated State view over existing owners plus external records.
-pub(super) fn state_records_json(
+/// Federates only trusted tenant-owned Node, Mission, Group and named producer evidence before query filters.
+pub(super) fn state_records_json_with_tenant(
     controller: &ControllerState,
     now: domain::TimestampMs,
     query: &std::collections::BTreeMap<&str, &str>,
+    tenant: Option<&str>,
 ) -> serde_json::Value {
     let mut records = Vec::new();
     for mission_id in controller.orchestrator.mission_ids() {
+        if tenant.is_some_and(|tenant| {
+            controller.bridge.control().mission_tenant(&mission_id) != Some(tenant)
+        }) {
+            continue;
+        }
         let execution = controller
             .orchestrator
             .execution(&mission_id)
@@ -166,6 +191,15 @@ pub(super) fn state_records_json(
         let Some(group) = controller.bridge.control().group(&group_id) else {
             continue;
         };
+        if tenant.is_some_and(|tenant| {
+            controller
+                .bridge
+                .control()
+                .mission_tenant(group.mission_id())
+                != Some(tenant)
+        }) {
+            continue;
+        }
         records.push(state_view_record(
             "roboguide",
             "execution_group",
@@ -193,6 +227,18 @@ pub(super) fn state_records_json(
         ));
     }
     for snapshot in controller.bridge.state().snapshots() {
+        if tenant.is_some_and(|tenant| {
+            !controller.bridge.control().state_source_visible_to_tenant(
+                &domain::StateSource::Node {
+                    node_id: snapshot.node_id().clone(),
+                    local_system_id: domain::LocalSystemId::new("registration")
+                        .expect("fixed identity"),
+                },
+                tenant,
+            )
+        }) {
+            continue;
+        }
         records.push(state_view_record(
             "node",
             "node",
@@ -222,6 +268,14 @@ pub(super) fn state_records_json(
         ));
     }
     for record in controller.bridge.state_records().records() {
+        if tenant.is_some_and(|tenant| {
+            !controller
+                .bridge
+                .control()
+                .state_source_visible_to_tenant(record.key().source(), tenant)
+        }) {
+            continue;
+        }
         let key = record.key();
         records.push(state_view_record(
             &format!("{:?}", key.object().class()).to_ascii_lowercase(),

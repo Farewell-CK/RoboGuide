@@ -594,6 +594,7 @@ mod tests {
             bridge,
             orchestrator: orchestration::MissionOrchestrator::new(),
             verifier_seen: Default::default(),
+            verifier_artifact_store: None,
             verifier_source_digest: None,
         }));
         crate::drive_application_timer(

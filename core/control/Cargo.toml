@@ -9,7 +9,7 @@ domain = { path = "../domain" }
 ports = { path = "../ports" }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
+serde_json = "1.0"
 
 [dev-dependencies]
 state = { path = "../state" }
-serde_json = "1.0"

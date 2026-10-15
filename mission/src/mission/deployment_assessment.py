@@ -13,7 +13,10 @@ from mission.models import JSONObject, MissionPlan
 SCHEMA = "roboguide.initial-operation-assessment/v0.1"
 DIAGNOSTIC_SCHEMA = "roboguide.initial-operation-assessment/v0.2"
 IDENTITY_DIAGNOSTIC_SCHEMA = "roboguide.initial-operation-assessment/v0.3"
-DIAGNOSTIC_SCHEMAS = frozenset({DIAGNOSTIC_SCHEMA, IDENTITY_DIAGNOSTIC_SCHEMA})
+POLICY_DIAGNOSTIC_SCHEMA = "roboguide.initial-operation-assessment/v0.4"
+DIAGNOSTIC_SCHEMAS = frozenset(
+    {DIAGNOSTIC_SCHEMA, IDENTITY_DIAGNOSTIC_SCHEMA, POLICY_DIAGNOSTIC_SCHEMA}
+)
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _UNAVAILABLE_REASONS = {
     "source_unconfigured",
@@ -28,6 +31,7 @@ EXCLUSION_REASONS = frozenset(
     {
         "registration_missing",
         "identity_unavailable",
+        "decision_evidence_unavailable",
         "health_unschedulable",
         "status_stale",
         "liveness_unreachable",
@@ -225,12 +229,21 @@ class InitialOperationAssessment:
             != len(self.candidate_diagnostics)
         ):
             raise ValueError("candidate diagnostic coverage is invalid")
-        if self.schema_version != IDENTITY_DIAGNOSTIC_SCHEMA and any(
+        if self.schema_version not in {
+            IDENTITY_DIAGNOSTIC_SCHEMA,
+            POLICY_DIAGNOSTIC_SCHEMA,
+        } and any(
             reason == "identity_unavailable"
             for item in self.candidate_diagnostics
             for reason, _ in item.exclusions
         ):
             raise ValueError("identity diagnostics require assessment v0.3")
+        if self.schema_version != POLICY_DIAGNOSTIC_SCHEMA and any(
+            reason == "decision_evidence_unavailable"
+            for item in self.candidate_diagnostics
+            for reason, _ in item.exclusions
+        ):
+            raise ValueError("decision evidence diagnostics require assessment v0.4")
         if self.placement_failure not in {
             None,
             "deployment_contract_unavailable",

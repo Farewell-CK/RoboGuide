@@ -5,7 +5,7 @@ use super::protocol::{
 };
 use super::view::{
     inventory_json, memory_providers_json, relation_kind_name, state_providers_json,
-    state_records_json,
+    state_records_json_with_tenant,
 };
 use crate::diagnostics::StageObservation;
 use crate::*;
@@ -113,7 +113,12 @@ fn authorize_tenant_path(
     if path.starts_with("/v1/")
         && !matches!(
             path,
-            "/v1/missions" | "/v1/inventory" | "/v1/node-identities"
+            "/v1/missions"
+                | "/v1/inventory"
+                | "/v1/node-identities"
+                | "/v1/verifier-evidence"
+                | "/v1/state/records"
+                | "/v1/state/providers"
         )
         && !path.starts_with("/v1/missions/")
         && !path.starts_with("/v1/executions/")
@@ -199,6 +204,8 @@ fn authorize_operator_request(
         ("POST", "/v1/memory/imports") => 2,
         ("POST", "/v1/node-identities/commands") => 2,
         ("POST", "/v1/tenant-migrations") => 2,
+        ("POST", "/v1/state-policies" | "/v1/verifier-sources" | "/v1/belief-policies") => 2,
+        ("POST", "/v1/verifier-evidence") => 1,
         ("POST", "/v1/attestation/challenges" | "/v1/attestation/evidence") => 2,
         ("POST", path)
             if path.starts_with("/v1/missions/")
@@ -488,8 +495,10 @@ pub(crate) async fn serve_http(
 
 /// Handles one bounded HTTP/1.1 request for Mission commands and diagnostics.
 #[cfg(test)]
-pub(crate) async fn handle_http_connection(
-    stream: &mut tokio::net::TcpStream,
+pub(crate) async fn handle_http_connection<
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+>(
+    stream: &mut S,
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
     event_write_gate: &Arc<Mutex<()>>,
@@ -512,8 +521,10 @@ pub(crate) async fn handle_http_connection(
 
 /// Supplies an explicit authenticated administrator principal to isolated application fixtures.
 #[cfg(test)]
-pub(crate) async fn handle_recovery_admin_test_connection(
-    stream: &mut tokio::net::TcpStream,
+pub(crate) async fn handle_recovery_admin_test_connection<
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+>(
+    stream: &mut S,
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
     event_write_gate: &Arc<Mutex<()>>,
@@ -713,6 +724,83 @@ where
             }
         };
     }
+    if method == "POST" && path == "/v1/state-policies" {
+        return match application::state_policy::submit(
+            controller,
+            event_log,
+            event_write_gate,
+            request_body.as_bytes(),
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin"),
+            clock.now(),
+        ) {
+            Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/belief-policies" {
+        return match application::state_policy::submit_beliefs(
+            controller,
+            event_log,
+            event_write_gate,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin"),
+            clock.now(),
+        ) {
+            Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/verifier-sources" {
+        return match application::state_policy::submit_verifiers(
+            controller,
+            event_log,
+            event_write_gate,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin"),
+            clock.now(),
+        ) {
+            Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/verifier-evidence" {
+        return match application::semantic_verifier::submit(
+            controller,
+            event_log,
+            event_write_gate,
+            clock,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:operator"),
+            tenant.as_deref(),
+        ) {
+            Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
     if method == "POST" && path == "/v1/tenant-migrations" {
         let result = application::tenant::migrate(
             controller,
@@ -830,6 +918,54 @@ where
                 }),
             )
         }
+        ("GET", "/v1/belief-policies") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            (
+                "200 OK",
+                serde_json::json!({"schema_version":"roboguide.belief-policy-view/v0.1", "registry":live.bridge.control().belief_policy_registry()}),
+            )
+        }
+        ("GET", "/v1/verifier-sources") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            (
+                "200 OK",
+                serde_json::json!({"schema_version":"roboguide.semantic-verifier-view/v0.1",
+                "registry":live.bridge.control().semantic_verifier_registry()}),
+            )
+        }
+        ("GET", "/v1/verifier-evidence") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            let receipts = live
+                .bridge
+                .control()
+                .semantic_verifier_receipts()
+                .into_iter()
+                .filter(|receipt| {
+                    tenant
+                        .as_deref()
+                        .is_none_or(|tenant| tenant == receipt.evidence.tenant_id)
+                })
+                .collect::<Vec<_>>();
+            (
+                "200 OK",
+                serde_json::json!({"schema_version":"roboguide.semantic-verifier-view/v0.1","receipts":receipts}),
+            )
+        }
+        ("GET", "/v1/state-policies") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            (
+                "200 OK",
+                serde_json::json!({"schema_version":"roboguide.decision-policy-view/v0.1","registry":live.bridge.control().decision_policy_registry()}),
+            )
+        }
         ("GET", path) if path.starts_with("/v1/executions/") && path.ends_with("/safety-stop") => {
             let execution_id = path
                 .trim_start_matches("/v1/executions/")
@@ -886,7 +1022,10 @@ where
             let controller = controller
                 .lock()
                 .map_err(|_| "controller lock is poisoned")?;
-            ("200 OK", state_providers_json(&controller))
+            (
+                "200 OK",
+                state_providers_json(&controller, tenant.as_deref()),
+            )
         }
         ("GET", "/v1/memory/providers") => {
             let controller = controller
@@ -900,7 +1039,12 @@ where
                 .map_err(|_| "controller lock is poisoned")?;
             (
                 "200 OK",
-                state_records_json(&controller, clock.now(), &parse_query(query)),
+                state_records_json_with_tenant(
+                    &controller,
+                    clock.now(),
+                    &parse_query(query),
+                    tenant.as_deref(),
+                ),
             )
         }
         ("GET", "/v1/events") => {
@@ -1142,12 +1286,16 @@ where
                     .await;
                 }
             };
-            let verifier_admission = match verifier_feed {
-                Some(feed) => feed.validate_plan(&plan),
-                None if plan.task_graph().tasks().iter().any(|task| {
-                    matches!(task.satisfaction_basis(), domain::TaskSatisfactionBasis::VerifierEvidence(_))
-                }) => Err("Mission requires verifier evidence but no deployment verifier source is configured".to_string()),
-                None => Ok(()),
+            let verifier_admission = {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned")?;
+                application::semantic_verifier::validate_plan(
+                    &live,
+                    &plan,
+                    tenant.as_deref().unwrap_or("local"),
+                    verifier_feed,
+                )
             };
             if let Err(error) = verifier_admission {
                 return write_http_response(
@@ -1218,6 +1366,33 @@ where
                             tenant.as_deref().unwrap_or("local"),
                         )
                         .map_err(|error| error.to_string())?;
+                    let generic = {
+                        let control = bridge.control();
+                        plan.task_graph().tasks().iter().all(|task| {
+                            match task.satisfaction_basis() {
+                                domain::TaskSatisfactionBasis::ExecutionReport => true,
+                                domain::TaskSatisfactionBasis::VerifierEvidence(spec) => control
+                                    .registered_verifier_source(
+                                        spec,
+                                        tenant.as_deref().unwrap_or("local"),
+                                    )
+                                    .is_ok(),
+                            }
+                        })
+                    };
+                    if generic {
+                        bridge
+                            .control_mut()
+                            .freeze_mission_verifier_sources(
+                                &plan,
+                                tenant.as_deref().unwrap_or("local"),
+                            )
+                            .map_err(|error| error.to_string())?;
+                    } else {
+                        verifier_feed
+                            .ok_or("verifier source changed during admission")?
+                            .validate_plan(&plan)?;
+                    }
                     let first_mission = orchestrator.mission_ids().is_empty();
                     let eligibility = deployment_feasibility
                         .map(|snapshot| snapshot.restrictions_for_plan(&plan, &group_id))
@@ -1283,6 +1458,9 @@ where
                                 .map_err(|error| error.to_string())?;
                         drive_ready_tasks(&mut candidate, now, &dispatch_correlation, &mut events)
                             .map_err(|error| error.to_string())
+                    })
+                    .and_then(|_| {
+                        application::semantic_verifier::monitor_active(&mut candidate, now)
                     })
                     .and_then(|_| {
                         candidate

@@ -5,6 +5,31 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Complete independently authenticated semantic evidence admitted before lifecycle consumption.
+    SemanticVerifierEvidenceAdmitted {
+        /// Original source contract, input and receive-time attribution.
+        receipt: crate::SemanticVerifierReceipt,
+    },
+    /// Late, stale, unknown or contradictory verifier evidence retained without rewriting terminal truth.
+    SemanticVerifierIncident {
+        /// Exact accepted Task affected by the report.
+        task_ref: TaskRef,
+        /// Explicit registered measurement authority.
+        source_id: String,
+        /// Original idempotent evidence identity, or monitor identity for source silence.
+        evidence_id: String,
+        /// Closed application classification, independent of local execution failure.
+        reason: String,
+        /// Original Controller admission or monitoring time.
+        received_at: TimestampMs,
+    },
+    /// An authority consumed explicit source/freshness/conflict policy over original State evidence.
+    StatePolicyDecision {
+        /// Exact logical Task whose Matching/Commit/Rebind decision was evaluated.
+        task_ref: TaskRef,
+        /// Complete original selected or rejected policy results, never a fused Global Truth.
+        receipts: Vec<DecisionEvidenceReceipt>,
+    },
     /// Control released an uncommitted future interval after current higher-priority Mission authorization.
     SchedulingReservationPreempted {
         /// Exact Group of the displaced planning interval.

@@ -26,6 +26,8 @@ mod persistence;
 mod physical_entity_registry;
 mod recovery;
 pub(crate) mod safety_stop;
+pub(crate) mod semantic_verifier;
+pub(crate) mod state_policy;
 mod task_verifier;
 pub(crate) mod tenant;
 mod timer;
@@ -54,7 +56,7 @@ pub(crate) use persistence::{
 };
 pub(crate) use physical_entity_registry::load_physical_entity_registry_file;
 #[cfg(test)]
-pub(crate) use recovery::{apply_recovery_required, resume_role_recovery};
+pub(crate) use recovery::resume_role_recovery;
 pub(crate) use recovery::{
     apply_runtime_events, begin_current_ambiguity_recoveries, recovery_view,
     resume_pending_recoveries,

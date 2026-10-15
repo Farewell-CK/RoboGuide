@@ -70,6 +70,11 @@ fn single_task_mission_plan(requirement: TaskRequirement) -> MissionPlan {
 /// Extracts the mission-scoped task identity carried by a task-level event.
 fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
     match payload {
+        EventPayload::StatePolicyDecision { task_ref, .. } => Some(task_ref),
+        EventPayload::SemanticVerifierIncident { task_ref, .. } => Some(task_ref),
+        EventPayload::SemanticVerifierEvidenceAdmitted { receipt } => {
+            Some(&receipt.evidence.task_ref)
+        }
         EventPayload::MissionSchedulingPriorityChanged { .. } => None,
         EventPayload::CandidatesMatched { task_ref }
         | EventPayload::SchedulingReservationPreempted { task_ref, .. }

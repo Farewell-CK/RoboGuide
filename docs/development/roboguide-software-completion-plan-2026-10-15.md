@@ -27,7 +27,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F0 基线与合同 | R03、R19 的非发布部分 | 备份、独立分支、软件 profile、权威/支持/验收矩阵 | 进行中 |
 | F1 停止与当前 HA | R01、R02 | 类型化 stop、Mission hold、证据/receipt/deadline、全生命周期 gate、schema 接线 | 当前切片软件验收通过；后续 stop reconciliation/recovery 升级仍由 F7 验收 |
 | F2 身份与入口 | R04、R05、R14 | pending reconciliation、tenant、证书轮换/撤销、Node 生命周期、硬件证明验证 | 当前身份/入口切片软件验收通过；State/Memory 跨服务授权与副本证书在 F3/F4/F5 接续完成 |
-| F3 State 与 MI | R06、R07、R08 | policy registry、authority consumer、Belief、provenance、verifier/持续验证 | 待完成 |
+| F3 State 与 MI | R06、R07、R08 | policy registry、authority consumer、Belief、provenance、verifier/持续验证 | 当前软件阶段验收通过；设备证据独立待验证，后续阶段仍必需 |
 | F4 Memory/Spatial | R10、R11、R12、R20 | reconciliation、Group 授权/handoff、active-map/GC/revocation、自动配准/融合/增量 | 待完成 |
 | F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | 待完成 |
 | F6 资源/调度 | R16、R20 | divisible quota、完整时间/空间承诺、真实成本 evidence 与确定性策略 | 待完成 |
@@ -41,7 +41,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 当前阶段记录：[F1 停止权威与当前 HA 软件验收](acceptance/2026-10-15-f1.md)。
 后续记录：[F2 身份与入口软件验收](acceptance/2026-10-15-f2.md)、
-[身份软件合同](identity-lifecycle-v0.1.md)。
+[身份软件合同](identity-lifecycle-v0.1.md)、[F3 State/MI 验收](acceptance/2026-10-15-f3.md)。
 
 ## 已接受的实现决定
 

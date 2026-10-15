@@ -5,7 +5,7 @@
 //! State & Memory Plane facade for implemented observable projections.
 
 /// Current composition authority wrapper, shared by Controller, replica supervisor and storage fences.
-pub const CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v29";
+pub const CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v30";
 
 /// Returns whether a supported Controller wrapper requires an exact durable command journal head.
 pub fn checkpoint_requires_authority_journal(schema: &str) -> bool {
@@ -13,12 +13,16 @@ pub fn checkpoint_requires_authority_journal(schema: &str) -> bool {
         schema,
         "roboguide.controller-checkpoint/v27"
             | "roboguide.controller-checkpoint/v28"
+            | "roboguide.controller-checkpoint/v29"
             | CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
     )
 }
 
 mod allocation;
+mod belief;
+mod covariance_intersection;
 mod decision_policy;
+mod decision_state;
 mod event_log;
 mod memory;
 mod node;
@@ -27,10 +31,15 @@ mod state_record;
 mod task_satisfaction;
 
 pub use allocation::InMemoryAllocationState;
+pub use belief::derive_belief;
+pub use covariance_intersection::{
+    CovarianceIntersectionResult, GaussianEstimate, covariance_intersection,
+};
 pub use decision_policy::{
     ConflictReducer, DECISION_EVIDENCE_POLICY_SCHEMA_V0_1, DecisionEvidencePolicy,
     DecisionEvidencePolicyError, DecisionKind, EvidenceDisposition, EvidenceEvaluation,
 };
+pub use decision_state::DecisionStateSnapshot;
 pub use event_log::{
     APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch, ArchiveManifest,
     ArchiveSink, CheckpointStoragePolicy, CheckpointWriteStats, ControlCommandJournalEntry,

@@ -83,6 +83,8 @@ const EVENT_PAYLOAD_SCHEMA_V18: &str = "domain.EventPayload.json/v18";
 const EVENT_PAYLOAD_SCHEMA_V19: &str = "domain.EventPayload.json/v19";
 /// Codec distinguishing semantic Task satisfaction rejection from local execution failure.
 const EVENT_PAYLOAD_SCHEMA_V20: &str = "domain.EventPayload.json/v20";
+/// Codec retaining explicit authority consumer policy and complete original State evidence.
+const EVENT_PAYLOAD_SCHEMA_V21: &str = "domain.EventPayload.json/v21";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1015,6 +1017,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V18 => Ok(18),
         EVENT_PAYLOAD_SCHEMA_V19 => Ok(19),
         EVENT_PAYLOAD_SCHEMA_V20 => Ok(20),
+        EVENT_PAYLOAD_SCHEMA_V21 => Ok(21),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -1028,6 +1031,9 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::StatePolicyDecision { .. }
+        | EventPayload::SemanticVerifierEvidenceAdmitted { .. }
+        | EventPayload::SemanticVerifierIncident { .. } => 21,
         EventPayload::MissionExecutionIsolated {
             failure_window: Some(_),
             ..
@@ -1216,6 +1222,9 @@ impl SqliteEventLog {
 /// Selects the newest codec marker only for payloads introduced by that codec.
 fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
     match payload {
+        EventPayload::StatePolicyDecision { .. }
+        | EventPayload::SemanticVerifierEvidenceAdmitted { .. }
+        | EventPayload::SemanticVerifierIncident { .. } => EVENT_PAYLOAD_SCHEMA_V21,
         EventPayload::MissionExecutionQuarantineCleared { .. }
         | EventPayload::MissionExecutionIsolated { .. } => EVENT_PAYLOAD_SCHEMA_V19,
         EventPayload::TaskSatisfactionRejected { .. } => EVENT_PAYLOAD_SCHEMA_V20,

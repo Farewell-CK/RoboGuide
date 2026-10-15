@@ -106,6 +106,11 @@ impl std::error::Error for SharedStateError {}
 
 /// Read access to current cross-mission Shared Node State facts.
 pub trait SharedNodeStateReader {
+    /// Supplies an immutable source-aware projection for explicitly enabled decision gates.
+    /// Legacy node-only readers provide no evidence and cannot satisfy a configured gate.
+    fn decision_records(&self) -> Vec<domain::StateRecord> {
+        Vec::new()
+    }
     /// Returns the latest snapshot for one node, if it is currently known.
     fn node(&self, node_id: &NodeId) -> Option<&NodeStateSnapshot>;
 

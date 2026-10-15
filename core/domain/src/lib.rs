@@ -10,9 +10,12 @@
 mod actor;
 mod allocation;
 mod attestation;
+mod belief;
 mod capability;
 mod capability_requirement;
 mod context;
+mod decision_policy;
+mod decision_registry;
 mod duration_estimate;
 mod error;
 mod event;
@@ -34,6 +37,7 @@ mod node_state;
 mod operator_authorization;
 mod physical_entity;
 mod physical_safety;
+mod registry_command;
 mod resource;
 mod role_assignment;
 mod spatial_memory;
@@ -44,6 +48,7 @@ mod task_requirement;
 mod task_runtime_contract;
 mod task_satisfaction;
 mod time;
+mod verifier_registry;
 
 pub use actor::{ActorBinding, MissionActor, MissionBindingSemantics};
 pub use allocation::{
@@ -59,6 +64,14 @@ pub use capability_requirement::{
 };
 pub use context::{
     ContextRole, CoordinationContext, DistinctPhysicalEntityConstraint, TaskContinuity,
+};
+pub use decision_policy::{
+    ConflictReducer, DECISION_EVIDENCE_POLICY_SCHEMA_V0_1, DecisionEvidencePolicy,
+    DecisionEvidencePolicyError, DecisionKind, EvidenceDisposition, EvidenceEvaluation,
+};
+pub use decision_registry::{
+    DecisionEvidenceReceipt, DecisionGate, DecisionGateTarget, DecisionPolicyRegistry,
+    StateCondition,
 };
 pub use duration_estimate::TaskDurationEstimate;
 pub use error::DomainError;
@@ -99,6 +112,12 @@ pub use node_identity::{
 pub use node_liveness_evidence::NodeSessionLivenessEvidence;
 pub use operator_authorization::{OperatorAuthorization, OperatorCertificateGrant};
 pub use task_runtime_contract::TaskRuntimeContractViolation;
+pub use verifier_registry::SemanticVerifierReceipt;
+pub use verifier_registry::SemanticVerifierWatch;
+pub use verifier_registry::{
+    SemanticVerdict, SemanticVerifierEvidence, SemanticVerifierRegistry, SemanticVerifierSource,
+    VerifierAttemptRef, VerifierFinality,
+};
 
 /// Supplies the conservative identity used only when decoding pre-v7 replica evidence.
 fn legacy_memory_consumer_provider_id() -> String {
@@ -184,3 +203,6 @@ pub const NODE_CONTRACT_VERSION_V0_6: &str = "roboguide.node.v0.6";
 #[cfg(test)]
 #[path = "domain_tests.rs"]
 mod tests;
+
+pub use belief::{BeliefAlgorithm, BeliefPolicy, BeliefPolicyRegistry, BeliefScalarKind};
+pub use registry_command::{RegistryCommandKind, RegistryCommandReceipt};

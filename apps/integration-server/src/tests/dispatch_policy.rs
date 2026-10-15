@@ -483,6 +483,7 @@ impl Fixture {
             memory_imports: BTreeMap::new(),
             safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
+            verifier_artifact_store: None,
             verifier_source_digest: None,
         };
         events.begin_batch().unwrap();

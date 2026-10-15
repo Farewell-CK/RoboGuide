@@ -40,6 +40,20 @@ pub(crate) struct TenantState<'a, S> {
 }
 
 impl<S: SharedNodeStateReader> SharedNodeStateReader for TenantState<'_, S> {
+    /// Excludes foreign Node evidence from the same deployment-qualified tenant snapshot.
+    fn decision_records(&self) -> Vec<domain::StateRecord> {
+        self.source
+            .decision_records()
+            .into_iter()
+            .filter(|record| {
+                record.key().source().node_id().is_none_or(|node| {
+                    self.allowed
+                        .as_ref()
+                        .is_none_or(|allowed| allowed.contains(node))
+                })
+            })
+            .collect()
+    }
     /// Returns evidence only for a tenant-admitted Node.
     fn node(&self, node_id: &NodeId) -> Option<&NodeStateSnapshot> {
         if self

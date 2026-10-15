@@ -1067,6 +1067,7 @@ mod tests {
                 memory_imports: BTreeMap::new(),
                 safety_stops: BTreeMap::new(),
                 verifier_seen: BTreeSet::new(),
+                verifier_artifact_store: None,
                 verifier_source_digest: None,
             }));
             let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
@@ -1999,6 +2000,7 @@ mod tests {
             memory_imports: BTreeMap::new(),
             safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
+            verifier_artifact_store: None,
             verifier_source_digest: None,
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2290,6 +2292,7 @@ mod tests {
             memory_imports: BTreeMap::new(),
             safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
+            verifier_artifact_store: None,
             verifier_source_digest: feed
                 .as_ref()
                 .map(|source| source.source_digest().to_string()),

@@ -369,7 +369,10 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<RecoveryOutcome, ControlError> {
-        if committed.stopped_owner_allowed() {
+        if committed.stopped_owner_allowed()
+            || self.node_identity_registry().is_some()
+            || self.decision_policy_registry().is_some()
+        {
             return Err(ControlError::InvalidProposal(
                 "stopped recovery requires current State at Rebind".into(),
             ));
@@ -386,6 +389,36 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<RecoveryOutcome, ControlError> {
+        let group = self
+            .groups
+            .get(committed.group_id())
+            .ok_or_else(|| ControlError::UnknownGroup(committed.group_id().clone()))?;
+        let role = group
+            .role_requirement(committed.task_ref(), committed.role_id())
+            .ok_or_else(|| ControlError::InvalidProposal("recovery Role is absent".into()))?;
+        if !self.node_is_eligible_for_role(state, committed.replacement_node_id(), role, timestamp)
+            || committed.operation().is_some_and(|operation| {
+                !self.node_is_eligible_for_role_operation(
+                    state,
+                    committed.replacement_node_id(),
+                    role,
+                    operation,
+                    timestamp,
+                )
+            })
+            || !self.decision_gates_allow(
+                state,
+                committed.replacement_node_id(),
+                role,
+                committed.operation(),
+                domain::DecisionKind::Rebind,
+                timestamp,
+            )
+        {
+            return Err(ControlError::AssignmentUnavailable(
+                "replacement identity/State policy is no longer eligible".into(),
+            ));
+        }
         if committed.stopped_owner_allowed()
             && !state
                 .node(committed.replacement_node_id())
@@ -402,7 +435,20 @@ impl ControlPlane {
                     .into(),
             ));
         }
-        self.rebind_role_validated(committed, timestamp, correlation_id, events)
+        let role = role.clone();
+        let outcome = self.rebind_role_validated(committed, timestamp, correlation_id, events)?;
+        self.audit_role_decision(
+            state,
+            committed.task_ref(),
+            committed.replacement_node_id(),
+            &role,
+            committed.operation(),
+            domain::DecisionKind::Rebind,
+            timestamp,
+            correlation_id,
+            events,
+        );
+        Ok(outcome)
     }
 
     /// Applies the existing committed-only binding transition after policy-specific preflight.

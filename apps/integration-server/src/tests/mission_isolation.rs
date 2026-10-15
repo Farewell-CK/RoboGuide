@@ -30,6 +30,7 @@ fn fixture(log: &state::SqliteEventLog) -> ControllerState {
         ),
         orchestrator: MissionOrchestrator::new(),
         verifier_seen: BTreeSet::new(),
+        verifier_artifact_store: None,
         verifier_source_digest: None,
     };
     for mission in ["mission-a", "mission-b"] {
@@ -456,6 +457,7 @@ fn held_terminal_fact_is_retained_without_release_or_execute_replay() {
         memory_imports: saved.memory_imports,
         safety_stops: saved.safety_stops,
         verifier_seen: saved.verifier_seen,
+        verifier_artifact_store: None,
         verifier_source_digest: saved.verifier_source_digest,
     };
     assert!(

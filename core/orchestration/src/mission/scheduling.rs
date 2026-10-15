@@ -543,10 +543,10 @@ impl MissionOrchestrator {
             }
             Err(error) => return Err(error.into()),
         };
-        control.bind_task_execution_with_requirement(
+        control.bind_task_execution_with_state(
+            state,
             &group_id,
             &committed,
-            &requirement,
             timestamp,
             correlation_id,
             events,

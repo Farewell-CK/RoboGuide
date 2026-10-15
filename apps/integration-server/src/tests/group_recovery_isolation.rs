@@ -88,6 +88,7 @@ fn restore_and_register(fixture: &Fixture) {
         memory_imports: saved.memory_imports,
         safety_stops: saved.safety_stops,
         verifier_seen: saved.verifier_seen,
+        verifier_artifact_store: None,
         verifier_source_digest: saved.verifier_source_digest,
     };
     restored

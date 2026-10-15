@@ -5,8 +5,10 @@
 //! Control Plane facade and composition root.
 
 mod allocation;
+mod belief;
 mod calendar;
 mod coordination;
+mod decision_policy;
 mod group;
 mod initial_preferences;
 mod matching;
@@ -18,6 +20,7 @@ mod reconciliation;
 mod registry_provenance;
 mod scheduler;
 mod tenant;
+mod verifier_registry;
 
 pub use allocation::AllocationProjectionError;
 pub use calendar::{ScheduledTaskReservation, SchedulingReservationPhase};
@@ -62,6 +65,36 @@ pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = ports::DEFAULT_NODE_LEASE_DURATION_MS
 /// authoritative after a process restart.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ControlCheckpoint {
+    /// Authorized source contracts, retained interpretation revisions and original evidence receipts.
+    #[serde(default)]
+    semantic_verifier_registry: Option<domain::SemanticVerifierRegistry>,
+    /// Source-attributed scalar/Gaussian derivation contracts.
+    #[serde(default)]
+    belief_policy_registry: Option<domain::BeliefPolicyRegistry>,
+    /// Immutable original Belief source/algorithm interpretations.
+    #[serde(default)]
+    belief_policy_history: BTreeMap<u64, domain::BeliefPolicyRegistry>,
+    /// Immutable original source-administration receipts; retries cannot reapply an update.
+    #[serde(default)]
+    registry_command_receipts: BTreeMap<String, domain::RegistryCommandReceipt>,
+    /// Complete immutable source interpretation history.
+    #[serde(default)]
+    semantic_verifier_history: BTreeMap<u64, domain::SemanticVerifierRegistry>,
+    /// Source-qualified immutable evidence identities and consumer dispositions.
+    #[serde(default)]
+    semantic_verifier_receipts: BTreeMap<String, domain::SemanticVerifierReceipt>,
+    /// Accepted Task source bindings; policy reload cannot silently replace semantic authority.
+    #[serde(default)]
+    mission_verifier_sources: BTreeMap<String, domain::SemanticVerifierSource>,
+    /// Original continuous-verification grace fences for exact attempt sets.
+    #[serde(default)]
+    semantic_verifier_watches: BTreeMap<String, domain::SemanticVerifierWatch>,
+    /// Explicit State consumer authority and immutable retained deployment revisions.
+    #[serde(default)]
+    decision_policy_registry: Option<domain::DecisionPolicyRegistry>,
+    /// Full original policy interpretation history, independent of current State records.
+    #[serde(default)]
+    decision_policy_history: BTreeMap<u64, domain::DecisionPolicyRegistry>,
     /// Explicit source-bound migration receipts; normal admission never reassigns legacy owners.
     #[serde(default)]
     tenant_migrations: BTreeMap<String, tenant::MissionTenantMigrationReceipt>,
@@ -391,6 +424,26 @@ impl std::error::Error for ControlError {}
 /// Authoritative in-process Control Plane state for the bootstrap.
 #[derive(Debug, Clone)]
 pub struct ControlPlane {
+    /// Authenticated semantic measurement source authority, independent of execution success.
+    semantic_verifier_registry: Option<domain::SemanticVerifierRegistry>,
+    /// Source-attributed scalar/Gaussian derivation contracts.
+    belief_policy_registry: Option<domain::BeliefPolicyRegistry>,
+    /// Immutable original Belief source/algorithm interpretations.
+    belief_policy_history: BTreeMap<u64, domain::BeliefPolicyRegistry>,
+    /// Immutable original source-administration receipts; retries cannot reapply an update.
+    registry_command_receipts: BTreeMap<String, domain::RegistryCommandReceipt>,
+    /// Retained original source meanings used by earlier admission receipts.
+    semantic_verifier_history: BTreeMap<u64, domain::SemanticVerifierRegistry>,
+    /// Complete original evidence/timing retained after Task/Mission terminal outcomes.
+    semantic_verifier_receipts: BTreeMap<String, domain::SemanticVerifierReceipt>,
+    /// Accepted Task source bindings; policy reload cannot silently replace semantic authority.
+    mission_verifier_sources: BTreeMap<String, domain::SemanticVerifierSource>,
+    /// Original continuous-verification grace fences for exact attempt sets.
+    semantic_verifier_watches: BTreeMap<String, domain::SemanticVerifierWatch>,
+    /// Durable explicit source/consumer contracts; absence is the legacy no-extra-gate profile.
+    decision_policy_registry: Option<domain::DecisionPolicyRegistry>,
+    /// Retained original policy versions needed to audit earlier decisions.
+    decision_policy_history: BTreeMap<u64, domain::DecisionPolicyRegistry>,
     /// Retained administrator attribution for explicit historical tenant migration.
     tenant_migrations: BTreeMap<String, tenant::MissionTenantMigrationReceipt>,
     /// HTTP authorization authority; transport receives only committed grants.
@@ -450,6 +503,16 @@ impl ControlPlane {
     /// Creates an empty Control Plane with explicit receive-time freshness TTL.
     pub const fn with_status_ttl(max_status_age_ms: u64) -> Self {
         Self {
+            semantic_verifier_registry: None,
+            belief_policy_registry: None,
+            belief_policy_history: BTreeMap::new(),
+            registry_command_receipts: BTreeMap::new(),
+            semantic_verifier_history: BTreeMap::new(),
+            semantic_verifier_receipts: BTreeMap::new(),
+            mission_verifier_sources: BTreeMap::new(),
+            semantic_verifier_watches: BTreeMap::new(),
+            decision_policy_registry: None,
+            decision_policy_history: BTreeMap::new(),
             tenant_migrations: BTreeMap::new(),
             operator_authorization: None,
             node_identity_registry: None,
@@ -475,6 +538,16 @@ impl ControlPlane {
     /// Captures durable Control authority without process-local lease timestamps.
     pub fn checkpoint(&self) -> ControlCheckpoint {
         ControlCheckpoint {
+            semantic_verifier_registry: self.semantic_verifier_registry.clone(),
+            belief_policy_registry: self.belief_policy_registry.clone(),
+            belief_policy_history: self.belief_policy_history.clone(),
+            registry_command_receipts: self.registry_command_receipts.clone(),
+            semantic_verifier_history: self.semantic_verifier_history.clone(),
+            semantic_verifier_receipts: self.semantic_verifier_receipts.clone(),
+            mission_verifier_sources: self.mission_verifier_sources.clone(),
+            semantic_verifier_watches: self.semantic_verifier_watches.clone(),
+            decision_policy_registry: self.decision_policy_registry.clone(),
+            decision_policy_history: self.decision_policy_history.clone(),
             tenant_migrations: self.tenant_migrations.clone(),
             operator_authorization: self.operator_authorization.clone(),
             node_identity_registry: self.node_identity_registry.clone(),
@@ -704,6 +777,16 @@ impl ControlPlane {
             }
         }
         let restored = Self {
+            semantic_verifier_registry: checkpoint.semantic_verifier_registry,
+            belief_policy_registry: checkpoint.belief_policy_registry,
+            belief_policy_history: checkpoint.belief_policy_history,
+            registry_command_receipts: checkpoint.registry_command_receipts,
+            semantic_verifier_history: checkpoint.semantic_verifier_history,
+            semantic_verifier_receipts: checkpoint.semantic_verifier_receipts,
+            mission_verifier_sources: checkpoint.mission_verifier_sources,
+            semantic_verifier_watches: checkpoint.semantic_verifier_watches,
+            decision_policy_registry: checkpoint.decision_policy_registry,
+            decision_policy_history: checkpoint.decision_policy_history,
             tenant_migrations: checkpoint.tenant_migrations,
             operator_authorization: checkpoint.operator_authorization,
             mission_tenants: checkpoint.mission_tenants,
@@ -725,6 +808,9 @@ impl ControlPlane {
             max_status_age_ms: checkpoint.max_status_age_ms,
         };
         restored.validate_tenant_checkpoint()?;
+        restored.validate_belief_policy_checkpoint()?;
+        restored.validate_decision_policy_checkpoint()?;
+        restored.validate_semantic_verifier_checkpoint()?;
         restored.validate_group_checkpoint_authority()?;
         restored.validate_scheduling_checkpoint_authority()?;
         restored.allocation_snapshot(TimestampMs::new(0))?;

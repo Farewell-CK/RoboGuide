@@ -19,7 +19,8 @@ from typing import BinaryIO
 from mission.authorization import AUTHORIZATION_SCHEMA, AuthorizationProfile
 from mission.deployment_recovery import DeploymentRecoverySession
 from mission.grounding_context import GroundingContextSnapshot
-from mission.models import JSONObject
+from mission.models import JSONObject, JSONValue
+from mission.provenance import PROVENANCE_SCHEMA, validate_snapshot
 from mission.recovery import RequestRecoveryEvidence
 from mission.rejected_draft import RejectedDraftEvidence
 from mission.request_record import MissionRequestError, MissionRequestRecord, _json_object
@@ -33,7 +34,8 @@ from mission.submission_evidence import (
     canonical_plan_digest,
 )
 
-STORAGE_SCHEMA = "roboguide.mission-request-storage/v0.2"
+STORAGE_SCHEMA = "roboguide.mission-request-storage/v0.3"
+PRE_PROVENANCE_STORAGE_SCHEMA = "roboguide.mission-request-storage/v0.2"
 LEGACY_STORAGE_SCHEMA = "roboguide.mission-request-storage/v0.1"
 HTTP_IDEMPOTENCY_PENDING = "pending"
 HTTP_IDEMPOTENCY_COMPLETE = "complete"
@@ -62,7 +64,11 @@ class HttpWriterLease:
 def _restore_record(document: object) -> MissionRequestRecord:
     """Read legacy rows or the atomic request/observations storage envelope."""
     value = _json_object(document, "mission request storage")
-    if value.get("schema_version") not in {STORAGE_SCHEMA, LEGACY_STORAGE_SCHEMA}:
+    if value.get("schema_version") not in {
+        STORAGE_SCHEMA,
+        PRE_PROVENANCE_STORAGE_SCHEMA,
+        LEGACY_STORAGE_SCHEMA,
+    }:
         return MissionRequestRecord.from_json(value)
     request = _json_object(value["request"], "request")
     record = MissionRequestRecord.from_json(request)
@@ -144,6 +150,18 @@ class MissionRequestStore:
         self._http_instance = str(uuid.uuid4())
         with self._connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("""CREATE TABLE IF NOT EXISTS mission_provenance (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL,
+                input_dialogue_digest TEXT NOT NULL, snapshot_digest TEXT NOT NULL UNIQUE,
+                document_json TEXT NOT NULL, recorded_at_ms INTEGER NOT NULL)""")
+            connection.execute("""CREATE INDEX IF NOT EXISTS mission_provenance_request
+                ON mission_provenance(request_id,sequence)""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS mission_provenance_origins (
+                request_id TEXT PRIMARY KEY, origin TEXT NOT NULL)""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS mission_deliberation_identities (
+                request_id TEXT NOT NULL, input_dialogue_digest TEXT NOT NULL,
+                configuration_digest TEXT NOT NULL, recorded_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(request_id,input_dialogue_digest))""")
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS mission_authorization (
                 singleton INTEGER PRIMARY KEY CHECK(singleton=1), profile_id TEXT NOT NULL,
@@ -356,7 +374,7 @@ class MissionRequestStore:
             connection.rollback()
         return {"ready": True, "storage": "writable"}
 
-    def save(self, record: MissionRequestRecord) -> None:
+    def save(self, record: MissionRequestRecord, *, provenance: JSONObject | None = None) -> None:
         """Atomically persist the request projection and its immutable current context."""
         document = json.dumps(
             {
@@ -374,6 +392,65 @@ class MissionRequestStore:
                 "SELECT document_json FROM mission_requests WHERE request_id = ?",
                 (record.request_id,),
             ).fetchone()
+            if provenance is not None:
+                try:
+                    validate_snapshot(provenance)
+                except ValueError as error:
+                    raise MissionRequestError(str(error)) from error
+                if (
+                    provenance.get("schema_version") != PROVENANCE_SCHEMA
+                    or provenance.get("request_id") != record.request_id
+                    or provenance.get("request_record_digest")
+                    != canonical_plan_digest(record.to_json())
+                ):
+                    raise MissionRequestError("provenance is detached from Request")
+                encoded = json.dumps(
+                    provenance,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                )
+                if len(encoded.encode()) > 256 * 1024:
+                    raise MissionRequestError("provenance exceeds its snapshot limit")
+                connection.execute(
+                    "INSERT OR IGNORE INTO mission_provenance_origins(request_id,origin) "
+                    "VALUES (?,?)",
+                    (
+                        record.request_id,
+                        "recorded_from_creation" if prior is None else "legacy_origin_unavailable",
+                    ),
+                )
+                if provenance["deliberation_active"] is True:
+                    existing = connection.execute(
+                        "SELECT configuration_digest FROM mission_deliberation_identities "
+                        "WHERE request_id=? AND input_dialogue_digest=?",
+                        (record.request_id, str(provenance["input_dialogue_digest"])),
+                    ).fetchone()
+                    if existing is not None and existing[0] != provenance["configuration_digest"]:
+                        raise MissionRequestError(
+                            "original deliberation configuration cannot change"
+                        )
+                    connection.execute(
+                        "INSERT OR IGNORE INTO mission_deliberation_identities VALUES (?,?,?,?)",
+                        (
+                            record.request_id,
+                            str(provenance["input_dialogue_digest"]),
+                            str(provenance["configuration_digest"]),
+                            record.updated_at_ms,
+                        ),
+                    )
+                connection.execute(
+                    """INSERT OR IGNORE INTO mission_provenance(request_id,input_dialogue_digest,
+                    snapshot_digest,document_json,recorded_at_ms) VALUES (?,?,?,?,?)""",
+                    (
+                        record.request_id,
+                        str(provenance["input_dialogue_digest"]),
+                        canonical_plan_digest(provenance),
+                        encoded,
+                        record.updated_at_ms,
+                    ),
+                )
             caller = _HTTP_TENANT.get()
             if caller is not None:
                 tenant, administrator = caller
@@ -641,6 +718,61 @@ class MissionRequestStore:
                 (request_id,),
             ).fetchone()
         return None if row is None else str(row[0])
+
+    def deliberation_configuration(self, request_id: str, input_digest: str) -> str | None:
+        """Read one original indexed configuration binding without scanning or renewing history."""
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT configuration_digest FROM mission_deliberation_identities "
+                "WHERE request_id=? AND input_dialogue_digest=?",
+                (request_id, input_digest),
+            ).fetchone()
+        return None if row is None else str(row[0])
+
+    def provenance(
+        self, request_id: str, *, after_sequence: int = 0, limit: int = 32
+    ) -> JSONObject:
+        """Read original transition provenance with digest checks and explicit legacy absence."""
+        if (
+            type(after_sequence) is not int
+            or after_sequence < 0
+            or type(limit) is not int
+            or not 1 <= limit <= 64
+        ):
+            raise MissionRequestError("provenance page bounds are invalid")
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                "SELECT sequence,snapshot_digest,document_json FROM mission_provenance "
+                "WHERE request_id=? AND sequence>? ORDER BY sequence LIMIT ?",
+                (request_id, after_sequence, limit + 1),
+            ).fetchall()
+            origin = connection.execute(
+                "SELECT origin FROM mission_provenance_origins WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+        snapshots: list[JSONValue] = []
+        for _sequence, digest, encoded in rows[:limit]:
+            value = _json_object(json.loads(str(encoded)), "provenance")
+            if canonical_plan_digest(value) != digest or value.get("request_id") != request_id:
+                raise MissionRequestError("provenance history integrity failure")
+            try:
+                validate_snapshot(value)
+            except ValueError as error:
+                raise MissionRequestError(str(error)) from error
+            snapshots.append(value)
+        return {
+            "schema_version": PROVENANCE_SCHEMA,
+            "request_id": request_id,
+            "availability": "recorded"
+            if origin is not None and origin[0] == "recorded_from_creation"
+            else "partial_legacy"
+            if origin is not None
+            else "legacy_unavailable",
+            "snapshots": snapshots,
+            "after_sequence": after_sequence,
+            "next_sequence": int(rows[min(limit, len(rows)) - 1][0]) if rows else after_sequence,
+            "has_more": len(rows) > limit,
+        }
 
     def migrate_request_tenant(
         self, request_id: str, tenant_id: str, source_digest: str, subject: str, now_ms: int

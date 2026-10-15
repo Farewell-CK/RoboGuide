@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Protocol, cast
 
 from mission.approval import ApprovalPolicy
@@ -33,6 +34,8 @@ from mission.grounding_reader import EmptyMissionGroundingReader, MissionGroundi
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import MissionPlanner
+from mission.provenance import implementation_identity, trace_deliberation
+from mission.provenance import snapshot as provenance_snapshot
 from mission.provider_errors import MissionIdentityError
 from mission.recovery import (
     FailureReason,
@@ -163,7 +166,22 @@ class MissionRequestEngine:
         self._repairer = repairer
         self._max_repair_attempts = max_repair_attempts
         self._prevalidation_recovery_attempts = prevalidation_recovery_attempts
-        self._provider_identity = provider_identity or {}
+        self._provider_identity = cast(
+            JSONObject, json.loads(json.dumps(provider_identity or {}, allow_nan=False))
+        )
+        self._provenance_identity = json.dumps(
+            {
+                "implementation": implementation_identity(),
+                "provider": self._provider_identity,
+                "catalog_digest": canonical_plan_digest(capability_catalog.to_json()),
+                "approval_policy_digest": canonical_plan_digest(asdict(self._approval_policy)),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        if len(self._provenance_identity.encode()) > 64 * 1024:
+            raise MissionRequestError("configured provenance identity exceeds its byte budget")
         if not isinstance(controller_preflight_enabled, bool):
             raise MissionRequestError("controller preflight flag must be a Boolean")
         self._controller_preflight_enabled = controller_preflight_enabled
@@ -230,7 +248,7 @@ class MissionRequestEngine:
                 repair_attempts=0,
                 review_history=(),
             )
-            self._store.save(record)
+            self._save_record(record)
         with self._locked_request(record.request_id):
             return self._process(record)
 
@@ -309,6 +327,13 @@ class MissionRequestEngine:
     def request_tenant(self, request_id: str) -> str | None:
         """Return the durable tenant owner for HTTP access control."""
         return self._store.request_tenant(request_id)
+
+    def provenance(
+        self, request_id: str, *, after_sequence: int = 0, limit: int = 32
+    ) -> JSONObject:
+        """Read original configuration/call history without model or Controller IO."""
+        self.get(request_id)
+        return self._store.provenance(request_id, after_sequence=after_sequence, limit=limit)
 
     def migrate_request_tenant(
         self, request_id: str, tenant_id: str, source_digest: str, subject: str
@@ -423,6 +448,7 @@ class MissionRequestEngine:
             record = self.get(request_id)
             if record.lifecycle is not MissionRequestLifecycle.AWAITING_APPROVAL:
                 raise MissionRequestError("request is not awaiting approval")
+            self._assert_deliberation_configuration(record, require_original=True)
             if (
                 record.draft_revision != draft_revision
                 or record.draft_digest != draft_digest
@@ -564,6 +590,33 @@ class MissionRequestEngine:
         return self._update(record, recovery_evidence=recovery)
 
     def _process(self, record: MissionRequestRecord) -> MissionRequestRecord:
+        """Freeze a deliberation invocation and retain calls through its transitions."""
+        identity = self._assert_deliberation_configuration(record)
+        with trace_deliberation(record.request_id, identity):
+            return self._process_traced(record)
+
+    def _assert_deliberation_configuration(
+        self, record: MissionRequestRecord, *, require_original: bool = False
+    ) -> str:
+        """Require original model/Catalog/policy identities before continuing a dialogue."""
+        identity = (
+            record.grounding_context.dialogue_digest
+            if record.grounding_context is not None
+            else dialogue_digest(tuple(turn.to_json() for turn in record.dialogue))
+        )
+        current = canonical_plan_digest(json.loads(self._provenance_identity))
+        previous = self._store.deliberation_configuration(record.request_id, identity)
+        if require_original and previous is None:
+            raise MissionRequestError(
+                "original deliberation identity is unavailable; a new reviewed dialogue is required"
+            )
+        if previous is not None and previous != current:
+            raise MissionRequestError(
+                "deliberation configuration changed; explicit new dialogue is required"
+            )
+        return identity
+
+    def _process_traced(self, record: MissionRequestRecord) -> MissionRequestRecord:
         """Interpret and plan until clarification, approval, or submission is required."""
         stage = "grounding"
         try:
@@ -1007,6 +1060,7 @@ class MissionRequestEngine:
 
     def _submit(self, record: MissionRequestRecord) -> MissionRequestRecord:
         """Submit the current complete plan and reduce the receipt to a stable request state."""
+        self._assert_deliberation_configuration(record, require_original=True)
         plan = record.plan
         if plan is None:
             raise MissionRequestError("cannot submit a request without a MissionPlan")
@@ -1137,6 +1191,14 @@ class MissionRequestEngine:
         return record, assessment
 
     def _recover_deployment_hold(
+        self, record: MissionRequestRecord, assessment: InitialOperationAssessment | None
+    ) -> MissionRequestRecord:
+        """Retain actual deployment-reconsideration model identity within the original dialogue."""
+        identity = self._assert_deliberation_configuration(record, require_original=True)
+        with trace_deliberation(record.request_id, identity):
+            return self._recover_deployment_hold_traced(record, assessment)
+
+    def _recover_deployment_hold_traced(
         self, record: MissionRequestRecord, assessment: InitialOperationAssessment | None
     ) -> MissionRequestRecord:
         """Let MI propose one bounded next step, then re-enter ordinary Review and Control.
@@ -1488,8 +1550,24 @@ class MissionRequestEngine:
                 else admission_evidence
             ),
         )
-        self._store.save(updated)
+        self._save_record(updated)
         return updated
+
+    def _save_record(self, record: MissionRequestRecord) -> None:
+        """Atomically link transitions to configuration and actual call evidence."""
+        context = record.grounding_context
+        evidence = provenance_snapshot(
+            self._provenance_identity,
+            record.request_id,
+            context.dialogue_digest
+            if context is not None
+            else dialogue_digest(tuple(turn.to_json() for turn in record.dialogue)),
+            canonical_plan_digest(record.to_json()),
+            context.context_digest if context is not None else None,
+            record.draft_revision,
+            record.lifecycle.value,
+        )
+        self._store.save(record, provenance=evidence)
 
     def _recovery_evidence(
         self,

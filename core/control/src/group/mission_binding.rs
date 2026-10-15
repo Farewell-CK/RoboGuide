@@ -215,6 +215,101 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<TaskExecution, ControlError> {
+        if self.decision_policy_registry().is_some() || plan.decision_policy_digest().is_some() {
+            return Err(ControlError::InvalidProposal(
+                "State-policy binding requires current evidence".into(),
+            ));
+        }
+        self.bind_task_execution_validated(group_id, plan, timestamp, correlation_id, events)
+    }
+
+    /// Revalidates current source contracts and policy generation before initial binding consumes commitment.
+    pub fn bind_task_execution_with_state<S: ports::SharedNodeStateReader, E: EventSink>(
+        &mut self,
+        state: &S,
+        group_id: &ExecutionGroupId,
+        plan: &CommittedPlan,
+        timestamp: TimestampMs,
+        correlation: &CorrelationId,
+        events: &mut E,
+    ) -> Result<TaskExecution, ControlError> {
+        let current = self
+            .decision_policy_registry()
+            .map(|registry| registry.digest().expect("validated registry"));
+        if plan.decision_policy_digest() != current.as_deref() {
+            return Err(ControlError::AssignmentUnavailable(
+                "State policy changed after Commit".into(),
+            ));
+        }
+        let group = self
+            .groups
+            .get(group_id)
+            .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
+        for assignment in plan.assignments() {
+            let role = group
+                .role_requirement(plan.task_ref(), assignment.role_id())
+                .ok_or_else(|| ControlError::InvalidProposal("Bind Role is absent".into()))?;
+            if !self.node_is_eligible_for_role(state, assignment.node_id(), role, timestamp)
+                || plan
+                    .operation_for_role(assignment.role_id())
+                    .is_some_and(|operation| {
+                        !self.node_is_eligible_for_role_operation(
+                            state,
+                            assignment.node_id(),
+                            role,
+                            operation,
+                            timestamp,
+                        )
+                    })
+                || [domain::DecisionKind::Commit, domain::DecisionKind::Bind]
+                    .into_iter()
+                    .any(|decision| {
+                        !self.decision_gates_allow(
+                            state,
+                            assignment.node_id(),
+                            role,
+                            plan.operation_for_role(assignment.role_id()),
+                            decision,
+                            timestamp,
+                        )
+                    })
+            {
+                return Err(ControlError::AssignmentUnavailable(
+                    "Bind source evidence is no longer admissible".into(),
+                ));
+            }
+        }
+        let execution =
+            self.bind_task_execution_validated(group_id, plan, timestamp, correlation, events)?;
+        let group = self.group(group_id).expect("bound Group remains present");
+        for assignment in plan.assignments() {
+            let role = group
+                .role_requirement(plan.task_ref(), assignment.role_id())
+                .expect("validated role");
+            self.audit_role_decision(
+                state,
+                plan.task_ref(),
+                assignment.node_id(),
+                role,
+                plan.operation_for_role(assignment.role_id()),
+                domain::DecisionKind::Bind,
+                timestamp,
+                correlation,
+                events,
+            );
+        }
+        Ok(execution)
+    }
+
+    /// Applies only an already revalidated initial binding using the existing reservation authority.
+    fn bind_task_execution_validated<E: EventSink>(
+        &mut self,
+        group_id: &ExecutionGroupId,
+        plan: &CommittedPlan,
+        timestamp: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<TaskExecution, ControlError> {
         let group = self
             .groups
             .get(group_id)

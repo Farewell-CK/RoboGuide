@@ -45,6 +45,7 @@ pub enum StateSemantic {
 
 /// A stable semantic object reference independent of transport or physical adapter handles.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StateObjectRef {
     /// Broad ownership class of the referenced object.
     class: StateObjectClass,
@@ -90,7 +91,7 @@ impl StateObjectRef {
 
 /// Attributes one State record to its actual producer.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(tag = "owner", rename_all = "snake_case")]
+#[serde(tag = "owner", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StateSource {
     /// A configured local system published the record through one node.
     Node {
