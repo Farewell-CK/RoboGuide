@@ -202,6 +202,7 @@ impl BoundedJointScheduler {
                     snapshot_version: snapshot.version(),
                     expansions,
                     duration_estimate: explicit_estimate.cloned(),
+                    cost_evidence: snapshot.cost_evidence().cloned().collect(),
                 };
                 return Ok(if starts_at <= context.now {
                     TaskSchedulingOutcome::SelectedNow(decision)
@@ -362,6 +363,10 @@ fn search_roles<S: SharedNodeStateReader>(
     let mut nodes = role_candidates.node_ids().to_vec();
     nodes.sort_by_key(|node| {
         (
+            snapshot
+                .cost_for_node(node)
+                .map(SchedulingCostEvidence::score)
+                .unwrap_or(u128::MAX),
             candidates.initial_priority(role.role_id(), node, starts_at),
             node.clone(),
         )
@@ -559,7 +564,15 @@ fn select_role<S: SharedNodeStateReader>(
     selected_resources: &BTreeSet<ResourceId>,
 ) -> Result<Option<RoleSchedulingSelection>, SchedulerError> {
     let mut stable_candidates = candidate_node_ids.to_vec();
-    stable_candidates.sort();
+    stable_candidates.sort_by_key(|node| {
+        (
+            snapshot
+                .cost_for_node(node)
+                .map(SchedulingCostEvidence::score)
+                .unwrap_or(u128::MAX),
+            node.clone(),
+        )
+    });
     stable_candidates.dedup();
     for node_id in stable_candidates {
         let node = state

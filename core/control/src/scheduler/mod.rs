@@ -32,6 +32,8 @@ pub enum SchedulerError {
     InvalidTimeWindow,
     /// Supplied duration evidence was stale or belonged to another Task.
     InvalidDurationEstimate(String),
+    /// Supplied load/cost evidence is malformed, stale, or internally inconsistent.
+    InvalidCostEvidence(String),
 }
 
 impl Display for SchedulerError {
@@ -59,6 +61,9 @@ impl Display for SchedulerError {
             }
             Self::InvalidDurationEstimate(reason) => {
                 write!(formatter, "invalid task duration estimate: {reason}")
+            }
+            Self::InvalidCostEvidence(reason) => {
+                write!(formatter, "invalid scheduler cost evidence: {reason}")
             }
         }
     }
@@ -171,6 +176,9 @@ pub struct TaskSchedulingDecision {
     /// Explicit attributed duration evidence consumed by this decision, when supplied.
     #[serde(default)]
     duration_estimate: Option<TaskDurationEstimate>,
+    /// Fresh cost evidence retained as planning provenance; it never grants resource authority.
+    #[serde(default)]
+    cost_evidence: Vec<SchedulingCostEvidence>,
 }
 
 impl TaskSchedulingDecision {
@@ -212,6 +220,11 @@ impl TaskSchedulingDecision {
     /// Returns explicit source-aware duration evidence retained with the decision.
     pub const fn duration_estimate(&self) -> Option<&TaskDurationEstimate> {
         self.duration_estimate.as_ref()
+    }
+
+    /// Returns the exact fresh cost evidence used only to order candidate exploration.
+    pub fn cost_evidence(&self) -> &[SchedulingCostEvidence] {
+        &self.cost_evidence
     }
 
     /// Builds fresh proposal-validation inputs without granting proposal authority.
@@ -350,6 +363,64 @@ pub struct SchedulingSnapshot {
     occupancies: Vec<SchedulingOccupancy>,
     /// Existing ContextRole bindings that this Task must reuse exactly.
     role_constraints: BTreeMap<RoleId, SchedulingRoleConstraint>,
+    /// Fresh source-aware cost evidence, keyed by candidate Node.
+    cost_evidence: BTreeMap<NodeId, SchedulingCostEvidence>,
+}
+
+/// Bounded source-aware scheduling cost evidence used only for deterministic candidate ordering.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchedulingCostEvidence {
+    /// Candidate Node receiving this evidence.
+    pub node_id: NodeId,
+    /// Stable provider/source identity.
+    pub source_id: String,
+    /// Controller receive time of this evidence.
+    pub received_at: TimestampMs,
+    /// Receive-relative evidence lifetime.
+    pub valid_for_ms: u64,
+    /// Queue delay observed by the source.
+    pub queue_delay_ms: u64,
+    /// Travel estimate in bounded micrometers.
+    pub travel_distance_um: u64,
+    /// Traffic delay estimate in milliseconds.
+    pub traffic_delay_ms: u64,
+    /// Source load in millionths of capacity.
+    pub load_millionths: u32,
+    /// Available GPU memory in bytes, when the source observed one.
+    pub gpu_memory_bytes: Option<u64>,
+}
+
+impl SchedulingCostEvidence {
+    /// Validates bounded source identity and receive-relative metrics without using wall clocks.
+    pub fn validate_at(&self, now: TimestampMs) -> Result<(), SchedulerError> {
+        if self.source_id.trim().is_empty()
+            || self.source_id.len() > 256
+            || self.valid_for_ms == 0
+            || self.valid_for_ms > 3_600_000
+            || self.load_millionths > 1_000_000
+            || self.queue_delay_ms > 86_400_000
+            || self.travel_distance_um > 10_000_000_000
+            || self.traffic_delay_ms > 86_400_000
+            || self.gpu_memory_bytes.is_some_and(|value| value > 1 << 50)
+            || now.as_millis().saturating_sub(self.received_at.as_millis()) > self.valid_for_ms
+            || self.received_at.as_millis() > now.as_millis()
+        {
+            return Err(SchedulerError::InvalidCostEvidence(
+                "source, freshness or metric bounds are invalid".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Computes one deterministic integer score; lower is preferred and ties use NodeId.
+    pub fn score(&self) -> u128 {
+        u128::from(self.queue_delay_ms) * 1_000
+            + u128::from(self.travel_distance_um)
+            + u128::from(self.traffic_delay_ms) * 1_000
+            + u128::from(self.load_millionths)
+            + u128::from(self.gpu_memory_bytes.unwrap_or(0) / (1024 * 1024))
+    }
 }
 
 impl SchedulingSnapshot {
@@ -366,6 +437,7 @@ impl SchedulingSnapshot {
             version,
             occupancies,
             role_constraints: BTreeMap::new(),
+            cost_evidence: BTreeMap::new(),
         }
     }
 
@@ -375,6 +447,7 @@ impl SchedulingSnapshot {
             version: 0,
             occupancies: Vec::new(),
             role_constraints: BTreeMap::new(),
+            cost_evidence: BTreeMap::new(),
         }
     }
 
@@ -390,6 +463,27 @@ impl SchedulingSnapshot {
         self
     }
 
+    /// Adds fresh evidence in deterministic Node order; stale evidence is rejected before use.
+    pub fn try_with_cost_evidence(
+        mut self,
+        now: TimestampMs,
+        evidence: impl IntoIterator<Item = SchedulingCostEvidence>,
+    ) -> Result<Self, SchedulerError> {
+        for item in evidence {
+            item.validate_at(now)?;
+            if self
+                .cost_evidence
+                .insert(item.node_id.clone(), item)
+                .is_some()
+            {
+                return Err(SchedulerError::InvalidCostEvidence(
+                    "duplicate Node cost evidence".into(),
+                ));
+            }
+        }
+        Ok(self)
+    }
+
     /// Returns the Control version represented by this snapshot.
     pub const fn version(&self) -> u64 {
         self.version
@@ -403,6 +497,16 @@ impl SchedulingSnapshot {
     /// Returns an exact reusable binding constraint for one Task-local Role.
     pub fn role_constraint(&self, role_id: &RoleId) -> Option<&SchedulingRoleConstraint> {
         self.role_constraints.get(role_id)
+    }
+
+    /// Returns fresh cost evidence for one candidate, if supplied.
+    pub fn cost_for_node(&self, node_id: &NodeId) -> Option<&SchedulingCostEvidence> {
+        self.cost_evidence.get(node_id)
+    }
+
+    /// Returns all cost evidence retained in the snapshot for audit provenance.
+    pub fn cost_evidence(&self) -> impl Iterator<Item = &SchedulingCostEvidence> {
+        self.cost_evidence.values()
     }
 }
 

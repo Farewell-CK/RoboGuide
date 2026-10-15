@@ -286,6 +286,10 @@ class MissionRequestEngine:
         """Return aggregate Mission Service metrics without exposing request contents."""
         return self._store.metrics()
 
+    def metrics_prometheus(self) -> str:
+        """Return aggregate scrapeable metrics without exposing tenant or request identities."""
+        return self._store.metrics_prometheus()
+
     @contextmanager
     def authenticated_command(
         self, tenant_id: str, administrator: bool, http_command: HttpCommandIdentity | None = None

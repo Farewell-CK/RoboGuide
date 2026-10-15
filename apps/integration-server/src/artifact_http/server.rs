@@ -305,6 +305,7 @@ where
             Response::Json("200 OK", serde_json::json!({"status": "ok", "ready": true}))
         }
         ("GET", "/metrics") => artifact_metrics(catalog, uploads)?,
+        ("GET", "/metrics/prometheus") => artifact_metrics_prometheus(catalog, uploads)?,
         ("POST", "/v1/artifact-uploads") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
@@ -361,7 +362,11 @@ where
         }
         ("GET", path) if path.starts_with("/v1/maps/") => {
             let response = get_revision(catalog, path)?;
-            let Response::Json(_, ref value) = response;
+            let Response::Json(_, ref value) = response else {
+                return Err(HttpError::internal(
+                    "map route returned a non-JSON response",
+                ));
+            };
             let snapshot: domain::MapRevisionSnapshot = serde_json::from_value(value.clone())
                 .map_err(|e| HttpError::internal(e.to_string()))?;
             authorized_map_read(
@@ -511,6 +516,25 @@ fn artifact_metrics(catalog: &ArtifactCatalog, uploads: &Uploads) -> Result<Resp
             "map_revisions": maps,
             "active_uploads": active_uploads,
         }),
+    ))
+}
+
+/// Returns bounded Prometheus metrics without manifest, tenant or artifact identities.
+fn artifact_metrics_prometheus(
+    catalog: &ArtifactCatalog,
+    uploads: &Uploads,
+) -> Result<Response, HttpError> {
+    let memories = catalog.memories()?.len();
+    let maps = catalog.revisions()?.len();
+    let active_uploads = uploads
+        .lock()
+        .map_err(|_| HttpError::internal("artifact upload registry lock is poisoned"))?
+        .active_uploads();
+    Ok(Response::Text(
+        "200 OK",
+        format!(
+            "# HELP roboguide_artifact_memory_manifests Memory manifests in the current catalog.\n# TYPE roboguide_artifact_memory_manifests gauge\nroboguide_artifact_memory_manifests {memories}\n# HELP roboguide_artifact_map_revisions Spatial map revisions in the current catalog.\n# TYPE roboguide_artifact_map_revisions gauge\nroboguide_artifact_map_revisions {maps}\n# HELP roboguide_artifact_active_uploads Active bounded uploads.\n# TYPE roboguide_artifact_active_uploads gauge\nroboguide_artifact_active_uploads {active_uploads}\n"
+        ),
     ))
 }
 

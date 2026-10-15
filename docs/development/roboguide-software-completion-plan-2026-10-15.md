@@ -30,7 +30,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F3 State 与 MI | R06、R07、R08 | policy registry、authority consumer、Belief、provenance、verifier/持续验证 | 当前软件阶段验收通过；设备证据独立待验证，后续阶段仍必需 |
 | F4 Memory/Spatial | R10、R11、R12、R20 | reconciliation、Group 授权/handoff、active-map/GC/revocation、自动配准/融合/增量 | 实施中，见 ADR-0105；不得提前报告完成 |
 | F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | 动态 learner/joint membership 与软件 leader transfer 已通过；升级/证书轮换/archive/CAS 数据面仍待完成 |
-| F6 资源/调度 | R16、R20 | divisible quota、完整时间/空间承诺、真实成本 evidence 与确定性策略 | 待完成 |
+| F6 资源/调度 | R16、R20 | divisible quota、完整时间/空间承诺、真实成本 evidence 与确定性策略 | cost evidence、逻辑 quota ledger 与 Prometheus 入口已通过；物理/OS 强制、完整时空和运行中抢占仍待完成 |
 | F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | 待完成 |
 | F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 待完成 |
 | F9 层级/Federation | R20 | 控制域、跨域 prepare/commit、路由/授权与恢复 | 待完成 |
@@ -77,6 +77,10 @@ active-map、完整 Group handoff/GC、动态 HA 与 F5–F10 仍为必需项，
 CAS/SQLite、mTLS 和独立 verifier 链路通过。它验证了 active-map 选择、tile 查询、重启失活、
 软件 stop barrier handoff 与八类引用 GC 门禁；不提供物理定位或设备停止证明。大文件准备窗口、
 完整 Group 授权/撤销生命周期和 F5–F10 仍未关闭。
+
+[F6 成本/quota 与 F10 Prometheus 切片](acceptance/2026-10-16-f6-cost-quota-f10-metrics.md)已补齐
+来源/TTL 绑定的成本排序证据、持久逻辑 quota ledger 以及 Mission/Artifact 的 Prometheus
+scrape 入口；这些不等于物理/OS quota、真实 GPU/交通成本或告警 SLO 达标。
 
 ## 已接受的实现决定
 

@@ -386,6 +386,8 @@ pub(super) fn receive_timestamp() -> TimestampMs {
 pub(super) enum Response {
     /// JSON response body.
     Json(&'static str, serde_json::Value),
+    /// Prometheus text response body.
+    Text(&'static str, String),
 }
 
 impl Response {
@@ -396,6 +398,7 @@ impl Response {
     {
         match self {
             Self::Json(status, body) => write_json(stream, status, &body).await,
+            Self::Text(status, body) => write_text(stream, status, &body).await,
         }
     }
 }
@@ -417,6 +420,31 @@ pub(super) async fn write_json(
         .map_err(|error| HttpError::internal(error.to_string()))?;
     stream
         .write_all(&body)
+        .await
+        .map_err(|error| HttpError::internal(error.to_string()))?;
+    stream
+        .shutdown()
+        .await
+        .map_err(|error| HttpError::internal(error.to_string()))?;
+    Ok(())
+}
+
+/// Writes one bounded text response with a scrapeable Prometheus content type.
+pub(super) async fn write_text(
+    stream: &mut (impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin),
+    status: &str,
+    body: &str,
+) -> Result<(), HttpError> {
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/plain; version=0.0.4; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream
+        .write_all(response.as_bytes())
+        .await
+        .map_err(|error| HttpError::internal(error.to_string()))?;
+    stream
+        .write_all(body.as_bytes())
         .await
         .map_err(|error| HttpError::internal(error.to_string()))?;
     stream

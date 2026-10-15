@@ -689,6 +689,39 @@ class MissionRequestStore:
             "http_idempotency_by_status": idempotency_metrics,
         }
 
+    def metrics_prometheus(self) -> str:
+        """Return bounded Prometheus text without tenant/request dimensions."""
+        metrics = self.metrics()
+        lines = [
+            "# HELP roboguide_mission_requests_total Mission Requests retained by lifecycle store.",
+            "# TYPE roboguide_mission_requests_total gauge",
+            f"roboguide_mission_requests_total {metrics['mission_requests_total']}",
+            "# HELP roboguide_authenticated_http_audit_total Authenticated HTTP audit rows.",
+            "# TYPE roboguide_authenticated_http_audit_total gauge",
+            f"roboguide_authenticated_http_audit_total {metrics['authenticated_http_audit_total']}",
+        ]
+        lifecycle = metrics["mission_requests_by_lifecycle"]
+        for name in (
+            "draft",
+            "clarifying",
+            "approved",
+            "submitted",
+            "running",
+            "completed",
+            "failed",
+        ):
+            raw = lifecycle.get(name, 0) if isinstance(lifecycle, dict) else 0
+            value = raw if isinstance(raw, int) else 0
+            lines.append(f'roboguide_mission_requests_by_lifecycle{{lifecycle="{name}"}} {value}')
+        statuses = metrics["http_idempotency_by_status"]
+        if isinstance(statuses, dict):
+            for name in sorted(statuses):
+                if name.isidentifier():
+                    raw = statuses[name]
+                    count = raw if isinstance(raw, int) else 0
+                    lines.append(f'roboguide_http_idempotency_by_status{{status="{name}"}} {count}')
+        return "\n".join(lines) + "\n"
+
     def bind_request_tenant(self, request_id: str, tenant_id: str, bound_at_ms: int) -> None:
         """Bind one Mission Request to its authenticated tenant exactly once."""
         if not request_id.strip() or not tenant_id.strip() or bound_at_ms < 0:

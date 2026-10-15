@@ -80,7 +80,11 @@ pub(super) fn list_authorized_memories(
         }
     }
     let mut response = super::server::list_memories(catalog)?;
-    let Response::Json(_, value) = &mut response;
+    let Response::Json(_, value) = &mut response else {
+        return Err(HttpError::internal(
+            "memory listing returned a non-JSON response",
+        ));
+    };
     if let Some(items) = value
         .get_mut("memories")
         .and_then(serde_json::Value::as_array_mut)

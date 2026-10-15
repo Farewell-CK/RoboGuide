@@ -30,6 +30,10 @@ Node journal 写入拒绝。实际文件、SQL 提交失败、正式查询、重
 [F4 Active Map 验收](development/acceptance/2026-10-16-f4-active-map.md)。这不关闭物理定位、
 硬件连续性、完整 Group 生命周期、map fusion 或跨站点数据面恢复。
 
+2026-10-16 Scheduler/运维软件切片已完成：`SchedulingCostEvidence` 的来源/TTL/边界校验与
+确定性排序、checkpointed logical `QuotaLedger`、以及 Mission/Artifact Prometheus 文本入口
+均已接入。它们不提供真实 GPU/交通成本、OS quota、物理执行时限或告警平台 SLO 达标证据。
+
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |

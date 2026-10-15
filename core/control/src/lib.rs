@@ -17,6 +17,7 @@ mod node;
 mod node_identity;
 mod node_session;
 mod proposal;
+mod quota;
 mod reconciliation;
 mod registry_provenance;
 mod scheduler;
@@ -33,6 +34,7 @@ pub use matching::RoleCandidateDiagnostics;
 pub use matching::{CandidateSet, RoleCandidates};
 pub use node::CandidateExclusionReason;
 pub use proposal::AssignmentProposal;
+pub use quota::{QuotaClaim, QuotaError, QuotaLedger, QuotaLimit};
 pub use reconciliation::{
     ActorTakeoverAuthorization, CommittedRecoveryAssignment, ReconciliationAssessment,
     RecoveryAssignmentProposal, RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,
@@ -148,6 +150,9 @@ pub struct ControlCheckpoint {
     pending_recovery_commitments: Vec<CommittedRecoveryAssignment>,
     /// Maximum receive-time age accepted by Control eligibility policy.
     max_status_age_ms: u64,
+    /// Explicit logical quota limits/claims; this never replaces physical reservation authority.
+    #[serde(default)]
+    quota_ledger: QuotaLedger,
 }
 
 /// Control-owned deployment constraint that narrows a logical actor to one physical node.
@@ -506,6 +511,8 @@ pub struct ControlPlane {
         BTreeMap<(ExecutionGroupId, TaskRef, RoleId), CommittedRecoveryAssignment>,
     /// Maximum receive-time age accepted by Control eligibility policy.
     pub(crate) max_status_age_ms: u64,
+    /// Durable logical quota ledger kept separate from physical resource reservations.
+    pub(crate) quota_ledger: QuotaLedger,
 }
 
 impl Default for ControlPlane {
@@ -519,6 +526,16 @@ impl ControlPlane {
     /// Creates an empty Control Plane.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns the durable logical quota ledger; it never grants physical resource ownership.
+    pub fn quota_ledger(&self) -> &QuotaLedger {
+        &self.quota_ledger
+    }
+
+    /// Returns the quota mutation surface used by an authenticated application authority.
+    pub fn quota_ledger_mut(&mut self) -> &mut QuotaLedger {
+        &mut self.quota_ledger
     }
 
     /// Creates an empty Control Plane with explicit receive-time freshness TTL.
@@ -557,6 +574,7 @@ impl ControlPlane {
             groups: BTreeMap::new(),
             pending_recovery_commitments: BTreeMap::new(),
             max_status_age_ms,
+            quota_ledger: QuotaLedger::new(),
         }
     }
 
@@ -604,6 +622,7 @@ impl ControlPlane {
                 .cloned()
                 .collect(),
             max_status_age_ms: self.max_status_age_ms,
+            quota_ledger: self.quota_ledger.clone(),
         }
     }
 
@@ -839,7 +858,12 @@ impl ControlPlane {
             groups,
             pending_recovery_commitments,
             max_status_age_ms: checkpoint.max_status_age_ms,
+            quota_ledger: checkpoint.quota_ledger,
         };
+        restored
+            .quota_ledger
+            .validate()
+            .map_err(|error| ControlError::InvalidProposal(error.to_string()))?;
         restored.validate_tenant_checkpoint()?;
         restored.validate_memory_authority_checkpoint()?;
         restored.validate_belief_policy_checkpoint()?;

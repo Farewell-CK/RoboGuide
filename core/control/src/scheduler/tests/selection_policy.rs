@@ -73,6 +73,114 @@ fn normal_scheduler_is_stable_and_repeatable() {
     assert_eq!(first.selections()[0].resource_ids()[0].as_str(), "space-a");
 }
 
+/// Fresh queue/load/travel evidence changes only deterministic ordering and is retained as provenance.
+#[test]
+fn scheduler_orders_candidates_by_fresh_cost_evidence_without_changing_eligibility() {
+    let mut state = InMemorySharedNodeState::new();
+    for node_id in ["node-a", "node-b"] {
+        record_node(
+            &mut state,
+            registration(
+                node_id,
+                CapabilityKind::Transport,
+                vec![(
+                    if node_id == "node-a" {
+                        "space-a"
+                    } else {
+                        "space-b"
+                    },
+                    ResourceKind::Space,
+                )],
+            ),
+        )
+        .expect("test node snapshot should be accepted");
+    }
+    let role_id = RoleId::new("transport").expect("test role id must be valid");
+    let task = requirement(
+        "mission-a",
+        "task-a",
+        vec![RoleRequirement::new(
+            role_id.clone(),
+            CapabilityKind::Transport,
+            Some(ResourceKind::Space),
+        )],
+    );
+    let candidates = CandidateSet::new(
+        task.task_ref().clone(),
+        vec![RoleCandidates::new(
+            role_id,
+            vec![
+                NodeId::new("node-a").expect("test node id must be valid"),
+                NodeId::new("node-b").expect("test node id must be valid"),
+            ],
+        )],
+    );
+    let snapshot = SchedulingSnapshot::empty()
+        .try_with_cost_evidence(
+            TimestampMs::new(100),
+            [
+                SchedulingCostEvidence {
+                    node_id: NodeId::new("node-a").unwrap(),
+                    source_id: "load-provider".into(),
+                    received_at: TimestampMs::new(100),
+                    valid_for_ms: 1_000,
+                    queue_delay_ms: 900,
+                    travel_distance_um: 100,
+                    traffic_delay_ms: 100,
+                    load_millionths: 900_000,
+                    gpu_memory_bytes: Some(1 << 30),
+                },
+                SchedulingCostEvidence {
+                    node_id: NodeId::new("node-b").unwrap(),
+                    source_id: "load-provider".into(),
+                    received_at: TimestampMs::new(100),
+                    valid_for_ms: 1_000,
+                    queue_delay_ms: 1,
+                    travel_distance_um: 1,
+                    traffic_delay_ms: 1,
+                    load_millionths: 1,
+                    gpu_memory_bytes: Some(1 << 40),
+                },
+            ],
+        )
+        .expect("fresh cost evidence should be accepted");
+    let outcome = BoundedJointScheduler::new()
+        .schedule_task_with_snapshot(
+            &state,
+            &task,
+            &candidates,
+            &snapshot,
+            TimestampMs::new(0),
+            TimestampMs::new(100),
+        )
+        .expect("cost evidence must not change candidate eligibility");
+    let decision = match outcome {
+        TaskSchedulingOutcome::SelectedNow(decision)
+        | TaskSchedulingOutcome::SelectedFuture(decision) => decision,
+        other => panic!("unexpected scheduler outcome: {other:?}"),
+    };
+    assert_eq!(decision.selections()[0].node_id().as_str(), "node-b");
+    assert_eq!(decision.cost_evidence().len(), 2);
+    assert!(
+        SchedulingSnapshot::empty()
+            .try_with_cost_evidence(
+                TimestampMs::new(100),
+                [SchedulingCostEvidence {
+                    node_id: NodeId::new("node-a").unwrap(),
+                    source_id: "stale".into(),
+                    received_at: TimestampMs::new(0),
+                    valid_for_ms: 1,
+                    queue_delay_ms: 0,
+                    travel_distance_um: 0,
+                    traffic_delay_ms: 0,
+                    load_millionths: 0,
+                    gpu_memory_bytes: None,
+                }],
+            )
+            .is_err()
+    );
+}
+
 /// Nodes absent from CandidateSet are never selected even when present in State.
 #[test]
 fn scheduler_never_bypasses_candidate_set() {

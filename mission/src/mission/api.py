@@ -258,6 +258,9 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
         if path == "/metrics":
             self._send(HTTPStatus.OK, self.server.engine.metrics())
             return
+        if path == "/metrics/prometheus":
+            self._send_text(HTTPStatus.OK, self.server.engine.metrics_prometheus())
+            return
         prefix = "/v1/mission-requests/"
         if path.startswith(prefix):
             parts = path[len(prefix) :].split("/")
@@ -707,6 +710,16 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
         payload = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _send_text(self, status: HTTPStatus, value: str) -> None:
+        """Write one scrapeable text response with explicit framing."""
+        payload = value.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Connection", "close")
         self.end_headers()
