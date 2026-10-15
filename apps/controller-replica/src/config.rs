@@ -50,6 +50,19 @@ pub(super) struct ProcessConfig {
     /// Explicit policy environment; inherited Controller environment is cleared.
     #[serde(default)]
     pub controller_environment: BTreeMap<String, String>,
+    /// Optional one-shot software leader transfer requested by the supervisor after startup.
+    #[serde(default)]
+    pub leader_transfer: Option<LeaderTransferConfig>,
+}
+
+/// Closed one-shot leader handoff command; it never asserts physical continuity.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LeaderTransferConfig {
+    /// Current pre-enrolled voter selected to receive the election trigger.
+    pub target: u64,
+    /// Stable operator operation identity for retries and status audit.
+    pub transfer_id: String,
 }
 
 impl ProcessConfig {
@@ -91,6 +104,14 @@ impl ProcessConfig {
             })
         {
             return Err("unsupported replica process paths/schema/environment".into());
+        }
+        if let Some(transfer) = &self.leader_transfer
+            && (transfer.target == self.replica.replica_id
+                || !self.replica.members.contains_key(&transfer.target)
+                || transfer.transfer_id.trim().is_empty()
+                || transfer.transfer_id.len() > 128)
+        {
+            return Err("leader transfer target or identity is invalid".into());
         }
         let routes = [self.grpc_address, self.http_address, self.artifact_address];
         let distinct = routes.into_iter().collect::<BTreeSet<_>>();

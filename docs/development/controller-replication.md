@@ -152,8 +152,12 @@ closure、standalone downgrade、live majority loss/restore，local Execute 仍�
 记录位于仓库外 `adr-follow-up-audit-2026-10-12/replica-processes-{1,2,3,4}/`；
 后续存储完整性修订还需在最终源码重跑进程检查，不把旧 binary 结果当作新 binary 证据。
 
-当前基础 profile 仍是三成员静态 membership；loopback 可不启用 TLS，跨主机必须使用
-ADR-0091 mTLS。系统仍不提供动态 membership、跨副本 archive 共识或物理 continuity 认证。
+当前 v0.1 profile 仍兼容三成员静态 membership；v0.2 profile 可在完整预注册 member universe
+中先以 learner catch-up，再用 OpenRaft joint consensus 加入/移除 voter。loopback 可不启用 TLS，
+跨主机必须使用 ADR-0091 mTLS。当前仍不提供任意新主机的在线 enrollment、跨副本 archive 共识
+或物理 continuity 认证。Leader transfer 通过私有 member envelope 触发目标 voter 选举：旧
+leader 暂停心跳并关闭自己的 child，目标实际成为新 term leader 后才返回成功；receipt 本身不
+证明设备连续运行。
 每个 checkpoint 至多 64MiB，新增 batch 至多 8192 events，retained event metadata 通过
 ADR-0087 的 checkpoint/history anchor 压缩保持有界，snapshot/frame 至多 256MiB；单批次
 本身超过界限仍 fail closed。Artifact blobs、provider-local Memory 内容不复制；目录可发现

@@ -233,7 +233,12 @@ fn replica_database_alias_cannot_acquire_a_second_writer() {
 
 /// Acquires three simultaneous ephemeral listeners so their released loopback ports are distinct.
 fn members() -> BTreeMap<u64, SocketAddr> {
-    let listeners = (0..3)
+    members_with_count(3)
+}
+
+/// Acquires a pre-enrolled member universe for dynamic membership tests.
+fn members_with_count(count: usize) -> BTreeMap<u64, SocketAddr> {
+    let listeners = (0..count)
         .map(|_| std::net::TcpListener::bind("127.0.0.1:0").unwrap())
         .collect::<Vec<_>>();
     listeners
@@ -243,6 +248,25 @@ fn members() -> BTreeMap<u64, SocketAddr> {
         .collect()
 }
 
+/// Supplies a v0.2 profile whose initial voters can be smaller than its pre-enrolled universe.
+fn dynamic_configuration(
+    id: u64,
+    members: &BTreeMap<u64, SocketAddr>,
+    initial_voters: BTreeSet<u64>,
+) -> ReplicaConfig {
+    ReplicaConfig {
+        schema: "roboguide.controller-replica/v0.2".into(),
+        cluster_id: "offline-dynamic-membership-test".into(),
+        replica_id: id,
+        members: members.clone(),
+        initial_voters: Some(initial_voters),
+        application_schema: "test/checkpoint-v1".into(),
+        application_policy_digest: "same-explicit-policy".into(),
+        shared_secret: None,
+        tls: None,
+    }
+}
+
 /// Supplies one exact homogeneous policy for isolated real replica engines.
 fn configuration(id: u64, members: &BTreeMap<u64, SocketAddr>) -> ReplicaConfig {
     ReplicaConfig {
@@ -250,6 +274,7 @@ fn configuration(id: u64, members: &BTreeMap<u64, SocketAddr>) -> ReplicaConfig 
         cluster_id: "offline-quorum-test".into(),
         replica_id: id,
         members: members.clone(),
+        initial_voters: None,
         application_schema: "test/checkpoint-v1".into(),
         application_policy_digest: "same-explicit-policy".into(),
         shared_secret: None,
@@ -355,6 +380,113 @@ async fn three_members_quorum_loss_crash_rejoin_and_epoch_fencing() {
     .await
     .unwrap();
     for (node, _) in &nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
+/// A target-side election request moves leadership without replaying or forcing an application write.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn controlled_leader_transfer_moves_to_caught_up_voter() {
+    let directory = tempfile::tempdir().unwrap();
+    let endpoints = members();
+    let mut nodes = Vec::new();
+    for id in 1..=3 {
+        nodes.push(
+            ReplicaNode::start(
+                configuration(id, &endpoints),
+                &directory.path().join(format!("replica-{id}.sqlite3")),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    let leader_index = leader(&nodes).await;
+    let old_epoch = nodes[leader_index].0.current_epoch().unwrap();
+    let target = (1..=3).find(|id| *id != old_epoch.replica_id).unwrap();
+    let receipt = nodes[leader_index]
+        .0
+        .request_leader_transfer(target, "transfer-test-1")
+        .await
+        .unwrap();
+    assert_eq!(receipt.state, "requested");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(epoch) = nodes[(target - 1) as usize].0.current_epoch()
+                && epoch.replica_id == target
+                && epoch.term > old_epoch.term
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    })
+    .await
+    .expect("target voter becomes leader after explicit transfer");
+    assert_ne!(nodes[leader_index].0.current_epoch(), Some(old_epoch));
+    for (node, _) in nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
+/// A pre-enrolled learner catches up before joint consensus admits and later removes its vote.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn dynamic_membership_uses_learner_catchup_and_joint_consensus() {
+    let directory = tempfile::tempdir().unwrap();
+    let endpoints = members_with_count(4);
+    let initial = [1_u64, 2, 3].into_iter().collect::<BTreeSet<_>>();
+    let mut nodes = Vec::new();
+    for id in 1..=4 {
+        nodes.push(
+            ReplicaNode::start(
+                dynamic_configuration(id, &endpoints, initial.clone()),
+                &directory.path().join(format!("replica-{id}.sqlite3")),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    let leader_index = leader(&nodes[..3]).await;
+    nodes[leader_index].0.add_learner(4).await.unwrap();
+    nodes[leader_index]
+        .0
+        .change_membership([1_u64, 2, 3, 4].into_iter().collect(), true)
+        .await
+        .unwrap();
+    assert!(
+        nodes[3]
+            .0
+            .raft
+            .metrics()
+            .borrow()
+            .membership_config
+            .voter_ids()
+            .any(|id| id == 4)
+    );
+    let current_leader = leader(&nodes).await;
+    nodes[current_leader]
+        .0
+        .change_membership([1_u64, 2, 3].into_iter().collect(), true)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if !nodes[3]
+                .0
+                .raft
+                .metrics()
+                .borrow()
+                .membership_config
+                .voter_ids()
+                .any(|id| id == 4)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    })
+    .await
+    .expect("removed member loses voter status after joint consensus");
+    for (node, _) in nodes {
         node.shutdown().await.unwrap();
     }
 }

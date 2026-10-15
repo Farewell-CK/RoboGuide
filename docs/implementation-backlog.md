@@ -186,8 +186,8 @@ Transport、序列化格式、数据库、调度算法或部署拓扑。
   [`ADR-0022`](decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md) 固定为单一
   `roboguide-node`、声明式 Local Integration Engine 与 deployment-owned Local EAIOS facade；
   Agent、SDK、Plugin、ROS Bridge 等仅是 facade 内部实现选择，不再是 RoboGuide core 的待决接入架构。
-- Control Plane 已有 ADR-0083 的 OpenRaft 静态三成员 loopback 软件 profile；
-  跨主机认证、动态 membership、policy/history 升级与物理高可用发布仍待决；
+- Control Plane 已有 ADR-0083 的 OpenRaft v0.1 静态三成员和 v0.2 预注册 learner/joint-consensus
+  软件 profile；跨主机认证、policy/history 升级与物理高可用发布仍待决；
 - State / Belief / Memory 的数据库、缓存、事件总线和复制方式；
 - Observation 融合采用投票、滤波、因子图或其他方法；
 - Scheduler v0.2 已采用 deterministic bounded joint search，ADR-0082 已实现 Orchestration

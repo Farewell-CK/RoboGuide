@@ -61,6 +61,46 @@ enum Command {
         /// Original issuing epoch whose quorum must still be current.
         epoch: ControllerEpoch,
     },
+    /// Target-side controlled election used by the explicit leader transfer profile.
+    TransferLeadership {
+        /// Epoch of the current leader that must still be the target's observed leader.
+        epoch: ControllerEpoch,
+        /// Target member identity; it must equal the receiving process.
+        target: u64,
+        /// Stable operator operation identity.
+        transfer_id: String,
+        /// Source last-log index required before triggering the election.
+        required_last_log_index: Option<u64>,
+    },
+    /// Read the leader epoch for an authenticated member-side administration client.
+    AdminEpoch,
+    /// Read the currently committed voter set for an administration audit.
+    AdminMembership,
+    /// Add one configured member as a learner through the current leader.
+    AdminAddLearner {
+        /// Current leader epoch captured before the mutation.
+        epoch: ControllerEpoch,
+        /// Pre-enrolled member identity to catch up.
+        member_id: u64,
+    },
+    /// Apply a voter set through OpenRaft joint consensus.
+    AdminChangeMembership {
+        /// Current leader epoch captured before the mutation.
+        epoch: ControllerEpoch,
+        /// Desired voter identities.
+        voters: std::collections::BTreeSet<u64>,
+        /// Whether removed voters remain as learners.
+        retain_removed_as_learners: bool,
+    },
+    /// Ask the current leader to perform the complete target-side transfer request.
+    AdminRequestTransfer {
+        /// Current leader epoch captured before the mutation.
+        epoch: ControllerEpoch,
+        /// Target voter identity.
+        target: u64,
+        /// Stable operator operation identity.
+        transfer_id: String,
+    },
 }
 
 /// Closed response preserves upstream Raft errors separately from child acceptance.
@@ -78,6 +118,14 @@ enum Reply {
     Commit(Result<CommitReceipt, String>),
     /// Small accepted application identity, never a live Control projection.
     AcceptedIdentity(Result<AcceptedApplicationIdentity, String>),
+    /// Target-side transfer admission; it does not mean the target has won an election.
+    Transfer(Result<LeaderTransferReceipt, String>),
+    /// Current leader epoch observed by an administration client.
+    Epoch(Option<ControllerEpoch>),
+    /// Current committed voter identities.
+    Membership(BTreeSet<u64>),
+    /// Membership administration result.
+    Admin(Result<(), String>),
     /// Identity/framing/profile rejected before entering the consensus engine.
     Rejected(String),
 }
@@ -176,7 +224,7 @@ where
     });
     let reply = if request.profile != node.profile_identity()
         || request.target != node.config.replica_id
-        || !node.config.members.contains_key(&request.sender)
+        || !node.member_allowed(request.sender)
         || !certificate_authenticated
         || authenticated != request.auth_digest
     {
@@ -205,6 +253,57 @@ where
                     .and_then(|()| node.accepted_application_identity());
                 Reply::AcceptedIdentity(result)
             }
+            Command::TransferLeadership {
+                epoch,
+                target,
+                transfer_id,
+                required_last_log_index,
+            } => Reply::Transfer(
+                node.accept_leader_transfer(epoch, target, transfer_id, required_last_log_index)
+                    .await,
+            ),
+            Command::AdminEpoch => Reply::Epoch(node.current_epoch()),
+            Command::AdminMembership => Reply::Membership(
+                node.raft
+                    .metrics()
+                    .borrow()
+                    .membership_config
+                    .voter_ids()
+                    .collect(),
+            ),
+            Command::AdminAddLearner { epoch, member_id } => {
+                Reply::Admin(node.add_learner(member_id).await.and_then(|()| {
+                    if node.current_epoch() == Some(epoch) {
+                        Ok(())
+                    } else {
+                        Err("leader epoch changed during learner admission".into())
+                    }
+                }))
+            }
+            Command::AdminChangeMembership {
+                epoch,
+                voters,
+                retain_removed_as_learners,
+            } => Reply::Admin(
+                node.change_membership(voters, retain_removed_as_learners)
+                    .await
+                    .and_then(|()| {
+                        if node.current_epoch() == Some(epoch) {
+                            Ok(())
+                        } else {
+                            Err("leader epoch changed during membership change".into())
+                        }
+                    }),
+            ),
+            Command::AdminRequestTransfer {
+                epoch,
+                target,
+                transfer_id,
+            } => Reply::Transfer(if node.current_epoch() == Some(epoch) {
+                node.request_leader_transfer(target, transfer_id).await
+            } else {
+                Err("leader epoch changed before transfer request".into())
+            }),
         }
     };
     let encoded = serde_json::to_vec(&reply).map_err(|error| error.to_string())?;
@@ -220,6 +319,181 @@ where
         .await
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+/// Sends one authenticated transfer request to a current voter and returns its admission receipt.
+pub(crate) async fn request_leader_transfer(
+    node: &ReplicaNode,
+    target: u64,
+    transfer_id: String,
+    epoch: ControllerEpoch,
+    required_last_log_index: Option<u64>,
+) -> Result<LeaderTransferReceipt, String> {
+    let address = *node
+        .config
+        .members
+        .get(&target)
+        .ok_or_else(|| "leader transfer target is not pre-enrolled".to_string())?;
+    let network = ReplicaNetwork {
+        target,
+        node: BasicNode::new(address.to_string()),
+        profile: node.profile_identity(),
+        sender: node.config.replica_id,
+        online: node.network_online.clone(),
+        shared_secret: node.config.shared_secret.clone(),
+        tls: node.tls.clone(),
+    };
+    match network
+        .exchange(
+            Command::TransferLeadership {
+                epoch,
+                target,
+                transfer_id,
+                required_last_log_index,
+            },
+            RPCOption::new(Duration::from_secs(5)),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::Transfer(result) => result,
+        _ => Err("leader transfer response was not a transfer receipt".into()),
+    }
+}
+
+/// Builds a member-authenticated administration connection without opening replica storage.
+fn admin_network(config: &ReplicaConfig, leader: u64) -> Result<ReplicaNetwork, String> {
+    let address = *config
+        .members
+        .get(&leader)
+        .ok_or_else(|| "administration leader is not pre-enrolled".to_string())?;
+    Ok(ReplicaNetwork {
+        target: leader,
+        node: BasicNode::new(address.to_string()),
+        profile: config.profile_identity(),
+        sender: config.replica_id,
+        online: Arc::new(AtomicBool::new(true)),
+        shared_secret: config.shared_secret.clone(),
+        tls: crate::tls::load(config.tls.as_ref())?.map(Arc::new),
+    })
+}
+
+/// Reads the current leader epoch through the private authenticated member envelope.
+pub(crate) async fn admin_epoch(
+    config: &ReplicaConfig,
+    leader: u64,
+) -> Result<Option<ControllerEpoch>, String> {
+    match admin_network(config, leader)?
+        .exchange(Command::AdminEpoch, RPCOption::new(Duration::from_secs(5)))
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::Epoch(epoch) => Ok(epoch),
+        _ => Err("leader administration epoch response was invalid".into()),
+    }
+}
+
+/// Reads one member's current epoch using the source node's authenticated profile.
+pub(crate) async fn member_epoch(
+    node: &ReplicaNode,
+    member: u64,
+) -> Result<Option<ControllerEpoch>, String> {
+    match admin_network(&node.config, member)?
+        .exchange(Command::AdminEpoch, RPCOption::new(Duration::from_secs(2)))
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::Epoch(epoch) => Ok(epoch),
+        _ => Err("member epoch response was invalid".into()),
+    }
+}
+
+/// Reads the current voter set through the authenticated member envelope.
+pub(crate) async fn admin_membership(
+    config: &ReplicaConfig,
+    leader: u64,
+) -> Result<std::collections::BTreeSet<u64>, String> {
+    match admin_network(config, leader)?
+        .exchange(
+            Command::AdminMembership,
+            RPCOption::new(Duration::from_secs(5)),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::Membership(membership) => Ok(membership),
+        _ => Err("leader administration membership response was invalid".into()),
+    }
+}
+
+/// Sends one authenticated learner admission command to the current leader.
+pub(crate) async fn admin_add_learner(
+    config: &ReplicaConfig,
+    leader: u64,
+    epoch: ControllerEpoch,
+    member_id: u64,
+) -> Result<(), String> {
+    match admin_network(config, leader)?
+        .exchange(
+            Command::AdminAddLearner { epoch, member_id },
+            RPCOption::new(Duration::from_secs(15)),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::Admin(result) => result,
+        _ => Err("learner administration response was invalid".into()),
+    }
+}
+
+/// Sends one authenticated joint-consensus membership mutation to the current leader.
+pub(crate) async fn admin_change_membership(
+    config: &ReplicaConfig,
+    leader: u64,
+    epoch: ControllerEpoch,
+    voters: std::collections::BTreeSet<u64>,
+    retain_removed_as_learners: bool,
+) -> Result<(), String> {
+    match admin_network(config, leader)?
+        .exchange(
+            Command::AdminChangeMembership {
+                epoch,
+                voters,
+                retain_removed_as_learners,
+            },
+            RPCOption::new(Duration::from_secs(15)),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::Admin(result) => result,
+        _ => Err("membership administration response was invalid".into()),
+    }
+}
+
+/// Sends one authenticated transfer request to the current leader.
+pub(crate) async fn admin_request_transfer(
+    config: &ReplicaConfig,
+    leader: u64,
+    epoch: ControllerEpoch,
+    target: u64,
+    transfer_id: String,
+) -> Result<LeaderTransferReceipt, String> {
+    match admin_network(config, leader)?
+        .exchange(
+            Command::AdminRequestTransfer {
+                epoch,
+                target,
+                transfer_id,
+            },
+            RPCOption::new(Duration::from_secs(15)),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::Transfer(result) => result,
+        _ => Err("leader transfer administration response was invalid".into()),
+    }
 }
 
 /// Factory establishes no connection until the upstream engine invokes an actual RPC.

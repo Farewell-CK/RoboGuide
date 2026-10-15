@@ -3,6 +3,7 @@
 use crate::config::ProcessConfig;
 use controller_replication::{ControllerEpoch, ReplicaNode, ReplicaView};
 use serde::Serialize;
+use serde_json::json;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::process::Stdio;
@@ -220,6 +221,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
     )
     .await?;
     let mut owned = None;
+    let mut leader_transfer_attempted = false;
     let mut timer = tokio::time::interval(Duration::from_millis(200));
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let result = loop {
@@ -240,6 +242,29 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                 if child_dead || owned.as_ref().is_some_and(|controller| Some(controller.epoch) != current) {
                     eprintln!("Stopping owned Controller: exited={child_dead}, current_epoch={current:?}");
                     stop_controller(&mut owned).await?;
+                }
+                if !leader_transfer_attempted
+                    && let (Some(transfer), Some(epoch)) =
+                        (configuration.leader_transfer.as_ref(), current)
+                {
+                    leader_transfer_attempted = true;
+                    stop_controller(&mut owned).await?;
+                    let result = node
+                        .request_leader_transfer(transfer.target, transfer.transfer_id.clone())
+                        .await;
+                    let record = match &result {
+                        Ok(receipt) => json!({"state":"requested","receipt":receipt}),
+                        Err(error) => json!({"state":"rejected","source_epoch":epoch,"error":error}),
+                    };
+                    std::fs::write(
+                        configuration.storage_directory.join("leader-transfer.json"),
+                        serde_json::to_vec(&record).map_err(|error| error.to_string())?,
+                    )
+                    .map_err(|error| error.to_string())?;
+                    if let Err(error) = result {
+                        eprintln!("Leader transfer rejected: {error}");
+                    }
+                    continue;
                 }
                 if owned.is_none() && let Some(epoch) = current {
                     configuration.validate()?;

@@ -12,7 +12,7 @@ mod transport;
 
 use openraft::{BasicNode, Raft};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -74,6 +74,91 @@ pub struct CommitReceipt {
     pub rejection: Option<String>,
 }
 
+/// Software-only leader handoff receipt; it never asserts physical continuity or device safety.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeaderTransferReceipt {
+    /// Stable caller-supplied operation identity for retries and audit correlation.
+    pub transfer_id: String,
+    /// Epoch that was required to remain current while the request was admitted.
+    pub source_epoch: ControllerEpoch,
+    /// Pre-enrolled infrastructure voter selected as the handoff target.
+    pub target: u64,
+    /// `requested` means target election was triggered; caller must observe a new target epoch.
+    pub state: String,
+}
+
+/// Authenticated member-side administration client; it opens no consensus storage or child.
+pub struct ReplicaAdminClient {
+    /// Complete startup-frozen cluster profile and member credential material.
+    config: ReplicaConfig,
+    /// Current leader endpoint selected by an operator or deployment supervisor.
+    leader: u64,
+}
+
+impl ReplicaAdminClient {
+    /// Validates a pre-enrolled member profile before constructing a private admin client.
+    pub fn new(config: ReplicaConfig, leader: u64) -> Result<Self, String> {
+        config.validate()?;
+        if !config.members.contains_key(&leader) {
+            return Err("administration leader is not pre-enrolled".into());
+        }
+        Ok(Self { config, leader })
+    }
+
+    /// Reads the current leader epoch, rejecting a follower or unavailable endpoint.
+    pub async fn epoch(&self) -> Result<ControllerEpoch, String> {
+        transport::admin_epoch(&self.config, self.leader)
+            .await?
+            .ok_or_else(|| "administration endpoint is not the current leader".into())
+    }
+
+    /// Reads the current committed voter set for an operator audit.
+    pub async fn membership(&self) -> Result<BTreeSet<u64>, String> {
+        transport::admin_membership(&self.config, self.leader).await
+    }
+
+    /// Adds one configured member as a learner and waits for its log catch-up.
+    pub async fn add_learner(&self, member_id: u64) -> Result<(), String> {
+        let epoch = self.epoch().await?;
+        transport::admin_add_learner(&self.config, self.leader, epoch, member_id).await
+    }
+
+    /// Applies one voter set through OpenRaft joint consensus.
+    pub async fn change_membership(
+        &self,
+        voters: BTreeSet<u64>,
+        retain_removed_as_learners: bool,
+    ) -> Result<(), String> {
+        let epoch = self.epoch().await?;
+        transport::admin_change_membership(
+            &self.config,
+            self.leader,
+            epoch,
+            voters,
+            retain_removed_as_learners,
+        )
+        .await
+    }
+
+    /// Requests controlled target-side election under the observed current leader epoch.
+    pub async fn request_leader_transfer(
+        &self,
+        target: u64,
+        transfer_id: impl Into<String>,
+    ) -> Result<LeaderTransferReceipt, String> {
+        let epoch = self.epoch().await?;
+        transport::admin_request_transfer(
+            &self.config,
+            self.leader,
+            epoch,
+            target,
+            transfer_id.into(),
+        )
+        .await
+    }
+}
+
 /// Startup-frozen, bounded three-member Controller replica profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,6 +171,9 @@ pub struct ReplicaConfig {
     pub replica_id: u64,
     /// Three immutable RPC endpoints keyed by infrastructure member identity.
     pub members: BTreeMap<u64, SocketAddr>,
+    /// Initial voters; additional pre-enrolled members start as learners and require an explicit change.
+    #[serde(default)]
+    pub initial_voters: Option<BTreeSet<u64>>,
     /// Exact application checkpoint schema admitted by this cluster.
     pub application_schema: String,
     /// Startup-owned application policy identity, identical on all members.
@@ -99,15 +187,33 @@ pub struct ReplicaConfig {
 }
 
 impl ReplicaConfig {
+    /// Returns the startup voter set while preserving the v0.1 three-member compatibility profile.
+    pub fn initial_voters(&self) -> BTreeSet<u64> {
+        self.initial_voters
+            .clone()
+            .unwrap_or_else(|| self.members.keys().copied().collect())
+    }
+
     /// Rejects unsupported membership/network scope before creating any consensus authority.
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema != "roboguide.controller-replica/v0.1"
+        let initial_voters = self.initial_voters();
+        if !(self.schema == "roboguide.controller-replica/v0.1"
+            || self.schema == "roboguide.controller-replica/v0.2")
             || self.cluster_id.trim().is_empty()
             || self.cluster_id.len() > 128
-            || self.members.len() != 3
+            || self.members.len() < 3
+            || self.members.len() > 9
             || !self.members.contains_key(&self.replica_id)
             || self.members.contains_key(&0)
             || self.members.values().any(|address| address.port() == 0)
+            || initial_voters.is_empty()
+            || initial_voters.len() > self.members.len()
+            || !initial_voters
+                .iter()
+                .all(|id| self.members.contains_key(id))
+            || (self.schema == "roboguide.controller-replica/v0.1"
+                && (self.members.len() != 3 || self.initial_voters.is_some()))
+            || (self.schema == "roboguide.controller-replica/v0.2" && self.initial_voters.is_none())
             || (self
                 .members
                 .values()
@@ -154,7 +260,7 @@ impl ReplicaConfig {
             .members
             .values()
             .collect::<std::collections::BTreeSet<_>>();
-        if unique.len() != 3 {
+        if unique.len() != self.members.len() {
             return Err("controller replica endpoints must be distinct".into());
         }
         Ok(())
@@ -165,6 +271,7 @@ impl ReplicaConfig {
         use sha2::{Digest as _, Sha256};
         let bytes = serde_json::to_vec(&serde_json::json!({
             "schema":self.schema,"cluster_id":self.cluster_id,"members":self.members,
+            "initial_voters":self.initial_voters(),
             "application_schema":self.application_schema,"application_policy_digest":self.application_policy_digest,
             "transport_auth":self.shared_secret.as_ref().map(|secret| {
                 format!("{:x}", sha2::Sha256::digest(secret.as_bytes()))
@@ -181,7 +288,6 @@ impl ReplicaConfig {
 #[derive(Clone)]
 pub struct ReplicaNode {
     /// Private network fault switch for deterministic partition verification only.
-    #[cfg(test)]
     network_online: Arc<std::sync::atomic::AtomicBool>,
     /// Infrastructure identity and exact cluster profile.
     config: Arc<ReplicaConfig>,
@@ -239,15 +345,20 @@ impl ReplicaNode {
         .await
         .map_err(|error| error.to_string())?;
         let node = Self {
+            network_online,
             config: Arc::new(config),
             raft,
             store,
             tls,
-            #[cfg(test)]
-            network_online,
         };
         let server = ReplicaServer::bind(node.clone()).await?;
-        if node.config.replica_id == *node.config.members.keys().next().expect("three members")
+        if node.config.replica_id
+            == *node
+                .config
+                .initial_voters()
+                .iter()
+                .next()
+                .expect("at least one initial voter")
             && !node
                 .raft
                 .is_initialized()
@@ -256,9 +367,9 @@ impl ReplicaNode {
         {
             let members = node
                 .config
-                .members
+                .initial_voters()
                 .iter()
-                .map(|(id, address)| (*id, BasicNode::new(address.to_string())))
+                .map(|id| (*id, BasicNode::new(node.config.members[id].to_string())))
                 .collect::<BTreeMap<_, _>>();
             node.raft
                 .initialize(members)
@@ -314,6 +425,208 @@ impl ReplicaNode {
                 .unwrap_or_else(|| "replica application rejected the base identity".into()));
         }
         Ok(reply.data)
+    }
+
+    /// Adds one pre-enrolled infrastructure member as a learner after current quorum confirmation.
+    pub async fn add_learner(&self, member_id: u64) -> Result<(), String> {
+        let epoch = self
+            .current_epoch()
+            .ok_or_else(|| "learner admission requires the current leader".to_string())?;
+        self.check_epoch(epoch).await?;
+        if member_id == self.config.replica_id
+            || !self.config.members.contains_key(&member_id)
+            || self
+                .raft
+                .metrics()
+                .borrow()
+                .membership_config
+                .voter_ids()
+                .any(|id| id == member_id)
+        {
+            return Err("learner admission target is not a pre-enrolled non-voter".into());
+        }
+        let node = BasicNode::new(self.config.members[&member_id].to_string());
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.raft.add_learner(member_id, node, true),
+        )
+        .await
+        .map_err(|_| "learner catch-up timed out".to_string())?
+        .map_err(|error| error.to_string())?;
+        self.check_epoch(epoch).await
+    }
+
+    /// Changes voters through OpenRaft joint consensus after every new voter is caught up.
+    pub async fn change_membership(
+        &self,
+        voters: BTreeSet<u64>,
+        retain_removed_as_learners: bool,
+    ) -> Result<(), String> {
+        if voters.is_empty()
+            || voters.len() > self.config.members.len()
+            || voters
+                .iter()
+                .any(|member_id| !self.config.members.contains_key(member_id))
+        {
+            return Err("membership change contains an unknown or empty voter set".into());
+        }
+        let epoch = self
+            .current_epoch()
+            .ok_or_else(|| "membership change requires the current leader".to_string())?;
+        self.check_epoch(epoch).await?;
+        let current_voters = self
+            .raft
+            .metrics()
+            .borrow()
+            .membership_config
+            .voter_ids()
+            .collect::<BTreeSet<_>>();
+        for member_id in voters.iter().filter(|id| !current_voters.contains(id)) {
+            self.add_learner(*member_id).await?;
+        }
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.raft
+                .change_membership(voters, retain_removed_as_learners),
+        )
+        .await
+        .map_err(|_| "membership joint consensus timed out".to_string())?
+        .map_err(|error| error.to_string())?;
+        self.check_epoch(epoch).await
+    }
+
+    /// Requests a target voter to trigger a controlled election under the current source epoch.
+    pub async fn request_leader_transfer(
+        &self,
+        member_id: u64,
+        transfer_id: impl Into<String>,
+    ) -> Result<LeaderTransferReceipt, String> {
+        let transfer_id = transfer_id.into();
+        if transfer_id.trim().is_empty() || transfer_id.len() > 128 {
+            return Err("leader transfer identity is empty or unbounded".into());
+        }
+        let epoch = self
+            .current_epoch()
+            .ok_or_else(|| "leader transfer requires the current leader".to_string())?;
+        self.check_epoch(epoch).await?;
+        if member_id == self.config.replica_id
+            || !self.config.members.contains_key(&member_id)
+            || !self
+                .raft
+                .metrics()
+                .borrow()
+                .membership_config
+                .voter_ids()
+                .any(|id| id == member_id)
+        {
+            return Err("leader transfer target is not a current voter".into());
+        }
+        let metrics = self.raft.metrics().borrow().clone();
+        let required_last_log_index = metrics.last_log_index;
+        if !metrics
+            .replication
+            .as_ref()
+            .and_then(|replication| replication.get(&member_id))
+            .and_then(|log| log.as_ref())
+            .map(|log| Some(log.index) >= required_last_log_index)
+            .unwrap_or(required_last_log_index.is_none())
+        {
+            return Err("leader transfer target has not caught up to the current log".into());
+        }
+        self.raft.runtime_config().heartbeat(false);
+        self.raft.runtime_config().elect(false);
+        let receipt = transport::request_leader_transfer(
+            self,
+            member_id,
+            transfer_id,
+            epoch,
+            required_last_log_index,
+        )
+        .await;
+        let receipt = match receipt {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                self.raft.runtime_config().heartbeat(true);
+                self.raft.runtime_config().elect(true);
+                return Err(error);
+            }
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+        loop {
+            if let Ok(Some(target_epoch)) = transport::member_epoch(self, member_id).await
+                && target_epoch.replica_id == member_id
+                && target_epoch.term > epoch.term
+            {
+                return Ok(receipt);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                if self.current_epoch() == Some(epoch) {
+                    self.raft.runtime_config().heartbeat(true);
+                    self.raft.runtime_config().elect(true);
+                }
+                return Err(
+                    "leader transfer target did not become leader before its deadline".into(),
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Returns whether an envelope sender is a current member or a configured bootstrap voter.
+    pub(crate) fn member_allowed(&self, member_id: u64) -> bool {
+        let metrics = self.raft.metrics().borrow().clone();
+        if metrics
+            .membership_config
+            .nodes()
+            .any(|(id, _)| *id == member_id)
+        {
+            return true;
+        }
+        metrics
+            .membership_config
+            .membership()
+            .get_joint_config()
+            .is_empty()
+            && self.initial_voters().contains(&member_id)
+    }
+
+    /// Returns the initial voter identities for bootstrap authorization.
+    fn initial_voters(&self) -> BTreeSet<u64> {
+        self.config.initial_voters()
+    }
+
+    /// Validates and triggers a target-side election without claiming that it already won.
+    pub(crate) async fn accept_leader_transfer(
+        &self,
+        source_epoch: ControllerEpoch,
+        target: u64,
+        transfer_id: String,
+        required_last_log_index: Option<u64>,
+    ) -> Result<LeaderTransferReceipt, String> {
+        let metrics = self.raft.metrics().borrow().clone();
+        if target != self.config.replica_id
+            || source_epoch.replica_id == self.config.replica_id
+            || source_epoch.term != metrics.current_term
+            || metrics.current_leader != Some(source_epoch.replica_id)
+            || !metrics
+                .membership_config
+                .voter_ids()
+                .any(|id| id == self.config.replica_id)
+            || metrics.last_log_index < required_last_log_index
+        {
+            return Err("leader transfer source epoch, target membership or log is stale".into());
+        }
+        self.raft
+            .trigger()
+            .elect()
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(LeaderTransferReceipt {
+            transfer_id,
+            source_epoch,
+            target,
+            state: "requested".into(),
+        })
     }
 
     /// Returns the complete quorum-applied view for inactive child materialization only.

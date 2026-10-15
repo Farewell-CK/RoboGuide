@@ -1,6 +1,6 @@
 # ADR-0083：Quorum Controller Replication 与保守切换
 
-- 状态：Implemented for static software profile; non-loopback transport requires ADR-0091 mTLS
+- 状态：Implemented for static v0.1 and pre-enrolled dynamic v0.2 software profiles; non-loopback transport requires ADR-0091 mTLS
 - 日期：2026-10-12
 - Profile：三个静态 voting replicas、loopback compatibility 或 mTLS software deployment；非正式 E6
 
@@ -36,10 +36,12 @@ Node Service 可配置有限 controller endpoint 列表，session 丢失后按�
 保持同一 Node、durable command journal 和 Local EAIOS handle。新 registration 不证明
 旧 attempt 停止；它不授权重放或 Actor takeover。默认仍一个 endpoint/standalone server。
 
-Replica profile 默认为关闭，当前提供固定三成员、loopback compatibility 或 ADR-0091 mTLS
-RPC、bounded snapshot/event history。Artifact blobs 与 provider-local Memory 内容保留独立
-数据平面，不宣称复制。动态 membership、跨副本 archive 共识和物理 continuity release
-仍是后续部署 gate；不扩大本次 1/2/4 之外的安全/发布/E6 授权。
+Replica profile 默认为关闭，v0.1 提供固定三成员，v0.2 允许完整预注册 member universe、learner
+catch-up 和 joint consensus 加入/移除；loopback compatibility 或 ADR-0091 mTLS RPC、bounded
+snapshot/event history 保持不变。私有 member envelope 提供带 epoch 的 learner/membership/leader
+transfer 管理命令，旧 leader 先停 child 和 heartbeat，目标实际新 term 选举后才收敛。Artifact
+blobs 与 provider-local Memory 内容保留独立数据平面，不宣称复制。任意新主机 enrollment、
+跨副本 archive 共识和物理 continuity release 仍是后续部署 gate；不扩大本次安全/发布/E6 授权。
 
 ## Validation gate
 
@@ -74,5 +76,7 @@ identity 无法确认时返回 ambiguity，application batch 回滚，child 由 
 部署、配置升级限制和完整结果入口见 [软件部署说明](../development/controller-replication.md)。
 
 ADR-0091 的 `--tls` 进程复核另外验证了 rustls 双向证书握手、SIGSTOP majority loss 和
-恢复；它仍只证明软件进程边界，不能替代动态 membership、PKI rotation、跨站点容量或物理
+恢复；F5 动态成员/transfer 的实际软件复核见
+[`2026-10-16-f5-membership-transfer.md`](../development/acceptance/2026-10-16-f5-membership-transfer.md)。
+它仍只证明软件进程边界，不能替代任意新主机 enrollment、PKI rotation、跨站点容量或物理
 continuity 证据。
