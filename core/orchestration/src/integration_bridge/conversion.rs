@@ -165,13 +165,15 @@ pub(super) fn registration_from_wire(
 ) -> Result<domain::NodeRegistration, IntegrationRuntimeError> {
     let semantic_profiles = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PREVIOUS_NODE_CONTRACT_VERSION
     );
     let independent_operation_support = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::NODE_CONTRACT_VERSION
     );
     let state_exports = wire

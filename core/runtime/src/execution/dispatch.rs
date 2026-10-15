@@ -430,6 +430,11 @@ impl RuntimeExecutionManager {
         Ok(())
     }
 
+    /// Returns retained cancellation authority without treating a journal receipt as physical stop.
+    pub fn cancellation_pending(&self, execution_id: &str) -> bool {
+        self.cancellation_intents.contains(execution_id)
+    }
+
     /// Returns cancellations that still need terminal physical evidence, even after a receipt.
     pub fn pending_cancellations(&self) -> Vec<(String, NodeId)> {
         self.cancellation_intents

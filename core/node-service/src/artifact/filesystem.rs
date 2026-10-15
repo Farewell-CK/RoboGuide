@@ -9,6 +9,11 @@ pub(super) fn validate_output_binding(
     validate_binding_identity(&binding.id, "output binding id")?;
     validate_binding_identity(&binding.map_id, "output map_id")?;
     validate_binding_identity(&binding.revision_id, "output revision_id")?;
+    if binding.producer_provider_id.is_some() != binding.payload_schema.is_some() {
+        return Err(ArtifactError::Configuration(
+            "output provider and content schema must be supplied together".into(),
+        ));
+    }
     for (value, field) in [
         (&binding.media_type, "output media type"),
         (&binding.format_name, "output format name"),
@@ -46,7 +51,7 @@ pub(super) fn build_output_manifest(
         ContentDigest::new(normalize_digest(content_digest)?)?,
         byte_size,
     );
-    MapArtifactManifest::new_with_format(
+    let manifest = MapArtifactManifest::new_with_format(
         artifact,
         binding.media_type.clone(),
         binding.format_name.clone(),
@@ -63,7 +68,16 @@ pub(super) fn build_output_manifest(
         provenance.created_at,
         provenance.parent_revision_id.clone(),
     )
-    .map_err(ArtifactError::Domain)
+    .map_err(ArtifactError::Domain)?;
+    match (&binding.producer_provider_id, &binding.payload_schema) {
+        (Some(provider), Some(schema)) => manifest
+            .with_producer_provider(provider, schema)
+            .map_err(ArtifactError::Domain),
+        (None, None) => Ok(manifest),
+        _ => Err(ArtifactError::Configuration(
+            "incomplete output provider".into(),
+        )),
+    }
 }
 
 /// Confirms a prepared manifest still matches every immutable static output field.
@@ -80,6 +94,9 @@ pub(super) fn validate_manifest_binding(
         && manifest.coordinate_convention() == binding.coordinate_convention
         && manifest.anchor_id().as_str() == binding.spatial_anchor_id
         && manifest.resolution_meters() == binding.resolution_meters;
+    let matches = matches
+        && manifest.producer_provider_id() == binding.producer_provider_id.as_deref()
+        && manifest.payload_schema() == binding.payload_schema.as_deref();
     if matches {
         Ok(())
     } else {

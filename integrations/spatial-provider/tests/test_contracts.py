@@ -145,6 +145,12 @@ def test_node_profile_uses_configured_selectors_and_arbitrary_node_identity(tmp_
         )
     )
     assert parsed["node_id"] == "deployment-selected-process-identity"
+    assert parsed["schema"] == "roboguide.node-config/v0.9"
+    assert all(
+        output["producer_provider_id"] == "spatial-file-maps"
+        and output["payload_schema"] == "roboguide.spatial-file-map/v0.1"
+        for output in parsed["artifacts"]["output_bindings"]
+    )
     assert {binding["id"] for binding in parsed["artifacts"]["output_bindings"]} == {
         "opaque-slot",
         "another-slot",

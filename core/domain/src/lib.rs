@@ -90,8 +90,9 @@ pub use event::{EventPayload, EventRecord};
 pub use execution::{
     CapabilityContractRef, EXECUTION_RECOVERY_METADATA_KEY, EXECUTION_RECOVERY_PROFILE_SCHEMA,
     ExecutionCommand, ExecutionContinuation, ExecutionIntent, ExecutionRecoveryProfile,
-    ExecutionRecoverySupport, ExecutionSessionDescriptor, ExecutionSessionSlot, ExecutionStopScope,
-    ExecutionValue, NodeEvent, OperationRecoverySupport, OperationRef,
+    ExecutionRecoverySupport, ExecutionRegistrationEvidence, ExecutionSessionDescriptor,
+    ExecutionSessionSlot, ExecutionStopScope, ExecutionValue, NodeEvent, OperationRecoverySupport,
+    OperationRef,
 };
 pub use execution_relation::{
     CoordinationMechanism, ExecutionCouplingMode, ExecutionRelationKind, ExecutionRelationSpec,
@@ -153,7 +154,7 @@ pub use role_assignment::RoleAssignment;
 pub use spatial_memory::{
     ContentDigest, MAP_MANIFEST_SCHEMA_V0_1, MapArtifactManifest, MapArtifactRef, MapId,
     MapReplicaStatus, MapRevisionId, MapRevisionSelector, MapRevisionSnapshot, MapRevisionStatus,
-    SPATIAL_MEMORY_SCHEMA_V0_1, SpatialAnchorId,
+    SPATIAL_MEMORY_SCHEMA_V0_1, SPATIAL_MEMORY_SCHEMA_V0_2, SpatialAnchorId,
 };
 pub use spatial_replica::MapReplicaSnapshot;
 pub use state_model::{
@@ -212,6 +213,8 @@ pub const NODE_CONTRACT_VERSION_V0_5: &str = "roboguide.node.v0.5";
 pub const NODE_CONTRACT_VERSION_V0_6: &str = "roboguide.node.v0.6";
 /// Node Contract with durable provider-qualified Memory continuity.
 pub const NODE_CONTRACT_VERSION_V0_7: &str = "roboguide.node.v0.7";
+/// Node Contract with exact typed-map producer and current publication provenance.
+pub const NODE_CONTRACT_VERSION_V0_8: &str = "roboguide.node.v0.8";
 
 #[cfg(test)]
 #[path = "domain_tests.rs"]

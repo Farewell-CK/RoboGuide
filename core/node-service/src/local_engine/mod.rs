@@ -57,6 +57,8 @@ pub const CONFIG_SCHEMA_V0_6: &str = "roboguide.node-config/v0.6";
 pub const CONFIG_SCHEMA_V0_7: &str = "roboguide.node-config/v0.7";
 /// Schema with explicitly negotiated readonly Memory import reconciliation.
 pub const CONFIG_SCHEMA_V0_8: &str = "roboguide.node-config/v0.8";
+/// Schema with explicitly registered typed-map producer provenance and publication attempts.
+pub const CONFIG_SCHEMA_V0_9: &str = "roboguide.node-config/v0.9";
 /// Maximum peer endpoints accepted from one bounded local observation.
 const MAX_PEER_CHANNELS_PER_OBSERVATION: usize = 64;
 /// Maximum JSON bytes accepted from one local peer readiness response.

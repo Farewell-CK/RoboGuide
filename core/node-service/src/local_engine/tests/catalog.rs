@@ -322,6 +322,8 @@ fn compiles_spatial_artifact_bindings() {
             map_id: "lab-map".to_string(),
             revision_id: "r2".to_string(),
             source_path: PathBuf::from("outputs/lab.map"),
+            producer_provider_id: None,
+            payload_schema: None,
             media_type: "application/octet-stream".to_string(),
             format_name: "nav2-map-bundle".to_string(),
             format_version: "bundle-v1".to_string(),

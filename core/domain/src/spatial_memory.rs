@@ -11,6 +11,9 @@ use std::fmt::{Display, Formatter};
 /// Version identifier for the first Spatial Memory manifest contract.
 pub const SPATIAL_MEMORY_SCHEMA_V0_1: &str = "roboguide.map-manifest/v0.1";
 
+/// Spatial manifest carrying an exact registered producer provider and content schema.
+pub const SPATIAL_MEMORY_SCHEMA_V0_2: &str = "roboguide.map-manifest/v0.2";
+
 /// Alias for callers referring specifically to the map-manifest wire contract.
 #[allow(dead_code)]
 pub const MAP_MANIFEST_SCHEMA_V0_1: &str = SPATIAL_MEMORY_SCHEMA_V0_1;
@@ -277,6 +280,10 @@ pub struct MapArtifactManifest {
     producer_node_id: NodeId,
     /// Optional local system that produced the artifact.
     producer_local_system_id: Option<LocalSystemId>,
+    /// Original provider identity, unavailable for historical v0.1 manifests.
+    producer_provider_id: Option<String>,
+    /// Original provider content schema, never inferred from a legacy catalog alias.
+    payload_schema: Option<String>,
     /// Mission that produced the artifact.
     source_mission_id: MissionId,
     /// Optional execution identity associated with production.
@@ -291,7 +298,7 @@ pub struct MapArtifactManifest {
     anchor_id: SpatialAnchorId,
     /// Optional metric resolution in metres per cell/unit.
     resolution_meters: Option<f64>,
-    /// RoboGuide-local creation time for the manifest.
+    /// Producer creation time, independent of Controller receive time and freshness authority.
     created_at: TimestampMs,
     /// Optional immutable parent revision for lineage.
     parent_revision_id: Option<MapRevisionId>,
@@ -328,6 +335,12 @@ struct MapManifestWire {
     /// Optional producing local-system identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     producer_local_system_id: Option<String>,
+    /// Exact original provider, mandatory only in v0.2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    producer_provider_id: Option<String>,
+    /// Exact opaque content schema declared by that provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    payload_schema: Option<String>,
     /// Source Mission identity.
     source_mission_id: String,
     /// Optional source execution identity.
@@ -348,7 +361,7 @@ struct MapManifestWire {
     /// Optional immutable parent revision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     parent_revision_id: Option<String>,
-    /// RoboGuide-local creation timestamp.
+    /// Producer creation timestamp; it cannot renew Controller freshness or deadlines.
     created_at_ms: u64,
 }
 
@@ -396,6 +409,8 @@ impl Serialize for MapArtifactManifest {
                 .producer_local_system_id
                 .as_ref()
                 .map(|value| value.as_str().to_string()),
+            producer_provider_id: self.producer_provider_id.clone(),
+            payload_schema: self.payload_schema.clone(),
             source_mission_id: self.source_mission_id.as_str().to_string(),
             source_execution_id: self.source_execution_id.clone(),
             source_task_ref: self.source_task_ref.clone(),
@@ -420,8 +435,18 @@ impl<'de> Deserialize<'de> for MapArtifactManifest {
     /// Deserializes and validates the versioned top-level manifest envelope.
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let wire = MapManifestWire::deserialize(deserializer)?;
-        if wire.schema != SPATIAL_MEMORY_SCHEMA_V0_1 {
+        if !matches!(
+            wire.schema.as_str(),
+            SPATIAL_MEMORY_SCHEMA_V0_1 | SPATIAL_MEMORY_SCHEMA_V0_2
+        ) {
             return Err(serde::de::Error::custom("unsupported map manifest schema"));
+        }
+        if wire.schema == SPATIAL_MEMORY_SCHEMA_V0_1
+            && (wire.producer_provider_id.is_some() || wire.payload_schema.is_some())
+        {
+            return Err(serde::de::Error::custom(
+                "legacy map cannot claim a producer provider",
+            ));
         }
         if wire.spatial_anchor.kind != "fixed" {
             return Err(serde::de::Error::custom(
@@ -455,7 +480,7 @@ impl<'de> Deserialize<'de> for MapArtifactManifest {
             .map(MapRevisionId::new)
             .transpose()
             .map_err(serde::de::Error::custom)?;
-        MapArtifactManifest::new_with_format(
+        let manifest = MapArtifactManifest::new_with_format(
             artifact,
             wire.media_type,
             wire.format.name,
@@ -472,7 +497,20 @@ impl<'de> Deserialize<'de> for MapArtifactManifest {
             TimestampMs::new(wire.created_at_ms),
             parent_revision_id,
         )
-        .map_err(serde::de::Error::custom)
+        .map_err(serde::de::Error::custom)?;
+        if wire.schema == SPATIAL_MEMORY_SCHEMA_V0_2 {
+            manifest
+                .with_producer_provider(
+                    wire.producer_provider_id
+                        .ok_or_else(|| serde::de::Error::custom("map provider is required"))?,
+                    wire.payload_schema.ok_or_else(|| {
+                        serde::de::Error::custom("map content schema is required")
+                    })?,
+                )
+                .map_err(serde::de::Error::custom)
+        } else {
+            Ok(manifest)
+        }
     }
 }
 
@@ -587,6 +625,8 @@ impl MapArtifactManifest {
             format_version,
             producer_node_id,
             producer_local_system_id,
+            producer_provider_id: None,
+            payload_schema: None,
             source_mission_id,
             source_execution_id,
             source_task_ref,
@@ -602,6 +642,45 @@ impl MapArtifactManifest {
     /// Returns the manifest schema version.
     pub fn schema_version(&self) -> &str {
         &self.schema_version
+    }
+
+    /// Binds original registered provider provenance without inventing unavailable historical fields.
+    pub fn with_producer_provider(
+        mut self,
+        provider_id: impl Into<String>,
+        payload_schema: impl Into<String>,
+    ) -> Result<Self, DomainError> {
+        let provider_id = provider_id.into();
+        let payload_schema = payload_schema.into();
+        if self.producer_provider_id.is_some()
+            || self.producer_local_system_id.is_none()
+            || self.source_execution_id.is_none()
+            || self.source_task_ref.is_none()
+            || [&provider_id, &payload_schema].into_iter().any(|value| {
+                value.is_empty()
+                    || value.trim() != value
+                    || value.len() > 256
+                    || value.chars().any(char::is_control)
+            })
+        {
+            return Err(DomainError::InvalidSpatialMemory {
+                reason: "provider-bound maps require exact original provider/content/LocalSystem/Task/attempt".into(),
+            });
+        }
+        self.schema_version = SPATIAL_MEMORY_SCHEMA_V0_2.into();
+        self.producer_provider_id = Some(provider_id);
+        self.payload_schema = Some(payload_schema);
+        Ok(self)
+    }
+
+    /// Returns the immutable original provider, or unavailable historical evidence.
+    pub fn producer_provider_id(&self) -> Option<&str> {
+        self.producer_provider_id.as_deref()
+    }
+
+    /// Returns the original opaque content schema rather than the catalog envelope schema.
+    pub fn payload_schema(&self) -> Option<&str> {
+        self.payload_schema.as_deref()
     }
 
     /// Returns the resolved immutable artifact reference.
@@ -689,7 +768,7 @@ impl MapArtifactManifest {
         self.resolution_meters
     }
 
-    /// Returns the RoboGuide-local creation time.
+    /// Returns producer creation metadata, independently of Controller receive-time evidence.
     pub const fn created_at(&self) -> TimestampMs {
         self.created_at
     }

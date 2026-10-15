@@ -50,8 +50,9 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 文件计算后续：[Occupancy 与原始 monotonic 预算](acceptance/2026-10-15-f4-planar-and-clock-budget.md)。
 点云/平面文件计算已有实际验收；[正式 Node/CAS 文件链路](acceptance/2026-10-15-f4-spatial-node.md)
 已通过显式 loopback 进程配置，含独立验证与 Controller/Node 无重复 worker 重启。
-远程 typed-map provider 权威、Group grant/撤销、pre-Execute、handoff、active-map/GC 和其余阶段
-继续实施；不从文件测试推断设备能力。
+[producer mTLS/dispatch 权威](acceptance/2026-10-15-f4-map-provider-authority.md)已接入实际文件链路，
+含原始声明冻结、当前发布 attempt 和旧二进制拒绝。Group grant/撤销、pre-Execute、完整 typed-map
+内容策略、handoff、active-map/GC 和其余阶段继续实施；不从文件测试推断设备能力。
 
 ## 已接受的实现决定
 

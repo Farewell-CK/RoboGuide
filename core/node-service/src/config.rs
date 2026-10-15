@@ -15,7 +15,7 @@ const fn default_reconnect_delay_ms() -> u64 {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeServiceConfig {
-    /// Configuration schema identity; v0.2 through v0.8 are accepted by the compiler.
+    /// Configuration schema identity; v0.2 through v0.9 are accepted by the compiler.
     pub schema: String,
     /// Stable node identity advertised to RoboGuide.
     pub node_id: String,
@@ -242,6 +242,12 @@ pub struct ArtifactOutputBindingConfig {
     pub map_id: String,
     /// Immutable revision reserved for this output.
     pub revision_id: String,
+    /// Original registered Memory provider; required by node-config/v0.9 outputs.
+    #[serde(default)]
+    pub producer_provider_id: Option<String>,
+    /// Original provider's opaque content schema, paired with its exact identity.
+    #[serde(default)]
+    pub payload_schema: Option<String>,
     /// Local source path under the deployment-owned artifact root.
     pub source_path: std::path::PathBuf,
     /// Opaque bundle media type sent in the manifest.

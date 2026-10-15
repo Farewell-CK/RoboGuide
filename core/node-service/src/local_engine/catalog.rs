@@ -16,6 +16,7 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_6
                 | CONFIG_SCHEMA_V0_7
                 | CONFIG_SCHEMA_V0_8
+                | CONFIG_SCHEMA_V0_9
         );
         let requires_readiness = matches!(
             config.schema.as_str(),
@@ -24,18 +25,23 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_6
                 | CONFIG_SCHEMA_V0_7
                 | CONFIG_SCHEMA_V0_8
+                | CONFIG_SCHEMA_V0_9
         );
         let supports_state_memory = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_5 | CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8
+            CONFIG_SCHEMA_V0_5
+                | CONFIG_SCHEMA_V0_6
+                | CONFIG_SCHEMA_V0_7
+                | CONFIG_SCHEMA_V0_8
+                | CONFIG_SCHEMA_V0_9
         );
         let supports_peer_observers = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8
+            CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9
         );
         let separates_capabilities_and_operations = matches!(
             config.schema.as_str(),
-            CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8
+            CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9
         );
         require(
             matches!(
@@ -47,6 +53,7 @@ impl CompiledLocalCatalog {
                     | CONFIG_SCHEMA_V0_6
                     | CONFIG_SCHEMA_V0_7
                     | CONFIG_SCHEMA_V0_8
+                    | CONFIG_SCHEMA_V0_9
             ),
             "schema",
             format!(
@@ -59,7 +66,7 @@ impl CompiledLocalCatalog {
             config.fallback_server_endpoints.is_empty()
                 || matches!(
                     config.schema.as_str(),
-                    CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8
+                    CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9
                 ),
             "fallback_server_endpoints",
             "requires node-config/v0.7",
@@ -123,11 +130,13 @@ impl CompiledLocalCatalog {
             &connections,
         )?;
         require(
-            config.schema == CONFIG_SCHEMA_V0_8
-                || config
-                    .memory_providers
-                    .iter()
-                    .all(|p| p.continuity.is_none()),
+            matches!(
+                config.schema.as_str(),
+                CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9
+            ) || config
+                .memory_providers
+                .iter()
+                .all(|p| p.continuity.is_none()),
             "memory_providers.continuity",
             "requires node-config/v0.8",
         )?;
@@ -138,7 +147,7 @@ impl CompiledLocalCatalog {
             &state_directory,
             matches!(
                 config.schema.as_str(),
-                CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8
+                CONFIG_SCHEMA_V0_6 | CONFIG_SCHEMA_V0_7 | CONFIG_SCHEMA_V0_8 | CONFIG_SCHEMA_V0_9
             ),
         )?;
         let resources = compile_resources(config.resources, &local_systems)?;
@@ -219,6 +228,40 @@ impl CompiledLocalCatalog {
             format!("requires schema `{CONFIG_SCHEMA_V0_3}`"),
         )?;
         let artifacts = compile_artifacts(config.artifacts, config_directory)?;
+        if let Some(service) = &artifacts {
+            for binding in service.output_bindings().values() {
+                let provenance = binding
+                    .producer_provider_id
+                    .as_ref()
+                    .zip(binding.payload_schema.as_ref());
+                require(
+                    if config.schema == CONFIG_SCHEMA_V0_9 {
+                        provenance.is_some()
+                    } else {
+                        binding.producer_provider_id.is_none() && binding.payload_schema.is_none()
+                    },
+                    "artifacts.output_bindings.producer_provider_id",
+                    "registered map providers require config v0.9; every v0.9 output needs exact provider/content schema",
+                )?;
+                if let Some((id, schema)) = provenance {
+                    let provider = memory_providers.get(id).ok_or_else(|| {
+                        validation(
+                            "artifacts.output_bindings.producer_provider_id",
+                            "producer provider is not declared",
+                        )
+                    })?;
+                    require(
+                        provider.kind() == "spatial"
+                            && provider.scope() == "global"
+                            && provider.visibility() == "exchangeable"
+                            && provider.payload_schema() == schema
+                            && provider.media_type() == binding.media_type,
+                        "artifacts.output_bindings.producer_provider_id",
+                        "producer must declare matching exchangeable global Spatial content",
+                    )?;
+                }
+            }
+        }
 
         Ok(Self {
             schema: config.schema,
@@ -311,7 +354,9 @@ impl CompiledLocalCatalog {
 
     /// Returns the semantic Node Contract selected by this configuration generation.
     pub fn node_contract_version(&self) -> &'static str {
-        if self.schema == CONFIG_SCHEMA_V0_8 {
+        if self.schema == CONFIG_SCHEMA_V0_9 {
+            integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
+        } else if self.schema == CONFIG_SCHEMA_V0_8 {
             integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
         } else if self.schema == CONFIG_SCHEMA_V0_7 {
             integration::grpc::v0_4::NODE_CONTRACT_VERSION

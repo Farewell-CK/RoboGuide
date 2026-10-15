@@ -81,6 +81,19 @@ Node Service 冻结构建产物，再上传 CAS 和发布原 source provenance�
 已通过显式 loopback compatibility 路径和独立 verifier，并验证重启无第二 worker。
 远程 typed-map 的实际 provider/当前发布 attempt/session 仍须版本化接线；未据此关闭 F4。
 
+当前 producer 切片以 typed-map v0.2 显式加入 provider 与内容 schema。完整原 build attempt/Task/
+LocalSystem 必须保留；当前发布 attempt 和 Node session 仅作为请求 context，由当前证书和
+Control/Runtime 重新查验，不是 header 授权。Node config v0.9 / Contract v0.8 显式协商这条
+路径；Node journal v8、Controller wrapper v33 / event codec v24 拒绝旧软件写新权威。
+旧 typed-map v0.1 保持原始读取语义，缺 provider 不能自动迁移成已注册的真实 provider；远程
+data-plane 新发布必须走新合同。管理恢复若需要导入旧历史，必须另有来源绑定迁移。
+
+注册依据在 dispatch preparation 时冻结进 Runtime command，保留实际原 Node Contract、
+已接受 source session 和 provider 声明。它不进入 MI 语义参数。原 attempt 的 retry/restore
+使用原快照，包括 legacy unavailable，不因新注册补新依据。发送前核对同 session/contract
+及原 provider 声明；变化则保留 pending 和所有权，等待显式 reconciliation。发布时同时核对
+原 build、当前 publication 两份 dispatch 声明与当前 provider，阻止新软件替旧工作补身份。
+
 ## 当前内容门禁切片
 
 Control 的完整 Memory resource policy 与 Artifact certificate registry 通过全局 recovery-admin

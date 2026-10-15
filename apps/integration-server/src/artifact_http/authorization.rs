@@ -216,7 +216,11 @@ impl ArtifactPrincipal {
             self.grant
                 .map_ids
                 .contains(resource.split('/').next().unwrap_or_default())
-                && (read || path.ends_with("/localization-evidence") || path.ends_with("/replicas"))
+                && (read
+                    || path.ends_with("/localization-evidence")
+                    || path.ends_with("/replicas")
+                    || (resource.split('/').count() == 3
+                        && resource.split('/').nth(1) == Some("revisions")))
         } else if let Some(upload) = path.strip_prefix("/v1/artifact-uploads/") {
             let id = upload.split('/').next().unwrap_or_default();
             catalog
@@ -291,6 +295,17 @@ impl ArtifactPrincipal {
             if self.grant.node_id.as_ref().map(NodeId::as_str) != Some(input.node_id.as_str()) {
                 return Err(HttpError::forbidden(
                     "map replica Node differs from certificate",
+                ));
+            }
+        } else if request.path.starts_with("/v1/maps/") {
+            let (manifest, _) = parse_map_publication(request)?;
+            if Some(manifest.producer_node_id()) != self.grant.node_id.as_ref()
+                || manifest
+                    .producer_provider_id()
+                    .is_none_or(|id| !self.grant.provider_ids.contains(id))
+            {
+                return Err(HttpError::forbidden(
+                    "map producer Node/provider differs from certificate",
                 ));
             }
         }

@@ -92,7 +92,7 @@ pub struct ArtifactProvenance {
     pub source_execution_id: Option<String>,
     /// Optional source task associated with production.
     pub source_task_ref: Option<TaskRef>,
-    /// RoboGuide-local creation timestamp for the manifest.
+    /// Producer creation timestamp; Controller receive time remains separate evidence.
     pub created_at: TimestampMs,
     /// Optional immutable parent revision for lineage.
     pub parent_revision_id: Option<MapRevisionId>,
@@ -219,6 +219,8 @@ impl ArtifactError {
 /// HTTP client for the independent artifact data plane.
 #[derive(Clone)]
 pub struct ArtifactClient {
+    /// Current Node session and exact publishing attempt, resolved by the Controller rather than trusted.
+    publication: Option<(NodeId, String, String)>,
     /// Opaque original Controller import identity; the server resolves current permission independently.
     memory_import_id: Option<String>,
     /// Reusable HTTP client with no map-specific protocol state.

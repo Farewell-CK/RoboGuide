@@ -12,9 +12,9 @@ impl NodeService {
         outbound: &mpsc::UnboundedSender<NodeMessage>,
         sequence: &Arc<tokio::sync::Mutex<u64>>,
     ) -> Result<(), NodeServiceError> {
-        if self.engine.catalog().node_contract_version()
-            != integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
-            || query.session_id != session
+        if !integration::grpc::v0_4::supports_memory_continuity(
+            self.engine.catalog().node_contract_version(),
+        ) || query.session_id != session
             || query.authorization_digest != integration::memory_import_query_digest(&query)
         {
             return Err(NodeServiceError::Protocol(

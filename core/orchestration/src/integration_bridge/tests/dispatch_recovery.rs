@@ -2,6 +2,185 @@
 
 use super::*;
 
+/// Creates registered software metadata for an offline provenance test, never physical observations.
+fn declaration_registration(
+    version: domain::NodeContractVersion,
+    schema: &str,
+) -> domain::NodeRegistration {
+    let registration = domain::NodeRegistration::new(
+        NodeId::new("declaration-owner").unwrap(),
+        domain::LocalRuntime::new("file-runtime", "1").unwrap(),
+        version,
+        Vec::new(),
+        Vec::new(),
+    );
+    let provider = domain::MemoryProviderDescriptor::new(
+        "source-provider",
+        registration.local_systems()[0].id().clone(),
+        domain::MemoryKind::Spatial,
+        domain::MemoryScopeLimit::Global,
+        domain::MemoryVisibility::Exchangeable,
+        schema,
+        "application/octet-stream",
+    )
+    .unwrap();
+    registration
+        .with_state_memory_exports(Vec::new(), vec![provider])
+        .unwrap()
+}
+
+/// Later registration, retry and restore cannot fill missing legacy provenance or refresh original claims.
+#[test]
+fn dispatch_registration_evidence_is_original_and_legacy_remains_unavailable() {
+    let mut bridge = IntegrationRuntimeBridge::new(
+        ControlPlane::new(),
+        InMemorySharedNodeState::new(),
+        InMemoryEventLog::new(),
+        GrpcNodeRouter::default(),
+    );
+    let correlation = CorrelationId::new("dispatch-declarations").unwrap();
+    let node = NodeId::new("declaration-owner").unwrap();
+    let command = ExecutionCommand::new(
+        domain::MissionId::new("declaration-mission").unwrap(),
+        domain::TaskId::new("legacy").unwrap(),
+        domain::ExecutionGroupId::new("declaration-group").unwrap(),
+        domain::RoleId::new("worker").unwrap(),
+        node.clone(),
+        domain::ExecutionIntent::new(
+            CapabilityContractRef::new("compute", "files", "v1").unwrap(),
+            BTreeMap::new(),
+        )
+        .unwrap(),
+        correlation.clone(),
+    );
+    bridge
+        .control
+        .register_node(
+            &mut bridge.state,
+            declaration_registration(domain::NodeContractVersion::v0_7(), "first-content/v1"),
+            domain::NodeStatus::new(NodeHealth::Online, TimestampMs::new(1)),
+            TimestampMs::new(1),
+            &correlation,
+            &mut InMemoryEventLog::new(),
+        )
+        .unwrap();
+    bridge
+        .execute("legacy-attempt".into(), command.clone(), Vec::new())
+        .unwrap();
+    bridge
+        .control
+        .register_node(
+            &mut bridge.state,
+            declaration_registration(domain::NodeContractVersion::v0_8(), "first-content/v1"),
+            domain::NodeStatus::new(NodeHealth::Online, TimestampMs::new(2)),
+            TimestampMs::new(2),
+            &correlation,
+            &mut InMemoryEventLog::new(),
+        )
+        .unwrap();
+    bridge
+        .control
+        .register_node_session(&node, "source-session", 5_000)
+        .unwrap();
+    bridge
+        .execute("legacy-attempt".into(), command.clone(), Vec::new())
+        .unwrap();
+    assert!(
+        bridge
+            .runtime
+            .execution_command("legacy-attempt")
+            .unwrap()
+            .registration_evidence()
+            .is_none()
+    );
+    let fresh_command = ExecutionCommand::new(
+        command.mission_id().clone(),
+        domain::TaskId::new("new").unwrap(),
+        command.group_id().clone(),
+        command.role_id().clone(),
+        command.node_id().clone(),
+        command.intent().clone(),
+        correlation.clone(),
+    );
+    bridge
+        .execute(
+            "original-v8-attempt".into(),
+            fresh_command.clone(),
+            Vec::new(),
+        )
+        .unwrap();
+    let original = bridge
+        .runtime
+        .execution_command("original-v8-attempt")
+        .unwrap()
+        .registration_evidence()
+        .unwrap()
+        .clone();
+    assert_eq!(
+        original.memory_providers()[0].payload_schema(),
+        "first-content/v1"
+    );
+    assert_eq!(original.source_session_id(), Some("source-session"));
+    let original_command = bridge
+        .runtime
+        .execution_command("original-v8-attempt")
+        .unwrap()
+        .clone();
+    assert!(bridge.dispatch_registration_is_current(&original_command));
+    bridge
+        .control
+        .register_node(
+            &mut bridge.state,
+            declaration_registration(domain::NodeContractVersion::v0_8(), "later-content/v2"),
+            domain::NodeStatus::new(NodeHealth::Online, TimestampMs::new(3)),
+            TimestampMs::new(3),
+            &correlation,
+            &mut InMemoryEventLog::new(),
+        )
+        .unwrap();
+    bridge
+        .execute("original-v8-attempt".into(), fresh_command, Vec::new())
+        .unwrap();
+    assert!(!bridge.dispatch_registration_is_current(&original_command));
+    assert!(matches!(
+        bridge.flush_dispatch_intent("original-v8-attempt", &original_command, &mut Vec::new()),
+        Err(IntegrationRuntimeError::Route(status)) if status.code() == tonic::Code::FailedPrecondition
+    ));
+    assert_eq!(
+        bridge
+            .runtime
+            .execution_command("original-v8-attempt")
+            .unwrap()
+            .registration_evidence(),
+        Some(&original)
+    );
+    let saved = bridge.checkpoint_json().unwrap();
+    let restored = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &saved,
+        InMemoryEventLog::new(),
+        GrpcNodeRouter::default(),
+        TimestampMs::new(4),
+    )
+    .unwrap();
+    assert!(!restored.dispatch_registration_is_current(&original_command));
+    assert!(
+        restored
+            .runtime
+            .execution_command("legacy-attempt")
+            .unwrap()
+            .registration_evidence()
+            .is_none()
+    );
+    assert_eq!(
+        restored
+            .runtime
+            .execution_command("original-v8-attempt")
+            .unwrap()
+            .registration_evidence(),
+        Some(&original)
+    );
+}
+
 /// Restore clears process-local authority and never implicitly re-dispatches a command.
 #[test]
 fn checkpoint_restore_is_conservative_across_process_boundary() {

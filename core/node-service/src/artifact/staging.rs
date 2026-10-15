@@ -12,6 +12,18 @@ pub struct ArtifactStager {
 }
 
 impl ArtifactStager {
+    /// Preserves exact cache/TLS ownership while attaching current Node publication routing context.
+    pub(crate) fn for_publication(
+        &self,
+        node: &NodeId,
+        session: &str,
+        execution: &str,
+    ) -> Result<Self, ArtifactError> {
+        Ok(Self {
+            client: self.client.for_publication(node, session, execution)?,
+            cache_directory: self.cache_directory.clone(),
+        })
+    }
     /// Retains an exact import purpose while preserving the actual endpoint, TLS and cache configuration.
     pub(crate) fn for_memory_import(&self, id: &str) -> Result<Self, ArtifactError> {
         Ok(Self {

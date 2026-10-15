@@ -31,6 +31,16 @@ pub mod v0_4 {
     pub const NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.6";
     /// Contract with explicitly negotiated durable Memory reconciliation.
     pub const CONTINUITY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.7";
+    /// Contract with exact registered Spatial producer provenance and current publication attempts.
+    pub const PROVIDER_MAP_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.8";
+
+    /// Checks explicitly negotiated original-provider query support across maintained contract versions.
+    pub fn supports_memory_continuity(version: &str) -> bool {
+        matches!(
+            version,
+            CONTINUITY_NODE_CONTRACT_VERSION | PROVIDER_MAP_NODE_CONTRACT_VERSION
+        )
+    }
     /// Prior profile-and-intent contract retained for explicit session compatibility.
     pub const PREVIOUS_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.5";
     /// Legacy combined-declaration contract retained for explicit session compatibility.

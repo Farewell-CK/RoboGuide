@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import io
 import json
@@ -13,14 +14,33 @@ import struct
 import subprocess
 import sys
 import time
+import tomllib
 import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from check_artifact_authority_processes import call as tls_call
 from check_spatial_local_processes import request as local_request
 from check_state_verifier_processes import ROOT, address, request, save, stop, wait_for
+from spatial_process_tls import configure as configure_tls
+
+
+def checker_identity() -> dict[str, str]:
+    """Pin maintained checker modules without claiming the interpreter's full dependency closure."""
+    names = (
+        "check_spatial_node_processes.py",
+        "check_spatial_local_processes.py",
+        "check_state_verifier_processes.py",
+        "check_identity_processes.py",
+        "check_artifact_authority_processes.py",
+        "spatial_process_tls.py",
+    )
+    return {
+        name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
+        for name in names
+    }
 
 
 def verify(directory: Path) -> dict[str, Any]:
@@ -34,6 +54,24 @@ def verify(directory: Path) -> dict[str, Any]:
     assert envelope["root_frame"] == profile["job"]["frame_id"]
     assert envelope["spatial_anchor"]["id"] == profile["spatial_anchor_id"]
     assert envelope["revision_id"] == profile["revision_id"]
+    configuration = tomllib.loads((directory / "node.toml").read_text())
+    assert configuration["schema"] == "roboguide.node-config/v0.9"
+    assert envelope["schema"] == "roboguide.map-manifest/v0.2"
+    assert envelope["producer_node_id"] == configuration["node_id"]
+    binding = next(
+        item
+        for item in configuration["artifacts"]["output_bindings"]
+        if item["id"] == profile["profile_id"]
+    )
+    declaration = next(
+        item
+        for item in configuration["memory_providers"]
+        if item["id"] == binding["producer_provider_id"]
+    )
+    assert envelope["producer_provider_id"] == binding["producer_provider_id"]
+    assert envelope["payload_schema"] == binding["payload_schema"] == declaration["payload_schema"]
+    assert envelope["producer_local_system_id"] == declaration["owner"]
+    assert envelope["media_type"] == declaration["media_type"]
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         names = archive.namelist()
         assert len(names) == len(set(names))
@@ -187,9 +225,13 @@ def plan(mission: str, profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> dict[str, Any]:
+def run(
+    python: Path, profile_file: Path, source_root: Path, output: Path, *, mtls: bool = False
+) -> dict[str, Any]:
     """Start isolated maintained processes and verify restore without redispatch."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
+    original_checker = checker_identity()
+    save(output / "checker-identity.json", original_checker)
     profile = json.loads(profile_file.read_bytes())["profiles"][0]
     save(
         output / "profile.json",
@@ -202,7 +244,8 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
     )
     (output / "source-root.txt").write_text(str(source_root))
     grpc, http, artifact = (address() for _ in range(3))
-    origin, cas = "http://" + http, "http://" + artifact
+    scheme = "https://" if mtls else "http://"
+    origin, cas = scheme + http, scheme + artifact
     node, mission = "cpu-" + uuid.uuid4().hex, "file-map-" + uuid.uuid4().hex
     socket_path = output / "backend/local.sock"
     environment = {
@@ -219,6 +262,30 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
             "OPENBLAS_NUM_THREADS": "2",
         }
     )
+    contexts, node_leaf = (
+        configure_tls(output, node, profile["map_id"], environment) if mtls else ({}, "")
+    )
+
+    def exchange(endpoint: str, path: str, body: Any = None) -> tuple[int, Any]:
+        """Use actual current client certificates for the owned HTTPS services, with no retry."""
+        if not mtls:
+            return request(endpoint, path, body)
+        context = contexts[
+            "viewer" if endpoint == cas or path == "/v1/verifier-evidence" else "admin"
+        ]
+        status, raw = tls_call(
+            endpoint,
+            context,
+            "GET" if body is None else "POST",
+            path,
+            None if body is None else json.dumps(body).encode(),
+            {
+                "Content-Type": "application/json",
+                **({"X-RoboGuide-Tenant": "local"} if path.startswith("/v1/missions") else {}),
+            },
+        )
+        return status, json.loads(raw)
+
     config = output / "node.toml"
     subprocess.run(
         [
@@ -230,7 +297,7 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
             "--node-id",
             node,
             "--server-endpoint",
-            "http://" + grpc,
+            scheme + grpc,
             "--artifact-endpoint",
             cas,
             "--state-root",
@@ -256,6 +323,7 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
 
     def start(command: list[str], name: str) -> subprocess.Popen[bytes]:
         """Pin actual binaries and track only the processes and diagnostics owned by this run."""
+        assert checker_identity() == original_checker, "checker source changed during original run"
         for binary, checksum in binaries.items():
             assert (
                 hashlib.sha256((ROOT / "target/debug" / binary).read_bytes()).hexdigest()
@@ -296,12 +364,32 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
             lambda: local_request(socket_path, "/v1/instance")[0] == 200, "actual Local EAIOS", 20
         )
         controller = start(controller_command, "controller")
-        wait_for(lambda: request(origin, "/healthz")[0] == 200, "Controller startup")
+        wait_for(lambda: exchange(origin, "/healthz")[0] == 200, "Controller startup")
+        if mtls:
+            status, enrolled = exchange(
+                origin,
+                "/v1/node-identities/commands",
+                {
+                    "command_id": uuid.uuid4().hex,
+                    "node_id": node,
+                    "expected_revision": 0,
+                    "action": {
+                        "kind": "register",
+                        "tenant_id": "local",
+                        "domain_id": "software-file-domain",
+                        "digest": node_leaf,
+                        "expires_at_ms": 0,
+                    },
+                },
+            )
+            assert status == 200, enrolled
         verifier = {
             "source_id": "independent-file-reader",
             "revision": 1,
             "tenant_id": "local",
-            "producer_principals": ["trusted-loopback:operator"],
+            "producer_principals": [
+                "independent-file-reader" if mtls else "trusted-loopback:operator"
+            ],
             "verifier": {"namespace": "observation", "name": "verify", "version": "v1"},
             "predicates": ["source and CAS bundle integrity"],
             "max_age_ms": 30000,
@@ -310,7 +398,7 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
             "continuous": False,
             "require_artifact": True,
         }
-        status, receipt = request(
+        status, receipt = exchange(
             origin,
             "/v1/verifier-sources",
             {
@@ -326,35 +414,126 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
         )
         assert status == 200, receipt
         node_process = start([str(ROOT / "target/debug/roboguide-node"), str(config)], "node")
-        wait_for(lambda: len(request(origin, "/v1/inventory")[1]["nodes"]) == 1, "actual CPU Node")
+        wait_for(lambda: len(exchange(origin, "/v1/inventory")[1]["nodes"]) == 1, "actual CPU Node")
         save(output / "mission.json", plan(mission, profile))
-        status, receipt = request(origin, "/v1/missions", plan(mission, profile))
+        status, receipt = exchange(origin, "/v1/missions", plan(mission, profile))
         assert status == 202, receipt
-        attempts = wait_for(
-            lambda: [
+
+        def completed_publication() -> list[dict[str, Any]]:
+            """Return actual completed publication or immediately retain its terminal failure."""
+            observed = exchange(origin, "/v1/execution-attempts")[1]["attempts"]
+            terminal = [
+                item
+                for item in observed
+                if item["task_id"] == "publish"
+                and item["status"] in {"Failed", "Cancelled", "Unknown"}
+            ]
+            if terminal:
+                save(output / "rejected-publication-attempts.json", terminal)
+                raise RuntimeError("formal publication failed or became physically ambiguous")
+            return [
                 entry
-                for entry in request(origin, "/v1/execution-attempts")[1]["attempts"]
+                for entry in observed
                 if entry["task_id"] == "publish" and entry["status"] == "Completed"
-            ],
+            ]
+
+        attempts = wait_for(
+            completed_publication,
             "formal Node publication after actual CPU worker exit",
             120,
         )
         assert len(attempts) == 1
         attempt = attempts[0]
-        assert request(origin, f"/v1/missions/{mission}")[1]["status"] != "Completed"
+        assert exchange(origin, f"/v1/missions/{mission}")[1]["status"] != "Completed"
         path = f"/v1/maps/{profile['map_id']}/revisions/{profile['revision_id']}"
-        status, snapshot = request(cas, path)
+        status, snapshot = exchange(cas, path)
         assert status == 200, snapshot
         save(output / "catalog-manifest.json", snapshot)
         manifest = snapshot["manifest"]
         assert manifest["producer_node_id"] == node
         assert manifest["producer_local_system_id"] == "spatial-files"
         assert manifest["source_task_ref"] == {"mission_id": mission, "task_id": "build"}
+        with sqlite3.connect(
+            f"file:{output / 'controller.sqlite3'}?mode=ro", uri=True
+        ) as connection:
+            original_checkpoint = json.loads(
+                connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()[
+                    0
+                ]
+            )
+        original_runtime = json.loads(original_checkpoint["integration_json"])["runtime"][
+            "executions"
+        ]
+        declarations = original_runtime[attempt["execution_id"]]["command"].get(
+            "registration_evidence"
+        )
+        assert declarations and declarations["contract_version"] == "roboguide.node.v0.8"
+        source_declarations = original_runtime[manifest["source_execution_id"]]["command"].get(
+            "registration_evidence"
+        )
+        assert source_declarations and source_declarations["source_session_id"]
+        save(
+            output / "dispatch-declarations.json",
+            {"source": source_declarations, "publication": declarations},
+        )
+        rejected_claims = []
+        if mtls:
+            headers = {
+                "Content-Type": "application/json",
+                "X-RoboGuide-Node-Id": node,
+                "X-RoboGuide-Session-Id": declarations["source_session_id"],
+            }
+            current_body = {
+                "schema": "roboguide.map-publication/v0.1",
+                "manifest": manifest,
+                "execution_id": attempt["execution_id"],
+            }
+            for case in (
+                "forged-node",
+                "stale-session",
+                "unregistered-provider",
+                "incompatible-schema",
+                "legacy-map-write",
+                "viewer-write",
+            ):
+                body = copy.deepcopy(current_body)
+                supplied_headers = headers.copy()
+                if case == "forged-node":
+                    supplied_headers["X-RoboGuide-Node-Id"] = "unauthorized-" + uuid.uuid4().hex
+                elif case == "stale-session":
+                    supplied_headers["X-RoboGuide-Session-Id"] = "expired-" + uuid.uuid4().hex
+                elif case == "unregistered-provider":
+                    body["manifest"]["producer_provider_id"] = "spatial-occupancy-maps"
+                elif case == "incompatible-schema":
+                    body["manifest"]["payload_schema"] = "unregistered-content/v1"
+                elif case == "legacy-map-write":
+                    body = copy.deepcopy(manifest)
+                    body["schema"] = "roboguide.map-manifest/v0.1"
+                    body.pop("producer_provider_id")
+                    body.pop("payload_schema")
+                status, rejected_body = tls_call(
+                    cas,
+                    contexts["viewer" if case == "viewer-write" else "enrolment-first"],
+                    "POST",
+                    path,
+                    json.dumps(body).encode(),
+                    supplied_headers,
+                )
+                assert status == 403, (case, status, rejected_body)
+                rejected_claims.append(
+                    {"case": case, "status": status, "response": json.loads(rejected_body)}
+                )
+            assert len(exchange(cas, "/v1/maps")[1]["revisions"]) == 1
+            assert exchange(cas, path)[1] == snapshot
+            save(output / "admission-rejections.json", rejected_claims)
         with urllib.request.urlopen(
-            cas + "/v1/artifacts/" + manifest["content_digest"], timeout=5
+            cas + "/v1/artifacts/" + manifest["content_digest"],
+            timeout=5,
+            context=contexts.get("viewer"),
         ) as response:  # noqa: S310
             payload = response.read(536870913)
         (output / "downloaded.bundle").write_bytes(payload)
+        assert checker_identity() == original_checker
         checked = subprocess.run(
             [sys.executable, str(Path(__file__)), "--verify", str(output)],
             capture_output=True,
@@ -366,7 +545,7 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
         assert independent["passed"] is True
         corrupt = output / "corrupt-bundle-check"
         corrupt.mkdir()
-        for name in ("catalog-manifest.json", "profile.json", "source-root.txt"):
+        for name in ("catalog-manifest.json", "profile.json", "source-root.txt", "node.toml"):
             (corrupt / name).write_bytes((output / name).read_bytes())
         damaged = bytearray(payload)
         damaged[len(damaged) // 2] ^= 1
@@ -411,11 +590,11 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
         stop(node_process)
         stop(controller)
         controller = start(controller_command, "controller-restored")
-        wait_for(lambda: request(origin, "/healthz")[0] == 200, "Controller restored")
+        wait_for(lambda: exchange(origin, "/healthz")[0] == 200, "Controller restored")
         start([str(ROOT / "target/debug/roboguide-node"), str(config)], "node-restored")
-        wait_for(lambda: len(request(origin, "/v1/inventory")[1]["nodes"]) == 1, "Node restored")
+        wait_for(lambda: len(exchange(origin, "/v1/inventory")[1]["nodes"]) == 1, "Node restored")
         time.sleep(0.3)
-        assert request(cas, path)[1] == snapshot
+        assert exchange(cas, path)[1] == snapshot
         assert workers[0].read_bytes() == original_worker
         assert {
             p.name: p.read_bytes() for p in (output / "backend/records").glob("*.json")
@@ -426,7 +605,7 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
             "source_revision": 1,
             "tenant_id": "local",
             "task_ref": {"mission_id": mission, "task_id": "publish"},
-            "plan_digest": request(origin, f"/v1/missions/{mission}/tenant")[1][
+            "plan_digest": exchange(origin, f"/v1/missions/{mission}/tenant")[1][
                 "source_plan_digest"
             ],
             "attempts": [{"role_id": attempt["role_id"], "attempt_id": attempt["execution_id"]}],
@@ -439,11 +618,11 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
             "artifact_digest": manifest["content_digest"],
             "artifact_size_bytes": manifest["byte_size"],
         }
-        status, receipt = request(origin, "/v1/verifier-evidence", evidence)
+        status, receipt = exchange(origin, "/v1/verifier-evidence", evidence)
         assert status == 200 and receipt["receipt"]["applied"] is True, receipt
-        assert request(origin, "/v1/verifier-evidence", evidence)[1] == receipt
+        assert exchange(origin, "/v1/verifier-evidence", evidence)[1] == receipt
         wait_for(
-            lambda: request(origin, f"/v1/missions/{mission}")[1]["status"] == "Completed",
+            lambda: exchange(origin, f"/v1/missions/{mission}")[1]["status"] == "Completed",
             "independent satisfaction",
         )
         with sqlite3.connect(
@@ -468,11 +647,17 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
             "independent_corrupt_bundle_rejected": True,
             "wrong_worker_exit_identity_unavailable": True,
             "binaries": binaries,
+            "checker_modules_sha256": original_checker,
             "configuration_digest": "sha256:" + hashlib.sha256(config.read_bytes()).hexdigest(),
             "independent": independent,
+            "rejected_remote_claims": rejected_claims,
             "verifier_receipt": receipt,
-            "transport_profile": "explicit-trusted-loopback-compatibility",
-            "typed_map_remote_provider_authority": "pending-versioned-contract",
+            "transport_profile": "actual-mutual-tls-and-enrolled-node"
+            if mtls
+            else "explicit-trusted-loopback-compatibility",
+            "typed_map_remote_provider_authority": "checked-current-route-provider-and-attempt"
+            if mtls
+            else "loopback-current-route-check-only",
             "hardware_evidence": "HardwareEvidencePending",
         }
         save(output / "result.json", result)
@@ -480,6 +665,16 @@ def run(python: Path, profile_file: Path, source_root: Path, output: Path) -> di
     finally:
         for process in reversed(processes):
             stop(process)
+        assert all(process.returncode is not None for process in processes)
+        save(
+            output / "owned-process-exits.json",
+            {
+                "all_owned_processes_reaped": True,
+                "processes": [
+                    {"pid": process.pid, "returncode": process.returncode} for process in processes
+                ],
+            },
+        )
         for log in logs:
             log.close()
 
@@ -492,15 +687,29 @@ def main() -> None:
     parser.add_argument("--source-root", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--verify", type=Path)
+    parser.add_argument("--mtls", action="store_true")
     arguments = parser.parse_args()
     if arguments.verify:
         print(json.dumps(verify(arguments.verify)))
     elif arguments.python and arguments.profile and arguments.source_root and arguments.output:
-        print(
-            json.dumps(
-                run(arguments.python, arguments.profile, arguments.source_root, arguments.output)
+        if arguments.output.exists():
+            parser.error("output directory must be new")
+        try:
+            result = run(
+                arguments.python,
+                arguments.profile,
+                arguments.source_root,
+                arguments.output,
+                mtls=arguments.mtls,
             )
-        )
+        except Exception as error:
+            if arguments.output.is_dir():
+                save(
+                    arguments.output / "failure.json",
+                    {"passed": False, "reason": str(error)[:4096]},
+                )
+            raise
+        print(json.dumps(result))
     else:
         parser.error("--python, --profile, --source-root and --output are required")
 

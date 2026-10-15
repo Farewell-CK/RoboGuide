@@ -68,6 +68,7 @@ impl ArtifactClient {
             builder = builder.identity(identity).add_root_certificate(root);
         }
         Ok(Self {
+            publication: None,
             memory_import_id: None,
             client: builder.build()?,
             endpoint,
@@ -89,9 +90,34 @@ impl ArtifactClient {
         Ok(client)
     }
 
+    /// Carries current Node routing context for an exact publishing attempt; headers grant no authority.
+    pub(super) fn for_publication(
+        &self,
+        node: &NodeId,
+        session: &str,
+        execution: &str,
+    ) -> Result<Self, ArtifactError> {
+        if [session, execution]
+            .into_iter()
+            .any(|id| id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control))
+        {
+            return Err(ArtifactError::Configuration(
+                "publication context is invalid".into(),
+            ));
+        }
+        let mut client = self.clone();
+        client.publication = Some((node.clone(), session.into(), execution.into()));
+        Ok(client)
+    }
+
     /// Carries an opaque original purpose through the existing mTLS client on every related request.
     fn request(&self, method: reqwest::Method, endpoint: Url) -> reqwest::RequestBuilder {
-        let builder = self.client.request(method, endpoint);
+        let mut builder = self.client.request(method, endpoint);
+        if let Some((node, session, _)) = &self.publication {
+            builder = builder
+                .header("X-RoboGuide-Node-Id", node.as_str())
+                .header("X-RoboGuide-Session-Id", session);
+        }
         if let Some(id) = &self.memory_import_id {
             builder.header("X-RoboGuide-Memory-Import-Id", id)
         } else {
@@ -288,9 +314,19 @@ impl ArtifactClient {
             return Ok(());
         }
         let endpoint = self.path(&["v1", "maps", map_id, "revisions", revision_id])?;
+        let payload = if manifest.producer_provider_id().is_some() {
+            let (_, _, execution) = self.publication.as_ref().ok_or_else(|| {
+                ArtifactError::Configuration(
+                    "provider-bound publication requires current Node session and attempt".into(),
+                )
+            })?;
+            serde_json::json!({"schema": "roboguide.map-publication/v0.1", "manifest": manifest, "execution_id": execution})
+        } else {
+            serde_json::to_value(manifest)?
+        };
         let response = match self
             .request(reqwest::Method::POST, endpoint.clone())
-            .json(manifest)
+            .json(&payload)
             .send()
             .await
         {

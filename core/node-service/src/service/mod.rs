@@ -146,6 +146,7 @@ impl NodeService {
                 "expected Registered".to_string(),
             ));
         };
+        let _publication_session = self.engine.publication_session(&registered.session_id)?;
         let mut local_events = self.engine.subscribe();
         let mut peer_readiness_events = self.engine.subscribe_peer_channel_readiness();
         self.replay_snapshots(&registered.session_id, &outbound)?;

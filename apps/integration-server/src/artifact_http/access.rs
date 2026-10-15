@@ -16,14 +16,15 @@ pub(crate) fn map_authorization_manifest(
                 .map_err(|e| e.to_string())?,
         ),
         domain::MemoryKind::Spatial,
-        "typed-map-catalog",
+        map.producer_provider_id().unwrap_or("typed-map-catalog"),
         MemoryOwner::Node {
             node_id: map.producer_node_id().clone(),
             local_system_id: local_system_id.clone(),
         },
         domain::MemoryScope::Global,
         domain::MemoryVisibility::Exchangeable,
-        domain::SPATIAL_MEMORY_SCHEMA_V0_1,
+        map.payload_schema()
+            .unwrap_or(domain::SPATIAL_MEMORY_SCHEMA_V0_1),
         map.media_type(),
         Some(domain::MemoryArtifactRef::new(
             map.artifact().content_digest().clone(),

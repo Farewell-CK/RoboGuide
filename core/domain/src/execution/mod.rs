@@ -7,7 +7,7 @@ mod recovery;
 mod session;
 mod value;
 
-pub use command::ExecutionCommand;
+pub use command::{ExecutionCommand, ExecutionRegistrationEvidence};
 pub use intent::{CapabilityContractRef, ExecutionIntent, OperationRef};
 pub use node_event::NodeEvent;
 pub use recovery::{

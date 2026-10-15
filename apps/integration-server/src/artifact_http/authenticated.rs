@@ -15,6 +15,29 @@ pub(super) struct AuthenticatedAdmission<'a> {
 }
 
 impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
+    /// Rejects remote legacy claims and binds current producer/provider to the actual certificate.
+    fn admit_map_publication(
+        &self,
+        manifest: &MapArtifactManifest,
+        publisher: Option<&MemoryPublicationIdentity>,
+        execution_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.authority
+            .revalidate_artifact_principal(self.principal)?;
+        if self.principal.certificate_digest.is_some()
+            && (manifest.producer_provider_id().is_none()
+                || self.principal.node_id() != Some(manifest.producer_node_id())
+                || !self
+                    .principal
+                    .grant
+                    .provider_ids
+                    .contains(manifest.producer_provider_id().unwrap_or_default()))
+        {
+            return Err("remote typed-map publication requires its actual certificate Node and registered provider".into());
+        }
+        self.authority
+            .admit_map_publication(manifest, publisher, execution_id)
+    }
     /// Resolves the actual certificate through the same composition authority as the original request.
     fn refresh_artifact_principal(
         &self,

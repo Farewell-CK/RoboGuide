@@ -16,6 +16,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 from .__main__ import observe, parse_job
@@ -573,6 +574,11 @@ def handler_type(service: SpatialService) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
+def termination_requested(_number: int, _frame: FrameType | None) -> None:
+    """Enter the same owned-worker cleanup for deployment SIGTERM and interactive SIGINT."""
+    raise KeyboardInterrupt
+
+
 def main() -> None:
     """Run the actual CPU provider on a private Unix socket without registering a Node or device."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -582,6 +588,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--readonly", action="store_true")
     args = parser.parse_args()
+    signal.signal(signal.SIGTERM, termination_requested)
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     sdk()
     service = SpatialService(

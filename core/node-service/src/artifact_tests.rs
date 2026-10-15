@@ -67,6 +67,8 @@ fn output_binding() -> ArtifactOutputBindingConfig {
         map_id: "lab".to_string(),
         revision_id: "r1".to_string(),
         source_path: PathBuf::from("outputs/lab-r1.bundle"),
+        producer_provider_id: None,
+        payload_schema: None,
         media_type: "application/octet-stream".to_string(),
         format_name: "grid".to_string(),
         format_version: "v1".to_string(),

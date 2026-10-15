@@ -93,7 +93,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   history only. Replica Imported history never grants current availability or Task satisfaction.
   The shipped immutable-file provider and process conformance use actual files/SQL/OS processes,
   zero devices and no model/simulator. Full Group authorization, revocation/GC, active-map and
-  spatial fusion remain required F4 work; this slice is not overall completion.
+  distributed Spatial activation/use remain required F4 work; this slice is not overall completion.
 - ADR-0105's content gate adds explicit Control policy/history and stable Artifact certificate grants.
   Actual binding changes advance Group membership generation; historical absence stays unavailable.
   Import intents retain original tenant/provider/policy/membership and authenticated submitter.
@@ -104,7 +104,7 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   protected from archive deletion. `contracts/memory/authorization-v0.1/` and
   `tools/quality/check_artifact_authority_processes.py` define the software/API slice; no Node or
   device is invented by its certificate/upload check. Node-wide Group grants/revocation ACK,
-  pre-Execute Memory readiness, full handoff, active-map/GC and spatial computation remain required
+  pre-Execute Memory readiness, full handoff, active-map/GC and complete Spatial consumption remain required
   F4 work. Do not claim complete distributed Group authorization from these current gates alone.
 - Operator HTTP mutation transactions retain an actual-transport witness through the real writer gate.
   Current leaf expiry, committed/deployment grants, principal, role, tenant and Mission ownership are
@@ -308,9 +308,17 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   identity; cancellation needs actual original worker exit and remains software-process evidence.
   The deployment generator declares arbitrary Node IDs and semantic output profiles, never devices.
   `tools/quality/check_spatial_node_processes.py` exercises maintained Node workflows, actual CAS,
-  an independent source/tile verifier and Controller/Node restart without another worker under the
-  explicit trusted-loopback compatibility profile. Remote typed-map provider authority and complete
-  Group/pre-Execute/active-map/GC integration remain required F4 work.
+  an independent source/tile verifier and Controller/Node restart without another worker. The explicit
+  mTLS profile uses actual enrolled software Node credentials and scoped Artifact/Operator principals.
+  Config v0.9 / Contract v0.8 / catalog v0.11 carry original provider-bound map v0.2 publication.
+  Runtime freezes dispatch-time contract/session/provider declarations outside semantic model input;
+  retry/restore retain original unavailable fields. Changed declarations/session fence new Execute;
+  catalog publication rechecks original completed build and exact live publishing attempt under the
+  actual writer gate. Node journal v8 retains v7 table layouts/views but rejects the actual v7 binary;
+  wrapper v33 and map codec v24 independently fence old writers, including zero-event metadata.
+  `tools/quality/check_spatial_upgrade_gates.py` checks actual archived binaries; the independent
+  schema checker uses pinned jsonschema outside MI. Complete Group/pre-Execute/active-map/GC and
+  typed-map full-manifest content-policy binding remain required F4 work.
 - The C1-S0 Habitat bridge supports existing `mobility.navigate@v1` without changing Core schemas.
   It keeps EMOS/Habitat dependencies in their independent Conda environment, maps semantic
   destination to the existing local Oracle navigation action, owns one persistent simulator process

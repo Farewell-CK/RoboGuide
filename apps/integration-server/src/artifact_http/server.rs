@@ -702,7 +702,7 @@ pub(super) fn map_memory_view(snapshot: domain::MapRevisionSnapshot) -> serde_js
             "revision_id": manifest.selector().revision_id().as_str(),
         },
         "kind": "spatial",
-        "provider_id": "typed-map-catalog",
+        "provider_id": manifest.producer_provider_id().unwrap_or("typed-map-catalog"),
         "owner": {
             "owner": "node",
             "node_id": manifest.producer_node_id().as_str(),
@@ -710,7 +710,7 @@ pub(super) fn map_memory_view(snapshot: domain::MapRevisionSnapshot) -> serde_js
         },
         "scope": {"kind": "global"},
         "visibility": "exchangeable",
-        "payload_schema": domain::SPATIAL_MEMORY_SCHEMA_V0_1,
+        "payload_schema": manifest.payload_schema().unwrap_or(domain::SPATIAL_MEMORY_SCHEMA_V0_1),
         "media_type": manifest.media_type(),
         "artifact": {
             "content_digest": manifest.artifact().content_digest(),
@@ -958,7 +958,7 @@ pub(super) fn publish_revision(
     if parts.len() != 3 || parts[1] != "revisions" {
         return Err(HttpError::not_found("map revision path is invalid"));
     }
-    let manifest: MapArtifactManifest = parse_json(&request.body)?;
+    let (manifest, execution_id) = parse_map_publication(request)?;
     if manifest.selector().map_id().as_str() != parts[0]
         || manifest.selector().revision_id().as_str() != parts[2]
     {
@@ -972,7 +972,12 @@ pub(super) fn publish_revision(
             manifest.artifact().byte_size(),
         )
         .map_err(map_cas_error)?;
-    catalog.append_authorized(EventPayload::MapArtifactPublished { manifest }, authority)?;
+    catalog.append_map(
+        manifest,
+        authority,
+        request.memory_publisher.as_ref(),
+        execution_id.as_deref(),
+    )?;
     Ok(Response::Json(
         "201 Created",
         serde_json::json!({"status": "published"}),

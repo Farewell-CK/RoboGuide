@@ -89,6 +89,8 @@ const EVENT_PAYLOAD_SCHEMA_V21: &str = "domain.EventPayload.json/v21";
 const EVENT_PAYLOAD_SCHEMA_V22: &str = "domain.EventPayload.json/v22";
 /// Codec retaining durable actual-byte upload admission, preparation and ownership receipts.
 const EVENT_PAYLOAD_SCHEMA_V23: &str = "domain.EventPayload.json/v23";
+/// Codec fencing exact registered producer provenance in typed-map evidence.
+const EVENT_PAYLOAD_SCHEMA_V24: &str = "domain.EventPayload.json/v24";
 
 /// One event row retained by the durable evidence store.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1024,6 +1026,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V21 => Ok(21),
         EVENT_PAYLOAD_SCHEMA_V22 => Ok(22),
         EVENT_PAYLOAD_SCHEMA_V23 => Ok(23),
+        EVENT_PAYLOAD_SCHEMA_V24 => Ok(24),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -1037,6 +1040,7 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        _ if provider_map_payload(payload) => 24,
         EventPayload::ArtifactUploadTransition { .. } => 23,
         EventPayload::MemoryCommandEvidence { .. } => 22,
         EventPayload::StatePolicyDecision { .. }
@@ -1230,6 +1234,7 @@ impl SqliteEventLog {
 /// Selects the newest codec marker only for payloads introduced by that codec.
 fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
     match payload {
+        _ if provider_map_payload(payload) => EVENT_PAYLOAD_SCHEMA_V24,
         EventPayload::ArtifactUploadTransition { .. } => EVENT_PAYLOAD_SCHEMA_V23,
         EventPayload::MemoryCommandEvidence { .. } => EVENT_PAYLOAD_SCHEMA_V22,
         EventPayload::StatePolicyDecision { .. }
@@ -1239,6 +1244,19 @@ fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
         | EventPayload::MissionExecutionIsolated { .. } => EVENT_PAYLOAD_SCHEMA_V19,
         EventPayload::TaskSatisfactionRejected { .. } => EVENT_PAYLOAD_SCHEMA_V20,
         _ => EVENT_PAYLOAD_SCHEMA_V17,
+    }
+}
+
+/// Identifies manifest-bearing map evidence without upgrading historical v0.1 records.
+fn provider_map_payload(payload: &EventPayload) -> bool {
+    match payload {
+        EventPayload::MapArtifactDeclared { manifest }
+        | EventPayload::MapArtifactPublished { manifest }
+        | EventPayload::MapArtifactStaged { manifest, .. }
+        | EventPayload::MapArtifactImported { manifest, .. } => {
+            manifest.producer_provider_id().is_some()
+        }
+        _ => false,
     }
 }
 

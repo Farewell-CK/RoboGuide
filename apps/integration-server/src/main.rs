@@ -34,6 +34,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Last wrapper without registered typed-map producer and current publishing-attempt authority.
+const PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v32";
 /// Last wrapper without Control-owned Memory membership and content authorization authority.
 const PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v31";
 /// Last wrapper without explicit original-provider Memory reconciliation authority.
@@ -205,6 +207,28 @@ impl artifact_http::LocalizationEvidenceObserver for ControllerLocalizationObser
 }
 
 impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
+    /// Revalidates the actual current route and provider before exact original/current attempt checks.
+    fn admit_map_publication(
+        &self,
+        manifest: &domain::MapArtifactManifest,
+        publisher: Option<&artifact_http::MemoryPublicationIdentity>,
+        execution_id: Option<&str>,
+    ) -> Result<(), String> {
+        if manifest.producer_provider_id().is_none() {
+            return Ok(());
+        }
+        self.admit_publisher(publisher, manifest.producer_node_id())?;
+        self.admit_manifest(&artifact_http::map_authorization_manifest(manifest)?)?;
+        let controller = self
+            .controller
+            .lock()
+            .map_err(|_| "map publication authority unavailable")?;
+        application::map_publication::validate(
+            &controller,
+            manifest,
+            execution_id.ok_or("current publication attempt is unavailable")?,
+        )
+    }
     /// Typed-map reads retain original Node tenant; missing old LocalSystem never becomes new policy evidence.
     fn authorize_map_access(
         &self,
@@ -874,6 +898,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
@@ -908,6 +933,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_SPATIAL_PROVIDER_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_AUTHORITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA

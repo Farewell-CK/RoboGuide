@@ -251,6 +251,23 @@ impl LocalIntegrationEngine {
                     &binding.revision_id,
                     Some(&binding.spatial_anchor_id),
                 )?;
+                if let Some(provider_id) = &binding.producer_provider_id {
+                    let provider = self
+                        .inner
+                        .catalog
+                        .memory_providers()
+                        .get(provider_id)
+                        .ok_or_else(|| {
+                            EngineError::Configuration(
+                                "original map provider is unavailable".into(),
+                            )
+                        })?;
+                    if provider.owner() != capability.owner() {
+                        return Err(EngineError::Configuration(
+                            "map workflow is not owned by its original provider LocalSystem".into(),
+                        ));
+                    }
+                }
                 let output_path = match directive.operation {
                     ArtifactOperation::PrepareOutput => stager.prepare_output_path(binding).await?,
                     ArtifactOperation::Publish => {
@@ -323,7 +340,9 @@ impl LocalIntegrationEngine {
                 self.freeze_artifact_output(invocation, capability, execution_id, directive)
                     .await
             }
-            ArtifactOperation::Publish => self.publish_artifact_output(directive).await,
+            ArtifactOperation::Publish => {
+                self.publish_artifact_output(directive, execution_id).await
+            }
             ArtifactOperation::Import | ArtifactOperation::Verify => {
                 self.record_input_completion(invocation, directive, prepared_input)
                     .await
@@ -511,6 +530,7 @@ impl LocalIntegrationEngine {
     pub(super) async fn publish_artifact_output(
         &self,
         directive: ArtifactDirective<'_>,
+        execution_id: &str,
     ) -> Result<(), EngineError> {
         let service = self.inner.catalog.artifact_service().ok_or_else(|| {
             EngineError::Configuration("artifact service is not configured".into())
@@ -549,7 +569,27 @@ impl LocalIntegrationEngine {
         let stager = self.inner.artifact_stager.as_ref().ok_or_else(|| {
             EngineError::Configuration("artifact service is not initialized".into())
         })?;
-        stager.publish_prepared(binding, &prepared).await?;
+        let current_stager = if prepared.manifest.producer_provider_id().is_some() {
+            let session = self
+                .inner
+                .publication_session
+                .lock()
+                .map_err(|_| EngineError::LockState)?
+                .clone()
+                .ok_or_else(|| {
+                    EngineError::Configuration(
+                        "current accepted publication session is unavailable".into(),
+                    )
+                })?;
+            stager.for_publication(
+                &NodeId::new(self.inner.catalog.node_id()).map_err(ArtifactError::Domain)?,
+                &session,
+                execution_id,
+            )?
+        } else {
+            stager.clone()
+        };
+        current_stager.publish_prepared(binding, &prepared).await?;
         Ok(())
     }
 

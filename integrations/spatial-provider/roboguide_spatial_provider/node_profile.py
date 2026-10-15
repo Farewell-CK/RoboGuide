@@ -32,7 +32,7 @@ def node_config(
         if not value.is_absolute() or ".." in value.parts:
             raise ValueError("Node state/cache/socket paths must be exact absolute paths")
     encoded = json.dumps
-    text = f"""schema = "roboguide.node-config/v0.8"
+    text = f"""schema = "roboguide.node-config/v0.9"
 node_id = {encoded(node_id)}
 server_endpoint = {encoded(server_endpoint)}
 state_directory = {encoded(str(state_root))}
@@ -62,11 +62,17 @@ read_timeout_ms = 10000
         key = digest(canonical(selector)).removeprefix("sha256:")
         planar = profile["job"]["schema_version"] == "roboguide.spatial-occupancy-job/v0.1"
         resolution = profile["job"]["policy"]["resolution_meters" if planar else "voxel_size"]
+        provider = "spatial-occupancy-maps" if planar else "spatial-file-maps"
+        payload_schema = (
+            "roboguide.spatial-occupancy-map/v0.1" if planar else "roboguide.spatial-file-map/v0.1"
+        )
         text += f"""
 [[artifacts.output_bindings]]
 id = {encoded(profile["profile_id"])}
 map_id = {encoded(profile["map_id"])}
 revision_id = {encoded(profile["revision_id"])}
+producer_provider_id = {encoded(provider)}
+payload_schema = {encoded(payload_schema)}
 source_path = {encoded(f"outputs/{key}/{job.job_id}/map.bundle")}
 media_type = "application/vnd.roboguide.spatial-map"
 format_name = {encoded("observed-occupancy-tiles" if planar else "observed-point-tiles")}

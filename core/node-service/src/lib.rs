@@ -60,13 +60,14 @@ pub use local_engine::mapping::{CompiledRequestMapping, MappingError, WorkflowCo
 pub use local_engine::mcp_driver::McpDriver;
 pub use local_engine::{
     CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CONFIG_SCHEMA_V0_5,
-    CONFIG_SCHEMA_V0_6, CONFIG_SCHEMA_V0_7, CONFIG_SCHEMA_V0_8, CapabilityReadinessFact,
-    CatalogError, CompiledArtifactService, CompiledCapability, CompiledCapabilityProfile,
-    CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog,
-    CompiledLocalSystem, CompiledMemoryContinuity, CompiledMemoryProvider, CompiledMemoryWorkflow,
-    CompiledOperation, CompiledPeerChannelObserver, CompiledResource, CompiledSensor,
-    CompiledStateExport, CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact, LocalHealthState,
-    MappedExecutionFact, MappedExecutionPhase, PeerChannelReadinessFact, StateExportFact,
+    CONFIG_SCHEMA_V0_6, CONFIG_SCHEMA_V0_7, CONFIG_SCHEMA_V0_8, CONFIG_SCHEMA_V0_9,
+    CapabilityReadinessFact, CatalogError, CompiledArtifactService, CompiledCapability,
+    CompiledCapabilityProfile, CompiledCapabilityReadiness, CompiledConnection,
+    CompiledHealthCheck, CompiledLocalCatalog, CompiledLocalSystem, CompiledMemoryContinuity,
+    CompiledMemoryProvider, CompiledMemoryWorkflow, CompiledOperation, CompiledPeerChannelObserver,
+    CompiledResource, CompiledSensor, CompiledStateExport, CompiledWorkflow, CompiledWorkflowStep,
+    LocalHealthFact, LocalHealthState, MappedExecutionFact, MappedExecutionPhase,
+    PeerChannelReadinessFact, StateExportFact,
 };
 pub use memory::{FilesystemMemoryLedger, LocalMemoryLedger, MemoryLedgerError, MemoryQuery};
 pub use service::{NodeService, NodeServiceError};

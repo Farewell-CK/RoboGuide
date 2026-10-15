@@ -1,6 +1,9 @@
 //! Canonical role-scoped command routed to one selected node.
 
-use crate::{CorrelationId, ExecutionGroupId, MissionId, NodeId, RoleId, TaskId, TaskRef};
+use crate::{
+    CorrelationId, ExecutionGroupId, MemoryProviderDescriptor, MissionId, NodeContractVersion,
+    NodeId, NodeRegistration, RoleId, TaskId, TaskRef,
+};
 
 use super::ExecutionIntent;
 use super::ExecutionRecoverySupport;
@@ -9,6 +12,9 @@ use super::ExecutionSessionDescriptor;
 /// A command sent through the runtime to a local node.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionCommand {
+    /// Original dispatch registration evidence; absent history never gains a later provider snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    registration_evidence: Option<ExecutionRegistrationEvidence>,
     /// Mission-scoped task whose role is being invoked.
     task_ref: TaskRef,
     /// Execution group that owns the role lifecycle.
@@ -41,6 +47,7 @@ impl ExecutionCommand {
         correlation_id: CorrelationId,
     ) -> Self {
         Self {
+            registration_evidence: None,
             task_ref: TaskRef::new(mission_id, task_id),
             group_id,
             role_id,
@@ -55,6 +62,20 @@ impl ExecutionCommand {
     /// Returns the complete mission-scoped task identity.
     pub const fn task_ref(&self) -> &TaskRef {
         &self.task_ref
+    }
+
+    /// Attaches composition-supplied original registration evidence outside semantic model parameters.
+    pub fn with_registration_evidence(
+        mut self,
+        evidence: Option<ExecutionRegistrationEvidence>,
+    ) -> Self {
+        self.registration_evidence = evidence;
+        self
+    }
+
+    /// Returns dispatch-time declarations without consulting newer registration or renewing evidence.
+    pub const fn registration_evidence(&self) -> Option<&ExecutionRegistrationEvidence> {
+        self.registration_evidence.as_ref()
     }
 
     /// Returns the mission targeted by this command.
@@ -112,5 +133,54 @@ impl ExecutionCommand {
     /// Returns the operation correlation identity.
     pub fn correlation_id(&self) -> &CorrelationId {
         &self.correlation_id
+    }
+}
+
+/// Immutable registration claims observed by the Controller before this attempt's dispatch.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionRegistrationEvidence {
+    /// Original Node identity; it must match the command's retained physical owner.
+    node_id: NodeId,
+    /// Explicitly negotiated source contract rather than current software version.
+    contract_version: NodeContractVersion,
+    /// Actual accepted source route at preparation; this history does not renew its lease.
+    source_session_id: Option<String>,
+    /// Bounded registered provider declarations; bytes and configured Local How remain outside Core.
+    memory_providers: Vec<MemoryProviderDescriptor>,
+}
+
+impl ExecutionRegistrationEvidence {
+    /// Copies actual existing registration evidence without asserting hardware or backend continuity.
+    pub fn from_registration(
+        registration: &NodeRegistration,
+        source_session_id: Option<&str>,
+    ) -> Self {
+        Self {
+            node_id: registration.node_id().clone(),
+            contract_version: registration.contract_version().clone(),
+            source_session_id: source_session_id.map(str::to_string),
+            memory_providers: registration.memory_providers().to_vec(),
+        }
+    }
+
+    /// Returns the original registered Node owning the provider claims.
+    pub const fn node_id(&self) -> &NodeId {
+        &self.node_id
+    }
+
+    /// Returns the original negotiated protocol contract.
+    pub const fn contract_version(&self) -> &NodeContractVersion {
+        &self.contract_version
+    }
+
+    /// Returns the original accepted session, independently of its current validity.
+    pub fn source_session_id(&self) -> Option<&str> {
+        self.source_session_id.as_deref()
+    }
+
+    /// Returns the original source declarations, never current placement or availability.
+    pub fn memory_providers(&self) -> &[MemoryProviderDescriptor] {
+        &self.memory_providers
     }
 }

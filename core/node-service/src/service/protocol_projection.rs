@@ -164,7 +164,8 @@ pub(super) fn registration_from_readiness(
         .collect();
     let current_contract = matches!(
         catalog.node_contract_version(),
-        integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::NODE_CONTRACT_VERSION
     );
     let capabilities = if current_contract {

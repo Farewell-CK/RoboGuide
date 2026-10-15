@@ -117,7 +117,15 @@ Memory continuity 的当前配置使用 Node Contract v0.7 / config v0.8，见
 digest 和实际 provider instance 在副作用前保留；readonly query 有独立持久预算，不重复
 import。Controller wrapper v31、Memory event codec v22 与 Node journal v7 分别 fence 回退；
 旧 Node binary 的写入拒绝已通过实际进程检查。当前 Imported 仍是历史证据，不授予可用性租约。
-完整 Group 授权、GC/active-map、空间计算和后续阶段继续按全部非发布计划实施。
+该历史连续性切片不关闭完整 Group 授权、GC/active-map 和后续阶段。
+
+Typed-map producer 当前使用 [catalog v0.11](../../contracts/node/v0.11/README.md)、Node config
+v0.9 / Contract v0.8 和 [map v0.2](../../contracts/spatial/v0.2/README.md)。Runtime 冻结原 dispatch
+声明，旧字段不从新注册补齐；Node 通过实际当前 session 发布原 build 的 bytes/provenance。
+当前 wrapper v33、map codec v24、journal v8 保持旧 authority 读取并拒绝旧二进制写入。
+实际 mTLS、独立文件检查、重启与降级拒绝见
+[producer 验收](acceptance/2026-10-15-f4-map-provider-authority.md)。Memory consumer、preparation、
+完整 typed-map policy、handoff、active-map/GC 和其余阶段继续实施。
 
 Mission Request v0.4 由 Engine 显式编排 Dialogue -> Grounding Snapshot -> Draft -> Review ->
 bounded Repair；Reviewer

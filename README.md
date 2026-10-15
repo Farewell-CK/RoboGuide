@@ -41,7 +41,9 @@ FPFH/RANSAC、ICP、pose-graph、观测点分块融合和不可变增量 revisio
 host monotonic deadline 的预算门禁，见[后续文件验收](docs/development/acceptance/2026-10-15-f4-planar-and-clock-budget.md)。
 私有 Unix Local How、正式 Node workflow/CAS publication、独立文件验证与无重复计算重启链路
 已通过实际软件进程验收，见[Node/Spatial 验收](docs/development/acceptance/2026-10-15-f4-spatial-node.md)。
-本次是显式 loopback 兼容配置；远程 typed-map provider 权威、Group grant、active-map/GC 仍须完成。
+原记录为显式 loopback 兼容配置。后续 [producer 权威验收](docs/development/acceptance/2026-10-15-f4-map-provider-authority.md)
+通过实际 mTLS、原始 dispatch/provider 快照及旧二进制拒绝检查；没有设备参与。
+完整 Group grant/preparation、typed-map 完整内容策略、active-map/GC 与其余阶段继续实施。
 
 ## 系统目标
 

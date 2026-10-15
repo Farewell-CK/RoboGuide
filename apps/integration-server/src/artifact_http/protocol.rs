@@ -19,6 +19,52 @@ pub(super) struct UploadFinalize {
     pub(super) byte_size: u64,
 }
 
+/// Explicit current publication context, separate from immutable original build provenance.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MapPublicationInput {
+    /// Exact request envelope schema.
+    schema: String,
+    /// Immutable producer-bound map manifest.
+    manifest: MapArtifactManifest,
+    /// Current Runtime publication attempt; the Controller resolves its authority independently.
+    execution_id: String,
+}
+
+/// Reads either explicit historical metadata or the complete provider-bound publication request.
+pub(super) fn parse_map_publication(
+    request: &Request,
+) -> Result<(MapArtifactManifest, Option<String>), HttpError> {
+    let value: serde_json::Value = parse_json(&request.body)?;
+    if value.get("schema").and_then(serde_json::Value::as_str)
+        == Some("roboguide.map-publication/v0.1")
+    {
+        let input: MapPublicationInput =
+            serde_json::from_value(value).map_err(|e| HttpError::bad_request(e.to_string()))?;
+        if input.schema != "roboguide.map-publication/v0.1"
+            || input.manifest.schema_version() != domain::SPATIAL_MEMORY_SCHEMA_V0_2
+            || input.execution_id.is_empty()
+            || input.execution_id.len() > 1024
+            || input.execution_id.trim() != input.execution_id
+            || input.execution_id.chars().any(char::is_control)
+        {
+            return Err(HttpError::bad_request(
+                "invalid original/current map publication context",
+            ));
+        }
+        Ok((input.manifest, Some(input.execution_id)))
+    } else {
+        let manifest: MapArtifactManifest =
+            serde_json::from_value(value).map_err(|e| HttpError::bad_request(e.to_string()))?;
+        if manifest.producer_provider_id().is_some() {
+            return Err(HttpError::bad_request(
+                "provider-bound maps require the publication envelope",
+            ));
+        }
+        Ok((manifest, None))
+    }
+}
+
 /// Node replica evidence request body.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

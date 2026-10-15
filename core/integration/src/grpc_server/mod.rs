@@ -6,7 +6,7 @@ use crate::grpc::v0_4::server_message::Message as ServerPayload;
 use crate::grpc::v0_4::{
     Ack, CONTINUITY_NODE_CONTRACT_VERSION, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION,
     MemoryImport, NODE_CONTRACT_VERSION, NodeMessage, PREVIOUS_NODE_CONTRACT_VERSION,
-    PROTOCOL_VERSION, Registered, ServerMessage, Welcome,
+    PROTOCOL_VERSION, PROVIDER_MAP_NODE_CONTRACT_VERSION, Registered, ServerMessage, Welcome,
 };
 use ports::{
     Clock, DiagnosticHandle, DiagnosticStage, NodeFactMetadata, NodeLeasePolicy, NodeProtocolPolicy,
@@ -430,7 +430,7 @@ impl GrpcNodeRouter {
             .ok_or_else(|| Status::unavailable("node is not connected"))?;
         self.validate_identity(node_id, &route.session_id)?;
         self.validate_certificate_expiry(route)?;
-        if route.node_contract_version != CONTINUITY_NODE_CONTRACT_VERSION
+        if !crate::grpc::v0_4::supports_memory_continuity(&route.node_contract_version)
             || !route.active
             || !route.supports_memory_import
         {
@@ -1157,6 +1157,7 @@ async fn run_grpc_session(
         ));
     }
     let node_contract = [
+        PROVIDER_MAP_NODE_CONTRACT_VERSION,
         CONTINUITY_NODE_CONTRACT_VERSION,
         NODE_CONTRACT_VERSION,
         PREVIOUS_NODE_CONTRACT_VERSION,
@@ -1469,7 +1470,8 @@ fn invocation_for_contract(
     node_contract_version: &str,
 ) -> Result<crate::grpc::v0_4::CanonicalInvocation, Status> {
     match node_contract_version {
-        CONTINUITY_NODE_CONTRACT_VERSION
+        PROVIDER_MAP_NODE_CONTRACT_VERSION
+        | CONTINUITY_NODE_CONTRACT_VERSION
         | NODE_CONTRACT_VERSION
         | PREVIOUS_NODE_CONTRACT_VERSION => {
             if !invocation.capability_contract.is_empty() || !invocation.parameters.is_empty() {

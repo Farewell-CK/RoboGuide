@@ -3,6 +3,19 @@
 use super::*;
 /// Composition-owned admission for Node-authored typed evidence and generic Memory claims.
 pub trait MemoryProviderAdmission: Send + Sync {
+    /// Admits original map producer provenance and its distinct current publishing attempt.
+    fn admit_map_publication(
+        &self,
+        manifest: &MapArtifactManifest,
+        _publisher: Option<&MemoryPublicationIdentity>,
+        _execution_id: Option<&str>,
+    ) -> Result<(), String> {
+        if manifest.producer_provider_id().is_some() {
+            Err("registered map publication authority is unavailable".into())
+        } else {
+            Ok(())
+        }
+    }
     /// Applies original typed-map producer tenant and full immutable content policy at the composition.
     fn authorize_map_access(
         &self,
@@ -113,6 +126,15 @@ pub struct MemoryPublicationIdentity {
 
 /// Admission check serialized with one durable catalog/evidence append.
 enum EvidenceWriteAdmission<'a> {
+    /// Exact provider-bound map publication checked inside the actual catalog writer ordering.
+    Map {
+        /// Current composition authority.
+        authority: &'a dyn MemoryProviderAdmission,
+        /// Accepted Node route context; it is not authentication.
+        publisher: Option<&'a MemoryPublicationIdentity>,
+        /// Current publish attempt, distinct from the retained source build attempt.
+        execution_id: Option<&'a str>,
+    },
     /// Revalidate an authenticated map/upload request without inventing Node-authored evidence.
     Artifact {
         /// Current request authentication and exact content/source policy.
@@ -368,6 +390,24 @@ impl ArtifactCatalog {
         )
     }
 
+    /// Commits an exact typed-map publication after final current provider/session/attempt admission.
+    pub(super) fn append_map(
+        &self,
+        manifest: MapArtifactManifest,
+        authority: &dyn MemoryProviderAdmission,
+        publisher: Option<&MemoryPublicationIdentity>,
+        execution_id: Option<&str>,
+    ) -> Result<TimestampMs, HttpError> {
+        self.append_with_admission(
+            EventPayload::MapArtifactPublished { manifest },
+            Some(EvidenceWriteAdmission::Map {
+                authority,
+                publisher,
+                execution_id,
+            }),
+        )
+    }
+
     /// Appends one generic Memory event after admission under the shared Controller write gate.
     pub(super) fn append_memory(
         &self,
@@ -418,6 +458,7 @@ impl ArtifactCatalog {
         if let Some(admission) = admission {
             let authority = match &admission {
                 EvidenceWriteAdmission::Artifact { authority }
+                | EvidenceWriteAdmission::Map { authority, .. }
                 | EvidenceWriteAdmission::Memory { authority, .. }
                 | EvidenceWriteAdmission::NodePublisher { authority, .. } => *authority,
             };
@@ -425,6 +466,20 @@ impl ArtifactCatalog {
                 .admit_artifact_payload(&payload)
                 .map_err(HttpError::forbidden)?;
             match admission {
+                EvidenceWriteAdmission::Map {
+                    authority,
+                    publisher,
+                    execution_id,
+                } => {
+                    let EventPayload::MapArtifactPublished { manifest } = &payload else {
+                        return Err(HttpError::internal(
+                            "map admission requires a map publication",
+                        ));
+                    };
+                    authority
+                        .admit_map_publication(manifest, publisher, execution_id)
+                        .map_err(HttpError::forbidden)?;
+                }
                 EvidenceWriteAdmission::Artifact { .. } => {}
                 EvidenceWriteAdmission::Memory {
                     authority,

@@ -46,6 +46,7 @@ impl LocalIntegrationEngine {
         let (peer_readiness, _) = broadcast::channel(256);
         Ok(Self {
             inner: Arc::new(EngineInner {
+                publication_session: Mutex::new(None),
                 catalog: Arc::new(catalog),
                 journal: Arc::new(journal),
                 drivers: driver_map,

@@ -106,6 +106,38 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         policy.evaluate(&records, decision, now)
     }
 
+    /// Freezes actual original declarations for all dispatch entrypoints and retains them on retry.
+    fn command_with_dispatch_registration(
+        &self,
+        execution_id: &str,
+        command: ExecutionCommand,
+    ) -> Result<ExecutionCommand, IntegrationRuntimeError> {
+        let evidence = if let Some(original) = self.runtime.execution_command(execution_id) {
+            if command.registration_evidence().is_some()
+                && command.registration_evidence() != original.registration_evidence()
+            {
+                return Err(IntegrationRuntimeError::Protocol(
+                    "retry changes original dispatch registration evidence".into(),
+                ));
+            }
+            original.registration_evidence().cloned()
+        } else {
+            self.state
+                .node(command.node_id())
+                .filter(|node| {
+                    node.registration().contract_version().as_str()
+                        == domain::NODE_CONTRACT_VERSION_V0_8
+                })
+                .map(|node| {
+                    domain::ExecutionRegistrationEvidence::from_registration(
+                        node.registration(),
+                        self.control.current_node_session(command.node_id()),
+                    )
+                })
+        };
+        Ok(command.with_registration_evidence(evidence))
+    }
+
     /// Prepares an existing Runtime command for durable application-level outbox delivery.
     ///
     /// This bridge deliberately performs no network side effect. The application must checkpoint
@@ -116,6 +148,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         command: ExecutionCommand,
         mut resource_ids: Vec<ResourceId>,
     ) -> Result<(), IntegrationRuntimeError> {
+        let command = self.command_with_dispatch_registration(&execution_id, command)?;
         let dispatch = self
             .runtime
             .validate_dispatch(&execution_id, &command, &resource_ids)
@@ -131,6 +164,23 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         Ok(())
     }
 
+    /// Compares immutable dispatch declarations with the same accepted route before any new Execute.
+    pub(super) fn dispatch_registration_is_current(&self, command: &ExecutionCommand) -> bool {
+        let Some(original) = command.registration_evidence() else {
+            return true;
+        };
+        original.node_id() == command.node_id()
+            && original.source_session_id().is_some()
+            && original.source_session_id() == self.control.current_node_session(command.node_id())
+            && self.state.node(command.node_id()).is_some_and(|node| {
+                node.registration().contract_version() == original.contract_version()
+                    && original
+                        .memory_providers()
+                        .iter()
+                        .all(|provider| node.registration().memory_providers().contains(provider))
+            })
+    }
+
     /// Delivers one already persisted Execute intent through the current Node route.
     pub(super) fn flush_dispatch_intent(
         &mut self,
@@ -138,6 +188,13 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         command: &ExecutionCommand,
         resource_ids: &mut Vec<ResourceId>,
     ) -> Result<(), IntegrationRuntimeError> {
+        if !self.dispatch_registration_is_current(command) {
+            return Err(IntegrationRuntimeError::Route(
+                tonic::Status::failed_precondition(
+                    "original dispatch registration/session changed; explicit reconciliation is required",
+                ),
+            ));
+        }
         resource_ids.sort();
         resource_ids.dedup();
         let session_json = command
@@ -208,6 +265,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         let mut delivered = 0;
         let mut first_error = None;
         for intent in intents {
+            if !self.dispatch_registration_is_current(&intent.command) {
+                continue;
+            }
             if held_groups.contains(intent.command.group_id()) {
                 continue;
             }
@@ -557,6 +617,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         if let Some(support) = recovery_support {
             command = command.with_recovery_support(support);
         }
+        let command = self.command_with_dispatch_registration(&execution_id, command)?;
         self.runtime
             .prepare_dispatch(execution_id, command.clone(), resource_ids)
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?;
@@ -853,6 +914,11 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime
             .execution_status(execution_id)
             .map(remote_status)
+    }
+
+    /// Exposes existing Runtime cancellation authority for final side-effect admission.
+    pub fn attempt_cancellation_pending(&self, execution_id: &str) -> bool {
+        self.runtime.cancellation_pending(execution_id)
     }
 
     /// Returns every retained physical attempt in deterministic identity order.

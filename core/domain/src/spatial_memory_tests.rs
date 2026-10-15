@@ -1,6 +1,74 @@
 //! Spatial Memory domain invariant tests.
 
 use super::*;
+use crate::TaskId;
+
+/// Constructs complete software provenance for schema checks, without asserting physical evidence.
+fn provider_map() -> MapArtifactManifest {
+    let mission = MissionId::new("file-computation").unwrap();
+    MapArtifactManifest::new_with_format(
+        artifact(),
+        "application/octet-stream",
+        "observed-file-tiles",
+        "v0.1",
+        NodeId::new("configured-compute").unwrap(),
+        Some(LocalSystemId::new("files").unwrap()),
+        mission.clone(),
+        Some("original-build-attempt".into()),
+        Some(TaskRef::new(mission, TaskId::new("build").unwrap())),
+        "source-frame",
+        "declared-file-frame",
+        SpatialAnchorId::new("source-anchor").unwrap(),
+        Some(0.05),
+        TimestampMs::new(42),
+        None,
+    )
+    .unwrap()
+    .with_producer_provider("configured-provider", "source-content/v1")
+    .unwrap()
+}
+
+/// Old metadata stays old; a new provider cannot be inferred or substituted during deserialization.
+#[test]
+fn provider_map_requires_complete_original_provenance_and_rejects_legacy_claims() {
+    let map = provider_map();
+    let value = serde_json::to_value(&map).unwrap();
+    assert_eq!(value["schema"], SPATIAL_MEMORY_SCHEMA_V0_2);
+    assert_eq!(
+        serde_json::from_value::<MapArtifactManifest>(value.clone()).unwrap(),
+        map
+    );
+    for field in [
+        "producer_provider_id",
+        "payload_schema",
+        "producer_local_system_id",
+        "source_task_ref",
+        "source_execution_id",
+    ] {
+        let mut missing = value.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<MapArtifactManifest>(missing).is_err(),
+            "missing original {field}"
+        );
+    }
+    let mut legacy = value.clone();
+    legacy["schema"] = serde_json::json!(SPATIAL_MEMORY_SCHEMA_V0_1);
+    assert!(serde_json::from_value::<MapArtifactManifest>(legacy.clone()).is_err());
+    for field in ["producer_provider_id", "payload_schema"] {
+        legacy.as_object_mut().unwrap().remove(field);
+    }
+    let historical: MapArtifactManifest = serde_json::from_value(legacy).unwrap();
+    assert_eq!(historical.producer_provider_id(), None);
+    assert_eq!(historical.payload_schema(), None);
+    assert!(
+        map.clone()
+            .with_producer_provider("other-provider", "source-content/v1")
+            .is_err()
+    );
+    let copied = map.with_artifact(map.artifact().clone()).unwrap();
+    assert_eq!(copied.producer_provider_id(), Some("configured-provider"));
+}
 
 /// Builds one valid immutable artifact reference for manifest tests.
 fn artifact() -> MapArtifactRef {

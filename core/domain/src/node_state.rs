@@ -490,7 +490,9 @@ impl NodeRegistration {
         if !operation_support.is_empty()
             && !matches!(
                 self.contract_version.as_str(),
-                NODE_CONTRACT_VERSION_V0_6 | NODE_CONTRACT_VERSION_V0_7
+                NODE_CONTRACT_VERSION_V0_6
+                    | NODE_CONTRACT_VERSION_V0_7
+                    | NODE_CONTRACT_VERSION_V0_8
             )
         {
             return Err(DomainError::InvalidMissionPlan {

@@ -15,7 +15,7 @@ pub(super) fn configure_connection(connection: &Connection) -> Result<(), Journa
 pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
     let prior_version =
         connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
-    if prior_version > 7 {
+    if prior_version > 8 {
         return Err(JournalError::Corrupt(
             "journal was written by a newer storage authority".into(),
         ));
@@ -30,7 +30,9 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
             |row| row.get(0),
         )
         .optional()?;
-    if marker.is_some_and(|version| version != 7) {
+    if marker.is_some_and(|version| !matches!(version, 7 | 8))
+        || (prior_version >= 7 && marker.is_none())
+    {
         return Err(JournalError::Corrupt(
             "journal storage marker is unsupported".into(),
         ));
@@ -124,10 +126,11 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
         CREATE VIEW IF NOT EXISTS memory_imports AS SELECT * FROM memory_import_authority_v7;",
     )?;
     transaction.execute(
-        "INSERT OR IGNORE INTO node_journal_storage_schema VALUES (1,7)",
+        "INSERT INTO node_journal_storage_schema VALUES (1,8)
+         ON CONFLICT(singleton) DO UPDATE SET version=8",
         [],
     )?;
-    transaction.pragma_update(None, "user_version", 7_i64)?;
+    transaction.pragma_update(None, "user_version", 8_i64)?;
     transaction.commit()?;
     Ok(())
 }

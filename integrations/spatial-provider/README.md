@@ -71,6 +71,12 @@ PYTHONPATH=integrations/spatial-provider /absolute/spatial-venv/bin/python \
   --output /absolute/node.toml
 ```
 
+HTTPS Node transport requires `ROBOGUIDE_NODE_MTLS_CLIENT_CERT`, `_CLIENT_KEY`, `_SERVER_CA` and
+`_DOMAIN`; Artifact HTTPS requires `ROBOGUIDE_ARTIFACT_CLIENT_CERT`, `_KEY` and `_CA`. Controller
+enrollment and actual certificate grants must authorize that configured software Node and provider.
+See the [identity contract](../../docs/development/identity-lifecycle-v0.1.md). The conformance tool
+creates private software test credentials; these establish no hardware identity.
+
 The [local contract](../../contracts/spatial/local-service-v0.1/README.md) fixes routes and profile
 fields. Node identity, endpoints, profiles and all source files belong to deployment. The generator
 creates no processes, registration or device inventory. Multiple configured slots use the same
@@ -82,5 +88,10 @@ certificate or device safe-state observation.
 
 [Process acceptance](../../docs/development/acceptance/2026-10-15-f4-spatial-node.md) exercises actual
 computation, formal Node Protocol, CAS, independent verification and restart without another worker.
-It uses the explicit trusted-loopback compatibility profile. Remote typed-map producer/provider
-authority, distributed Group grants/preparation, active-map and GC remain required F4 work.
+The first record used trusted-loopback compatibility. The subsequent
+[producer authority check](../../docs/development/acceptance/2026-10-15-f4-map-provider-authority.md)
+uses actual Node/Operator/Artifact mTLS, Node enrollment, frozen original dispatch declarations and
+map v0.2, with config v0.9 / Contract v0.8. It rejects current route/provider/format impersonation and
+actual archived binaries. These are same-host software processes, with zero devices or models.
+Distributed Group grants/preparation, full typed-map content-policy binding, active-map and GC
+remain required F4 work.
