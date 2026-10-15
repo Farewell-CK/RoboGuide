@@ -18,7 +18,7 @@ struct PreemptionCommand {
 pub(super) fn preempt(
     controller: &Arc<Mutex<ControllerState>>,
     events: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     clock: &impl Clock,
     path: &str,
     body: &str,
@@ -45,9 +45,7 @@ pub(super) fn preempt(
         Ok(request) => request,
         Err(error) => return Ok(("400 Bad Request", serde_json::json!({"error":error}))),
     };
-    let _gate = gate
-        .lock()
-        .map_err(|_| "event-log write gate is poisoned")?;
+    let _gate = gate.lock()?;
     events.begin_batch()?;
     let result = (|| {
         let mut live = controller.lock().map_err(|_| {

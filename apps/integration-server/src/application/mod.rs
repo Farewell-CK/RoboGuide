@@ -33,6 +33,7 @@ mod task_verifier;
 pub(crate) mod tenant;
 mod timer;
 mod verifier_source;
+mod write_gate;
 #[cfg(test)]
 pub(crate) use isolation::resume_mission_candidate;
 pub(crate) use isolation::resume_mission_candidate_with_policy;
@@ -40,6 +41,7 @@ pub(crate) use isolation::{
     flush_unisolated_commands, flush_unisolated_dispatch, run_mission_transition,
     validate_isolation_checkpoint_schema,
 };
+pub(crate) use write_gate::{ApplicationWriteGate, run_synchronous_transaction};
 
 pub(crate) use actor_placement::{
     load_actor_placement_file, validate_actor_placement_coverage,

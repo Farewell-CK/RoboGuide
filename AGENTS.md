@@ -106,6 +106,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   device is invented by its certificate/upload check. Node-wide Group grants/revocation ACK,
   pre-Execute Memory readiness, full handoff, active-map/GC and spatial computation remain required
   F4 work. Do not claim complete distributed Group authorization from these current gates alone.
+- Operator HTTP mutation transactions retain an actual-transport witness through the real writer gate.
+  Current leaf expiry, committed/deployment grants, principal, role, tenant and Mission ownership are
+  rechecked after acquiring that mutex, before candidate/SQL mutation. The same guard spans Commit or
+  rollback; no nested/fake mutex grants authority. Registry SQL hands the Tokio worker back; other
+  blocking/degraded-read paths remain F10 work. `tools/quality/check_identity_processes.py` uses actual
+  HTTPS, SQLite and inotify to observe original grant reads, queue work, revoke the leaf and verify
+  that no second registry revision commits. It registers zero Node facts.
 - `core/orchestration/` owns complete MissionPlan acceptance, Mission-level Group
   creation, DAG-driven TaskExecution readiness, and explicit Mission completion.
 - ADR-0092 fences the reviewed reliability slice: wrapper v26 and failure-window event codec v19

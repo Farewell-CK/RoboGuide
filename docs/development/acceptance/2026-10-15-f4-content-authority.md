@@ -72,7 +72,8 @@ Python 2463 项、strict mypy 198 sources、Ruff/format 207 files、函数文档
 
 仍须实现并验收 Node Group grant/接收预算/撤销 ACK、pre-Execute Memory prerequisite、当前
 availability、运行中撤销 stop/handoff、parent/child exchange、active-map、tombstone/完整引用图/
-GC 和空间配准/融合/增量。旧 Group 的显式可信迁移、全部 Operator mutation 的事务内身份
-重查、typed-map 完整远端 provider/session 接线、HA 内容恢复及索引/锁性能也须在 F4–F10
+GC 和完整空间接线。后续[实际点云计算](2026-10-15-f4-spatial-files.md)与
+[Operator 事务内身份重查](2026-10-15-f4-operator-transactions.md)已有单独验收，不改写本轮历史。
+旧 Group 的显式可信迁移、typed-map 完整远端 provider/session 接线、HA 内容恢复及索引/锁性能仍须在 F4–F10
 闭环。真实停止、硬件身份、硬实时和物理连续性保持 HardwareEvidencePending；整体尚未
 SoftwareComplete。

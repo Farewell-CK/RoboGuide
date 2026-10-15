@@ -586,14 +586,14 @@ fn receipt_from_value(value: &serde_json::Value) -> Result<MemoryImportQueryRece
 pub(crate) fn submit(
     controller: &Arc<Mutex<ControllerState>>,
     events: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     clock: &impl Clock,
     body: &[u8],
     principal: &str,
 ) -> Result<serde_json::Value, String> {
     let request: MemoryQueryRequest = serde_json::from_slice(body).map_err(|e| e.to_string())?;
     let id = request.import_id.clone();
-    let _guard = gate.lock().map_err(|_| "Memory query writer unavailable")?;
+    let _guard = gate.lock()?;
     events.begin_batch().map_err(|e| e.to_string())?;
     let result = (|| {
         let mut live = controller

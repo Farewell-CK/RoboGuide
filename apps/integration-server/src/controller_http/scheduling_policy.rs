@@ -14,7 +14,7 @@ struct PriorityCommand {
 pub(super) fn update_priority(
     controller: &Arc<Mutex<ControllerState>>,
     events: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     clock: &impl Clock,
     path: &str,
     body: &str,
@@ -33,9 +33,7 @@ pub(super) fn update_priority(
         path.trim_start_matches("/v1/missions/")
             .trim_end_matches("/scheduling-policy"),
     )?;
-    let _guard = gate
-        .lock()
-        .map_err(|_| "event-log write gate is poisoned")?;
+    let _guard = gate.lock()?;
     events.begin_batch()?;
     let result = (|| {
         let mut live = controller.lock().map_err(|_| {

@@ -82,3 +82,10 @@ CAS 放置后形成 Completed 归属。最终 SQL 失败可以对原 CAS identit
 v7 不变。上传归属事件在完整 snapshot/archive/replay 合同落地前不能 GC。原始工作流 context
 保持不变；Node 从既有 continuity identity 读取 opaque import purpose，通过当前 Controller
 查验其实际权限。该 purpose 不是 bearer credential，也不证明 Local EAIOS 已停止或执行完成。
+
+Operator 请求同样携带显式 transport witness 到真实应用 writer gate。取得锁后重新核对
+actual leaf/notAfter、部署文件与已提交 registry、稳定 principal、role、tenant 和当前 Mission
+归属，再向应用事务提供同一 mutex guard。排队期间的撤权不能沿旧字符串主体执行；内部
+startup/timer/Node 输入仍走同一真实 writer。Registry SQL 使用 Tokio 的同步事务 worker handoff，
+使真实排队检查可推进；这不声称全部存储阻塞或 degraded-read 问题已经关闭。见
+[实际排队撤权验收](../development/acceptance/2026-10-15-f4-operator-transactions.md)。

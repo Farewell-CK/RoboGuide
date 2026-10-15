@@ -86,7 +86,7 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
         tenants: None,
         subject: Some("test:viewer".into()),
         role: Some("viewer".into()),
-        mtls: true,
+        mtls: false,
     };
     let plan = include_bytes!("../../../../scenarios/phase1-mission-v0.3/mission-plan.json");
     for path in [
@@ -139,7 +139,7 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
         tenants: None,
         subject: Some("test:operator".into()),
         role: Some("operator".into()),
-        mtls: true,
+        mtls: false,
     };
     assert!(
         route(
@@ -171,7 +171,7 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
         tenants: None,
         subject: Some("test:recovery-admin".into()),
         role: Some(RECOVERY_ADMIN_ROLE.into()),
-        mtls: true,
+        mtls: false,
     };
     assert!(
         route(
@@ -211,7 +211,7 @@ async fn tenant_administrator_cannot_read_or_replace_global_source_and_content_a
         tenants: Some(BTreeSet::from(["tenant-a".into()])),
         subject: Some("scoped-admin".into()),
         role: Some("recovery-admin".into()),
-        mtls: true,
+        mtls: false,
     };
     let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
     for path in [
@@ -316,7 +316,7 @@ async fn review_sql_failure_preserves_quarantine_and_next_review_succeeds() {
         tenants: None,
         subject: Some("test:recovery-admin".into()),
         role: Some(RECOVERY_ADMIN_ROLE.into()),
-        mtls: true,
+        mtls: false,
     };
     let bytes = request(
         "POST",
@@ -534,14 +534,14 @@ async fn node_identity_http_commands_are_authorized_durable_and_do_not_invent_no
         tenants: None,
         subject: Some("sha256:admin-leaf".into()),
         role: Some(RECOVERY_ADMIN_ROLE.into()),
-        mtls: true,
+        mtls: false,
     };
     let operator = OperatorPrincipal {
         certificate: None,
         tenants: None,
         subject: Some("sha256:operator-leaf".into()),
         role: Some("operator".into()),
-        mtls: true,
+        mtls: false,
     };
     let register = domain::IdentityCommand {
         command_id: "initial-enrolment".into(),
@@ -643,7 +643,7 @@ async fn node_identity_sql_failure_preserves_the_original_registry() {
         tenants: None,
         subject: Some("admin".into()),
         role: Some(RECOVERY_ADMIN_ROLE.into()),
-        mtls: true,
+        mtls: false,
     };
     let command = domain::IdentityCommand {
         command_id: "enrol".into(),
@@ -715,14 +715,14 @@ async fn tenant_http_scope_and_legacy_migration_preserve_plan_and_ownership() {
         tenants: Some(BTreeSet::from(["*".into()])),
         subject: Some("test:admin".into()),
         role: Some(RECOVERY_ADMIN_ROLE.into()),
-        mtls: true,
+        mtls: false,
     };
     let scoped = OperatorPrincipal {
         certificate: None,
         tenants: Some(BTreeSet::from(["a".into()])),
         subject: Some("test:tenant-a".into()),
         role: Some("operator".into()),
-        mtls: true,
+        mtls: false,
     };
     assert!(
         route(
@@ -911,4 +911,144 @@ async fn operator_authorization_fences_captured_principal_and_restart_rollback()
         .await
         .starts_with("HTTP/1.1 401")
     );
+}
+
+/// A parsed administrator command waits on the real writer while revocation commits ahead of it.
+#[test]
+fn queued_operator_command_rechecks_transport_authority_before_any_mutation() {
+    for change in ["revoked", "role", "tenant", "validity", "unchanged"] {
+        let directory = tempfile::tempdir().unwrap();
+        let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+        let controller = controller(&log);
+        let gate = Arc::new(Mutex::new(()));
+        let path = directory.path().join("operator.json");
+        let digest = format!("sha256:{}", "b".repeat(64));
+        let mut profile = domain::OperatorAuthorization {
+            schema_version: "roboguide.operator-authorization/v0.1".into(),
+            registry_id: "queued-authority".into(),
+            revision: 1,
+            grants: BTreeMap::from([(
+                digest.clone(),
+                domain::OperatorCertificateGrant {
+                    principal_id: "original-stable-admin".into(),
+                    role: RECOVERY_ADMIN_ROLE.into(),
+                    tenant_ids: BTreeSet::from(["*".into()]),
+                    not_before_ms: 0,
+                    expires_at_ms: 0,
+                    revoked: false,
+                },
+            )]),
+        };
+        std::fs::write(&path, serde_json::to_vec(&profile).unwrap()).unwrap();
+        synchronize_authority(&controller, &log, &gate, Some(profile.clone())).unwrap();
+        let principal = OperatorPrincipal {
+            certificate: Some(OperatorCertificateContext {
+                digest: digest.clone(),
+                expires_at_ms: u64::MAX,
+                path: path.clone(),
+            }),
+            tenants: Some(BTreeSet::from(["*".into()])),
+            subject: Some("original-stable-admin".into()),
+            role: Some(RECOVERY_ADMIN_ROLE.into()),
+            mtls: true,
+        };
+        let metadata = ControlHttpRequest {
+            method: "POST".into(),
+            target: "/v1/memory-authorizations".into(),
+            headers: BTreeMap::new(),
+            body: Vec::new(),
+        };
+        let request_gate = Arc::new(AuthorizedRequestGate::new(
+            gate.clone(),
+            controller.clone(),
+            principal,
+            &metadata,
+            None,
+            domain::TimestampMs::new(10),
+        ));
+        let body = serde_json::to_vec(&serde_json::json!({
+            "command_id":"queued-original-command", "expected_revision":0,
+            "registry":{"schema_version":domain::MEMORY_AUTHORIZATION_SCHEMA,
+                        "registry_id":"queued-memory", "revision":1, "policies":{}}
+        }))
+        .unwrap();
+        let writer = gate.lock().unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let pending = {
+            let controller = controller.clone();
+            let log = log.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                application::state_policy::submit_memory(
+                    &controller,
+                    &log,
+                    &request_gate,
+                    &body,
+                    "original-stable-admin",
+                    domain::TimestampMs::new(10),
+                )
+            })
+        };
+        barrier.wait();
+        profile.revision += 1;
+        let grant = profile.grants.get_mut(&digest).unwrap();
+        match change {
+            "revoked" => grant.revoked = true,
+            "role" => {
+                grant.role = "viewer".into();
+                grant.tenant_ids = BTreeSet::from(["a".into()]);
+            }
+            "tenant" => grant.tenant_ids = BTreeSet::from(["a".into()]),
+            "validity" => grant.expires_at_ms = 5,
+            "unchanged" => {}
+            _ => unreachable!(),
+        }
+        std::fs::write(&path, serde_json::to_vec(&profile).unwrap()).unwrap();
+        let before = {
+            let mut live = controller.lock().unwrap();
+            let mut candidate = live.clone();
+            candidate
+                .bridge
+                .control_mut()
+                .accept_operator_authorization(Some(profile))
+                .unwrap();
+            let checkpoint = server_checkpoint_json(&candidate).unwrap();
+            log.begin_batch().unwrap();
+            save_controller_checkpoint(&log, &checkpoint).unwrap();
+            log.commit_batch().unwrap();
+            *live = candidate;
+            checkpoint
+        };
+        let committed = log.load_checkpoint().unwrap().unwrap();
+        let count = log.len().unwrap();
+        drop(writer);
+        let result = pending.join().unwrap();
+        if change == "unchanged" {
+            assert!(result.is_ok(), "{result:?}");
+            assert!(
+                controller
+                    .lock()
+                    .unwrap()
+                    .bridge
+                    .control()
+                    .memory_authorization_registry()
+                    .is_some()
+            );
+        } else {
+            assert!(
+                result.is_err(),
+                "stale {change} command committed: {result:?}"
+            );
+            assert_eq!(
+                server_checkpoint_json(&controller.lock().unwrap()).unwrap(),
+                before
+            );
+            assert_eq!(
+                log.load_checkpoint().unwrap().unwrap().checkpoint_json,
+                committed.checkpoint_json
+            );
+            assert_eq!(log.len().unwrap(), count);
+        }
+    }
 }

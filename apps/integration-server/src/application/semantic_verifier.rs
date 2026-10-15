@@ -133,7 +133,7 @@ fn validate_input(
 pub(crate) fn submit(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     clock: &impl Clock,
     body: &[u8],
     subject: &str,
@@ -144,9 +144,7 @@ pub(crate) fn submit(
     if tenant.is_some_and(|tenant| tenant != input.tenant_id) {
         return Err("verifier evidence belongs to another tenant".into());
     }
-    let _gate = gate
-        .lock()
-        .map_err(|_| "application write gate is poisoned")?;
+    let _gate = gate.lock()?;
     let mut live = controller
         .lock()
         .map_err(|_| "controller lock is poisoned")?;

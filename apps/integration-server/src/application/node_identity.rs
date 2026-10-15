@@ -6,16 +6,14 @@ use crate::*;
 pub(crate) fn submit(
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
-    event_write_gate: &Arc<Mutex<()>>,
+    event_write_gate: &dyn crate::application::ApplicationWriteGate,
     clock: &impl Clock,
     body: &[u8],
     authority_subject: &str,
 ) -> Result<serde_json::Value, String> {
     let command: domain::IdentityCommand =
         serde_json::from_slice(body).map_err(|error| error.to_string())?;
-    let _gate = event_write_gate
-        .lock()
-        .map_err(|_| "event-log write gate is poisoned")?;
+    let _gate = event_write_gate.lock()?;
     let mut live = controller
         .lock()
         .map_err(|_| "controller lock is poisoned")?;

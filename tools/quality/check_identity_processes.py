@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import ctypes
 import hashlib
+import http.client
 import json
 import os
 import socket
+import sqlite3
 import ssl
+import struct
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -158,6 +164,145 @@ def stop(process: subprocess.Popen[bytes]) -> None:
             process.wait(timeout=5)
 
 
+def queued_revocation(
+    origin: str,
+    admin: ssl.SSLContext,
+    next_admin: ssl.SSLContext,
+    profile: dict[str, Any],
+    profile_path: Path,
+    database: Path,
+    directory: Path,
+    revoked_digest: str,
+) -> dict[str, Any]:
+    """Revoke queued HTTPS work after observing its original grant-file read."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.inotify_init1.argtypes = [ctypes.c_int]
+    libc.inotify_init1.restype = ctypes.c_int
+    libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+    libc.inotify_add_watch.restype = ctypes.c_int
+    descriptor = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+    if descriptor < 0:
+        raise OSError(ctypes.get_errno(), "cannot observe original authority reads")
+    try:
+        if libc.inotify_add_watch(descriptor, os.fsencode(profile_path), 0x30) < 0:
+            raise OSError(ctypes.get_errno(), "cannot watch the actual operator profile")
+
+        def reads(count: int) -> int:
+            """Wait for actual read-close events within the bounded injection window."""
+            observed = 0
+            deadline = time.monotonic() + 2
+            while observed < count and time.monotonic() < deadline:
+                try:
+                    content = os.read(descriptor, 65536)
+                except BlockingIOError:
+                    time.sleep(0.005)
+                    continue
+                offset = 0
+                while offset + 16 <= len(content):
+                    _, mask, _, size = struct.unpack_from("iIII", content, offset)
+                    if mask & 0x4000:
+                        raise ValueError("authority-read observation overflowed")
+                    observed += bool(mask & 0x10)
+                    offset += 16 + size
+            if observed < count:
+                raise TimeoutError(f"original authority read count {observed}/{count}")
+            return observed
+
+        first: dict[str, Any] = {
+            "command_id": str(uuid.uuid4()),
+            "expected_revision": 0,
+            "registry": {
+                "schema_version": "roboguide.memory-authorization/v0.1",
+                "registry_id": str(uuid.uuid4()),
+                "revision": 1,
+                "policies": {},
+            },
+        }
+        second = {
+            "command_id": str(uuid.uuid4()),
+            "expected_revision": 1,
+            "registry": {**first["registry"], "revision": 2},
+        }
+        endpoint = urllib.parse.urlsplit(origin)
+        assert endpoint.hostname is not None and endpoint.port is not None
+        with socket.create_connection((endpoint.hostname, endpoint.port), timeout=3) as raw:
+            with admin.wrap_socket(raw, server_hostname=endpoint.hostname) as waiting:
+                transport_reads = reads(1)
+                payload = json.dumps(second).encode()
+                waiting.sendall(
+                    b"POST /v1/memory-authorizations HTTP/1.1\r\nHost: localhost\r\n"
+                    + f"Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n".encode()
+                    + payload[:-1]
+                )
+
+                def finish_original_request() -> tuple[int, dict[str, Any]]:
+                    """Finish the already authenticated connection before deployment revocation."""
+                    waiting.sendall(payload[-1:])
+                    response = http.client.HTTPResponse(waiting)
+                    response.begin()
+                    value = json.loads(response.read(2 * 1024 * 1024 + 1))
+                    if not isinstance(value, dict):
+                        raise ValueError("queued Controller response is not an object")
+                    return response.status, value
+
+                with sqlite3.connect(database, timeout=1) as lock:
+                    lock.execute("BEGIN IMMEDIATE")
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as workers:
+                        try:
+                            original = workers.submit(
+                                request, origin, admin, "/v1/memory-authorizations", first
+                            )
+                            first_reads = reads(3)
+                            queued = workers.submit(finish_original_request)
+                            try:
+                                queued_reads = reads(1)
+                            except TimeoutError:
+                                lock.rollback()
+                                observed_failure = {
+                                    "original_result": original.result(timeout=4),
+                                    "queued_result": queued.result(timeout=4),
+                                }
+                                (directory / "queue-window-unavailable.json").write_text(
+                                    json.dumps(observed_failure, indent=2) + "\n"
+                                )
+                                raise
+                            profile["revision"] += 1
+                            profile["grants"][revoked_digest]["revoked"] = True
+                            temporary = profile_path.with_suffix(".pending")
+                            temporary.write_text(json.dumps(profile))
+                            temporary.replace(profile_path)
+                        finally:
+                            lock.rollback()
+                        original_result = original.result(timeout=4)
+                        queued_result = queued.result(timeout=4)
+        observed = {
+            "original_result": original_result,
+            "queued_result": queued_result,
+            "original_file_reads": first_reads,
+            "queued_transport_file_reads": transport_reads,
+            "queued_original_file_reads": queued_reads,
+        }
+        (directory / "queued-observation.json").write_text(json.dumps(observed, indent=2) + "\n")
+        assert original_result[0] == 200, original_result
+        assert queued_result[0] == 409, queued_result
+        assert "revision changed before transaction" in queued_result[1]["error"]
+        registry = request(origin, next_admin, "/v1/memory-authorizations")
+        assert registry[0] == 200 and registry[1]["registry"]["revision"] == 1, registry
+        evidence = {
+            "original_status": original_result[0],
+            "queued_status": queued_result[0],
+            "queued_rejection": queued_result[1],
+            "original_file_reads": first_reads,
+            "queued_original_file_reads": queued_reads,
+            "remaining_registry_revision": 1,
+            "second_command_not_committed": True,
+        }
+        (directory / "queued-revocation.json").write_text(json.dumps(evidence, indent=2) + "\n")
+        return evidence
+    finally:
+        os.close(descriptor)
+
+
 def run(directory: Path, skip_build: bool) -> dict[str, Any]:
     """Validate public identity transactions, restart, rollback and principal rotation."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -169,6 +314,7 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
             timeout=180,
         )
     binary = ROOT / "target/debug/integration-server"
+    binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
     certificates = directory / "pki"
     digests = pki(certificates)
     registry = {
@@ -202,6 +348,7 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
     }
     environment.update(
         {
+            "TOKIO_WORKER_THREADS": "8",
             "ROBOGUIDE_NODE_MTLS_SERVER_CERT": str(certificates / "server.crt"),
             "ROBOGUIDE_NODE_MTLS_SERVER_KEY": str(certificates / "server.key"),
             "ROBOGUIDE_NODE_MTLS_CLIENT_CA": str(certificates / "ca.crt"),
@@ -234,6 +381,8 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
 
     def start(identity: ssl.SSLContext) -> subprocess.Popen[bytes]:
         """Start the real composition root with its original storage and wait for public health."""
+        if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_sha256:
+            raise ValueError("Controller binary changed during the software check")
         path = directory / f"controller-{len(logs)}.log"
         logs.append(str(path))
         with path.open("wb") as output:
@@ -302,11 +451,16 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
             )[0]
             == 403
         )
-        grants["sha256:" + digests["admin"]]["revoked"] = True
-        profile["revision"] = 2
-        temporary = profile_path.with_suffix(".pending")
-        temporary.write_text(json.dumps(profile))
-        temporary.replace(profile_path)
+        queued = queued_revocation(
+            origin,
+            admin,
+            next_admin,
+            profile,
+            profile_path,
+            directory / "events.sqlite3",
+            directory,
+            "sha256:" + digests["admin"],
+        )
         assert request(origin, admin, "/v1/node-identities")[0] == 401
         before = request(origin, next_admin, "/v1/node-identities")[1]["registry"]
         stop(process)
@@ -320,7 +474,8 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
         return {
             "passed": True,
             "application_schema": schema,
-            "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+            "binary_sha256": binary_sha256,
+            "queued_revocation": queued,
             "registry_records": len(before["records"]),
             "registered_node_facts": 0,
             "hardware_identity": "HardwareEvidencePending",

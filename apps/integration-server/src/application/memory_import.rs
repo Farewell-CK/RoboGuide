@@ -558,7 +558,7 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
 pub(crate) fn submit(
     controller: &Arc<Mutex<ControllerState>>,
     events: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     clock: &impl Clock,
     body: &[u8],
     subject: &str,
@@ -569,9 +569,7 @@ pub(crate) fn submit(
         return Err("invalid original Memory import principal".into());
     }
     let id = request.import_id.clone();
-    let _guard = gate
-        .lock()
-        .map_err(|_| "Memory command writer ordering is unavailable")?;
+    let _guard = gate.lock()?;
     events.begin_batch().map_err(|error| error.to_string())?;
     let result = (|| {
         let mut live = controller

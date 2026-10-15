@@ -19,7 +19,7 @@ struct RegistryUpdate<R> {
 pub(crate) fn bootstrap_artifact(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     configured: Option<&domain::ArtifactAuthorizationRegistry>,
     tls_enabled: bool,
     now: domain::TimestampMs,
@@ -75,7 +75,7 @@ pub(crate) fn bootstrap_artifact(
 pub(crate) fn submit_artifact(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     body: &[u8],
     subject: &str,
     now: domain::TimestampMs,
@@ -103,7 +103,7 @@ pub(crate) fn submit_artifact(
 pub(crate) fn submit_memory(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     body: &[u8],
     subject: &str,
     now: domain::TimestampMs,
@@ -131,7 +131,7 @@ pub(crate) fn submit_memory(
 pub(crate) fn submit(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     body: &[u8],
     subject: &str,
     now: domain::TimestampMs,
@@ -156,7 +156,7 @@ pub(crate) fn submit(
 pub(crate) fn submit_verifiers(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     body: &[u8],
     subject: &str,
     now: domain::TimestampMs,
@@ -182,7 +182,7 @@ pub(crate) fn submit_verifiers(
 pub(crate) fn submit_beliefs(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     body: &[u8],
     subject: &str,
     now: domain::TimestampMs,
@@ -217,72 +217,72 @@ fn digest(value: &impl Serialize) -> Result<String, String> {
 fn commit_registry<R: Serialize>(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     input: &RegistryUpdate<R>,
     subject: &str,
     now: domain::TimestampMs,
     kind: domain::RegistryCommandKind,
     apply: impl FnOnce(&mut control::ControlPlane) -> Result<(), control::ControlError>,
 ) -> Result<serde_json::Value, String> {
-    let input_digest = digest(input)?;
-    let _gate = gate
-        .lock()
-        .map_err(|_| "application write gate is poisoned")?;
-    let mut live = controller
-        .lock()
-        .map_err(|_| "controller lock is poisoned")?;
-    if let Some(receipt) = live
-        .bridge
-        .control()
-        .registry_command_receipt(&input.command_id, kind, &input_digest, subject)
-        .map_err(|error| error.to_string())?
-    {
-        return Ok(
+    crate::application::run_synchronous_transaction(|| {
+        let input_digest = digest(input)?;
+        let _gate = gate.lock()?;
+        let mut live = controller
+            .lock()
+            .map_err(|_| "controller lock is poisoned")?;
+        if let Some(receipt) = live
+            .bridge
+            .control()
+            .registry_command_receipt(&input.command_id, kind, &input_digest, subject)
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(
+                serde_json::json!({"schema_version":"roboguide.registry-command-receipt/v0.1","receipt":receipt}),
+            );
+        }
+        let mut candidate = live.clone();
+        apply(candidate.bridge.control_mut()).map_err(|error| error.to_string())?;
+        let revision = serde_json::to_value(&input.registry)
+            .map_err(|error| error.to_string())?
+            .get("revision")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or("registry lacks revision")?;
+        let receipt = domain::RegistryCommandReceipt {
+            command_id: input.command_id.clone(),
+            kind,
+            input_digest,
+            registry_digest: digest(&input.registry)?,
+            revision,
+            authority_subject: subject.into(),
+            accepted_at_ms: now.as_millis(),
+        };
+        candidate
+            .bridge
+            .control_mut()
+            .retain_registry_command_receipt(receipt.clone())
+            .map_err(|error| error.to_string())?;
+        let checkpoint = server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
+        log.begin_batch().map_err(|error| error.to_string())?;
+        let transaction = (|| {
+            let command = control_command_journal_entry_with_digest(
+                format!("registry:{}", input.command_id),
+                Some(subject.into()),
+                receipt.input_digest.clone(),
+                &checkpoint,
+                log.current_batch_event_sequence()?,
+            );
+            log.save_checkpoint_with_command(SERVER_CHECKPOINT_SCHEMA, &checkpoint, command)?;
+            log.commit_batch()
+        })();
+        if let Err(error) = transaction {
+            let rollback = log.rollback_batch();
+            return Err(format!(
+                "source registry commit failed: {error}; rollback={rollback:?}"
+            ));
+        }
+        *live = candidate;
+        Ok(
             serde_json::json!({"schema_version":"roboguide.registry-command-receipt/v0.1","receipt":receipt}),
-        );
-    }
-    let mut candidate = live.clone();
-    apply(candidate.bridge.control_mut()).map_err(|error| error.to_string())?;
-    let revision = serde_json::to_value(&input.registry)
-        .map_err(|error| error.to_string())?
-        .get("revision")
-        .and_then(serde_json::Value::as_u64)
-        .ok_or("registry lacks revision")?;
-    let receipt = domain::RegistryCommandReceipt {
-        command_id: input.command_id.clone(),
-        kind,
-        input_digest,
-        registry_digest: digest(&input.registry)?,
-        revision,
-        authority_subject: subject.into(),
-        accepted_at_ms: now.as_millis(),
-    };
-    candidate
-        .bridge
-        .control_mut()
-        .retain_registry_command_receipt(receipt.clone())
-        .map_err(|error| error.to_string())?;
-    let checkpoint = server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
-    log.begin_batch().map_err(|error| error.to_string())?;
-    let transaction = (|| {
-        let command = control_command_journal_entry_with_digest(
-            format!("registry:{}", input.command_id),
-            Some(subject.into()),
-            receipt.input_digest.clone(),
-            &checkpoint,
-            log.current_batch_event_sequence()?,
-        );
-        log.save_checkpoint_with_command(SERVER_CHECKPOINT_SCHEMA, &checkpoint, command)?;
-        log.commit_batch()
-    })();
-    if let Err(error) = transaction {
-        let rollback = log.rollback_batch();
-        return Err(format!(
-            "source registry commit failed: {error}; rollback={rollback:?}"
-        ));
-    }
-    *live = candidate;
-    Ok(
-        serde_json::json!({"schema_version":"roboguide.registry-command-receipt/v0.1","receipt":receipt}),
-    )
+        )
+    })
 }

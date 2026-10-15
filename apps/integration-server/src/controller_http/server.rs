@@ -7,6 +7,7 @@ use super::view::{
     inventory_json, memory_providers_json, relation_kind_name, state_providers_json,
     state_records_json_with_tenant,
 };
+use crate::application::ApplicationWriteGate;
 use crate::diagnostics::StageObservation;
 use crate::*;
 use ports::SharedNodeStateReader;
@@ -21,7 +22,8 @@ use tokio_rustls::TlsAcceptor;
 #[path = "operator_authorization.rs"]
 mod authorization;
 use authorization::{
-    OperatorCertificateContext, load_grants, refresh_principal, synchronize_authority,
+    AuthorizedRequestGate, OperatorCertificateContext, load_grants, refresh_principal,
+    synchronize_authority,
 };
 
 #[cfg(test)]
@@ -542,7 +544,7 @@ pub(crate) async fn handle_http_connection<
     .await
 }
 
-/// Supplies an explicit authenticated administrator principal to isolated application fixtures.
+/// Supplies an explicitly trusted local administrator to isolated application fixtures.
 #[cfg(test)]
 pub(crate) async fn handle_recovery_admin_test_connection<
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -568,7 +570,7 @@ pub(crate) async fn handle_recovery_admin_test_connection<
             tenants: None,
             subject: Some("test:recovery-admin".into()),
             role: Some(RECOVERY_ADMIN_ROLE.into()),
-            mtls: true,
+            mtls: false,
         },
     )
     .await
@@ -693,6 +695,20 @@ where
     if missing_scoped_registry {
         return write_http_response(stream,"503 Service Unavailable",serde_json::json!({"error":"tenant-scoped admission requires the lifecycle Node identity registry"})).await;
     }
+    let authorization_time = if principal.certificate.is_some() {
+        clock.now()
+    } else {
+        domain::TimestampMs::new(0)
+    };
+    let authorized_write_gate = Arc::new(AuthorizedRequestGate::new(
+        event_write_gate.clone(),
+        controller.clone(),
+        principal.clone(),
+        &request,
+        tenant.clone(),
+        authorization_time,
+    ));
+    let event_write_gate = &authorized_write_gate;
     if method == "GET" && path == "/metrics" {
         let metrics = controller
             .lock()
@@ -1165,9 +1181,7 @@ where
             // The shared connection must never expose an application's uncommitted batch.
             // Wait off the async executor, then hold the existing write gate only for the read.
             let events = tokio::task::spawn_blocking(move || {
-                let _guard = gate
-                    .lock()
-                    .map_err(|_| "event-log write gate is poisoned".to_string())?;
+                let _guard = gate.lock()?;
                 log.events_page(after_sequence, limit)
                     .map_err(|error| error.to_string())
             })
@@ -1417,9 +1431,7 @@ where
                 DiagnosticStage::WriteGate,
                 None,
             );
-            let _write_guard = event_write_gate
-                .lock()
-                .map_err(|_| "event-log write gate is poisoned")?;
+            let _write_guard = event_write_gate.lock()?;
             drop(gate_wait);
             let capacity = {
                 let live = controller
@@ -1861,9 +1873,7 @@ where
                 path.trim_start_matches("/v1/missions/")
                     .trim_end_matches("/resume"),
             )?;
-            let write_guard = event_write_gate
-                .lock()
-                .map_err(|_| "event-log write gate is poisoned")?;
+            let write_guard = event_write_gate.lock()?;
             if let Err(error) = event_log.begin_batch() {
                 drop(write_guard);
                 return write_http_response(
@@ -1993,9 +2003,7 @@ where
                 path.trim_start_matches("/v1/missions/")
                     .trim_end_matches("/review"),
             )?;
-            let _write_guard = event_write_gate
-                .lock()
-                .map_err(|_| "event-log write gate is poisoned")?;
+            let _write_guard = event_write_gate.lock()?;
             if let Err(error) = event_log.begin_batch() {
                 drop(_write_guard);
                 return write_http_response(stream,"503 Service Unavailable",serde_json::json!({"error": format!("review transaction unavailable: {error}")})).await;
@@ -2076,9 +2084,7 @@ where
                 DiagnosticStage::WriteGate,
                 None,
             );
-            let _write_guard = event_write_gate
-                .lock()
-                .map_err(|_| "event-log write gate is poisoned")?;
+            let _write_guard = event_write_gate.lock()?;
             drop(gate_wait);
             event_log.begin_batch()?;
             let now = clock.now();
@@ -2408,9 +2414,7 @@ where
                 DiagnosticStage::WriteGate,
                 None,
             );
-            let _write_guard = event_write_gate
-                .lock()
-                .map_err(|_| "event-log write gate is poisoned")?;
+            let _write_guard = event_write_gate.lock()?;
             drop(gate_wait);
             event_log.begin_batch()?;
             let result: Result<(ControllerState, String), String> = (|| {
@@ -2565,9 +2569,7 @@ where
                 DiagnosticStage::WriteGate,
                 None,
             );
-            let _write_guard = event_write_gate
-                .lock()
-                .map_err(|_| "event-log write gate is poisoned")?;
+            let _write_guard = event_write_gate.lock()?;
             drop(gate_wait);
             event_log.begin_batch()?;
             let result: Result<(ControllerState, String), String> = (|| {

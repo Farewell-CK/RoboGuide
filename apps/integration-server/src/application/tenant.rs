@@ -20,16 +20,14 @@ pub(crate) fn source_digest(
 pub(crate) fn migrate(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &dyn crate::application::ApplicationWriteGate,
     clock: &impl Clock,
     body: &[u8],
     subject: &str,
 ) -> Result<serde_json::Value, String> {
     let command: control::MissionTenantMigration =
         serde_json::from_slice(body).map_err(|error| error.to_string())?;
-    let _gate = gate
-        .lock()
-        .map_err(|_| "application write gate is poisoned")?;
+    let _gate = gate.lock()?;
     let mut live = controller
         .lock()
         .map_err(|_| "controller lock is poisoned")?;

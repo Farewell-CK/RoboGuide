@@ -8,6 +8,8 @@
 flowchart TB
   Client[证书主体 / tenant / 幂等键] --> MI[Mission Service / MI / Request + provenance SQL]
   ID[Control 持久身份 / 授权 revision / tenant / 测量] --> Entry
+  Entry --> WIT[实际 leaf / 当前委托 / 事务写锁内复核]
+  WIT --> SQL
   ID --> PROTO
   ID --> ART
   MI --> Entry[Controller 用户与高权限入口]
@@ -68,6 +70,9 @@ Local EAIOS 掌握。SoftwareProcess、测试合成观察和设备观察的证�
 `GET /v1/executions/{execution_id}/safety-stop` 检查；这个查询不刷新 TTL 或 stop deadline。
 身份与 tenant 权威的当前调用链见 [ADR-0103](../../decisions/0103-http-command-reconciliation-and-node-identity-lifecycle.md)
 及[身份合同](../../development/identity-lifecycle-v0.1.md)；证书登记不会增加设备 inventory。
+Operator transport witness 随真实 writer guard 到 Commit/rollback，等待期间的撤权在事务内复核。
+[实际 mTLS 排队检查](../../development/acceptance/2026-10-15-f4-operator-transactions.md)
+核对第二个 registry revision 未提交。其它存储阻塞和只读快照降级仍需 F10。
 
 State 与 MI 的当前软件路径见 [ADR-0104](../../decisions/0104-state-consumers-belief-and-semantic-verifier.md)
 及 [F3 进程验收](../../development/acceptance/2026-10-15-f3.md)。Belief 是命名 producer，Control

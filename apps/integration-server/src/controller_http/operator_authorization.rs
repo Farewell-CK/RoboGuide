@@ -1,6 +1,135 @@
 //! Durable deployment certificate updates checked after HTTP parsing, before route authority.
 
 use super::*;
+use std::sync::MutexGuard;
+use std::time::Instant;
+
+/// Per-request transport witness checked inside the same mutex held through application Commit.
+pub(super) struct AuthorizedRequestGate {
+    /// Actual application writer; this wrapper never releases and reenters it during a transaction.
+    inner: Arc<Mutex<()>>,
+    /// Current committed grant and Mission ownership authorities.
+    controller: Arc<Mutex<ControllerState>>,
+    /// Actual TLS certificate or the explicitly configured trusted loopback connection.
+    principal: OperatorPrincipal,
+    /// Bounded route authorization metadata; no body or credential is retained here.
+    request: ControlHttpRequest,
+    /// Already selected tenant, checked again against current ownership and delegation.
+    tenant: Option<String>,
+    /// Original Controller-local clock anchor, never another machine's timestamp.
+    received_at: domain::TimestampMs,
+    /// Monotonic elapsed time also fences expiry while a blocking worker waits for the writer.
+    received_instant: Instant,
+}
+
+impl AuthorizedRequestGate {
+    /// Captures an immutable transport witness without acquiring authority or copying request bytes.
+    pub(super) fn new(
+        inner: Arc<Mutex<()>>,
+        controller: Arc<Mutex<ControllerState>>,
+        principal: OperatorPrincipal,
+        request: &ControlHttpRequest,
+        tenant: Option<String>,
+        received_at: domain::TimestampMs,
+    ) -> Self {
+        Self {
+            inner,
+            controller,
+            principal,
+            request: ControlHttpRequest {
+                method: request.method.clone(),
+                target: request.target.clone(),
+                headers: request
+                    .headers
+                    .iter()
+                    .filter(|(name, _)| {
+                        matches!(
+                            name.as_str(),
+                            "x-roboguide-tenant" | "x-roboguide-operator-role"
+                        )
+                    })
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect(),
+                body: Vec::new(),
+            },
+            tenant,
+            received_at,
+            received_instant: Instant::now(),
+        }
+    }
+
+    /// Resolves current exact certificate grants while caller holds the sole application writer.
+    fn validate(&self, live: &ControllerState) -> Result<(), String> {
+        let principal = &self.principal;
+        if let Some(certificate) = &principal.certificate {
+            let elapsed =
+                u64::try_from(self.received_instant.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let now = self.received_at.as_millis().saturating_add(elapsed);
+            if now >= certificate.expires_at_ms {
+                return Err(
+                    "operator transport certificate expired while awaiting authority".into(),
+                );
+            }
+            let (roles, configured) = load_grants(&certificate.path)?;
+            let committed = live.bridge.control().operator_authorization();
+            if configured.as_ref() != committed {
+                return Err(
+                    "operator deployment revision changed before transaction; retry admission"
+                        .into(),
+                );
+            }
+            let current = roles
+                .get(&certificate.digest)
+                .ok_or("operator transport leaf is no longer enrolled")?;
+            let subject = if let Some(profile) = committed {
+                let grant = profile
+                    .grants
+                    .get(&certificate.digest)
+                    .ok_or("operator transport leaf is absent from committed authority")?;
+                if !grant.active(now) {
+                    return Err(
+                        "operator transport grant expired or was revoked before transaction".into(),
+                    );
+                }
+                grant.principal_id.as_str()
+            } else {
+                certificate.digest.as_str()
+            };
+            if principal.subject.as_deref() != Some(subject)
+                || principal.role.as_deref() != Some(current.role.as_str())
+                || principal.tenants.as_ref() != Some(&current.tenant_ids)
+            {
+                return Err("operator transport delegation changed before transaction".into());
+            }
+        } else if principal.mtls {
+            return Err("operator request has no verified transport witness".into());
+        }
+        let path = self.request.target.split('?').next().unwrap_or("");
+        authorize_operator_request(&self.request, principal, &self.request.method, path)
+            .map_err(|(_, error)| error.to_owned())?;
+        if authorized_tenant(&self.request, principal)? != self.tenant {
+            return Err("operator tenant delegation changed before transaction".into());
+        }
+        authorize_tenant_path(live, self.tenant.as_deref(), path)
+    }
+}
+
+impl application::ApplicationWriteGate for AuthorizedRequestGate {
+    /// Acquires the real mutex and rechecks authority before exposing the transaction guard.
+    fn lock(&self) -> Result<MutexGuard<'_, ()>, String> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|_| "event-log write gate is poisoned")?;
+        let live = self
+            .controller
+            .lock()
+            .map_err(|_| "controller lock is poisoned")?;
+        self.validate(&live)?;
+        drop(live);
+        Ok(guard)
+    }
+}
 
 /// Actual transport identity, retained independently of a startup role projection.
 #[derive(Debug, Clone)]

@@ -31,6 +31,8 @@ Artifact 稳定证书主体和实际 bytes 上传归属门禁，见
 [内容授权合同](contracts/memory/authorization-v0.1/README.md)及
 [内容门禁验收](docs/development/acceptance/2026-10-15-f4-content-authority.md)。完整 Node Group grant、撤销 ACK、
 执行前 Memory 准备、handoff、active-map/GC 及后续阶段仍须完成。
+Operator 修改请求现在在实际事务写锁内复核证书和当前委托，见
+[排队撤权验收](docs/development/acceptance/2026-10-15-f4-operator-transactions.md)。
 
 独立 [Spatial file provider](integrations/spatial-provider/README.md) 已实现真实 PLY/PCD 的
 FPFH/RANSAC、ICP、pose-graph、观测点分块融合和不可变增量 revision。
