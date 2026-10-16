@@ -479,6 +479,20 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                         else None
                     )
                     if terminal_failure is not None:
+                        self._best_effort_write_json(
+                            "live-world-failure.json",
+                            {
+                                "schema_version": "roboguide.live-world-failure/v0.1",
+                                "failure_owner": "SUT_SYSTEM",
+                                "failure_stage": "stage2_local_skill",
+                                "failure_basis": terminal_failure.get("failure_basis"),
+                                "invocation": invocation.as_dict(),
+                                "local_failure": terminal_failure,
+                                "simulator_steps": steps,
+                                "final_info": json_observation(info),
+                            },
+                            "Stage2 local failure",
+                        )
                         outcome = self._pair_outcome(
                             "FAILED",
                             "original Stage2 skill requested episode termination",

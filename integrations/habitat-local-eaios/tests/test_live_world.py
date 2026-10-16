@@ -667,6 +667,9 @@ def test_live_loop_closes_bad_terminate_endpoint_and_keeps_peer_running(
     assert completed[0].terminal_basis == "original-skill-bad-terminate"
     assert completed[1].local_skill_completed is True
     assert summary["termination_reason"] == "all_local_slots_finished"
+    failure = json.loads((tmp_path / "live-world-failure.json").read_bytes())
+    assert failure["failure_owner"] == "SUT_SYSTEM"
+    assert failure["local_failure"]["termination"]["bad_terminate"] is True
 
 
 @pytest.mark.parametrize("archive_failed", [False, True])
