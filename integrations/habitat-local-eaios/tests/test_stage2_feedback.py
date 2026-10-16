@@ -268,6 +268,31 @@ def test_direct_completion_budget_and_high_level_causes_remain_distinct(
         harness.close()
 
 
+@pytest.mark.parametrize("bad_terminate", [False, True])
+def test_terminal_failure_projection_only_exposes_original_episode_abort(
+    bad_terminate: bool,
+) -> None:
+    """The live loop sees an original abort while ordinary budget exit stays recoverable."""
+    harness = BoundaryHarness()
+    try:
+        harness.agent.chat("first action")
+        harness.feedback.physical_step()
+        harness.skill._cur_skill_step = [1000]
+        harness.skill._force_end_on_timeout = bad_terminate
+        harness.terminate()
+        failure = harness.feedback.terminal_failure(harness.agent.name)
+        if bad_terminate:
+            assert failure is not None
+            assert failure["failure_basis"] == "original-skill-bad-terminate"
+            assert failure["tool_name"] == "nav_to_obj"
+            assert failure["termination"]["bad_terminate"] is True
+            assert failure["physical_steps_since_call"] == 1
+        else:
+            assert failure is None
+    finally:
+        harness.close()
+
+
 def test_nonterminal_skill_does_not_emit_per_step_json_or_claim_arrival() -> None:
     """Repeated original skill queries add no model calls, action rewrites, or event records."""
     harness = BoundaryHarness()

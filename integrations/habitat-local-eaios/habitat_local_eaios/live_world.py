@@ -473,6 +473,37 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 self._record_video(steps, observations, info)
                 for agent, invocation in list(ledger.active.items()):
                     current_feedback = bindings.feedbacks.get(agent)
+                    terminal_failure = (
+                        current_feedback.terminal_failure(f"agent_{agent}")
+                        if current_feedback is not None
+                        else None
+                    )
+                    if terminal_failure is not None:
+                        outcome = self._pair_outcome(
+                            "FAILED",
+                            "original Stage2 skill requested episode termination",
+                            invocation,
+                            str(environment.current_episode.scene_id),
+                            steps,
+                            self._initial_position(agent),
+                            agent,
+                            sequence,
+                            local_skill_completed=False,
+                            episode_terminated=bool(done or environment.episode_over),
+                            terminal_basis="original-skill-bad-terminate",
+                        )
+                        completed(agent, ledger.finish(agent), outcome)
+                        latest[agent] = outcome
+                        history.append(
+                            {
+                                "invocation": invocation.as_dict(),
+                                "outcome": outcome.as_dict(),
+                                "local_failure": terminal_failure,
+                            }
+                        )
+                        bindings.finish(agent)
+                        self._bind_navigation_diagnostics(ledger.active)
+                        continue
                     acquisition = isinstance(invocation, CanonicalObservationAcquisitionInvocation)
                     acquisition_receipt = None
                     acquisition_expired = False
