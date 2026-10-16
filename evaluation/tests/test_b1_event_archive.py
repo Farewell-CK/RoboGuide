@@ -156,6 +156,16 @@ def test_page_boundaries_need_confirmed_tail(tmp_path: Path, count: int) -> None
     assert stub.mission_reads == 3
 
 
+def test_default_budget_covers_large_production_sized_event_prefix(tmp_path: Path) -> None:
+    """A bounded default archive reaches a 40k-event Controller prefix without truncation."""
+    run = make_run(tmp_path)
+    stub = ControllerStub(run, [event(i) for i in range(1, 40_434)])
+    status = archive(stub, EventArchiveLimits(tail_confirmation_seconds=0))
+    assert status["state"] == "complete"
+    assert status["event_count"] == 40_433
+    assert status["pages"] == 407
+
+
 def test_sequence_gaps_use_actual_last_sequence(tmp_path: Path) -> None:
     """Legal append-sequence gaps must neither truncate pages nor invent missing events."""
     run = make_run(tmp_path)

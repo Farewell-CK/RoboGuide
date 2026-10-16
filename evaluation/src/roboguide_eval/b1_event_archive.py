@@ -25,7 +25,11 @@ class EventArchiveLimits:
     """Bound calls, memory, response bytes and elapsed acquisition time."""
 
     page_size: int = 100
-    max_pages: int = 256
+    # The Controller event endpoint has no total-count query. 1024 pages
+    # bounds the prefix at 102,400 events while covering the 40,433-event
+    # production trace observed in one bounded B1 run; byte and wall-clock
+    # limits remain independent fail-closed ceilings.
+    max_pages: int = 1024
     max_page_bytes: int = 8 * 1024 * 1024
     max_total_bytes: int = 64 * 1024 * 1024
     timeout_seconds: float = 2.0
