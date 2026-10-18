@@ -74,6 +74,36 @@ fn recovery_metadata_validates_exact_operations_before_connections_open() {
     }
 }
 
+/// Safety declarations must point to owned observed safe-state exports and exact operations.
+#[test]
+fn safety_metadata_validates_generation_bound_export_contract() {
+    let config: NodeServiceConfig = toml::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scenarios/e1-shared-world-episode-51/node-a.toml"
+    )))
+    .expect("deployment TOML");
+    CompiledLocalCatalog::compile(config.clone(), Path::new(".")).expect("valid safety profile");
+    let key = domain::EXECUTION_SAFETY_METADATA_KEY;
+    for mutation in ["schema", "operation", "export"] {
+        let mut changed = config.clone();
+        let raw = changed.local_systems[0].metadata.get(key).expect("profile");
+        let mut value: serde_json::Value = serde_json::from_str(raw).expect("JSON");
+        match mutation {
+            "schema" => value["schema"] = "unknown".into(),
+            "operation" => value["operations"][0]["operation"]["name"] = "undeclared".into(),
+            _ => value["operations"][0]["safe_state_export_id"] = "missing".into(),
+        }
+        changed.local_systems[0]
+            .metadata
+            .insert(key.into(), value.to_string());
+        assert!(matches!(
+            CompiledLocalCatalog::compile(changed, Path::new(".")),
+            Err(CatalogError::Validation { field, .. })
+                if field == "local_systems.metadata.execution-safety"
+        ));
+    }
+}
+
 /// Catalog compiles multiple local systems and all generic driver configurations.
 #[test]
 fn compiles_multi_system_generic_catalog() {

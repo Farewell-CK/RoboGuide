@@ -549,51 +549,70 @@ impl NodeService {
                     ));
                 }
                 let mut receipt_reason = String::new();
-                let receipt_status = match self
-                    .engine
-                    .admit_controller_epoch(&execute.controller_epoch)
-                {
-                    Err(error) => {
-                        receipt_reason = error.to_string();
-                        send_local_rejection(
-                            outbound,
-                            session_id,
-                            &execution_id,
-                            "execute_epoch_rejected",
-                            &error,
-                        )?;
-                        integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
-                    }
-                    Ok(()) => match self.engine.execute_with_session(
-                        execution_id.clone(),
-                        invocation,
-                        execute.resource_ids,
-                        &execute.execution_session_json,
-                    ) {
-                        Ok(ExecuteDisposition::Started | ExecuteDisposition::DispatchPending) => {
-                            integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
-                        }
-                        Ok(ExecuteDisposition::Existing(mut snapshot)) => {
-                            snapshot.session_id = session_id.to_string();
-                            outbound
-                                .send(NodeMessage {
-                                    message: Some(NodePayload::ExecutionSnapshot(snapshot)),
-                                })
-                                .map_err(|_| NodeServiceError::Closed)?;
-                            integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
-                        }
+                let missing_generation = self.engine.catalog().node_contract_version()
+                    == integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+                    && execute.execution_generation == 0;
+                let receipt_status = if missing_generation {
+                    let error = EngineError::Protocol(
+                        "safety-capable Node Execute lacks execution generation".to_string(),
+                    );
+                    receipt_reason = error.to_string();
+                    send_local_rejection(
+                        outbound,
+                        session_id,
+                        &execution_id,
+                        "execute_generation_missing",
+                        &error,
+                    )?;
+                    integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
+                } else {
+                    match self
+                        .engine
+                        .admit_controller_epoch(&execute.controller_epoch)
+                    {
                         Err(error) => {
                             receipt_reason = error.to_string();
                             send_local_rejection(
                                 outbound,
                                 session_id,
                                 &execution_id,
-                                "execute_rejected",
+                                "execute_epoch_rejected",
                                 &error,
                             )?;
                             integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
                         }
-                    },
+                        Ok(()) => match self.engine.execute_with_session_generation(
+                            execution_id.clone(),
+                            invocation,
+                            execute.resource_ids,
+                            &execute.execution_session_json,
+                            execute.execution_generation,
+                        ) {
+                            Ok(
+                                ExecuteDisposition::Started | ExecuteDisposition::DispatchPending,
+                            ) => integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted,
+                            Ok(ExecuteDisposition::Existing(mut snapshot)) => {
+                                snapshot.session_id = session_id.to_string();
+                                outbound
+                                    .send(NodeMessage {
+                                        message: Some(NodePayload::ExecutionSnapshot(snapshot)),
+                                    })
+                                    .map_err(|_| NodeServiceError::Closed)?;
+                                integration::grpc::v0_4::CommandReceiptStatus::CommandPersisted
+                            }
+                            Err(error) => {
+                                receipt_reason = error.to_string();
+                                send_local_rejection(
+                                    outbound,
+                                    session_id,
+                                    &execution_id,
+                                    "execute_rejected",
+                                    &error,
+                                )?;
+                                integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
+                            }
+                        },
+                    }
                 };
                 send_command_receipt(
                     outbound,

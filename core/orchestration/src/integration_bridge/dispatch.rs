@@ -146,7 +146,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .transpose()
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
             .unwrap_or_default();
-        let route_result = self.router.execute_with_session(
+        let route_result = self.router.execute_with_session_generation(
             command.node_id().as_str(),
             format!("dispatch-{execution_id}"),
             execution_id.to_string(),
@@ -156,6 +156,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 .map(|resource_id| resource_id.as_str().to_string())
                 .collect(),
             session_json,
+            command.execution_generation().unwrap_or(0),
         );
         self.runtime.record_dispatch_attempt(execution_id);
         if let Err(error) = route_result {
@@ -556,6 +557,12 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         }
         if let Some(support) = recovery_support {
             command = command.with_recovery_support(support);
+        }
+        if let Some(generation) = self
+            .runtime
+            .allocated_attempt_generation(group_id, task_ref, role_id)
+        {
+            command = command.with_execution_generation(generation);
         }
         self.runtime
             .prepare_dispatch(execution_id, command.clone(), resource_ids)

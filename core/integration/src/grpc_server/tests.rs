@@ -726,6 +726,76 @@ fn execution_session_requires_registration_metadata() {
     assert!(error.message().contains("execution-session/v0.1"));
 }
 
+/// Safety-capable routes require and preserve the exact Runtime attempt generation.
+#[test]
+fn safety_route_requires_generation_and_transports_it() {
+    let router = GrpcNodeRouter::default();
+    let (sender, mut receiver) = mpsc::unbounded_channel();
+    router.sessions.lock().expect("registry lock").insert(
+        "dog-a".to_string(),
+        RoutedSession {
+            certificate_expires_at_ms: None,
+            liveness_evidence: None,
+            activated_at: None,
+            session_id: "session-safety".to_string(),
+            sender,
+            lease_id: "lease-safety".to_string(),
+            last_heartbeat: std::time::Instant::now(),
+            lease_duration: std::time::Duration::from_secs(15),
+            node_contract_version: SAFETY_NODE_CONTRACT_VERSION.to_string(),
+            management_sequence: 0,
+            state_export_ids: BTreeSet::new(),
+            active: true,
+            supports_execution_session: false,
+            supports_memory_import: false,
+        },
+    );
+    let invocation = crate::grpc::v0_4::CanonicalInvocation {
+        mission_id: "m".to_string(),
+        task_id: "t".to_string(),
+        group_id: "g".to_string(),
+        role_id: "r".to_string(),
+        intent: Some(crate::grpc::v0_4::ExecutionIntent {
+            operation: Some(crate::grpc::v0_4::OperationRef {
+                namespace: "mobility".to_string(),
+                name: "navigate".to_string(),
+                version: "v1".to_string(),
+            }),
+            objective: "reach target".to_string(),
+            parameters: Default::default(),
+        }),
+        ..Default::default()
+    };
+    let error = router
+        .execute_with_session_generation(
+            "dog-a",
+            "dispatch-attempt-1".to_string(),
+            "attempt-1".to_string(),
+            invocation.clone(),
+            Vec::new(),
+            String::new(),
+            0,
+        )
+        .expect_err("safety route rejects missing generation");
+    assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+    router
+        .execute_with_session_generation(
+            "dog-a",
+            "dispatch-attempt-1".to_string(),
+            "attempt-1".to_string(),
+            invocation,
+            Vec::new(),
+            String::new(),
+            7,
+        )
+        .expect("generation-bound Execute routes");
+    let Some(ServerPayload::Execute(execute)) = receiver.try_recv().unwrap().unwrap().message
+    else {
+        panic!("Execute message required");
+    };
+    assert_eq!(execute.execution_generation, 7);
+}
+
 /// Expired leases cannot route Execute or Cancel.
 #[test]
 fn expired_lease_rejects_new_commands() {

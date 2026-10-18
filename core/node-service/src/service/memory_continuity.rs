@@ -14,6 +14,8 @@ impl NodeService {
     ) -> Result<(), NodeServiceError> {
         if self.engine.catalog().node_contract_version()
             != integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
+            && self.engine.catalog().node_contract_version()
+                != integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
             || query.session_id != session
             || query.authorization_digest != integration::memory_import_query_digest(&query)
         {

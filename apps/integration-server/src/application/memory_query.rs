@@ -126,13 +126,15 @@ fn admit(
         .state()
         .node(&import.request.node_id)
         .ok_or("original Node is not registered")?;
-    if node.registration().contract_version().as_str()
-        != integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
-        || !node
-            .registration()
-            .memory_providers()
-            .iter()
-            .any(|p| p.provider_id() == import.request.consumer_provider_id)
+    if !matches!(
+        node.registration().contract_version().as_str(),
+        integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+    ) || !node
+        .registration()
+        .memory_providers()
+        .iter()
+        .any(|p| p.provider_id() == import.request.consumer_provider_id)
     {
         return Err("original provider has no negotiated Memory continuity route".into());
     }

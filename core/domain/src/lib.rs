@@ -202,6 +202,9 @@ pub const NODE_CONTRACT_VERSION_V0_6: &str = "roboguide.node.v0.6";
 /// Node Contract with durable provider-qualified Memory continuity.
 pub const NODE_CONTRACT_VERSION_V0_7: &str = "roboguide.node.v0.7";
 
+/// Node Contract carrying explicit physical execution-generation identity for safety evidence.
+pub const NODE_CONTRACT_VERSION_V0_8: &str = "roboguide.node.v0.8";
+
 #[cfg(test)]
 #[path = "domain_tests.rs"]
 mod tests;

@@ -244,6 +244,9 @@ message Execute {
   // preserves standalone/legacy delivery; a Node that receives a value must
   // durably reject older epochs before admitting the command.
   string controller_epoch = 7;
+  // Exact Runtime attempt generation. Zero is reserved for legacy commands;
+  // the safety-capable Node Contract requires a non-zero value.
+  uint64 execution_generation = 8;
 }
 
 message Cancel {

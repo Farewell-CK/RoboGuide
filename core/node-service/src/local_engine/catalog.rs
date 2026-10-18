@@ -212,6 +212,40 @@ impl CompiledLocalCatalog {
                     )?;
                 }
             }
+            if let Some(raw) = system.metadata().get(domain::EXECUTION_SAFETY_METADATA_KEY) {
+                require(
+                    separates_capabilities_and_operations,
+                    "local_systems.metadata.execution-safety",
+                    "safety declaration requires independently owned v0.7 operations",
+                )?;
+                let profile =
+                    domain::ExecutionSafetyProfile::from_metadata(raw).map_err(|reason| {
+                        validation(
+                            "local_systems.metadata.execution-safety",
+                            reason.to_string(),
+                        )
+                    })?;
+                for support in profile.operations {
+                    let operation = support.operation.to_string();
+                    require(
+                        operations
+                            .get(&operation)
+                            .is_some_and(|binding| binding.owner() == system.id()),
+                        "local_systems.metadata.execution-safety",
+                        "safety declaration must reference an exact operation owned by this Local System",
+                    )?;
+                    let export = state_exports.get(&support.safe_state_export_id);
+                    require(
+                        export.is_some_and(|export| {
+                            export.owner() == system.id()
+                                && export.semantic() == "observed"
+                                && export.payload_schema() == domain::SAFE_STATE_OBSERVATION_SCHEMA
+                        }),
+                        "local_systems.metadata.execution-safety",
+                        "safety declaration must reference an observed safe-state export",
+                    )?;
+                }
+            }
         }
         require(
             supports_artifacts || config.artifacts.is_none(),
@@ -311,7 +345,13 @@ impl CompiledLocalCatalog {
 
     /// Returns the semantic Node Contract selected by this configuration generation.
     pub fn node_contract_version(&self) -> &'static str {
-        if self.schema == CONFIG_SCHEMA_V0_8 {
+        if self.local_systems.values().any(|system| {
+            system
+                .metadata()
+                .contains_key(domain::EXECUTION_SAFETY_METADATA_KEY)
+        }) {
+            integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+        } else if self.schema == CONFIG_SCHEMA_V0_8 {
             integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
         } else if self.schema == CONFIG_SCHEMA_V0_7 {
             integration::grpc::v0_4::NODE_CONTRACT_VERSION

@@ -31,6 +31,8 @@ pub mod v0_4 {
     pub const NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.6";
     /// Contract with explicitly negotiated durable Memory reconciliation.
     pub const CONTINUITY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.7";
+    /// Contract carrying explicit physical execution-generation identity for safety evidence.
+    pub const SAFETY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.8";
     /// Prior profile-and-intent contract retained for explicit session compatibility.
     pub const PREVIOUS_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.5";
     /// Legacy combined-declaration contract retained for explicit session compatibility.
@@ -271,6 +273,7 @@ mod tests {
             command_id: "dispatch-attempt-1".to_string(),
             execution_session_json: String::new(),
             controller_epoch: String::new(),
+            execution_generation: 1,
         };
         let decoded = super::v0_4::Execute::decode(execute.encode_to_vec().as_slice())
             .expect("v0.4 Execute decodes");

@@ -143,8 +143,26 @@ impl LocalIntegrationEngine {
         &self,
         execution_id: String,
         invocation: CanonicalInvocation,
+        resource_ids: Vec<String>,
+        execution_session_json: &str,
+    ) -> Result<ExecuteDisposition, EngineError> {
+        self.execute_with_session_generation(
+            execution_id,
+            invocation,
+            resource_ids,
+            execution_session_json,
+            0,
+        )
+    }
+
+    /// Admits one Execute with an explicit Runtime attempt generation for safety-bound workflows.
+    pub fn execute_with_session_generation(
+        &self,
+        execution_id: String,
+        invocation: CanonicalInvocation,
         mut resource_ids: Vec<String>,
         execution_session_json: &str,
+        execution_generation: u64,
     ) -> Result<ExecuteDisposition, EngineError> {
         validate_invocation_identity(&execution_id, &invocation)?;
         let session = if execution_session_json.is_empty() {
@@ -170,7 +188,8 @@ impl LocalIntegrationEngine {
         let capability = self.operation(&operation)?.clone();
         validate_resources(&self.inner.catalog, &capability, &resource_ids)?;
         resource_ids.sort();
-        let mut invocation_json = canonical_invocation_json(&invocation, &resource_ids)?;
+        let mut invocation_json =
+            canonical_invocation_json(&invocation, &resource_ids, execution_generation)?;
         if let Some(session) = session {
             invocation_json
                 .as_object_mut()

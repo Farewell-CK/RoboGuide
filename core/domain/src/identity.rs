@@ -3,7 +3,7 @@
 use crate::{
     DomainError, NODE_CONTRACT_VERSION_V0_1, NODE_CONTRACT_VERSION_V0_2,
     NODE_CONTRACT_VERSION_V0_3, NODE_CONTRACT_VERSION_V0_4, NODE_CONTRACT_VERSION_V0_5,
-    NODE_CONTRACT_VERSION_V0_6, NODE_CONTRACT_VERSION_V0_7,
+    NODE_CONTRACT_VERSION_V0_6, NODE_CONTRACT_VERSION_V0_7, NODE_CONTRACT_VERSION_V0_8,
 };
 use std::fmt::{Display, Formatter};
 
@@ -140,6 +140,11 @@ impl NodeContractVersion {
     /// Creates the Memory continuity Node Contract identity.
     pub fn v0_7() -> Self {
         Self(NODE_CONTRACT_VERSION_V0_7.to_string())
+    }
+
+    /// Creates the execution-generation and physical-safety Node Contract identity.
+    pub fn v0_8() -> Self {
+        Self(NODE_CONTRACT_VERSION_V0_8.to_string())
     }
 }
 

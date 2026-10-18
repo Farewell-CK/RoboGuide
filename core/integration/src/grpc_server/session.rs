@@ -239,7 +239,10 @@ pub(super) fn accept_current_message(
                 &value.session_id
             }
             Some(NodePayload::MemoryImportQueryReceipt(value)) => {
-                if route.node_contract_version != CONTINUITY_NODE_CONTRACT_VERSION {
+                if !matches!(
+                    route.node_contract_version.as_str(),
+                    CONTINUITY_NODE_CONTRACT_VERSION | SAFETY_NODE_CONTRACT_VERSION
+                ) {
                     return Err(Status::failed_precondition(
                         "Memory query receipt requires negotiated Node Contract v0.7",
                     ));
@@ -285,7 +288,8 @@ pub(super) fn validate_registration(
     if registration.node_id.trim().is_empty()
         || !matches!(
             registration.node_contract_version.as_str(),
-            CONTINUITY_NODE_CONTRACT_VERSION
+            SAFETY_NODE_CONTRACT_VERSION
+                | CONTINUITY_NODE_CONTRACT_VERSION
                 | NODE_CONTRACT_VERSION
                 | PREVIOUS_NODE_CONTRACT_VERSION
                 | LEGACY_NODE_CONTRACT_VERSION
@@ -437,7 +441,7 @@ fn validate_operation_support(
 ) -> Result<(), Status> {
     if !matches!(
         registration.node_contract_version.as_str(),
-        NODE_CONTRACT_VERSION | CONTINUITY_NODE_CONTRACT_VERSION
+        NODE_CONTRACT_VERSION | CONTINUITY_NODE_CONTRACT_VERSION | SAFETY_NODE_CONTRACT_VERSION
     ) {
         if !registration.operation_support.is_empty() {
             return Err(Status::invalid_argument(
