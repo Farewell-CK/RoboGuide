@@ -1,9 +1,11 @@
 # Node contract catalog v0.10
 
 This catalog retains wire session `roboguide.node-protocol/v0.4` and adds explicitly negotiated
-`roboguide.node.v0.7` / `roboguide.node-config/v0.8` Memory continuity. Contracts v0.4–v0.6 remain
-explicit compatibility profiles. A v0.8 Node offers v0.7 only; an old Controller cannot silently
-accept the profile or infer support from protobuf ignoring an unknown frame.
+`roboguide.node.v0.7` / `roboguide.node-config/v0.8` Memory continuity. The safety-capable profile
+is `roboguide.node.v0.8`; it adds the attempt-bound `Execute.execution_generation` field used by
+the physical-stop evidence contract. Contracts v0.4–v0.6 remain explicit compatibility profiles.
+An old Controller cannot silently accept a safety profile or infer support by ignoring an unknown
+wire field.
 
 `MemoryImportQuery` has an independent durable command identity, original import/content/provider,
 generation, receive-relative budget, and current Controller epoch/digest. Controller commits its
