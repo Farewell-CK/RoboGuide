@@ -1,5 +1,6 @@
 //! Artifact HTTP request routing and catalog mutation endpoints.
 
+use super::authenticated::AuthenticatedAdmission;
 use super::*;
 
 /// Certificate-to-role profile for a remotely bound Artifact HTTP listener.
@@ -419,9 +420,18 @@ where
             memory_admission
                 .revalidate_artifact_principal(&principal)
                 .map_err(HttpError::forbidden)?;
+            let record = catalog.owned_upload(id, &principal)?;
+            let received_bytes = uploads
+                .lock()
+                .map_err(|_| {
+                    HttpError::service_unavailable("artifact upload registry unavailable")
+                })?
+                .received_bytes(id)
+                .or(record.byte_size)
+                .unwrap_or(0);
             Response::Json(
                 "200 OK",
-                serde_json::json!({"schema_version":"roboguide.artifact-upload-observation/v0.1","record":catalog.owned_upload(id,&principal)?}),
+                serde_json::json!({"schema_version":"roboguide.artifact-upload-observation/v0.1","record":record,"received_bytes":received_bytes}),
             )
         }
         (method, path)
@@ -607,7 +617,7 @@ pub(super) fn get_memory(catalog: &ArtifactCatalog, path: &str) -> Result<Respon
 pub(super) fn publish_memory(
     catalog: &ArtifactCatalog,
     store: &FileSystemArtifactStore,
-    memory_admission: &dyn MemoryProviderAdmission,
+    authority: &AuthenticatedAdmission<'_>,
     request: &Request,
     path: &str,
 ) -> Result<Response, HttpError> {
@@ -629,13 +639,15 @@ pub(super) fn publish_memory(
         ));
     }
     if let Some(artifact) = manifest.artifact() {
-        store
-            .verify_artifact(artifact.content_digest().as_str(), artifact.byte_size())
-            .map_err(map_cas_error)?;
+        let digest = artifact.content_digest().as_str();
+        if !catalog.has_completed_upload(authority.principal, digest, artifact.byte_size())? {
+            run_blocking(|| store.verify_artifact(digest, artifact.byte_size()))
+                .map_err(map_cas_error)?;
+        }
     }
     catalog.append_memory(
         EventPayload::MemoryManifestPublished { manifest },
-        memory_admission,
+        authority,
         request.memory_publisher.as_ref(),
     )?;
     Ok(Response::Json(
@@ -648,7 +660,7 @@ pub(super) fn publish_memory(
 pub(super) fn record_memory_replica(
     catalog: &ArtifactCatalog,
     store: &FileSystemArtifactStore,
-    memory_admission: &dyn MemoryProviderAdmission,
+    authority: &AuthenticatedAdmission<'_>,
     request: &Request,
     path: &str,
 ) -> Result<Response, HttpError> {
@@ -662,9 +674,11 @@ pub(super) fn record_memory_replica(
     let artifact = input.manifest.artifact().ok_or_else(|| {
         HttpError::bad_request("metadata-only Memory cannot produce replica evidence")
     })?;
-    store
-        .verify_artifact(artifact.content_digest().as_str(), artifact.byte_size())
-        .map_err(map_cas_error)?;
+    let digest = artifact.content_digest().as_str();
+    if !catalog.has_verified_content(digest, artifact.byte_size())? {
+        run_blocking(|| store.verify_artifact(digest, artifact.byte_size()))
+            .map_err(map_cas_error)?;
+    }
     let node_id =
         NodeId::new(input.node_id).map_err(|error| HttpError::bad_request(error.to_string()))?;
     let consumer_provider_id = input.consumer_provider_id;
@@ -693,7 +707,7 @@ pub(super) fn record_memory_replica(
             ));
         }
     };
-    catalog.append_memory(payload, memory_admission, request.memory_publisher.as_ref())?;
+    catalog.append_memory(payload, authority, request.memory_publisher.as_ref())?;
     Ok(Response::Json(
         "202 Accepted",
         serde_json::json!({"status": input.status}),
@@ -863,7 +877,7 @@ pub(super) async fn append_upload(
             .revalidate_artifact_principal(principal)
             .map_err(HttpError::forbidden)?;
         super::upload_authority::check_live_upload(catalog, upload_id, principal)?;
-        upload.write_chunk(bytes).map_err(map_cas_error)
+        run_blocking(|| upload.write_chunk(bytes)).map_err(map_cas_error)
     };
     let stream_result = timeout(
         UPLOAD_BODY_TIMEOUT,
@@ -873,11 +887,15 @@ pub(super) async fn append_upload(
     match stream_result {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
-            abort_in_flight(uploads, in_flight)?;
+            if matches!(error.status, "400 Bad Request" | "408 Request Timeout") {
+                restore_after_append(uploads, upload_id, in_flight)?;
+            } else {
+                abort_in_flight(uploads, in_flight)?;
+            }
             return Err(error);
         }
         Err(_) => {
-            abort_in_flight(uploads, in_flight)?;
+            restore_after_append(uploads, upload_id, in_flight)?;
             return Err(HttpError::request_timeout(
                 "artifact request body timed out",
             ));
@@ -904,6 +922,27 @@ pub(super) async fn append_upload(
         "202 Accepted",
         serde_json::json!({"upload_id": upload_id, "received_bytes": size}),
     ))
+}
+
+/// Runs synchronous artifact filesystem work without occupying a Tokio worker thread.
+///
+/// The artifact store deliberately exposes a synchronous transport-neutral port.  Large CAS
+/// writes and fsyncs therefore must cross this boundary before they run in the async HTTP server;
+/// otherwise a single multi-hundred-megabyte upload can starve Node Protocol lease heartbeats.
+/// Unit tests use a current-thread runtime, where `block_in_place` is unavailable, so the same
+/// operation is called directly there.
+pub(super) fn run_blocking<T>(operation: impl FnOnce() -> T) -> T {
+    let multi_thread = tokio::runtime::Handle::try_current().is_ok_and(|handle| {
+        matches!(
+            handle.runtime_flavor(),
+            tokio::runtime::RuntimeFlavor::MultiThread
+        )
+    });
+    if multi_thread {
+        tokio::task::block_in_place(operation)
+    } else {
+        operation()
+    }
 }
 
 /// Explicitly aborts one staged upload and releases its count and byte quota.
@@ -987,7 +1026,7 @@ pub(super) fn get_revision(catalog: &ArtifactCatalog, path: &str) -> Result<Resp
 pub(super) fn publish_revision(
     catalog: &ArtifactCatalog,
     store: &FileSystemArtifactStore,
-    authority: &dyn MemoryProviderAdmission,
+    authority: &AuthenticatedAdmission<'_>,
     request: &Request,
     path: &str,
 ) -> Result<Response, HttpError> {
@@ -1006,12 +1045,15 @@ pub(super) fn publish_revision(
             "manifest selector does not match request path",
         ));
     }
-    store
-        .verify_artifact(
-            manifest.artifact().content_digest().as_str(),
-            manifest.artifact().byte_size(),
-        )
-        .map_err(map_cas_error)?;
+    let digest = manifest.artifact().content_digest().as_str();
+    if !catalog.has_completed_upload(
+        authority.principal,
+        digest,
+        manifest.artifact().byte_size(),
+    )? {
+        run_blocking(|| store.verify_artifact(digest, manifest.artifact().byte_size()))
+            .map_err(map_cas_error)?;
+    }
     catalog.append_map(
         manifest,
         authority,

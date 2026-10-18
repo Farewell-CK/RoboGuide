@@ -88,7 +88,7 @@ impl MemoryReceiverBudget {
             || now.time_namespace.is_empty()
             || now.time_namespace.len() > 128
             || !(1..=1000).contains(&now.uncertainty_ms)
-            || !(1..=120_000).contains(&valid_for_ms)
+            || !(1..=domain::MEMORY_PREPARATION_MAX_BUDGET_MS).contains(&valid_for_ms)
             || valid_for_ms <= now.uncertainty_ms
         {
             return Err(JournalError::InvalidSpec(
@@ -117,7 +117,7 @@ impl MemoryReceiverBudget {
             || self
                 .deadline_lower_ms
                 .saturating_sub(self.received_lower_ms)
-                > 120_000
+                > domain::MEMORY_PREPARATION_MAX_BUDGET_MS
         {
             return 0;
         }

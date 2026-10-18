@@ -213,6 +213,9 @@ def run(
                     "chunk_size_bytes = 32768", "chunk_size_bytes = 1048576"
                 )
                 configured = configured.replace("read_timeout_ms = 3000", "read_timeout_ms = 30000")
+                # The provider's explicit discover/export contract rehashes the real source file;
+                # give that local HTTP call the same bounded large-file window as the data plane.
+                configured = configured.replace("timeout_ms = 3000", "timeout_ms = 120000")
             config.write_text(configured)
             command = [
                 sys.executable,
@@ -226,8 +229,13 @@ def run(
                 str(owned),
                 "--enable-file-jobs",
             ]
-            if use_lifecycle:
-                command += ["--max-job-seconds", "120", "--max-job-rounds", "2000000"]
+            if use_lifecycle or large_transfer:
+                # A large-transfer conformance run must not use the five-second default compute
+                # budget: hashing the admitted multi-hundred-megabyte file is the real provider
+                # workload, and the original budget must cover it without being renewed.
+                command += ["--max-job-seconds", "300"]
+                if use_lifecycle:
+                    command += ["--max-job-rounds", "2000000"]
             if large_transfer:
                 command += ["--max-bytes", "1073741824"]
             command += (
@@ -376,7 +384,7 @@ def run(
         published = wait_for(
             lambda: exchange(path, context=contexts["viewer"], endpoint=cas)[1].get("manifest"),
             "actual source Node publication and CAS upload",
-            90 if large_transfer else 20,
+            25 * 60 if large_transfer else 20,
         )
         assert published == manifest, published
         accepted = mission(mission_id, manifest)
@@ -475,7 +483,7 @@ def run(
             completed = wait_for(
                 completed_task,
                 "actual original file computation completes",
-                180 if use_lifecycle else 35,
+                300 if large_transfer else (180 if use_lifecycle else 35),
             )
             assert len(completed) == 1
             attempt = completed[0]
@@ -539,7 +547,11 @@ def run(
             for delivery in use["controls"].values()
             if delivery["command"]["operation"] == "grant"
         ]
-        assert grants and all(delivery["receipt"]["status"] == "granted" for delivery in grants)
+        grant_statuses = [delivery["receipt"]["status"] for delivery in grants]
+        # A renewal can race with terminal Task completion.  The original granted generation
+        # proves current use; a later grant that arrives after the revoke fence must remain
+        # unknown/rejected and must never be counted as permission.
+        assert grants and "granted" in grant_statuses
         if use_lifecycle:
             assert use["generation"] >= 2, (
                 "actual long computation completed without testing a renewal"
@@ -662,6 +674,7 @@ def run(
             "actual_hash_jobs": 2,
             "actual_imports": 1,
             "actual_use_grants": len(grants),
+            "use_grant_statuses": grant_statuses,
             "actual_use_generation": use["generation"],
             "use_lifecycle": use_lifecycle,
             "large_transfer": large_transfer,

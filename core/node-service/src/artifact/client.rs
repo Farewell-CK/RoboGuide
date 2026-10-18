@@ -2,6 +2,11 @@
 
 use super::*;
 
+/// Maximum number of progress-aware retries for one upload chunk or finalization request.
+const MAX_UPLOAD_RETRIES: u8 = 8;
+/// Upper bound for one resumable upload request, independent of local digest chunking.
+const MAX_UPLOAD_CHUNK_BYTES: usize = 16 * 1024 * 1024;
+
 impl ArtifactClient {
     /// Creates a client after validating an absolute HTTP(S) endpoint and transfer limits.
     pub fn new(
@@ -557,7 +562,7 @@ impl ArtifactClient {
     /// Uploads and finalizes bytes from an already hashed, rewound regular-file handle.
     pub(super) async fn upload_open_blob(
         &self,
-        source_file: tokio::fs::File,
+        mut source_file: tokio::fs::File,
         digest: String,
         byte_size: u64,
     ) -> Result<(String, u64, String), ArtifactError> {
@@ -586,30 +591,180 @@ impl ArtifactClient {
         validate_segment(&upload_id, "upload_id")?;
 
         let content_endpoint = self.path(&["v1", "artifact-uploads", &upload_id, "content"])?;
-        let body = self.stream_file(source_file);
-        let response = self
-            .request(reqwest::Method::POST, content_endpoint.clone())
-            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-            .header(reqwest::header::CONTENT_LENGTH, byte_size.to_string())
-            .body(body)
-            .send()
-            .await
-            .map_err(|error| ArtifactError::remote_outcome_unknown("upload content", error))?;
-        ensure_success(&response, &content_endpoint)?;
+        let mut offset = 0_u64;
+        let upload_chunk_size = self
+            .chunk_size_bytes
+            .saturating_mul(8)
+            .clamp(1, MAX_UPLOAD_CHUNK_BYTES);
+        let mut buffer = vec![0_u8; upload_chunk_size];
+        let mut attempts = 0_u8;
+        while offset < byte_size {
+            source_file.seek(SeekFrom::Start(offset)).await?;
+            let expected = (byte_size - offset).min(buffer.len() as u64) as usize;
+            source_file.read_exact(&mut buffer[..expected]).await?;
+            let chunk = Bytes::copy_from_slice(&buffer[..expected]);
+            let expected_end = offset + expected as u64;
+            match self
+                .append_upload_chunk(&content_endpoint, chunk.clone())
+                .await
+            {
+                Ok(received) if received == expected_end => {
+                    offset = received;
+                    attempts = 0;
+                }
+                Ok(received) if received >= offset && received < expected_end => {
+                    offset = received;
+                    attempts = 0;
+                }
+                Ok(received) => {
+                    return Err(ArtifactError::Configuration(format!(
+                        "artifact upload server advanced to invalid offset {received}"
+                    )));
+                }
+                Err(error) => {
+                    if matches!(
+                        &error,
+                        ArtifactError::Status { status, .. }
+                            if !status.is_server_error()
+                                && *status != reqwest::StatusCode::REQUEST_TIMEOUT
+                    ) {
+                        return Err(error);
+                    }
+                    if attempts >= MAX_UPLOAD_RETRIES {
+                        return Err(error);
+                    }
+                    attempts = attempts.saturating_add(1);
+                    let observation = self.observe_upload(&upload_id).await?;
+                    if observation
+                        .get("record")
+                        .and_then(|record| record.get("phase"))
+                        .and_then(Value::as_str)
+                        == Some("completed")
+                    {
+                        verify_completed_upload(&observation, &digest, byte_size)?;
+                        return Ok((digest, byte_size, upload_id));
+                    }
+                    let received = observation
+                        .get("received_bytes")
+                        .and_then(Value::as_u64)
+                        .ok_or_else(|| {
+                            ArtifactError::Configuration(
+                                "artifact upload observation lacks received_bytes".into(),
+                            )
+                        })?;
+                    if received > byte_size {
+                        return Err(ArtifactError::Configuration(
+                            "artifact upload observation exceeds declared size".into(),
+                        ));
+                    }
+                    if received < offset {
+                        return Err(ArtifactError::Configuration(
+                            "artifact upload observation moved backwards".into(),
+                        ));
+                    }
+                    offset = received;
+                }
+            }
+        }
 
         let finalize_endpoint = self.path(&["v1", "artifact-uploads", &upload_id, "finalize"])?;
         let finalize_payload = serde_json::json!({
             "content_digest": digest,
             "byte_size": byte_size,
         });
+        let mut attempts = 0_u8;
+        loop {
+            let response = self
+                .request(reqwest::Method::POST, finalize_endpoint.clone())
+                .json(&finalize_payload)
+                .send()
+                .await;
+            match response {
+                Ok(response) if response.status().is_success() => {
+                    return Ok((digest, byte_size, upload_id));
+                }
+                Ok(response) => {
+                    let status = response.status();
+                    if !(status.is_server_error() || status == reqwest::StatusCode::REQUEST_TIMEOUT)
+                    {
+                        return Err(ArtifactError::Status {
+                            status,
+                            endpoint: finalize_endpoint.to_string(),
+                        });
+                    }
+                    if attempts >= MAX_UPLOAD_RETRIES {
+                        return Err(ArtifactError::Status {
+                            status,
+                            endpoint: finalize_endpoint.to_string(),
+                        });
+                    }
+                    attempts = attempts.saturating_add(1);
+                    let observation = self.observe_upload(&upload_id).await?;
+                    if observation
+                        .get("record")
+                        .and_then(|record| record.get("phase"))
+                        .and_then(Value::as_str)
+                        == Some("completed")
+                    {
+                        verify_completed_upload(&observation, &digest, byte_size)?;
+                        return Ok((digest, byte_size, upload_id));
+                    }
+                }
+                Err(error) => {
+                    let unknown =
+                        ArtifactError::remote_outcome_unknown("upload finalization", error);
+                    if attempts >= MAX_UPLOAD_RETRIES {
+                        return Err(unknown);
+                    }
+                    attempts = attempts.saturating_add(1);
+                    let observation = self.observe_upload(&upload_id).await?;
+                    if observation
+                        .get("record")
+                        .and_then(|record| record.get("phase"))
+                        .and_then(Value::as_str)
+                        == Some("completed")
+                    {
+                        verify_completed_upload(&observation, &digest, byte_size)?;
+                        return Ok((digest, byte_size, upload_id));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Appends one bounded chunk and returns the server's durable received-byte offset.
+    async fn append_upload_chunk(
+        &self,
+        endpoint: &Url,
+        chunk: Bytes,
+    ) -> Result<u64, ArtifactError> {
         let response = self
-            .request(reqwest::Method::POST, finalize_endpoint.clone())
-            .json(&finalize_payload)
+            .request(reqwest::Method::POST, endpoint.clone())
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .header(reqwest::header::CONTENT_LENGTH, chunk.len().to_string())
+            .body(chunk)
             .send()
             .await
-            .map_err(|error| ArtifactError::remote_outcome_unknown("upload finalization", error))?;
-        ensure_success(&response, &finalize_endpoint)?;
-        Ok((digest, byte_size, upload_id))
+            .map_err(|error| ArtifactError::remote_outcome_unknown("upload content", error))?;
+        ensure_success(&response, endpoint)?;
+        let body = response.json::<Value>().await?;
+        body.get("received_bytes")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                ArtifactError::Configuration("upload response lacks received_bytes".into())
+            })
+    }
+
+    /// Reads the original upload observation without creating a second upload identity.
+    async fn observe_upload(&self, upload_id: &str) -> Result<Value, ArtifactError> {
+        let endpoint = self.path(&["v1", "artifact-uploads", upload_id])?;
+        let response = self
+            .request(reqwest::Method::GET, endpoint.clone())
+            .send()
+            .await
+            .map_err(|error| ArtifactError::remote_outcome_unknown("upload observation", error))?;
+        ensure_success(&response, &endpoint)?;
+        Ok(response.json::<Value>().await?)
     }
 
     /// Builds a URL by appending escaped path segments to the configured endpoint.
@@ -680,35 +835,25 @@ impl ArtifactClient {
         }
         Ok(())
     }
+}
 
-    /// Creates a streaming request body backed by one already validated open file.
-    pub(super) fn stream_file(&self, file: tokio::fs::File) -> reqwest::Body {
-        let chunk_size = self.chunk_size_bytes;
-        let (sender, receiver) = mpsc::channel::<Result<Bytes, std::io::Error>>(8);
-        tokio::spawn(async move {
-            let mut file = file;
-            let mut buffer = vec![0_u8; chunk_size];
-            loop {
-                match file.read(&mut buffer).await {
-                    Ok(0) => break,
-                    Ok(length) => {
-                        if sender
-                            .send(Ok(Bytes::copy_from_slice(&buffer[..length])))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        let _ = sender.send(Err(error)).await;
-                        break;
-                    }
-                }
-            }
-        });
-        reqwest::Body::wrap_stream(ReceiverStream::new(receiver))
+/// Verifies a completed upload observation before treating a lost finalization response as success.
+fn verify_completed_upload(
+    observation: &Value,
+    expected_digest: &str,
+    expected_size: u64,
+) -> Result<(), ArtifactError> {
+    let record = observation
+        .get("record")
+        .ok_or_else(|| ArtifactError::Configuration("upload observation lacks record".into()))?;
+    if record.get("content_digest").and_then(Value::as_str) != Some(expected_digest)
+        || record.get("byte_size").and_then(Value::as_u64) != Some(expected_size)
+    {
+        return Err(ArtifactError::Configuration(
+            "completed upload observation differs from original byte proof".into(),
+        ));
     }
+    Ok(())
 }
 
 /// Return whether an Artifact endpoint is outside the trusted local development profile.

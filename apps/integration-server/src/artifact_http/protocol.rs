@@ -165,7 +165,7 @@ impl RequestHead {
             write_chunk(upload, &self.prefetched_body[..prefetched])?;
         }
         let mut received = prefetched;
-        let mut buffer = vec![0_u8; 1024 * 1024];
+        let mut buffer = vec![0_u8; UPLOAD_STREAM_CHUNK_BYTES];
         while received < expected {
             let remaining = expected - received;
             let read_limit = remaining.min(buffer.len());

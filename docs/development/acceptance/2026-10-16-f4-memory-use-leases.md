@@ -1,10 +1,10 @@
 # F4 当前 Memory 使用许可切片
 
 本切片接通 Controller→正式 Node Protocol→Node journal→真实 Local Memory backend 的
-当前使用租约。F4 仍进行中；active-map、Group handoff、GC、大文件路径与 F5–F10 均未关闭。
+当前使用租约。F4 仍进行中；active-map、Group handoff、GC 与 F5–F10 均未关闭。
 所有记录为同主机实际软件进程与文件证据：0 设备、0 模型、0 仿真器，未运行实验或 E6。
 
-原 preparation/import/首次 Execute 的 120 秒预算不变。新使用命令绑定完整原 context、
+原 preparation/import/首次 Execute 的不可续期预算保持 120 秒；大文件路径通过分块、断点进度和不重复哈希完成。新使用命令绑定完整原 context、
 tenant、Task/Role/attempt、Node/session、配置、provider/backend、内容策略及成员版本，
 最多 30 秒，generation 连续且重复命令不续期。当前与最近三代记录保留，水位拒绝更旧重放。
 撤销不可逆，重启先持久 fence；所有所选后端确认最新 generation 前，整组 pending Execute
@@ -51,10 +51,19 @@ provider instance、identity digest 和 contract digest 完全一致时晋升为
 `/tmp/rg-memory-prep-20261018-a/result.json` 通过真实 SQL 故障注入、两 Node/CAS、原 provider
 对账、独立复算与重启，`devices/models/simulators=0`。
 
-大文件检查 `/tmp/rg-memory-large-final-20261018-a/failure.json` 本轮在源 Node→CAS 发布阶段
-触发 checker 的 90 秒外层等待上限，565,360,640 字节源文件只传到 137,609,216 字节，尚未
-到达刚修复的 reconciliation 分支。因此这次结果是大文件流程 `TEST GAP`，不能计为通过，
-也不能用它否定已经单独通过的 query 状态归约修复；后续应先调整大文件传输验收预算并重跑。
+历史大文件失败记录 `/tmp/rg-memory-large-final-20261018-a/failure.json` 保留为
+`TEST GAP`：旧实现的 90 秒外层等待在源 Node→CAS 发布阶段结束，565,360,640 字节只传到
+137,609,216 字节。该记录不与修复后的二进制混报。
+
+修复后的大文件闭环 `/tmp/rg-memory-large-final-20261018-q/result.json` 已通过：
+569,559,040 字节真实源文件在原 120 秒准备窗口内完成分块上传、CAS 发布、第二 Node 导入、原始 provider 复核、
+重启和撤销；`actual_node_restarts=2`、`actual_backend_restarts=2`、
+`actual_import_completion_sql_failure=true`、`readonly_reconciliations=1`、
+`independent_verifiers=2`、`original_receiver_budget_unchanged=true`，且
+`devices/models/simulators=0`。同一 upload identity 会返回
+`received_bytes` 并从已确认前缀继续；CAS/fsync 通过阻塞边界执行且不占用 Tokio worker，发布复用已持久化的完成证明，
+不会再次哈希整份大文件。原始 query identity 只发送一次，后续 generation 才能在窗口后对账；
+撤销允许有界重试并保持不可逆。
 
 `rg-spatial-use-20261015-b/schema-validation.json` 验证实际 v0.2 context、两种 Node 配置、
 完整 raw map、使用命令/回执及非法变体。`upgrade-gates-final.json` 记录 6 项实际旧二进制拒绝：
@@ -71,7 +80,11 @@ fmt 与 Python 全量离线检查通过。Python 变更路径 Ruff、strict mypy
 
 失败原记录全部保留：普通文件 `rg-memory-use-20261015-a/c` 分别暴露检查器未等撤销回执和
 后端 preparation 版本接线问题；长任务 `renew-a/b/c/d` 暴露大文件超时、重发和写锁/新鲜度
-问题；`renew-e` 观察到 12 代续约，最终触及实际计算预算，未报告成功。`--large-transfer`
-保留大文件检查入口；其准备窗口失败尚未关闭，下一切片须整改并重新验收。
+问题；`renew-e` 观察到 12 代续约，最终触及实际计算预算，未报告成功。它们是整改前的
+历史证据，不代表当前修复后二进制的结果。
+
+当前仍未关闭的具体边界是：Integration Server 重启时仍会清理未完成的 staging 文件，跨进程
+恢复半截 upload 还没有 durable staging rehydration；active-map 选择、Group handoff、引用
+感知 GC、物理停止/硬件连续性以及 F5–F10 仍需独立实现和验收。
 
 这些检查不提供当前设备定位、物理停止、硬件连续性、跨主机时钟同步或完整 F4 完成证据。

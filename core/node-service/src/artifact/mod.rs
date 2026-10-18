@@ -22,8 +22,6 @@ use std::io::SeekFrom;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 
 mod client;
 mod filesystem;

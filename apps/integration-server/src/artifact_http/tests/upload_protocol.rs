@@ -285,9 +285,9 @@ fn upload_registry_enforces_count_bytes_and_idle_expiration() {
     assert!(!store.root().join("staging").join("second.partial").exists());
 }
 
-/// An interrupted body and a mismatched finalize both abort staging and release all quota.
+/// An interrupted body retains its verified prefix for same-identity resume; mismatched finalize aborts.
 #[tokio::test]
-async fn upload_errors_abort_session_and_release_registry_quota() {
+async fn upload_errors_retain_prefix_and_release_registry_quota_on_abort() {
     let directory = tempfile::tempdir().expect("temporary directory exists");
     let store = FileSystemArtifactStore::new(directory.path()).expect("CAS initializes");
     let event_log =
@@ -329,16 +329,34 @@ async fn upload_errors_abort_session_and_release_registry_quota() {
     );
     {
         let registry = uploads.lock().expect("registry remains readable");
-        assert_eq!(registry.active_uploads(), 0);
-        assert_eq!(registry.active_bytes, 0);
+        assert_eq!(registry.active_uploads(), 1);
+        assert_eq!(registry.active_bytes, 2);
     }
     assert!(
-        !store
+        store
             .root()
             .join("staging")
             .join("interrupted.partial")
             .exists()
     );
+    let resumed = raw_request(
+        "PUT",
+        "/v1/artifact-uploads/interrupted/content",
+        b"cd",
+        true,
+    );
+    let resumed_body = response_body(
+        &request_once(&store, &catalog, &uploads, resumed).await,
+        "202 Accepted",
+    );
+    let resumed_json: serde_json::Value =
+        serde_json::from_slice(&resumed_body).expect("resume response is JSON");
+    assert_eq!(resumed_json["received_bytes"], 4);
+    {
+        let registry = uploads.lock().expect("registry remains readable");
+        assert_eq!(registry.active_uploads(), 1);
+        assert_eq!(registry.active_bytes, 4);
+    }
 
     let mismatch_start = raw_request(
         "POST",
@@ -372,8 +390,8 @@ async fn upload_errors_abort_session_and_release_registry_quota() {
     );
     {
         let registry = uploads.lock().expect("registry remains readable");
-        assert_eq!(registry.active_uploads(), 0);
-        assert_eq!(registry.active_bytes, 0);
+        assert_eq!(registry.active_uploads(), 1);
+        assert_eq!(registry.active_bytes, 4);
     }
     assert!(
         !store
@@ -381,6 +399,11 @@ async fn upload_errors_abort_session_and_release_registry_quota() {
             .join("staging")
             .join("mismatch.partial")
             .exists()
+    );
+    let interrupted_abort = raw_request("DELETE", "/v1/artifact-uploads/interrupted", &[], false);
+    response_body(
+        &request_once(&store, &catalog, &uploads, interrupted_abort).await,
+        "200 OK",
     );
     let explicit_start = raw_request(
         "POST",

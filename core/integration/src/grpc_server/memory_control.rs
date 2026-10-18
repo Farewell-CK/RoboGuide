@@ -84,7 +84,7 @@ impl GrpcNodeRouter {
     ) -> Result<(), Status> {
         command.validate().map_err(Status::invalid_argument)?;
         if command.operation != domain::MemoryControlKind::Revoke
-            && !(1..=120_000).contains(&remaining_budget_ms)
+            && !(1..=domain::MEMORY_PREPARATION_MAX_BUDGET_MS).contains(&remaining_budget_ms)
         {
             return Err(Status::invalid_argument(
                 "Memory control original budget is unavailable",

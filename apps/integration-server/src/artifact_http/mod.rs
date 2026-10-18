@@ -41,6 +41,8 @@ const MAX_ACTIVE_UPLOAD_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const UPLOAD_IDLE_TTL: Duration = Duration::from_secs(15 * 60);
 /// Maximum wall time allowed for one declared artifact request body to arrive.
 const UPLOAD_BODY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// Bounded body read size; one authority recheck covers each accepted write window.
+const UPLOAD_STREAM_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 /// Frequency at which idle sessions are removed even when no HTTP request arrives.
 const UPLOAD_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 

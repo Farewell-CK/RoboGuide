@@ -28,7 +28,7 @@ pub(crate) struct MemoryQueryRequest {
 pub(crate) struct MemoryReconciliation {
     /// Original opening time, unchanged by restart or HTTP retry.
     opened_at_ms: u64,
-    /// Original nonrenewable deadline, at most five minutes after opening.
+    /// Original nonrenewable reconciliation deadline, at most five minutes after opening.
     deadline_ms: u64,
     /// Complete consecutive generation history, at most sixteen readonly queries.
     queries: BTreeMap<u64, MemoryQueryIntent>,
@@ -46,11 +46,11 @@ struct MemoryQueryIntent {
     principal: String,
     /// Original Controller-local authorization time.
     authorized_at_ms: u64,
-    /// Original validity and Node receive-relative timeout used for all deliveries.
+    /// Original validity and Node receive-relative timeout for the single in-flight delivery.
     valid_for_ms: u64,
     /// Last prepared post-Commit delivery; replay does not reset the limit.
     last_delivery_ms: Option<u64>,
-    /// At most four identical deliveries; each Node query identity runs at most once.
+    /// One delivery per query identity; a later generation is used after the bounded window.
     deliveries: u32,
     /// First accepted receipt, retained verbatim for audit and restore checking.
     receipt: Option<serde_json::Value>,
@@ -263,15 +263,13 @@ pub(crate) fn prepare(controller: &mut ControllerState, now: domain::TimestampMs
         };
         for query in session.queries.values_mut() {
             if query.receipt.is_none()
-                && query.deliveries < 4
+                && query.deliveries == 0
                 && now.as_millis() >= query.authorized_at_ms
                 && now.as_millis()
                     < session
                         .deadline_ms
                         .min(query.authorized_at_ms.saturating_add(query.valid_for_ms))
-                && query
-                    .last_delivery_ms
-                    .is_none_or(|last| now.as_millis().saturating_sub(last) >= 1000)
+                && query.last_delivery_ms.is_none()
             {
                 query.last_delivery_ms = Some(now.as_millis());
                 query.deliveries += 1;
@@ -581,7 +579,7 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
                         .query_timeout_ms
                         .min(session.deadline_ms - q.authorized_at_ms)
                 || q.valid_for_ms > 30_000
-                || q.deliveries > 4
+                || q.deliveries > 1
                 || (q.deliveries == 0) != q.last_delivery_ms.is_none()
                 || q.last_delivery_ms.is_some_and(|t| {
                     t < q.authorized_at_ms || t >= q.authorized_at_ms.saturating_add(q.valid_for_ms)

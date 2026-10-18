@@ -8,7 +8,7 @@ use domain::{
 use sha2::{Digest as _, Sha256};
 
 /// Original admission window shared by preparation/import/probe, without restart renewal.
-const PREPARATION_WINDOW_MS: u64 = 120_000;
+const PREPARATION_WINDOW_MS: u64 = domain::MEMORY_PREPARATION_MAX_BUDGET_MS;
 /// Maximum observed-content age before a pending Execute needs another once-only query.
 const AVAILABILITY_WINDOW_MS: u64 = 10_000;
 
@@ -81,7 +81,8 @@ pub(crate) struct MemoryControlDelivery {
     pub(crate) issued_at_ms: u64,
     /// Last prepared send time; changed only before checkpoint Commit.
     pub(crate) last_delivery_ms: Option<u64>,
-    /// At most four prepared deliveries of this same identity.
+    /// Every management identity has a bounded delivery budget; Node journal deduplication keeps
+    /// retries from repeating an admitted backend operation.
     pub(crate) deliveries: u32,
     /// Original Node outcome; a duplicate cannot change its timestamp or contents.
     pub(crate) receipt: Option<MemoryControlReceipt>,
@@ -479,7 +480,12 @@ pub(crate) fn prepare(
             {
                 if delivery.deliveries >= 4 {
                     record.phase = MemoryPreparationPhase::Unknown;
-                    record.reason = "original Memory control delivery budget exhausted".into();
+                    record.reason = if delivery.command.operation == MemoryControlKind::Revoke {
+                        "original Memory revoke delivery budget exhausted"
+                    } else {
+                        "original Memory control delivery budget exhausted"
+                    }
+                    .into();
                     break;
                 }
                 delivery.last_delivery_ms = Some(now.as_millis());

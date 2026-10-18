@@ -59,6 +59,13 @@ impl UploadRegistry {
         self.sessions.len().saturating_add(self.in_flight_count)
     }
 
+    /// Returns the bytes durably accepted by one currently idle upload session.
+    pub(super) fn received_bytes(&self, upload_id: &str) -> Option<u64> {
+        self.sessions
+            .get(upload_id)
+            .map(|session| session.upload.size())
+    }
+
     /// Aborts sessions whose idle deadline has elapsed and releases their byte accounting.
     pub(super) fn expire_idle(&mut self, now: Instant) -> Result<usize, HttpError> {
         let expired = self
@@ -175,7 +182,8 @@ impl UploadRegistry {
         mut in_flight: InFlightUpload,
         now: Instant,
     ) -> Result<(), HttpError> {
-        if in_flight.session.upload.size() != in_flight.accounted_bytes {
+        let received_bytes = in_flight.session.upload.size();
+        if received_bytes > in_flight.accounted_bytes {
             let release_result = self.release_in_flight(in_flight.accounted_bytes);
             let _ = in_flight.session.upload.abort();
             release_result?;
@@ -183,6 +191,14 @@ impl UploadRegistry {
                 "artifact upload byte accounting diverged",
             ));
         }
+        // A disconnected chunk may have ended before its declared Content-Length. Keep the
+        // verified prefix and release only the unused reservation so the same upload identity can
+        // resume from the observed offset.
+        self.active_bytes = self
+            .active_bytes
+            .checked_sub(in_flight.accounted_bytes - received_bytes)
+            .ok_or_else(|| HttpError::internal("artifact upload byte accounting underflowed"))?;
+        in_flight.accounted_bytes = received_bytes;
         if self.sessions.contains_key(&upload_id) {
             let release_result = self.release_in_flight(in_flight.accounted_bytes);
             let _ = in_flight.session.upload.abort();

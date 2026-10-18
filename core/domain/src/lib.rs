@@ -40,8 +40,9 @@ pub use memory_authority::{
     MemoryGroupPolicy, map_manifest_digest, map_memory_manifest, memory_manifest_digest,
 };
 pub use memory_preparation::{
-    MemoryAvailabilityEvidence, MemoryControlCommand, MemoryControlKind, MemoryControlReceipt,
-    MemoryControlStatus, MemoryPreparation, MemoryRequirement, PreparedMemoryInput,
+    MEMORY_PREPARATION_MAX_BUDGET_MS, MemoryAvailabilityEvidence, MemoryControlCommand,
+    MemoryControlKind, MemoryControlReceipt, MemoryControlStatus, MemoryPreparation,
+    MemoryRequirement, PreparedMemoryInput,
 };
 pub use memory_use::{
     MEMORY_USE_MAX_BUDGET_MS, MemoryUseControl, MemoryUseOperation,

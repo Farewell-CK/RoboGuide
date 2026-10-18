@@ -1,6 +1,8 @@
 //! Durable source-bound upload receipts and protected-content reference authorization.
 
-use super::server::{abort_in_flight, release_in_flight, restore_after_append, take_for_terminal};
+use super::server::{
+    abort_in_flight, release_in_flight, restore_after_append, run_blocking, take_for_terminal,
+};
 use super::*;
 use domain::{ArtifactUploadPhase, ArtifactUploadRecord};
 
@@ -122,8 +124,7 @@ pub(super) fn finalize_authorized_upload(
         authority
             .revalidate_artifact_principal(principal)
             .map_err(HttpError::forbidden)?;
-        store
-            .verify_artifact(&digest, input.byte_size)
+        run_blocking(|| store.verify_artifact(&digest, input.byte_size))
             .map_err(|_| HttpError::conflict("original prepared CAS outcome remains unknown"))?;
     } else {
         check_live_upload(catalog, id, principal)?;
@@ -136,11 +137,13 @@ pub(super) fn finalize_authorized_upload(
                 .revalidate_artifact_principal(principal)
                 .map_err(HttpError::forbidden)?;
             check_live_upload(catalog, id, principal)?;
-            in_flight
-                .session
-                .upload
-                .prepare_finalize(&digest, input.byte_size)
-                .map_err(map_cas_error)
+            run_blocking(|| {
+                in_flight
+                    .session
+                    .upload
+                    .prepare_finalize(&digest, input.byte_size)
+            })
+            .map_err(map_cas_error)
         })();
         if let Err(error) = preparation {
             abort_in_flight(uploads, in_flight)?;
@@ -171,10 +174,7 @@ pub(super) fn finalize_authorized_upload(
                     "original upload changed before CAS finalization",
                 ));
             }
-            in_flight
-                .session
-                .upload
-                .finalize(&digest, input.byte_size)
+            run_blocking(|| in_flight.session.upload.finalize(&digest, input.byte_size))
                 .map_err(map_cas_error)
         })();
         match result {
@@ -184,9 +184,7 @@ pub(super) fn finalize_authorized_upload(
                 return Err(error);
             }
         }
-        store
-            .verify_artifact(&digest, input.byte_size)
-            .map_err(map_cas_error)?;
+        run_blocking(|| store.verify_artifact(&digest, input.byte_size)).map_err(map_cas_error)?;
     }
     if record.phase != ArtifactUploadPhase::Completed {
         record.phase = ArtifactUploadPhase::Completed;
@@ -272,6 +270,68 @@ impl ArtifactCatalog {
             .map_err(|_| HttpError::service_unavailable("upload evidence unavailable"))?
             .get(id)
             .cloned())
+    }
+
+    /// Returns whether this authenticated principal already supplied and finalized these bytes.
+    ///
+    /// The upload transition is the durable byte proof: `prepare_finalize` hashed and fsynced the
+    /// staging inode before `Completed` was committed. Publication can therefore reuse that
+    /// immutable evidence instead of hashing a multi-hundred-megabyte CAS blob a second time.
+    pub(super) fn has_completed_upload(
+        &self,
+        principal: &ArtifactPrincipal,
+        digest: &str,
+        size: u64,
+    ) -> Result<bool, HttpError> {
+        self.ensure_available()?;
+        let records = self
+            .upload_records
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("upload evidence unavailable"))?;
+        Ok(records.values().any(|record| {
+            record.phase == ArtifactUploadPhase::Completed
+                && record.principal_id == principal.subject
+                && record.tenant_id == principal.tenant_id
+                && record.content_digest.as_deref() == Some(digest)
+                && record.byte_size == Some(size)
+        }))
+    }
+
+    /// Returns whether the CAS digest has an earlier immutable upload or published manifest proof.
+    pub(super) fn has_verified_content(&self, digest: &str, size: u64) -> Result<bool, HttpError> {
+        self.ensure_available()?;
+        let uploaded = self
+            .upload_records
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("upload evidence unavailable"))?
+            .values()
+            .any(|record| {
+                record.phase == ArtifactUploadPhase::Completed
+                    && record.content_digest.as_deref() == Some(digest)
+                    && record.byte_size == Some(size)
+            });
+        if uploaded {
+            return Ok(true);
+        }
+        let memory = self
+            .memory_projection
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("generic Memory catalog unavailable"))?;
+        if memory.memories().into_iter().any(|manifest| {
+            manifest.artifact().is_some_and(|artifact| {
+                artifact.content_digest().as_str() == digest && artifact.byte_size() == size
+            })
+        }) {
+            return Ok(true);
+        }
+        let projection = self
+            .projection
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("Spatial catalog unavailable"))?;
+        Ok(projection.revisions().into_iter().any(|revision| {
+            let artifact = revision.manifest().artifact();
+            artifact.content_digest().as_str() == digest && artifact.byte_size() == size
+        }))
     }
 
     /// Validates stable owner equality, including after leaf rotation; no prefix grants ownership.

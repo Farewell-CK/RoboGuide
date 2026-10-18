@@ -7,6 +7,9 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+/// Maximum non-renewable preparation/import/first-use admission window.
+pub const MEMORY_PREPARATION_MAX_BUDGET_MS: u64 = 120_000;
+
 /// Accepted-plan Memory requirement; it never contains a consumer Node or provider selector.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -160,7 +163,7 @@ impl MemoryPreparation {
         if !matches!(
             self.schema.as_str(),
             "roboguide.memory-preparation/v0.1" | "roboguide.memory-preparation/v0.2"
-        ) || !(1..=120_000).contains(&self.valid_for_ms)
+        ) || !(1..=MEMORY_PREPARATION_MAX_BUDGET_MS).contains(&self.valid_for_ms)
             || self.registry_revision == 0
             || !(1..=8).contains(&self.inputs.len())
             || !self.invocation.is_object()
