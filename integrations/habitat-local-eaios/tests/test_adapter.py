@@ -226,6 +226,36 @@ def test_cancel_acceptance_does_not_immediately_report_cancelled(tmp_path: Path)
         adapter.close()
 
 
+def test_safe_state_requires_local_terminal_outcome_and_generation(tmp_path: Path) -> None:
+    """The safety export appears only after cancellation reaches the local terminal state."""
+    adapter, backend = _adapter(tmp_path)
+    request = _request()
+    invocation = request["invocation"]
+    assert isinstance(invocation, dict)
+    invocation["attempt_id"] = "attempt-safe-4"
+    invocation["execution_generation"] = 4
+    try:
+        execution_id = str(adapter.submit(request)["execution_id"])
+        assert backend.started.wait(1.0)
+        assert adapter.safe_state() == {"observations": []}
+        adapter.cancel({"execution_id": execution_id})
+        _wait_state(adapter, execution_id, "CANCELLED")
+        assert adapter.safe_state() == {
+            "observations": [
+                {
+                    "execution_id": "attempt-safe-4",
+                    "execution_generation": 4,
+                    "command_id": "cancel-attempt-safe-4",
+                    "safe_state": True,
+                    "assurance": "software-process",
+                }
+            ]
+        }
+    finally:
+        backend.finish.set()
+        adapter.close()
+
+
 def test_duplicate_exact_invocation_reuses_one_local_handle(tmp_path: Path) -> None:
     """Repeated exact Execute calls cannot authorize a second local physical execution."""
     adapter, backend = _adapter(tmp_path)

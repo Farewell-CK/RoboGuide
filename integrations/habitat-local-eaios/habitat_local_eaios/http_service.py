@@ -39,6 +39,9 @@ class WorkflowAdapter(Protocol):
     def progress(self) -> dict[str, object]:
         """Read optional operation-owned progress without changing execution."""
 
+    def safe_state(self) -> dict[str, object]:
+        """Read attempt-bound safe-state evidence without changing execution."""
+
     def recovery_support(self) -> dict[str, object]:
         """Read deployment cancellation and continuation facts without changing execution."""
 
@@ -69,6 +72,13 @@ class HabitatBridgeHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/v1/executions/progress":
             self._respond(HTTPStatus.OK, self.server.adapter.progress())
+            return
+        if self.path == "/v1/executions/safe-state":
+            safe_state = getattr(self.server.adapter, "safe_state", None)
+            if safe_state is None:
+                self._respond(HTTPStatus.NOT_IMPLEMENTED, {"error": "safe-state unavailable"})
+            else:
+                self._respond(HTTPStatus.OK, safe_state())
             return
         if self.path == "/v1/executions/recovery-support":
             self._respond(HTTPStatus.OK, self.server.adapter.recovery_support())

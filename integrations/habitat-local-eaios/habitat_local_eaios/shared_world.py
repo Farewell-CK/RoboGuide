@@ -60,6 +60,7 @@ from .relocation_start import (
 )
 from .reset_route_support import build_reset_route_support
 from .retained_session import MAX_CONTINUATIONS, RetainedWorldSession, claim_retained_world
+from .safe_state import read_safe_state, validate_safe_state_response
 from .semantic_evidence import build_authoritative_semantic_evidence
 from .source_provenance import build_runtime_source_manifest
 from .spatial_feasibility import assess_spatial_feasibility, load_spatial_profile_snapshot
@@ -1662,6 +1663,10 @@ class NodeEndpoint:
         return read_execution_progress(
             self._progress_directory, self.agent_id, self._store.active_execution()
         )
+
+    def safe_state(self) -> dict[str, object]:
+        """Expose only this endpoint's terminal cancellation evidence to Controller State."""
+        return validate_safe_state_response(read_safe_state(self._store.all_executions()))
 
     def recovery_support(self) -> dict[str, object]:
         """Return frozen deployment facts; joint continuation never implies isolated stopping."""
