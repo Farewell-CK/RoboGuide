@@ -436,11 +436,24 @@ pub(crate) fn receipt(
     }
     let phase = validate_result(&import.request, receipt)?;
     if let Some(prior) = &query.receipt {
-        return if prior["result_json"] == receipt.result_json && prior["status"] == receipt.status {
-            Ok(())
-        } else {
-            Err("query result is immutable".into())
-        };
+        if prior["result_json"] == receipt.result_json && prior["status"] == receipt.status {
+            return Ok(());
+        }
+        let advances_unknown = prior["status"].as_i64()
+            == Some(i64::from(
+                MemoryImportReceiptStatus::MemoryImportUnknown as i32,
+            ))
+            && prior["result_json"].as_str() == Some("")
+            && matches!(phase, ImportPhase::Completed | ImportPhase::Rejected)
+            && prior["identity_digest"] == receipt.identity_digest
+            && prior["provider_instance_id"] == receipt.provider_instance_id
+            && prior["provider_contract_digest"] == receipt.provider_contract_digest;
+        if !advances_unknown {
+            return Err("query result is immutable".into());
+        }
+        // Unknown is an interruption observation, not a terminal conclusion. The original
+        // provider may later return one conclusive result under the same query identity.
+        // Keep the identity immutable while allowing that monotonic Unknown -> terminal step.
     }
     for prior in session
         .queries

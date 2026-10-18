@@ -41,6 +41,21 @@ Controller wrapper v37。旧 preparation v0.1 的 schema 不变，缺失 use aut
 全部 reap。独立 verifier 重读实际源文件/CAS/导入 bytes；本地 Completed 不替代语义满足。
 普通文件检查还注入真正的导入完成 SQL 失败，原 provider 只读对账，不再复制或换 ID。
 
+2026-10-18 补充了同一 readonly query 的单调恢复规则：无结果的 `Unknown` 可在原
+provider instance、identity digest 和 contract digest 完全一致时晋升为确定的 `Completed` /
+`Rejected`；确定结果仍不可改写，provider 身份变化仍拒绝。此前大文件失败记录中，Controller
+已保存空结果 `Unknown`，同一 Node journal 则保存了原 provider 的确定结果，重试因此被拒绝。
+新增 `original_provider_query_resolves_only_current_authorized_import_and_fences_old_wrapper`
+回归覆盖 Unknown→Completed、确定结果重复幂等及 Completed→Rejected 拒绝；Integration Server
+全套 220 项、Clippy、fmt 通过。标准大小实际进程检查
+`/tmp/rg-memory-prep-20261018-a/result.json` 通过真实 SQL 故障注入、两 Node/CAS、原 provider
+对账、独立复算与重启，`devices/models/simulators=0`。
+
+大文件检查 `/tmp/rg-memory-large-final-20261018-a/failure.json` 本轮在源 Node→CAS 发布阶段
+触发 checker 的 90 秒外层等待上限，565,360,640 字节源文件只传到 137,609,216 字节，尚未
+到达刚修复的 reconciliation 分支。因此这次结果是大文件流程 `TEST GAP`，不能计为通过，
+也不能用它否定已经单独通过的 query 状态归约修复；后续应先调整大文件传输验收预算并重跑。
+
 `rg-spatial-use-20261015-b/schema-validation.json` 验证实际 v0.2 context、两种 Node 配置、
 完整 raw map、使用命令/回执及非法变体。`upgrade-gates-final.json` 记录 6 项实际旧二进制拒绝：
 source 和已有 use head/commands/effects 的 consumer 均拒绝旧 Node v9，回退 header 后仍拒绝

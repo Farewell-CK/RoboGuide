@@ -237,6 +237,18 @@ fn query_receipt(
     }
 }
 
+/// Represents an interrupted original-provider query with immutable backend identity metadata.
+fn unknown_query_receipt(
+    request: &MemoryImportRequest,
+    generation: u64,
+) -> integration::grpc::v0_4::MemoryImportQueryReceipt {
+    let mut receipt = query_receipt(request, generation);
+    receipt.status = MemoryImportReceiptStatus::MemoryImportUnknown as i32;
+    receipt.reason = "original provider query interrupted".into();
+    receipt.result_json.clear();
+    receipt
+}
+
 /// Query reconciliation persists original budgets but cannot release Control ownership or satisfy Tasks.
 #[test]
 fn original_provider_query_resolves_only_current_authorized_import_and_fences_old_wrapper() {
@@ -277,14 +289,48 @@ fn original_provider_query_resolves_only_current_authorized_import_and_fences_ol
     application::memory_query::receipt(
         &mut live,
         request.node_id.as_str(),
-        &query_receipt(&request, 1),
+        &unknown_query_receipt(&request, 1),
         TimestampMs::new(9),
+        &mut events.clone(),
+    )
+    .unwrap();
+    application::memory_query::receipt(
+        &mut live,
+        request.node_id.as_str(),
+        &query_receipt(&request, 1),
+        TimestampMs::new(10),
         &mut events.clone(),
     )
     .unwrap();
     assert_eq!(
         live.memory_imports[&request.import_id].phase,
         ImportPhase::Completed
+    );
+    let duplicate = query_receipt(&request, 1);
+    application::memory_query::receipt(
+        &mut live,
+        request.node_id.as_str(),
+        &duplicate,
+        TimestampMs::new(11),
+        &mut events.clone(),
+    )
+    .unwrap();
+    let mut conflicting = query_receipt(&request, 1);
+    conflicting.status = MemoryImportReceiptStatus::MemoryImportRejected as i32;
+    let mut conflicting_result: serde_json::Value =
+        serde_json::from_str(&conflicting.result_json).unwrap();
+    conflicting_result["outcome"] = serde_json::json!("rejected_before_effect");
+    conflicting.result_json = conflicting_result.to_string();
+    assert!(
+        application::memory_query::receipt(
+            &mut live,
+            request.node_id.as_str(),
+            &conflicting,
+            TimestampMs::new(12),
+            &mut events.clone(),
+        )
+        .unwrap_err()
+        .contains("query result is immutable")
     );
     assert_eq!(
         live.bridge
