@@ -49,6 +49,12 @@ stop certificate、硬实时 hazard、运行中抢占和异构 regrasp 仍保持
 两软件 Node 的真实 CAS/计算/独立验证/重启检查与旧 v37 writer 拒绝分别保留证据；它不关闭
 跨主机部署、多 provider 部分 Unknown 的完整对账、跨 Group handoff 或 F5–F10。
 
+2026-10-19 原 revoke 的多 provider 部分 Unknown 对账已由
+[ADR-0107](decisions/0107-original-revoke-observation-and-provider-progress.md) 与
+[专项验收](development/acceptance/2026-10-19-f4-original-revoke-reconciliation.md) 补齐。
+原回执/预算保留，自动恢复和独立有界 GET 各有实际进程证据；无法确认仍保留 ownership，
+内容确认不绕过 stop gate。跨 Group handoff、跨主机、HA 数据面及其余阶段继续为必需项。
+
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |

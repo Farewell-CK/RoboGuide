@@ -29,6 +29,8 @@ from memory_preparation_profile import configuration, mission, node_environment,
 from memory_use_lifecycle import ActualUseScenario
 from memory_use_lifecycle import run as run_use_interruption
 from memory_use_profile import request
+from memory_use_query_processes import Setup as UseQuerySetup
+from memory_use_query_processes import run as run_use_query
 from spatial_content_policy import digest
 
 
@@ -48,6 +50,7 @@ def identity() -> dict[str, str]:
             "memory_use_profile.py",
             "memory_use_lifecycle.py",
             "memory_group_lifecycle.py",
+            "memory_use_query_processes.py",
         )
     ]
     result = {
@@ -98,9 +101,11 @@ def run(
     use_case: str | None = None,
     large_transfer: bool = False,
     group_lifecycle: bool = False,
+    use_query_recovery: bool = False,
+    use_query_case: str = "manual",
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
-    use_lifecycle = use_lifecycle or use_case is not None
+    use_lifecycle = use_lifecycle or use_case is not None or use_query_recovery
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     directory = directory.resolve()
     initial_identity = identity()
@@ -156,6 +161,9 @@ def run(
     }
     save(directory / "manifest.json", manifest)
     save(directory / "source/exports.json", [{"manifest": manifest, "artifact_path": "source.bin"}])
+    query_setup = (
+        UseQuerySetup.create(directory, manifest, use_query_case) if use_query_recovery else None
+    )
     logs: list[BinaryIO] = []
     processes: list[subprocess.Popen[bytes]] = []
 
@@ -213,6 +221,17 @@ def run(
             configured = configuration(
                 owned, nodes[index], grpc, backends[index], cas, index == 1 or group_lifecycle
             )
+            if query_setup is not None:
+                configured = query_setup.configure(configured, index == 1)
+                if index == 1:
+                    configured = configured.replace(
+                        'id = "memory-http"\nlocal_system = "posix-compute"\nendpoint = "'
+                        + backends[index]
+                        + '"',
+                        'id = "memory-http"\nlocal_system = "posix-compute"\nendpoint = "unix://'
+                        + str(directory / "consumer/memory-proxy.sock")
+                        + '"',
+                    )
             if large_transfer:
                 configured = configured.replace(
                     "max_artifact_bytes = 1048576", "max_artifact_bytes = 1073741824"
@@ -267,7 +286,9 @@ def run(
                 "actual file backend readiness",
             )
         # Abort actual SQL completion after fsynced copying, retaining original bytes and identity.
-        if not group_lifecycle:
+        if query_setup is not None:
+            query_setup.start_extra(start)
+        if not group_lifecycle and not use_query_recovery:
             with sqlite3.connect(directory / "consumer/backend/memory.sqlite3") as connection:
                 connection.execute(
                     "CREATE TRIGGER fail_final_import BEFORE UPDATE OF state ON imports "
@@ -397,6 +418,25 @@ def run(
             25 * 60 if large_transfer else 20,
         )
         assert published == manifest, published
+        if query_setup is not None:
+            scenario = GroupScenario(
+                directory,
+                nodes,
+                backends,
+                manifest,
+                exchange,
+                contexts["viewer"],
+                controller,
+                controller_command,
+                start,
+            )
+            result = run_use_query(query_setup, scenario, node_processes, environment)
+            assert identity() == initial_identity, "pinned source or binary changed"
+            result.update(
+                source_identity=initial_identity, configuration_identity=configuration_identity
+            )
+            save(directory / "result.json", result)
+            return result
         if group_lifecycle:
             result = run_group(
                 GroupScenario(
@@ -780,6 +820,8 @@ def main() -> None:
     parser.add_argument("--use-lifecycle", action="store_true")
     parser.add_argument("--large-transfer", action="store_true")
     parser.add_argument("--group-lifecycle", action="store_true")
+    parser.add_argument("--use-query-recovery", action="store_true")
+    parser.add_argument("--use-query-case", choices=("manual", "automatic", "unresolved"))
     parser.add_argument(
         "--use-case", choices=("revoke", "expire", "backend-restart", "controller-restart")
     )
@@ -799,6 +841,8 @@ def main() -> None:
                     arguments.use_case,
                     arguments.large_transfer,
                     arguments.group_lifecycle,
+                    arguments.use_query_recovery or arguments.use_query_case is not None,
+                    arguments.use_query_case or "manual",
                 ),
                 sort_keys=True,
             )

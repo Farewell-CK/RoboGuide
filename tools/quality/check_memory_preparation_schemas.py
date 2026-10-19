@@ -31,12 +31,13 @@ def run(directory: Path) -> dict[str, Any]:
     assert admitted["passed"] is True
     spatial = bool(admitted.get("prepared_map_consumer"))
     consumer_config = tomllib.loads((directory / "consumer/node.toml").read_text())
-    has_use = consumer_config["schema"] == "roboguide.node-config/v0.11"
+    has_query = consumer_config["schema"] == "roboguide.node-config/v0.12"
+    has_use = has_query or consumer_config["schema"] == "roboguide.node-config/v0.11"
     preparation_version = "preparation-v0.2" if has_use else "preparation-v0.1"
+    config_version = "v0.14" if has_query else "v0.13" if has_use else "v0.12"
     schema_paths = {
         "mission": ROOT / "contracts/mission/v0.9/mission-plan.schema.json",
-        "config": ROOT
-        / f"contracts/node/{'v0.13' if has_use else 'v0.12'}/node-config.schema.json",
+        "config": ROOT / f"contracts/node/{config_version}/node-config.schema.json",
         "source_config": ROOT
         / f"contracts/node/{'v0.11' if spatial else 'v0.12'}/node-config.schema.json",
         "map": ROOT / "contracts/spatial/v0.2/map-manifest.schema.json",
@@ -49,6 +50,11 @@ def run(directory: Path) -> dict[str, Any]:
             for name in ("control", "receipt")
         },
     }
+    if has_query:
+        for name in ("query", "receipt"):
+            schema_paths["use_query_" + name] = (
+                ROOT / f"contracts/memory/use-query-v0.1/{name}.schema.json"
+            )
     validators = {}
     for name, path in schema_paths.items():
         schema = json.loads(path.read_bytes())
@@ -109,7 +115,19 @@ def run(directory: Path) -> dict[str, Any]:
                 if delivery["receipt"]:
                     validators["use_receipt"].validate(delivery["receipt"])
                     use_receipts.append(delivery["receipt"])
-        assert any(receipt["status"] == "granted" for receipt in use_receipts)
+        assert any(receipt["status"] == "granted" for receipt in use_receipts) or (
+            has_query and admitted.get("consumer_cancelled_before_execute") is True
+        )
+    query_receipts = []
+    if has_query:
+        query_path = directory / "readonly-use-queries.json"
+        if query_path.exists():
+            for row in json.loads(query_path.read_bytes())["records"]:
+                intent = row["intent"]
+                validators["use_query_query"].validate(intent["query"])
+                if intent["receipt"]:
+                    validators["use_query_receipt"].validate(intent["receipt"])
+                    query_receipts.append(intent["receipt"])
     rejected = []
 
     def reject(schema_name: str, case: str, value: dict[str, Any]) -> None:
@@ -177,14 +195,35 @@ def run(directory: Path) -> dict[str, Any]:
             else:
                 changed["operation"] = "revoke"
             reject("use_control", case, changed)
-        changed = copy.deepcopy(
-            next(value for value in use_receipts if value["status"] == "granted")
+        positive_grant = next(
+            (value for value in use_receipts if value["status"] == "granted"), None
         )
-        changed["providers"] = []
-        reject("use_receipt", "positive-use-needs-provider-proof", changed)
+        if positive_grant is not None:
+            changed = copy.deepcopy(positive_grant)
+            changed["providers"] = []
+            reject("use_receipt", "positive-use-needs-provider-proof", changed)
         changed = copy.deepcopy(config)
         changed["memory_providers"][0]["use_lease"]["query"]["operation"]["method"] = "POST"
         reject("config", "use-query-cannot-mutate", changed)
+    if has_query and query_receipts:
+        positive_query = copy.deepcopy(query_receipts[0])
+        confirmed = next(
+            item for item in positive_query["observations"] if item["status"] == "confirmed"
+        )
+        confirmed["proof"] = None
+        reject("use_query_receipt", "confirmed-query-needs-original-proof", positive_query)
+        intent = json.loads((directory / "readonly-use-queries.json").read_bytes())["records"][0][
+            "intent"
+        ]
+        for case in ("generation-bound", "duplicate-provider", "control-effect"):
+            changed = copy.deepcopy(intent["query"])
+            if case == "generation-bound":
+                changed["generation"] = 17
+            elif case == "duplicate-provider":
+                changed["provider_ids"].append(changed["provider_ids"][0])
+            else:
+                changed["operation"] = "revoke"
+            reject("use_query_query", case, changed)
     result = {
         "passed": True,
         "jsonschema": importlib.metadata.version("jsonschema"),
@@ -193,6 +232,8 @@ def run(directory: Path) -> dict[str, Any]:
         "actual_typed_maps": len(typed),
         "actual_use_commands": len(use_commands),
         "actual_use_receipts": len(use_receipts),
+        "actual_use_query_receipts": len(query_receipts),
+        "positive_grant_available": any(value["status"] == "granted" for value in use_receipts),
         "rejected_cases": rejected,
         "schema_identity": {
             str(path.relative_to(ROOT)): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()

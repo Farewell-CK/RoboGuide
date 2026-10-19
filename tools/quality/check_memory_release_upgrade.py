@@ -28,7 +28,7 @@ def tables(database: Path) -> tuple[str, ...]:
         )
 
 
-def run(directory: Path, old_controller: Path) -> dict[str, Any]:
+def run(directory: Path, old_controller: Path, old_node: Path | None = None) -> dict[str, Any]:
     """Preserve completed actual Node histories and reject downgrade at nonempty and empty heads."""
     result = json.loads((directory / "result.json").read_bytes())
     cleanup = json.loads((directory / "owned-process-exits.json").read_bytes())
@@ -39,6 +39,9 @@ def run(directory: Path, old_controller: Path) -> dict[str, Any]:
         "sha256:" + hashlib.sha256(current.read_bytes()).hexdigest()
         == result["source_identity"]["target/debug/integration-server"]
     )
+    expected_schema = subprocess.check_output(
+        [str(current), "--application-schema"], cwd=ROOT, text=True
+    ).strip()
     output = directory / ("release-upgrade-" + uuid.uuid4().hex)
     output.mkdir(mode=0o700)
     environment = {
@@ -61,10 +64,13 @@ def run(directory: Path, old_controller: Path) -> dict[str, Any]:
         )
         (output / (name + ".stdout")).write_bytes(observed.stdout)
         (output / (name + ".stderr")).write_bytes(observed.stderr)
-        assert (
-            observed.returncode != 0
-            and b"unsupported checkpoint schema roboguide.controller-checkpoint/v38"
-            in observed.stderr
+        assert observed.returncode != 0 and (
+            ("unsupported checkpoint schema " + expected_schema).encode() in observed.stderr
+            or (
+                name == "actual-completed-memory-group"
+                and b"unsupported event payload schema domain.EventPayload.json/v26"
+                in observed.stderr
+            )
         ), observed.stderr
         after = logical_digest(database, tables(database))
         assert before == after
@@ -97,12 +103,50 @@ def run(directory: Path, old_controller: Path) -> dict[str, Any]:
         assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
         assert (
             connection.execute("SELECT schema FROM controller_checkpoint").fetchone()[0]
-            == "roboguide.controller-checkpoint/v38"
+            == expected_schema
         )
     reject(database, "zero-node-zero-event")
+    if old_node is not None:
+        database = directory / "consumer/node-state/execution-journal.sqlite3"
+        before = logical_digest(database, tables(database))
+        original = directory / "consumer/node.toml"
+        config = directory / "consumer" / ("old-node-" + uuid.uuid4().hex + ".toml")
+        config.write_text(original.read_text().replace("node-config/v0.12", "node-config/v0.11"))
+        node_environment = dict(environment)
+        for suffix, filename in (
+            ("CERT", "enrolment-next.crt"),
+            ("KEY", "enrolment-next.key"),
+            ("CA", "ca.crt"),
+        ):
+            node_environment["ROBOGUIDE_ARTIFACT_CLIENT_" + suffix] = str(
+                directory / "pki" / filename
+            )
+        observed = subprocess.run(
+            [str(old_node), str(config)],
+            cwd=ROOT,
+            env=node_environment,
+            capture_output=True,
+            timeout=15,
+        )
+        (output / "old-node.stderr").write_bytes(observed.stderr)
+        assert (
+            observed.returncode != 0
+            and b"journal was written by a newer storage authority" in observed.stderr
+        ), observed.stderr
+        after = logical_digest(database, tables(database))
+        assert before == after
+        receipts.append(
+            {
+                "case": "actual-node-journal-old-binary",
+                "returncode": observed.returncode,
+                "before": before,
+                "after": after,
+                "old_binary": "sha256:" + hashlib.sha256(old_node.read_bytes()).hexdigest(),
+            }
+        )
     value = {
         "passed": True,
-        "schema": "roboguide.controller-checkpoint/v38",
+        "schema": expected_schema,
         "old_binary": "sha256:" + hashlib.sha256(old_controller.read_bytes()).hexdigest(),
         "cases": receipts,
         "devices": 0,
@@ -116,8 +160,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--old-controller", type=Path, required=True)
+    parser.add_argument("--old-node", type=Path)
     arguments = parser.parse_args()
-    print(json.dumps(run(arguments.directory, arguments.old_controller), sort_keys=True))
+    print(
+        json.dumps(
+            run(arguments.directory, arguments.old_controller, arguments.old_node), sort_keys=True
+        )
+    )
 
 
 if __name__ == "__main__":

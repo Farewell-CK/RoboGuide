@@ -67,3 +67,10 @@ ownership。正常 Task 满足只等待该 Task 原 context 与所有 provider �
 这些门禁与物理 stop 证据分别检查，不能互相替代。执行前 permit 保留 preparation、当前
 availability 和 use lease 的最早原始到期时间；每次发送前以新 receive clock 重新检查整组
 pending inputs，已经发出的命令仍由接收 Node 的原预算和本地 gate 约束。
+
+## 后续原撤销恢复
+
+[ADR-0107](0107-original-revoke-observation-and-provider-progress.md) 在保持原 use v0.1
+命令/回执语义的前提下补充逐 provider 进度和独立只读会话。wrapper v39/journal v11/codec
+v26 保留原 Unknown；原确认、观察和物理 stop 证明分别核验。验收见
+[原撤销部分失败对账](../development/acceptance/2026-10-19-f4-original-revoke-reconciliation.md)。

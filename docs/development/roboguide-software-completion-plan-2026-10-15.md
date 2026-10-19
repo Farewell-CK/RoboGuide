@@ -97,6 +97,12 @@ transport、证书路由和多域恢复仍未关闭。
 最早原期限。共享 wrapper v38 fences 旧 writer。两软件 Node/实际文件/CAS/独立复算/重启
 与标准 SQL 故障对账均已验收；部分 Unknown、跨 Group handoff 和后续阶段继续为必需项。
 
+[原撤销部分失败对账验收](acceptance/2026-10-19-f4-original-revoke-reconciliation.md)
+已完成逐 provider 进度、原预算内恢复、独立有界 GET 会话、原 Unknown/预算不变、
+迟到/替换 backend 拒绝与旧二进制门禁。三种实际软件故障配置和正常并行 Task 链路分别
+验收；内容对账不绕过独立 stop hold。完整成员变更/跨 Group handoff 是下一工作包，
+跨主机、HA 内容恢复及 F5–F10 仍必需；完整 F4 不提前关闭。
+
 ## 已接受的实现决定
 
 - Stop 冻结完整受影响 attempt 集合、operation-owned export、策略、owner/session 和 deadline。
