@@ -1,6 +1,7 @@
 //! Symlink-safe filesystem path validation and durable mutation primitives.
 
 use crate::types::ArtifactStoreError;
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io;
 #[cfg(unix)]
@@ -173,13 +174,13 @@ pub(crate) fn remove_staging(path: &Path) -> Result<(), ArtifactStoreError> {
     }
 }
 
-/// Removes incomplete upload files left behind by a previous store process.
+/// Removes incomplete upload files except identities retained by the durable upload journal.
 ///
-/// Upload handles are intentionally not recoverable because their incremental hash state is
-/// process-local. Initialization therefore removes only `.partial` leaves from the validated
-/// staging directory and refuses to recurse through an unexpected directory entry.
-pub(crate) fn cleanup_abandoned_staging(
+/// Only `.partial` leaves from the validated staging directory are considered; callers must pass
+/// the identities recovered from the authoritative upload event log.
+pub(crate) fn cleanup_staging_except(
     staging_directory: &Path,
+    preserve_upload_ids: &BTreeSet<String>,
 ) -> Result<(), ArtifactStoreError> {
     validate_directory_tree(
         staging_directory,
@@ -191,7 +192,14 @@ pub(crate) fn cleanup_abandoned_staging(
     for entry in entries {
         let entry = entry.map_err(|error| io_error("read artifact staging entry", error))?;
         let file_name = entry.file_name();
-        if !file_name.to_string_lossy().ends_with(".partial") {
+        let Some(upload_id) = file_name
+            .to_string_lossy()
+            .strip_suffix(".partial")
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if preserve_upload_ids.contains(&upload_id) {
             continue;
         }
         let metadata = fs::symlink_metadata(entry.path())

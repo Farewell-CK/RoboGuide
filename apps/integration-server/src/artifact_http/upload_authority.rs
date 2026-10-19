@@ -1,10 +1,22 @@
 //! Durable source-bound upload receipts and protected-content reference authorization.
 
-use super::server::{
-    abort_in_flight, release_in_flight, restore_after_append, run_blocking, take_for_terminal,
-};
+use super::server::{release_in_flight, restore_after_append, run_blocking, take_for_terminal};
 use super::*;
 use domain::{ArtifactUploadPhase, ArtifactUploadRecord};
+
+/// Shared authority and storage handles for one staged upload finalization.
+struct FinalizeContext<'a> {
+    /// Filesystem CAS owner.
+    store: &'a FileSystemArtifactStore,
+    /// Process-local restored upload sessions.
+    uploads: &'a Uploads,
+    /// Durable upload event catalog.
+    catalog: &'a ArtifactCatalog,
+    /// Current authenticated admission authority.
+    authority: &'a dyn MemoryProviderAdmission,
+    /// Stable authenticated caller identity.
+    principal: &'a ArtifactPrincipal,
+}
 
 /// Reads fresh Controller wall time; no peer or manifest timestamp can renew an upload budget.
 fn now_ms() -> Result<u64, HttpError> {
@@ -47,6 +59,16 @@ pub(super) fn start_authorized_upload(
             .revalidate_artifact_principal(principal)
             .map_err(HttpError::forbidden)?;
         catalog.owned_upload(&input.upload_id, principal)?;
+        if record.phase == ArtifactUploadPhase::Started {
+            ensure_started_upload_session(
+                &input.upload_id,
+                store,
+                uploads,
+                catalog,
+                authority,
+                principal,
+            )?;
+        }
         return Ok(Response::Json(
             "200 OK",
             serde_json::json!({"upload_id":input.upload_id,"record":record,"replayed":true}),
@@ -93,7 +115,58 @@ pub(super) fn start_authorized_upload(
     super::server::start_upload(request, store, uploads)
 }
 
-/// Finishes the exact staged proof, or reconciles only an already Prepared original CAS identity.
+/// Recreates a missing Started upload session from its durable identity after restart.
+fn ensure_started_upload_session(
+    id: &str,
+    store: &FileSystemArtifactStore,
+    uploads: &Uploads,
+    catalog: &ArtifactCatalog,
+    authority: &dyn MemoryProviderAdmission,
+    principal: &ArtifactPrincipal,
+) -> Result<(), HttpError> {
+    check_live_upload(catalog, id, principal)?;
+    if uploads
+        .lock()
+        .map_err(|_| HttpError::service_unavailable("upload registry unavailable"))?
+        .sessions
+        .contains_key(id)
+    {
+        return Ok(());
+    }
+    let _gate = catalog
+        .write_gate
+        .lock()
+        .map_err(|_| HttpError::service_unavailable("upload writer ordering unavailable"))?;
+    authority
+        .revalidate_artifact_principal(principal)
+        .map_err(HttpError::forbidden)?;
+    check_live_upload(catalog, id, principal)?;
+    if uploads
+        .lock()
+        .map_err(|_| HttpError::service_unavailable("upload registry unavailable"))?
+        .sessions
+        .contains_key(id)
+    {
+        return Ok(());
+    }
+    match run_blocking(|| store.resume_upload(id.to_string())) {
+        Ok(upload) => uploads
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("upload registry unavailable"))?
+            .insert_restored(upload, Instant::now()),
+        Err(artifact_store::ArtifactStoreError::UploadNotFound { .. }) => {
+            let upload =
+                run_blocking(|| store.begin_upload(id.to_string())).map_err(map_cas_error)?;
+            uploads
+                .lock()
+                .map_err(|_| HttpError::service_unavailable("upload registry unavailable"))?
+                .insert_new(id.to_string(), upload, Instant::now())
+        }
+        Err(error) => Err(map_cas_error(error)),
+    }
+}
+
+/// Finishes the exact staged proof, including a Prepared upload recovered after restart.
 pub(super) fn finalize_authorized_upload(
     request: &Request,
     store: &FileSystemArtifactStore,
@@ -110,81 +183,50 @@ pub(super) fn finalize_authorized_upload(
     let digest =
         artifact_store::normalize_digest(input.content_digest.as_str()).map_err(map_cas_error)?;
     let mut record = catalog.owned_upload(id, principal)?;
-    if record.phase != ArtifactUploadPhase::Started {
-        if !matches!(
-            record.phase,
-            ArtifactUploadPhase::Prepared | ArtifactUploadPhase::Completed
-        ) || record.content_digest.as_deref() != Some(&digest)
-            || record.byte_size != Some(input.byte_size)
-        {
-            return Err(HttpError::conflict(
-                "finalize differs from the original immutable upload proof",
-            ));
+    if record.phase == ArtifactUploadPhase::Abandoned {
+        return Err(HttpError::conflict("artifact upload was abandoned"));
+    }
+    if record.phase != ArtifactUploadPhase::Started
+        && (record.content_digest.as_deref() != Some(&digest)
+            || record.byte_size != Some(input.byte_size))
+    {
+        return Err(HttpError::conflict(
+            "finalize differs from the original immutable upload proof",
+        ));
+    }
+    authority
+        .revalidate_artifact_principal(principal)
+        .map_err(HttpError::forbidden)?;
+
+    let needs_staging = match record.phase {
+        ArtifactUploadPhase::Started => {
+            ensure_started_upload_session(id, store, uploads, catalog, authority, principal)?;
+            true
         }
-        authority
-            .revalidate_artifact_principal(principal)
-            .map_err(HttpError::forbidden)?;
-        run_blocking(|| store.verify_artifact(&digest, input.byte_size))
-            .map_err(|_| HttpError::conflict("original prepared CAS outcome remains unknown"))?;
-    } else {
-        check_live_upload(catalog, id, principal)?;
-        let mut in_flight = take_for_terminal(uploads, id)?;
-        let preparation = (|| {
-            let _gate = catalog.write_gate.lock().map_err(|_| {
-                HttpError::service_unavailable("upload writer ordering unavailable")
-            })?;
-            authority
-                .revalidate_artifact_principal(principal)
-                .map_err(HttpError::forbidden)?;
-            check_live_upload(catalog, id, principal)?;
-            run_blocking(|| {
-                in_flight
-                    .session
-                    .upload
-                    .prepare_finalize(&digest, input.byte_size)
-            })
-            .map_err(map_cas_error)
-        })();
-        if let Err(error) = preparation {
-            abort_in_flight(uploads, in_flight)?;
-            return Err(error);
+        ArtifactUploadPhase::Prepared => {
+            match run_blocking(|| store.verify_artifact(&digest, input.byte_size)) {
+                Ok(_) => false,
+                Err(artifact_store::ArtifactStoreError::ArtifactNotFound { .. }) => true,
+                Err(error) => return Err(map_cas_error(error)),
+            }
         }
-        record.phase = ArtifactUploadPhase::Prepared;
-        record.content_digest = Some(digest.clone());
-        record.byte_size = Some(input.byte_size);
-        record.prepared_at_ms = Some(now_ms()?);
-        if let Err(error) = catalog.append_authorized(
-            EventPayload::ArtifactUploadTransition {
-                record: record.clone(),
-            },
+        ArtifactUploadPhase::Completed => {
+            run_blocking(|| store.verify_artifact(&digest, input.byte_size))
+                .map_err(|_| HttpError::conflict("completed artifact bytes are unavailable"))?;
+            false
+        }
+        ArtifactUploadPhase::Abandoned => unreachable!(),
+    };
+
+    if needs_staging {
+        let context = FinalizeContext {
+            store,
+            uploads,
+            catalog,
             authority,
-        ) {
-            restore_after_append(uploads, id, in_flight)?;
-            return Err(error);
-        }
-        let result = (|| {
-            let _gate = catalog.write_gate.lock().map_err(|_| {
-                HttpError::service_unavailable("upload writer ordering unavailable")
-            })?;
-            authority
-                .revalidate_artifact_principal(principal)
-                .map_err(HttpError::forbidden)?;
-            if catalog.owned_upload(id, principal)? != record {
-                return Err(HttpError::conflict(
-                    "original upload changed before CAS finalization",
-                ));
-            }
-            run_blocking(|| in_flight.session.upload.finalize(&digest, input.byte_size))
-                .map_err(map_cas_error)
-        })();
-        match result {
-            Ok(_) => release_in_flight(uploads, in_flight.accounted_bytes)?,
-            Err(error) => {
-                abort_in_flight(uploads, in_flight)?;
-                return Err(error);
-            }
-        }
-        run_blocking(|| store.verify_artifact(&digest, input.byte_size)).map_err(map_cas_error)?;
+            principal,
+        };
+        record = finalize_staged_upload(id, record, digest.clone(), input.byte_size, &context)?;
     }
     if record.phase != ArtifactUploadPhase::Completed {
         record.phase = ArtifactUploadPhase::Completed;
@@ -200,6 +242,89 @@ pub(super) fn finalize_authorized_upload(
         "201 Created",
         serde_json::json!({"digest":digest,"byte_size":input.byte_size,"receipt":record}),
     ))
+}
+
+/// Verifies, durably prepares, and finalizes a Started or Prepared staging handle.
+fn finalize_staged_upload(
+    id: &str,
+    mut record: ArtifactUploadRecord,
+    digest: String,
+    byte_size: u64,
+    context: &FinalizeContext<'_>,
+) -> Result<ArtifactUploadRecord, HttpError> {
+    let mut in_flight = take_for_terminal(context.uploads, id)?;
+    let preparation = (|| {
+        let _gate =
+            context.catalog.write_gate.lock().map_err(|_| {
+                HttpError::service_unavailable("upload writer ordering unavailable")
+            })?;
+        context
+            .authority
+            .revalidate_artifact_principal(context.principal)
+            .map_err(HttpError::forbidden)?;
+        if record.phase == ArtifactUploadPhase::Started {
+            check_live_upload(context.catalog, id, context.principal)?;
+        } else if context.catalog.owned_upload(id, context.principal)? != record {
+            return Err(HttpError::conflict(
+                "original prepared upload changed before finalization",
+            ));
+        }
+        run_blocking(|| {
+            in_flight
+                .session
+                .upload
+                .prepare_finalize(&digest, byte_size)
+        })
+        .map_err(map_cas_error)
+    })();
+    if let Err(error) = preparation {
+        if record.phase == ArtifactUploadPhase::Started && error.status == "409 Conflict" {
+            in_flight.session.upload.abort().map_err(map_cas_error)?;
+            release_in_flight(context.uploads, in_flight.accounted_bytes)?;
+        } else {
+            restore_after_append(context.uploads, id, in_flight)?;
+        }
+        return Err(error);
+    }
+    if record.phase == ArtifactUploadPhase::Started {
+        record.phase = ArtifactUploadPhase::Prepared;
+        record.content_digest = Some(digest.clone());
+        record.byte_size = Some(byte_size);
+        record.prepared_at_ms = Some(now_ms()?);
+        if let Err(error) = context.catalog.append_authorized(
+            EventPayload::ArtifactUploadTransition {
+                record: record.clone(),
+            },
+            context.authority,
+        ) {
+            restore_after_append(context.uploads, id, in_flight)?;
+            return Err(error);
+        }
+    }
+    let result = (|| {
+        let _gate =
+            context.catalog.write_gate.lock().map_err(|_| {
+                HttpError::service_unavailable("upload writer ordering unavailable")
+            })?;
+        context
+            .authority
+            .revalidate_artifact_principal(context.principal)
+            .map_err(HttpError::forbidden)?;
+        if context.catalog.owned_upload(id, context.principal)? != record {
+            return Err(HttpError::conflict(
+                "original upload changed before CAS finalization",
+            ));
+        }
+        run_blocking(|| in_flight.session.upload.finalize(&digest, byte_size))
+            .map_err(map_cas_error)
+    })();
+    if let Err(error) = result {
+        restore_after_append(context.uploads, id, in_flight)?;
+        return Err(error);
+    }
+    release_in_flight(context.uploads, in_flight.accounted_bytes)?;
+    run_blocking(|| context.store.verify_artifact(&digest, byte_size)).map_err(map_cas_error)?;
+    Ok(record)
 }
 
 /// Abandons only the original upload workflow; immutable CAS bytes and historical proof are retained.
@@ -258,6 +383,26 @@ pub(super) fn validate_record_transition(
 }
 
 impl ArtifactCatalog {
+    /// Returns upload records whose staging bytes may be resumed after a process restart.
+    pub(super) fn recoverable_upload_records(
+        &self,
+    ) -> Result<Vec<ArtifactUploadRecord>, HttpError> {
+        self.ensure_available()?;
+        Ok(self
+            .upload_records
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("upload evidence unavailable"))?
+            .values()
+            .filter(|record| {
+                matches!(
+                    record.phase,
+                    ArtifactUploadPhase::Started | ArtifactUploadPhase::Prepared
+                )
+            })
+            .cloned()
+            .collect())
+    }
+
     /// Reads original upload evidence without making a new upload or renewing any budget.
     pub(super) fn upload_record(
         &self,

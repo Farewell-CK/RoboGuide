@@ -2,7 +2,7 @@
 
 use crate::digest::{DIGEST_PREFIX, digest_reader, normalize_digest};
 use crate::path_validation::{
-    add_no_follow_flag, cleanup_abandoned_staging, create_directory, io_error, open_regular_file,
+    add_no_follow_flag, cleanup_staging_except, create_directory, io_error, open_regular_file,
     seal_blob, sync_directory, unsafe_path_error, validate_blob_parent, validate_directory_tree,
     validate_upload_id,
 };
@@ -10,8 +10,9 @@ use crate::types::{
     ArtifactStoreError, ArtifactUpload, FileSystemArtifactStore, StoredArtifact, UploadState,
 };
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,7 +42,6 @@ impl FileSystemArtifactStore {
             "create artifact staging directory",
         )?;
         create_directory(&root.join(BLOB_DIRECTORY), "create artifact blob directory")?;
-        cleanup_abandoned_staging(&root.join(STAGING_DIRECTORY))?;
         Ok(Self {
             root,
             _writer_lock: writer_lock,
@@ -108,6 +108,88 @@ impl FileSystemArtifactStore {
             store: self.clone(),
             state: UploadState::Active,
         })
+    }
+
+    /// Reopens one durable staging file after a process restart and rebuilds its hash state.
+    ///
+    /// The caller must have recovered the same upload identity from the authoritative event log;
+    /// a filename alone never grants ownership or publication authority.
+    pub fn resume_upload(
+        &self,
+        upload_id: impl Into<String>,
+    ) -> Result<ArtifactUpload, ArtifactStoreError> {
+        let upload_id = validate_upload_id(upload_id.into())?;
+        let staging_directory = self.root.join(STAGING_DIRECTORY);
+        validate_directory_tree(
+            &staging_directory,
+            false,
+            "validate artifact staging directory",
+        )?;
+        let staging_path = staging_directory.join(format!("{upload_id}.partial"));
+        match fs::symlink_metadata(&staging_path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(unsafe_path_error(
+                    "resume artifact upload",
+                    "staging path cannot be a symbolic link",
+                ));
+            }
+            Ok(metadata) if !metadata.is_file() => {
+                return Err(unsafe_path_error(
+                    "resume artifact upload",
+                    "staging path must be a regular file",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(ArtifactStoreError::UploadNotFound { upload_id });
+            }
+            Err(error) => return Err(io_error("inspect artifact staging path", error)),
+        };
+        let mut options = OpenOptions::new();
+        options.read(true).write(true);
+        add_no_follow_flag(&mut options);
+        let mut file = options
+            .open(&staging_path)
+            .map_err(|error| io_error("resume artifact upload", error))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| io_error("inspect resumed artifact upload", error))?;
+        if !metadata.is_file() {
+            return Err(unsafe_path_error(
+                "resume artifact upload",
+                "staging path must resolve to a regular file",
+            ));
+        }
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = file
+                .read(&mut buffer)
+                .map_err(|error| io_error("hash resumed artifact upload", error))?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+        }
+        file.seek(SeekFrom::End(0))
+            .map_err(|error| io_error("position resumed artifact upload", error))?;
+        Ok(ArtifactUpload {
+            upload_id,
+            staging_path,
+            file: Some(file),
+            hasher,
+            size: metadata.len(),
+            store: self.clone(),
+            state: UploadState::Active,
+        })
+    }
+
+    /// Removes staging files not named by a durable Started/Prepared upload record.
+    pub fn cleanup_staging_except(
+        &self,
+        preserve_upload_ids: &BTreeSet<String>,
+    ) -> Result<(), ArtifactStoreError> {
+        cleanup_staging_except(&self.root.join(STAGING_DIRECTORY), preserve_upload_ids)
     }
 
     /// Opens a finalized artifact for streaming reads by digest.

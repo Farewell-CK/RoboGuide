@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 
 /// Typed maps and generic Memory cannot claim the same unified selector in either order.
 #[test]
@@ -205,6 +206,89 @@ async fn fragmented_headers_and_bodies_are_read_to_declared_length() {
     response_body(
         &request_once(&store, &catalog, &uploads, finalize).await,
         "201 Created",
+    );
+}
+
+/// A process restart rehydrates only the durable upload identity and resumes its staged prefix.
+#[tokio::test]
+async fn restart_rehydrates_durable_partial_upload() {
+    let directory = tempfile::tempdir().expect("temporary directory exists");
+    let cas_root = directory.path().join("cas");
+    let store = FileSystemArtifactStore::new(&cas_root).expect("CAS initializes");
+    let event_log =
+        SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
+    seed_controller_checkpoint(&event_log);
+    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
+        .expect("catalog replays");
+    let uploads = test_uploads();
+    let start_body = br#"{"upload_id":"restart-upload"}"#;
+    response_body(
+        &request_once(
+            &store,
+            &catalog,
+            &uploads,
+            raw_request("POST", "/v1/artifact-uploads", start_body, true),
+        )
+        .await,
+        "201 Created",
+    );
+    drop(uploads);
+    drop(store);
+    fs::write(
+        cas_root.join("staging").join("restart-upload.partial"),
+        b"hello ",
+    )
+    .expect("crash leaves the durable prefix");
+    fs::write(
+        cas_root.join("staging").join("unknown-upload.partial"),
+        b"unowned bytes",
+    )
+    .expect("unknown staging file exists before recovery");
+
+    let restarted_store = FileSystemArtifactStore::new(&cas_root).expect("CAS restarts");
+    let restarted_uploads = super::super::server::restore_uploads(&restarted_store, &catalog)
+        .expect("durable Started upload rehydrates");
+    assert!(
+        !cas_root
+            .join("staging")
+            .join("unknown-upload.partial")
+            .exists()
+    );
+    let suffix = b"spatial memory";
+    let content = raw_request(
+        "PUT",
+        "/v1/artifact-uploads/restart-upload/content",
+        suffix,
+        true,
+    );
+    let response = request_once(&restarted_store, &catalog, &restarted_uploads, content).await;
+    let body: serde_json::Value = serde_json::from_slice(&response_body(&response, "202 Accepted"))
+        .expect("append response is JSON");
+    assert_eq!(body["received_bytes"], 20);
+    let finalize_body = serde_json::to_vec(&serde_json::json!({
+        "content_digest": digest_bytes(b"hello spatial memory"),
+        "byte_size": 20,
+    }))
+    .expect("finalize body serializes");
+    response_body(
+        &request_once(
+            &restarted_store,
+            &catalog,
+            &restarted_uploads,
+            raw_request(
+                "POST",
+                "/v1/artifact-uploads/restart-upload/finalize",
+                &finalize_body,
+                true,
+            ),
+        )
+        .await,
+        "201 Created",
+    );
+    assert!(
+        restarted_store
+            .contains(&digest_bytes(b"hello spatial memory"))
+            .expect("resumed blob is present")
     );
 }
 

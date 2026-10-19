@@ -120,6 +120,46 @@ impl UploadRegistry {
         Ok(())
     }
 
+    /// Inserts a journal-authorized staging handle recovered after process restart.
+    pub(super) fn insert_restored(
+        &mut self,
+        upload: ArtifactUpload,
+        now: Instant,
+    ) -> Result<(), HttpError> {
+        let upload_id = upload.upload_id().to_string();
+        let received_bytes = upload.size();
+        if self.active_uploads() >= self.max_uploads {
+            return Err(HttpError::resource_exhausted(
+                "recovered artifact upload count exceeds limit",
+            ));
+        }
+        if self.sessions.contains_key(&upload_id) {
+            return Err(HttpError::conflict(
+                "recovered artifact upload id is duplicated",
+            ));
+        }
+        let active_bytes = self
+            .active_bytes
+            .checked_add(received_bytes)
+            .ok_or_else(|| {
+                HttpError::too_large("recovered artifact upload bytes overflow quota")
+            })?;
+        if active_bytes > self.max_bytes {
+            return Err(HttpError::too_large(
+                "recovered artifact upload bytes exceed quota",
+            ));
+        }
+        self.active_bytes = active_bytes;
+        self.sessions.insert(
+            upload_id,
+            UploadSession {
+                upload,
+                last_activity: now,
+            },
+        );
+        Ok(())
+    }
+
     /// Extracts one session and reserves its declared incoming bytes atomically.
     pub(super) fn take_for_append(
         &mut self,

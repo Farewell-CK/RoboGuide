@@ -54,3 +54,8 @@ status 读取真实结果；同 ID 不再启动 worker。显式部署计算预�
 当前检查保留整改前实际大文件未能在 120 秒窗口内完成的失败产物；修复后的闭环仍使用原
 120 秒预算，不通过延长期限把失败改成成功。生命周期检查使用真实源文件与显式有界 CPU
 工作量，不冒充设备实验。
+
+Artifact staging 在 Controller/Integration Server 重启后按 upload event journal 恢复：只重建
+有权威 Started/Prepared 记录的 partial 文件增量哈希，Prepared 且 CAS 已完成时直接补写
+Completed；没有事件依据的 partial 文件清理。恢复不改变原 principal、tenant、deadline 或
+字节证明。

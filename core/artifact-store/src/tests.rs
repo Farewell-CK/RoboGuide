@@ -4,6 +4,7 @@ use super::*;
 use crate::digest::DIGEST_PREFIX;
 use crate::path_validation::create_directory;
 use crate::store::{BLOB_DIRECTORY, STAGING_DIRECTORY};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Read;
 use tempfile::tempdir;
@@ -181,9 +182,9 @@ fn dropping_upload_cleans_staging() {
     );
 }
 
-/// Reopening a store removes unrecoverable partial files but preserves unrelated entries.
+/// Explicit recovery cleanup removes unjournaled partial files but preserves unrelated entries.
 #[test]
-fn initialization_cleans_abandoned_partial_uploads() {
+fn recovery_cleanup_removes_abandoned_partial_uploads() {
     let directory = tempdir().expect("temporary directory must exist");
     let staging = directory.path().join(STAGING_DIRECTORY);
     fs::create_dir_all(&staging).expect("staging directory must exist");
@@ -192,13 +193,45 @@ fn initialization_cleans_abandoned_partial_uploads() {
     fs::write(&abandoned, b"incomplete bytes").expect("partial file must be written");
     fs::write(&unrelated, b"preserve").expect("unrelated file must be written");
 
-    let _store = FileSystemArtifactStore::new(directory.path()).expect("store must clean staging");
+    let store = FileSystemArtifactStore::new(directory.path()).expect("store must initialize");
+    store
+        .cleanup_staging_except(&BTreeSet::new())
+        .expect("store must clean unjournaled staging");
 
     assert!(!abandoned.exists());
     assert_eq!(
         fs::read(unrelated).expect("unrelated staging entry remains readable"),
         b"preserve"
     );
+}
+
+/// Reopening a journal-authorized staging file preserves its bytes and incremental digest.
+#[test]
+fn resumes_staging_upload_after_store_restart() {
+    let directory = tempdir().expect("temporary directory must exist");
+    let store = FileSystemArtifactStore::new(directory.path()).expect("store must initialize");
+    fs::write(
+        store
+            .root()
+            .join(STAGING_DIRECTORY)
+            .join("restart-upload.partial"),
+        b"hello ",
+    )
+    .expect("crash leaves a partial staging file");
+    drop(store);
+
+    let store = FileSystemArtifactStore::new(directory.path()).expect("store restarts");
+    let mut resumed = store
+        .resume_upload("restart-upload")
+        .expect("authorized partial upload resumes");
+    resumed
+        .write_chunk(b"spatial memory")
+        .expect("suffix writes");
+    let artifact = resumed
+        .finalize(&sample_digest(), 20)
+        .expect("resumed bytes finalize");
+    assert_eq!(artifact.size(), 20);
+    assert!(store.contains(&sample_digest()).expect("blob exists"));
 }
 
 /// A competing initializer fails before cleanup and cannot delete the active writer's upload.

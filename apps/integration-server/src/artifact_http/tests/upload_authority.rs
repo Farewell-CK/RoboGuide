@@ -80,11 +80,15 @@ async fn upload_finalization_sql_failure_preserves_original_byte_proof_without_r
         restored.upload_record("original").unwrap(),
         Some(original.clone())
     );
-    let empty_uploads = test_uploads();
+    drop(uploads);
+    drop(store);
+    let restarted_store = FileSystemArtifactStore::new(directory.path().join("cas")).unwrap();
+    let restarted_uploads =
+        super::super::server::restore_uploads(&restarted_store, &restored).unwrap();
     let response = request_once(
-        &store,
+        &restarted_store,
         &restored,
-        &empty_uploads,
+        &restarted_uploads,
         raw_request(
             "POST",
             "/v1/artifact-uploads/original/finalize",
@@ -105,9 +109,9 @@ async fn upload_finalization_sql_failure_preserves_original_byte_proof_without_r
     );
     assert_eq!(completed["receipt"]["deadline_ms"], original.deadline_ms);
     let replay = request_once(
-        &store,
+        &restarted_store,
         &restored,
-        &empty_uploads,
+        &restarted_uploads,
         raw_request(
             "POST",
             "/v1/artifact-uploads/original/finalize",

@@ -83,8 +83,10 @@ fmt 与 Python 全量离线检查通过。Python 变更路径 Ruff、strict mypy
 问题；`renew-e` 观察到 12 代续约，最终触及实际计算预算，未报告成功。它们是整改前的
 历史证据，不代表当前修复后二进制的结果。
 
-当前仍未关闭的具体边界是：Integration Server 重启时仍会清理未完成的 staging 文件，跨进程
-恢复半截 upload 还没有 durable staging rehydration；active-map 选择、Group handoff、引用
-感知 GC、物理停止/硬件连续性以及 F5–F10 仍需独立实现和验收。
+本轮已关闭 Integration Server 重启后的 staging 恢复：启动先重放 upload event，再恢复
+有权威 Started/Prepared 记录的 partial 文件并重建增量 SHA-256；Prepared 已完成 CAS 的
+记录可直接补写 Completed；没有 durable 记录的 partial 文件会被清理。回归覆盖半截 Started
+跨重启续传，以及 SQL 完成提交失败后 Prepared/CAS 跨重启对账。active-map 选择、Group
+handoff、引用感知 GC、物理停止/硬件连续性以及 F5–F10 仍需独立实现和验收。
 
 这些检查不提供当前设备定位、物理停止、硬件连续性、跨主机时钟同步或完整 F4 完成证据。

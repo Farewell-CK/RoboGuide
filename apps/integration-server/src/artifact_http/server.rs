@@ -2,6 +2,7 @@
 
 use super::authenticated::AuthenticatedAdmission;
 use super::*;
+use std::collections::BTreeSet;
 
 /// Certificate-to-role profile for a remotely bound Artifact HTTP listener.
 #[derive(Clone)]
@@ -172,7 +173,8 @@ pub async fn serve_artifact_http(
     localization_observer: Arc<dyn LocalizationEvidenceObserver>,
     tls: Option<ArtifactTlsProfile>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let uploads: Uploads = Arc::new(Mutex::new(UploadRegistry::production()));
+    let uploads =
+        restore_uploads(&store, &catalog).map_err(|error| std::io::Error::other(error.message))?;
     let connections = Arc::new(tokio::sync::Semaphore::new(128));
     let mut sweep = interval(UPLOAD_SWEEP_INTERVAL);
     sweep.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -234,6 +236,65 @@ pub async fn serve_artifact_http(
             }
         }
     }
+}
+
+/// Rehydrates only journal-authorized staging files and removes unknown leftovers.
+pub(super) fn restore_uploads(
+    store: &FileSystemArtifactStore,
+    catalog: &ArtifactCatalog,
+) -> Result<Uploads, HttpError> {
+    let now_ms = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| HttpError::internal(error.to_string()))?
+            .as_millis(),
+    )
+    .map_err(|error| HttpError::internal(error.to_string()))?;
+    let now = Instant::now();
+    let mut registry = UploadRegistry::production();
+    let mut preserve = BTreeSet::new();
+    for record in catalog.recoverable_upload_records()? {
+        if record.phase == domain::ArtifactUploadPhase::Started && now_ms >= record.deadline_ms {
+            continue;
+        }
+        let mut upload = match run_blocking(|| store.resume_upload(record.upload_id.clone())) {
+            Ok(upload) => upload,
+            Err(artifact_store::ArtifactStoreError::UploadNotFound { .. })
+                if record.phase == domain::ArtifactUploadPhase::Started =>
+            {
+                run_blocking(|| store.begin_upload(record.upload_id.clone()))
+                    .map_err(map_cas_error)?
+            }
+            Err(artifact_store::ArtifactStoreError::UploadNotFound { .. }) => {
+                let digest = record.content_digest.as_deref().ok_or_else(|| {
+                    HttpError::internal("prepared upload record has no content digest")
+                })?;
+                let size = record.byte_size.ok_or_else(|| {
+                    HttpError::internal("prepared upload record has no byte size")
+                })?;
+                match run_blocking(|| store.verify_artifact(digest, size)) {
+                    Ok(_) | Err(artifact_store::ArtifactStoreError::ArtifactNotFound { .. }) => {
+                        continue;
+                    }
+                    Err(error) => return Err(map_cas_error(error)),
+                }
+            }
+            Err(error) => return Err(map_cas_error(error)),
+        };
+        if record.phase == domain::ArtifactUploadPhase::Prepared {
+            let digest = record.content_digest.as_deref().ok_or_else(|| {
+                HttpError::internal("prepared upload record has no content digest")
+            })?;
+            let size = record
+                .byte_size
+                .ok_or_else(|| HttpError::internal("prepared upload record has no byte size"))?;
+            run_blocking(|| upload.prepare_finalize(digest, size)).map_err(map_cas_error)?;
+        }
+        preserve.insert(record.upload_id.clone());
+        registry.insert_restored(upload, now)?;
+    }
+    run_blocking(|| store.cleanup_staging_except(&preserve)).map_err(map_cas_error)?;
+    Ok(Arc::new(Mutex::new(registry)))
 }
 
 /// Handles one request and closes the short-lived HTTP connection.
