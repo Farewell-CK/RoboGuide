@@ -3,6 +3,53 @@
 use super::*;
 
 impl LocalIntegrationEngine {
+    /// Returns bounded original live invocation contexts for provider-owned Group exports.
+    /// Node journal evidence narrows local discovery; only current Controller admission can publish.
+    pub(crate) fn memory_export_contexts(
+        &self,
+        provider_id: &str,
+    ) -> Result<Vec<serde_json::Value>, EngineError> {
+        let provider = self
+            .catalog()
+            .memory_providers()
+            .get(provider_id)
+            .ok_or_else(|| EngineError::Configuration("Memory export provider absent".into()))?;
+        let mut groups = std::collections::BTreeMap::new();
+        for record in self.inner.journal.live_memory_export_records()? {
+            if !matches!(
+                record.status(),
+                JournalStatus::Accepted | JournalStatus::Running
+            ) || record.cancellation_requested()
+                || self
+                    .inner
+                    .journal
+                    .cancellation_pending(record.execution_id())?
+            {
+                continue;
+            }
+            let invocation = decode_invocation_json(record.spec().invocation_content())?;
+            let operation = journal_operation(&invocation)?;
+            if self.operation(operation)?.owner() != provider.owner() {
+                continue;
+            }
+            if let Some(group) = invocation
+                .get("group_id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+            {
+                groups.entry(group.to_string()).or_insert(invocation);
+                if groups.len() > 32 {
+                    return Err(EngineError::Configuration(
+                        "Memory export live Group bound exceeded".into(),
+                    ));
+                }
+            }
+        }
+        let mut contexts =
+            vec![serde_json::json!({"node_id":self.catalog().node_id(),"provider_id":provider_id})];
+        contexts.extend(groups.into_values());
+        Ok(contexts)
+    }
     /// Creates an engine and opens its durable SQLite WAL journal.
     pub fn new(
         catalog: CompiledLocalCatalog,

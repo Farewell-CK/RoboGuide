@@ -722,6 +722,22 @@ impl ExecutionJournal {
         )
     }
 
+    /// Reads a bounded live producer set without reviving terminal execution history.
+    pub(crate) fn live_memory_export_records(&self) -> Result<Vec<JournalExecution>, JournalError> {
+        let records = self.query_records(
+            "SELECT execution_id, invocation_content, invocation_digest, workflow_digest,
+                    resource_ids, local_handle, cancellation_requested, sequence, status, reason
+             FROM execution_authority_v7 WHERE status IN ('accepted','running')
+             AND cancellation_requested=0 ORDER BY execution_id LIMIT 1025",
+        )?;
+        if records.len() > 1024 {
+            return Err(JournalError::InvalidSpec(
+                "live Memory producer record bound exceeded".into(),
+            ));
+        }
+        Ok(records)
+    }
+
     /// Returns terminal business facts in stable execution-ID order for reconnect replay.
     pub fn terminal_records(&self) -> Result<Vec<JournalExecution>, JournalError> {
         self.query_records(

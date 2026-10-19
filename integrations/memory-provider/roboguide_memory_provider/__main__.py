@@ -93,6 +93,8 @@ def handler_type(
                     self._respond(200, jobs.health())
                 elif jobs is not None and self.path == "/v1/file-jobs/status":
                     self._respond(200, jobs.status(self._body()["execution_id"]))
+                elif jobs is not None and self.path == "/v1/file-jobs/safe-state":
+                    self._respond(200, jobs.safe_state())
                 elif self.path == "/v1/instance":
                     self._respond(200, store.identity())
                 elif self.path == "/v1/import-query":

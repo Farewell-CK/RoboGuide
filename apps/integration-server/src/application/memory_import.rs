@@ -124,6 +124,12 @@ pub(crate) fn authorize(
     request: &MemoryImportRequest,
     now: domain::TimestampMs,
 ) -> Result<Option<MemoryAuthorityStamp>, String> {
+    super::memory_handoff::authorize_input(
+        controller,
+        &request.execution_id,
+        request.manifest.selector(),
+        now,
+    )?;
     if let Some(gate) = &request.evidence_gate {
         gate.policy.validate().map_err(|error| error.to_string())?;
         if gate.policy.payload_schema.is_none() {

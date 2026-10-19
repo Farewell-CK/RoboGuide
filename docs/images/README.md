@@ -14,3 +14,8 @@
 
 - `roboguide-v2-overall-architecture.png`：当前 RoboGuide V2 总体架构图，已嵌入 V2 DOCX；
 - `distributed-embodied-ai-os-architecture-v1.1.png`：历史 Distributed Embodied AI OS 总体架构 V1.1。
+
+2026-10-19 当前部署视图增加 ADR-0108 双 Group Memory handoff：原成员/attempt/期限、完整
+stop/revoke、immutable child lineage、真实接收准备与显式 commit 的关系见
+[implementation-topology](../architecture/v2/implementation-topology.md)。该 Mermaid 为当前软件
+调用链，既有概念 PNG 保留其基线含义；软件 assurance 不宣称物理交接。

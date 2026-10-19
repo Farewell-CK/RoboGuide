@@ -5,6 +5,25 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Durable application exchange lineage and stage; no second resource authority is created.
+    MemoryHandoffTransition {
+        /// Stable exact-request identity.
+        handoff_id: String,
+        /// Original immutable source Group.
+        source_group_id: ExecutionGroupId,
+        /// Independently committed receiving Group.
+        target_group_id: ExecutionGroupId,
+        /// Complete original parent metadata, retained after catalog maintenance.
+        parent: MemoryArtifactManifest,
+        /// New immutable scoped child, never an in-place scope rewrite.
+        child: Box<MemoryArtifactManifest>,
+        /// Explicit application stage.
+        phase: String,
+        /// Canonical complete durable record digest.
+        content_digest: String,
+        /// Original certificate-derived principal.
+        principal: String,
+    },
     /// Independent bounded observation of an original revoke; it authorizes no content effect.
     MemoryUseReconciliationEvidence {
         /// Original Control Group.

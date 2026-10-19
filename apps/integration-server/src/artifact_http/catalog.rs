@@ -3,6 +3,16 @@
 use super::*;
 /// Composition-owned admission for Node-authored typed evidence and generic Memory claims.
 pub trait MemoryProviderAdmission: Send + Sync {
+    /// Permits one exact protected parent reference only through a durable stopped-Group child
+    /// exchange and an independently current authenticated original import. Hash knowledge grants none.
+    fn authorize_handoff_blob_reference(
+        &self,
+        _principal: &ArtifactPrincipal,
+        _protected: &MemoryArtifactManifest,
+        _import_id: Option<&str>,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
     /// Admits original map producer provenance and its distinct current publishing attempt.
     fn admit_map_publication(
         &self,
@@ -286,6 +296,61 @@ impl ArtifactCatalog {
             }
             _ => Ok(None),
         }
+    }
+
+    /// Dry-runs a composition-owned immutable scoped publication under the outer writer gate.
+    /// This grants no remote publisher authority and performs no SQL write or cache mutation.
+    pub(crate) fn validate_application_memory_publication(
+        &self,
+        manifest: &MemoryArtifactManifest,
+    ) -> Result<(), String> {
+        self.ensure_available().map_err(|error| error.message)?;
+        let projection = self
+            .projection
+            .lock()
+            .map_err(|_| "Spatial catalog unavailable")?;
+        let memory = self
+            .memory_projection
+            .lock()
+            .map_err(|_| "Memory catalog unavailable")?;
+        let mut candidate = memory.clone();
+        candidate
+            .apply_memory_payload(
+                TimestampMs::new(0),
+                &EventPayload::MemoryManifestPublished {
+                    manifest: manifest.clone(),
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        validate_disjoint_memory_namespace(&projection, &candidate)
+    }
+
+    /// Installs an already committed application event; a projection failure fences later access.
+    /// The caller holds the real shared writer gate through Commit and this cache installation.
+    pub(crate) fn install_application_memory_publication(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        timestamp: TimestampMs,
+    ) -> Result<(), String> {
+        self.validate_application_memory_publication(manifest)?;
+        let result = self
+            .memory_projection
+            .lock()
+            .map_err(|_| "Memory catalog unavailable".to_string())
+            .and_then(|mut projection| {
+                projection
+                    .apply_memory_payload(
+                        timestamp,
+                        &EventPayload::MemoryManifestPublished {
+                            manifest: manifest.clone(),
+                        },
+                    )
+                    .map_err(|error| error.to_string())
+            });
+        if let Err(error) = result {
+            return Err(self.fence(error).message);
+        }
+        Ok(())
     }
     /// Persists certificate admission before any data access under the existing writer ordering gate.
     pub(super) fn audit_access(

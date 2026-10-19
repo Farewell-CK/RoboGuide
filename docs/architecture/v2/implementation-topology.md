@@ -43,6 +43,14 @@ flowchart TB
   Entry --> MINT[持久 Memory intent / 对账 generation 与预算]
   MINT --> SQL
   MINT --> PROTO
+  Entry --> HANDOFF[持久双 Group handoff / 原成员与期限]
+  HANDOFF --> STOP
+  HANDOFF --> MINT
+  HANDOFF --> CHILD[停止与撤销齐全 / immutable child + lineage]
+  CHILD --> ART
+  HANDOFF --> READY[原接收方准备 / 显式 commit / Execute gate]
+  READY --> RT
+  HANDOFF --> SQL
   CTRL --> MAUTH[Memory tenant / selector / provider / 成员 generation]
   Entry --> MAUTH
   MAUTH --> MINT
@@ -182,3 +190,10 @@ flowchart LR
 
 原始 Unknown 不覆盖，副作用不重复，观察期限不延长使用许可。Controller/supervisor wrapper
 v39 与 Node journal v11 拒绝旧 writer。证据缺失或预算耗尽保留 ownership。
+
+## Group Memory 交接实施边界（ADR-0108）
+
+Application 持久化双 Group 的原成员/attempt/策略/期限，使用现有完整停止与内容撤销门禁；
+Control 保持唯一 Commit/Bind/Rebind 权威。带父级 lineage 的新 scoped manifest 仅在停止与
+撤销齐全后提交，目标真实准备与显式 commit 后才 Execute。原 typed-map provenance 单独
+保留，软件 assurance 不建立设备停止或物理交接证明。

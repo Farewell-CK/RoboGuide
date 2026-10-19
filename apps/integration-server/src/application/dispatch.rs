@@ -18,6 +18,7 @@ pub(crate) fn drive_ready_tasks(
                 controller
                     .bridge
                     .group_recovery_holds_dispatch(execution.group_id(), timestamp)
+                    || super::memory_handoff::holds_binding(controller, execution.group_id())
             })
         {
             attempted.extend(
@@ -118,6 +119,7 @@ fn drive_ready_task(
             controller
                 .bridge
                 .group_recovery_holds_dispatch(mission.group_id(), timestamp)
+                || super::memory_handoff::holds_binding(controller, mission.group_id())
         })
     {
         return Ok(false);

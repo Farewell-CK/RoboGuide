@@ -20,6 +20,7 @@ mod isolation;
 #[cfg(test)]
 pub(crate) use isolation::revalidate_mission_resume;
 pub(crate) mod map_publication;
+pub(crate) mod memory_handoff;
 pub(crate) mod memory_import;
 pub(crate) mod memory_preparation;
 pub(crate) mod memory_query;

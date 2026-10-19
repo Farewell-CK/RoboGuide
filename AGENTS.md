@@ -125,6 +125,20 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   results remain history. Query views are paged and bounded. Config v0.12/Contract v0.11/catalog v0.14,
   Node journal v11, wrapper v39 and codec v26 fence older writers. Content revoke proof remains separate
   from device stop, physical continuity and overall SoftwareComplete.
+- ADR-0108's application Group Memory handoff freezes both Control memberships, the complete
+  original bound attempts, policy revision, stable principal/tenant and original five-minute deadline.
+  Source independent stop confirmations and all original context/provider revoke proofs precede
+  immutable scoped-child publication; the original source owner, bytes and production provenance
+  remain unchanged with full parent lineage. Original target import/probe/use and current State are
+  rechecked at explicit commit before Execute. Pending/manual holds retain ownership; source never
+  resumes automatically. CAS parent-reference exceptions require the actual original child import
+  per chunk and never authorize ordinary aliases. Node Group exports use bounded live original
+  journal contexts, with actual Controller provider/member/session admission. Complete receiver
+  proofs survive grant pruning. Later accepted Tasks require complete original receiver retirement,
+  fresh Control binding/membership and their own new preparation/use; initial grants never renew.
+  A post-commit original-delivery fence retains its original commit receipt and proof. Wrapper
+  v40/codec v27 fence older writers. SoftwareProcess worker
+  exit remains distinct from device stop, physical handoff and overall SoftwareComplete.
 - Generic replica durable identity is exact `(MemorySelector, NodeId, ConsumerProviderId)`; admission,
   event replay, projections, and APIs preserve that provider dimension, and accepted evidence remains
   monotonic after Imported. Explicit application-owned selective-import commands and bounded

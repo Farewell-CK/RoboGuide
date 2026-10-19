@@ -52,6 +52,10 @@ class FileJobs:
             "CHECK(budget_ms BETWEEN 1000 AND 300000))"
         )
         self._db.execute(
+            "CREATE TABLE IF NOT EXISTS software_stop_commands (execution_id TEXT PRIMARY KEY, "
+            "command_id TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation>0))"
+        )
+        self._db.execute(
             "UPDATE jobs SET state='UNKNOWN',reason='original computation was interrupted' "
             "WHERE state='RUNNING'"
         )
@@ -110,6 +114,18 @@ class FileJobs:
     def cancel(self, execution_id: str) -> dict[str, object]:
         """Fence a late start or request a current worker stop, without early CANCELLED status."""
         with self._mutex:
+            row = self._db.execute(
+                "SELECT invocation_json FROM jobs WHERE execution_id=?", (execution_id,)
+            ).fetchone()
+            if row is not None and row[0] is not None:
+                invocation = json.loads(row[0])
+                generation = self._original_generation(invocation)
+                if generation is not None:
+                    self._db.execute(
+                        "INSERT OR IGNORE INTO software_stop_commands VALUES (?,?,?)",
+                        (execution_id, "cancel-" + execution_id, generation),
+                    )
+                    self._db.commit()
             event = self._active.get(execution_id)
             if event is not None:
                 event.set()
@@ -121,6 +137,51 @@ class FileJobs:
                 )
                 self._db.commit()
             return {"accepted": True, **self.status(execution_id)}
+
+    @staticmethod
+    def _original_generation(invocation: dict[str, Any]) -> int | None:
+        """Validate the complete software attempt identity against its original invocation."""
+        fields = [invocation.get(name) for name in ("group_id", "task_id", "role_id")]
+        if not all(isinstance(value, str) and value for value in fields):
+            return None
+        identities = [value for value in fields if isinstance(value, str)]
+        prefix = (
+            "attempt-"
+            + "-".join(f"{len(value.encode('utf-8'))}:{value}" for value in identities)
+            + "-"
+        )
+        execution = invocation.get("execution_id", "")
+        if not isinstance(execution, str) or not execution.startswith(prefix):
+            return None
+        suffix = execution[len(prefix) :]
+        if not suffix.isascii() or not suffix.isdecimal() or suffix.startswith("0"):
+            return None
+        generation = int(suffix)
+        return generation if generation <= (1 << 63) - 1 else None
+
+    def safe_state(self) -> dict[str, object]:
+        """Observe original worker exit after actual cancel with software assurance only."""
+        with self._mutex:
+            rows = self._db.execute(
+                "SELECT c.execution_id,c.command_id,c.generation FROM software_stop_commands c "
+                "JOIN jobs j ON j.execution_id=c.execution_id WHERE j.state='CANCELLED' "
+                "ORDER BY c.execution_id LIMIT 256"
+            ).fetchall()
+            observations = []
+            for execution, command, generation in rows:
+                worker = self._workers.get(execution)
+                if execution in self._active or worker is not None and worker.is_alive():
+                    continue
+                observations.append(
+                    {
+                        "execution_id": execution,
+                        "execution_generation": generation,
+                        "command_id": command,
+                        "safe_state": True,
+                        "assurance": "software-process",
+                    }
+                )
+            return {"observations": observations}
 
     def _inputs(self, invocation: dict[str, Any]) -> list[tuple[dict[str, Any], Path]]:
         """Resolve only exact admitted imports or explicit startup exports, never caller paths."""

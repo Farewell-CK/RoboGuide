@@ -122,10 +122,12 @@ fn authorize_tenant_path(
                 | "/v1/state/records"
                 | "/v1/state/providers"
                 | "/v1/memory/use-queries"
+                | "/v1/memory/handoffs"
         )
         && !path.starts_with("/v1/missions/")
         && !path.starts_with("/v1/executions/")
         && !path.starts_with("/v1/groups/")
+        && !path.starts_with("/v1/memory/handoffs/")
     {
         return Err("global projection requires explicit global delegation".into());
     }
@@ -222,6 +224,10 @@ fn authorize_operator_request(
         ("POST", "/v1/memory/imports") => 2,
         ("POST", "/v1/memory/import-queries") => 2,
         ("POST", "/v1/memory/use-queries") => 2,
+        ("POST", "/v1/memory/handoffs") => 2,
+        ("POST", path) if path.starts_with("/v1/memory/handoffs/") && path.ends_with("/commit") => {
+            2
+        }
         ("POST", "/v1/node-identities/commands") => 2,
         ("POST", "/v1/tenant-migrations") => 2,
         (
@@ -727,6 +733,74 @@ where
                 .await
             }
         };
+    }
+    if method == "POST"
+        && (path == "/v1/memory/handoffs"
+            || path.starts_with("/v1/memory/handoffs/") && path.ends_with("/commit"))
+    {
+        let commit_id = path
+            .strip_prefix("/v1/memory/handoffs/")
+            .and_then(|id| id.strip_suffix("/commit"))
+            .map(str::to_owned);
+        let shared = controller.clone();
+        let log = event_log.clone();
+        let gate = event_write_gate.clone();
+        let body = request.body.clone();
+        let subject = principal
+            .subject
+            .as_deref()
+            .unwrap_or("trusted-loopback:recovery-admin")
+            .to_string();
+        let tenant = tenant.clone();
+        let worker_clock = application::memory_use_query::AdmissionClock::new(clock.now());
+        let result = tokio::task::spawn_blocking(move || {
+            application::memory_handoff::submit(
+                &shared,
+                &log,
+                &gate,
+                &worker_clock,
+                &body,
+                &subject,
+                tenant.as_deref(),
+                commit_id.as_deref(),
+            )
+        })
+        .await
+        .map_err(|error| format!("handoff worker failed: {error}"))?;
+        return match result {
+            Ok(body) => write_http_response(stream, "202 Accepted", body).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "GET" && path == "/v1/memory/handoffs" {
+        let parameters = parse_query(query);
+        let limit = parameters
+            .get("limit")
+            .map(|value| value.parse::<usize>())
+            .transpose();
+        let Ok(limit) = limit else {
+            return write_http_response(
+                stream,
+                "400 Bad Request",
+                serde_json::json!({"error":"limit must be an integer"}),
+            )
+            .await;
+        };
+        let body = {
+            let live = controller
+                .lock()
+                .map_err(|_| "handoff authority unavailable")?;
+            application::memory_handoff::view(
+                &live,
+                tenant.as_deref(),
+                parameters.get("after").copied(),
+                limit.unwrap_or(32),
+            )
+        };
+        return write_http_response(stream, "200 OK", body).await;
     }
     if method == "POST" && path == "/v1/memory/use-queries" {
         let shared = controller.clone();
@@ -2829,8 +2903,15 @@ fn controller_metrics(
         .count();
     let (memory_unresolved, memory_queries, memory_exhausted) =
         application::memory_use_query::metrics(controller, now);
+    let (handoffs_pending, handoffs_manual) = application::memory_handoff::metrics(controller);
     Ok(format!(
-        "# HELP roboguide_memory_revoke_providers_unresolved Original providers lacking revoke confirmation.\n\
+        "# HELP roboguide_memory_handoffs_pending Exchanges awaiting original barriers or explicit commit.\n\
+         # TYPE roboguide_memory_handoffs_pending gauge\n\
+         roboguide_memory_handoffs_pending {handoffs_pending}\n\
+         # HELP roboguide_memory_handoffs_manual Exchanges retaining ownership for manual reconciliation.\n\
+         # TYPE roboguide_memory_handoffs_manual gauge\n\
+         roboguide_memory_handoffs_manual {handoffs_manual}\n\
+         # HELP roboguide_memory_revoke_providers_unresolved Original providers lacking revoke confirmation.\n\
          # TYPE roboguide_memory_revoke_providers_unresolved gauge\n\
          roboguide_memory_revoke_providers_unresolved {memory_unresolved}\n\
          # HELP roboguide_memory_use_queries_pending Pending original readonly observations.\n\

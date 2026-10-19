@@ -23,6 +23,7 @@ fn fixture(log: &state::SqliteEventLog) -> ControllerState {
         memory_imports: BTreeMap::new(),
         memory_preparation: Default::default(),
         memory_use: Default::default(),
+        memory_handoffs: BTreeMap::new(),
         safety_stops: BTreeMap::new(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
@@ -460,6 +461,7 @@ fn held_terminal_fact_is_retained_without_release_or_execute_replay() {
         memory_imports: saved.memory_imports,
         memory_preparation: saved.memory_preparation,
         memory_use: saved.memory_use,
+        memory_handoffs: saved.memory_handoffs,
         safety_stops: saved.safety_stops,
         verifier_seen: saved.verifier_seen,
         verifier_artifact_store: None,

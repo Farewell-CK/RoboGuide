@@ -157,6 +157,68 @@ def test_async_admission_returns_original_handle_and_cancel_joins_actual_worker(
         store.close()
 
 
+def test_software_stop_observation_requires_actual_cancel_and_worker_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An actual live worker cannot report a safe state from cancel acceptance alone."""
+    store, invocation, _ = declared_file(tmp_path)
+    invocation.update(group_id="group", task_id="task", role_id="role")
+    invocation["execution_id"] = "attempt-5:group-4:task-4:role-1"
+    jobs = FileJobs(store, max_job_seconds=120)
+    entered, release = threading.Event(), threading.Event()
+    perform = jobs._perform
+
+    def boundary(
+        call: dict[str, Any], admission: tuple[threading.Event, str | None, int, int]
+    ) -> dict[str, object]:
+        """Hold an actual owned worker before its first read without fabricating an outcome."""
+        entered.set()
+        assert release.wait(timeout=5)
+        return perform(call, admission)
+
+    monkeypatch.setattr(jobs, "_perform", boundary)
+    try:
+        jobs.submit(invocation)
+        assert entered.wait(timeout=5)
+        assert jobs.safe_state() == {"observations": []}
+        jobs.cancel(invocation["execution_id"])
+        assert jobs.safe_state() == {"observations": []}
+        release.set()
+        for worker in jobs._workers.values():
+            worker.join(timeout=5)
+            assert not worker.is_alive()
+        observed = jobs.safe_state()["observations"]
+        assert observed == [
+            {
+                "execution_id": invocation["execution_id"],
+                "execution_generation": 1,
+                "command_id": "cancel-" + invocation["execution_id"],
+                "safe_state": True,
+                "assurance": "software-process",
+            }
+        ]
+        jobs.close()
+        jobs = FileJobs(store)
+        assert jobs.safe_state()["observations"] == observed
+        assert jobs._original_generation({**invocation, "group_id": "another"}) is None
+        assert (
+            jobs._original_generation(
+                {**invocation, "execution_id": invocation["execution_id"] + "0"}
+            )
+            == 10
+        )
+        assert (
+            jobs._original_generation(
+                {**invocation, "execution_id": invocation["execution_id"][:-1] + "01"}
+            )
+            is None
+        )
+    finally:
+        release.set()
+        jobs.close()
+        store.close()
+
+
 def test_compute_budget_sql_failure_rolls_back_admission_before_worker_start(
     tmp_path: Path,
 ) -> None:

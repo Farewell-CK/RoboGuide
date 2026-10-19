@@ -112,6 +112,134 @@ fn authority() -> (
     (control, manifest, provider, task, role, node)
 }
 
+/// Explicit stopped exchanges require independent child policy, immutable provenance and both epochs.
+/// This pure authorization model supplies neither a stop certificate nor receiving byte evidence.
+#[test]
+fn stopped_group_exchange_requires_exact_both_memberships_and_immutable_child() {
+    let (mut control, parent, _, _, _, _) = authority();
+    let target_id = ExecutionGroupId::new("target").unwrap();
+    let target_mission = MissionId::new("target-mission").unwrap();
+    let target = crate::ExecutionGroup::new_mission(
+        target_id.clone(),
+        target_mission.clone(),
+        TaskRef::new(target_mission, TaskId::new("receive").unwrap()),
+    );
+    control.groups.insert(target_id.clone(), target);
+    let mut encoded = serde_json::to_value(&parent).unwrap();
+    encoded["selector"]["revision_id"] = "child".into();
+    encoded["scope"]["execution_group_id"] = "target".into();
+    let child: domain::MemoryArtifactManifest = serde_json::from_value(encoded).unwrap();
+    let mut registry = control.memory_authorization_registry().unwrap().clone();
+    let parent_key = format!(
+        "{}/{}",
+        parent.selector().memory_id(),
+        parent.selector().revision_id()
+    );
+    registry
+        .policies
+        .get_mut(&parent_key)
+        .unwrap()
+        .principals
+        .insert("explicit-exchange".into(), BTreeSet::from([Op::Handoff]));
+    let mut policy = registry.policies[&parent_key].clone();
+    policy.policy_id = "child-policy".into();
+    policy.selector = child.selector().clone();
+    policy.manifest_digest = domain::memory_manifest_digest(&child).unwrap();
+    policy.principals.clear();
+    policy.groups[0].group_id = target_id.clone();
+    registry.policies.insert(policy.key(), policy);
+    registry.revision = 2;
+    control
+        .accept_memory_authorization_registry(registry, 1)
+        .unwrap();
+    let source = ExecutionGroupId::new("group").unwrap();
+    let source_version = control
+        .group(&source)
+        .unwrap()
+        .membership_version()
+        .unwrap()
+        .clone();
+    let target_version = control
+        .group(&target_id)
+        .unwrap()
+        .membership_version()
+        .unwrap()
+        .clone();
+    assert!(
+        control
+            .authorize_stopped_memory_handoff(
+                &parent,
+                &child,
+                &source,
+                &source_version,
+                &target_version,
+                "local",
+                "explicit-exchange"
+            )
+            .is_ok()
+    );
+    assert!(
+        control
+            .authorize_memory_handoff(&parent, &child, "local", "explicit-exchange")
+            .is_err()
+    );
+    for (tenant, principal) in [("other", "explicit-exchange"), ("local", "reader")] {
+        assert!(
+            control
+                .authorize_stopped_memory_handoff(
+                    &parent,
+                    &child,
+                    &source,
+                    &source_version,
+                    &target_version,
+                    tenant,
+                    principal
+                )
+                .is_err()
+        );
+    }
+    let mut wrong = target_version.clone();
+    wrong.generation += 1;
+    assert!(
+        control
+            .authorize_stopped_memory_handoff(
+                &parent,
+                &child,
+                &source,
+                &source_version,
+                &wrong,
+                "local",
+                "explicit-exchange"
+            )
+            .is_err()
+    );
+    for (field, value) in [
+        ("provider_id", serde_json::json!("replacement")),
+        ("source_execution_id", serde_json::json!("replacement")),
+        (
+            "artifact",
+            serde_json::json!({"content_digest":format!("sha256:{}","f".repeat(64)),"byte_size":1}),
+        ),
+    ] {
+        let mut encoded = serde_json::to_value(&child).unwrap();
+        encoded[field] = value;
+        let changed = serde_json::from_value(encoded).unwrap();
+        assert!(
+            control
+                .authorize_stopped_memory_handoff(
+                    &parent,
+                    &changed,
+                    &source,
+                    &source_version,
+                    &target_version,
+                    "local",
+                    "explicit-exchange"
+                )
+                .is_err()
+        );
+    }
+}
+
 /// Exact binding/provider and original scope are required even when a caller knows every digest.
 #[test]
 fn memory_content_requires_current_exact_member_and_provider() {

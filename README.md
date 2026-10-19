@@ -5,6 +5,11 @@ RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智�
 当前架构 source of truth 是 [`docs/architecture/v2/README.md`](docs/architecture/v2/README.md) 及其引用的已接受 ADR。它们记录当前实现对应的职责、协议语义、关键闭环和架构约束；原始 [`RoboGuide_Architecture_Baseline_V2.docx`](docs/architecture/v2/RoboGuide_Architecture_Baseline_V2.docx) 仅保留为最初 V2 基线快照，可能落后于后续演进。V1.1 作为历史基线保留。
 
 全部非发布软件整改正在按[实施计划](docs/development/roboguide-software-completion-plan-2026-10-15.md)执行。
+Group Memory 交接由 [ADR-0108](docs/decisions/0108-durable-group-memory-handoff.md) 定义：
+原两端成员/attempt/策略/期限持久化；完整停止与原内容撤销齐全后提交带 lineage 的新 scope，
+原接收方真实 import/probe 与显式 commit 后才 Execute。wrapper v40/codec v27 保护该权威。
+软件线程退出只证明声明的 SoftwareProcess；完整 F4 和 F5–F10 仍有独立验收要求。
+
 当前停止链路冻结 operation-owned State export、当前 attempt/session、receipt、TTL、confidence 和
 deadline；Mission hold 与释放/继续门禁保留未确认所有权，旧停止记录不会自动升级为确认。
 Mission HTTP 命令与 Request 进展原子关联，提供观察与中断恢复入口，不重复原命令。

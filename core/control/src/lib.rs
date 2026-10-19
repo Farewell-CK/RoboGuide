@@ -14,6 +14,7 @@ mod group;
 mod initial_preferences;
 mod matching;
 mod memory_authority;
+mod memory_handoff;
 mod node;
 mod node_identity;
 mod node_session;

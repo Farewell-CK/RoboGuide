@@ -67,6 +67,13 @@ budgets persist before worker admission; `--max-job-seconds` is an explicit depl
 requested count is part of the immutable invocation. Tightening admission does not rerun or hide
 historical results. The original computation budget still bounds actual work at every read phase.
 
+GET `/v1/file-jobs/safe-state` exposes only actual software worker exit after an original cancel.
+The backend retains the original canonical invocation, validated generation and actual cancel
+command identity. A live worker, natural completion or UNKNOWN does not emit confirmation.
+The configured State export must explicitly declare `SoftwareProcess`; these observations cannot
+establish device stopping. ADR-0108's Controller handoff separately requires durable Cancel receipt,
+terminal cancellation, independent current-session observation and original context/provider revokes.
+
 `tools/quality/check_memory_preparation_processes.py` uses this shipped code through actual TLS
 and two formally enrolled software Nodes. It proves the explicit pre-Execute permission barrier,
 actual final-import SQL failure/read-only reconciliation, current availability, two real hash

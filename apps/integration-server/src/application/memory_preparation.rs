@@ -126,6 +126,12 @@ fn build(
     let id = preparation_id(&intent.execution_id);
     let mut inputs = Vec::new();
     for requirement in command.memory_requirements() {
+        super::memory_handoff::authorize_input(
+            controller,
+            &intent.execution_id,
+            &requirement.selector,
+            now,
+        )?;
         let (manifest, typed_map) = catalog
             .memory_source(&requirement.selector)?
             .ok_or("Memory source is not yet admitted")?;
@@ -193,6 +199,14 @@ pub(crate) fn authorize(
         .preparation
         .as_ref()
         .ok_or("Memory source context is unavailable")?;
+    for input in &preparation.inputs {
+        super::memory_handoff::authorize_input(
+            controller,
+            &preparation.execution_id,
+            &input.requirement.selector,
+            now,
+        )?;
+    }
     let mission = controller
         .orchestrator
         .execution(preparation.task_ref.mission_id())

@@ -592,6 +592,7 @@ mod tests {
             memory_imports: BTreeMap::new(),
             memory_preparation: Default::default(),
             memory_use: Default::default(),
+            memory_handoffs: BTreeMap::new(),
             safety_stops: BTreeMap::new(),
             bridge,
             orchestrator: orchestration::MissionOrchestrator::new(),

@@ -57,6 +57,12 @@ stop certificate、硬实时 hazard、运行中抢占和异构 regrasp 仍保持
 
 ## V2 开放架构问题
 
+2026-10-19 双 Group Memory 交接与后续成员生命周期由
+[ADR-0108](decisions/0108-durable-group-memory-handoff.md) 与
+[实际软件验收](development/acceptance/2026-10-19-f4-group-memory-handoff.md) 接通：原停止/
+context/provider revoke、不可变 child lineage、原接收准备、显式 commit、后续新代际/新许可，
+并覆盖 SQL 回滚、超时、策略变化与重启。它不关闭完整 F4、跨主机、HA 内容恢复或物理交接。
+
 | ID | 问题 | 需要回答的核心内容 |
 | --- | --- | --- |
 | Q1 | State Authority | 已有 source-aware federation 之上，Shared Belief 在何种新鲜度和不确定性条件下可驱动决策；冲突如何由显式 provider 归约 |

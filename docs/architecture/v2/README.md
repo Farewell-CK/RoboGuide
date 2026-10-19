@@ -1,5 +1,12 @@
 # RoboGuide V2 架构基线
 
+2026-10-19 [ADR-0108](../../decisions/0108-durable-group-memory-handoff.md) 接通 Application
+持久双 Group Memory 交接：完整原停止/revoke → immutable child lineage → 原 receiver
+import/probe/use → 当前 State 与显式 commit → Execute。Control 继续独占成员与资源承诺；
+失败保留 ownership，原 scope/provenance/期限不改写。wrapper v40/codec v27 fence 旧 writer。
+Node 出站 Group 导出消费原 journal 活跃 operation context；软件 assurance 不建立设备证明。
+
+
 > 当前仓库架构语义的 source of truth。原始
 > [`RoboGuide_Architecture_Baseline_V2.docx`](RoboGuide_Architecture_Baseline_V2.docx)
 > 保留最初 V2 基线；后续已接受的演进由本文和编号 ADR 共同记录。

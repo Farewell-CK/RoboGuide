@@ -34,7 +34,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
-/// Previous wrapper without scoped context/provider revocation and per-send Memory expiry gates.
+/// Previous wrapper without durable stopped-Group Memory handoff authority.
+const PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v39";
 /// Prior wrapper without independent readonly Memory-use evidence.
 const PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v38";
 /// Previous wrapper without scoped context/provider revoke and per-send expiry gates.
@@ -120,6 +121,8 @@ struct ControllerState {
     memory_preparation: application::memory_preparation::MemoryPreparationState,
     /// Renewable current content permission, separate from immutable preparation/import budgets.
     memory_use: application::memory_use::MemoryUseState,
+    /// Original Group exchange intents and complete lineage, never a second binding registry.
+    memory_handoffs: BTreeMap<String, application::memory_handoff::HandoffRecord>,
     /// Exact authorized selective-import intents and durable Node receipts.
     memory_imports: BTreeMap<String, application::memory_import::MemoryImportIntent>,
     /// Application safety policy over existing exact Runtime cancellation intents and raw evidence.
@@ -305,6 +308,39 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
                 .map_err(|e| e.to_string())?;
         }
         Ok(())
+    }
+    /// Rechecks one explicit stopped-parent lineage plus the actual current child import per chunk.
+    fn authorize_handoff_blob_reference(
+        &self,
+        principal: &artifact_http::ArtifactPrincipal,
+        protected: &domain::MemoryArtifactManifest,
+        import_id: Option<&str>,
+    ) -> Result<bool, String> {
+        let Some(import_id) = import_id else {
+            return Ok(false);
+        };
+        let child = {
+            let live = self
+                .controller
+                .lock()
+                .map_err(|_| "handoff content authority unavailable")?;
+            if !application::memory_handoff::permits_parent_reference(
+                &live,
+                protected,
+                import_id,
+                ports::Clock::now(self.clock.as_ref()),
+            )? {
+                return Ok(false);
+            }
+            live.memory_imports[import_id].request.manifest.clone()
+        };
+        self.authorize_memory_access(
+            principal,
+            &child,
+            domain::MemoryAccessOperation::Read,
+            Some(import_id),
+        )?;
+        Ok(true)
     }
     /// Resolves an opaque original import through current Control instead of treating headers as grants.
     fn authorize_memory_access(
@@ -608,6 +644,9 @@ struct ServerCheckpoint {
     /// Original use commands and fences; historical absence remains unavailable.
     #[serde(default)]
     memory_use: application::memory_use::MemoryUseState,
+    /// Durable stopped-Group exchanges; historical absence creates no handoff authority.
+    #[serde(default)]
+    memory_handoffs: BTreeMap<String, application::memory_handoff::HandoffRecord>,
     /// Exact authorized selective-import intents and durable Node receipts.
     #[serde(default)]
     memory_imports: BTreeMap<String, application::memory_import::MemoryImportIntent>,
@@ -978,6 +1017,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
@@ -1019,6 +1059,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
@@ -1060,6 +1101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 memory_imports: saved.memory_imports,
                 memory_preparation: saved.memory_preparation,
                 memory_use: saved.memory_use,
+                memory_handoffs: saved.memory_handoffs,
                 safety_stops: saved.safety_stops,
                 bridge: IntegrationRuntimeBridge::restore_from_checkpoint_with_lease_policy(
                     &saved.integration_json,
@@ -1085,6 +1127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             memory_imports: BTreeMap::new(),
             memory_preparation: Default::default(),
             memory_use: Default::default(),
+            memory_handoffs: BTreeMap::new(),
             safety_stops: BTreeMap::new(),
             bridge: IntegrationRuntimeBridge::new_with_lease_policy(
                 control::ControlPlane::new(),
@@ -1129,6 +1172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .control()
         .validate_mission_tenant_authority()?;
     application::memory_import::validate_restored(&controller)?;
+    application::memory_handoff::validate_restored(&controller)?;
     let restored_memory_fences =
         application::memory_preparation::restore(&mut controller, process_clock.now())?;
     let restored_use_fences =

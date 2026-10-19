@@ -68,8 +68,13 @@ def run(directory: Path, old_controller: Path, old_node: Path | None = None) -> 
             ("unsupported checkpoint schema " + expected_schema).encode() in observed.stderr
             or (
                 name == "actual-completed-memory-group"
-                and b"unsupported event payload schema domain.EventPayload.json/v26"
-                in observed.stderr
+                and any(
+                    (
+                        "unsupported event payload schema domain.EventPayload.json/v" + str(version)
+                    ).encode()
+                    in observed.stderr
+                    for version in (26, 27)
+                )
             )
         ), observed.stderr
         after = logical_digest(database, tables(database))

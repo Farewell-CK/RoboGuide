@@ -687,6 +687,16 @@ pub(crate) fn blocks_release(controller: &ControllerState, mission_id: &domain::
     })
 }
 
+/// Requires an actual retained independent confirmation for an exact handoff source attempt.
+pub(crate) fn attempt_confirmed(controller: &ControllerState, execution: &str) -> bool {
+    controller
+        .safety_stops
+        .get(execution)
+        .is_some_and(|purpose| {
+            purpose.record.may_release_ownership() && validate_confirmation(purpose).is_ok()
+        })
+}
+
 /// Revalidates complete retained confirmation evidence without relying on a new live session.
 fn validate_confirmation(purpose: &SafetyStopPurpose) -> Result<(), String> {
     let identity = &purpose.record.identity;

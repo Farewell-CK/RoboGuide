@@ -128,6 +128,12 @@ pub(super) fn authorize_blob_read(
                     "discoverable metadata does not offer content exchange",
                 ));
             }
+            if authority
+                .authorize_handoff_blob_reference(principal, &manifest, import_id)
+                .map_err(HttpError::forbidden)?
+            {
+                continue;
+            }
             authority
                 .authorize_memory_access(
                     principal,

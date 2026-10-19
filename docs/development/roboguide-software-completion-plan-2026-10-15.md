@@ -100,8 +100,15 @@ transport、证书路由和多域恢复仍未关闭。
 [原撤销部分失败对账验收](acceptance/2026-10-19-f4-original-revoke-reconciliation.md)
 已完成逐 provider 进度、原预算内恢复、独立有界 GET 会话、原 Unknown/预算不变、
 迟到/替换 backend 拒绝与旧二进制门禁。三种实际软件故障配置和正常并行 Task 链路分别
-验收；内容对账不绕过独立 stop hold。完整成员变更/跨 Group handoff 是下一工作包，
+验收；内容对账不绕过独立 stop hold。后续 Group handoff 工作包见下文，
 跨主机、HA 内容恢复及 F5–F10 仍必需；完整 F4 不提前关闭。
+
+[双 Group 交接与成员生命周期验收](acceptance/2026-10-19-f4-group-memory-handoff.md)
+已通过停止/撤销 → immutable child lineage → 原接收方 import/probe/use → 显式 commit →
+目标 Execute/独立验证的实际软件链路；后续 Task 在原接收方退役后取得新成员代际与新许可。
+两个 SQL 回滚窗口、超时、策略变化、待交接重启、旧 writer/零事件 fence 均有实际证据。
+wrapper v40/codec v27 保护该权威。软件 worker 停止不升级为设备事实；完整 F4、跨主机、
+HA 数据面恢复及 F5–F10 仍必需，后续实施应核对 active-map/GC 与内容恢复的完整生命周期。
 
 ## 已接受的实现决定
 

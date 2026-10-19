@@ -70,6 +70,14 @@ fn authorize(
     preparation: &MemoryPreparation,
     now: domain::TimestampMs,
 ) -> Result<(), String> {
+    for input in &preparation.inputs {
+        super::memory_handoff::authorize_input(
+            controller,
+            &preparation.execution_id,
+            &input.requirement.selector,
+            now,
+        )?;
+    }
     let mission = controller
         .orchestrator
         .execution(preparation.task_ref.mission_id())

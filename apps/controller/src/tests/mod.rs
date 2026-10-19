@@ -78,6 +78,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
             Some(&receipt.evidence.task_ref)
         }
         EventPayload::MissionSchedulingPriorityChanged { .. }
+        | EventPayload::MemoryHandoffTransition { .. }
         | EventPayload::ArtifactUploadTransition { .. } => None,
         EventPayload::CandidatesMatched { task_ref }
         | EventPayload::SchedulingReservationPreempted { task_ref, .. }

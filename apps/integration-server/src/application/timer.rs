@@ -75,6 +75,7 @@ pub(crate) fn drive_application_timer_with_clock(
         let mut events = event_log.clone();
         apply_runtime_events(&mut candidate, now, &correlation, &mut events)?;
         safety_stop::tick(&mut candidate, now)?;
+        super::memory_handoff::tick(&mut candidate, now)?;
         begin_current_ambiguity_recoveries(&mut candidate, now, &correlation, &mut events)?;
         resume_pending_recoveries(&mut candidate, now, &correlation, &mut events)?;
         apply_pending_cancellations(&mut candidate, now, &correlation, &mut events)?;
@@ -156,6 +157,7 @@ pub(crate) fn drive_application_timer_with_clock(
             .map_err(|_| "controller lock is poisoned")?;
         let has_memory_imports = !candidate.memory_imports.is_empty();
         *live = candidate;
+        super::memory_handoff::install_catalog(&live)?;
         if !live.memory_preparation.records.is_empty() {
             super::memory_preparation::flush(&live, now, clock.now());
         }

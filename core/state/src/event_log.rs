@@ -91,7 +91,9 @@ const EVENT_PAYLOAD_SCHEMA_V22: &str = "domain.EventPayload.json/v22";
 const EVENT_PAYLOAD_SCHEMA_V23: &str = "domain.EventPayload.json/v23";
 /// Codec fencing exact registered producer provenance in typed-map evidence.
 const EVENT_PAYLOAD_SCHEMA_V24: &str = "domain.EventPayload.json/v24";
-/// Complete typed-map source with provider-qualified byte-import evidence.
+/// Codec retaining complete stopped-Group handoff lineage and application transitions.
+/// The Controller wrapper separately fences zero-event authority revisions.
+const EVENT_PAYLOAD_SCHEMA_V27: &str = "domain.EventPayload.json/v27";
 /// Codec including independent original-revoke observation evidence.
 const EVENT_PAYLOAD_SCHEMA_V26: &str = "domain.EventPayload.json/v26";
 /// Complete provider-qualified typed-map byte-import evidence.
@@ -1034,6 +1036,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V24 => Ok(24),
         EVENT_PAYLOAD_SCHEMA_V25 => Ok(25),
         EVENT_PAYLOAD_SCHEMA_V26 => Ok(26),
+        EVENT_PAYLOAD_SCHEMA_V27 => Ok(27),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -1047,6 +1050,7 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::MemoryHandoffTransition { .. } => 27,
         EventPayload::MemoryUseReconciliationEvidence { .. } => 26,
         EventPayload::MapMemoryReplicaRecorded { .. } => 25,
         _ if provider_map_payload(payload) => 24,
@@ -1243,6 +1247,7 @@ impl SqliteEventLog {
 /// Selects the newest codec marker only for payloads introduced by that codec.
 fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
     match payload {
+        EventPayload::MemoryHandoffTransition { .. } => EVENT_PAYLOAD_SCHEMA_V27,
         EventPayload::MemoryUseReconciliationEvidence { .. } => EVENT_PAYLOAD_SCHEMA_V26,
         EventPayload::MapMemoryReplicaRecorded { .. } => EVENT_PAYLOAD_SCHEMA_V25,
         _ if provider_map_payload(payload) => EVENT_PAYLOAD_SCHEMA_V24,

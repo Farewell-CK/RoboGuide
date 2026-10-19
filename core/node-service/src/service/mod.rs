@@ -484,8 +484,9 @@ impl NodeService {
     ///
     /// `discover` is the provider's publish-eligibility decision. Node Service performs only the
     /// publication mechanism and mechanical safety checks; it does not promote or select from all
-    /// Local EAIOS Memory. ExecutionGroup-scoped items are excluded because complete distributed
-    /// Group authorization/handoff is not part of the current Node Protocol.
+    /// Local EAIOS Memory. Group-scoped publication remains subject to the Artifact composition's
+    /// exact current Control binding, original provider, tenant and actual publisher session.
+    /// A source manifest or its publication never grants receiving content-use permission.
     fn spawn_memory_exports(&self, session_id: String) -> tokio::task::JoinHandle<()> {
         let engine = self.engine.clone();
         tokio::spawn(async move {
@@ -495,8 +496,14 @@ impl NodeService {
                 return;
             }
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+            let mut execution_events = engine.subscribe();
             loop {
-                ticker.tick().await;
+                tokio::select! {
+                    _ = ticker.tick() => {},
+                    event = execution_events.recv() => {
+                        if matches!(event,Err(tokio::sync::broadcast::error::RecvError::Closed)) {return;}
+                    }
+                }
                 let provider_ids = engine
                     .catalog()
                     .memory_providers()
@@ -505,87 +512,92 @@ impl NodeService {
                     .map(|provider| provider.id().to_string())
                     .collect::<Vec<_>>();
                 for provider_id in provider_ids {
-                    let invocation = serde_json::json!({
-                        "node_id": engine.catalog().node_id(),
-                        "provider_id": provider_id,
-                    });
-                    let publish_eligible_manifests = match engine
-                        .discover_memories(
-                            &provider_id,
-                            &crate::MemoryQuery::default(),
-                            invocation.clone(),
-                        )
-                        .await
-                    {
-                        Ok(manifests) => manifests,
+                    let contexts = match engine.memory_export_contexts(&provider_id) {
+                        Ok(contexts) => contexts,
                         Err(error) => {
-                            eprintln!("Memory discovery for {provider_id} will retry: {error}");
+                            eprintln!("Memory export contexts unavailable: {error}");
                             continue;
                         }
                     };
-                    for manifest in publish_eligible_manifests {
-                        if matches!(manifest.scope(), domain::MemoryScope::ExecutionGroup(_)) {
-                            continue;
-                        }
-                        if let Err(error) = engine.validate_memory_export(&provider_id, &manifest) {
-                            eprintln!(
-                                "Memory discovery for {} returned an inadmissible export: {error}",
-                                manifest.selector()
-                            );
-                            continue;
-                        }
-                        let artifact_path = match engine
-                            .export_memory(&provider_id, &manifest, invocation.clone())
+                    for invocation in contexts {
+                        let publish_eligible_manifests = match engine
+                            .discover_memories(
+                                &provider_id,
+                                &crate::MemoryQuery::default(),
+                                invocation.clone(),
+                            )
                             .await
                         {
-                            Ok(path) => path,
+                            Ok(manifests) => manifests,
                             Err(error) => {
+                                eprintln!("Memory discovery for {provider_id} will retry: {error}");
+                                continue;
+                            }
+                        };
+                        for manifest in publish_eligible_manifests {
+                            if let Err(error) =
+                                engine.validate_memory_export(&provider_id, &manifest)
+                            {
                                 eprintln!(
-                                    "Memory export for {} will retry: {error}",
+                                    "Memory discovery for {} returned an inadmissible export: {error}",
                                     manifest.selector()
                                 );
                                 continue;
                             }
-                        };
-                        let Some(stager) = engine.artifact_stager() else {
-                            eprintln!(
-                                "Memory publication for {} requires the Artifact data plane",
-                                manifest.selector()
-                            );
-                            continue;
-                        };
-                        if manifest.visibility() == domain::MemoryVisibility::Exchangeable {
-                            let Some(path) = artifact_path else {
+                            let artifact_path = match engine
+                                .export_memory(&provider_id, &manifest, invocation.clone())
+                                .await
+                            {
+                                Ok(path) => path,
+                                Err(error) => {
+                                    eprintln!(
+                                        "Memory export for {} will retry: {error}",
+                                        manifest.selector()
+                                    );
+                                    continue;
+                                }
+                            };
+                            let Some(stager) = engine.artifact_stager() else {
                                 eprintln!(
-                                    "Memory export for {} lacks its configured artifact path",
+                                    "Memory publication for {} requires the Artifact data plane",
                                     manifest.selector()
                                 );
                                 continue;
                             };
-                            if let Err(error) = stager.upload_memory_output(&manifest, &path).await
+                            if manifest.visibility() == domain::MemoryVisibility::Exchangeable {
+                                let Some(path) = artifact_path else {
+                                    eprintln!(
+                                        "Memory export for {} lacks its configured artifact path",
+                                        manifest.selector()
+                                    );
+                                    continue;
+                                };
+                                if let Err(error) =
+                                    stager.upload_memory_output(&manifest, &path).await
+                                {
+                                    eprintln!(
+                                        "Memory Artifact upload for {} will retry: {error}",
+                                        manifest.selector()
+                                    );
+                                    continue;
+                                }
+                            }
+                            let node_id = match domain::NodeId::new(engine.catalog().node_id()) {
+                                Ok(node_id) => node_id,
+                                Err(error) => {
+                                    eprintln!("Memory publisher Node identity is invalid: {error}");
+                                    continue;
+                                }
+                            };
+                            if let Err(error) = stager
+                                .publish_memory(&manifest, &node_id, &session_id)
+                                .await
                             {
                                 eprintln!(
-                                    "Memory Artifact upload for {} will retry: {error}",
+                                    "Memory publication for {} is fenced until retry: {error}",
                                     manifest.selector()
                                 );
-                                continue;
                             }
-                        }
-                        let node_id = match domain::NodeId::new(engine.catalog().node_id()) {
-                            Ok(node_id) => node_id,
-                            Err(error) => {
-                                eprintln!("Memory publisher Node identity is invalid: {error}");
-                                continue;
-                            }
-                        };
-                        if let Err(error) = stager
-                            .publish_memory(&manifest, &node_id, &session_id)
-                            .await
-                        {
-                            eprintln!(
-                                "Memory publication for {} is fenced until retry: {error}",
-                                manifest.selector()
-                            );
                         }
                     }
                 }
