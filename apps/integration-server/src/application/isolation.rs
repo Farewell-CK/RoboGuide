@@ -319,13 +319,25 @@ pub(crate) fn flush_unisolated_commands(
 
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA
+        && saved
+            .memory_use
+            .records
+            .values()
+            .flat_map(|record| record.controls.values())
+            .any(|delivery| delivery.reconciliation.is_some())
+    {
+        return Err("legacy wrapper contains independent Memory use observation authority".into());
+    }
     let missions: Vec<serde_json::Value> =
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
     ) && !saved.memory_use.records.is_empty()
     {
         return Err("legacy wrapper contains current Memory use authority".into());
@@ -333,6 +345,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -343,6 +356,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -361,6 +375,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -384,6 +399,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -407,6 +423,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -424,6 +441,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -470,6 +488,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -499,6 +518,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -525,6 +545,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -571,6 +592,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -598,6 +620,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA

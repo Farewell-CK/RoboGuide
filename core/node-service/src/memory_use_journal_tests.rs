@@ -41,6 +41,200 @@ fn use_command(context: &MemoryPreparation, generation: u64) -> MemoryUseControl
     command
 }
 
+/// Opens an observation-only query against original revoke metadata, not a fabricated backend.
+fn observation_query(
+    command: &MemoryUseControl,
+    context: &MemoryPreparation,
+) -> domain::MemoryUseQuery {
+    let mut query = domain::MemoryUseQuery {
+        schema: "roboguide.memory-use-query/v0.1".into(),
+        query_id: String::new(),
+        command_id: command.command_id.clone(),
+        command_digest: command.digest().unwrap(),
+        generation: 1,
+        provider_ids: context
+            .inputs
+            .iter()
+            .map(|input| input.consumer.provider_id().to_string())
+            .collect(),
+        opened_at_ms: 20_000,
+        session_budget_ms: 300_000,
+        valid_for_ms: 30_000,
+    };
+    query.provider_ids.sort();
+    query.provider_ids.dedup();
+    query.query_id = query.expected_id();
+    query
+}
+
+/// Independent observations preserve expired original budgets and cannot recreate either session.
+#[test]
+fn readonly_use_session_is_separate_bounded_and_restart_stable() {
+    let (_directory, path, journal) = super::journal();
+    let context = context();
+    let mut command = use_command(&context, 1);
+    command.operation = MemoryUseOperation::Revoke;
+    command.generation = 0;
+    command.valid_for_ms = 0;
+    command.command_id = command.expected_command_id();
+    let now = ReceiverClockObservation::read().unwrap();
+    journal
+        .prepare_memory_context(&context, &now, 120_000, &command.configuration_digest)
+        .unwrap();
+    let original = journal.admit_memory_use_control(&command, &now, 0).unwrap();
+    let query = observation_query(&command, &context);
+    let later = ReceiverClockObservation {
+        lower_ms: now.lower_ms + 20_000,
+        ..now.clone()
+    };
+    assert_eq!(original.budget.remaining_ms(&later), 0);
+    let observation = journal
+        .admit_memory_use_observation(&query, &later, 20_000, 250_000)
+        .unwrap();
+    assert_eq!(
+        observation.budget.deadline_lower_ms,
+        later.lower_ms + 20_000
+    );
+    assert_eq!(
+        journal
+            .memory_use_command(&command.command_id)
+            .unwrap()
+            .unwrap(),
+        original
+    );
+    drop(journal);
+    let journal = ExecutionJournal::open(&path).unwrap();
+    let retry = ReceiverClockObservation {
+        lower_ms: later.lower_ms + 10_000,
+        ..later.clone()
+    };
+    assert_eq!(
+        journal
+            .admit_memory_use_observation(&query, &retry, 30_000, 300_000)
+            .unwrap()
+            .budget,
+        observation.budget
+    );
+    let mut changed = query.clone();
+    changed.provider_ids.push("foreign-provider".into());
+    assert!(
+        journal
+            .admit_memory_use_observation(&changed, &retry, 10_000, 200_000)
+            .is_err()
+    );
+    let mut next = query.clone();
+    next.generation = 2;
+    next.query_id = next.expected_id();
+    assert!(
+        journal
+            .admit_memory_use_observation(&next, &retry, 20_000, 200_000)
+            .is_ok()
+    );
+    next.generation = 3;
+    next.query_id = next.expected_id();
+    next.opened_at_ms += 1;
+    assert!(
+        journal
+            .admit_memory_use_observation(&next, &retry, 20_000, 200_000)
+            .is_err()
+    );
+    next.opened_at_ms = query.opened_at_ms;
+    let expired = ReceiverClockObservation {
+        lower_ms: later.lower_ms + 300_000,
+        ..later
+    };
+    assert!(
+        journal
+            .admit_memory_use_observation(&next, &expired, 20_000, 200_000)
+            .is_err()
+    );
+    assert_eq!(
+        journal
+            .memory_use_command(&command.command_id)
+            .unwrap()
+            .unwrap(),
+        original
+    );
+}
+
+/// A readonly receipt can append exact proof while the initial Unknown remains immutable.
+#[test]
+fn readonly_use_result_never_replaces_unknown_or_repeats_provider_get() {
+    let (_directory, _path, journal) = super::journal();
+    let context = context();
+    let mut command = use_command(&context, 1);
+    command.operation = MemoryUseOperation::Revoke;
+    command.generation = 0;
+    command.valid_for_ms = 0;
+    command.command_id = command.expected_command_id();
+    let now = ReceiverClockObservation::read().unwrap();
+    journal
+        .prepare_memory_context(&context, &now, 120_000, &command.configuration_digest)
+        .unwrap();
+    journal.admit_memory_use_control(&command, &now, 0).unwrap();
+    let unknown = MemoryUseReceipt {
+        schema: "roboguide.memory-use-receipt/v0.1".into(),
+        command_id: command.command_id.clone(),
+        lease_id: command.lease_id.clone(),
+        generation: 0,
+        preparation_id: command.preparation_id.clone(),
+        preparation_digest: command.preparation_digest.clone(),
+        configuration_digest: command.configuration_digest.clone(),
+        status: MemoryUseStatus::Unknown,
+        remaining_budget_ms: 0,
+        providers: vec![],
+        reason: "metadata ambiguity".into(),
+    };
+    journal.record_memory_use_receipt(&unknown).unwrap();
+    let query = observation_query(&command, &context);
+    journal
+        .admit_memory_use_observation(&query, &now, 20_000, 250_000)
+        .unwrap();
+    for provider in &query.provider_ids {
+        assert!(
+            journal
+                .begin_memory_use_observation_provider(&query, provider)
+                .unwrap()
+        );
+        assert!(
+            !journal
+                .begin_memory_use_observation_provider(&query, provider)
+                .unwrap()
+        );
+    }
+    let receipt = domain::MemoryUseQueryReceipt {
+        schema: "roboguide.memory-use-query-receipt/v0.1".into(),
+        query_id: query.query_id.clone(),
+        query_digest: query.digest().unwrap(),
+        observations: query
+            .provider_ids
+            .iter()
+            .map(|provider| domain::MemoryUseQueryObservation {
+                provider_id: provider.clone(),
+                status: domain::MemoryUseQueryStatus::NotIssued,
+                proof: None,
+                reason: "no provider effect was fabricated".into(),
+            })
+            .collect(),
+    };
+    journal.record_memory_use_observation(&receipt).unwrap();
+    assert_eq!(
+        journal.record_memory_use_observation(&receipt).unwrap(),
+        receipt
+    );
+    let mut forged = receipt.clone();
+    forged.observations[0].status = domain::MemoryUseQueryStatus::Confirmed;
+    assert!(journal.record_memory_use_observation(&forged).is_err());
+    assert_eq!(
+        journal
+            .memory_use_command(&command.command_id)
+            .unwrap()
+            .unwrap()
+            .receipt,
+        Some(unknown)
+    );
+}
+
 /// Retains unit proof solely for persistence tests; actual adapter validation is separate.
 fn record_unit_proofs(
     journal: &ExecutionJournal,

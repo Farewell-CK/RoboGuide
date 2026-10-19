@@ -24,6 +24,7 @@ pub(crate) mod memory_import;
 pub(crate) mod memory_preparation;
 pub(crate) mod memory_query;
 pub(crate) mod memory_use;
+pub(crate) mod memory_use_query;
 pub(crate) mod node_identity;
 mod outcomes;
 mod persistence;

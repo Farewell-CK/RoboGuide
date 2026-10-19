@@ -243,6 +243,27 @@ impl<C: Clock> NodeFactDriver<'_, C> {
                     session_id,
                     message,
                 } = &event
+                    && let Some(
+                        integration::grpc::v0_4::node_message::Message::MemoryUseQueryReceipt(
+                            receipt,
+                        ),
+                    ) = &message.message
+                {
+                    super::memory_use_query::receipt(
+                        &mut candidate,
+                        node_id,
+                        session_id,
+                        receipt,
+                        received,
+                        now,
+                    )
+                    .map_err(FactFailure::Rejected)?;
+                }
+                if let GrpcNodeEvent::NodeMessage {
+                    node_id,
+                    session_id,
+                    message,
+                } = &event
                     && let Some(integration::grpc::v0_4::node_message::Message::MemoryUseReceipt(
                         receipt,
                     )) = &message.message

@@ -31,6 +31,7 @@ mod memory;
 mod memory_authority;
 mod memory_preparation;
 mod memory_use;
+mod memory_use_query;
 pub use artifact_authorization::{
     ArtifactAccessRole, ArtifactAuthorizationRegistry, ArtifactCertificateGrant,
 };
@@ -47,6 +48,9 @@ pub use memory_preparation::{
 pub use memory_use::{
     MEMORY_USE_MAX_BUDGET_MS, MemoryUseControl, MemoryUseOperation,
     MemoryUseProviderAcknowledgement, MemoryUseReceipt, MemoryUseStatus, memory_use_lease_id,
+};
+pub use memory_use_query::{
+    MemoryUseQuery, MemoryUseQueryObservation, MemoryUseQueryReceipt, MemoryUseQueryStatus,
 };
 mod mission;
 mod mission_plan;
@@ -234,6 +238,9 @@ pub const NODE_CONTRACT_VERSION_V0_8: &str = "roboguide.node.v0.8";
 pub const NODE_CONTRACT_VERSION_V0_9: &str = "roboguide.node.v0.9";
 
 /// Node Contract with renewable, backend-enforced current Memory use permissions.
+/// Contract with bounded independent Memory-use revoke observation.
+pub const NODE_CONTRACT_VERSION_V0_11: &str = "roboguide.node.v0.11";
+/// Original content-use contract, without independent revoke queries.
 pub const NODE_CONTRACT_VERSION_V0_10: &str = "roboguide.node.v0.10";
 
 #[cfg(test)]

@@ -48,9 +48,9 @@ pub use journal::{
     ArtifactFinalizationKind, BeginMemoryObservation, ExecutionJournal, ExecutionSpec,
     ImportContinuity, ImportQueryRecord, ImportQueryResult, ImportQuerySpec, JournalError,
     JournalExecution, JournalMemoryPreparation, JournalMemoryUseCommand, JournalMemoryUseEffect,
-    JournalStatus, MemoryImportRecord, MemoryImportStatus, MemoryReceiverBudget,
-    PrepareArtifactFreeze, PrepareDispatch, PrepareMemoryImport, PreparedArtifactRecord,
-    ReceiverClockObservation,
+    JournalMemoryUseQuery, JournalStatus, MemoryImportRecord, MemoryImportStatus,
+    MemoryReceiverBudget, MemoryUseObservationBudget, PrepareArtifactFreeze, PrepareDispatch,
+    PrepareMemoryImport, PreparedArtifactRecord, ReceiverClockObservation,
 };
 pub use local_engine::driver::{
     BoxDriverFuture, CompiledDriverRequest, DriverError, DriverEvent, DriverEventStream,
@@ -63,8 +63,8 @@ pub use local_engine::mcp_driver::McpDriver;
 pub use local_engine::{
     CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CONFIG_SCHEMA_V0_5,
     CONFIG_SCHEMA_V0_6, CONFIG_SCHEMA_V0_7, CONFIG_SCHEMA_V0_8, CONFIG_SCHEMA_V0_9,
-    CONFIG_SCHEMA_V0_10, CONFIG_SCHEMA_V0_11, CapabilityReadinessFact, CatalogError,
-    CompiledArtifactService, CompiledCapability, CompiledCapabilityProfile,
+    CONFIG_SCHEMA_V0_10, CONFIG_SCHEMA_V0_11, CONFIG_SCHEMA_V0_12, CapabilityReadinessFact,
+    CatalogError, CompiledArtifactService, CompiledCapability, CompiledCapabilityProfile,
     CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog,
     CompiledLocalSystem, CompiledMemoryAvailability, CompiledMemoryContinuity,
     CompiledMemoryProvider, CompiledMemoryUse, CompiledMemoryWorkflow, CompiledOperation,

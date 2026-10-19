@@ -117,6 +117,14 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   Groups do not acquire extra clock reads. Real file conformance uses two enrolled software Nodes,
   mTLS/CAS/independent CPU verifiers and original-budget restart; it creates zero device facts and
   does not close full Group handoff, partial-Unknown reconciliation, F5-F10 or HardwareEvidencePending.
+- ADR-0107 adds per-original-provider revoke progress and independent readonly use queries.
+  Initial Unknown receipts and effect budgets remain immutable; confirmed backend replies are reused,
+  and one failing provider never skips independent peers. One explicit observation session per revoke
+  has a frozen five-minute/sixteen-generation bound; original GET intents persist before I/O and never
+  create control/import effects. Current owner/session/tenant checks gate evidence consumption; late
+  results remain history. Query views are paged and bounded. Config v0.12/Contract v0.11/catalog v0.14,
+  Node journal v11, wrapper v39 and codec v26 fence older writers. Content revoke proof remains separate
+  from device stop, physical continuity and overall SoftwareComplete.
 - Generic replica durable identity is exact `(MemorySelector, NodeId, ConsumerProviderId)`; admission,
   event replay, projections, and APIs preserve that provider dimension, and accepted evidence remains
   monotonic after Imported. Explicit application-owned selective-import commands and bounded

@@ -175,6 +175,7 @@ impl NodeService {
         let mut imports = tokio::task::JoinSet::new();
         let mut use_pending =
             std::collections::BTreeMap::<(u8, String), domain::MemoryUseControl>::new();
+        let mut query_pending = std::collections::BTreeMap::<String, domain::MemoryUseQuery>::new();
         let session_result: Result<(), NodeServiceError> = async {
             loop {
                 while imports.len()<4 && let Some((_,command))=use_pending.pop_first() {
@@ -182,14 +183,27 @@ impl NodeService {
                     let sender=outbound.clone();let sequence=Arc::clone(&management_sequence);
                     imports.spawn(async move {service.handle_memory_use_control(command,&session,&sender,&sequence).await});
                 }
+                while imports.len()<4 && let Some((_,query))=query_pending.pop_first(){
+                    let service=Self::new(self.engine.clone());let session=registered.session_id.clone();let sender=outbound.clone();let sequence=Arc::clone(&management_sequence);
+                    imports.spawn(async move {service.handle_memory_use_query(query,&session,&sender,&sequence).await});
+                }
                 tokio::select! {
                     message = inbound.message() => {
                         let Some(message) = message.map_err(NodeServiceError::Status)? else {
                             return Ok(());
                         };
+                        if let Some(ServerPayload::MemoryUseQuery(frame))=&message.message {
+                            if frame.session_id!=registered.session_id || frame.query_json.len()>16*1024 || self.engine.catalog().node_contract_version()!=integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION {return Err(NodeServiceError::Protocol("readonly use query lacks current negotiated session/bounds".into()));}
+                            let query:domain::MemoryUseQuery=serde_json::from_str(&frame.query_json).map_err(|e|NodeServiceError::Protocol(e.to_string()))?;
+                            self.engine.admit_controller_epoch(&frame.controller_epoch)?;
+                            self.engine.admit_memory_use_query(&query,frame.valid_for_ms,frame.session_remaining_ms)?;
+                            if query_pending.len()>=64 && !query_pending.contains_key(&query.query_id){return Err(NodeServiceError::Protocol("bounded readonly use query queue is full".into()));}
+                            query_pending.insert(query.query_id.clone(),query);
+                            continue;
+                        }
                         if let Some(ServerPayload::MemoryUseControl(frame))=&message.message {
                             if frame.session_id!=registered.session_id || frame.command_json.len()>16*1024
-                                || self.engine.catalog().node_contract_version()!=integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION {
+                                || !integration::grpc::v0_4::supports_memory_use(self.engine.catalog().node_contract_version()) {
                                 return Err(NodeServiceError::Protocol("Memory-use control lacks its explicit current session/contract/bounds".into()));
                             }
                             let command:domain::MemoryUseControl=serde_json::from_str(&frame.command_json).map_err(|e|NodeServiceError::Protocol(e.to_string()))?;

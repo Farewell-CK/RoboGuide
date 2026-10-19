@@ -11,11 +11,13 @@ mod authority;
 mod memory_continuity;
 mod memory_preparation;
 mod memory_use;
+mod memory_use_queries;
 pub use memory_preparation::{
     BeginMemoryObservation, JournalMemoryPreparation, MemoryReceiverBudget,
     ReceiverClockObservation,
 };
 pub use memory_use::{JournalMemoryUseCommand, JournalMemoryUseEffect};
+pub use memory_use_queries::{JournalMemoryUseQuery, MemoryUseObservationBudget};
 mod storage;
 
 pub use memory_continuity::{

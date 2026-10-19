@@ -197,8 +197,7 @@ impl LocalIntegrationEngine {
                 ));
             }
             let mut memory = serde_json::json!({"preparation_id":preparation.preparation_id,"preparation_digest":preparation.digest().map_err(EngineError::Configuration)?, "inputs":preparation.inputs});
-            if self.catalog().node_contract_version()
-                == integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
+            if integration::grpc::v0_4::supports_memory_use(self.catalog().node_contract_version())
             {
                 memory
                     .as_object_mut()

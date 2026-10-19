@@ -1160,6 +1160,7 @@ async fn run_grpc_session(
         ));
     }
     let node_contract = [
+        crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION,
         MEMORY_USE_NODE_CONTRACT_VERSION,
         PREPARATION_NODE_CONTRACT_VERSION,
         PROVIDER_MAP_NODE_CONTRACT_VERSION,
@@ -1430,6 +1431,7 @@ async fn run_grpc_session(
                 Some(NodePayload::MemoryImportQueryReceipt(value)) => value.sequence,
                 Some(NodePayload::MemoryControlReceipt(value)) => value.sequence,
                 Some(NodePayload::MemoryUseReceipt(value)) => value.sequence,
+                Some(NodePayload::MemoryUseQueryReceipt(value)) => value.sequence,
                 Some(NodePayload::ExecutionEvent(value)) => value.sequence,
                 Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
                 _ => 0,
@@ -1479,6 +1481,7 @@ fn invocation_for_contract(
 ) -> Result<crate::grpc::v0_4::CanonicalInvocation, Status> {
     match node_contract_version {
         MEMORY_USE_NODE_CONTRACT_VERSION
+        | crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
         | PREPARATION_NODE_CONTRACT_VERSION
         | PROVIDER_MAP_NODE_CONTRACT_VERSION
         | CONTINUITY_NODE_CONTRACT_VERSION

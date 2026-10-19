@@ -35,6 +35,9 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
 /// Previous wrapper without scoped context/provider revocation and per-send Memory expiry gates.
+/// Prior wrapper without independent readonly Memory-use evidence.
+const PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v38";
+/// Previous wrapper without scoped context/provider revoke and per-send expiry gates.
 const PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v37";
 /// Previous wrapper without continuous Group Memory-use authority.
 const PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v36";
@@ -975,6 +978,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA
@@ -1015,6 +1019,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_RELEASE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_USE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_MEMORY_REPLICA_SERVER_CHECKPOINT_SCHEMA

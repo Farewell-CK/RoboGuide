@@ -63,6 +63,9 @@ pub const CONFIG_SCHEMA_V0_9: &str = "roboguide.node-config/v0.9";
 /// Schema negotiating durable Memory preparation and current backend observation.
 pub const CONFIG_SCHEMA_V0_10: &str = "roboguide.node-config/v0.10";
 /// Schema negotiating continuous current-use permission and irreversible backend fencing.
+/// Explicit independent revoke-observation configuration.
+pub const CONFIG_SCHEMA_V0_12: &str = "roboguide.node-config/v0.12";
+/// Original continuous content-use configuration.
 pub const CONFIG_SCHEMA_V0_11: &str = "roboguide.node-config/v0.11";
 /// Maximum peer endpoints accepted from one bounded local observation.
 const MAX_PEER_CHANNELS_PER_OBSERVATION: usize = 64;

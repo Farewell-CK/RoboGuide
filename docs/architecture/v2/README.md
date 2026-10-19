@@ -6,6 +6,11 @@
 
 ![RoboGuide V2 总体架构](../../images/roboguide-v2-overall-architecture.png)
 
+2026-10-19 [ADR-0107](../../decisions/0107-original-revoke-observation-and-provider-progress.md)
+增加逐 provider 撤销进度与独立只读 use query。原 Unknown/预算保持不变；后续原 provider
+确认证据单独追加，完整 provider/context/stop gate 同时成立才可释放。一个原命令最多一个
+五分钟/十六代观察会话，不能补发副作用。wrapper v39/journal v11/codec v26 保护此边界。
+
 ## 1. 系统定位
 
 RoboGuide 是面向异构具身智能体协作的通用分布式操作系统框架。它联合调度

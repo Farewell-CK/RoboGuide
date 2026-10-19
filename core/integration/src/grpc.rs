@@ -38,11 +38,24 @@ pub mod v0_4 {
     /// Contract with continuous original-budget Group content-use authority and backend fencing.
     pub const MEMORY_USE_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.10";
 
+    /// Contract with independent bounded readonly use-revoke observation.
+    pub const MEMORY_USE_QUERY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.11";
+
+    /// Checks content-use support without granting new query semantics to old Nodes.
+    pub fn supports_memory_use(version: &str) -> bool {
+        matches!(
+            version,
+            MEMORY_USE_NODE_CONTRACT_VERSION | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
+        )
+    }
+
     /// Checks explicit prepared-content support without inferring it from older provider declarations.
     pub fn supports_memory_preparation(version: &str) -> bool {
         matches!(
             version,
-            PREPARATION_NODE_CONTRACT_VERSION | MEMORY_USE_NODE_CONTRACT_VERSION
+            PREPARATION_NODE_CONTRACT_VERSION
+                | MEMORY_USE_NODE_CONTRACT_VERSION
+                | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
         )
     }
 
@@ -54,6 +67,7 @@ pub mod v0_4 {
                 | PROVIDER_MAP_NODE_CONTRACT_VERSION
                 | PREPARATION_NODE_CONTRACT_VERSION
                 | MEMORY_USE_NODE_CONTRACT_VERSION
+                | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
         )
     }
     /// Prior profile-and-intent contract retained for explicit session compatibility.

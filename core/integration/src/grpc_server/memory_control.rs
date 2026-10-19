@@ -3,6 +3,46 @@
 use super::*;
 
 impl GrpcNodeRouter {
+    /// Sends a committed independent readonly query under current route and quorum authority.
+    pub fn send_memory_use_query(
+        &self,
+        node: &str,
+        query: &domain::MemoryUseQuery,
+        remaining: u64,
+        session_remaining: u64,
+    ) -> Result<(), Status> {
+        query.validate().map_err(Status::invalid_argument)?;
+        if remaining == 0
+            || remaining > query.valid_for_ms
+            || session_remaining < remaining
+            || session_remaining > query.session_budget_ms
+        {
+            return Err(Status::invalid_argument(
+                "readonly use query budgets are invalid",
+            ));
+        }
+        let query_json =
+            serde_json::to_string(query).map_err(|e| Status::invalid_argument(e.to_string()))?;
+        self.send_preparation_payload(node, |route, controller_epoch| {
+            if route.node_contract_version
+                != crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
+            {
+                return Err(Status::failed_precondition(
+                    "independent readonly use queries require Node Contract v0.11",
+                ));
+            }
+            Ok(ServerPayload::MemoryUseQuery(
+                crate::grpc::v0_4::MemoryUseQuery {
+                    session_id: route.session_id.clone(),
+                    query_json,
+                    controller_epoch,
+                    valid_for_ms: remaining,
+                    session_remaining_ms: session_remaining,
+                },
+            ))
+        })
+    }
+
     /// Sends current-use authority only after quorum, certificate and exact original-session checks.
     pub fn send_memory_use_control(
         &self,
@@ -21,7 +61,7 @@ impl GrpcNodeRouter {
         let command_json =
             serde_json::to_string(command).map_err(|e| Status::invalid_argument(e.to_string()))?;
         self.send_preparation_payload(node_id, |route, controller_epoch| {
-            if route.node_contract_version != MEMORY_USE_NODE_CONTRACT_VERSION
+            if !crate::grpc::v0_4::supports_memory_use(&route.node_contract_version)
                 || command.node_id.as_str() != node_id
                 || (command.operation == domain::MemoryUseOperation::Grant
                     && command.source_session_id != route.session_id)

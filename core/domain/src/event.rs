@@ -5,6 +5,25 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Independent bounded observation of an original revoke; it authorizes no content effect.
+    MemoryUseReconciliationEvidence {
+        /// Original Control Group.
+        group_id: ExecutionGroupId,
+        /// Original Task ownership scope.
+        task_ref: TaskRef,
+        /// Immutable original revoke identity.
+        command_id: String,
+        /// Independent once-admitted observation.
+        query_id: String,
+        /// Application admission or observation stage.
+        stage: String,
+        /// Complete immutable request/result digest.
+        content_digest: String,
+        /// Original authenticated principal or reporting session.
+        principal: String,
+        /// Original Controller receive time.
+        received_at: TimestampMs,
+    },
     /// Durable original upload source and actual byte ownership; this is not Memory import success.
     ArtifactUploadTransition {
         /// Complete source-bound monotonic workflow evidence.

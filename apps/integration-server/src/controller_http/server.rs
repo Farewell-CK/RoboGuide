@@ -121,6 +121,7 @@ fn authorize_tenant_path(
                 | "/v1/verifier-evidence"
                 | "/v1/state/records"
                 | "/v1/state/providers"
+                | "/v1/memory/use-queries"
         )
         && !path.starts_with("/v1/missions/")
         && !path.starts_with("/v1/executions/")
@@ -220,6 +221,7 @@ fn authorize_operator_request(
         ("POST", "/v1/maintenance/archive") => 2,
         ("POST", "/v1/memory/imports") => 2,
         ("POST", "/v1/memory/import-queries") => 2,
+        ("POST", "/v1/memory/use-queries") => 2,
         ("POST", "/v1/node-identities/commands") => 2,
         ("POST", "/v1/tenant-migrations") => 2,
         (
@@ -726,6 +728,67 @@ where
             }
         };
     }
+    if method == "POST" && path == "/v1/memory/use-queries" {
+        let shared = controller.clone();
+        let log = event_log.clone();
+        let gate = event_write_gate.clone();
+        let body = request.body.clone();
+        let subject = principal
+            .subject
+            .as_deref()
+            .unwrap_or("trusted-loopback:recovery-admin")
+            .to_string();
+        let tenant = tenant.clone();
+        let worker_clock = application::memory_use_query::AdmissionClock::new(clock.now());
+        let result = tokio::task::spawn_blocking(move || {
+            application::memory_use_query::submit(
+                &shared,
+                &log,
+                &gate,
+                &worker_clock,
+                &body,
+                &subject,
+                tenant.as_deref(),
+            )
+        })
+        .await
+        .map_err(|error| format!("readonly use query worker failed: {error}"))?;
+        return match result {
+            Ok(body) => write_http_response(stream, "202 Accepted", body).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "GET" && path == "/v1/memory/use-queries" {
+        let parameters = parse_query(query);
+        let after = parameters.get("after").copied();
+        let limit = parameters
+            .get("limit")
+            .map(|v| v.parse::<usize>())
+            .transpose();
+        let Ok(limit) = limit else {
+            return write_http_response(
+                stream,
+                "400 Bad Request",
+                serde_json::json!({"error":"limit must be an integer"}),
+            )
+            .await;
+        };
+        let body = {
+            let live = controller
+                .lock()
+                .map_err(|_| "Controller authority unavailable")?;
+            application::memory_use_query::view(
+                &live,
+                tenant.as_deref(),
+                after,
+                limit.unwrap_or(32),
+            )
+        };
+        return write_http_response(stream, "200 OK", body).await;
+    }
     if method == "POST" && path == "/v1/memory/import-queries" {
         let result = application::memory_query::submit(
             controller,
@@ -993,7 +1056,8 @@ where
             (
                 "200 OK",
                 serde_json::json!({
-                    "schema_version":"roboguide.memory-use-view/v0.1", "records":live.memory_use.records,
+                    "schema_version":"roboguide.memory-use-view/v0.2", "records":live.memory_use.records,
+                    "provider_progress":application::memory_use_query::progress(&live,clock.now()),
                     "receipt_is_physical_stop_proof":false,
                 }),
             )
@@ -2763,8 +2827,19 @@ fn controller_metrics(
         .iter()
         .filter(|node| node.reported_status().health().is_schedulable())
         .count();
+    let (memory_unresolved, memory_queries, memory_exhausted) =
+        application::memory_use_query::metrics(controller, now);
     Ok(format!(
-        "# HELP roboguide_missions_total Accepted Mission projections.\n\
+        "# HELP roboguide_memory_revoke_providers_unresolved Original providers lacking revoke confirmation.\n\
+         # TYPE roboguide_memory_revoke_providers_unresolved gauge\n\
+         roboguide_memory_revoke_providers_unresolved {memory_unresolved}\n\
+         # HELP roboguide_memory_use_queries_pending Pending original readonly observations.\n\
+         # TYPE roboguide_memory_use_queries_pending gauge\n\
+         roboguide_memory_use_queries_pending {memory_queries}\n\
+         # HELP roboguide_memory_use_observations_exhausted Observation sessions past their frozen deadline.\n\
+         # TYPE roboguide_memory_use_observations_exhausted gauge\n\
+         roboguide_memory_use_observations_exhausted {memory_exhausted}\n\
+         # HELP roboguide_missions_total Accepted Mission projections.\n\
          # TYPE roboguide_missions_total gauge\n\
          roboguide_missions_total {}\n\
          # HELP roboguide_missions_active Active Mission executions.\n\

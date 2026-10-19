@@ -66,8 +66,7 @@ impl LocalIntegrationEngine {
         remaining_budget_ms: u64,
     ) -> Result<JournalMemoryUseCommand, EngineError> {
         command.validate().map_err(EngineError::Memory)?;
-        if self.catalog().node_contract_version()
-            != integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
+        if !integration::grpc::v0_4::supports_memory_use(self.catalog().node_contract_version())
             || command.node_id.as_str() != self.catalog().node_id()
         {
             return Err(EngineError::Memory(
@@ -384,7 +383,9 @@ impl LocalIntegrationEngine {
             let mut gates = self.inner.memory_use_workers.lock().map_err(|_| {
                 EngineError::Memory("Memory-use worker ordering is unavailable".into())
             })?;
-            if gates.len() >= 4096 && !gates.contains_key(&command.lease_id) {
+            if gates.keys().filter(|key| key.starts_with("use-")).count() >= 4096
+                && !gates.contains_key(&command.lease_id)
+            {
                 return Err(EngineError::Memory(
                     "Memory-use worker registry is full".into(),
                 ));
@@ -432,6 +433,11 @@ impl LocalIntegrationEngine {
             providers: Vec::new(),
             reason: String::new(),
         };
+        if command.operation == MemoryUseOperation::Revoke {
+            return self
+                .complete_original_revoke(&record, &context.preparation, receipt)
+                .await;
+        }
         let providers = context
             .preparation
             .inputs
@@ -510,9 +516,7 @@ impl LocalIntegrationEngine {
         &self,
         preparation: &MemoryPreparation,
     ) -> Result<(), EngineError> {
-        if self.catalog().node_contract_version()
-            == integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
-        {
+        if integration::grpc::v0_4::supports_memory_use(self.catalog().node_contract_version()) {
             let current = self.inner.journal.current_memory_use(
                 &preparation.preparation_id,
                 &ReceiverClockObservation::read()?,
@@ -526,3 +530,5 @@ impl LocalIntegrationEngine {
         Ok(())
     }
 }
+
+mod observation;

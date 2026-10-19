@@ -578,8 +578,7 @@ impl LocalIntegrationEngine {
         }
         if self.inner.journal.get(&execute.execution_id)?.is_none() {
             self.observe_prepared_memory(&record.preparation).await?;
-            if self.catalog().node_contract_version()
-                == integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
+            if integration::grpc::v0_4::supports_memory_use(self.catalog().node_contract_version())
             {
                 self.verify_memory_use_before_execute(&record.preparation)
                     .await?;

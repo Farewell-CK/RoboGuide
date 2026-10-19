@@ -48,6 +48,9 @@ pub(crate) struct MemoryUseDelivery {
     pub(crate) last_delivery_ms: Option<u64>,
     /// Original authenticated aggregate provider outcome.
     pub(crate) receipt: Option<MemoryUseReceipt>,
+    /// Independent readonly recovery evidence; absent historical authority remains absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reconciliation: Option<super::memory_use_query::UseReconciliation>,
     /// First original receive time, unchanged by duplicates.
     pub(crate) received_at_ms: Option<u64>,
 }
@@ -103,7 +106,7 @@ fn current_stamp(controller: &ControllerState, command: &MemoryUseControl) -> bo
 }
 
 /// Finds original context/configuration; missing history never becomes current permission.
-fn source<'a>(
+pub(super) fn source<'a>(
     controller: &'a ControllerState,
     execution: &str,
 ) -> Result<
@@ -221,6 +224,7 @@ fn queue(
             last_delivery_ms: None,
             receipt: None,
             received_at_ms: None,
+            reconciliation: None,
         },
     );
     let minimum = record.generation.saturating_sub(RETAINED_GRANTS as u64 - 1);
@@ -287,26 +291,34 @@ fn revoke_acknowledged(record: &MemoryUseRecord, preparation: &MemoryPreparation
     else {
         return false;
     };
-    let Some(receipt) = &delivery.receipt else {
-        return false;
-    };
-    if receipt.status != MemoryUseStatus::Revoked
-        || receipt.command_id != delivery.command.command_id
-        || receipt.generation != 0
-        || delivery.received_at_ms.is_none()
-    {
-        return false;
+    let mut proofs = BTreeMap::new();
+    if let Some(receipt) = &delivery.receipt {
+        if receipt.command_id != delivery.command.command_id
+            || receipt.generation != 0
+            || delivery.received_at_ms.is_none()
+        {
+            return false;
+        }
+        for provider in &receipt.providers {
+            if !provider.import_ids.is_empty()
+                || proofs
+                    .insert(provider.provider_id.clone(), provider.clone())
+                    .is_some()
+            {
+                return false;
+            }
+        }
     }
-    let observed = receipt
-        .providers
-        .iter()
-        .map(|provider| provider.provider_id.clone())
-        .collect::<BTreeSet<_>>();
-    observed == expected
-        && observed.len() == receipt.providers.len()
-        && receipt
-            .providers
-            .iter()
+    for provider in super::memory_use_query::reconciled_proofs(delivery) {
+        if let Some(old) = proofs.insert(provider.provider_id.clone(), provider.clone())
+            && old != provider
+        {
+            return false;
+        }
+    }
+    proofs.keys().cloned().collect::<BTreeSet<_>>() == expected
+        && proofs
+            .values()
             .all(|provider| provider.import_ids.is_empty())
 }
 
@@ -594,6 +606,7 @@ pub(crate) fn prepare(
         }
         controller.memory_use.records.insert(id, record);
     }
+    super::memory_use_query::prepare(controller, now);
     Ok(())
 }
 
@@ -642,6 +655,7 @@ pub(crate) fn flush(
             }
         }
     }
+    super::memory_use_query::flush(controller, prepared_at, now);
 }
 
 /// Pins provider proofs to the actual original availability evidence, independently of current names.
@@ -650,8 +664,17 @@ fn validate_providers(
     execution: &str,
     outcome: &MemoryUseReceipt,
 ) -> Result<(), String> {
+    validate_provider_proofs(controller, execution, &outcome.providers)
+}
+
+/// Checks original backend identity for independent observations as well as initial receipts.
+pub(super) fn validate_provider_proofs(
+    controller: &ControllerState,
+    execution: &str,
+    proofs: &[domain::MemoryUseProviderAcknowledgement],
+) -> Result<(), String> {
     let (original, preparation, _) = source(controller, execution)?;
-    for provider in &outcome.providers {
+    for provider in proofs {
         // Revoke deliberately grants no import IDs; select its complete original coverage from
         // the retained preparation, never from the incoming acknowledgement's empty list.
         let inputs = preparation
@@ -780,6 +803,7 @@ pub(crate) fn restore(
         let mut generations = BTreeSet::new();
         let mut has_revoke = false;
         for (key, delivery) in &record.controls {
+            super::memory_use_query::validate_restore(controller, &id, delivery)?;
             delivery.command.validate_preparation(preparation)?;
             if key != &delivery.command.command_id
                 || delivery.command.configuration_digest != configuration

@@ -4,6 +4,9 @@ use super::*;
 use application::{memory_preparation as preparation, memory_use as usage};
 use domain::{MemoryControlKind, MemoryControlStatus, MemoryUseOperation, MemoryUseStatus};
 
+#[path = "runtime_replay_memory_queries.rs"]
+mod queries;
+
 /// Adds explicitly synthetic journal evidence to existing independently scheduled software slots.
 fn retain_memory(fixture: &mut ParallelMission, index: usize, providers: usize) {
     let attempt = &fixture.attempts[index];
@@ -198,6 +201,7 @@ fn retain_memory(fixture: &mut ParallelMission, index: usize, providers: usize) 
                     last_delivery_ms: Some(3),
                     receipt: None,
                     received_at_ms: None,
+                    reconciliation: None,
                 },
             )]),
             reason: String::new(),

@@ -15,7 +15,7 @@ pub(super) fn configure_connection(connection: &Connection) -> Result<(), Journa
 pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
     let prior_version =
         connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
-    if prior_version > 10 {
+    if prior_version > 11 {
         return Err(JournalError::Corrupt(
             "journal was written by a newer storage authority".into(),
         ));
@@ -30,7 +30,7 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
             |row| row.get(0),
         )
         .optional()?;
-    if marker.is_some_and(|version| !matches!(version, 7..=10))
+    if marker.is_some_and(|version| !matches!(version, 7..=11))
         || (prior_version >= 7 && marker.is_none())
     {
         return Err(JournalError::Corrupt(
@@ -151,6 +151,16 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
              receipt_json TEXT, PRIMARY KEY(command_id,provider_id)
          );",
     )?;
+    transaction.execute_batch("CREATE TABLE IF NOT EXISTS memory_use_observation_sessions (
+        command_id TEXT PRIMARY KEY REFERENCES memory_use_commands(command_id),
+        opened_at_ms INTEGER NOT NULL, width_ms INTEGER NOT NULL, generation INTEGER NOT NULL, budget_json TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS memory_use_observation_queries (
+        query_id TEXT PRIMARY KEY, command_id TEXT NOT NULL REFERENCES memory_use_commands(command_id),
+        query_json TEXT NOT NULL, budget_json TEXT NOT NULL, receipt_json TEXT);
+        CREATE TABLE IF NOT EXISTS memory_use_observation_providers (
+        query_id TEXT NOT NULL REFERENCES memory_use_observation_queries(query_id), provider_id TEXT NOT NULL, PRIMARY KEY(query_id,provider_id));
+        CREATE TABLE IF NOT EXISTS memory_use_auto_query_times (
+        command_id TEXT NOT NULL, provider_id TEXT NOT NULL, last_lower_ms INTEGER NOT NULL, PRIMARY KEY(command_id,provider_id));")?;
     if prior_version < 2 {
         // Rows created by v1 could already have called Local EAIOS. Migrate them conservatively.
         transaction.execute(
@@ -165,11 +175,11 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
         CREATE VIEW IF NOT EXISTS memory_imports AS SELECT * FROM memory_import_authority_v7;",
     )?;
     transaction.execute(
-        "INSERT INTO node_journal_storage_schema VALUES (1,10)
-         ON CONFLICT(singleton) DO UPDATE SET version=10",
+        "INSERT INTO node_journal_storage_schema VALUES (1,11)
+         ON CONFLICT(singleton) DO UPDATE SET version=11",
         [],
     )?;
-    transaction.pragma_update(None, "user_version", 10_i64)?;
+    transaction.pragma_update(None, "user_version", 11_i64)?;
     transaction.commit()?;
     Ok(())
 }

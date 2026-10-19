@@ -495,6 +495,7 @@ impl NodeRegistration {
                     | NODE_CONTRACT_VERSION_V0_8
                     | crate::NODE_CONTRACT_VERSION_V0_9
                     | crate::NODE_CONTRACT_VERSION_V0_10
+                    | crate::NODE_CONTRACT_VERSION_V0_11
             )
         {
             return Err(DomainError::InvalidMissionPlan {
@@ -726,8 +727,10 @@ impl NodeRegistration {
             })
         });
         let has_memory = requirement.memories().is_empty()
-            || (self.contract_version().as_str() == crate::NODE_CONTRACT_VERSION_V0_10
-                && crate::MemoryRequirement::validate_set(requirement.memories()).is_ok()
+            || (matches!(
+                self.contract_version().as_str(),
+                crate::NODE_CONTRACT_VERSION_V0_10 | crate::NODE_CONTRACT_VERSION_V0_11
+            ) && crate::MemoryRequirement::validate_set(requirement.memories()).is_ok()
                 && requirement.memories().iter().all(|required| {
                     self.memory_providers().iter().any(|provider| {
                         provider.supports_use_lease() && required.matches_provider(provider)

@@ -349,6 +349,43 @@ impl ExecutionJournal {
         Ok(())
     }
 
+    /// Reserves an automatic revoke query with persistent backoff inside the original ten seconds.
+    pub fn begin_memory_use_revoke_query(
+        &self,
+        command_id: &str,
+        provider_id: &str,
+    ) -> Result<bool, JournalError> {
+        let now = ReceiverClockObservation::read()?;
+        let mut connection = self.lock_connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let command = read_command(&tx, command_id)?.ok_or_else(|| {
+            JournalError::InvalidSpec("revoke query has no original command".into())
+        })?;
+        let effect = read_effect(&tx, command_id, provider_id)?.ok_or_else(|| {
+            JournalError::InvalidSpec("revoke query has no original effect".into())
+        })?;
+        if command.budget.remaining_ms(&now) == 0 || effect.query_count >= 3 {
+            return Ok(false);
+        }
+        let last:Option<u64>=tx.query_row("SELECT last_lower_ms FROM memory_use_auto_query_times WHERE command_id=?1 AND provider_id=?2",params![command_id,provider_id],|row|row.get(0)).optional()?;
+        let delay = match effect.query_count {
+            0 => 250,
+            1 => 1000,
+            _ => 2000,
+        };
+        if now.lower_ms
+            < last
+                .unwrap_or(command.budget.received_lower_ms)
+                .saturating_add(delay)
+        {
+            return Ok(false);
+        }
+        tx.execute("UPDATE memory_use_effects SET query_count=query_count+1 WHERE command_id=?1 AND provider_id=?2 AND query_count<3",params![command_id,provider_id])?;
+        tx.execute("INSERT INTO memory_use_auto_query_times VALUES (?1,?2,?3) ON CONFLICT(command_id,provider_id) DO UPDATE SET last_lower_ms=excluded.last_lower_ms",params![command_id,provider_id,now.lower_ms])?;
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// Persists one exact already-validated private reply without changing command admission time.
     pub fn record_memory_use_effect_receipt(
         &self,
@@ -447,7 +484,7 @@ fn validate_effect_coverage(
 }
 
 /// Reads exact serialized original command/budget and rejects malformed or substituted identities.
-fn read_command(
+pub(super) fn read_command(
     connection: &Connection,
     id: &str,
 ) -> Result<Option<JournalMemoryUseCommand>, JournalError> {
@@ -472,7 +509,7 @@ fn read_command(
 }
 
 /// Reads immutable backend request/evidence and its durable bounded readonly-query count.
-fn read_effect(
+pub(super) fn read_effect(
     connection: &Connection,
     command: &str,
     provider: &str,

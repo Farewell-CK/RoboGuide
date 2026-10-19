@@ -216,8 +216,38 @@ pub(super) fn accept_current_message(
                 route.management_sequence = value.sequence;
                 &value.session_id
             }
+            Some(NodePayload::MemoryUseQueryReceipt(value)) => {
+                if route.node_contract_version
+                    != crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
+                {
+                    return Err(Status::failed_precondition(
+                        "independent Memory use observation was not negotiated",
+                    ));
+                }
+                if value.session_id != session_id || value.sequence <= route.management_sequence {
+                    return Ok(false);
+                }
+                if value.receipt_json.len() > 256 * 1024 {
+                    return Err(Status::invalid_argument(
+                        "readonly use receipt exceeds its bound",
+                    ));
+                }
+                let receipt: domain::MemoryUseQueryReceipt =
+                    serde_json::from_str(&value.receipt_json)
+                        .map_err(|_| Status::invalid_argument("invalid readonly use receipt"))?;
+                if receipt.schema != "roboguide.memory-use-query-receipt/v0.1"
+                    || receipt.query_id.len() > 256
+                    || receipt.observations.len() > 8
+                {
+                    return Err(Status::invalid_argument(
+                        "invalid readonly use receipt bounds",
+                    ));
+                }
+                route.management_sequence = value.sequence;
+                &value.session_id
+            }
             Some(NodePayload::MemoryUseReceipt(value)) => {
-                if route.node_contract_version != MEMORY_USE_NODE_CONTRACT_VERSION {
+                if !crate::grpc::v0_4::supports_memory_use(&route.node_contract_version) {
                     return Err(Status::failed_precondition(
                         "Memory-use receipts require explicit Node Contract v0.10",
                     ));
@@ -352,6 +382,7 @@ pub(super) fn validate_registration(
         || !matches!(
             registration.node_contract_version.as_str(),
             MEMORY_USE_NODE_CONTRACT_VERSION
+                | crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
                 | PREPARATION_NODE_CONTRACT_VERSION
                 | PROVIDER_MAP_NODE_CONTRACT_VERSION
                 | CONTINUITY_NODE_CONTRACT_VERSION
@@ -376,7 +407,7 @@ pub(super) fn validate_registration(
     }
     if registration.memory_providers.iter().any(|provider| {
         !provider.use_contract.is_empty()
-            && (registration.node_contract_version != MEMORY_USE_NODE_CONTRACT_VERSION
+            && (!crate::grpc::v0_4::supports_memory_use(&registration.node_contract_version)
                 || provider.use_contract != "roboguide.memory-use/shared-kernel/v0.1"
                 || provider.preparation_contract != "roboguide.memory-provider-availability/v0.1")
     }) {
@@ -531,6 +562,7 @@ fn validate_operation_support(
             | PROVIDER_MAP_NODE_CONTRACT_VERSION
             | PREPARATION_NODE_CONTRACT_VERSION
             | MEMORY_USE_NODE_CONTRACT_VERSION
+            | crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
     ) {
         if !registration.operation_support.is_empty() {
             return Err(Status::invalid_argument(

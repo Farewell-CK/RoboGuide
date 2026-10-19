@@ -71,6 +71,7 @@ fn single_task_mission_plan(requirement: TaskRequirement) -> MissionPlan {
 fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
     match payload {
         EventPayload::StatePolicyDecision { task_ref, .. }
+        | EventPayload::MemoryUseReconciliationEvidence { task_ref, .. }
         | EventPayload::MemoryCommandEvidence { task_ref, .. } => Some(task_ref),
         EventPayload::SemanticVerifierIncident { task_ref, .. } => Some(task_ref),
         EventPayload::SemanticVerifierEvidenceAdmitted { receipt } => {

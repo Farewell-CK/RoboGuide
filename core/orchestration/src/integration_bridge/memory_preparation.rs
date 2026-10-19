@@ -12,6 +12,19 @@ pub struct MemoryDispatchPermit {
 }
 
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
+    /// Delivers application-committed observation without interpreting evidence or changing ownership.
+    pub fn deliver_memory_use_query(
+        &self,
+        node: &NodeId,
+        query: &domain::MemoryUseQuery,
+        remaining: u64,
+        session_remaining: u64,
+    ) -> Result<(), IntegrationRuntimeError> {
+        self.router
+            .send_memory_use_query(node.as_str(), query, remaining, session_remaining)
+            .map_err(IntegrationRuntimeError::Route)
+    }
+
     /// Selects an actual registered receiver using Control and the same source-aware decision view.
     pub fn select_memory_provider(
         &self,

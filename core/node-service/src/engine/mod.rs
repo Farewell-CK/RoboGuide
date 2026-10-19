@@ -133,7 +133,9 @@ pub struct LocalIntegrationEngine {
 struct EngineInner {
     /// Orders prepared Execute admission against irreversible context revocation.
     memory_context_gate: Mutex<()>,
-    /// Process-local serialization only; the journal remains the sole lease/effect authority.
+    /// Global bound on provider observation/control I/O across all contexts.
+    memory_use_provider_workers: Arc<tokio::sync::Semaphore>,
+    /// Process-local ordering; the journal remains the sole lease/effect authority.
     memory_use_workers: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Current accepted Node route used only for Artifact publication, never immutable invocation identity.
     publication_session: Mutex<Option<String>>,

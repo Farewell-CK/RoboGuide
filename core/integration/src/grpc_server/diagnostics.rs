@@ -109,6 +109,7 @@ pub(super) fn diagnostic_kind(message: &NodeMessage) -> DiagnosticKind {
         Some(
             NodePayload::CommandReceipt(_)
             | NodePayload::MemoryImportReceipt(_)
+            | NodePayload::MemoryUseQueryReceipt(_)
             | NodePayload::MemoryImportQueryReceipt(_),
         ) => DiagnosticKind::Receipt,
         Some(NodePayload::ExecutionEvent(_) | NodePayload::ExecutionSnapshot(_)) => {

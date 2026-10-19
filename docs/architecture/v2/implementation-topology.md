@@ -167,3 +167,18 @@ provider；回放同样核对原 publication，不创建第二份通用 manifest
 [producer 验收](../../development/acceptance/2026-10-15-f4-map-provider-authority.md)。
 显式 Occupancy profile 使用 SE(2)，free/occupied/conflict/unknown 保持分离；原始 monotonic
 deadline 不因 wall rollback 或换 host 续期。完整地图消费/激活、Group lifetime/handoff 与 GC 仍需完成。
+
+### 原撤销的独立只读恢复
+
+```mermaid
+flowchart LR
+    A[Authenticated recovery operator] --> B[Application query journal and original budgets]
+    B --> C[Negotiated Node Contract v0.11]
+    C --> D[Original provider GET only]
+    D --> E[Append immutable observation evidence]
+    E --> F[All original providers and context ACKs]
+    F --> G[Independent stop and scoped Control release gates]
+```
+
+原始 Unknown 不覆盖，副作用不重复，观察期限不延长使用许可。Controller/supervisor wrapper
+v39 与 Node journal v11 拒绝旧 writer。证据缺失或预算耗尽保留 ownership。

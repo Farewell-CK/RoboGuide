@@ -1,0 +1,485 @@
+syntax = "proto3";
+
+package roboguide.node.v0_4;
+
+// Formal RoboGuide Node Protocol v0.4 bidirectional session.
+service RoboGuideNodeProtocol {
+  rpc NodeSession(stream NodeMessage) returns (stream ServerMessage);
+}
+
+message NodeMessage {
+  oneof message {
+    Hello hello = 1;
+    Register register = 2;
+    Heartbeat heartbeat = 3;
+    RegistrationUpdate registration_update = 4;
+    ExecutionEvent execution_event = 5;
+    ExecutionSnapshot execution_snapshot = 6;
+    ProtocolError error = 7;
+    StateObservationBatch state_observation_batch = 8;
+    PeerChannelReadiness peer_channel_readiness = 9;
+    CommandReceipt command_receipt = 10;
+    MemoryImportReceipt memory_import_receipt = 11;
+    MemoryImportQueryReceipt memory_import_query_receipt = 12;
+    MemoryControlReceipt memory_control_receipt = 13;
+    MemoryUseReceipt memory_use_receipt = 14;
+    MemoryUseQueryReceipt memory_use_query_receipt = 15;
+  }
+}
+
+message ServerMessage {
+  oneof message {
+    Welcome welcome = 1;
+    Registered registered = 2;
+    Execute execute = 3;
+    Cancel cancel = 4;
+    Ack ack = 5;
+    ProtocolError error = 6;
+    MemoryImport memory_import = 7;
+    MemoryImportQuery memory_import_query = 8;
+    MemoryControl memory_control = 9;
+    MemoryUseControl memory_use_control = 10;
+    MemoryUseQuery memory_use_query = 11;
+  }
+}
+
+message Hello {
+  string node_id = 1;
+  repeated string protocol_versions = 2;
+  repeated string node_contract_versions = 3;
+}
+
+message Welcome {
+  string server_version = 1;
+  string selected_protocol_version = 2;
+  string selected_node_contract_version = 3;
+  uint64 heartbeat_interval_ms = 4;
+  uint64 lease_duration_ms = 5;
+}
+
+message Register { NodeRegistration registration = 1; }
+
+message Registered {
+  string session_id = 1;
+  string lease_id = 2;
+}
+
+message NodeRegistration {
+  string node_id = 1;
+  repeated LocalSystemDescriptor local_systems = 2;
+  repeated Capability capabilities = 3;
+  repeated Sensor sensors = 4;
+  repeated Resource resources = 5;
+  map<string, string> metadata = 6;
+  string node_contract_version = 7;
+  repeated StateExportDescriptor state_exports = 8;
+  repeated MemoryProviderDescriptor memory_providers = 9;
+  // Exact v0.6 capability evidence. This is mutually exclusive with legacy capabilities.
+  repeated CapabilityProfile capability_profiles = 10;
+  // Canonical operations accepted by the node's configured Local EAIOS boundary.
+  // This declaration does not expose the local workflow or implementation.
+  repeated OperationSupport operation_support = 11;
+}
+
+message LocalSystemDescriptor {
+  string id = 1;
+  LocalRuntime runtime = 2;
+  map<string, string> metadata = 3;
+}
+
+message LocalRuntime { string name = 1; string version = 2; }
+
+message Capability {
+  string kind = 1;
+  bool available = 2;
+  repeated string contracts = 3;
+  string local_system_id = 4;
+}
+
+// One exact canonical capability profile owned by a Local EAIOS.
+message CapabilityProfile {
+  string contract = 1;
+  // Transitional coarse category retained only for the current Control compatibility model.
+  string kind = 2;
+  string local_system_id = 3;
+  bool ready = 4;
+  map<string, ScalarValue> attributes = 5;
+}
+
+// One canonical operation that the node can receive through its Local EAIOS boundary.
+message OperationSupport {
+  OperationRef operation = 1;
+  string local_system_id = 2;
+}
+
+message Sensor {
+  string id = 1;
+  string kind = 2;
+  map<string, string> metadata = 3;
+  string local_system_id = 4;
+}
+
+message Resource {
+  string id = 1;
+  string kind = 2;
+  uint32 capacity = 3;
+  map<string, string> metadata = 4;
+  string local_system_id = 5;
+}
+
+enum StateObjectClass {
+  STATE_OBJECT_CLASS_UNSPECIFIED = 0;
+  NODE = 1;
+  WORLD = 2;
+  ROBOGUIDE = 3;
+}
+
+enum StateSemantic {
+  STATE_SEMANTIC_UNSPECIFIED = 0;
+  DESIRED = 1;
+  COMMITTED = 2;
+  REPORTED = 3;
+  OBSERVED = 4;
+  DERIVED = 5;
+  BELIEF = 6;
+}
+
+message StateExportDescriptor {
+  string export_id = 1;
+  string local_system_id = 2;
+  StateObjectClass object_class = 3;
+  string object_type = 4;
+  string object_id = 5;
+  StateSemantic semantic = 6;
+  string payload_schema = 7;
+  uint64 valid_for_ms = 8;
+}
+
+enum MemoryKind {
+  MEMORY_KIND_UNSPECIFIED = 0;
+  EXECUTION = 1;
+  SPATIAL = 2;
+  SEMANTIC = 3;
+  EXPERIENCE = 4;
+  ARTIFACT = 5;
+}
+
+enum MemoryScopeKind {
+  MEMORY_SCOPE_KIND_UNSPECIFIED = 0;
+  LOCAL = 1;
+  // Reserved for manifest/live-operation scope. Provider declarations in v0.6 reject this value.
+  EXECUTION_GROUP = 2;
+  GLOBAL = 3;
+}
+
+enum MemoryVisibility {
+  MEMORY_VISIBILITY_UNSPECIFIED = 0;
+  DISCOVERABLE = 1;
+  EXCHANGEABLE = 2;
+}
+
+message MemoryProviderDescriptor {
+  string provider_id = 1;
+  string local_system_id = 2;
+  MemoryKind kind = 3;
+  MemoryScopeKind scope = 4;
+  string execution_group_id = 5;
+  MemoryVisibility visibility = 6;
+  string payload_schema = 7;
+  string media_type = 8;
+  // Explicit current-backend observation support, negotiated only by Node Contract v0.9.
+  string preparation_contract = 9;
+  // Explicit continuous content-use profile, negotiated only by Node Contract v0.10.
+  string use_contract = 10;
+}
+
+message Heartbeat {
+  string session_id = 1;
+  string lease_id = 2;
+  uint64 sequence = 3;
+  NodeStatus status = 4;
+}
+
+message RegistrationUpdate {
+  string session_id = 1;
+  uint64 sequence = 2;
+  NodeRegistration registration = 3;
+}
+
+message NodeStatus { string health = 1; string detail = 2; }
+
+message StateObservationBatch {
+  string session_id = 1;
+  uint64 sequence = 2;
+  repeated StateObservation observations = 3;
+}
+
+message StateObservation {
+  string export_id = 1;
+  bytes json_value = 2;
+  bool has_source_observed_at = 3;
+  uint64 source_observed_at_ms = 4;
+  bool has_confidence = 5;
+  uint32 confidence_millionths = 6;
+}
+
+// Identified Local EAIOS acknowledgement for one logical peer-channel endpoint.
+// The named Local EAIOS creates the actual channel; RoboGuide only orchestrates and fences it.
+// valid_for_ms is evaluated from Controller receive time, never from a remote clock.
+message PeerChannelReadiness {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string group_id = 3;
+  string context_id = 4;
+  string context_role_id = 5;
+  string channel_instance_id = 6;
+  string profile_id = 7;
+  string message_schema = 8;
+  bool ready = 9;
+  uint64 valid_for_ms = 10;
+  string local_system_id = 11;
+}
+
+message Execute {
+  string session_id = 1;
+  string execution_id = 2;
+  CanonicalInvocation invocation = 3;
+  repeated string resource_ids = 4;
+  // Immutable Controller command identity. Replays must retain this value.
+  string command_id = 5;
+  // Controller-derived, digest-bound accepted-plan topology. Empty only on
+  // explicit legacy commands; this is not an ExecutionIntent parameter.
+  string execution_session_json = 6;
+  // Optional monotonic Controller epoch used by replicated Controllers. Empty
+  // preserves standalone/legacy delivery; a Node that receives a value must
+  // durably reject older epochs before admitting the command.
+  string controller_epoch = 7;
+  // Exact durable context required for accepted Memory prerequisites.
+  string memory_preparation_id = 8;
+  string memory_preparation_digest = 9;
+  // Mandatory semantic requirement array under v0.9, including explicit [] for no inputs.
+  string memory_requirements_json = 10;
+}
+
+message Cancel {
+  string session_id = 1;
+  string execution_id = 2;
+  // Immutable Controller command identity. Replays must retain this value.
+  string command_id = 3;
+  // Optional monotonic Controller epoch used by replicated Controllers.
+  string controller_epoch = 4;
+}
+
+enum CommandKind {
+  COMMAND_KIND_UNSPECIFIED = 0;
+  COMMAND_EXECUTE = 1;
+  COMMAND_CANCEL = 2;
+}
+
+enum CommandReceiptStatus {
+  COMMAND_RECEIPT_STATUS_UNSPECIFIED = 0;
+  // Node durable journal accepted the command before any local side effect.
+  COMMAND_PERSISTED = 1;
+  // Node rejected the command. Controller acceptance makes the observation durable; it does not
+  // claim that every pre-journal validation failure is retained by the Node journal.
+  COMMAND_REJECTED = 2;
+}
+
+// Command-admission acknowledgement. It is not a Local EAIOS lifecycle fact.
+message CommandReceipt {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string command_id = 3;
+  string execution_id = 4;
+  CommandKind kind = 5;
+  CommandReceiptStatus status = 6;
+  string reason = 7;
+}
+
+// Controller-authorized selective Memory import. Discovery never creates this command.
+message MemoryImport {
+  string session_id = 1;
+  string import_id = 2;
+  string command_id = 3;
+  string consumer_provider_id = 4;
+  string manifest_json = 5;
+  string mission_id = 6;
+  string group_id = 7;
+  string task_id = 8;
+  string role_id = 9;
+  string execution_id = 10;
+  string controller_epoch = 11;
+  // Digest over the immutable authorization tuple and manifest JSON.
+  string authorization_digest = 12;
+  // Complete original context; a generic projection cannot strip typed Spatial provenance.
+  string memory_preparation_id = 13;
+  string typed_map_manifest_json = 14;
+}
+
+enum MemoryImportReceiptStatus {
+  MEMORY_IMPORT_RECEIPT_STATUS_UNSPECIFIED = 0;
+  // The Node import identity was durably admitted before local side effects.
+  MEMORY_IMPORT_PERSISTED = 1;
+  // The local provider import completed and evidence was published.
+  MEMORY_IMPORT_COMPLETED = 2;
+  // The command was rejected by an immutable identity or provider check.
+  MEMORY_IMPORT_REJECTED = 3;
+  // The outcome is not known after a local or transport failure.
+  MEMORY_IMPORT_UNKNOWN = 4;
+}
+
+// Durable selective-import admission and completion evidence.
+message MemoryImportReceipt {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string import_id = 3;
+  string command_id = 4;
+  MemoryImportReceiptStatus status = 5;
+  string reason = 6;
+}
+
+// Negotiated only with Node Contract v0.7. This command never repeats an import.
+message MemoryImportQuery {
+  string session_id = 1;
+  string query_id = 2;
+  string import_id = 3;
+  string command_id = 4;
+  string consumer_provider_id = 5;
+  string original_content_digest = 6;
+  uint64 generation = 7;
+  uint64 valid_for_ms = 8;
+  string controller_epoch = 9;
+  string authorization_digest = 10;
+}
+
+// Immutable result of one journaled readonly query, not Task satisfaction or live placement.
+message MemoryImportQueryReceipt {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string query_id = 3;
+  string import_id = 4;
+  string command_id = 5;
+  uint64 generation = 6;
+  MemoryImportReceiptStatus status = 7;
+  string reason = 8;
+  string identity_digest = 9;
+  string provider_instance_id = 10;
+  string provider_contract_digest = 11;
+  string result_json = 12;
+}
+
+message CanonicalInvocation {
+  string mission_id = 1;
+  string task_id = 2;
+  string group_id = 3;
+  string role_id = 4;
+  string capability_contract = 5;
+  map<string, ScalarValue> parameters = 6;
+  // Required by semantic Node Contracts v0.5+; absent on legacy v0.4 invocations.
+  ExecutionIntent intent = 7;
+}
+
+// The semantic What delegated to a Local EAIOS without prescribing Local How.
+message ExecutionIntent {
+  OperationRef operation = 1;
+  string objective = 2;
+  map<string, ScalarValue> parameters = 3;
+}
+
+// Canonical operation identity, versioned independently of the Node Contract.
+message OperationRef {
+  string namespace = 1;
+  string name = 2;
+  string version = 3;
+}
+
+message ScalarValue {
+  oneof value {
+    bool bool_value = 1;
+    sint64 integer_value = 2;
+    double float_value = 3;
+    string string_value = 4;
+  }
+}
+
+enum ExecutionPhase {
+  EXECUTION_PHASE_UNSPECIFIED = 0;
+  ACCEPTED = 1;
+  STARTED = 2;
+  COMPLETED = 3;
+  FAILED = 4;
+  CANCELLED = 5;
+  UNKNOWN = 6;
+}
+
+message ExecutionEvent {
+  string session_id = 1;
+  string execution_id = 2;
+  uint64 sequence = 3;
+  ExecutionPhase phase = 4;
+  string reason = 5;
+}
+
+message ExecutionSnapshot {
+  string session_id = 1;
+  string execution_id = 2;
+  uint64 last_sequence = 3;
+  ExecutionPhase phase = 4;
+  string reason = 5;
+}
+
+message Ack { uint64 sequence = 1; }
+
+message ProtocolError {
+  string code = 1;
+  string reason = 2;
+  string session_id = 3;
+  string execution_id = 4;
+}
+
+// Controller command metadata only; payload bytes remain on the Artifact data plane.
+message MemoryControl {
+  string session_id = 1;
+  string command_json = 2;
+  string controller_epoch = 3;
+  // Remaining original Controller budget at send time, never part of immutable identity.
+  uint64 valid_for_ms = 4;
+}
+
+// Durable Node preparation/probe/revocation observation; application Commit precedes sequence ACK.
+message MemoryControlReceipt {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string receipt_json = 3;
+}
+
+// Original-budget runtime use authority, independent of import/preparation effects.
+message MemoryUseControl {
+  string session_id = 1;
+  string command_json = 2;
+  string controller_epoch = 3;
+  uint64 valid_for_ms = 4;
+}
+
+// Durable exact-provider permission evidence, never Task or physical-stop truth.
+message MemoryUseReceipt {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string receipt_json = 3;
+}
+
+// Independent readonly observation; no content-use authority or effect is admitted.
+message MemoryUseQuery {
+  string session_id = 1;
+  string query_json = 2;
+  string controller_epoch = 3;
+  uint64 valid_for_ms = 4;
+  uint64 session_remaining_ms = 5;
+}
+
+// Immutable original-provider observation, committed before application sequence ACK.
+message MemoryUseQueryReceipt {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string receipt_json = 3;
+}

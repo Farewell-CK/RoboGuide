@@ -13,6 +13,11 @@ Node 生命周期、稳定证书主体、租户匹配/承诺/恢复门禁和原�
 当前实现拓扑与证据边界见[实现拓扑](docs/architecture/v2/implementation-topology.md)。
 软件测试不构成设备停止、硬实时或机器人执行连续性的证据。
 
+Memory 撤销部分失败的独立只读恢复由
+[ADR-0107](docs/decisions/0107-original-revoke-observation-and-provider-progress.md) 定义：
+逐 provider 原证明、单一有界观察会话、追加证据及原作用域 release gate。原 Unknown
+和预算保持不变，观察不重发副作用。wrapper v39 / Node journal v11 保护此合同。
+
 ## V2 总体架构
 
 ![RoboGuide V2 Overall Architecture](docs/images/roboguide-v2-overall-architecture.png)

@@ -165,7 +165,8 @@ pub(super) fn registration_from_wire(
 ) -> Result<domain::NodeRegistration, IntegrationRuntimeError> {
     let semantic_profiles = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
@@ -174,7 +175,8 @@ pub(super) fn registration_from_wire(
     );
     let independent_operation_support = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION
