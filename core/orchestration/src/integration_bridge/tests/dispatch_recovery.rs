@@ -2,6 +2,79 @@
 
 use super::*;
 
+/// Missing Memory permission withholds plain peers in that Group without hiding another Group.
+#[test]
+fn memory_barrier_withholds_plain_peer_and_preserves_other_group_outbox() {
+    let mut bridge = IntegrationRuntimeBridge::new(
+        ControlPlane::new(),
+        InMemorySharedNodeState::new(),
+        InMemoryEventLog::new(),
+        GrpcNodeRouter::default(),
+    );
+    for (execution, group, memory) in [
+        ("metadata-memory", "waiting-group", true),
+        ("metadata-peer", "waiting-group", false),
+        ("metadata-independent", "other-group", false),
+    ] {
+        let mut command = ExecutionCommand::new(
+            domain::MissionId::new(group).unwrap(),
+            domain::TaskId::new(execution).unwrap(),
+            domain::ExecutionGroupId::new(group).unwrap(),
+            domain::RoleId::new("worker").unwrap(),
+            NodeId::new("unit-unrouted-software-owner").unwrap(),
+            domain::ExecutionIntent::new(
+                CapabilityContractRef::new("compute", "unit", "v1").unwrap(),
+                BTreeMap::new(),
+            )
+            .unwrap(),
+            CorrelationId::new("unit-memory-barrier").unwrap(),
+        );
+        if memory {
+            command = command
+                .with_memory_requirements(vec![domain::MemoryRequirement {
+                    selector: domain::MemorySelector::new(
+                        domain::MemoryId::new("unit-content").unwrap(),
+                        domain::MemoryRevisionId::new("r1").unwrap(),
+                    ),
+                    kind: domain::MemoryKind::Artifact,
+                    payload_schema: "unit.bytes/v1".into(),
+                    media_type: "application/octet-stream".into(),
+                }])
+                .unwrap();
+        }
+        bridge
+            .runtime
+            .prepare_dispatch(execution.into(), command, vec![])
+            .unwrap();
+    }
+    assert!(
+        bridge
+            .flush_dispatch_outbox_with_memory(
+                &runtime::FixedClock::new(TimestampMs::new(5)),
+                &BTreeSet::new(),
+                &BTreeMap::new()
+            )
+            .is_err(),
+        "the unrelated Group still attempts its absent route"
+    );
+    let deliveries = bridge
+        .runtime
+        .pending_dispatch_intents()
+        .into_iter()
+        .map(|intent| (intent.execution_id, intent.delivery_attempts))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(deliveries["metadata-memory"], 0);
+    assert_eq!(deliveries["metadata-peer"], 0);
+    assert_eq!(deliveries["metadata-independent"], 1);
+    assert!(
+        bridge
+            .state
+            .node(&NodeId::new("unit-unrouted-software-owner").unwrap())
+            .is_none(),
+        "metadata fixtures create no Node inventory"
+    );
+}
+
 /// Creates registered software metadata for an offline provenance test, never physical observations.
 fn declaration_registration(
     version: domain::NodeContractVersion,

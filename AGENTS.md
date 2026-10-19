@@ -107,6 +107,16 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   budgets before bounded owned background workers; duplicate HTTP commands do not start another.
   Current-use receipts are not physical stop proof. Full lifecycle/handoff, active-map/GC and later
   stages remain mandatory until their complete conformance records pass.
+- ADR-0106's scoped release slice advances the shared Controller/supervisor wrapper to v38.
+  Local completion may record AwaitingSatisfaction while only that Task's original context/provider
+  revoke ACKs gate normal release; live peers retain permission. Whole-Group cancellation/failure,
+  final negative verifier and recovery retain all original receiver/provider fences, separately from
+  physical stop proof. Revoke proofs pin the original backend instance/contract even with empty
+  import IDs. Application MemoryDispatchPermit retains the earliest preparation/availability/use
+  deadline; each Execute send rechecks all pending Group inputs with a fresh local clock. No-Memory
+  Groups do not acquire extra clock reads. Real file conformance uses two enrolled software Nodes,
+  mTLS/CAS/independent CPU verifiers and original-budget restart; it creates zero device facts and
+  does not close full Group handoff, partial-Unknown reconciliation, F5-F10 or HardwareEvidencePending.
 - Generic replica durable identity is exact `(MemorySelector, NodeId, ConsumerProviderId)`; admission,
   event replay, projections, and APIs preserve that provider dimension, and accepted evidence remains
   monotonic after Imported. Explicit application-owned selective-import commands and bounded

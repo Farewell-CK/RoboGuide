@@ -2,6 +2,15 @@
 
 use super::*;
 
+/// Application-committed readiness for one original attempt, with its earliest immutable expiry.
+#[derive(Debug, Clone)]
+pub struct MemoryDispatchPermit {
+    /// Complete original Control-selected context; this grants no independent resource ownership.
+    pub preparation: domain::MemoryPreparation,
+    /// Exclusive Controller-local deadline across preparation, byte observation and current use.
+    pub expires_at: TimestampMs,
+}
+
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     /// Selects an actual registered receiver using Control and the same source-aware decision view.
     pub fn select_memory_provider(

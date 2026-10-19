@@ -12,6 +12,14 @@ original receipts, and fences outstanding permission on restart. Expiry, ambigui
 and revocation retain physical ownership behind the existing stop/hold boundary. A content-use
 receipt is never physical stop, safe-state, localization or semantic Task satisfaction evidence.
 
+Controller wrapper v38 distinguishes local completion, per-Task release and whole-Group release.
+A normally completed Task waits for its own original context and all provider revoke ACKs while
+independent live peers keep their permission. Group cancellation, final failure/negative verifier
+and recovery apply the corresponding complete receiver set. Revoke provider identities remain
+pinned to the original backend instance/contract even though revoke carries no import IDs.
+Each Execute send rechecks all pending Group inputs and their earliest original preparation,
+availability and use expiry. These application gates do not change the Node wire envelope.
+
 Node Contract v0.10/config v0.11/catalog v0.13 explicitly negotiates this extension. Original
 [preparation v0.2](../preparation-v0.2/README.md) requires an explicit `use_contract`. Historical
 v0.1 preparation remains readable with original absence; it cannot acquire a runtime use lease.

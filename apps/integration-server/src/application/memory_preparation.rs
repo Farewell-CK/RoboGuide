@@ -316,6 +316,91 @@ fn admit_inputs(
     Ok(completed)
 }
 
+/// Reserves the original irreversible context fence without renewing issue time or delivery counts.
+fn revoke(
+    record: &mut MemoryPreparationRecord,
+    why: &str,
+    now: domain::TimestampMs,
+) -> Result<(), String> {
+    if record.preparation.is_some() && record.phase != MemoryPreparationPhase::Revoked {
+        record.phase = MemoryPreparationPhase::Revoking;
+        record.available_until_ms = None;
+        record.reason = bounded_reason(why);
+        queue(record, MemoryControlKind::Revoke, 0, now)?;
+    }
+    Ok(())
+}
+
+/// Fences original Group preparations, including imports which never reached a use grant.
+pub(crate) fn revoke_group(
+    controller: &mut ControllerState,
+    group: &domain::ExecutionGroupId,
+    why: &str,
+    now: domain::TimestampMs,
+) -> Result<(), String> {
+    for record in controller.memory_preparation.records.values_mut() {
+        if record
+            .preparation
+            .as_ref()
+            .is_some_and(|context| &context.group_id == group)
+        {
+            revoke(record, why, now)?;
+        }
+    }
+    Ok(())
+}
+
+/// Fences only the original receiver context of an independently stopped recovery attempt.
+pub(crate) fn revoke_attempt(
+    controller: &mut ControllerState,
+    execution: &str,
+    now: domain::TimestampMs,
+) -> Result<(), String> {
+    if let Some(record) = controller.memory_preparation.records.get_mut(execution) {
+        revoke(record, "original attempt recovery requested", now)?;
+    }
+    Ok(())
+}
+
+/// Checks one context without requiring unrelated live peers to relinquish their ownership.
+pub(crate) fn blocks_attempt_release(controller: &ControllerState, execution: &str) -> bool {
+    controller
+        .memory_preparation
+        .records
+        .get(execution)
+        .is_some_and(|record| {
+            record.preparation.is_some()
+                && !record.controls.values().any(|delivery| {
+                    delivery.command.operation == MemoryControlKind::Revoke
+                        && delivery.received_at_ms.is_some()
+                        && delivery
+                            .receipt
+                            .as_ref()
+                            .is_some_and(|receipt| receipt.status == MemoryControlStatus::Revoked)
+                })
+        })
+}
+
+/// Requires durable context revocation in the selected release scope, separately from use ACKs.
+pub(crate) fn blocks_release(
+    controller: &ControllerState,
+    mission: &domain::MissionId,
+    task: Option<&domain::TaskRef>,
+) -> bool {
+    controller
+        .memory_preparation
+        .records
+        .values()
+        .any(|record| {
+            let Some(context) = &record.preparation else {
+                return false;
+            };
+            context.task_ref.mission_id() == mission
+                && task.is_none_or(|task| task == &context.task_ref)
+                && blocks_attempt_release(controller, &record.execution_id)
+        })
+}
+
 /// Mutates only the private application candidate; every send waits for its checkpoint Commit.
 pub(crate) fn prepare(
     controller: &mut ControllerState,
@@ -363,6 +448,14 @@ pub(crate) fn prepare(
         .collect::<Vec<_>>();
     for id in ids {
         let mut record = controller.memory_preparation.records[&id].clone();
+        if controller
+            .bridge
+            .attempt_history()
+            .iter()
+            .any(|attempt| attempt.execution_id() == id && attempt.status().is_terminal())
+        {
+            revoke(&mut record, "original execution ended", now)?;
+        }
         if record.phase == MemoryPreparationPhase::WaitingSource
             && now.as_millis() < record.deadline_ms
             && let Some(intent) = pending.iter().find(|intent| intent.execution_id == id)
@@ -658,7 +751,7 @@ pub(crate) fn receipt(
 pub(crate) fn ready(
     controller: &ControllerState,
     now: domain::TimestampMs,
-) -> BTreeMap<String, MemoryPreparation> {
+) -> BTreeMap<String, orchestration::MemoryDispatchPermit> {
     controller
         .memory_preparation
         .records
@@ -672,10 +765,19 @@ pub(crate) fn ready(
                 && super::memory_use::permits(controller, &record.execution_id, now)
         })
         .filter_map(|(id, record)| {
-            record
-                .preparation
-                .clone()
-                .map(|preparation| (id.clone(), preparation))
+            let expires_at_ms = record
+                .deadline_ms
+                .min(record.available_until_ms?)
+                .min(super::memory_use::dispatch_expires_at(controller, id, now)?);
+            record.preparation.clone().map(|preparation| {
+                (
+                    id.clone(),
+                    orchestration::MemoryDispatchPermit {
+                        preparation,
+                        expires_at: domain::TimestampMs::new(expires_at_ms),
+                    },
+                )
+            })
         })
         .collect()
 }

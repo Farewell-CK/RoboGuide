@@ -37,6 +37,13 @@ Node 的现有 v0.9 prepared input 继续保留完整 raw map，导入仍使用�
 Execute 接纳预算；撤销/到期保留 stop/ownership 门禁。参考后端显式使用同 kernel 私有 Unix
 预算合同，不比较跨主机时钟；active-map 与设备定位保持独立证据。
 
+当前生命周期收敛见 [多 Node Memory 验收](../../development/acceptance/2026-10-19-f4-memory-group-lifecycle.md)。
+本地 completion 可先记录 `AwaitingSatisfaction`；正常 Task 仅等待自己原 context 与 provider
+撤销确认，活跃兄弟 Task 继续持有许可。整组终结/恢复核对全部原参与方，并单独检查需要的
+stop 证据。执行前 permit 取 preparation、availability、use 的最早原始到期时间；每次发送
+均以新 receive clock 重查整组 pending Memory inputs。wrapper v38 保护该收敛，未改变
+Node Protocol 或 Local EAIOS 的即时操作/安全权威。
+
 Control 活性与观测时间的已接受演进见 ADR-0076：Integration 仅提供当前精确 session/lease
 的连续接收证据，由 Control 在应用持久事务中决定续约/过期。原始 ingress receive time
 用于 State/health/peer/progress 的年龄；当前 decision time 用于资格、Commit、恢复与发送。

@@ -193,6 +193,16 @@ pub(crate) fn apply_recovery_required(
         // Unknown, heartbeat loss and Cancel receipts do not prove physical stop.
         return Ok(());
     }
+    if let Some(execution) = controller
+        .bridge
+        .current_task_attempt_id(command.group_id(), command.task_ref(), command.role_id())
+        .map(str::to_owned)
+    {
+        super::memory_use::revoke_attempt(controller, &execution, timestamp)?;
+        if super::memory_use::blocks_attempt_release(controller, &execution) {
+            return Ok(());
+        }
+    }
     let Some(group) = controller.bridge.control().group(command.group_id()) else {
         return Ok(());
     };
@@ -235,11 +245,21 @@ pub(crate) fn begin_current_ambiguity_recoveries(
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for group_id in controller.bridge.group_recovery_ids() {
-        if controller
+        if !matches!(
+            controller
+                .bridge
+                .group_recovery_disposition(&group_id, timestamp),
+            runtime::GroupRecoveryDisposition::AwaitingStop
+                | runtime::GroupRecoveryDisposition::StopConfirmed
+                | runtime::GroupRecoveryDisposition::ContinuationPrepared
+        ) {
+            continue;
+        }
+        let mission = controller
             .orchestrator
             .mission_ids()
-            .iter()
-            .any(|mission_id| {
+            .into_iter()
+            .find(|mission_id| {
                 controller
                     .orchestrator
                     .execution(mission_id)
@@ -249,8 +269,17 @@ pub(crate) fn begin_current_ambiguity_recoveries(
                                 == orchestration::MissionExecutionLifecycle::Running
                             && mission.isolation().is_none()
                     })
-            })
-        {
+            });
+        if let Some(mission) = mission {
+            if super::memory_use::blocks_release(controller, &mission) {
+                super::memory_use::revoke_group(
+                    controller,
+                    &group_id,
+                    "Group continuation requested",
+                    timestamp,
+                )?;
+                continue;
+            }
             controller
                 .bridge
                 .prepare_group_continuation(&group_id, timestamp, correlation_id)?;
@@ -316,6 +345,13 @@ pub(crate) fn resume_role_recovery(
     if !controller
         .bridge
         .recovery_release_permitted(need, timestamp)
+    {
+        return Ok(());
+    }
+    if controller
+        .bridge
+        .current_task_attempt_id(need.group_id(), need.task_ref(), need.role_id())
+        .is_some_and(|execution| super::memory_use::blocks_attempt_release(controller, execution))
     {
         return Ok(());
     }

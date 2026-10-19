@@ -43,6 +43,12 @@ deadline 与 abort/dispatch-ready gate 均有 checkpoint 和回归，见
 [F7 停止与恢复验收](development/acceptance/2026-10-16-f7-stop-recovery-software.md)。物理
 stop certificate、硬实时 hazard、运行中抢占和异构 regrasp 仍保持独立部署 gate。
 
+2026-10-19 Memory 的 Task/整组 release scope、原 context/provider revoke ACK、原 backend
+身份核验和每次发送的最早期限门禁已接入生产路径，见
+[多 Node 生命周期验收](development/acceptance/2026-10-19-f4-memory-group-lifecycle.md)。
+两软件 Node 的真实 CAS/计算/独立验证/重启检查与旧 v37 writer 拒绝分别保留证据；它不关闭
+跨主机部署、多 provider 部分 Unknown 的完整对账、跨 Group handoff 或 F5–F10。
+
 ## V2 开放架构问题
 
 | ID | 问题 | 需要回答的核心内容 |

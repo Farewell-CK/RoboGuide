@@ -90,6 +90,13 @@ transport、证书路由和多域恢复仍未关闭。
 路径的 StopConfirmed、Mission hold、Unknown/recovery 和 whole-Group gate；不把软件测试或
 `SoftwareProcess` assurance 当作设备停止证明。
 
+[2026-10-19 多 Node Memory 生命周期](acceptance/2026-10-19-f4-memory-group-lifecycle.md)
+进一步修正 Task 与整组 release 的作用域：本地 completion 可单独入库；正常 Task 等待自身
+原 context/provider ACK，活跃兄弟 Task 保留许可；取消、最终失败、负向 verifier 和恢复
+核对对应完整参与方。回执固定原 backend instance/contract；每次 Execute 发送重查整组
+最早原期限。共享 wrapper v38 fences 旧 writer。两软件 Node/实际文件/CAS/独立复算/重启
+与标准 SQL 故障对账均已验收；部分 Unknown、跨 Group handoff 和后续阶段继续为必需项。
+
 ## 已接受的实现决定
 
 - Stop 冻结完整受影响 attempt 集合、operation-owned export、策略、owner/session 和 deadline。

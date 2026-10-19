@@ -37,6 +37,7 @@ mod relation_view;
 
 use conversion::*;
 pub use dispatch::{RecoveryDeploymentSupport, RecoverySupportDisposition};
+pub use memory_preparation::MemoryDispatchPermit;
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///

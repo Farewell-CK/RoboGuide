@@ -23,6 +23,8 @@ from typing import Any, BinaryIO
 
 from check_identity_processes import request as tls_request
 from check_state_verifier_processes import ROOT, address, save, stop, wait_for
+from memory_group_lifecycle import GroupScenario
+from memory_group_lifecycle import run as run_group
 from memory_preparation_profile import configuration, mission, node_environment, tls
 from memory_use_lifecycle import ActualUseScenario
 from memory_use_lifecycle import run as run_use_interruption
@@ -45,6 +47,7 @@ def identity() -> dict[str, str]:
             "spatial_content_policy.py",
             "memory_use_profile.py",
             "memory_use_lifecycle.py",
+            "memory_group_lifecycle.py",
         )
     ]
     result = {
@@ -94,6 +97,7 @@ def run(
     use_lifecycle: bool = False,
     use_case: str | None = None,
     large_transfer: bool = False,
+    group_lifecycle: bool = False,
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
     use_lifecycle = use_lifecycle or use_case is not None
@@ -107,6 +111,8 @@ def run(
     origin, cas = "https://" + operator, "https://" + artifact
     backends = ["http://" + address() for _ in range(2)]
     backends[1] = "unix://" + str(directory / "consumer/backend/local.sock")
+    if group_lifecycle:
+        backends[0] = "unix://" + str(directory / "source/backend/local.sock")
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -204,7 +210,9 @@ def run(
             owned = directory / name
             owned.mkdir(exist_ok=True)
             config = owned / "node.toml"
-            configured = configuration(owned, nodes[index], grpc, backends[index], cas, index == 1)
+            configured = configuration(
+                owned, nodes[index], grpc, backends[index], cas, index == 1 or group_lifecycle
+            )
             if large_transfer:
                 configured = configured.replace(
                     "max_artifact_bytes = 1048576", "max_artifact_bytes = 1073741824"
@@ -229,18 +237,18 @@ def run(
                 str(owned),
                 "--enable-file-jobs",
             ]
-            if use_lifecycle or large_transfer:
+            if use_lifecycle or large_transfer or group_lifecycle:
                 # A large-transfer conformance run must not use the five-second default compute
                 # budget: hashing the admitted multi-hundred-megabyte file is the real provider
                 # workload, and the original budget must cover it without being renewed.
                 command += ["--max-job-seconds", "300"]
-                if use_lifecycle:
+                if use_lifecycle or group_lifecycle:
                     command += ["--max-job-rounds", "2000000"]
             if large_transfer:
                 command += ["--max-bytes", "1073741824"]
             command += (
                 ["--listen-unix", "--enable-use-leases"]
-                if index
+                if index or group_lifecycle
                 else ["--listen-port", backends[index].rsplit(":", 1)[1]]
             )
             if index == 0:
@@ -259,11 +267,12 @@ def run(
                 "actual file backend readiness",
             )
         # Abort actual SQL completion after fsynced copying, retaining original bytes and identity.
-        with sqlite3.connect(directory / "consumer/backend/memory.sqlite3") as connection:
-            connection.execute(
-                "CREATE TRIGGER fail_final_import BEFORE UPDATE OF state ON imports "
-                "BEGIN SELECT RAISE(ABORT,'original import completion crash window'); END"
-            )
+        if not group_lifecycle:
+            with sqlite3.connect(directory / "consumer/backend/memory.sqlite3") as connection:
+                connection.execute(
+                    "CREATE TRIGGER fail_final_import BEFORE UPDATE OF state ON imports "
+                    "BEGIN SELECT RAISE(ABORT,'original import completion crash window'); END"
+                )
         controller = start(controller_command, "controller")
         wait_for(lambda: exchange("/healthz")[0] == 200, "actual Controller startup")
         for index, name in enumerate(("enrolment-first", "enrolment-next")):
@@ -345,6 +354,7 @@ def run(
                 "use_lifecycle": use_lifecycle,
                 "use_case": use_case,
                 "large_transfer": large_transfer,
+                "group_lifecycle": group_lifecycle,
                 "controller_diagnostics": "controller-diagnostics.jsonl",
             },
         )
@@ -387,6 +397,26 @@ def run(
             25 * 60 if large_transfer else 20,
         )
         assert published == manifest, published
+        if group_lifecycle:
+            result = run_group(
+                GroupScenario(
+                    directory,
+                    nodes,
+                    backends,
+                    manifest,
+                    exchange,
+                    contexts["viewer"],
+                    controller,
+                    controller_command,
+                    start,
+                )
+            )
+            assert identity() == initial_identity, "pinned source or binary changed"
+            result.update(
+                source_identity=initial_identity, configuration_identity=configuration_identity
+            )
+            save(directory / "result.json", result)
+            return result
         accepted = mission(mission_id, manifest)
         if use_lifecycle:
             accepted["tasks"][0]["roles"][0]["execution_intent"]["parameters"]["rounds"] = 1
@@ -530,7 +560,20 @@ def run(
             status, response = exchange(
                 "/v1/verifier-evidence", evidence, context=contexts["viewer"]
             )
-            assert status == 200 and response["receipt"]["applied"] is True, response
+            assert status == 200, response
+            evidence_id = evidence["evidence_id"]
+            applied = wait_for(
+                lambda evidence_id=evidence_id: next(
+                    (
+                        row
+                        for row in exchange("/v1/verifier-evidence")[1]["receipts"]
+                        if row["evidence"]["evidence_id"] == evidence_id and row["applied"] is True
+                    ),
+                    None,
+                ),
+                "original verifier evidence applies after context and provider revoke ACKs",
+            )
+            save(directory / f"applied-verifier-{index}.json", applied)
             receipts.append(response)
         wait_for(
             lambda: exchange(f"/v1/missions/{mission_id}")[1]["status"] == "Completed",
@@ -736,10 +779,15 @@ def main() -> None:
     parser.add_argument("--verify", nargs=2, metavar=("OUTPUT", "INDEX"))
     parser.add_argument("--use-lifecycle", action="store_true")
     parser.add_argument("--large-transfer", action="store_true")
+    parser.add_argument("--group-lifecycle", action="store_true")
     parser.add_argument(
         "--use-case", choices=("revoke", "expire", "backend-restart", "controller-restart")
     )
     arguments = parser.parse_args()
+    if arguments.group_lifecycle and (
+        arguments.use_lifecycle or arguments.use_case or arguments.large_transfer
+    ):
+        parser.error("--group-lifecycle is a separate bounded software profile")
     if arguments.verify:
         print(json.dumps(verify(Path(arguments.verify[0]), int(arguments.verify[1]))))
     elif arguments.output:
@@ -750,6 +798,7 @@ def main() -> None:
                     arguments.use_lifecycle,
                     arguments.use_case,
                     arguments.large_transfer,
+                    arguments.group_lifecycle,
                 ),
                 sort_keys=True,
             )

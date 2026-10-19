@@ -79,6 +79,11 @@ command 收到 `revoked` receipt、provider ID 集合精确相等且没有重复
 不把聚合状态单独当作整组撤销完成。它不等价于多 Node 动态 Group 授权、物理 stop、handoff
 或硬实时安全证明。
 
+上述 2026-10-19 初始 release gate 随后按 Task/整组范围修正：本地 completion 可先入库，
+正常 Task 不等待活跃 peer；context 撤销与原 backend/provider ACK 分别检查。wrapper v38、
+每次发送的原最早期限、实际两 Node 并发/独立验证/重启及旧二进制拒绝见
+[后续生命周期记录](2026-10-19-f4-memory-group-lifecycle.md)，不以初始 gate 的单元检查替代。
+
 全工作区 Rust 检查在本次最新代并发修正前通过 824 项、忽略 2 项；Clippy、private Rustdoc、
 fmt 与 Python 全量离线检查通过。Python 变更路径 Ruff、strict mypy（17 文件）和函数文档检查
 通过；全量类型检查的既有问题仍归 F10，不由该局部检查声明通过。最新代并发修正的 4 项

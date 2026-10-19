@@ -1,6 +1,6 @@
 # 当前软件实现与部署拓扑
 
-更新：2026-10-15。对应全部非发布软件整改计划；后续目标不视为当前能力。
+更新：2026-10-19。对应全部非发布软件整改计划；后续目标不视为当前能力。
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
 
@@ -55,7 +55,8 @@ flowchart TB
   MEM --> AVAIL[原 backend / 当前 bytes / 一次性 Probe]
   AVAIL --> PROTO
   PROTO --> PREP
-  PREP -->|当前许可与原预算通过才发送| RT
+  PREP --> PERMIT[Memory permit / 最早原期限 / 每次发送重查整组]
+  PERMIT --> RT
   PREP --> REVOKE[durable Revoke ACK / 独立 stop hold]
   REVOKE --> PROTO
   ART --> UPLOAD[原 upload / bytes 校验与 fsync / CAS 归属 receipt]
@@ -73,10 +74,13 @@ flowchart TB
   MAUTH --> USE
   USE --> SQL
   USE --> PROTO
-  USE -->|全组当前许可| RT
+  USE --> PERMIT
   MEM --> ULOCAL[同 kernel 与 time namespace / 私有 Unix / 每块读取复查]
   ULOCAL --> PROTO
   USE --> REVOKE
+  REVOKE --> RELEASE[按 Task 或整组核对全部原 context 与 provider ACK]
+  STOP -->|按需核对独立停止证据| RELEASE
+  RELEASE --> ORCH
 ```
 
 Controller 中 Orchestration、Control、Runtime、State 和 Integration 当前共址，责任边界由
@@ -106,6 +110,12 @@ Runtime 在实际 dispatch preparation 冻结原 Node contract、session 和 pro
 副作用只在应用事务持久化并取得当前 quorum/epoch 后发出。副本只复制元数据和命令证据，
 CAS 内容及 Local EAIOS 执行连续性需要独立恢复合同。Unknown 保留所有权；本地安全仍由
 Local EAIOS 掌握。SoftwareProcess、测试合成观察和设备观察的证据等级不能混用。
+
+当前 Memory 释放按实际范围检查：正常 Task 不等待仍在运行的兄弟 Task；取消、最终失败、
+负向 verifier 与恢复保留整组或原停止 attempt 的 context/provider 门禁。回执固定原 backend
+instance/contract，不能只匹配 provider 名称。Controller 与 supervisor 共享 wrapper v38；
+旧 v37 读取后只作保守恢复，不刷新原预算。实际两 Node 文件路径、原子持久化与证据边界见
+[生命周期验收](../../development/acceptance/2026-10-19-f4-memory-group-lifecycle.md)。
 
 当前停止软件门禁见 ADR-0102。完整数据记录可由
 `GET /v1/executions/{execution_id}/safety-stop` 检查；这个查询不刷新 TTL 或 stop deadline。

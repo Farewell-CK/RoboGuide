@@ -5,6 +5,9 @@ use domain::{CorrelationId, ExecutionGroupId, TaskExecutionLifecycle, TimestampM
 use integration::grpc::v0_4::{ExecutionPhase, NodeMessage, node_message::Message as NodePayload};
 use sha2::{Digest, Sha256};
 
+#[path = "runtime_replay_memory.rs"]
+mod memory;
+
 /// Decodes a canonical v0.7 Mission so production checkpoint normalization is also exercised.
 fn parallel_plan() -> domain::MissionPlan {
     parallel_plan_with_verifier(false)

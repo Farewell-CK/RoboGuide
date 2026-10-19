@@ -527,8 +527,29 @@ pub(crate) fn apply_pending(
                 .task_verifier_source(&input.task_ref)
                 .expect("frozen source validated")
                 .stop_timeout_ms;
+            super::memory_use::revoke_group(
+                controller,
+                &group,
+                "final verifier rejected Mission",
+                now,
+            )?;
             safety_stop::admit_group_stop(controller, &group, now, timeout)?;
             continue;
+        }
+        if input.verdict == SemanticVerdict::Satisfied {
+            if super::memory_use::blocks_task_release(controller, &input.task_ref) {
+                continue;
+            }
+        } else {
+            super::memory_use::revoke_group(
+                controller,
+                &group,
+                "final verifier rejected Mission",
+                now,
+            )?;
+            if super::memory_use::blocks_release(controller, input.task_ref.mission_id()) {
+                continue;
+            }
         }
         if input.verdict == SemanticVerdict::Satisfied {
             if !task_policy_allows(

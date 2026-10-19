@@ -42,6 +42,12 @@ SQL 失败、TLS、CPU 计算和独立验证。完整 Group lifetime/handoff、�
 Operator 修改请求现在在实际事务写锁内复核证书和当前委托，见
 [排队撤权验收](docs/development/acceptance/2026-10-15-f4-operator-transactions.md)。
 
+[多 Node Memory 生命周期切片](docs/development/acceptance/2026-10-19-f4-memory-group-lifecycle.md)
+将本地 completion、Task 释放与整组取消/失败分开：正常 Task 等待自己的 context/provider
+撤销确认，活跃兄弟 Task 保留许可；整组终结等待全部原参与方。执行前每次发送重新检查
+整组 Memory permit 的原到期时间。Controller/supervisor wrapper v38 拒绝旧 writer；软件
+进程与文件证据不证明设备停止或完整 F4 已完成。
+
 独立 [Spatial file provider](integrations/spatial-provider/README.md) 已实现真实 PLY/PCD 的
 FPFH/RANSAC、ICP、pose-graph、观测点分块融合和不可变增量 revision。
 [文件验收](docs/development/acceptance/2026-10-15-f4-spatial-files.md)包含独立坐标真值、单位转换、

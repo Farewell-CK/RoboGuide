@@ -312,14 +312,110 @@ fn revoke_acknowledged(record: &MemoryUseRecord, preparation: &MemoryPreparation
 
 /// Blocks terminal Mission release while any original content-use provider is unresolved.
 pub(crate) fn blocks_release(controller: &ControllerState, mission_id: &domain::MissionId) -> bool {
+    blocks_release_for(controller, mission_id, None)
+}
+
+/// Allows independent Task progress without borrowing the still-running peers' use permissions.
+pub(crate) fn blocks_task_release(controller: &ControllerState, task: &domain::TaskRef) -> bool {
+    blocks_release_for(controller, task.mission_id(), Some(task))
+}
+
+/// Checks the exact release scope against retained original contexts and provider evidence.
+fn blocks_release_for(
+    controller: &ControllerState,
+    mission_id: &domain::MissionId,
+    task: Option<&domain::TaskRef>,
+) -> bool {
+    if super::memory_preparation::blocks_release(controller, mission_id, task) {
+        return true;
+    }
     controller.memory_use.records.values().any(|record| {
         let Ok((_, preparation, _)) = source(controller, &record.execution_id) else {
             // A retained use record without its immutable source is an authority gap.  Keep the
             // release fail-closed until restore/reconciliation repairs or fences the record.
             return true;
         };
-        preparation.task_ref.mission_id() == mission_id && !revoke_acknowledged(record, preparation)
+        preparation.task_ref.mission_id() == mission_id
+            && task.is_none_or(|task| task == &preparation.task_ref)
+            && !revoke_acknowledged(record, preparation)
     })
+}
+
+/// Fences every original Group participant before any whole-Group terminal ownership release.
+pub(crate) fn revoke_group(
+    controller: &mut ControllerState,
+    group: &domain::ExecutionGroupId,
+    why: &str,
+    now: domain::TimestampMs,
+) -> Result<(), String> {
+    super::memory_preparation::revoke_group(controller, group, why, now)?;
+    let ids = controller
+        .memory_use
+        .records
+        .iter()
+        .filter(|(_, record)| {
+            record
+                .controls
+                .values()
+                .any(|delivery| &delivery.command.group_id == group)
+        })
+        .map(|(id, _)| id.clone())
+        .collect::<Vec<_>>();
+    for id in ids {
+        let mut record = controller.memory_use.records[&id].clone();
+        revoke(controller, &mut record, why, now)?;
+        controller.memory_use.records.insert(id, record);
+    }
+    Ok(())
+}
+
+/// Reserves original context and use fences before releasing one stopped recovery attempt.
+pub(crate) fn revoke_attempt(
+    controller: &mut ControllerState,
+    execution: &str,
+    now: domain::TimestampMs,
+) -> Result<(), String> {
+    super::memory_preparation::revoke_attempt(controller, execution, now)?;
+    if let Some(mut record) = controller.memory_use.records.get(execution).cloned() {
+        revoke(
+            controller,
+            &mut record,
+            "original attempt recovery requested",
+            now,
+        )?;
+        controller
+            .memory_use
+            .records
+            .insert(execution.into(), record);
+    }
+    Ok(())
+}
+
+/// Keeps stopped-role recovery local while still requiring every original provider ACK.
+pub(crate) fn blocks_attempt_release(controller: &ControllerState, execution: &str) -> bool {
+    super::memory_preparation::blocks_attempt_release(controller, execution)
+        || controller
+            .memory_use
+            .records
+            .get(execution)
+            .is_some_and(|record| {
+                source(controller, execution).map_or(true, |(_, preparation, _)| {
+                    !revoke_acknowledged(record, preparation)
+                })
+            })
+}
+
+/// Retains the issue-bound head expiry for a final per-send Execute permit.
+pub(crate) fn dispatch_expires_at(
+    controller: &ControllerState,
+    execution: &str,
+    now: domain::TimestampMs,
+) -> Option<u64> {
+    let record = controller.memory_use.records.get(execution)?;
+    let delivery = granted(record, now)?;
+    (delivery.command.generation == record.generation)
+        .then(|| expires(delivery))
+        .flatten()
 }
 
 /// Checks the independently committed lease at Runtime's whole-Group final Execute barrier.
@@ -554,23 +650,30 @@ fn validate_providers(
     execution: &str,
     outcome: &MemoryUseReceipt,
 ) -> Result<(), String> {
-    let (original, _, _) = source(controller, execution)?;
+    let (original, preparation, _) = source(controller, execution)?;
     for provider in &outcome.providers {
+        // Revoke deliberately grants no import IDs; select its complete original coverage from
+        // the retained preparation, never from the incoming acknowledgement's empty list.
+        let inputs = preparation
+            .inputs
+            .iter()
+            .filter(|input| input.consumer.provider_id() == provider.provider_id)
+            .map(|input| input.import_id.as_str())
+            .collect::<BTreeSet<_>>();
         let expected = original
             .controls
             .values()
             .filter_map(|delivery| delivery.receipt.as_ref())
             .filter(|receipt| receipt.status == domain::MemoryControlStatus::Available)
             .flat_map(|receipt| &receipt.observations)
-            .filter(|observation| provider.import_ids.contains(&observation.import_id))
+            .filter(|observation| inputs.contains(observation.import_id.as_str()))
             .map(|observation| (observation.import_id.as_str(), observation))
             .collect::<BTreeMap<_, _>>();
-        if outcome.status == MemoryUseStatus::Granted
-            && (expected.len() != provider.import_ids.len()
-                || expected.values().any(|observation| {
-                    observation.provider_instance_id != provider.provider_instance_id
-                        || observation.provider_contract_digest != provider.provider_contract_digest
-                }))
+        if expected.len() != inputs.len()
+            || expected.values().any(|observation| {
+                observation.provider_instance_id != provider.provider_instance_id
+                    || observation.provider_contract_digest != provider.provider_contract_digest
+            })
         {
             return Err("Memory use proof changed its original backend or configuration".into());
         }

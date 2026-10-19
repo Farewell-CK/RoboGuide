@@ -215,12 +215,34 @@ pub(crate) fn apply_task_verifier(
         let Some(domain::TaskSatisfactionBasis::VerifierEvidence(spec)) = controller
             .orchestrator
             .task_satisfaction_basis(&mission_id, &task_ref)
+            .cloned()
         else {
             continue;
         };
         if !verdict.satisfied && safety_stop::has_live_group_attempts(controller, &group_id) {
+            super::memory_use::revoke_group(
+                controller,
+                &group_id,
+                "final verifier rejected Mission",
+                now,
+            )?;
             safety_stop::admit_group_stop(controller, &group_id, now, 10_000)?;
             continue;
+        }
+        if verdict.satisfied {
+            if super::memory_use::blocks_task_release(controller, &task_ref) {
+                continue;
+            }
+        } else {
+            super::memory_use::revoke_group(
+                controller,
+                &group_id,
+                "final verifier rejected Mission",
+                now,
+            )?;
+            if super::memory_use::blocks_release(controller, &mission_id) {
+                continue;
+            }
         }
         if verdict.satisfied {
             if !super::semantic_verifier::task_policy_allows(

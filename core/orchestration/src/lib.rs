@@ -39,8 +39,9 @@ pub use mission::dispatch_policy::{
 pub use integration_bridge::{
     CONTROLLER_CHECKPOINT_SCHEMA, GroupSharedViewEntry, GroupSharedViewSnapshot,
     GroupSpatialVerification, GroupViewFreshness, IntegrationRuntimeBridge,
-    IntegrationRuntimeError, ObservedTaskExecutionOutcome, ObservedTaskExecutionResult,
-    RecoveryDeploymentSupport, RecoverySupportDisposition, RemoteExecutionStatus,
+    IntegrationRuntimeError, MemoryDispatchPermit, ObservedTaskExecutionOutcome,
+    ObservedTaskExecutionResult, RecoveryDeploymentSupport, RecoverySupportDisposition,
+    RemoteExecutionStatus,
 };
 pub use mechanism_profile::SupportedMechanismProfile;
 pub use mission::isolation::{

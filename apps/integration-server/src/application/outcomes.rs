@@ -44,9 +44,6 @@ fn apply_selected_outcomes(
         if only_mission.is_some_and(|selected| selected != &mission_id) {
             continue;
         }
-        if safety_stop::blocks_release(controller, &mission_id) {
-            continue;
-        }
         if controller
             .orchestrator
             .execution(&mission_id)
@@ -69,10 +66,22 @@ fn apply_selected_outcomes(
                 .ok_or("terminal outcome Mission is absent")?
                 .group_id()
                 .clone();
+            super::memory_use::revoke_group(
+                controller,
+                &group_id,
+                "Mission execution failed",
+                timestamp,
+            )?;
             if safety_stop::has_live_group_attempts(controller, &group_id) {
                 safety_stop::admit_group_stop(controller, &group_id, timestamp, 10_000)?;
                 continue;
             }
+            if super::memory_use::blocks_release(controller, &mission_id) {
+                continue;
+            }
+        }
+        if safety_stop::blocks_release(controller, &mission_id) {
+            continue;
         }
         run_mission_transition(
             controller,
@@ -148,6 +157,7 @@ fn apply_pending_execution_satisfaction(
         };
         for task in group.task_executions() {
             if task.lifecycle() == domain::TaskExecutionLifecycle::AwaitingSatisfaction
+                && !super::memory_use::blocks_task_release(controller, task.task_ref())
                 && should_apply_execution_report(
                     controller
                         .orchestrator
@@ -208,6 +218,24 @@ pub(crate) fn apply_pending_cancellations(
     correlation_id: &domain::CorrelationId,
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let cancelling = controller
+        .orchestrator
+        .mission_ids()
+        .into_iter()
+        .filter_map(|mission| {
+            let execution = controller.orchestrator.execution(&mission)?;
+            (execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling)
+                .then(|| execution.group_id().clone())
+        })
+        .collect::<Vec<_>>();
+    for group in cancelling {
+        super::memory_use::revoke_group(
+            controller,
+            &group,
+            "Mission cancellation requested",
+            timestamp,
+        )?;
+    }
     let ready = controller
         .orchestrator
         .mission_ids()
@@ -218,7 +246,8 @@ pub(crate) fn apply_pending_cancellations(
                 && controller
                     .bridge
                     .group_attempts_terminal(execution.group_id())
-                && !safety_stop::blocks_release(controller, &mission_id))
+                && !safety_stop::blocks_release(controller, &mission_id)
+                && !super::memory_use::blocks_release(controller, &mission_id))
             .then_some(mission_id)
         })
         .collect::<Vec<_>>();

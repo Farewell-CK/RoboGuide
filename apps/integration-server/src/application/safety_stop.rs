@@ -684,7 +684,7 @@ pub(crate) fn blocks_release(controller: &ControllerState, mission_id: &domain::
     controller.safety_stops.values().any(|purpose| {
         purpose.record.identity.task_ref.mission_id() == mission_id
             && !purpose.record.may_release_ownership()
-    }) || super::memory_use::blocks_release(controller, mission_id)
+    })
 }
 
 /// Revalidates complete retained confirmation evidence without relying on a new live session.

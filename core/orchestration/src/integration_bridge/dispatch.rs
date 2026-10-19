@@ -229,7 +229,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         execution_id: &str,
         command: &ExecutionCommand,
         resource_ids: &mut Vec<ResourceId>,
-        preparation: Option<&domain::MemoryPreparation>,
+        permit: Option<&super::MemoryDispatchPermit>,
         now: Option<TimestampMs>,
     ) -> Result<(), IntegrationRuntimeError> {
         if !self.dispatch_registration_is_current(command) {
@@ -240,7 +240,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             ));
         }
         if !command.memory_requirements().is_empty() {
-            let context = preparation.ok_or_else(|| {
+            let permit = permit.ok_or_else(|| {
                 IntegrationRuntimeError::Protocol(
                     "Memory prerequisites require a committed prepared-context permit".into(),
                 )
@@ -250,13 +250,17 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     "prepared dispatch requires current receive time".into(),
                 )
             })?;
-            if context.execution_id != execution_id || context.node_id != *command.node_id() {
+            let context = &permit.preparation;
+            if context.execution_id != execution_id
+                || context.node_id != *command.node_id()
+                || now >= permit.expires_at
+            {
                 return Err(IntegrationRuntimeError::Protocol(
-                    "prepared dispatch names another original attempt".into(),
+                    "prepared dispatch is expired or names another original attempt".into(),
                 ));
             }
             self.validate_memory_preparation(context, now)?;
-        } else if preparation.is_some() {
+        } else if permit.is_some() {
             return Err(IntegrationRuntimeError::Protocol(
                 "a command with no Memory requirements cannot borrow a prepared context".into(),
             ));
@@ -269,7 +273,8 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .transpose()
             .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
             .unwrap_or_default();
-        let route_result = if let Some(preparation) = preparation {
+        let route_result = if let Some(permit) = permit {
+            let preparation = &permit.preparation;
             self.router.execute_with_preparation(
                 command.node_id().as_str(),
                 integration::grpc::v0_4::Execute {
@@ -350,7 +355,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         &mut self,
         clock: &impl ports::Clock,
         held_groups: &BTreeSet<ExecutionGroupId>,
-        preparations: &BTreeMap<String, domain::MemoryPreparation>,
+        preparations: &BTreeMap<String, super::MemoryDispatchPermit>,
     ) -> Result<usize, IntegrationRuntimeError> {
         self.flush_dispatch_outbox_using_clock(Some(clock), held_groups, Some(preparations))
     }
@@ -360,27 +365,21 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         &mut self,
         clock: Option<&dyn ports::Clock>,
         held_groups: &BTreeSet<ExecutionGroupId>,
-        preparations: Option<&BTreeMap<String, domain::MemoryPreparation>>,
+        preparations: Option<&BTreeMap<String, super::MemoryDispatchPermit>>,
     ) -> Result<usize, IntegrationRuntimeError> {
         let intents = self.runtime.pending_dispatch_intents();
-        let memory_held = intents
-            .iter()
-            .filter(|intent| !intent.command.memory_requirements().is_empty())
-            .filter(|intent| {
-                preparations
-                    .and_then(|contexts| contexts.get(&intent.execution_id))
-                    .zip(clock.map(ports::Clock::now))
-                    .is_none_or(|(context, now)| {
-                        self.validate_memory_preparation(context, now).is_err()
-                    })
-            })
-            .map(|intent| intent.command.group_id().clone())
-            .collect::<BTreeSet<_>>();
         let state = self.decision_state();
         let mut delivered = 0;
         let mut first_error = None;
-        for intent in intents {
-            if memory_held.contains(intent.command.group_id()) {
+        for intent in &intents {
+            // The preceding route may have taken time. Check every pending Group input again,
+            // including when the next member itself has no Memory requirements.
+            if !self.memory_dispatch_group_permitted(
+                &intents,
+                preparations,
+                intent.command.group_id(),
+                clock,
+            ) {
                 continue;
             }
             if !self.dispatch_registration_is_current(&intent.command) {
@@ -442,6 +441,40 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             }
         }
         first_error.map_or(Ok(delivered), Err)
+    }
+
+    /// Rechecks all original pending Memory inputs at one fresh per-send decision time.
+    fn memory_dispatch_group_permitted(
+        &self,
+        intents: &[runtime::DispatchIntent],
+        preparations: Option<&BTreeMap<String, super::MemoryDispatchPermit>>,
+        group: &ExecutionGroupId,
+        clock: Option<&dyn ports::Clock>,
+    ) -> bool {
+        let mut inputs = intents
+            .iter()
+            .filter(|intent| {
+                intent.command.group_id() == group
+                    && !intent.command.memory_requirements().is_empty()
+            })
+            .peekable();
+        if inputs.peek().is_none() {
+            return true;
+        }
+        let now = clock.map(ports::Clock::now);
+        inputs.all(|intent| {
+            preparations
+                .and_then(|permits| permits.get(&intent.execution_id))
+                .zip(now)
+                .is_some_and(|(permit, now)| {
+                    permit.preparation.execution_id == intent.execution_id
+                        && permit.preparation.node_id == *intent.command.node_id()
+                        && now < permit.expires_at
+                        && self
+                            .validate_memory_preparation(&permit.preparation, now)
+                            .is_ok()
+                })
+        })
     }
 
     /// Persists cancellation intent for every retained nonterminal physical attempt in one Group.

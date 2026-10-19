@@ -59,3 +59,11 @@ Artifact staging 在 Controller/Integration Server 重启后按 upload event jou
 有权威 Started/Prepared 记录的 partial 文件增量哈希，Prepared 且 CAS 已完成时直接补写
 Completed；没有事件依据的 partial 文件清理。恢复不改变原 principal、tenant、deadline 或
 字节证明。
+
+2026-10-19 生命周期收敛：本地 completion 仍可进入 `AwaitingSatisfaction`，它不释放
+ownership。正常 Task 满足只等待该 Task 原 context 与所有 provider 的撤销确认，不能等待
+仍在运行的兄弟 Task；整组取消、失败、负向 verifier 和恢复则先撤销全组原 context，再等待
+全部原参与方。缺少或替换 backend instance/contract 的 revoke ACK 不授予释放权限。
+这些门禁与物理 stop 证据分别检查，不能互相替代。执行前 permit 保留 preparation、当前
+availability 和 use lease 的最早原始到期时间；每次发送前以新 receive clock 重新检查整组
+pending inputs，已经发出的命令仍由接收 Node 的原预算和本地 gate 约束。

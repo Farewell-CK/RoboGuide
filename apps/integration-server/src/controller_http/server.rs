@@ -2141,8 +2141,15 @@ where
                         now,
                         10_000,
                     )?;
+                    application::memory_use::revoke_group(
+                        &mut candidate,
+                        &group_id,
+                        "Mission cancellation requested",
+                        now,
+                    )?;
                     let safety_blocked =
-                        application::safety_stop::blocks_release(&candidate, &mission_id);
+                        application::safety_stop::blocks_release(&candidate, &mission_id)
+                            || application::memory_use::blocks_release(&candidate, &mission_id);
                     let ControllerState {
                         bridge,
                         orchestrator,
