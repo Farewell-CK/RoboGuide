@@ -226,8 +226,8 @@ def test_cancel_acceptance_does_not_immediately_report_cancelled(tmp_path: Path)
         adapter.close()
 
 
-def test_safe_state_requires_local_terminal_outcome_and_generation(tmp_path: Path) -> None:
-    """The safety export appears only after cancellation reaches the local terminal state."""
+def test_thread_backend_terminal_cannot_prove_original_process_exit(tmp_path: Path) -> None:
+    """Even a real local Cancelled result and generation cannot prove a separate process exit."""
     adapter, backend = _adapter(tmp_path)
     request = _request()
     invocation = request["invocation"]
@@ -240,17 +240,7 @@ def test_safe_state_requires_local_terminal_outcome_and_generation(tmp_path: Pat
         assert adapter.safe_state() == {"observations": []}
         adapter.cancel({"execution_id": execution_id})
         _wait_state(adapter, execution_id, "CANCELLED")
-        assert adapter.safe_state() == {
-            "observations": [
-                {
-                    "execution_id": "attempt-safe-4",
-                    "execution_generation": 4,
-                    "command_id": "cancel-attempt-safe-4",
-                    "safe_state": True,
-                    "assurance": "software-process",
-                }
-            ]
-        }
+        assert adapter.safe_state() == {"observations": []}
     finally:
         backend.finish.set()
         adapter.close()
