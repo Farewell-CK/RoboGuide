@@ -191,6 +191,76 @@ impl ControlPlane {
         Self::authorize_memory_policy_principal(policy, principal, operation)
     }
 
+    /// Authorizes an immutable source-bound handoff without transferring ownership or broadening
+    /// semantic scope. Cross-Group handoff is allowed only from a Global source to an existing
+    /// current target Group; a Group source may narrow to Local or remain within that Group.
+    pub fn authorize_memory_handoff(
+        &self,
+        parent: &MemoryArtifactManifest,
+        child: &MemoryArtifactManifest,
+        tenant: &str,
+        principal: &str,
+    ) -> Result<(), ControlError> {
+        parent
+            .validate()
+            .map_err(|error| ControlError::InvalidProposal(error.to_string()))?;
+        child
+            .validate()
+            .map_err(|error| ControlError::InvalidProposal(error.to_string()))?;
+        if parent.selector() == child.selector()
+            || parent.visibility() != domain::MemoryVisibility::Exchangeable
+            || child.visibility() != domain::MemoryVisibility::Exchangeable
+            || parent.kind() != child.kind()
+            || parent.provider_id() != child.provider_id()
+            || parent.payload_schema() != child.payload_schema()
+            || parent.media_type() != child.media_type()
+            || parent.owner() != child.owner()
+            || parent.artifact() != child.artifact()
+        {
+            return Err(denied(
+                "Memory handoff changes immutable ownership, contract or bytes",
+            ));
+        }
+        self.authorize_memory_principal(parent, tenant, principal, MemoryAccessOperation::Handoff)?;
+        let scope_allowed = match (parent.scope(), child.scope()) {
+            (MemoryScope::Local, MemoryScope::Local)
+            | (MemoryScope::ExecutionGroup(_), MemoryScope::Local)
+            | (MemoryScope::Global, MemoryScope::Local | MemoryScope::Global) => true,
+            (MemoryScope::ExecutionGroup(source), MemoryScope::ExecutionGroup(target)) => {
+                if source != target {
+                    return Err(denied(
+                        "Group-scoped Memory handoff cannot cross Groups without a Global source",
+                    ));
+                }
+                true
+            }
+            (MemoryScope::Global, MemoryScope::ExecutionGroup(target)) => {
+                let group = self
+                    .group(target)
+                    .ok_or_else(|| denied("Memory handoff target Group is absent"))?;
+                if group.lifecycle() == GroupLifecycle::Released
+                    || group.membership_version().is_none()
+                {
+                    return Err(denied("Memory handoff target Group is not current"));
+                }
+                if child
+                    .source_mission_id()
+                    .is_some_and(|mission| mission != group.mission_id())
+                {
+                    return Err(denied(
+                        "Memory handoff child provenance belongs to another Mission",
+                    ));
+                }
+                true
+            }
+            _ => false,
+        };
+        if !scope_allowed {
+            return Err(denied("Memory handoff broadens immutable semantic scope"));
+        }
+        Ok(())
+    }
+
     /// Checks complete Spatial provenance before granting a certificate-derived principal access.
     pub fn authorize_typed_map_principal(
         &self,

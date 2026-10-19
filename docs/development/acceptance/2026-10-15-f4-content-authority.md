@@ -18,7 +18,10 @@ session/lease、identity 与必需的 attestation；仅登记证书不能制造 
 
 上传在实际完整 bytes 的 hash/size/fsync 后才写 Prepared，CAS 可验证后写 Completed。最终
 SQL 失败保留 Prepared；exact finalize retry 只核对原 CAS，保留原 admission/deadline/
-preparation。Started 不证明存在完整内容。未实现的 handoff 继续拒绝。上传归属事件在完整
+preparation。Started 不证明存在完整内容。跨 scope parent/child handoff 现在必须经过 Control
+的显式 `Handoff` principal grant：owner/provider/bytes/schema/media 不得改变，scope 只能收窄；
+Global source 才能进入当前非 Released target Group。没有该 grant、目标 Group 或完整来源
+一致性时仍拒绝。实际跨 Group stop barrier/物理 handoff 仍是独立 gate。上传归属事件在完整
 snapshot/archive/replay 落地前不能删除。
 
 wrapper v32、inner v21、upload codec v23 保持回退 fence；Node journal 仍为 v7。原 Local
@@ -71,8 +74,9 @@ Python 2463 项、strict mypy 198 sources、Ruff/format 207 files、函数文档
 结构有效，真实 revision-2 Artifact registry 通过 schema 校验。
 
 仍须实现并验收 Node Group grant/接收预算/撤销 ACK、pre-Execute Memory prerequisite、当前
-availability、运行中撤销 stop/handoff、parent/child exchange、active-map、tombstone/完整引用图/
-GC 和完整空间接线。后续[实际点云计算](2026-10-15-f4-spatial-files.md)与
+availability、运行中撤销 stop/handoff、跨 Group stop barrier/physical handoff、active-map、
+tombstone/完整引用图/GC 和完整空间接线。parent/child exchange 的 Control scope/owner/bytes
+门禁已接入并由 Control 回归覆盖。后续[实际点云计算](2026-10-15-f4-spatial-files.md)与
 [Operator 事务内身份重查](2026-10-15-f4-operator-transactions.md)已有单独验收，不改写本轮历史。
 旧 Group 的显式可信迁移、typed-map 完整远端 provider/session 接线、HA 内容恢复及索引/锁性能仍须在 F4–F10
 闭环。真实停止、硬件身份、硬实时和物理连续性保持 HardwareEvidencePending；整体尚未

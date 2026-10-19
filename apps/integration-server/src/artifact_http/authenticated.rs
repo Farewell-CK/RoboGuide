@@ -114,6 +114,16 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
     fn admit_manifest(&self, manifest: &MemoryArtifactManifest) -> Result<(), String> {
         self.authority.admit_manifest(manifest)
     }
+    /// Delegates explicit source-bound scope handoff to the current Control authority.
+    fn authorize_memory_handoff(
+        &self,
+        principal: &ArtifactPrincipal,
+        parent: &MemoryArtifactManifest,
+        child: &MemoryArtifactManifest,
+    ) -> Result<(), String> {
+        self.authority
+            .authorize_memory_handoff(principal, parent, child)
+    }
     /// Keeps exact receiving provider and Node checks in the composition adapter.
     fn admit_replica(
         &self,

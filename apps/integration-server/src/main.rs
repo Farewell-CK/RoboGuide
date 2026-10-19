@@ -410,6 +410,23 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
             )
             .map_err(|e| e.to_string())
     }
+    /// Authorizes a source-bound immutable handoff through the current tenant/policy registry.
+    fn authorize_memory_handoff(
+        &self,
+        principal: &artifact_http::ArtifactPrincipal,
+        parent: &domain::MemoryArtifactManifest,
+        child: &domain::MemoryArtifactManifest,
+    ) -> Result<(), String> {
+        self.revalidate_artifact_principal(principal)?;
+        let live = self
+            .controller
+            .lock()
+            .map_err(|_| "Memory handoff authority unavailable")?;
+        live.bridge
+            .control()
+            .authorize_memory_handoff(parent, child, &principal.tenant_id, principal.subject())
+            .map_err(|error| error.to_string())
+    }
     /// Resolves current stable principal and exact actual certificate validity without role headers.
     fn refresh_artifact_principal(
         &self,

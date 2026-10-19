@@ -256,6 +256,67 @@ fn memory_member_generation_rejects_return_to_previous_owner() {
     );
 }
 
+/// Scope handoff requires an explicit principal grant and can only narrow a Group source.
+#[test]
+fn memory_handoff_requires_explicit_policy_and_rejects_cross_group_broadening() {
+    let (mut control, parent, _provider, _task, _role, _node) = authority();
+    let child = domain::MemoryArtifactManifest::new(
+        domain::MemorySelector::new(
+            domain::MemoryId::new("content-child").unwrap(),
+            domain::MemoryRevisionId::new("revision").unwrap(),
+        ),
+        parent.kind(),
+        parent.provider_id(),
+        parent.owner().clone(),
+        MemoryScope::Local,
+        MemoryVisibility::Exchangeable,
+        parent.payload_schema(),
+        parent.media_type(),
+        parent.artifact().cloned(),
+        None,
+        None,
+        None,
+        TimestampMs::new(2),
+    )
+    .unwrap();
+    assert!(
+        control
+            .authorize_memory_handoff(&parent, &child, "local", "admin")
+            .is_err()
+    );
+
+    let mut registry = control.memory_authorization_registry().unwrap().clone();
+    registry.revision = 2;
+    registry
+        .policies
+        .values_mut()
+        .next()
+        .unwrap()
+        .principals
+        .insert("admin".into(), BTreeSet::from([Op::Handoff]));
+    control
+        .accept_memory_authorization_registry(registry, 1)
+        .unwrap();
+    control
+        .authorize_memory_handoff(&parent, &child, "local", "admin")
+        .expect("explicit Group handoff grant permits narrowing to Local");
+
+    let mut foreign = child.clone();
+    let foreign_scope = ExecutionGroupId::new("foreign-group").unwrap();
+    let value = serde_json::to_value(&foreign).unwrap();
+    let mut value = value;
+    value["scope"] = serde_json::json!({
+        "kind": "execution_group",
+        "execution_group_id": foreign_scope.as_str()
+    });
+    foreign = serde_json::from_value(value).unwrap();
+    assert!(
+        control
+            .authorize_memory_handoff(&parent, &foreign, "local", "admin")
+            .is_err()
+    );
+}
+
 /// Revocation changes content eligibility without changing any Group lifecycle, binding or reservation.
 #[test]
 fn memory_revocation_retains_ownership_and_original_manifest_identity() {
