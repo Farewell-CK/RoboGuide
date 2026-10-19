@@ -83,8 +83,9 @@ Spatial v0 的已知后续工作：
   TaskExecution。
 - Generic Memory 已由 ADR-0098/ADR-0100 接入 exact current Group/Task/Role/attempt/provider 的
   Controller -> Node selective-import command、durable receipt 和重试 fence；Unknown 的显式
-  reconciliation 已由 ADR-0105 接入原实例只读查询；完整成员授权与 retention/GC/revocation
-  仍未关闭。当前 Control 已补 source-bound parent/child handoff 的显式 Handoff principal、
+  reconciliation 已由 ADR-0105 接入原实例只读查询；当前使用租约已有原 provider 集合的
+  provider-complete revoke release gate，但多 Node 完整成员授权、retention/GC 和跨节点
+  revocation 仍未关闭。当前 Control 已补 source-bound parent/child handoff 的显式 Handoff principal、
   owner/provider/bytes/schema/media 不变和 scope 收窄门禁；跨 Group stop barrier/physical
   handoff 仍未由该门禁冒充关闭。discovery 不授权全量复制，
   import 不得隐式改变 Task lifecycle。

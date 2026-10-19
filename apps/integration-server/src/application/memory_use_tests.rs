@@ -59,6 +59,79 @@ fn timing_receipt(command: &MemoryUseControl) -> MemoryUseReceipt {
     }
 }
 
+/// A release gate cannot treat an aggregate revoke status as complete without every provider.
+#[test]
+fn revoke_release_gate_requires_distinct_provider_acknowledgements() {
+    let command = control(1);
+    let mut revoke = command.clone();
+    revoke.operation = MemoryUseOperation::Revoke;
+    revoke.generation = 0;
+    revoke.valid_for_ms = 0;
+    revoke.command_id = revoke.expected_command_id();
+    let mut record = record();
+    queue(&mut record, revoke.clone(), domain::TimestampMs::new(100)).unwrap();
+    let preparation: domain::MemoryPreparation = serde_json::from_value(serde_json::json!({
+        "schema":"roboguide.memory-preparation/v0.2","preparation_id":"unit-original-preparation",
+        "tenant_id":"unit-tenant","group_id":"unit-group","task_ref":{"mission_id":"unit-mission","task_id":"unit-task"},
+        "role_id":"unit-role","execution_id":"unit-original-attempt","node_id":"unit-metadata-node","source_session_id":"unit-original-session",
+        "membership":{"generation":1,"bindings_digest":format!("sha256:{}","b".repeat(64))},"registry_id":"unit-policy","registry_revision":1,
+        "invocation":{"mission_id":"unit-mission","group_id":"unit-group","task_id":"unit-task","role_id":"unit-role","operation":"unit@v1","objective":"unit","parameters":{},"resource_ids":[]},
+        "resource_ids":[],"valid_for_ms":120000,"inputs":[{"requirement":{"selector":{"memory_id":"unit-memory","revision_id":"r1"},"kind":"artifact","payload_schema":"unit.file/v1","media_type":"application/octet-stream"},
+        "manifest":{"schema":"roboguide.memory-manifest/v0.1","selector":{"memory_id":"unit-memory","revision_id":"r1"},"kind":"artifact","provider_id":"unit-source","owner":{"owner":"node","node_id":"unit-publisher","local_system_id":"files"},"scope":{"kind":"global"},"visibility":"exchangeable","payload_schema":"unit.file/v1","media_type":"application/octet-stream","artifact":{"content_digest":format!("sha256:{}","c".repeat(64)),"byte_size":1},"created_at":1},
+        "typed_map":null,"consumer":{"preparation_contract":"unit","use_contract":"roboguide.memory-use/shared-kernel/v0.1","provider_id":"provider-a","local_system_id":"files","kind":"artifact","scope":{"kind":"global"},"visibility":"exchangeable","payload_schema":"unit.file/v1","media_type":"application/octet-stream"},"import_id":"unit-import"}]
+    })).unwrap();
+    let delivery = record.controls.get_mut(&revoke.command_id).unwrap();
+    delivery.receipt = Some(MemoryUseReceipt {
+        schema: "roboguide.memory-use-receipt/v0.1".into(),
+        command_id: revoke.command_id.clone(),
+        lease_id: revoke.lease_id.clone(),
+        generation: 0,
+        preparation_id: revoke.preparation_id.clone(),
+        preparation_digest: revoke.preparation_digest.clone(),
+        configuration_digest: revoke.configuration_digest.clone(),
+        status: MemoryUseStatus::Revoked,
+        remaining_budget_ms: 0,
+        providers: vec![],
+        reason: String::new(),
+    });
+    delivery.received_at_ms = Some(101);
+    assert!(!revoke_acknowledged(&record, &preparation));
+    record
+        .controls
+        .get_mut(&revoke.command_id)
+        .unwrap()
+        .receipt
+        .as_mut()
+        .unwrap()
+        .providers
+        .push(domain::MemoryUseProviderAcknowledgement {
+            provider_id: "provider-a".into(),
+            provider_instance_id: "unit-backend".into(),
+            provider_contract_digest: format!("sha256:{}", "d".repeat(64)),
+            import_ids: vec![],
+            receipt_digest: format!("sha256:{}", "e".repeat(64)),
+            original_receipt: serde_json::json!({"status":"revoked"}),
+        });
+    assert!(revoke_acknowledged(&record, &preparation));
+    record
+        .controls
+        .get_mut(&revoke.command_id)
+        .unwrap()
+        .receipt
+        .as_mut()
+        .unwrap()
+        .providers
+        .push(domain::MemoryUseProviderAcknowledgement {
+            provider_id: "provider-a".into(),
+            provider_instance_id: "unit-backend".into(),
+            provider_contract_digest: format!("sha256:{}", "d".repeat(64)),
+            import_ids: vec![],
+            receipt_digest: format!("sha256:{}", "e".repeat(64)),
+            original_receipt: serde_json::json!({"status":"revoked"}),
+        });
+    assert!(!revoke_acknowledged(&record, &preparation));
+}
+
 /// An identical command cannot gain time or delivery opportunities through a retry or serialization.
 #[test]
 fn duplicate_grant_preserves_original_issue_and_expiry() {

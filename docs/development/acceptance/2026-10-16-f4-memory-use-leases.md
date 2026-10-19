@@ -70,6 +70,15 @@ provider instance、identity digest 和 contract digest 完全一致时晋升为
 source 和已有 use head/commands/effects 的 consumer 均拒绝旧 Node v9，回退 header 后仍拒绝
 durable marker；旧 Controller v36 拒绝 v37（含 0 Node / 0 event）。原 authority 行 digest 均不变。
 
+2026-10-19 增加了应用层的 provider-complete release gate。撤销命令提交后，
+`safety_stop::blocks_release` 还会检查原 preparation 的 provider 集合；只有同一 revoke
+command 收到 `revoked` receipt、provider ID 集合精确相等且没有重复项，Mission/Group 才能
+继续 terminal release。缺 provider、重复 provider、foreign provider、Unknown 或尚未收到
+回执都会 fail-closed。Node engine 仍先逐 provider 校验原始 backend response，Node journal
+仍校验每个 provider effect 的 durable receipt；该门禁只是把这组证据真正接入 release，
+不把聚合状态单独当作整组撤销完成。它不等价于多 Node 动态 Group 授权、物理 stop、handoff
+或硬实时安全证明。
+
 全工作区 Rust 检查在本次最新代并发修正前通过 824 项、忽略 2 项；Clippy、private Rustdoc、
 fmt 与 Python 全量离线检查通过。Python 变更路径 Ruff、strict mypy（17 文件）和函数文档检查
 通过；全量类型检查的既有问题仍归 F10，不由该局部检查声明通过。最新代并发修正的 4 项

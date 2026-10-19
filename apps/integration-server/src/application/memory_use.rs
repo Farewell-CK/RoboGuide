@@ -260,6 +260,68 @@ fn dispatch_grant(record: &MemoryUseRecord, now: domain::TimestampMs) -> bool {
     granted(record, now).is_some_and(|delivery| delivery.command.generation == record.generation)
 }
 
+/// Returns the provider identities selected by the immutable original preparation.
+fn expected_provider_ids(preparation: &MemoryPreparation) -> BTreeSet<String> {
+    preparation
+        .inputs
+        .iter()
+        .map(|input| input.consumer.provider_id().to_string())
+        .collect()
+}
+
+/// Requires one distinct revoke acknowledgement for every original provider.
+///
+/// The Node engine validates each opaque provider response before constructing the aggregate
+/// receipt.  The application nevertheless keeps the release gate at provider granularity: an
+/// aggregate `revoked` status with a missing, duplicated, or foreign provider entry is not enough
+/// to release the Mission Group.
+fn revoke_acknowledged(record: &MemoryUseRecord, preparation: &MemoryPreparation) -> bool {
+    let expected = expected_provider_ids(preparation);
+    if !record.revoked {
+        return false;
+    }
+    let Some(delivery) = record
+        .controls
+        .values()
+        .find(|value| value.command.operation == MemoryUseOperation::Revoke)
+    else {
+        return false;
+    };
+    let Some(receipt) = &delivery.receipt else {
+        return false;
+    };
+    if receipt.status != MemoryUseStatus::Revoked
+        || receipt.command_id != delivery.command.command_id
+        || receipt.generation != 0
+        || delivery.received_at_ms.is_none()
+    {
+        return false;
+    }
+    let observed = receipt
+        .providers
+        .iter()
+        .map(|provider| provider.provider_id.clone())
+        .collect::<BTreeSet<_>>();
+    observed == expected
+        && observed.len() == receipt.providers.len()
+        && receipt
+            .providers
+            .iter()
+            .all(|provider| provider.import_ids.is_empty())
+}
+
+/// Blocks terminal Mission release while any original content-use provider is unresolved.
+pub(crate) fn blocks_release(controller: &ControllerState, mission_id: &domain::MissionId) -> bool {
+    controller.memory_use.records.values().any(|record| {
+        let Ok((_, preparation, _)) = source(controller, &record.execution_id) else {
+            // A retained use record without its immutable source is an authority gap.  Keep the
+            // release fail-closed until restore/reconciliation repairs or fences the record.
+            return true;
+        };
+        preparation.task_ref.mission_id() == mission_id && !revoke_acknowledged(record, preparation)
+    })
+}
+
 /// Checks the independently committed lease at Runtime's whole-Group final Execute barrier.
 pub(crate) fn permits(
     controller: &ControllerState,

@@ -73,8 +73,9 @@ ownership、实际证书时间、恢复 session 清空、租户管理员越界�
 Python 2463 项、strict mypy 198 sources、Ruff/format 207 files、函数文档通过。两份授权 schema
 结构有效，真实 revision-2 Artifact registry 通过 schema 校验。
 
-仍须实现并验收 Node Group grant/接收预算/撤销 ACK、pre-Execute Memory prerequisite、当前
-availability、运行中撤销 stop/handoff、跨 Group stop barrier/physical handoff、active-map、
+Node Group grant/接收预算已有当前 use lease 与 provider-complete release gate；仍须完善并验收
+多 Node 成员授权、pre-Execute Memory prerequisite、当前 availability、运行中撤销
+stop/handoff、跨 Group stop barrier/physical handoff、active-map、
 tombstone/完整引用图/GC 和完整空间接线。parent/child exchange 的 Control scope/owner/bytes
 门禁已接入并由 Control 回归覆盖。后续[实际点云计算](2026-10-15-f4-spatial-files.md)与
 [Operator 事务内身份重查](2026-10-15-f4-operator-transactions.md)已有单独验收，不改写本轮历史。
