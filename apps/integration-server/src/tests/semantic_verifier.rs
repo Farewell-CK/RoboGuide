@@ -222,6 +222,26 @@ impl Fixture {
     }
 }
 
+/// A per-Task producer keeps legitimate intermediate verification and DAG dependencies.
+#[tokio::test]
+async fn plan_preflight_keeps_timely_independent_verifier_dependencies() {
+    let fixture = Fixture::new();
+    fixture.sources(false, false).await;
+    let before = server_checkpoint_json(&fixture.controller.lock().unwrap()).unwrap();
+    let sequence = fixture.log.latest_sequence().unwrap();
+    let (status, result) = fixture
+        .request("/v1/missions/validate-plan", &plan(), false, 3)
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(result["decision"], "not_blocked");
+    assert_eq!(result["verifier_source_digest"], serde_json::Value::Null);
+    assert_eq!(
+        server_checkpoint_json(&fixture.controller.lock().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(fixture.log.latest_sequence().unwrap(), sequence);
+}
+
 /// Declares software producer ownership and nonrenewable continuous measurement bounds.
 fn registry(continuous: bool, require_artifact: bool) -> serde_json::Value {
     serde_json::json!({"command_id":"enroll-verifier","expected_revision":0,"registry":{

@@ -1389,7 +1389,7 @@ fn current_journal_keeps_legacy_inspection_but_refuses_legacy_writes() {
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        11
+        12
     );
 }
 
@@ -1399,7 +1399,7 @@ fn future_journal_and_dual_authorities_refuse_without_migration() {
     let (directory, path, journal) = journal();
     drop(journal);
     let connection = rusqlite::Connection::open(&path).unwrap();
-    connection.pragma_update(None, "user_version", 12).unwrap();
+    connection.pragma_update(None, "user_version", 13).unwrap();
     drop(connection);
     assert!(ExecutionJournal::open(&path).is_err());
     let connection = rusqlite::Connection::open(&path).unwrap();
@@ -1407,9 +1407,9 @@ fn future_journal_and_dual_authorities_refuse_without_migration() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        12
+        13
     );
-    connection.pragma_update(None, "user_version", 11).unwrap();
+    connection.pragma_update(None, "user_version", 12).unwrap();
     connection
         .execute_batch("DROP VIEW executions; CREATE TABLE executions (shadow INTEGER)")
         .unwrap();

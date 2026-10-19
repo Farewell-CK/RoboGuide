@@ -1,6 +1,6 @@
 # 当前软件实现与部署拓扑
 
-更新：2026-10-19。对应全部非发布软件整改计划；后续目标不视为当前能力。
+更新：2026-10-20。对应全部非发布软件整改计划；后续目标不视为当前能力。
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
 
@@ -13,10 +13,13 @@ flowchart TB
   ID --> PROTO
   ID --> ART
   MI --> Entry[Controller 用户与高权限入口]
+  MI --> PREFLIGHT[只读发布合同前检 / exact plan + source digests]
+  PREFLIGHT --> FEEDBACK[有界草案错误 / 原始输出保留]
+  FEEDBACK --> MI
   Entry --> ORCH[Orchestration / DAG / Mission hold]
   ORCH --> CTRL[Control / commitment / binding / calendar]
   CTRL --> RT[Runtime / attempts / durable intents]
-  RT --> PROTO[Integration / Node Protocol]
+  RT --> PROTO[Integration / Node Protocol / 独立 generation + Memory 字段]
   PROTO --> NODE[配置接入的 Node Service]
   NODE --> LOCAL[部署侧 Local EAIOS / 操作 / 即时安全]
   LOCAL --> OBS[注册中声明的 State / safe-state export]
@@ -35,7 +38,7 @@ flowchart TB
   CTRL --> SQL
   RT --> SQL
   STATE --> SQL
-  SQL -. 显式 HA profile .-> HA[静态三成员 quorum / epoch / materialization]
+  SQL -. 显式 HA profile .-> HA[quorum / 动态成员 / leader transfer / epoch / materialization]
   NODE <--> ART[Artifact CAS / 内容授权]
   NODE --> MEM[配置固定的 Local Memory provider]
   MEM --> QUERY[原实例 GET query / 实际 bytes 与原始日志]
@@ -114,6 +117,10 @@ Runtime 在实际 dispatch preparation 冻结原 Node contract、session 和 pro
 并同时核对通用与完整 Spatial 两份 digest。通用读取/import 不能丢弃 typed provenance；
 旧策略缺依据时拒绝 map 读取，只有显式收紧升级可以增加 binding，已有 binding 不可替换或
 移除。wrapper v34 拒绝旧 Controller 忽略新策略，包括无事件的策略事务。
+
+发布合同前检与提交复用应用校验，见 [ADR-0109](../../decisions/0109-published-plan-validation-and-bounded-draft-recovery.md)。
+前检不写入权威状态、不选择 Node，也不保证物理可达或当前资源可用；真实提交仍重新检查。
+终态 verifier 的资源持有限制来自显式部署来源，不成为通用单 Actor 或顺序执行禁令。
 
 副作用只在应用事务持久化并取得当前 quorum/epoch 后发出。副本只复制元数据和命令证据，
 CAS 内容及 Local EAIOS 执行连续性需要独立恢复合同。Unknown 保留所有权；本地安全仍由
@@ -197,3 +204,12 @@ Application 持久化双 Group 的原成员/attempt/策略/期限，使用现有
 Control 保持唯一 Commit/Bind/Rebind 权威。带父级 lineage 的新 scoped manifest 仅在停止与
 撤销齐全后提交，目标真实准备与显式 commit 后才 Execute。原 typed-map provenance 单独
 保留，软件 assurance 不建立设备停止或物理交接证明。
+
+分支集成以 [ADR-0111](../../decisions/0111-branch-integration-and-authority-version-fences.md) 为准：
+统一 Node Contract v0.12/config v0.13/catalog v0.15，Execute tag 11 单独传输原 attempt generation；
+Memory preparation、use/revoke 和独立进程停止保留各自证据。共享 wrapper v41/journal v12
+拒绝旧 writer；跨分支版本号碰撞不成为迁移授权。软件进程退出仍不证明设备停止。
+自然失败的 hold 收尾只消费当前原始 Failed attempt；Cancelled 不变成 Failed，也不绕过
+Memory handoff 的 binding 保留。停止确认本身不释放正在交接的源 Group。
+Artifact 的单 writer lease 随最后一个应用 store/clone/upload 显式释放；无写入权的子进程
+继承 descriptor 不延长该应用的写入权，也不允许仍有上传时启动第二 writer。

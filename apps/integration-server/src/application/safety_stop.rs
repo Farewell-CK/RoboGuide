@@ -13,11 +13,75 @@ struct SafeStateObservation {
     /// Frozen attempt generation.
     execution_generation: u64,
     /// Exact stop command observed by the provider.
-    command_id: String,
+    command_id: Option<String>,
+    /// Independently reaped original process, only legal in explicit v0.3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    process_exit: Option<ProcessExitObservation>,
+    /// Original local terminal state, retained without rewriting it as Cancelled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    terminal_state: Option<String>,
     /// Provider-observed safe state, separate from command acceptance.
     safe_state: bool,
     /// Software-process observations cannot establish device stopping.
     assurance: domain::SafetyAssurance,
+}
+
+/// One original process, observed exited by its owning LocalSystem; not device safety.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessExitObservation {
+    /// Identity fixed at original worker construction, never reassigned after exit.
+    instance_id: String,
+    /// OS identity observed from the original process handle.
+    pid: u64,
+    /// Actual exit status after join.
+    exit_code: i32,
+    /// Immutable Group owning this worker's attempts.
+    group_id: String,
+    /// Complete original-worker current-attempt coverage, without duplicate identities.
+    attempts: Vec<ProcessAttempt>,
+}
+
+/// Exact attempt generation covered by the original exited worker.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessAttempt {
+    /// Runtime physical attempt identity.
+    execution_id: String,
+    /// Runtime-issued generation.
+    execution_generation: u64,
+}
+
+/// Validates a bounded source observation without substituting a terminal status for exit.
+fn process_exit_valid(proof: &ProcessExitObservation) -> bool {
+    !proof.instance_id.is_empty()
+        && proof.instance_id.len() <= 128
+        && proof.pid > 0
+        && !proof.group_id.is_empty()
+        && proof.group_id.len() <= 256
+        && !proof.attempts.is_empty()
+        && proof.attempts.len() <= 256
+        && proof.attempts.iter().all(|attempt| {
+            !attempt.execution_id.is_empty()
+                && attempt.execution_id.len() <= 1024
+                && attempt.execution_generation > 0
+        })
+        && proof
+            .attempts
+            .iter()
+            .map(|attempt| &attempt.execution_id)
+            .collect::<BTreeSet<_>>()
+            .len()
+            == proof.attempts.len()
+}
+
+/// Natural-terminal reconciliation never claims that a Cancel command was admitted.
+fn natural_process_exit(proof: &SafetyObservationProof) -> bool {
+    proof.observation.process_exit.is_some()
+        && matches!(
+            proof.observation.terminal_state.as_deref(),
+            Some("FAILED" | "COMPLETED")
+        )
 }
 
 /// One fixed State export may observe multiple independent local handles without changing its object key.
@@ -102,6 +166,9 @@ pub(crate) struct SafetyStopPurpose {
     support: Option<domain::OperationSafetySupport>,
     /// Frozen source/schema/freshness/conflict gate, not supplied by observations.
     policy: Option<state::DecisionEvidencePolicy>,
+    /// Complete current Group attempt set frozen before requesting this process stop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    process_attempts: Option<BTreeSet<ProcessAttempt>>,
     /// Exact Cancel identity in the existing Runtime outbox.
     command_id: String,
     /// First durable command receipt receive time.
@@ -121,6 +188,19 @@ pub(crate) struct SafetyStopPurpose {
 }
 
 impl SafetyStopPurpose {
+    /// Prevents older wrappers from acquiring original-worker exit reconciliation authority.
+    pub(crate) fn uses_process_exit_contract(&self) -> bool {
+        self.process_attempts.is_some()
+            || self.record.phase == SafetyStopPhase::TerminalProcessObserved
+            || self.export.as_ref().is_some_and(|export| {
+                export.payload_schema() == domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+            })
+            || self
+                .safe_proof
+                .as_ref()
+                .is_some_and(|proof| proof.observation.process_exit.is_some())
+    }
+
     /// Identifies current typed authority so old wrapper versions cannot hide it.
     pub(crate) fn is_current_authority(&self) -> bool {
         self.legacy_evidence.is_none()
@@ -177,6 +257,7 @@ pub(crate) fn deserialize_purposes<'de, D: serde::Deserializer<'de>>(
                     export: None,
                     support: None,
                     policy: None,
+                    process_attempts: None,
                     command_id: format!("cancel-{id}"),
                     accepted_at: None,
                     stopped_at: legacy.stopped_at,
@@ -233,7 +314,10 @@ fn safety_declaration(
             export.export_id() == support.safe_state_export_id
                 && export.local_system_id() == owner
                 && export.semantic() == domain::StateSemantic::Observed
-                && export.payload_schema() == domain::SAFE_STATE_OBSERVATION_SCHEMA
+                && matches!(
+                    export.payload_schema(),
+                    domain::SAFE_STATE_OBSERVATION_SCHEMA | domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+                )
         })?
         .clone();
     let mut policy = state::DecisionEvidencePolicy::new(
@@ -252,8 +336,38 @@ fn safety_declaration(
         state::ConflictReducer::RequireEquivalent,
     )
     .ok()?;
-    policy.payload_schema = Some(domain::SAFE_STATE_OBSERVATION_SCHEMA.into());
+    policy.payload_schema = Some(export.payload_schema().into());
     Some((export, support, policy))
+}
+
+/// Freezes exact current Group generations; later recovery cannot rewrite original coverage.
+fn current_process_attempts(
+    controller: &ControllerState,
+    group_id: &domain::ExecutionGroupId,
+) -> Option<BTreeSet<ProcessAttempt>> {
+    controller
+        .bridge
+        .attempt_history()
+        .into_iter()
+        .filter(|attempt| {
+            attempt.command().group_id() == group_id
+                && controller.bridge.current_task_attempt_id(
+                    group_id,
+                    attempt.command().task_ref(),
+                    attempt.command().role_id(),
+                ) == Some(attempt.execution_id())
+        })
+        .map(|attempt| {
+            Some(ProcessAttempt {
+                execution_id: attempt.execution_id().to_owned(),
+                execution_generation: controller.bridge.current_attempt_generation(
+                    group_id,
+                    attempt.command().task_ref(),
+                    attempt.command().role_id(),
+                )?,
+            })
+        })
+        .collect()
 }
 
 /// Detects current nonterminal physical work before any whole-Group terminal release decision.
@@ -392,6 +506,16 @@ pub(crate) fn admit(
             Some((export, support, policy)) => (Some(export), Some(support), Some(policy)),
             None => (None, None, None),
         };
+        let process_attempts = if export.as_ref().is_some_and(|export| {
+            export.payload_schema() == domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+        }) {
+            Some(
+                current_process_attempts(controller, group_id)
+                    .ok_or("current process-stop Group lacks original attempt generations")?,
+            )
+        } else {
+            None
+        };
         let session_id = controller
             .bridge
             .current_node_session(command.node_id())
@@ -431,6 +555,7 @@ pub(crate) fn admit(
                 export,
                 support,
                 policy,
+                process_attempts,
                 command_id: format!("cancel-{}", attempt.execution_id()),
                 accepted_at: None,
                 stopped_at: None,
@@ -573,8 +698,35 @@ fn safe_proof(
     let observation = matching.into_iter().next()?;
     if !observation.safe_state
         || observation.execution_generation != identity.execution_generation
-        || observation.command_id != purpose.command_id
         || observation.assurance != support.assurance
+    {
+        return None;
+    }
+    if export.payload_schema() == domain::PROCESS_EXIT_OBSERVATION_SCHEMA {
+        let exited = observation.process_exit.as_ref()?;
+        let expected = purpose.process_attempts.as_ref()?;
+        let actual: BTreeSet<_> = exited.attempts.iter().cloned().collect();
+        if current_process_attempts(controller, &identity.group_id).as_ref() != Some(expected) {
+            return None;
+        }
+        let status = match controller.bridge.execution_status(&identity.execution_id)? {
+            orchestration::RemoteExecutionStatus::Failed => "FAILED",
+            orchestration::RemoteExecutionStatus::Completed => "COMPLETED",
+            orchestration::RemoteExecutionStatus::Cancelled => "CANCELLED",
+            _ => return None,
+        };
+        if !process_exit_valid(exited)
+            || exited.group_id != identity.group_id.as_str()
+            || *expected != actual
+            || observation.command_id.is_some()
+            || observation.terminal_state.as_deref() != Some(status)
+            || observation.assurance != domain::SafetyAssurance::SoftwareProcess
+        {
+            return None;
+        }
+    } else if observation.process_exit.is_some()
+        || observation.terminal_state.is_some()
+        || observation.command_id.as_deref() != Some(purpose.command_id.as_str())
     {
         return None;
     }
@@ -634,6 +786,22 @@ pub(crate) fn tick(controller: &mut ControllerState, now: TimestampMs) -> Result
                 .map_err(|error| error.to_string())?;
         }
         if let Some(proof) = proof {
+            if natural_process_exit(&proof) {
+                if purpose.record.phase == SafetyStopPhase::StopRequested {
+                    purpose
+                        .record
+                        .advance(
+                            &identity,
+                            SafetyStopPhase::TerminalProcessObserved,
+                            proof.received_at,
+                            "original-worker-exit-and-natural-terminal",
+                            &proof.record_digest,
+                        )
+                        .map_err(|error| error.to_string())?;
+                }
+                purpose.stopped_at.get_or_insert(proof.received_at);
+                purpose.safe_at.get_or_insert(proof.received_at);
+            }
             if purpose.record.phase == SafetyStopPhase::StopCommandAccepted {
                 purpose
                     .record
@@ -647,12 +815,14 @@ pub(crate) fn tick(controller: &mut ControllerState, now: TimestampMs) -> Result
                     .map_err(|error| error.to_string())?;
                 purpose.safe_at.get_or_insert(proof.received_at);
             }
-            if purpose.record.phase == SafetyStopPhase::SafeStateObserved
-                && let Some(stopped) = purpose.stopped_at
+            if matches!(
+                purpose.record.phase,
+                SafetyStopPhase::SafeStateObserved | SafetyStopPhase::TerminalProcessObserved
+            ) && let Some(stopped) = purpose.stopped_at
             {
                 let confirmation_time = stopped
                     .max(proof.received_at)
-                    .max(purpose.accepted_at.ok_or("stop acceptance is absent")?);
+                    .max(purpose.accepted_at.unwrap_or(proof.received_at));
                 let confirmation_digest =
                     digest(&(&identity, &purpose.receipt_digest, stopped, &proof))?;
                 purpose
@@ -661,7 +831,11 @@ pub(crate) fn tick(controller: &mut ControllerState, now: TimestampMs) -> Result
                         &identity,
                         SafetyStopPhase::StopConfirmed,
                         confirmation_time,
-                        "terminal-cancel-and-independent-safe-state",
+                        if natural_process_exit(&proof) {
+                            "original-worker-exit-and-natural-terminal"
+                        } else {
+                            "terminal-cancel-and-independent-safe-state"
+                        },
                         confirmation_digest,
                     )
                     .map_err(|error| error.to_string())?;
@@ -704,9 +878,14 @@ fn validate_confirmation(purpose: &SafetyStopPurpose) -> Result<(), String> {
         .safe_proof
         .as_ref()
         .ok_or("confirmed stop checkpoint lacks its observation proof")?;
-    let accepted = purpose
-        .accepted_at
-        .ok_or("confirmed stop lacks original acceptance time")?;
+    let natural = natural_process_exit(proof);
+    let accepted = if natural {
+        purpose.accepted_at.unwrap_or(proof.received_at)
+    } else {
+        purpose
+            .accepted_at
+            .ok_or("confirmed stop lacks original acceptance time")?
+    };
     let stopped = purpose
         .stopped_at
         .ok_or("confirmed stop lacks original terminal time")?;
@@ -732,10 +911,11 @@ fn validate_confirmation(purpose: &SafetyStopPurpose) -> Result<(), String> {
     if batch.observations.len() > 256
         || matches.len() != 1
         || matches[0] != &proof.observation
-        || purpose
-            .receipt_digest
-            .as_ref()
-            .is_none_or(|value| !is_digest(value))
+        || (!natural
+            && purpose
+                .receipt_digest
+                .as_ref()
+                .is_none_or(|value| !is_digest(value)))
         || purpose.session_id.as_deref() != Some(proof.source_epoch.as_str())
         || proof.record.source_epoch() != Some(proof.source_epoch.as_str())
         || proof.key != *proof.record.key()
@@ -748,7 +928,18 @@ fn validate_confirmation(purpose: &SafetyStopPurpose) -> Result<(), String> {
         || !proof.observation.safe_state
         || proof.observation.execution_id != identity.execution_id
         || proof.observation.execution_generation != identity.execution_generation
-        || proof.observation.command_id != purpose.command_id
+        || (proof.observation.process_exit.is_none()
+            && proof.observation.command_id.as_deref() != Some(purpose.command_id.as_str()))
+        || (proof.observation.process_exit.is_some()
+            && (proof.observation.command_id.is_some()
+                || proof.record.payload_schema() != domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+                || !process_exit_valid(
+                    proof
+                        .observation
+                        .process_exit
+                        .as_ref()
+                        .expect("checked process witness"),
+                )))
         || [accepted, stopped, proof.received_at]
             .iter()
             .any(|time| *time < purpose.record.requested_at || *time >= purpose.record.deadline)
@@ -824,7 +1015,10 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<bool, St
             if &support.operation != command.intent().operation()
                 || support.safe_state_export_id != export.export_id()
                 || export.semantic() != domain::StateSemantic::Observed
-                || export.payload_schema() != domain::SAFE_STATE_OBSERVATION_SCHEMA
+                || !matches!(
+                    export.payload_schema(),
+                    domain::SAFE_STATE_OBSERVATION_SCHEMA | domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+                )
                 || policy.object != *export.object()
                 || policy.channel_id != export.export_id()
                 || policy.allowed_sources
@@ -841,6 +1035,41 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<bool, St
         if purpose.record.phase.confirms_stop() {
             if purpose.legacy_evidence.is_some() {
                 return Err("legacy evidence cannot grant stop confirmation".into());
+            }
+            if let Some(proof) = &purpose.safe_proof
+                && let Some(exited) = &proof.observation.process_exit
+            {
+                let frozen = purpose
+                    .process_attempts
+                    .as_ref()
+                    .ok_or("restored process stop lacks original Group coverage")?;
+                let actual: BTreeSet<_> = exited.attempts.iter().cloned().collect();
+                let history: BTreeSet<_> = controller
+                    .bridge
+                    .attempt_history()
+                    .into_iter()
+                    .filter(|attempt| attempt.command().group_id() == &identity.group_id)
+                    .map(|attempt| ProcessAttempt {
+                        execution_id: attempt.execution_id().to_owned(),
+                        execution_generation: attempt.command().execution_generation().unwrap_or(0),
+                    })
+                    .collect();
+                let terminal = match attempt.status() {
+                    runtime::ExecutionStatus::Failed => Some("FAILED"),
+                    runtime::ExecutionStatus::Completed => Some("COMPLETED"),
+                    runtime::ExecutionStatus::Cancelled => Some("CANCELLED"),
+                    _ => None,
+                };
+                if exited.group_id != identity.group_id.as_str()
+                    || *frozen != actual
+                    || !frozen.is_subset(&history)
+                    || proof.observation.terminal_state.as_deref() != terminal
+                    || proof.observation.assurance != domain::SafetyAssurance::SoftwareProcess
+                {
+                    return Err(
+                        "restored process-exit coverage differs from original attempts".into(),
+                    );
+                }
             }
             validate_confirmation(purpose)?;
         }

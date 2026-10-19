@@ -173,7 +173,7 @@ EAIOS 继续拥有 semantic/storage authority，其 adapter 行为仍需现场�
 | RT-G6 Fault-injection evidence | 离线确定性矩阵已完成 | [`runtime-reliability-fault-matrix.md`](development/runtime-reliability-fault-matrix.md) 覆盖 crash/restart/disconnect/duplicate/cancel/rebind；真机断电与真实网络分区证据仍缺失 |
 | RT-G7 Capability readiness | 软件闭环已完成，真机证据待补 | Node/WebUI process health 与 exact canonical capability readiness 分离；真实 ROS/EAIOS probe 仍需部署验证 |
 | RT-G8 Verification evidence | 强类型链路已完成，field mapping 待真机验证 | localization evidence 包含 active map identity、mode、pose quality、frame、current attempt/Node/session provenance；`has_map=true` 仅为 legacy smoke |
-| RT-G9 Relation actuation | 部分接入，仍未完成 | 已有 stop purpose/Cancel outbox 和取消终结局部 gate；Mission hold、安全记录自身来源/时效校验、receipt 状态机、deadline timer、完整 release/resume gate 与专项竞态测试仍缺；物理/hard-realtime 验收独立 |
+| RT-G9 Relation actuation | 当前停止权威软件切片已验收；完整 F7 继续实施 | ADR-0102 已接通 Mission hold、原来源/时效、receipt/独立 safe-state、无输入 deadline 与 release/resume gate；ADR-0110/0111 接通原软件进程退出和分支版本门禁。运行中抢占、耦合迁移、hazard、物理/hard-realtime 仍须独立验收，SoftwareProcess 不证明设备停止 |
 
 RT-G7/RT-G8 的最小边界由
 [`ADR-0019`](decisions/0019-capability-readiness-and-localization-evidence.md) 已确定：RT-G7

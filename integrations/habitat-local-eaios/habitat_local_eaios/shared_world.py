@@ -60,6 +60,7 @@ from .relocation_start import (
 )
 from .reset_route_support import build_reset_route_support
 from .retained_session import MAX_CONTINUATIONS, RetainedWorldSession, claim_retained_world
+from .safe_state import read_safe_state, validate_safe_state_response
 from .semantic_evidence import build_authoritative_semantic_evidence
 from .source_provenance import build_runtime_source_manifest
 from .spatial_feasibility import assess_spatial_feasibility, load_spatial_profile_snapshot
@@ -1663,6 +1664,15 @@ class NodeEndpoint:
             self._progress_directory, self.agent_id, self._store.active_execution()
         )
 
+    def safe_state(self) -> dict[str, object]:
+        """Expose this endpoint's independent original-worker exit witness to State."""
+        return validate_safe_state_response(
+            read_safe_state(
+                self._store.all_executions(),
+                getattr(self._coordinator, "process_exit_observation", lambda: None)(),
+            )
+        )
+
     def recovery_support(self) -> dict[str, object]:
         """Return frozen deployment facts; joint continuation never implies isolated stopping."""
         # Read stored configuration only. Attribute forwarding could query a
@@ -1987,6 +1997,9 @@ class ProcessWorldService:
         self._supported_operations: tuple[str, ...] = SUPPORTED_OPERATIONS
         self._ready = False
         self._start_requested = False
+        self._process_instance = ""
+        self._exit_observation: dict[str, object] | None = None
+        self._shutdown_lock = threading.RLock()
 
     def start(self) -> str:
         """Spawn the world process and wait for explicit readiness evidence."""
@@ -1999,6 +2012,9 @@ class ProcessWorldService:
             args=(child_connection, self._config, self._agent_ids),
             name="habitat-shared-world",
         )
+        import uuid
+
+        self._process_instance = str(uuid.uuid4())
         process.start()
         child_connection.close()
         self._connection = parent_connection
@@ -2155,23 +2171,38 @@ class ProcessWorldService:
             if not process.is_alive():
                 raise IntegrationError("shared world process exited during the serial segment")
 
+    def close_and_observe(self) -> dict[str, object] | None:
+        """Reap the original child, returning actual OS exit evidence or unavailable."""
+        self.shutdown()
+        with self._shutdown_lock:
+            return None if self._exit_observation is None else dict(self._exit_observation)
+
     def shutdown(self) -> None:
-        """Request clean world shutdown with bounded termination fallback."""
-        connection, process = self._connection, self._process
-        self._connection = None
-        self._process = None
-        self._ready = False
-        if connection is not None:
-            try:
-                connection.send(("CLOSE", None))
-            except (BrokenPipeError, EOFError, OSError):
-                pass
-            connection.close()
-        if process is not None:
-            process.join(timeout=30.0)
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=30.0)
+        """Close only the original worker; a surviving worker never gains stop assurance."""
+        with self._shutdown_lock:
+            connection, process = self._connection, self._process
+            self._connection = None
+            self._ready = False
+            if connection is not None:
+                try:
+                    connection.send(("CLOSE", None))
+                except (BrokenPipeError, EOFError, OSError):
+                    pass
+                connection.close()
+            if process is not None:
+                process.join(timeout=2.0)
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=2.0)
+                # Retain an unresolved handle; no replacement worker or fabricated exit.
+                exit_code = getattr(process, "exitcode", None)
+                if not process.is_alive() and type(exit_code) is int:
+                    self._exit_observation = {
+                        "instance_id": self._process_instance,
+                        "pid": process.pid,
+                        "exit_code": exit_code,
+                    }
+                    self._process = None
 
     def _require_live(self) -> tuple[Any, Any]:
         """Return live IPC state or reject before pairing."""

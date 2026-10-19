@@ -1,4 +1,4 @@
-schema = "roboguide.node-config/v0.7"
+schema = "roboguide.node-config/v0.13"
 node_id = "e1-shared-world-perception-node-a"
 server_endpoint = "http://127.0.0.1:25060"
 state_directory = "NODE_STATE_PLACEHOLDER"
@@ -13,6 +13,7 @@ runtime_version = "c1-s0"
 "roboguide.habitat-robot-type" = "SpotRobot"
 "roboguide.execution-session" = "roboguide.execution-session/v0.1"
 "roboguide.execution-recovery" = "{\"schema_version\":\"roboguide.local-execution-recovery/v0.1\",\"operations\":[{\"operation\":{\"namespace\":\"mobility\",\"name\":\"move\",\"version\":\"v1\"},\"stop_scope\":\"execution-group\",\"continuation\":\"unsupported\"},{\"operation\":{\"namespace\":\"mobility\",\"name\":\"navigate\",\"version\":\"v1\"},\"stop_scope\":\"execution-group\",\"continuation\":\"unsupported\"},{\"operation\":{\"namespace\":\"observation\",\"name\":\"acquire\",\"version\":\"v1\"},\"stop_scope\":\"execution-group\",\"continuation\":\"unsupported\"},{\"operation\":{\"namespace\":\"observation\",\"name\":\"verify\",\"version\":\"v1\"},\"stop_scope\":\"execution-group\",\"continuation\":\"unsupported\"}]}"
+"roboguide.execution-safety" = '''{"schema":"roboguide.execution-safety/v0.1","operations":[{"operation":{"namespace":"mobility","name":"navigate","version":"v1"},"safe_state_export_id":"execution-safety","max_evidence_age_ms":1500,"stop_deadline_ms":30000,"min_confidence_millionths":null,"assurance":"software-process"},{"operation":{"namespace":"mobility","name":"move","version":"v1"},"safe_state_export_id":"execution-safety","max_evidence_age_ms":1500,"stop_deadline_ms":30000,"min_confidence_millionths":null,"assurance":"software-process"},{"operation":{"namespace":"observation","name":"verify","version":"v1"},"safe_state_export_id":"execution-safety","max_evidence_age_ms":1500,"stop_deadline_ms":30000,"min_confidence_millionths":null,"assurance":"software-process"},{"operation":{"namespace":"observation","name":"acquire","version":"v1"},"safe_state_export_id":"execution-safety","max_evidence_age_ms":1500,"stop_deadline_ms":30000,"min_confidence_millionths":null,"assurance":"software-process"}]}'''
 
 [local_systems.health]
 state_pointer = "/state"
@@ -156,6 +157,30 @@ connection = "habitat-http"
 kind = "http"
 method = "GET"
 path = "/v1/executions/progress"
+
+[state_exports.step.request]
+base = {}
+
+[[state_exports]]
+id = "execution-safety"
+owner = "habitat-local-eaios"
+object_class = "node"
+object_type = "local-execution-safety"
+object_id = "e1-shared-world-perception-node-a"
+semantic = "observed"
+payload_schema = "roboguide.safe-state-observation/v0.3"
+valid_for_ms = 1500
+interval_ms = 500
+value_pointer = ""
+
+[state_exports.step]
+id = "execution-safety-observer"
+connection = "habitat-http"
+
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/executions/safe-state"
 
 [state_exports.step.request]
 base = {}

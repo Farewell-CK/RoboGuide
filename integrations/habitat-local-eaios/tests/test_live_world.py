@@ -29,6 +29,7 @@ from habitat_local_eaios.model import (  # noqa: E402
     parse_canonical_invocation,
 )
 from habitat_local_eaios.shared_world import NodeEndpoint  # noqa: E402
+from habitat_local_eaios.stage2_feedback import Stage2ExecutionFeedback  # noqa: E402
 from habitat_local_eaios.store import ExecutionStore  # noqa: E402
 from test_endpoint_registry import node_sources  # noqa: E402
 from test_shared_world import (  # noqa: E402
@@ -628,6 +629,47 @@ def test_later_endpoint_activation_preserves_running_peer(tmp_path: Path) -> Non
     assert actor.originals[1].llm_model.calls == 1
     assert actor.originals[2].initializations == 0
     assert summary["identity"]["simulator_steps"] == 3
+
+
+def test_live_loop_closes_bad_terminate_endpoint_and_keeps_peer_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An original episode-abort request becomes one failed endpoint, not a long hang."""
+    actor, gym = Actor(2), Gym({1: 2})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    first, second = invocation(0, ("left", "right")), invocation(1, ("left", "right"))
+
+    def terminal_failure(
+        feedback: Stage2ExecutionFeedback, agent_name: str
+    ) -> dict[str, Any] | None:
+        """Inject only the already-observed original abort at the post-step boundary."""
+        pending = feedback._pending.get(agent_name)
+        if agent_name == "agent_0" and pending is not None and pending.physical_steps >= 1:
+            return {
+                "failure_basis": "original-skill-bad-terminate",
+                "tool_name": pending.document["tool_name"],
+                "termination": {"bad_terminate": True},
+            }
+        return None
+
+    monkeypatch.setattr(Stage2ExecutionFeedback, "terminal_failure", terminal_failure)
+    completed: list[LocalExecutionOutcome] = []
+    _, summary = runtime.execute_live(
+        {0: first, 1: second},
+        lambda: {},
+        lambda: False,
+        lambda *args: None,
+        lambda agent, request, outcome: completed.append(outcome),
+        0.1,
+    )
+    assert gym.steps == actor.calls == 2
+    assert [outcome.state for outcome in completed] == ["FAILED", "COMPLETED"]
+    assert completed[0].terminal_basis == "original-skill-bad-terminate"
+    assert completed[1].local_skill_completed is True
+    assert summary["termination_reason"] == "all_local_slots_finished"
+    failure = json.loads((tmp_path / "live-world-failure.json").read_bytes())
+    assert failure["failure_owner"] == "SUT_SYSTEM"
+    assert failure["local_failure"]["termination"]["bad_terminate"] is True
 
 
 @pytest.mark.parametrize("archive_failed", [False, True])

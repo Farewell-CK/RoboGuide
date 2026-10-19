@@ -49,8 +49,14 @@ def build_endpoint_registry(
     for agent, path in node_configs:
         document = tomllib.loads(path.read_text(encoding="utf-8"))
         systems = document.get("local_systems", [])
-        if document.get("schema") != "roboguide.node-config/v0.7" or len(systems) != 1:
-            raise IntegrationError("endpoint requires one configured Local EAIOS on Node v0.7")
+        if (
+            document.get("schema")
+            not in {"roboguide.node-config/v0.7", "roboguide.node-config/v0.13"}
+            or len(systems) != 1
+        ):
+            raise IntegrationError(
+                "endpoint requires one configured Local EAIOS on Node v0.7 or explicit v0.13"
+            )
         system = systems[0]
         owner = system["id"]
         robot_type = system.get("metadata", {}).get("roboguide.habitat-robot-type")

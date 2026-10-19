@@ -1,5 +1,12 @@
 # RoboGuide V2 架构基线
 
+2026-10-20 [ADR-0111](../../decisions/0111-branch-integration-and-authority-version-fences.md)
+组合 Memory、发布合同前检与独立进程停止证据。Node v0.12/config v0.13/catalog v0.15
+分别保留 Memory tags 8–10 与 generation tag 11，preparation/Execute 固定原代次。
+wrapper v41/journal v12 fence 旧 writer；歧义 fork 停止权威不自动迁移。Artifact writer
+lease 由最后一个应用 store/clone/upload 显式释放，子进程继承 descriptor 不获得写入权。
+当前拓扑同步动态成员与 leader transfer；后续完整 F4 和 F5–F10 仍未关闭。
+
 2026-10-19 [ADR-0108](../../decisions/0108-durable-group-memory-handoff.md) 接通 Application
 持久双 Group Memory 交接：完整原停止/revoke → immutable child lineage → 原 receiver
 import/probe/use → 当前 State 与显式 commit → Execute。Control 继续独占成员与资源承诺；
@@ -1017,3 +1024,5 @@ V2 取代 V1.1，成为当前权威架构基线。V1.1 保存在
 [ADR-0101](../../decisions/0101-relation-stop-and-explicit-safe-state-evidence.md) 要求 relation reconciliation 使用持久 Cancel outbox、Mission hold，以及 exact-session、schema、TTL 和来源受限的安全状态证据。当前 Application 只完成部分接入，Mission hold、完整证据校验、deadline 和全释放/恢复 gate 尚未闭合，RT-G9 仍未完成。Local EAIOS 的即时安全权威保持不变。
 
 当前工作树的分层剩余项和验收条件见[原审计剩余整改清单](../../development/roboguide-remediation-remaining-2026-10-14.md)。Controller v27 与 HA supervisor v26 的 composition 不一致也仍需整改；库级复制能力不能代替整套 HA 进程验收。
+
+停止证据补充（[ADR-0110](../../decisions/0110-execution-generation-and-process-stop-evidence.md)）：软件进程退出证明与执行终态、Cancel receipt 分离。v0.3 明确绑定原进程实例和完整当前 attempt 集；自然失败保持 Failed，缺失证明继续持有资源。该软件部署不建立设备停止保证。

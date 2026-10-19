@@ -23,11 +23,22 @@ declaration bound to the same reset identity. Its `verifier_source` is the exact
 terminal verifier contract and predicate set; preserve the required predicate and do not infer
 success from local execution. Its `execution_lifetime` describes endpoint capacity and release
 semantics for Control. It is not live inventory and never selects a Node, ResourceId, Actor
-binding, or Physical Entity. Aggregate the declared exclusive resource demand only for Roles that
-must run in the same Task; independent Tasks may reuse an endpoint after Control-owned release.
+binding, or Physical Entity. Account for simultaneous Role demand and for resources retained by unfinished satisfaction checks.
+Independent Tasks may reuse an endpoint only after Control-owned release.
 Do not add Actors, dependencies, relations, or weaker satisfaction evidence merely to fit this
 deployment declaration. If the exact verifier or capacity is insufficient for the grounded
 objective, preserve the objective and expose the evidence or deployment gap.
+
+For each Task, check when its declared satisfaction evidence can become available and when its
+resources can be released. If the supplied source publishes only after all session slots have
+executed, a Task waiting for that verdict retains its endpoint until that publication. Check DAG
+prerequisites, Actor reuse, and retained capacity across Tasks for circular waits. Adding a DAG edge
+alone does not resolve a predecessor that still waits for the same final verdict. Timely per-Task
+verifiers and ordinary local completion keep their own declared release behavior. Preserve all
+required effects and evidence: do not downgrade verification, invent participants or relations, or
+change a topology merely to satisfy a validator. If the supplied contracts cannot express an
+executable plan with the required evidence, expose the specific contract gap. Recovery must
+address all supplied validation issues against the unchanged task and frozen evidence.
 
 ## Coordination mode and Group shared view
 

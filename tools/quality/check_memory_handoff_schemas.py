@@ -29,7 +29,7 @@ def run(directory: Path) -> dict[str, Any]:
     paths = {
         "handoff": "memory/handoff-v0.1/request.schema.json",
         "mission": "mission/v0.9/mission-plan.schema.json",
-        "config": "node/v0.13/node-config.schema.json",
+        "config": "node/v0.15/node-config.schema.json",
     }
     for kind in ("preparation", "control", "receipt", "availability"):
         paths[kind] = f"memory/preparation-v0.2/{kind}.schema.json"

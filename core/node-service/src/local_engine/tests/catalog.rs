@@ -74,6 +74,68 @@ fn recovery_metadata_validates_exact_operations_before_connections_open() {
     }
 }
 
+/// Safety declarations must point to owned observed safe-state exports and exact operations.
+#[test]
+fn safety_metadata_validates_generation_bound_export_contract() {
+    let config: NodeServiceConfig = toml::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scenarios/e1-shared-world-episode-51/node-a.toml"
+    )))
+    .expect("deployment TOML");
+    CompiledLocalCatalog::compile(config.clone(), Path::new(".")).expect("valid safety profile");
+    assert_eq!(
+        CompiledLocalCatalog::compile(config.clone(), Path::new("."))
+            .unwrap()
+            .node_contract_version(),
+        integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+    );
+    for schema in [CONFIG_SCHEMA_V0_8, CONFIG_SCHEMA_V0_9, CONFIG_SCHEMA_V0_12] {
+        let mut legacy = config.clone();
+        legacy.schema = schema.into();
+        assert!(
+            CompiledLocalCatalog::compile(legacy, Path::new(".")).is_err(),
+            "{schema}"
+        );
+    }
+    for schema in [
+        domain::SAFE_STATE_OBSERVATION_SCHEMA,
+        domain::PROCESS_EXIT_OBSERVATION_SCHEMA,
+        "unknown-stop-observation",
+    ] {
+        let mut changed = config.clone();
+        changed
+            .state_exports
+            .iter_mut()
+            .find(|export| export.id == "execution-safety")
+            .unwrap()
+            .payload_schema = schema.into();
+        assert_eq!(
+            CompiledLocalCatalog::compile(changed, Path::new(".")).is_ok(),
+            schema != "unknown-stop-observation",
+            "{schema}",
+        );
+    }
+    let key = domain::EXECUTION_SAFETY_METADATA_KEY;
+    for mutation in ["schema", "operation", "export"] {
+        let mut changed = config.clone();
+        let raw = changed.local_systems[0].metadata.get(key).expect("profile");
+        let mut value: serde_json::Value = serde_json::from_str(raw).expect("JSON");
+        match mutation {
+            "schema" => value["schema"] = "unknown".into(),
+            "operation" => value["operations"][0]["operation"]["name"] = "undeclared".into(),
+            _ => value["operations"][0]["safe_state_export_id"] = "missing".into(),
+        }
+        changed.local_systems[0]
+            .metadata
+            .insert(key.into(), value.to_string());
+        assert!(matches!(
+            CompiledLocalCatalog::compile(changed, Path::new(".")),
+            Err(CatalogError::Validation { field, .. })
+                if field == "local_systems.metadata.execution-safety"
+        ));
+    }
+}
+
 /// Catalog compiles multiple local systems and all generic driver configurations.
 #[test]
 fn compiles_multi_system_generic_catalog() {

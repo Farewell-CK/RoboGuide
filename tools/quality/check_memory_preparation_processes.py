@@ -239,6 +239,8 @@ def run(
                 cas,
                 index == 1 or group_lifecycle or handoff_case is not None,
             )
+            if handoff_case is not None:
+                configured = configured.replace("node-config/v0.11", "node-config/v0.13")
             if handoff_case is not None and index == 0:
                 configured = configured.replace("hash-imported-file@v1", "hash-exported-file@v1")
                 configured = source_configuration(configured, nodes[index])

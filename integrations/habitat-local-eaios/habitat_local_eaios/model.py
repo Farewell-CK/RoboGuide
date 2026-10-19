@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass
-from typing import Union
+from typing import Union, cast
 
 # Runtime compatibility is Python 3.9 because this module executes in the EMOS environment.
 ScalarValue = Union[bool, int, float, str]  # noqa: UP007
@@ -168,6 +168,7 @@ class CanonicalMobilityInvocation:
     resource_ids: tuple[str, ...]
     execution_session: ExecutionSessionMetadata | None = None
     attempt_id: str | None = None
+    execution_generation: int | None = None
 
     @classmethod
     def from_request(cls, request: object) -> CanonicalMobilityInvocation:
@@ -189,6 +190,7 @@ class CanonicalMobilityInvocation:
         if not expected.issubset(invocation) or set(invocation) - expected - {
             "execution_session",
             "attempt_id",
+            "execution_generation",
         }:
             raise IntegrationError("canonical invocation fields do not match the C1-S0 contract")
         operation = _non_empty_string(invocation["operation"], "operation")
@@ -227,6 +229,7 @@ class CanonicalMobilityInvocation:
                 if "attempt_id" in invocation
                 else None
             ),
+            execution_generation=_execution_generation(invocation),
         )
 
     @property
@@ -253,6 +256,8 @@ class CanonicalMobilityInvocation:
             result["execution_session"] = self.execution_session.as_dict()
         if self.attempt_id is not None:
             result["attempt_id"] = self.attempt_id
+        if self.execution_generation is not None:
+            result["execution_generation"] = self.execution_generation
         return result
 
     def request_key(self) -> str:
@@ -283,6 +288,7 @@ class CanonicalRelocationInvocation:
     resource_ids: tuple[str, ...]
     execution_session: ExecutionSessionMetadata | None = None
     attempt_id: str | None = None
+    execution_generation: int | None = None
 
     @classmethod
     def from_request(cls, request: object) -> CanonicalRelocationInvocation:
@@ -329,6 +335,7 @@ class CanonicalRelocationInvocation:
             resource_ids=resources,
             execution_session=session,
             attempt_id=attempt_id,
+            execution_generation=cast("int | None", invocation["execution_generation"]),
         )
 
     @property
@@ -371,6 +378,8 @@ class CanonicalRelocationInvocation:
             result["execution_session"] = self.execution_session.as_dict()
         if self.attempt_id is not None:
             result["attempt_id"] = self.attempt_id
+        if self.execution_generation is not None:
+            result["execution_generation"] = self.execution_generation
         return result
 
     def request_key(self) -> str:
@@ -422,6 +431,7 @@ class CanonicalObservationInvocation(CanonicalMobilityInvocation):
             resource_ids=body["resource_ids"],  # type: ignore[arg-type]
             execution_session=body["execution_session"],  # type: ignore[arg-type]
             attempt_id=body["attempt_id"],  # type: ignore[arg-type]
+            execution_generation=body["execution_generation"],  # type: ignore[arg-type]
         )
 
     @property
@@ -489,6 +499,7 @@ def _parse_invocation(
     if not expected.issubset(invocation) or set(invocation) - expected - {
         "execution_session",
         "attempt_id",
+        "execution_generation",
     }:
         raise IntegrationError("canonical invocation fields do not match the contract")
     operation = _non_empty_string(invocation["operation"], "operation")
@@ -528,7 +539,18 @@ def _parse_invocation(
             if "attempt_id" in invocation
             else None
         ),
+        "execution_generation": _execution_generation(invocation),
     }
+
+
+def _execution_generation(invocation: dict[str, object]) -> int | None:
+    """Validate an optional non-zero Runtime generation without inferring it locally."""
+    if "execution_generation" not in invocation:
+        return None
+    value = invocation["execution_generation"]
+    if type(value) is not int or not 1 <= value <= 2**64 - 1:
+        raise IntegrationError("execution_generation must be a non-zero uint64")
+    return value
 
 
 def _string_object(value: object, field: str) -> dict[str, object]:

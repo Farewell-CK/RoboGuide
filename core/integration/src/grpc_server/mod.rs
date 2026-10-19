@@ -7,7 +7,8 @@ use crate::grpc::v0_4::{
     Ack, CONTINUITY_NODE_CONTRACT_VERSION, Cancel, Execute, LEGACY_NODE_CONTRACT_VERSION,
     MEMORY_USE_NODE_CONTRACT_VERSION, MemoryImport, NODE_CONTRACT_VERSION, NodeMessage,
     PREPARATION_NODE_CONTRACT_VERSION, PREVIOUS_NODE_CONTRACT_VERSION, PROTOCOL_VERSION,
-    PROVIDER_MAP_NODE_CONTRACT_VERSION, Registered, ServerMessage, Welcome,
+    PROVIDER_MAP_NODE_CONTRACT_VERSION, Registered, SAFETY_NODE_CONTRACT_VERSION, ServerMessage,
+    Welcome,
 };
 use ports::{
     Clock, DiagnosticHandle, DiagnosticStage, NodeFactMetadata, NodeLeasePolicy, NodeProtocolPolicy,
@@ -731,6 +732,29 @@ impl GrpcNodeRouter {
         resource_ids: Vec<String>,
         execution_session_json: String,
     ) -> Result<(), Status> {
+        self.execute_with_session_generation(
+            node_id,
+            command_id,
+            execution_id,
+            invocation,
+            resource_ids,
+            execution_session_json,
+            0,
+        )
+    }
+
+    /// Sends Execute with exact topology and Runtime attempt-generation evidence.
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_with_session_generation(
+        &self,
+        node_id: &str,
+        command_id: String,
+        execution_id: String,
+        invocation: crate::grpc::v0_4::CanonicalInvocation,
+        resource_ids: Vec<String>,
+        execution_session_json: String,
+        execution_generation: u64,
+    ) -> Result<(), Status> {
         self.check_command_delivery()?;
         if command_id.trim().is_empty()
             || execution_id.trim().is_empty()
@@ -770,6 +794,12 @@ impl GrpcNodeRouter {
                 "Node registration does not advertise roboguide.execution-session/v0.1",
             ));
         }
+        if route.node_contract_version == SAFETY_NODE_CONTRACT_VERSION && execution_generation == 0
+        {
+            return Err(Status::failed_precondition(
+                "safety-capable Node requires non-zero execution generation",
+            ));
+        }
         if route.last_heartbeat.elapsed() >= route.lease_duration {
             return Err(Status::unavailable("node lease expired"));
         }
@@ -786,6 +816,7 @@ impl GrpcNodeRouter {
                     command_id,
                     execution_session_json,
                     controller_epoch,
+                    execution_generation,
                     memory_preparation_id: String::new(),
                     memory_preparation_digest: String::new(),
                     memory_requirements_json: if crate::grpc::v0_4::supports_memory_preparation(
@@ -1160,6 +1191,7 @@ async fn run_grpc_session(
         ));
     }
     let node_contract = [
+        SAFETY_NODE_CONTRACT_VERSION,
         crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION,
         MEMORY_USE_NODE_CONTRACT_VERSION,
         PREPARATION_NODE_CONTRACT_VERSION,
@@ -1480,7 +1512,8 @@ fn invocation_for_contract(
     node_contract_version: &str,
 ) -> Result<crate::grpc::v0_4::CanonicalInvocation, Status> {
     match node_contract_version {
-        MEMORY_USE_NODE_CONTRACT_VERSION
+        SAFETY_NODE_CONTRACT_VERSION
+        | MEMORY_USE_NODE_CONTRACT_VERSION
         | crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
         | PREPARATION_NODE_CONTRACT_VERSION
         | PROVIDER_MAP_NODE_CONTRACT_VERSION

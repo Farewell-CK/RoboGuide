@@ -27,9 +27,40 @@ from mission.submission_evidence import canonical_plan_digest
 LEGACY_REJECTED_DRAFT_SCHEMA = "roboguide.mission.rejected-draft/v0.1"
 REJECTED_DRAFT_SCHEMA = "roboguide.mission.rejected-draft/v0.2"
 IDENTITY_REJECTED_DRAFT_SCHEMA = "roboguide.mission.rejected-draft/v0.3"
+UNVERIFIED_DRAFT_SCHEMA = "roboguide.mission.rejected-draft/v0.4"
 MAX_PROVIDER_OUTPUT_BYTES = 256 * 1024
 _VALIDATION_STAGES = ("normalization", "plan_validation")
 _DELIBERATION_STAGES = ("planner", "repairer")
+
+
+class DraftValidationUnavailable(RuntimeError):
+    """Retain a candidate after a system check fails, without permitting regeneration."""
+
+    stage = "controller_validation_unavailable"
+
+    def __init__(
+        self,
+        error: Exception,
+        *,
+        provider_output: JSONObject,
+        normalized_output: JSONObject,
+        generated_at_ms: int,
+    ) -> None:
+        """Preserve both candidate forms and the actual infrastructure error classification."""
+        super().__init__(str(error))
+        self.provider_output = provider_output
+        self.normalized_output = normalized_output
+        self.generated_at_ms = generated_at_ms
+        self.validation_errors: tuple[JSONObject, ...] = (
+            {
+                "stage": self.stage,
+                "code": "controller.validation_unavailable",
+                "path": "/",
+                "message": str(error)[:4096],
+                "failure_owner": "SUT_SYSTEM",
+                "error_type": type(error).__name__,
+            },
+        )
 
 
 class RejectedPlanError(MissionPlanError):
@@ -52,6 +83,7 @@ class RejectedPlanError(MissionPlanError):
         provider_output: JSONObject,
         normalized_output: JSONObject | None,
         generated_at_ms: int,
+        validation_errors: tuple[JSONObject, ...] | None = None,
     ) -> None:
         """Attach the failed draft payloads to the validation message."""
         super().__init__(message)
@@ -61,6 +93,7 @@ class RejectedPlanError(MissionPlanError):
         self.provider_output = provider_output
         self.normalized_output = normalized_output
         self.generated_at_ms = generated_at_ms
+        self.validation_errors = validation_errors or ({"stage": stage, "message": message},)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,16 +145,30 @@ class RejectedDraftEvidence:
             LEGACY_REJECTED_DRAFT_SCHEMA,
             REJECTED_DRAFT_SCHEMA,
             IDENTITY_REJECTED_DRAFT_SCHEMA,
+            UNVERIFIED_DRAFT_SCHEMA,
         }:
             raise ValueError("unsupported rejected draft evidence schema")
         allowed_stages = (
-            ("identity_validation",)
-            if self.schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA
-            else _VALIDATION_STAGES
+            (DraftValidationUnavailable.stage,)
+            if self.schema_version == UNVERIFIED_DRAFT_SCHEMA
+            else (
+                ("identity_validation",)
+                if self.schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA
+                else _VALIDATION_STAGES
+            )
         )
         if self.stage not in allowed_stages:
             raise ValueError("rejected draft stage does not match its schema")
-        if self.schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA and self.normalized_output is None:
+        if self.schema_version == UNVERIFIED_DRAFT_SCHEMA and (
+            len(self.validation_errors) != 1
+            or self.validation_errors[0].get("code") != "controller.validation_unavailable"
+            or self.validation_errors[0].get("failure_owner") != "SUT_SYSTEM"
+        ):
+            raise ValueError("unverified draft must retain its system failure classification")
+        if (
+            self.schema_version in {IDENTITY_REJECTED_DRAFT_SCHEMA, UNVERIFIED_DRAFT_SCHEMA}
+            and self.normalized_output is None
+        ):
             raise ValueError("identity rejection requires normalized draft evidence")
         if self.deliberation_stage not in _DELIBERATION_STAGES:
             raise ValueError("unsupported rejected draft deliberation stage")
@@ -158,7 +205,7 @@ class RejectedDraftEvidence:
             if not isinstance(digest_value, str):
                 raise ValueError("rejected draft normalized output does not match its digest")
             if (
-                self.schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA
+                self.schema_version in {IDENTITY_REJECTED_DRAFT_SCHEMA, UNVERIFIED_DRAFT_SCHEMA}
                 and normalized.get("truncated") is True
             ):
                 if not isinstance(normalized.get("byte_length"), int):
@@ -208,6 +255,7 @@ class RejectedDraftEvidence:
             LEGACY_REJECTED_DRAFT_SCHEMA,
             REJECTED_DRAFT_SCHEMA,
             IDENTITY_REJECTED_DRAFT_SCHEMA,
+            UNVERIFIED_DRAFT_SCHEMA,
         }:
             raise ValueError("unsupported rejected draft evidence schema")
         required = {
@@ -234,9 +282,13 @@ class RejectedDraftEvidence:
             raise ValueError("rejected draft evidence fields do not match its schema")
         stage = _text(item["stage"], "rejected draft stage")
         allowed_stages = (
-            ("identity_validation",)
-            if schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA
-            else _VALIDATION_STAGES
+            (DraftValidationUnavailable.stage,)
+            if schema_version == UNVERIFIED_DRAFT_SCHEMA
+            else (
+                ("identity_validation",)
+                if schema_version == IDENTITY_REJECTED_DRAFT_SCHEMA
+                else _VALIDATION_STAGES
+            )
         )
         if stage not in allowed_stages:
             raise ValueError("unsupported rejected draft stage")
@@ -345,7 +397,7 @@ def build_rejected_draft_evidence(
     request_id: str,
     mission_id: str,
     attempt_index: int,
-    error: RejectedPlanError | MissionIdentityError,
+    error: RejectedPlanError | MissionIdentityError | DraftValidationUnavailable,
     grounding_context_digest: str | None,
     semantic_evidence_digest: str | None,
     provider_identity: JSONObject,
@@ -359,7 +411,9 @@ def build_rejected_draft_evidence(
     normalized = error.normalized_output
     identity_failure = isinstance(error, MissionIdentityError)
     normalized_evidence = normalized
-    if normalized is not None and identity_failure:
+    if normalized is not None and (
+        identity_failure or isinstance(error, DraftValidationUnavailable)
+    ):
         normalized_evidence = bounded_provider_output(normalized)[0]
     return RejectedDraftEvidence(
         request_id=request_id,
@@ -370,7 +424,11 @@ def build_rejected_draft_evidence(
             f"{provider_output_digest(error.provider_output).removeprefix('sha256:')[:12]}"
         ),
         stage=error.stage,
-        validation_errors=({"stage": error.stage, "message": str(error)},),
+        validation_errors=(
+            error.validation_errors
+            if isinstance(error, (RejectedPlanError, DraftValidationUnavailable))
+            else ({"stage": error.stage, "message": str(error)},)
+        ),
         provider_output=output,
         provider_output_digest=provider_output_digest(error.provider_output),
         normalized_output=normalized_evidence,
@@ -384,7 +442,11 @@ def build_rejected_draft_evidence(
         persisted_at_ms=persisted_at_ms,
         deliberation_stage=deliberation_stage,
         schema_version=(
-            IDENTITY_REJECTED_DRAFT_SCHEMA if identity_failure else REJECTED_DRAFT_SCHEMA
+            UNVERIFIED_DRAFT_SCHEMA
+            if isinstance(error, DraftValidationUnavailable)
+            else IDENTITY_REJECTED_DRAFT_SCHEMA
+            if identity_failure
+            else REJECTED_DRAFT_SCHEMA
         ),
     )
 

@@ -50,6 +50,7 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
         self._verifier_published = False
         self._verifier_required = False
         self._execution_error: str | None = None
+        self._process_exit_observation: dict[str, object] | None = None
         self._initialization_error: str | None = None
         self._worker = threading.Thread(
             target=self._run, name="shared-world-live-coordinator", daemon=True
@@ -254,6 +255,53 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
             self._closure_error = "live-session-state-archival"
             _LOG.exception("live local evidence archival unavailable")
 
+    def process_exit_observation(self) -> dict[str, object] | None:
+        """Read an already-reaped original process witness, never infer it from terminal rows."""
+        from copy import deepcopy
+
+        with self._condition:
+            return deepcopy(self._process_exit_observation)
+
+    def _close_process_evidence(self) -> None:
+        """After final publication, observe real exit without stopping an executing peer."""
+        observe = getattr(self._world, "close_and_observe", None)
+        if observe is None or self._retain_stopped_session:
+            return
+        try:
+            exited = observe()
+            if not isinstance(exited, dict):
+                return
+            with self._condition:
+                session = self._ledger.session
+                invocations = [value for _, value in self._ledger.seen.values()]
+                if (
+                    session is None
+                    or not invocations
+                    or any(
+                        value.attempt_id is None or value.execution_generation is None
+                        for value in invocations
+                    )
+                ):
+                    return
+                from .safe_state import validate_process_exit
+
+                self._process_exit_observation = validate_process_exit(
+                    {
+                        **exited,
+                        "group_id": session.group_id,
+                        "attempts": [
+                            {
+                                "execution_id": value.attempt_id,
+                                "execution_generation": value.execution_generation,
+                            }
+                            for value in invocations
+                        ],
+                    }
+                )
+                self._write_json("worker-exit-observation.json", self._process_exit_observation)
+        except Exception:
+            _LOG.exception("original worker exit observation unavailable")
+
     def _run(self) -> None:
         """Own one world lifecycle; infrastructure errors never trigger a replacement reset."""
         try:
@@ -326,6 +374,7 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
                             handle, "shared world ended before this dispatch activated"
                         )
                 self._closure_phase = "closed"
+            self._close_process_evidence()
             self._archive_closure()
 
     def _publish_terminal(

@@ -50,8 +50,14 @@ feasibility v0.6 的 `finality_profile` 固定三个中立字段：
 `run/episode/scene/dataset` identity、Habitat 官方 terminal verifier source，以及
 endpoint 数量、capacity-one、resource release 和 verifier publication 绑定到一个 digest。
 Planner、Reviewer 和 Repairer 看到的是这份不可变的 deployment declaration；它不是 live
-Node inventory，也不选择 Actor 或 Physical Entity。MI 只在同一 Task 的同时 Role 需求上
-应用容量边界，independent Tasks 在 Control 释放后仍可复用 endpoint。缺失、篡改或跨 reset
+Node inventory，也不选择 Actor 或 Physical Entity。MI 检查同一 Task 的同时 Role 需求和
+终态 verifier 在所有 session slots 结束前持有的容量；independent Tasks 只有在 Control
+实际释放后才能复用 endpoint。Planner/regenerate/Repairer 的新草案还通过 Controller
+`/v1/missions/validate-plan` 复用提交时的发布合同校验，保留原始草案与多条结构化错误，
+进入原有有界恢复。HTTP 失败、缺失接口和来源不匹配保持系统失败；前检不能授予提交、
+调度、资源或物理可达性保证。需同步部署包含该接口的 Controller，不能回退为跳过前检。
+逐 Task 可及时发布的独立 verifier 不受全局终态 source 的生命周期限制。
+详见 [ADR-0109](../decisions/0109-published-plan-validation-and-bounded-draft-recovery.md)。缺失、篡改或跨 reset
 的 artifact 会让 live Mission Service 在请求前 fail closed；offline prepare 可以只验证配置
 模板，不宣称已经拥有本次 reset 的 verifier evidence。
 

@@ -31,6 +31,8 @@ pub(crate) struct DeploymentFeasibility {
     live_operations: Option<BTreeMap<domain::NodeId, BTreeSet<String>>>,
     /// Producer-owned final verdict barrier; no change to Mission semantics or Control release.
     terminal_verifier_barrier: bool,
+    /// Source identity for the public, inventory-free endpoint lifetime declaration.
+    registry_digest: Option<String>,
 }
 
 /// Check whether concurrent Roles of one Task can use distinct configured endpoints.
@@ -87,7 +89,50 @@ impl DeploymentFeasibility {
             operation_admission: snapshot.operation_admission,
             live_operations: snapshot.live_operations,
             terminal_verifier_barrier: snapshot.terminal_verifier_barrier,
+            registry_digest: snapshot.registry_digest,
         })
+    }
+
+    /// Projects only explicit finality and capacity declarations, never current Node facts.
+    pub(crate) fn published_lifetime(&self) -> Option<serde_json::Value> {
+        self.terminal_verifier_barrier.then(|| {
+            serde_json::json!({
+                "declaration_digest": self.registry_digest,
+                "configured_endpoint_count": self.node_agents.len(),
+                "endpoint_capacity": 1,
+                "exclusive_resource_kind": "space",
+                "max_slots": 32,
+                "resource_release": "after-task-satisfaction",
+                "verifier_publication": "after-all-session-slots",
+            })
+        })
+    }
+
+    /// Preserves the actual snapshot identity without copying Node/agent bindings into MI.
+    pub(crate) fn planning_identity(&self) -> Option<serde_json::Value> {
+        let fields = [
+            "run_id",
+            "episode_id",
+            "scene_id",
+            "dataset_revision",
+            "dataset_sha256",
+            "semantic_evidence_digest",
+        ];
+        fields
+            .iter()
+            .all(|field| {
+                self.identity[field]
+                    .as_str()
+                    .is_some_and(|value| !value.trim().is_empty())
+            })
+            .then(|| {
+                serde_json::Value::Object(
+                    fields
+                        .into_iter()
+                        .map(|field| (field.to_owned(), self.identity[field].clone()))
+                        .collect(),
+                )
+            })
     }
 
     /// Adds a separately configured initial source without renewing it on restore.
@@ -2251,13 +2296,19 @@ mod tests {
         let path = directory.path().join("reset.json");
         snapshot(&path, false);
         let feasibility = DeploymentFeasibility::load(&path).expect("snapshot is valid");
-        assert_http_topology_rejection(&feasibility, plan_document(false, true)).await;
+        assert_http_topology_rejection(
+            &feasibility,
+            plan_document(false, true),
+            (409, "no feasible shared-world endpoint assignment"),
+        )
+        .await;
     }
 
     /// Check the actual HTTP admission boundary and its lack of durable acceptance mutations.
     async fn assert_http_topology_rejection(
         feasibility: &DeploymentFeasibility,
         document: serde_json::Value,
+        expected: (u16, &str),
     ) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -2344,8 +2395,11 @@ mod tests {
                 .read_to_string(&mut response)
                 .await
                 .expect("response reads");
-            assert!(response.starts_with("HTTP/1.1 409 Conflict"));
-            assert!(response.contains("no feasible shared-world endpoint assignment"));
+            assert!(
+                response.starts_with(&format!("HTTP/1.1 {} ", expected.0)),
+                "{response}"
+            );
+            assert!(response.contains(expected.1), "{response}");
         };
         tokio::time::timeout(Duration::from_secs(5), async {
             tokio::join!(server, client)
@@ -2432,7 +2486,12 @@ mod tests {
                 .unwrap_err()
                 .contains("resource lifetime")
         );
-        assert_http_topology_rejection(&evidence, repeated).await;
+        assert_http_topology_rejection(
+            &evidence,
+            repeated,
+            (422, "Actor endpoint is needed by unordered work"),
+        )
+        .await;
         // Even two endpoints cannot close two retained slots on the same Actor.
         final_satisfaction(&mut serial, 0);
         let plan = orchestration::decode_mission_plan(&serial.to_string()).unwrap();
@@ -2482,7 +2541,12 @@ mod tests {
                     .unwrap();
             assert!(evidence.restrictions_for_plan(&rejected, &group).is_err());
         }
-        assert_http_topology_rejection(&evidence, bounded_plan_document(33, true)).await;
+        assert_http_topology_rejection(
+            &evidence,
+            bounded_plan_document(33, true),
+            (409, "no feasible shared-world endpoint assignment"),
+        )
+        .await;
         snapshot(&path, false);
         let legacy = DeploymentFeasibility::load(&path).unwrap();
         let legacy_serial =

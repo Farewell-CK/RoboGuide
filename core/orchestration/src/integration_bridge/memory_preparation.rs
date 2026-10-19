@@ -135,6 +135,23 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             "role_id":command.role_id(),"operation":command.intent().operation().to_string(),
             "objective":command.intent().objective(),"parameters":parameters,"resource_ids":resources,
         });
+        if command.registration_evidence().is_some_and(|registration| {
+            registration.contract_version().as_str()
+                == integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+        }) {
+            let generation = command
+                .execution_generation()
+                .filter(|generation| *generation > 0)
+                .ok_or_else(|| {
+                    IntegrationRuntimeError::Protocol(
+                        "prepared invocation lacks original attempt generation".into(),
+                    )
+                })?;
+            value
+                .as_object_mut()
+                .expect("locally encoded invocation object")
+                .insert("execution_generation".into(), serde_json::json!(generation));
+        }
         if let Some(session) = command.session() {
             value
                 .as_object_mut()

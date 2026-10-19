@@ -90,8 +90,11 @@ def build_spatial_profile_snapshot(
     for agent_id, path in sorted(node_configs):
         raw = path.read_bytes()
         config = tomllib.loads(raw.decode("utf-8"))
-        if config.get("schema") != "roboguide.node-config/v0.7":
-            raise IntegrationError("spatial profile requires Node config v0.7")
+        if config.get("schema") not in {
+            "roboguide.node-config/v0.7",
+            "roboguide.node-config/v0.13",
+        }:
+            raise IntegrationError("spatial profile requires Node config v0.7 or explicit v0.13")
         node_id = config.get("node_id")
         if not isinstance(node_id, str) or not node_id.strip():
             raise IntegrationError("spatial profile needs a nonblank Node identity")

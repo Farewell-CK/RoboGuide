@@ -24,6 +24,8 @@ pub(super) struct FrozenFeasibilitySnapshot {
     pub(super) live_operations: Option<BTreeMap<domain::NodeId, BTreeSet<String>>>,
     /// Explicit producer finality; verifier-backed slots retain endpoints until world closure.
     pub(super) terminal_verifier_barrier: bool,
+    /// Exact registry source identity, retained without exposing endpoint bindings to MI.
+    pub(super) registry_digest: Option<String>,
 }
 
 impl FrozenFeasibilitySnapshot {
@@ -383,6 +385,10 @@ impl FrozenFeasibilitySnapshot {
             operation_admission,
             live_operations,
             terminal_verifier_barrier,
+            registry_digest: body
+                .get("execution_profile")
+                .and_then(|profile| profile["registry_digest"].as_str())
+                .map(str::to_owned),
         })
     }
 }

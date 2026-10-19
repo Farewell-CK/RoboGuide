@@ -85,3 +85,56 @@ def test_failed_terminal_write_never_sets_publication_flags(
     assert producer.closure()["verifier_published"] is False
     assert producer.closure()["evidence_flushed"] is False
     assert producer.closure()["execution_error"] == "execution:Stage2ContractViolation"
+
+
+def test_exit_export_binds_complete_original_group_generations(tmp_path: Path) -> None:
+    """The real exporter freezes all original worker invocations and returns defensive copies."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    producer = coordinator(tmp_path)
+    producer._process_exit_observation = None
+    producer._ledger = LiveSlotLedger((0, 1))
+    for agent in (0, 1):
+        producer._ledger.admit(
+            agent, replace(invocation(agent, ("left", "right")), execution_generation=agent + 4)
+        )
+    producer._world = SimpleNamespace(
+        close_and_observe=lambda: {"instance_id": "test-original", "pid": 17, "exit_code": 0}
+    )
+    producer._close_process_evidence()
+    proof = producer.process_exit_observation()
+    assert proof is not None
+    assert proof["group_id"] == "group"
+    assert proof["attempts"] == [
+        {"execution_id": "attempt-0", "execution_generation": 4},
+        {"execution_id": "attempt-1", "execution_generation": 5},
+    ]
+    proof["pid"] = 999
+    preserved = producer.process_exit_observation()
+    assert preserved is not None and preserved["pid"] == 17
+    assert json.loads((tmp_path / "worker-exit-observation.json").read_text())["pid"] == 17
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_missing_generation_or_retained_worker_cannot_gain_exit_authority(
+    tmp_path: Path, retained: bool
+) -> None:
+    """Missing original generation stays unavailable; retained sessions must not be stopped."""
+    from types import SimpleNamespace
+
+    producer = coordinator(tmp_path)
+    producer._process_exit_observation = None
+    producer._retain_stopped_session = retained
+    calls: list[bool] = []
+
+    def observe() -> dict[str, object]:
+        """Count explicit fixture closes without inventing a missing attempt generation."""
+        calls.append(True)
+        return {"instance_id": "test-original", "pid": 17, "exit_code": 0}
+
+    producer._world = SimpleNamespace(close_and_observe=observe)
+    producer._close_process_evidence()
+    assert producer.process_exit_observation() is None
+    assert not (tmp_path / "worker-exit-observation.json").exists()
+    assert calls == ([] if retained else [True])

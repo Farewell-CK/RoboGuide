@@ -271,6 +271,39 @@ fn writer_lock_fences_competing_initializer_before_staging_cleanup() {
         .expect("artifact root must be available after the first writer exits");
 }
 
+/// Actual inherited descriptors do not outlive the last application owner or its active uploads.
+#[cfg(unix)]
+#[test]
+fn final_store_owner_releases_lease_while_original_child_remains_alive() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let directory = tempdir().unwrap();
+    let store = FileSystemArtifactStore::new(directory.path()).unwrap();
+    let retained = store.clone();
+    let upload = store.begin_upload("owned-upload").unwrap();
+    let mut child = Command::new("sh")
+        .args(["-c", "read token"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(store._writer_lock.file.try_clone().unwrap()))
+        .spawn()
+        .unwrap();
+    drop(store);
+    assert!(FileSystemArtifactStore::new(directory.path()).is_err());
+    drop(retained);
+    assert!(FileSystemArtifactStore::new(directory.path()).is_err());
+    drop(upload);
+    let reopened = FileSystemArtifactStore::new(directory.path());
+    let original_child_alive = child.try_wait().unwrap().is_none();
+    child.stdin.take().unwrap().write_all(b"done\n").unwrap();
+    assert!(child.wait().unwrap().success());
+    assert!(original_child_alive);
+    assert!(
+        reopened.is_ok(),
+        "final application owner must release its lease: {reopened:?}"
+    );
+}
+
 /// Store initialization rejects a configured root symlink without creating entries outside it.
 #[cfg(unix)]
 #[test]

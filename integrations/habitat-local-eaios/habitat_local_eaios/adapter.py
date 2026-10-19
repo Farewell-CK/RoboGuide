@@ -17,6 +17,7 @@ from .model import (
     canonical_operation_from_route,
     parse_canonical_invocation,
 )
+from .safe_state import read_safe_state, validate_safe_state_response
 from .store import TERMINAL_STATES, ExecutionStore, StoredExecution
 
 LOG = logging.getLogger("roboguide.habitat_local_eaios")
@@ -169,6 +170,10 @@ class HabitatLocalAdapter:
         return read_execution_progress(
             self._progress_directory, self._agent_id, self._store.active_execution()
         )
+
+    def safe_state(self) -> dict[str, object]:
+        """Return unavailable when this backend has no independent original-process exit witness."""
+        return validate_safe_state_response(read_safe_state(self._store.all_executions()))
 
     def recovery_support(self) -> dict[str, object]:
         """Expose actual stop scope; a reset-on-new-invocation backend cannot resume its world."""

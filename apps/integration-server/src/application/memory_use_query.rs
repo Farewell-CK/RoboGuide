@@ -182,9 +182,9 @@ pub(crate) fn admit(
         .state()
         .node(&preparation.node_id)
         .ok_or("original Node is unavailable")?;
-    if node.registration().contract_version().as_str()
-        != integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
-    {
+    if !integration::grpc::v0_4::supports_memory_use_query(
+        node.registration().contract_version().as_str(),
+    ) {
         return Err(
             "original Node did not negotiate independent readonly Memory use queries".into(),
         );

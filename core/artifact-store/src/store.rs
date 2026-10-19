@@ -7,7 +7,8 @@ use crate::path_validation::{
     validate_upload_id,
 };
 use crate::types::{
-    ArtifactStoreError, ArtifactUpload, FileSystemArtifactStore, StoredArtifact, UploadState,
+    ArtifactStoreError, ArtifactUpload, ArtifactWriterLease, FileSystemArtifactStore,
+    StoredArtifact, UploadState,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -311,7 +312,7 @@ impl FileSystemArtifactStore {
 ///
 /// The lock attempt is non-blocking so composition roots fail startup clearly when another
 /// process already owns the CAS. The returned descriptor must remain open for the writer lifetime.
-fn acquire_writer_lock(root: &Path) -> Result<Arc<File>, ArtifactStoreError> {
+fn acquire_writer_lock(root: &Path) -> Result<Arc<ArtifactWriterLease>, ArtifactStoreError> {
     validate_directory_tree(root, false, "validate artifact root for writer lock")?;
     let lock_path = root.join(WRITER_LOCK_FILE);
     match fs::symlink_metadata(&lock_path) {
@@ -351,5 +352,5 @@ fn acquire_writer_lock(root: &Path) -> Result<Arc<File>, ArtifactStoreError> {
         )
     })?;
     sync_directory(root, "sync artifact writer lock")?;
-    Ok(Arc::new(file))
+    Ok(Arc::new(ArtifactWriterLease { file }))
 }

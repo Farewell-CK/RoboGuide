@@ -41,11 +41,24 @@ pub mod v0_4 {
     /// Contract with independent bounded readonly use-revoke observation.
     pub const MEMORY_USE_QUERY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.11";
 
+    /// Unified Memory and original-attempt safety contract; old v0.8 is map-only.
+    pub const SAFETY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.12";
+
+    /// Checks independently budgeted readonly revoke observation support.
+    pub fn supports_memory_use_query(version: &str) -> bool {
+        matches!(
+            version,
+            MEMORY_USE_QUERY_NODE_CONTRACT_VERSION | SAFETY_NODE_CONTRACT_VERSION
+        )
+    }
+
     /// Checks content-use support without granting new query semantics to old Nodes.
     pub fn supports_memory_use(version: &str) -> bool {
         matches!(
             version,
-            MEMORY_USE_NODE_CONTRACT_VERSION | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
+            MEMORY_USE_NODE_CONTRACT_VERSION
+                | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
+                | SAFETY_NODE_CONTRACT_VERSION
         )
     }
 
@@ -56,6 +69,7 @@ pub mod v0_4 {
             PREPARATION_NODE_CONTRACT_VERSION
                 | MEMORY_USE_NODE_CONTRACT_VERSION
                 | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
+                | SAFETY_NODE_CONTRACT_VERSION
         )
     }
 
@@ -68,6 +82,7 @@ pub mod v0_4 {
                 | PREPARATION_NODE_CONTRACT_VERSION
                 | MEMORY_USE_NODE_CONTRACT_VERSION
                 | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
+                | SAFETY_NODE_CONTRACT_VERSION
         )
     }
     /// Prior profile-and-intent contract retained for explicit session compatibility.
@@ -85,6 +100,36 @@ mod tests {
         NodeRegistration, Resource,
     };
     use prost::Message;
+
+    /// Branch-local generation tag 8 cannot alias the published prepared-content strings.
+    #[test]
+    fn combined_execute_preserves_preparation_and_separate_attempt_generation() {
+        let command = super::v0_4::Execute {
+            execution_id: "original-attempt".into(),
+            memory_preparation_id: "original-context".into(),
+            memory_preparation_digest: format!("sha256:{}", "a".repeat(64)),
+            memory_requirements_json: "[]".into(),
+            execution_generation: 7,
+            ..Default::default()
+        };
+        let decoded = super::v0_4::Execute::decode(command.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(decoded, command);
+        assert!(super::v0_4::Execute::decode(&[0x40_u8, 7][..]).is_err());
+        let old_preparation = super::v0_4::Execute {
+            execution_generation: 0,
+            ..command
+        };
+        let decoded =
+            super::v0_4::Execute::decode(old_preparation.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(decoded.execution_generation, 0);
+        assert_eq!(decoded.memory_preparation_id, "original-context");
+        assert!(super::v0_4::supports_memory_use_query(
+            super::v0_4::SAFETY_NODE_CONTRACT_VERSION
+        ));
+        assert!(!super::v0_4::supports_memory_use_query(
+            super::v0_4::PROVIDER_MAP_NODE_CONTRACT_VERSION
+        ));
+    }
 
     /// Current additive wire fields preserve profiles, operation support, and semantic objectives.
     #[test]
@@ -313,6 +358,7 @@ mod tests {
             command_id: "dispatch-attempt-1".to_string(),
             execution_session_json: String::new(),
             controller_epoch: String::new(),
+            execution_generation: 1,
         };
         let decoded = super::v0_4::Execute::decode(execute.encode_to_vec().as_slice())
             .expect("v0.4 Execute decodes");

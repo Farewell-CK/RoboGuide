@@ -5,6 +5,17 @@
 RoboGuide has a current V2 architecture baseline plus development and MVP documents.
 The first core bootstrap has started; the full runtime and MVP are not complete.
 
+ADR-0111 integrates Memory remediation, published plan validation and independent process-exit
+evidence under Node Contract v0.12 / config v0.13 / catalog v0.15. Published Memory tags 8–10
+retain their meaning; original attempt generation uses tag 11 and is identical in preparation
+and Execute. Safety metadata requires explicit config/contract negotiation; old v0.8 is map-only.
+Shared Controller wrapper v41 and Node journal v12 fence old writers. Ambiguous legacy fork
+checkpoints containing process-exit authority refuse automatic migration. The fork ADRs are now
+ADR-0109/0110; Memory ADR-0106/0107 remain unchanged. Artifact's shared application writer lease
+explicitly unlocks after every store clone and upload is dropped, independently of descriptors
+inherited by nonwriter children. No process evidence establishes device safety. See
+`docs/development/roboguide-integration-status-2026-10-20.md`; full F4 and F5–F10 remain required.
+
 - `docs/architecture/v2/` contains the current V2 source of truth and summary.
 - `README.md` and `docs/project-goals-and-mvp.md` define project scope.
 - `docs/implementation-backlog.md` tracks deferred decisions.
@@ -26,6 +37,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   legacy unverified stop strings migrate to manual evidence inside a startup transaction.
   SoftwareProcess assurance never establishes device stopping. The shared Controller wrapper
   schema lives in `core/state`; both runnable binaries expose read-only `--application-schema`.
+- ADR-0110 adds explicit safe-state v0.3 original-software-worker exit evidence. The Local EAIOS
+  reaps the original process and publishes its instance/PID/exit code plus complete Group attempt
+  generations; terminal rows and Cancel flags alone never prove exit. Natural Failed/Completed
+  reconciliation preserves the original Runtime result and does not invent a Cancel receipt.
+  Cancelled retains its durable receipt gate. Unified wrapper v41 fences this authority, retaining original
+  frozen coverage across restore; software proof never claims device stopping. The offline actual
+  Controller/two-Node/owned-child gate is `tools/quality/check_process_stop_evidence.py`.
 - ADR-0103's Mission HTTP command journal atomically links Request saves to the exact authenticated
   caller/tenant/method/path/key and immutable progress evidence. `/v1/http-commands/observe` and
   `/v1/http-commands/reconcile` never re-execute create, model calls or Controller submission.
@@ -826,6 +844,14 @@ empty placeholders or a top-level `src/`.
 
 ## Build, Test, and Development Commands
 
+ADR-0109 adds the inventory-free, read-only Controller `POST /v1/missions/validate-plan`
+query (`roboguide.plan-validation/v0.1`). Published deployment/verifier checks are shared with
+submission; the query never creates Groups, events, bindings or reservations. Configured MI
+execution-planning evidence enables the query for every newly generated or repaired candidate.
+Source drift and HTTP failure are system failures, while exact-plan negative findings retain
+original output and use the existing bounded regeneration budget. Ordinary endpoint reuse and
+timely per-Task verifiers must not inherit a global terminal-world barrier. See ADR-0109.
+
 For documentation changes, run:
 
 ```bash
@@ -854,6 +880,12 @@ uv run python tools/quality/check_python_function_docs.py \
   mission apps/mission-service integrations/robonix-map-service integrations/habitat-local-eaios
 uv run pytest -q
 ```
+
+Habitat deployment compatibility additionally runs the real worker interpreter:
+`PYTHONPATH=integrations/habitat-local-eaios <habitat-python> -m habitat_local_eaios.runtime_check`.
+This zero-Provider, zero-simulator gate exercises canonical parsing, SQLite round trips and the
+real loopback HTTP boundary. B1 runs it before starting SUT processes or calling MI; it is not
+physical readiness evidence. Set `ROBOGUIDE_HABITAT_PYTHON` for the matching pytest subprocess test.
 
 For evaluation harness changes, run:
 

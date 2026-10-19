@@ -4,6 +4,13 @@
 基线：`main@5285a92a6af8bf4a99bb0852b5cdb80728c9144c` 加已备份的未提交整改工作树。
 实施分支：`codex/remediation-complete-software-2026-10-15`。
 
+2026-10-20 集成工作在 `codex/main-integration-2026-10-20` 隔离工作树执行，目标合并 main；
+包含 MI 部署校验和执行故障闭环分支。全部远程分支与当前必需剩余项见
+[分支同步与剩余整改核对](roboguide-integration-status-2026-10-20.md)。
+ADR-0111 统一独立分支冲突合同为 Node v0.12/config v0.13/catalog v0.15、wrapper v41/
+journal v12，并保持旧 Memory 证据和原预算。集成完成不等于全部阶段 SoftwareComplete。
+本工作包结果见 [main 分支集成与软件组合验收](acceptance/2026-10-20-main-integration.md)。
+
 ## 交付要求
 
 原审计 14 层、R01–R20 的全部非发布工作均为必需项，原 P2 不再是本轮的排除项。

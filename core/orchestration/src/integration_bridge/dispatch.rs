@@ -153,6 +153,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                             | domain::NODE_CONTRACT_VERSION_V0_9
                             | domain::NODE_CONTRACT_VERSION_V0_10
                             | domain::NODE_CONTRACT_VERSION_V0_11
+                            | domain::NODE_CONTRACT_VERSION_V0_12
                     )
                 })
                 .map(|node| {
@@ -289,6 +290,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     command_id: format!("dispatch-{execution_id}"),
                     execution_session_json: session_json,
                     controller_epoch: String::new(),
+                    execution_generation: command.execution_generation().unwrap_or(0),
                     memory_preparation_id: preparation.preparation_id.clone(),
                     memory_preparation_digest: preparation
                         .digest()
@@ -298,7 +300,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 },
             )
         } else {
-            self.router.execute_with_session(
+            self.router.execute_with_session_generation(
                 command.node_id().as_str(),
                 format!("dispatch-{execution_id}"),
                 execution_id.to_string(),
@@ -308,6 +310,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     .map(|resource_id| resource_id.as_str().to_string())
                     .collect(),
                 session_json,
+                command.execution_generation().unwrap_or(0),
             )
         };
         self.runtime.record_dispatch_attempt(execution_id);
@@ -777,6 +780,12 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         }
         if let Some(support) = recovery_support {
             command = command.with_recovery_support(support);
+        }
+        if let Some(generation) = self
+            .runtime
+            .allocated_attempt_generation(group_id, task_ref, role_id)
+        {
+            command = command.with_execution_generation(generation);
         }
         let command = self.command_with_dispatch_registration(&execution_id, command)?;
         self.runtime

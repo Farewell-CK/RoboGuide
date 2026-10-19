@@ -19,3 +19,7 @@
 stop/revoke、immutable child lineage、真实接收准备与显式 commit 的关系见
 [implementation-topology](../architecture/v2/implementation-topology.md)。该 Mermaid 为当前软件
 调用链，既有概念 PNG 保留其基线含义；软件 assurance 不宣称物理交接。
+
+2026-10-20 当前部署 Mermaid 同步 ADR-0111：独立 generation/Memory wire、动态成员与
+leader transfer、保留交接 ownership 的失败收尾和 Artifact 应用 writer lease。概念 PNG
+继续保持 V2 基线，不把这些软件接线画成设备或完整 HA 数据面已经验收。

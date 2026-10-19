@@ -217,9 +217,7 @@ pub(super) fn accept_current_message(
                 &value.session_id
             }
             Some(NodePayload::MemoryUseQueryReceipt(value)) => {
-                if route.node_contract_version
-                    != crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
-                {
+                if !crate::grpc::v0_4::supports_memory_use_query(&route.node_contract_version) {
                     return Err(Status::failed_precondition(
                         "independent Memory use observation was not negotiated",
                     ));
@@ -381,7 +379,8 @@ pub(super) fn validate_registration(
     if registration.node_id.trim().is_empty()
         || !matches!(
             registration.node_contract_version.as_str(),
-            MEMORY_USE_NODE_CONTRACT_VERSION
+            SAFETY_NODE_CONTRACT_VERSION
+                | MEMORY_USE_NODE_CONTRACT_VERSION
                 | crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
                 | PREPARATION_NODE_CONTRACT_VERSION
                 | PROVIDER_MAP_NODE_CONTRACT_VERSION
@@ -393,6 +392,16 @@ pub(super) fn validate_registration(
     {
         return Err(Status::invalid_argument(
             "registration node and contract identities are invalid",
+        ));
+    }
+    if registration.node_contract_version != SAFETY_NODE_CONTRACT_VERSION
+        && registration
+            .local_systems
+            .iter()
+            .any(|system| system.metadata.contains_key("roboguide.execution-safety"))
+    {
+        return Err(Status::invalid_argument(
+            "execution-safety declarations require explicit Node Contract v0.12",
         ));
     }
     if registration.memory_providers.iter().any(|provider| {
@@ -557,7 +566,8 @@ fn validate_operation_support(
 ) -> Result<(), Status> {
     if !matches!(
         registration.node_contract_version.as_str(),
-        NODE_CONTRACT_VERSION
+        SAFETY_NODE_CONTRACT_VERSION
+            | NODE_CONTRACT_VERSION
             | CONTINUITY_NODE_CONTRACT_VERSION
             | PROVIDER_MAP_NODE_CONTRACT_VERSION
             | PREPARATION_NODE_CONTRACT_VERSION

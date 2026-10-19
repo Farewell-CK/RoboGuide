@@ -162,8 +162,9 @@ pub use physical_entity::{
 };
 pub use physical_safety::{
     EXECUTION_SAFETY_METADATA_KEY, ExecutionSafetyProfile, OperationSafetySupport,
-    PHYSICAL_STOP_CONTRACT_SCHEMA_V0_1, SAFE_STATE_OBSERVATION_SCHEMA, SafetyAssurance,
-    SafetyStopError, SafetyStopIdentity, SafetyStopPhase, SafetyStopRecord,
+    PHYSICAL_STOP_CONTRACT_SCHEMA_V0_1, PROCESS_EXIT_OBSERVATION_SCHEMA,
+    SAFE_STATE_OBSERVATION_SCHEMA, SafetyAssurance, SafetyStopError, SafetyStopIdentity,
+    SafetyStopPhase, SafetyStopRecord,
 };
 pub use resource::{Resource, ResourceKind, ResourceRequirement};
 pub use role_assignment::RoleAssignment;
@@ -234,6 +235,8 @@ pub const NODE_CONTRACT_VERSION_V0_6: &str = "roboguide.node.v0.6";
 pub const NODE_CONTRACT_VERSION_V0_7: &str = "roboguide.node.v0.7";
 /// Node Contract with exact typed-map producer and current publication provenance.
 pub const NODE_CONTRACT_VERSION_V0_8: &str = "roboguide.node.v0.8";
+/// Unified Memory and generation-bound execution-safety contract.
+pub const NODE_CONTRACT_VERSION_V0_12: &str = "roboguide.node.v0.12";
 /// Node Contract with durable pre-execution Memory context and current backend observation.
 pub const NODE_CONTRACT_VERSION_V0_9: &str = "roboguide.node.v0.9";
 

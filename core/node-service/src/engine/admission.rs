@@ -143,8 +143,41 @@ impl LocalIntegrationEngine {
             invocation,
             resource_ids,
             execution_session_json,
+            0,
             None,
         )
+    }
+
+    /// Admits an explicit Runtime generation without permitting it to change on replay.
+    pub fn execute_with_session_generation(
+        &self,
+        execution_id: String,
+        invocation: CanonicalInvocation,
+        resource_ids: Vec<String>,
+        execution_session_json: &str,
+        execution_generation: u64,
+    ) -> Result<ExecuteDisposition, EngineError> {
+        self.execute_with_memory_context(
+            execution_id,
+            invocation,
+            resource_ids,
+            execution_session_json,
+            execution_generation,
+            None,
+        )
+    }
+
+    /// Rejects missing generation only when the peer explicitly negotiated the combined contract.
+    pub(crate) fn validate_execution_generation(&self, generation: u64) -> Result<(), EngineError> {
+        if self.catalog().node_contract_version()
+            == integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+            && generation == 0
+        {
+            return Err(EngineError::Protocol(
+                "generation-bound Execute requires nonzero original attempt generation".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Admits the exact original invocation while retaining the prepared-context identity in SQL.
@@ -154,8 +187,10 @@ impl LocalIntegrationEngine {
         invocation: CanonicalInvocation,
         mut resource_ids: Vec<String>,
         execution_session_json: &str,
+        execution_generation: u64,
         preparation: Option<&domain::MemoryPreparation>,
     ) -> Result<ExecuteDisposition, EngineError> {
+        self.validate_execution_generation(execution_generation)?;
         validate_invocation_identity(&execution_id, &invocation)?;
         let session = if execution_session_json.is_empty() {
             None
@@ -180,7 +215,15 @@ impl LocalIntegrationEngine {
         let capability = self.operation(&operation)?.clone();
         validate_resources(&self.inner.catalog, &capability, &resource_ids)?;
         resource_ids.sort();
-        let mut invocation_json = canonical_invocation_json(&invocation, &resource_ids)?;
+        let normalized_generation = if self.catalog().node_contract_version()
+            == integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+        {
+            execution_generation
+        } else {
+            0
+        };
+        let mut invocation_json =
+            canonical_invocation_json(&invocation, &resource_ids, normalized_generation)?;
         if let Some(session) = session {
             invocation_json
                 .as_object_mut()

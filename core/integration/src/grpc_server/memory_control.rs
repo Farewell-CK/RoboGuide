@@ -24,9 +24,7 @@ impl GrpcNodeRouter {
         let query_json =
             serde_json::to_string(query).map_err(|e| Status::invalid_argument(e.to_string()))?;
         self.send_preparation_payload(node, |route, controller_epoch| {
-            if route.node_contract_version
-                != crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
-            {
+            if !crate::grpc::v0_4::supports_memory_use_query(&route.node_contract_version) {
                 return Err(Status::failed_precondition(
                     "independent readonly use queries require Node Contract v0.11",
                 ));
@@ -217,6 +215,13 @@ impl GrpcNodeRouter {
             ));
         }
         self.send_preparation_payload(node_id, |route, controller_epoch| {
+            if route.node_contract_version == crate::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+                && command.execution_generation == 0
+            {
+                return Err(Status::failed_precondition(
+                    "prepared Execute lacks original attempt generation",
+                ));
+            }
             if !command.execution_session_json.is_empty() && !route.supports_execution_session {
                 return Err(Status::failed_precondition(
                     "prepared Execute session was not negotiated",

@@ -30,6 +30,7 @@ pub(crate) mod node_identity;
 mod outcomes;
 mod persistence;
 mod physical_entity_registry;
+pub(crate) mod plan_validation;
 mod recovery;
 pub(crate) mod safety_stop;
 pub(crate) mod semantic_verifier;

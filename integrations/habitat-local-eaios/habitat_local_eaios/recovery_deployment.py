@@ -67,8 +67,8 @@ def render_node_config(text: str, retain_stopped_session: bool) -> str:
     accidentally change a different LocalSystem or any other configuration.
     """
     config = tomllib.loads(text)
-    if config.get("schema") != "roboguide.node-config/v0.7":
-        raise IntegrationError("recovery deployment requires Node config v0.7")
+    if config.get("schema") not in {"roboguide.node-config/v0.7", "roboguide.node-config/v0.13"}:
+        raise IntegrationError("recovery deployment requires Node config v0.7 or explicit v0.13")
     owner = _owner(config)
     metadata = owner.get("metadata", {})
     if metadata.get("roboguide.execution-session") != "roboguide.execution-session/v0.1":

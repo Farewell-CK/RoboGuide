@@ -88,35 +88,46 @@ def run(directory: Path, old_controller: Path, old_node: Path | None = None) -> 
     empty.mkdir(mode=0o700)
     grpc, operator, artifact = address(), address(), address()
     database = empty / "controller.sqlite3"
-    with (empty / "controller.log").open("wb") as log:
-        process = subprocess.Popen(
-            [str(current), grpc, str(database), operator, artifact, str(empty / "cas")],
-            cwd=ROOT,
-            env=environment,
-            stdout=log,
-            stderr=log,
-        )
-    try:
-        origin = "http://" + operator
-        wait_for(
-            lambda: request(origin, "/healthz")[0] == 200, "current zero-Node Controller starts"
-        )
-        assert request(origin, "/v1/inventory")[1]["nodes"] == []
-    finally:
-        stop(process)
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
-        assert (
-            connection.execute("SELECT schema FROM controller_checkpoint").fetchone()[0]
-            == expected_schema
-        )
+    migration_schemas = []
+    origin = "http://" + operator
+    for binary, label in ((old_controller, "legacy"), (current, "upgraded")):
+        with (empty / f"{label}-controller.log").open("wb") as log:
+            process = subprocess.Popen(
+                [str(binary), grpc, str(database), operator, artifact, str(empty / "cas")],
+                cwd=ROOT,
+                env=environment,
+                stdout=log,
+                stderr=log,
+            )
+        try:
+            wait_for(
+                lambda: request(origin, "/healthz")[0] == 200,
+                f"{label} zero-Node Controller starts",
+            )
+            assert request(origin, "/v1/inventory")[1]["nodes"] == []
+        finally:
+            stop(process)
+        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+            assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
+            migration_schemas.append(
+                connection.execute("SELECT schema FROM controller_checkpoint").fetchone()[0]
+            )
+    assert migration_schemas[0] != expected_schema
+    assert migration_schemas[1] == expected_schema
+    receipts.append(
+        {"case": "actual-zero-node-forward-migration", "schemas": migration_schemas, "nodes": 0}
+    )
     reject(database, "zero-node-zero-event")
     if old_node is not None:
         database = directory / "consumer/node-state/execution-journal.sqlite3"
         before = logical_digest(database, tables(database))
         original = directory / "consumer/node.toml"
         config = directory / "consumer" / ("old-node-" + uuid.uuid4().hex + ".toml")
-        config.write_text(original.read_text().replace("node-config/v0.12", "node-config/v0.11"))
+        config.write_text(
+            original.read_text()
+            .replace("node-config/v0.13", "node-config/v0.11")
+            .replace("node-config/v0.12", "node-config/v0.11")
+        )
         node_environment = dict(environment)
         for suffix, filename in (
             ("CERT", "enrolment-next.crt"),

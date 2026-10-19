@@ -16,7 +16,21 @@ pub struct FileSystemArtifactStore {
     /// Root directory containing the staging and blob trees.
     pub(crate) root: PathBuf,
     /// Exclusive lease shared by every clone and in-progress upload from this store.
-    pub(crate) _writer_lock: Arc<File>,
+    pub(crate) _writer_lock: Arc<ArtifactWriterLease>,
+}
+
+/// Application writer lifetime, independent of descriptors inherited by nonwriter children.
+#[derive(Debug)]
+pub(crate) struct ArtifactWriterLease {
+    /// Locked file description shared by all store clones and outstanding uploads.
+    pub(crate) file: File,
+}
+
+impl Drop for ArtifactWriterLease {
+    /// Ends the lease only after the last application owner and upload have been dropped.
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
 }
 
 impl PartialEq for FileSystemArtifactStore {

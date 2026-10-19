@@ -88,6 +88,9 @@ def bootstrap_source(directory: Path, manifest: dict[str, Any]) -> dict[str, Any
 
 def source_configuration(text: str, node: str) -> str:
     """Declare real file-worker exit observation with explicit software-only assurance."""
+    text = text.replace("node-config/v0.11", "node-config/v0.13").replace(
+        "node-config/v0.12", "node-config/v0.13"
+    )
     support = {
         "schema": "roboguide.execution-safety/v0.1",
         "operations": [

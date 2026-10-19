@@ -215,6 +215,23 @@ fn readiness_update_changes_later_control_matching() {
 /// Node Contract v0.6 profiles and operation support jointly constrain normalized Matching.
 #[test]
 fn capability_profile_attributes_reach_control_matching() {
+    assert_capability_profile_matching(integration::grpc::v0_4::NODE_CONTRACT_VERSION);
+}
+
+/// Negotiating Memory continuity retains the profile and operation declarations.
+#[test]
+fn continuity_contract_profiles_reach_control_matching() {
+    assert_capability_profile_matching(integration::grpc::v0_4::CONTINUITY_NODE_CONTRACT_VERSION);
+}
+
+/// Safety generation transport must not reclassify typed registration as a legacy contract.
+#[test]
+fn safety_contract_profiles_reach_control_matching() {
+    assert_capability_profile_matching(integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION);
+}
+
+/// Exercises wire registration, observed readiness and constrained Matching for one version.
+fn assert_capability_profile_matching(node_contract_version: &str) {
     use integration::grpc::v0_4::scalar_value::Value as Scalar;
 
     let registration = NodeRegistration {
@@ -231,7 +248,7 @@ fn capability_profile_attributes_reach_control_matching() {
         sensors: Vec::new(),
         resources: Vec::new(),
         metadata: Default::default(),
-        node_contract_version: integration::grpc::v0_4::NODE_CONTRACT_VERSION.to_string(),
+        node_contract_version: node_contract_version.to_string(),
         state_exports: Vec::new(),
         memory_providers: Vec::new(),
         capability_profiles: vec![integration::grpc::v0_4::CapabilityProfile {

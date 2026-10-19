@@ -31,10 +31,13 @@ def run(directory: Path) -> dict[str, Any]:
     assert admitted["passed"] is True
     spatial = bool(admitted.get("prepared_map_consumer"))
     consumer_config = tomllib.loads((directory / "consumer/node.toml").read_text())
-    has_query = consumer_config["schema"] == "roboguide.node-config/v0.12"
+    has_combined = consumer_config["schema"] == "roboguide.node-config/v0.13"
+    has_query = has_combined or consumer_config["schema"] == "roboguide.node-config/v0.12"
     has_use = has_query or consumer_config["schema"] == "roboguide.node-config/v0.11"
     preparation_version = "preparation-v0.2" if has_use else "preparation-v0.1"
-    config_version = "v0.14" if has_query else "v0.13" if has_use else "v0.12"
+    config_version = (
+        "v0.15" if has_combined else "v0.14" if has_query else "v0.13" if has_use else "v0.12"
+    )
     schema_paths = {
         "mission": ROOT / "contracts/mission/v0.9/mission-plan.schema.json",
         "config": ROOT / f"contracts/node/{config_version}/node-config.schema.json",

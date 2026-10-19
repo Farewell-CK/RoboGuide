@@ -107,7 +107,7 @@ def test_opt_in_changes_only_exact_operation_owner_metadata(tmp_path: Path) -> N
         ('"name":"move"', '"name":"invented-operation"'),
         ('operation = "mobility.move@v1"', 'operation = "mobility.other@v1"'),
         ('owner = "habitat-local-eaios"', 'owner = "unknown-owner"'),
-        ('schema = "roboguide.node-config/v0.7"', 'schema = "roboguide.node-config/v0.6"'),
+        ('schema = "roboguide.node-config/v0.13"', 'schema = "roboguide.node-config/v0.6"'),
     ],
 )
 def test_inconsistent_source_refuses_entire_set_before_any_write(

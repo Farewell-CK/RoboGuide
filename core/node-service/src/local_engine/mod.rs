@@ -64,6 +64,9 @@ pub const CONFIG_SCHEMA_V0_9: &str = "roboguide.node-config/v0.9";
 pub const CONFIG_SCHEMA_V0_10: &str = "roboguide.node-config/v0.10";
 /// Schema negotiating continuous current-use permission and irreversible backend fencing.
 /// Explicit independent revoke-observation configuration.
+/// Unified Memory and generation-bound safety configuration.
+pub const CONFIG_SCHEMA_V0_13: &str = "roboguide.node-config/v0.13";
+/// Explicit independent revoke-observation configuration without combined generation semantics.
 pub const CONFIG_SCHEMA_V0_12: &str = "roboguide.node-config/v0.12";
 /// Original continuous content-use configuration.
 pub const CONFIG_SCHEMA_V0_11: &str = "roboguide.node-config/v0.11";

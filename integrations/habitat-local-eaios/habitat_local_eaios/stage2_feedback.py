@@ -707,6 +707,32 @@ class Stage2ExecutionFeedback:
         """Report a definite relocation completion observed from the original place skill."""
         return self._operation_completed.get(agent_name, False)
 
+    def terminal_failure(self, agent_name: str) -> dict[str, Any] | None:
+        """Return an original skill abort without converting ordinary budget exits.
+
+        Habitat-Baselines uses ``bad_terminate`` to request episode termination
+        when a skill cannot return control to the high-level policy.  The
+        vendor policy still returns its original action tuple; this read-only
+        projection lets the deployment close that endpoint after the already
+        completed Gym step.  A normal skill-budget exit remains recoverable and
+        therefore returns ``None``.
+        """
+        pending = self._pending.get(agent_name)
+        if pending is None:
+            return None
+        termination = pending.document.get("termination")
+        if not isinstance(termination, Mapping) or termination.get("bad_terminate") is not True:
+            return None
+        return {
+            "status": pending.document.get("status"),
+            "tool_name": pending.document.get("tool_name"),
+            "tool_call_id": pending.document.get("tool_call_id"),
+            "action_sequence": pending.document.get("action_sequence"),
+            "physical_steps_since_call": pending.physical_steps,
+            "termination": dict(termination),
+            "failure_basis": "original-skill-bad-terminate",
+        }
+
     def local_completion(self, agent_name: str) -> None:
         """Retain the loop's existing post-step terminal measure, never a PDDL assertion.
 

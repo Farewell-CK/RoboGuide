@@ -2,6 +2,12 @@
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
+2026-10-20 的[分支同步与剩余整改核对](docs/development/roboguide-integration-status-2026-10-20.md)
+记录所有远程分支与尚未关闭的非发布工作。整改、MI 校验和执行故障闭环按
+[ADR-0111](docs/decisions/0111-branch-integration-and-authority-version-fences.md)组合：
+Node Contract v0.12/config v0.13/catalog v0.15、wrapper v41/journal v12；Memory 准备与原执行
+代次保持一致。SoftwareProcess 证据仍不证明设备停止，完整 F4 与 F5–F10 继续实施。
+
 当前架构 source of truth 是 [`docs/architecture/v2/README.md`](docs/architecture/v2/README.md) 及其引用的已接受 ADR。它们记录当前实现对应的职责、协议语义、关键闭环和架构约束；原始 [`RoboGuide_Architecture_Baseline_V2.docx`](docs/architecture/v2/RoboGuide_Architecture_Baseline_V2.docx) 仅保留为最初 V2 基线快照，可能落后于后续演进。V1.1 作为历史基线保留。
 
 全部非发布软件整改正在按[实施计划](docs/development/roboguide-software-completion-plan-2026-10-15.md)执行。
@@ -194,6 +200,12 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 外部用户、Agent 或 Application 提供 Mission / Goal，但不直接操作具体设备。
 
 ### Mission Intelligence
+
+配置 execution-planning evidence 的部署在每个生成/恢复草案上调用 Controller 只读
+`POST /v1/missions/validate-plan`，绑定实际计划与冻结来源；已知合同冲突进入现有有界
+草案恢复，接口不可用或来源不匹配保留系统失败。前检不做资源承诺，也不证明物理可达。
+普通顺序复用与终态 verifier 持有资源使用各自的声明规则，见
+[ADR-0109](docs/decisions/0109-published-plan-validation-and-bounded-draft-recovery.md)。
 
 负责 Mission Understanding、Clarification、Task Planning、Task Graph 和 Execution
 Requirements，回答 `What needs to be achieved?`。外部用户只提交文本 instruction；仅当存在
@@ -1173,3 +1185,16 @@ ADR-0080 的有界事实批处理默认最多 8 条、单一合批窗口 2ms；r
 Deployment-owned bounded active observation, pre-dispatch model reselection and evidence closure are
 documented in [the extension guide](docs/extensions/bounded-observation-and-evidence-closure.md),
 with authority and physical release limits in [ADR-0094](docs/decisions/0094-bounded-observation-and-local-contract-recovery.md).
+
+软件进程停止与本地执行结果是独立证据（[ADR-0110](docs/decisions/0110-execution-generation-and-process-stop-evidence.md)）。
+Habitat Local EAIOS 在原 worker 真实退出后发布 safe-state v0.3，完整绑定原 Group、attempt
+和 generation；Failed/Completed 不会被改写为 Cancelled。缺失证明保留 ownership；
+软件进程证明不表示设备安全。实际 Controller、两个生产 Node 与独立 POSIX child 的离线门禁：
+`uv run python tools/quality/check_process_stop_evidence.py --output /absolute/fresh-directory`。
+该检查不调用 Provider 或仿真器，fixture 结果不是 B1 benchmark。
+
+B1 在启动前还使用实际 Habitat Python 执行 `habitat_local_eaios.runtime_check`，覆盖五种
+canonical operation 的请求解析、代次校验、SQLite 和真实 loopback HTTP 接收。失败在调用 MI
+或启动仿真前停止，保存 `habitat-runtime-check.json`；主 Python 3.13 测试通过不代表独立
+Python 3.9 worker 已兼容。运行该解释器回归时设置 `ROBOGUIDE_HABITAT_PYTHON`。详见
+[部署兼容性检查](integrations/habitat-local-eaios/README.md#deployment-python-compatibility)。

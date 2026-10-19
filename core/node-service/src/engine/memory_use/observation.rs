@@ -21,9 +21,9 @@ impl LocalIntegrationEngine {
         remaining: u64,
         session_remaining: u64,
     ) -> Result<(), EngineError> {
-        if self.catalog().node_contract_version()
-            != integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
-        {
+        if !integration::grpc::v0_4::supports_memory_use_query(
+            self.catalog().node_contract_version(),
+        ) {
             return Err(EngineError::Memory(
                 "independent use queries were not negotiated".into(),
             ));

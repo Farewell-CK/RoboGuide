@@ -7,7 +7,7 @@ import json
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from http.client import HTTPException
 from pathlib import Path
 from typing import Protocol, cast
@@ -15,6 +15,7 @@ from typing import Protocol, cast
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings
 from mission.contract_values import MissionPlanError
+from mission.controller import MissionControllerError
 from mission.deployment_assessment import InitialOperationAssessment
 from mission.deployment_recovery import (
     DeploymentRecoveryAction,
@@ -30,6 +31,7 @@ from mission.execution_profile import DeploymentExecutionProfile
 from mission.grounding_context import GroundingContextSnapshot, admitted_physical_entity_ids
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.plan_validation import PlanValidationError, reference_issues
 from mission.planning_profile import DeploymentPlanningProfile
 from mission.planning_world_evidence import planning_world_review_payload
 from mission.provenance import ensure_provider_budget, provider_call
@@ -44,7 +46,7 @@ from mission.provider_mission_plan import (
     build_mission_plan_provider_schema,
     normalize_mission_plan_provider_output,
 )
-from mission.rejected_draft import RejectedPlanError
+from mission.rejected_draft import DraftValidationUnavailable, RejectedPlanError
 from mission.request_record import DialogueTurn, IntentAssessment
 from mission.review import MissionPlanReview
 from mission.satisfaction_policy import (
@@ -109,6 +111,19 @@ class UrllibJsonTransport:
         return cast(JSONObject, decoded)
 
 
+def _validate_planning_world(
+    evidence: ExecutionPlanningEvidence | None, context: GroundingContextSnapshot
+) -> None:
+    """Fence source/snapshot mismatch before spending any Provider or regeneration call."""
+    if evidence is not None:
+        try:
+            evidence.validate_world(context.semantic_evidence)
+        except ExecutionPlanningEvidenceError as error:
+            raise MissionProviderError(
+                f"execution planning evidence is invalid: {error}", configuration_failure=True
+            ) from error
+
+
 def _validate_plan_output(
     value: JSONObject,
     mission_id: str,
@@ -132,10 +147,28 @@ def _validate_plan_output(
             execution_planning_evidence.validate_world(grounding_context.semantic_evidence)
             execution_planning_evidence.validate_plan(plan)
         except ExecutionPlanningEvidenceError as error:
-            raise MissionPlanError(str(error)) from error
-    plan.validate_implementation_support()
-    plan.validate_physical_entity_grounding(admitted_physical_entity_ids(grounding_context))
-    validate_authoritative_executor_constraints(plan, grounding_context)
+            raise MissionProviderError(str(error), configuration_failure=True) from error
+    checks: tuple[tuple[str, Callable[[], None]], ...] = (
+        ("plan.implementation_unsupported", plan.validate_implementation_support),
+        (
+            "plan.physical_grounding_invalid",
+            lambda: plan.validate_physical_entity_grounding(
+                admitted_physical_entity_ids(grounding_context)
+            ),
+        ),
+        (
+            "plan.executor_constraint_unfounded",
+            lambda: validate_authoritative_executor_constraints(plan, grounding_context),
+        ),
+    )
+    issues: list[JSONObject] = []
+    for code, check in checks:
+        try:
+            check()
+        except MissionPlanError as error:
+            issues.append({"code": code, "path": "/", "message": str(error)})
+    if issues:
+        raise PlanValidationError(issues)
     capability_catalog.validate_plan(plan)
     validate_satisfaction_policy(plan, satisfaction_policy, grounding_context.semantic_evidence)
     return plan
@@ -152,6 +185,7 @@ def _validated_provider_draft(
     grounding_context: GroundingContextSnapshot,
     execution_profile: DeploymentExecutionProfile | None,
     execution_planning_evidence: ExecutionPlanningEvidence | None = None,
+    plan_validator: Callable[[MissionPlan], None] | None = None,
 ) -> MissionPlan:
     """Normalize and admit a Planner or Repairer output with durable rejection payloads."""
     try:
@@ -165,7 +199,10 @@ def _validated_provider_draft(
             generated_at_ms=generated_at_ms,
         ) from error
     try:
-        return _validate_plan_output(
+        issues = reference_issues(normalized, grounding_context)
+        if issues:
+            raise PlanValidationError(issues)
+        plan = _validate_plan_output(
             normalized,
             mission_id,
             grounded_intent,
@@ -175,6 +212,17 @@ def _validated_provider_draft(
             execution_profile,
             execution_planning_evidence,
         )
+        if plan_validator is not None:
+            try:
+                plan_validator(plan)
+            except MissionControllerError as error:
+                raise DraftValidationUnavailable(
+                    error,
+                    provider_output=provider_output,
+                    normalized_output=normalized,
+                    generated_at_ms=generated_at_ms,
+                ) from error
+        return plan
     except MissionPlanError as error:
         raise RejectedPlanError(
             str(error),
@@ -182,8 +230,15 @@ def _validated_provider_draft(
             provider_output=provider_output,
             normalized_output=normalized,
             generated_at_ms=generated_at_ms,
+            validation_errors=(
+                tuple({"stage": "plan_validation", **issue} for issue in error.validation_errors)
+                if isinstance(error, PlanValidationError)
+                else None
+            ),
         ) from error
     except MissionProviderError as error:
+        if error.configuration_failure:
+            raise
         raise MissionIdentityError(
             str(error),
             provider_output=provider_output,
@@ -410,6 +465,7 @@ class ResponsesMissionPlanner:
         execution_profile: DeploymentExecutionProfile | None = None,
         planning_profile: DeploymentPlanningProfile | None = None,
         execution_planning_evidence: ExecutionPlanningEvidence | None = None,
+        plan_validator: Callable[[MissionPlan], None] | None = None,
     ) -> None:
         """Create a Planner over transport mechanics that carry no Mission authority."""
         self._client = _ResponsesClient(settings, environment, transport)
@@ -417,6 +473,7 @@ class ResponsesMissionPlanner:
         self._execution_profile = execution_profile
         self._planning_profile = planning_profile
         self._execution_planning_evidence = execution_planning_evidence
+        self._plan_validator = plan_validator
 
     def plan(
         self,
@@ -480,6 +537,7 @@ class ResponsesMissionPlanner:
         (``MissionPlanError``) are wrapped into ``RejectedPlanError`` with
         the raw and normalized outputs for evidence and recovery.
         """
+        _validate_planning_world(self._execution_planning_evidence, grounding_context)
         canonical_schema = self._client._load_schema()
         payload: dict[str, JSONValue] = {
             "mission_id": mission_id,
@@ -534,6 +592,7 @@ class ResponsesMissionPlanner:
             grounding_context,
             self._execution_profile,
             self._execution_planning_evidence,
+            self._plan_validator,
         )
 
 
@@ -635,6 +694,7 @@ class ResponsesMissionRepairer:
         execution_profile: DeploymentExecutionProfile | None = None,
         planning_profile: DeploymentPlanningProfile | None = None,
         execution_planning_evidence: ExecutionPlanningEvidence | None = None,
+        plan_validator: Callable[[MissionPlan], None] | None = None,
     ) -> None:
         """Create a Repairer adapter over the shared Responses request implementation."""
         self._client = _ResponsesClient(settings, environment, transport)
@@ -642,6 +702,7 @@ class ResponsesMissionRepairer:
         self._execution_profile = execution_profile
         self._planning_profile = planning_profile
         self._execution_planning_evidence = execution_planning_evidence
+        self._plan_validator = plan_validator
 
     def reconsider_deployment(
         self,
@@ -671,6 +732,7 @@ class ResponsesMissionRepairer:
             raise MissionProviderError(
                 "deployment recovery inputs are detached", configuration_failure=True
             )
+        _validate_planning_world(self._execution_planning_evidence, grounding_context)
         canonical_schema = self._client._load_schema()
         plan_schema = self._client._mission_plan_provider_schema(canonical_schema, mission_id)
         definitions = plan_schema.pop("$defs")
@@ -777,6 +839,7 @@ class ResponsesMissionRepairer:
                     grounding_context,
                     self._execution_profile,
                     self._execution_planning_evidence,
+                    self._plan_validator,
                 )
             explanation = raw["explanation"]
             if not isinstance(explanation, str):
@@ -852,6 +915,7 @@ class ResponsesMissionRepairer:
         feedback: JSONObject | None,
     ) -> MissionPlan:
         """Call Repairer once and preserve raw output on model-draft validation failure."""
+        _validate_planning_world(self._execution_planning_evidence, grounding_context)
         canonical_schema = self._client._load_schema()
         payload: JSONObject = {
             "mission_id": mission_id,
@@ -909,6 +973,7 @@ class ResponsesMissionRepairer:
             grounding_context,
             self._execution_profile,
             self._execution_planning_evidence,
+            self._plan_validator,
         )
 
 

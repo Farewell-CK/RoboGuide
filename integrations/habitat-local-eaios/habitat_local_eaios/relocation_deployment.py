@@ -66,8 +66,11 @@ def build_relocation_profile(node_configs: tuple[tuple[int, Path], ...]) -> dict
             config = tomllib.loads(raw.decode("utf-8"))
         except (OSError, UnicodeError, ValueError) as error:
             raise IntegrationError("relocation Node source is not readable TOML") from error
-        if config.get("schema") != "roboguide.node-config/v0.7":
-            raise IntegrationError("relocation profile requires Node config v0.7")
+        if config.get("schema") not in {
+            "roboguide.node-config/v0.7",
+            "roboguide.node-config/v0.13",
+        }:
+            raise IntegrationError("relocation profile requires Node config v0.7 or explicit v0.13")
         capability = _one(config.get("capability_profiles"), "contract", RELOCATION_OPERATION)
         operation = _one(config.get("operations"), "operation", RELOCATION_OPERATION)
         owner = capability.get("owner")

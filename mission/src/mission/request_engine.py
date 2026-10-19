@@ -45,6 +45,7 @@ from mission.recovery import (
     classify_failure,
 )
 from mission.rejected_draft import (
+    DraftValidationUnavailable,
     RejectedDraftEvidence,
     RejectedPlanError,
     build_rejected_draft_evidence,
@@ -726,7 +727,7 @@ class MissionRequestEngine:
                             grounding_context=grounding_context,
                             previous_provider_output=last_error.provider_output,
                             validation_errors=[
-                                {"stage": last_error.stage, "message": str(last_error)}
+                                dict(issue) for issue in last_error.validation_errors
                             ],
                         ),
                     )
@@ -739,7 +740,7 @@ class MissionRequestEngine:
                     )
                     if cycle_attempts > self._prevalidation_recovery_attempts:
                         raise
-                except MissionIdentityError as error:
+                except (MissionIdentityError, DraftValidationUnavailable) as error:
                     record = self._record_rejected_output(
                         record, grounding_context, error, "planner"
                     )
@@ -756,7 +757,7 @@ class MissionRequestEngine:
         self,
         record: MissionRequestRecord,
         grounding_context: GroundingContextSnapshot,
-        error: RejectedPlanError | MissionIdentityError,
+        error: RejectedPlanError | MissionIdentityError | DraftValidationUnavailable,
         deliberation_stage: str,
     ) -> MissionRequestRecord:
         """Persist one Planner or Repairer model-draft rejection with unique request ordering."""
@@ -831,7 +832,7 @@ class MissionRequestEngine:
                             grounding_context=grounding_context,
                             previous_provider_output=last_error.provider_output,
                             validation_errors=[
-                                {"stage": last_error.stage, "message": str(last_error)}
+                                dict(issue) for issue in last_error.validation_errors
                             ],
                         ),
                     )
@@ -844,7 +845,7 @@ class MissionRequestEngine:
                     )
                     if cycle_attempts > self._prevalidation_recovery_attempts:
                         raise
-                except MissionIdentityError as error:
+                except (MissionIdentityError, DraftValidationUnavailable) as error:
                     record = self._record_rejected_output(
                         record, grounding_context, error, "repairer"
                     )
@@ -1342,7 +1343,9 @@ class MissionRequestEngine:
                     pass
                 else:
                     raw = observed
-            if isinstance(failure, RejectedPlanError | MissionIdentityError):
+            if isinstance(
+                failure, RejectedPlanError | MissionIdentityError | DraftValidationUnavailable
+            ):
                 record = self._record_rejected_output(record, context, failure, "repairer")
         finished = self._clock()
         if finished < attempt.started_at_ms:

@@ -447,6 +447,7 @@ pub(super) fn lock_keys(
 pub(super) fn canonical_invocation_json(
     invocation: &CanonicalInvocation,
     resource_ids: &[String],
+    execution_generation: u64,
 ) -> Result<serde_json::Value, EngineError> {
     let operation = invocation_operation(invocation)?;
     let (objective, wire_parameters, legacy) = if let Some(intent) = invocation.intent.as_ref() {
@@ -499,6 +500,12 @@ pub(super) fn canonical_invocation_json(
         object.insert(
             "objective".to_string(),
             serde_json::Value::String(objective.expect("semantic objective was validated").into()),
+        );
+    }
+    if execution_generation > 0 {
+        object.insert(
+            "execution_generation".to_string(),
+            serde_json::Value::Number(execution_generation.into()),
         );
     }
     Ok(normalized)

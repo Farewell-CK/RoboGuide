@@ -116,7 +116,9 @@ pub(crate) fn validate(
         if evidence.node_id() != attempt.command().node_id()
             || !matches!(
                 evidence.contract_version().as_str(),
-                domain::NODE_CONTRACT_VERSION_V0_8 | domain::NODE_CONTRACT_VERSION_V0_9
+                domain::NODE_CONTRACT_VERSION_V0_8
+                    | domain::NODE_CONTRACT_VERSION_V0_9
+                    | domain::NODE_CONTRACT_VERSION_V0_12
             )
             || evidence.source_session_id().is_none_or(str::is_empty)
             || evidence
@@ -130,7 +132,9 @@ pub(crate) fn validate(
     }
     if !matches!(
         registration.contract_version().as_str(),
-        domain::NODE_CONTRACT_VERSION_V0_8 | domain::NODE_CONTRACT_VERSION_V0_9
+        domain::NODE_CONTRACT_VERSION_V0_8
+            | domain::NODE_CONTRACT_VERSION_V0_9
+            | domain::NODE_CONTRACT_VERSION_V0_12
     ) || registration.operation_owner(source.command().intent().operation())
         != manifest.producer_local_system_id()
         || registration.operation_owner(command.intent().operation())

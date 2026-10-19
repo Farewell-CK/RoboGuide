@@ -196,7 +196,8 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         }
         if (
             record != expected
-            or config.get("schema") != "roboguide.node-config/v0.7"
+            or config.get("schema")
+            not in {"roboguide.node-config/v0.7", "roboguide.node-config/v0.13"}
             or resource.get("owner") != owner["id"]
             or resource.get("kind") != "space"
             or type(resource.get("capacity")) is not int

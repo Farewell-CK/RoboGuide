@@ -34,6 +34,9 @@ pub struct ExecutionCommand {
     /// Immutable dispatch-time stop/continuation declaration; absent legacy attempts cannot retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     recovery_support: Option<ExecutionRecoverySupport>,
+    /// Exact Runtime generation carried to the Local EAIOS for attempt-bound evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    execution_generation: Option<u64>,
     /// Correlation identity for the command and its observations.
     correlation_id: CorrelationId,
 }
@@ -59,6 +62,7 @@ impl ExecutionCommand {
             intent,
             session: None,
             recovery_support: None,
+            execution_generation: None,
             correlation_id,
         }
     }
@@ -148,6 +152,19 @@ impl ExecutionCommand {
     /// Returns original stop/continuation facts; later registration cannot upgrade this attempt.
     pub const fn recovery_support(&self) -> Option<&ExecutionRecoverySupport> {
         self.recovery_support.as_ref()
+    }
+
+    /// Returns the exact Runtime attempt generation, when this command is generation-bound.
+    pub const fn execution_generation(&self) -> Option<u64> {
+        self.execution_generation
+    }
+
+    /// Attaches a non-zero Runtime attempt generation to this immutable command.
+    pub fn with_execution_generation(mut self, generation: u64) -> Self {
+        if generation > 0 {
+            self.execution_generation = Some(generation);
+        }
+        self
     }
 
     /// Returns the operation correlation identity.

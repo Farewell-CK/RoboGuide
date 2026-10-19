@@ -180,12 +180,37 @@ def test_context_scoped_resource_is_counted_once_for_one_task() -> None:
         role["resource_scope"] = "context"
         task["roles"].append(role)
     cast(dict[str, Any], task["roles"][0])["resource_scope"] = "context"
+    task["satisfaction"]["basis"] = "execution-report"
+    task["satisfaction"]["verifier"] = None
     evidence.validate_plan(MissionPlan.from_json(raw))
 
 
 def test_terminal_verifier_capacity_allows_independent_task_reuse() -> None:
-    """Independent Tasks can reuse endpoints after Control-owned release."""
+    """Final-world Tasks retain endpoints even when they are in different Tasks."""
     evidence, _ = _evidence(endpoint_count=2)
     evidence.validate_plan(_plan(1))
     evidence.validate_plan(_plan(2))
-    evidence.validate_plan(_plan(3))
+    with pytest.raises(MissionPlanError, match="terminal verifier retains 3 slots"):
+        evidence.validate_plan(_plan(3))
+
+
+def test_ordinary_tasks_can_reuse_a_single_endpoint() -> None:
+    """Ordinary completion retains the existing serial resource release contract."""
+    evidence, _ = _evidence(endpoint_count=1)
+    raw = _plan(3).to_json()
+    tasks = cast(list[JSONObject], raw["tasks"])
+    for task in tasks:
+        satisfaction = cast(JSONObject, task["satisfaction"])
+        satisfaction["basis"] = "execution-report"
+        satisfaction["verifier"] = None
+    evidence.validate_plan(MissionPlan.from_json(raw))
+
+
+def test_adding_dependencies_cannot_unlock_a_final_world_verifier() -> None:
+    """A predecessor awaiting world closure cannot satisfy a dependent Task's DAG edge."""
+    evidence, _ = _evidence()
+    raw = _plan(2).to_json()
+    tasks = cast(list[JSONObject], raw["tasks"])
+    tasks[1]["depends_on"] = [tasks[0]["id"]]
+    with pytest.raises(MissionPlanError, match="before a dependent Task"):
+        evidence.validate_plan(MissionPlan.from_json(raw))

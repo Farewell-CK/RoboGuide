@@ -108,6 +108,11 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         "docs/development/index.md",
         (
             ("编码规范", "docs/development/coding-standards.md"),
+            (
+                "全部非发布整改计划",
+                "docs/development/roboguide-software-completion-plan-2026-10-15.md",
+            ),
+            ("分支同步与剩余整改", "docs/development/roboguide-integration-status-2026-10-20.md"),
             ("运行时可靠性故障矩阵", "docs/development/runtime-reliability-fault-matrix.md"),
             ("ADR 遗留核验", "docs/development/adr-follow-up-register.md"),
             ("Controller 事务性能", "docs/development/controller-persistence-performance.md"),

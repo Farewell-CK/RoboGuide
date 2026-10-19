@@ -426,8 +426,7 @@ def test_current_node_config_binds_progress_to_operation_owner(suffix: str) -> N
     path = ROOT.parents[1] / "scenarios/e1-shared-world-episode-51" / f"node-{suffix}.toml"
     config = tomllib.loads(path.read_text())
     exports = config["state_exports"]
-    assert len(exports) == 1
-    export = exports[0]
+    export = next(export for export in exports if export["id"] == "execution-progress")
     assert export["owner"] == "habitat-local-eaios"
     assert export["object_id"] == config["node_id"]
     assert export["semantic"] == "reported"

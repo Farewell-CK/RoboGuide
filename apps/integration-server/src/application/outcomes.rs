@@ -83,6 +83,48 @@ fn apply_selected_outcomes(
         if safety_stop::blocks_release(controller, &mission_id) {
             continue;
         }
+        // Only an original Failed attempt may close this hold after full stop confirmation.
+        // Cancelled is a non-success outcome, not natural failure or handoff release authority.
+        if matches!(outcome.result(), ObservedTaskExecutionResult::Failed)
+            && controller
+                .orchestrator
+                .execution(&mission_id)
+                .is_some_and(|execution| {
+                    execution.isolation().is_some_and(|hold| {
+                        hold.source == orchestration::MissionIsolationSource::SafetyStop
+                    }) && controller
+                        .bridge
+                        .group_attempts_terminal(execution.group_id())
+                        && !super::memory_handoff::holds_binding(controller, execution.group_id())
+                        && controller
+                            .bridge
+                            .attempt_history()
+                            .into_iter()
+                            .any(|attempt| {
+                                let command = attempt.command();
+                                command.group_id() == execution.group_id()
+                                    && command.task_ref() == outcome.task_ref()
+                                    && attempt.status() == runtime::ExecutionStatus::Failed
+                                    && controller.bridge.current_task_attempt_id(
+                                        command.group_id(),
+                                        command.task_ref(),
+                                        command.role_id(),
+                                    ) == Some(attempt.execution_id())
+                            })
+                })
+        {
+            controller.orchestrator.task_failed(
+                &mission_id,
+                outcome.task_ref(),
+                "original execution failure; complete current Group stop confirmed",
+                controller.bridge.control_mut(),
+                timestamp,
+                correlation_id,
+                events,
+            )?;
+            close_terminal_mission_coordination(controller, &mission_id);
+            continue;
+        }
         run_mission_transition(
             controller,
             &mission_id,

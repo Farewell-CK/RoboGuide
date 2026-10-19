@@ -15,6 +15,17 @@ impl RuntimeExecutionManager {
             .contains_key(&slot)
             .then(|| self.attempt_generations.get(&slot).copied().unwrap_or(1))
     }
+
+    /// Returns the generation allocated for a slot before its Execute is routed.
+    pub fn allocated_attempt_generation(
+        &self,
+        group_id: &ExecutionGroupId,
+        task_ref: &TaskRef,
+        role_id: &RoleId,
+    ) -> Option<u64> {
+        let slot = (group_id.clone(), task_ref.clone(), role_id.clone());
+        self.attempt_generations.get(&slot).copied()
+    }
     /// Validates whether one committed execution needs a new Integration route.
     pub fn validate_dispatch(
         &self,

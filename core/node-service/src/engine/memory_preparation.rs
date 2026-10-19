@@ -551,6 +551,7 @@ impl LocalIntegrationEngine {
         &self,
         execute: &integration::grpc::v0_4::Execute,
     ) -> Result<ExecuteDisposition, EngineError> {
+        self.validate_execution_generation(execute.execution_generation)?;
         if execute.command_id != format!("dispatch-{}", execute.execution_id) {
             return Err(EngineError::Protocol(
                 "prepared Execute command identity differs from its attempt".into(),
@@ -562,6 +563,19 @@ impl LocalIntegrationEngine {
             &execute.memory_preparation_digest,
             &execute.session_id,
         )?;
+        if self.catalog().node_contract_version()
+            == integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+            && record
+                .preparation
+                .invocation
+                .get("execution_generation")
+                .and_then(serde_json::Value::as_u64)
+                != Some(execute.execution_generation)
+        {
+            return Err(EngineError::Configuration(
+                "prepared Execute changed its original attempt generation".into(),
+            ));
+        }
         let requirements: Vec<domain::MemoryRequirement> =
             serde_json::from_str(&execute.memory_requirements_json).map_err(EngineError::Json)?;
         if requirements
@@ -606,6 +620,7 @@ impl LocalIntegrationEngine {
                 .ok_or_else(|| EngineError::Protocol("prepared Execute lacks invocation".into()))?,
             execute.resource_ids.clone(),
             &execute.execution_session_json,
+            execute.execution_generation,
             Some(&current.preparation),
         )
     }

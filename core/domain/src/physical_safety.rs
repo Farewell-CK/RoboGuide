@@ -16,6 +16,9 @@ pub const EXECUTION_SAFETY_METADATA_KEY: &str = "roboguide.execution-safety";
 /// Payload schema separating software-process and device observations.
 pub const SAFE_STATE_OBSERVATION_SCHEMA: &str = "roboguide.safe-state-observation/v0.2";
 
+/// Version explicitly carrying original process-exit coverage.
+pub const PROCESS_EXIT_OBSERVATION_SCHEMA: &str = "roboguide.safe-state-observation/v0.3";
+
 /// Evidence assurance declared by a LocalSystem; a software process never proves device stopping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -103,6 +106,8 @@ pub enum SafetyStopPhase {
     StopCommandAccepted,
     /// Local EAIOS observed its configured safe state.
     SafeStateObserved,
+    /// A current natural terminal fact has independent original-worker exit evidence.
+    TerminalProcessObserved,
     /// RoboGuide received a timely, attempt-bound terminal stop confirmation.
     StopConfirmed,
     /// Control prepared a continuation after retaining the stop evidence.
@@ -119,6 +124,9 @@ impl SafetyStopPhase {
         matches!(
             (self, next),
             (Self::StopRequested, Self::StopCommandAccepted)
+                | (Self::StopRequested, Self::TerminalProcessObserved)
+                | (Self::TerminalProcessObserved, Self::StopConfirmed)
+                | (Self::TerminalProcessObserved, Self::ManualEscalation)
                 | (Self::StopRequested, Self::ManualEscalation)
                 | (Self::StopCommandAccepted, Self::SafeStateObserved)
                 | (Self::StopCommandAccepted, Self::ManualEscalation)
@@ -311,6 +319,7 @@ impl SafetyStopRecord {
             next,
             SafetyStopPhase::StopCommandAccepted
                 | SafetyStopPhase::SafeStateObserved
+                | SafetyStopPhase::TerminalProcessObserved
                 | SafetyStopPhase::StopConfirmed
         ) && received_at >= self.deadline
         {

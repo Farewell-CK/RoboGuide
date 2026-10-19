@@ -193,7 +193,7 @@ impl NodeService {
                             return Ok(());
                         };
                         if let Some(ServerPayload::MemoryUseQuery(frame))=&message.message {
-                            if frame.session_id!=registered.session_id || frame.query_json.len()>16*1024 || self.engine.catalog().node_contract_version()!=integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION {return Err(NodeServiceError::Protocol("readonly use query lacks current negotiated session/bounds".into()));}
+                            if frame.session_id!=registered.session_id || frame.query_json.len()>16*1024 || !integration::grpc::v0_4::supports_memory_use_query(self.engine.catalog().node_contract_version()) {return Err(NodeServiceError::Protocol("readonly use query lacks current negotiated session/bounds".into()));}
                             let query:domain::MemoryUseQuery=serde_json::from_str(&frame.query_json).map_err(|e|NodeServiceError::Protocol(e.to_string()))?;
                             self.engine.admit_controller_epoch(&frame.controller_epoch)?;
                             self.engine.admit_memory_use_query(&query,frame.valid_for_ms,frame.session_remaining_ms)?;
@@ -618,7 +618,18 @@ impl NodeService {
                 let modern = integration::grpc::v0_4::supports_memory_preparation(
                     self.engine.catalog().node_contract_version(),
                 );
-                let prepared = if modern {
+                let generation_error = self
+                    .engine
+                    .validate_execution_generation(execute.execution_generation)
+                    .err();
+                let epoch_error = self
+                    .engine
+                    .admit_controller_epoch(&execute.controller_epoch)
+                    .err();
+                let admission_error = generation_error.or(epoch_error);
+                let prepared = if admission_error.is_some() {
+                    None
+                } else if modern {
                     let requirements: Vec<domain::MemoryRequirement> =
                         serde_json::from_str(&execute.memory_requirements_json)
                             .map_err(|e| NodeServiceError::Protocol(e.to_string()))?;
@@ -658,10 +669,7 @@ impl NodeService {
                     ));
                 }
                 let mut receipt_reason = String::new();
-                let receipt_status = match self
-                    .engine
-                    .admit_controller_epoch(&execute.controller_epoch)
-                {
+                let receipt_status = match admission_error.map_or(Ok(()), Err) {
                     Err(error) => {
                         receipt_reason = error.to_string();
                         if !modern {
@@ -676,11 +684,12 @@ impl NodeService {
                         integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
                     }
                     Ok(()) => match prepared.unwrap_or_else(|| {
-                        self.engine.execute_with_session(
+                        self.engine.execute_with_session_generation(
                             execution_id.clone(),
                             invocation,
                             execute.resource_ids,
                             &execute.execution_session_json,
+                            execute.execution_generation,
                         )
                     }) {
                         Ok(ExecuteDisposition::Started | ExecuteDisposition::DispatchPending) => {

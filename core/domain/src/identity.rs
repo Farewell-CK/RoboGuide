@@ -142,6 +142,11 @@ impl NodeContractVersion {
         Self(NODE_CONTRACT_VERSION_V0_7.to_string())
     }
 
+    /// Creates the unified Memory and generation-bound safety Node Contract identity.
+    pub fn v0_12() -> Self {
+        Self(crate::NODE_CONTRACT_VERSION_V0_12.to_string())
+    }
+
     /// Creates the explicitly registered typed-map producer Node Contract identity.
     pub fn v0_8() -> Self {
         Self(NODE_CONTRACT_VERSION_V0_8.to_string())

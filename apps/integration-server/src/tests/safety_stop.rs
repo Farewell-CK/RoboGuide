@@ -7,6 +7,11 @@ use ports::SharedNodeStateReader;
 
 /// Declares a test-only provider using the same registration and State export rules as deployment.
 fn fixture() -> stop_recovery::Fixture {
+    fixture_with_process_exit(false)
+}
+
+/// Builds either explicit v0.2 legacy or v0.3 original-process observation policy.
+fn fixture_with_process_exit(process: bool) -> stop_recovery::Fixture {
     let mut fixture = stop_recovery::Fixture::new();
     let node = fixture.attempt.command().node_id().clone();
     let registration = fixture
@@ -24,7 +29,7 @@ fn fixture() -> stop_recovery::Fixture {
     encoded["local_systems"][0]["metadata"][domain::EXECUTION_SAFETY_METADATA_KEY] = serde_json::Value::String(serde_json::json!({
         "schema": "roboguide.execution-safety/v0.1", "operations": [{
             "operation": fixture.attempt.command().intent().operation(), "safe_state_export_id": "safe-process",
-            "max_evidence_age_ms": 10, "stop_deadline_ms": 100, "min_confidence_millionths": 800000,
+            "max_evidence_age_ms": 10, "stop_deadline_ms": 100, "min_confidence_millionths": if process { None } else { Some(800000) },
             "assurance": "software-process"
         }]
     }).to_string());
@@ -39,7 +44,11 @@ fn fixture() -> stop_recovery::Fixture {
         )
         .unwrap(),
         domain::StateSemantic::Observed,
-        domain::SAFE_STATE_OBSERVATION_SCHEMA,
+        if process {
+            domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+        } else {
+            domain::SAFE_STATE_OBSERVATION_SCHEMA
+        },
         10,
     )
     .unwrap();
@@ -244,6 +253,28 @@ fn complete_software_stop_proof_survives_later_ticks_and_restore_validation() {
         &fixture.controller,
         fixture.attempt.command().task_ref().mission_id()
     ));
+    let allocation = fixture.allocations();
+    application::apply_runtime_outcomes(
+        &mut fixture.controller,
+        domain::TimestampMs::new(200),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        allocation,
+        fixture.allocations(),
+        "confirmed cancellation cannot become natural failure release"
+    );
+    assert!(
+        fixture
+            .controller
+            .orchestrator
+            .execution(fixture.attempt.command().mission_id())
+            .unwrap()
+            .isolation()
+            .is_some()
+    );
     let mut corrupt = original;
     corrupt[fixture.attempt.execution_id()]["safe_proof"]["observation"]["safe_state"] =
         serde_json::json!(false);
@@ -473,4 +504,259 @@ async fn confirmed_software_stop_allows_public_mission_cancellation() {
             .allocations()
             .is_empty()
     );
+}
+
+/// Produces explicit synthetic process-exit coverage, distinct from the execution store.
+fn process_observation(fixture: &stop_recovery::Fixture, terminal: &str) -> serde_json::Value {
+    let command = fixture.attempt.command();
+    let generation = fixture
+        .controller
+        .bridge
+        .current_attempt_generation(command.group_id(), command.task_ref(), command.role_id())
+        .unwrap();
+    serde_json::json!({
+        "execution_id": fixture.attempt.execution_id(), "execution_generation": generation,
+        "command_id": null, "safe_state": true, "assurance": "software-process",
+        "terminal_state": terminal,
+        "process_exit": { "instance_id":"synthetic-original-process", "pid":17, "exit_code":0,
+            "group_id":command.group_id().as_str(),
+            "attempts":[{"execution_id":fixture.attempt.execution_id(),"execution_generation":generation}]}
+    })
+}
+
+/// Natural execution failure plus independent exit closes the safety hold without a fake Cancelled.
+#[test]
+fn original_worker_exit_closes_natural_failure_without_cancel_receipt() {
+    let mut fixture = fixture_with_process_exit(true);
+    fixture.fact(2, wire::ExecutionPhase::Failed, 5);
+    admit(&mut fixture);
+    let value = process_observation(&fixture, "FAILED");
+    observe(
+        &mut fixture,
+        "s1",
+        9,
+        serde_json::json!({"observations":[value]}),
+        None,
+    );
+    safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+    assert_eq!(phase(&fixture), "stop_confirmed");
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .execution_status(fixture.attempt.execution_id()),
+        Some(orchestration::RemoteExecutionStatus::Failed)
+    );
+    assert!(!safety_stop::validate_restored(&fixture.controller).unwrap());
+    application::apply_runtime_outcomes(
+        &mut fixture.controller,
+        domain::TimestampMs::new(10),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        fixture
+            .controller
+            .orchestrator
+            .execution(fixture.attempt.command().mission_id())
+            .unwrap()
+            .lifecycle(),
+        orchestration::MissionExecutionLifecycle::Failed
+    );
+}
+
+/// A real receipt received before the natural failure must not prevent independent exit confirmation.
+#[test]
+fn process_exit_after_cancel_receipt_preserves_original_failed_result() {
+    let mut fixture = fixture_with_process_exit(true);
+    admit(&mut fixture);
+    receipt(&mut fixture);
+    fixture.fact(2, wire::ExecutionPhase::Failed, 8);
+    let value = process_observation(&fixture, "FAILED");
+    observe(
+        &mut fixture,
+        "s1",
+        9,
+        serde_json::json!({"observations":[value]}),
+        None,
+    );
+    safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+    assert_eq!(phase(&fixture), "stop_confirmed");
+    assert!(!safety_stop::validate_restored(&fixture.controller).unwrap());
+}
+
+/// Process exit cannot stand in for actual command admission when the claimed lifecycle is Cancelled.
+#[test]
+fn cancelled_process_still_requires_the_real_durable_cancel_receipt() {
+    let mut fixture = fixture_with_process_exit(true);
+    admit(&mut fixture);
+    fixture.fact(2, wire::ExecutionPhase::Cancelled, 8);
+    let value = process_observation(&fixture, "CANCELLED");
+    observe(
+        &mut fixture,
+        "s1",
+        9,
+        serde_json::json!({"observations":[value]}),
+        None,
+    );
+    safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+    assert_eq!(phase(&fixture), "stop_requested");
+    receipt(&mut fixture);
+    safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+    assert_eq!(phase(&fixture), "stop_confirmed");
+}
+
+/// Wrong process coverage, source or status cannot convert terminal flags into stop authority.
+#[test]
+fn process_exit_identity_coverage_status_and_schema_fail_closed() {
+    for fault in [
+        "group",
+        "generation",
+        "partial",
+        "duplicate",
+        "extra",
+        "status",
+        "source",
+        "pid",
+        "legacy",
+    ] {
+        let mut fixture = fixture_with_process_exit(fault != "legacy");
+        fixture.fact(2, wire::ExecutionPhase::Failed, 5);
+        admit(&mut fixture);
+        let mut value = process_observation(&fixture, "FAILED");
+        match fault {
+            "group" => value["process_exit"]["group_id"] = serde_json::json!("other"),
+            "generation" => {
+                value["process_exit"]["attempts"][0]["execution_generation"] =
+                    serde_json::json!(999)
+            }
+            "partial" => value["process_exit"]["attempts"] = serde_json::json!([]),
+            "duplicate" => {
+                let entry = value["process_exit"]["attempts"][0].clone();
+                value["process_exit"]["attempts"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(entry);
+            }
+            "extra" => value["process_exit"]["attempts"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({"execution_id":"not-current", "execution_generation":1})),
+            "status" => value["terminal_state"] = serde_json::json!("COMPLETED"),
+            "pid" => value["process_exit"]["pid"] = serde_json::json!(0),
+            _ => {}
+        }
+        observe(
+            &mut fixture,
+            if fault == "source" { "old" } else { "s1" },
+            9,
+            serde_json::json!({"observations":[value]}),
+            Some(900_000),
+        );
+        safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+        assert_ne!(phase(&fixture), "stop_confirmed", "{fault}");
+    }
+}
+
+/// A naturally Completed local attempt can be stopped without becoming semantic success.
+#[test]
+fn completed_original_worker_exit_retains_the_mission_hold() {
+    let mut fixture = fixture_with_process_exit(true);
+    admit(&mut fixture);
+    fixture.fact(2, wire::ExecutionPhase::Completed, 8);
+    let value = process_observation(&fixture, "COMPLETED");
+    observe(
+        &mut fixture,
+        "s1",
+        9,
+        serde_json::json!({"observations":[value]}),
+        None,
+    );
+    safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+    assert_eq!(phase(&fixture), "stop_confirmed");
+    assert!(!safety_stop::validate_restored(&fixture.controller).unwrap());
+    let mission = fixture
+        .controller
+        .orchestrator
+        .execution(fixture.attempt.command().mission_id())
+        .unwrap();
+    assert!(mission.isolation().is_some());
+    assert_eq!(
+        mission.lifecycle(),
+        orchestration::MissionExecutionLifecycle::Running
+    );
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .execution_status(fixture.attempt.execution_id()),
+        Some(orchestration::RemoteExecutionStatus::Completed)
+    );
+}
+
+/// Restoring a process proof must retain its exact original Group coverage and terminal state.
+#[test]
+fn process_stop_checkpoint_retains_original_frozen_coverage_and_status() {
+    let mut fixture = fixture_with_process_exit(true);
+    fixture.fact(2, wire::ExecutionPhase::Failed, 5);
+    admit(&mut fixture);
+    let value = process_observation(&fixture, "FAILED");
+    observe(
+        &mut fixture,
+        "s1",
+        9,
+        serde_json::json!({"observations":[value]}),
+        None,
+    );
+    safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+    let original = serde_json::to_value(&fixture.controller.safety_stops).unwrap();
+    for fault in ["missing-coverage", "wrong-coverage", "terminal"] {
+        let mut corrupt = original.clone();
+        let purpose = &mut corrupt[fixture.attempt.execution_id()];
+        match fault {
+            "missing-coverage" => {
+                purpose.as_object_mut().unwrap().remove("process_attempts");
+            }
+            "wrong-coverage" => {
+                purpose["process_attempts"][0]["execution_generation"] = serde_json::json!(999)
+            }
+            _ => {
+                purpose["safe_proof"]["observation"]["terminal_state"] =
+                    serde_json::json!("COMPLETED")
+            }
+        }
+        fixture.controller.safety_stops = serde_json::from_value(corrupt).unwrap();
+        assert!(
+            safety_stop::validate_restored(&fixture.controller).is_err(),
+            "{fault}"
+        );
+    }
+    fixture.controller.safety_stops = serde_json::from_value(original).unwrap();
+    assert!(!safety_stop::validate_restored(&fixture.controller).unwrap());
+}
+
+/// Explicit wrapper upgrade admits legacy evidence but cannot smuggle new process-stop authority.
+#[test]
+fn previous_wrapper_cannot_contain_process_stop_authority() {
+    for process in [false, true] {
+        let mut fixture = fixture_with_process_exit(process);
+        admit(&mut fixture);
+        let mut saved: ServerCheckpoint = serde_json::from_str(
+            &application::server_checkpoint_json(&fixture.controller).unwrap(),
+        )
+        .unwrap();
+        application::validate_isolation_checkpoint_schema(&saved).unwrap();
+        for schema in [
+            PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA,
+            "roboguide.controller-checkpoint/v32",
+        ] {
+            saved.schema = schema.into();
+            assert_eq!(
+                application::validate_isolation_checkpoint_schema(&saved).is_ok(),
+                !process,
+                "{schema}"
+            );
+        }
+    }
 }
