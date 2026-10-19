@@ -74,6 +74,32 @@ fn apply_selected_outcomes(
                 continue;
             }
         }
+        // Only terminal failure may close a SafetyStop hold after every retained stop
+        // is confirmed. This is not a resume and never dispatches more work.
+        if matches!(outcome.result(), ObservedTaskExecutionResult::Failed)
+            && controller
+                .orchestrator
+                .execution(&mission_id)
+                .is_some_and(|execution| {
+                    execution.isolation().is_some_and(|hold| {
+                        hold.source == orchestration::MissionIsolationSource::SafetyStop
+                    }) && controller
+                        .bridge
+                        .group_attempts_terminal(execution.group_id())
+                })
+        {
+            controller.orchestrator.task_failed(
+                &mission_id,
+                outcome.task_ref(),
+                "original execution failure; complete current Group stop confirmed",
+                controller.bridge.control_mut(),
+                timestamp,
+                correlation_id,
+                events,
+            )?;
+            close_terminal_mission_coordination(controller, &mission_id);
+            continue;
+        }
         run_mission_transition(
             controller,
             &mission_id,

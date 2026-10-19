@@ -239,7 +239,11 @@ impl CompiledLocalCatalog {
                         export.is_some_and(|export| {
                             export.owner() == system.id()
                                 && export.semantic() == "observed"
-                                && export.payload_schema() == domain::SAFE_STATE_OBSERVATION_SCHEMA
+                                && matches!(
+                                    export.payload_schema(),
+                                    domain::SAFE_STATE_OBSERVATION_SCHEMA
+                                        | domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+                                )
                         }),
                         "local_systems.metadata.execution-safety",
                         "safety declaration must reference an observed safe-state export",

@@ -134,8 +134,9 @@ pub use physical_entity::{
 };
 pub use physical_safety::{
     EXECUTION_SAFETY_METADATA_KEY, ExecutionSafetyProfile, OperationSafetySupport,
-    PHYSICAL_STOP_CONTRACT_SCHEMA_V0_1, SAFE_STATE_OBSERVATION_SCHEMA, SafetyAssurance,
-    SafetyStopError, SafetyStopIdentity, SafetyStopPhase, SafetyStopRecord,
+    PHYSICAL_STOP_CONTRACT_SCHEMA_V0_1, PROCESS_EXIT_OBSERVATION_SCHEMA,
+    SAFE_STATE_OBSERVATION_SCHEMA, SafetyAssurance, SafetyStopError, SafetyStopIdentity,
+    SafetyStopPhase, SafetyStopRecord,
 };
 pub use resource::{Resource, ResourceKind, ResourceRequirement};
 pub use role_assignment::RoleAssignment;

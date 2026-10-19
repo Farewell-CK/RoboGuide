@@ -83,6 +83,24 @@ fn safety_metadata_validates_generation_bound_export_contract() {
     )))
     .expect("deployment TOML");
     CompiledLocalCatalog::compile(config.clone(), Path::new(".")).expect("valid safety profile");
+    for schema in [
+        domain::SAFE_STATE_OBSERVATION_SCHEMA,
+        domain::PROCESS_EXIT_OBSERVATION_SCHEMA,
+        "unknown-stop-observation",
+    ] {
+        let mut changed = config.clone();
+        changed
+            .state_exports
+            .iter_mut()
+            .find(|export| export.id == "execution-safety")
+            .unwrap()
+            .payload_schema = schema.into();
+        assert_eq!(
+            CompiledLocalCatalog::compile(changed, Path::new(".")).is_ok(),
+            schema != "unknown-stop-observation",
+            "{schema}",
+        );
+    }
     let key = domain::EXECUTION_SAFETY_METADATA_KEY;
     for mutation in ["schema", "operation", "export"] {
         let mut changed = config.clone();

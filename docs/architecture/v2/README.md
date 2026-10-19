@@ -977,3 +977,5 @@ V2 取代 V1.1，成为当前权威架构基线。V1.1 保存在
 [ADR-0101](../../decisions/0101-relation-stop-and-explicit-safe-state-evidence.md) 要求 relation reconciliation 使用持久 Cancel outbox、Mission hold，以及 exact-session、schema、TTL 和来源受限的安全状态证据。当前 Application 只完成部分接入，Mission hold、完整证据校验、deadline 和全释放/恢复 gate 尚未闭合，RT-G9 仍未完成。Local EAIOS 的即时安全权威保持不变。
 
 当前工作树的分层剩余项和验收条件见[原审计剩余整改清单](../../development/roboguide-remediation-remaining-2026-10-14.md)。Controller v27 与 HA supervisor v26 的 composition 不一致也仍需整改；库级复制能力不能代替整套 HA 进程验收。
+
+停止证据补充（[ADR-0107](../../decisions/0107-execution-generation-and-process-stop-evidence.md)）：软件进程退出证明与执行终态、Cancel receipt 分离。v0.3 明确绑定原进程实例和完整当前 attempt 集；自然失败保持 Failed，缺失证明继续持有资源。该软件部署不建立设备停止保证。

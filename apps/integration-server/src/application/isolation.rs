@@ -309,21 +309,33 @@ pub(crate) fn flush_unisolated_commands(
 
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA
+        && saved
+            .safety_stops
+            .values()
+            .any(|purpose| purpose.uses_process_exit_contract())
+    {
+        return Err("legacy wrapper contains process-exit stop authority".into());
+    }
     let missions: Vec<serde_json::Value> =
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
-    if saved.schema != SERVER_CHECKPOINT_SCHEMA
-        && saved
-            .memory_imports
-            .values()
-            .any(|intent| intent.reconciliation.is_some())
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_PROCESS_STOP_SERVER_CHECKPOINT_SCHEMA
+    ) && saved
+        .memory_imports
+        .values()
+        .any(|intent| intent.reconciliation.is_some())
     {
         return Err("legacy wrapper contains Memory reconciliation authority".into());
     }
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_PROCESS_STOP_SERVER_CHECKPOINT_SCHEMA
+            | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
     ) && integration.get("control").is_some_and(|control| {
         control
             .get("decision_policy_registry")
@@ -362,6 +374,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_PROCESS_STOP_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
     ) && integration.get("control").is_some_and(|control| {
@@ -384,6 +397,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_PROCESS_STOP_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
@@ -403,6 +417,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_PROCESS_STOP_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
@@ -442,6 +457,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_PROCESS_STOP_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
@@ -462,6 +478,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_PROCESS_STOP_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_POLICY_SERVER_CHECKPOINT_SCHEMA
             | PRE_IDENTITY_SERVER_CHECKPOINT_SCHEMA
