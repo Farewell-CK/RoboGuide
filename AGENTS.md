@@ -759,6 +759,12 @@ uv run python tools/quality/check_python_function_docs.py \
 uv run pytest -q
 ```
 
+Habitat deployment compatibility additionally runs the real worker interpreter:
+`PYTHONPATH=integrations/habitat-local-eaios <habitat-python> -m habitat_local_eaios.runtime_check`.
+This zero-Provider, zero-simulator gate exercises canonical parsing, SQLite round trips and the
+real loopback HTTP boundary. B1 runs it before starting SUT processes or calling MI; it is not
+physical readiness evidence. Set `ROBOGUIDE_HABITAT_PYTHON` for the matching pytest subprocess test.
+
 For evaluation harness changes, run:
 
 ```bash

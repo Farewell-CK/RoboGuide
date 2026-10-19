@@ -335,7 +335,7 @@ class CanonicalRelocationInvocation:
             resource_ids=resources,
             execution_session=session,
             attempt_id=attempt_id,
-            execution_generation=cast(int | None, invocation["execution_generation"]),
+            execution_generation=cast("int | None", invocation["execution_generation"]),
         )
 
     @property

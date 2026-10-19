@@ -62,6 +62,25 @@ HTTP facade. Status reports `ACCEPTED`, then `RUNNING`, then only a backend-obse
 change the local state to `CANCELLED`. The simulator process reports that terminal state only after
 it has actually stopped stepping the local execution.
 
+## Deployment Python compatibility
+
+The bridge also executes inside the independent Habitat Python 3.9 environment. Passing the
+repository's Python 3.13 tests does not establish compatibility with that worker. Before starting
+Habitat or calling MI, the B1 launcher executes `habitat_local_eaios.runtime_check` with the exact
+worker interpreter and saves `habitat-runtime-check.json` plus its log in the new run directory.
+Failure stops deployment startup and is recorded as `local_eaios_runtime_incompatible`.
+
+The check uses generic fixture requests, a temporary SQLite database and the production loopback
+HTTP handler/adapter. It covers all five supported operation identities, absent and valid uint64
+execution generations, malformed-generation rejection, durable identity and duplicate admission.
+Its local backend is explicitly a software fixture; it starts no simulator or Provider and never
+claims physical completion, benchmark success or full deployment readiness.
+
+To run it independently, use
+`PYTHONPATH=integrations/habitat-local-eaios <habitat-python> -m habitat_local_eaios.runtime_check`.
+Set `ROBOGUIDE_HABITAT_PYTHON=<habitat-python>` when running pytest to include the actual deployment
+interpreter subprocess regression. The offline `ROBOGUIDE_B1_PREPARE_ONLY=1` path remains process-free.
+
 ## Optional operation progress
 
 `--progress-directory <run-local-path>` enables a read-only navigation observer;

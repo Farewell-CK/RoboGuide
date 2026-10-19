@@ -385,6 +385,19 @@ for n in "${NODE_LETTERS[@]}"; do
         || { FAILURE_REASON=node_configuration_invalid; exit 1; }
 done
 
+HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
+FAILURE_OWNER=SUT_SYSTEM
+FAILURE_COMPONENT=local_eaios
+FAILURE_REASON=local_eaios_runtime_incompatible
+# Execute the actual worker Python's parsers and HTTP boundary before starting
+# any simulator or MI call. Import/reset probes do not exercise invocation bodies.
+PYTHONPATH="$REPO/integrations/habitat-local-eaios" \
+    "$HABITAT_PYTHON" -m habitat_local_eaios.runtime_check \
+    --output "$RUN/habitat-runtime-check.json" >"$RUN/habitat-runtime-check.log" 2>&1
+FAILURE_OWNER=EXTERNAL_INFRA
+FAILURE_COMPONENT=environment
+FAILURE_REASON=deployment_setup_failed
+
 clean_port "${CONTROLLER_GRPC_PORT}"
 clean_port "${CONTROLLER_PORT}"
 clean_port "${ARTIFACT_PORT}"
@@ -399,7 +412,6 @@ if [[ "${ROBOGUIDE_B1_LIVE_VIEW:-0}" == 1 ]]; then
     wait_http "http://127.0.0.1:$LIVE_VIEW_PORT/healthz" 30
     echo "B1 live operator view: http://127.0.0.1:$LIVE_VIEW_PORT/" >&2
 fi
-HABITAT_PYTHON="$(conda run -n "$HABITAT_ENV" which python)"
 (
     cd "$EMOS_ROOT"
     exec env \

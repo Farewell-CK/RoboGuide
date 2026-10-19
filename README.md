@@ -1144,3 +1144,9 @@ Habitat Local EAIOS 在原 worker 真实退出后发布 safe-state v0.3，完整
 软件进程证明不表示设备安全。实际 Controller、两个生产 Node 与独立 POSIX child 的离线门禁：
 `uv run python tools/quality/check_process_stop_evidence.py --output /absolute/fresh-directory`。
 该检查不调用 Provider 或仿真器，fixture 结果不是 B1 benchmark。
+
+B1 在启动前还使用实际 Habitat Python 执行 `habitat_local_eaios.runtime_check`，覆盖五种
+canonical operation 的请求解析、代次校验、SQLite 和真实 loopback HTTP 接收。失败在调用 MI
+或启动仿真前停止，保存 `habitat-runtime-check.json`；主 Python 3.13 测试通过不代表独立
+Python 3.9 worker 已兼容。运行该解释器回归时设置 `ROBOGUIDE_HABITAT_PYTHON`。详见
+[部署兼容性检查](integrations/habitat-local-eaios/README.md#deployment-python-compatibility)。
