@@ -1137,3 +1137,10 @@ ADR-0080 的有界事实批处理默认最多 8 条、单一合批窗口 2ms；r
 Deployment-owned bounded active observation, pre-dispatch model reselection and evidence closure are
 documented in [the extension guide](docs/extensions/bounded-observation-and-evidence-closure.md),
 with authority and physical release limits in [ADR-0094](docs/decisions/0094-bounded-observation-and-local-contract-recovery.md).
+
+软件进程停止与本地执行结果是独立证据（[ADR-0107](docs/decisions/0107-execution-generation-and-process-stop-evidence.md)）。
+Habitat Local EAIOS 在原 worker 真实退出后发布 safe-state v0.3，完整绑定原 Group、attempt
+和 generation；Failed/Completed 不会被改写为 Cancelled。缺失证明保留 ownership；
+软件进程证明不表示设备安全。实际 Controller、两个生产 Node 与独立 POSIX child 的离线门禁：
+`uv run python tools/quality/check_process_stop_evidence.py --output /absolute/fresh-directory`。
+该检查不调用 Provider 或仿真器，fixture 结果不是 B1 benchmark。

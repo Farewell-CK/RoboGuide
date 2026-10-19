@@ -26,6 +26,13 @@ The first core bootstrap has started; the full runtime and MVP are not complete.
   legacy unverified stop strings migrate to manual evidence inside a startup transaction.
   SoftwareProcess assurance never establishes device stopping. The shared Controller wrapper
   schema lives in `core/state`; both runnable binaries expose read-only `--application-schema`.
+- ADR-0107 adds explicit safe-state v0.3 original-software-worker exit evidence. The Local EAIOS
+  reaps the original process and publishes its instance/PID/exit code plus complete Group attempt
+  generations; terminal rows and Cancel flags alone never prove exit. Natural Failed/Completed
+  reconciliation preserves the original Runtime result and does not invent a Cancel receipt.
+  Cancelled retains its durable receipt gate. Wrapper v32 fences this authority, retaining original
+  frozen coverage across restore; software proof never claims device stopping. The offline actual
+  Controller/two-Node/owned-child gate is `tools/quality/check_process_stop_evidence.py`.
 - ADR-0103's Mission HTTP command journal atomically links Request saves to the exact authenticated
   caller/tenant/method/path/key and immutable progress evidence. `/v1/http-commands/observe` and
   `/v1/http-commands/reconcile` never re-execute create, model calls or Controller submission.

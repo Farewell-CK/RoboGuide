@@ -1665,7 +1665,7 @@ class NodeEndpoint:
         )
 
     def safe_state(self) -> dict[str, object]:
-        """Expose this endpoint's independently witnessed original-worker exit to Controller State."""
+        """Expose this endpoint's independent original-worker exit witness to State."""
         return validate_safe_state_response(
             read_safe_state(
                 self._store.all_executions(),

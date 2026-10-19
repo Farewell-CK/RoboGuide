@@ -172,7 +172,7 @@ class HabitatLocalAdapter:
         )
 
     def safe_state(self) -> dict[str, object]:
-        """Expose only terminal local cancellation evidence for the safety State export."""
+        """Return unavailable when this backend has no independent original-process exit witness."""
         return validate_safe_state_response(read_safe_state(self._store.all_executions()))
 
     def recovery_support(self) -> dict[str, object]:
