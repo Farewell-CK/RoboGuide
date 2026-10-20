@@ -40,6 +40,7 @@ from .perception import cached_detection_observations, inspect_perception, obser
 from .perception_diagnostics import PerceptionDiagnostics
 from .preassignment_feasibility import preassignment_digest
 from .shared_world import SharedEmosStage2Runtime
+from .view_scan import inspect_view_scan, view_scan_declaration
 
 _LOG = logging.getLogger(__name__)
 LIVE_FEASIBILITY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.6"
@@ -122,15 +123,40 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         if acquisition:
             for agent in observer_ids:
                 inspect_navigation_dispatch(environment, agent)
+                inspect_view_scan(environment, actor._active_policies[agent], agent)
         self._write_json("endpoint-registry-used.json", self.registry)
         self._write_json(
             "perception-readiness.json",
             {
+                "schema_version": "roboguide.perception-readiness/v0.2",
                 "enabled": self._config.enable_observation,
                 "sensors": {
                     str(agent): sensor for agent, sensor in self._detection_sensors.items()
                 },
                 "source": "loaded-original-sensors-and-cameras",
+                "detector_sources": {
+                    str(agent): {
+                        "sensor_uuid": key,
+                        "agent_id": environment.task.sensor_suite.sensors[key].agent_id,
+                        "pixel_threshold": environment.task.sensor_suite.sensors[
+                            key
+                        ].pixel_threshold,
+                        "scope": "world" if key == "detected_objects" else "agent",
+                    }
+                    for agent, key in self._detection_sensors.items()
+                },
+                **(
+                    {
+                        "view_search": {
+                            str(agent): inspect_view_scan(
+                                environment, actor._active_policies[agent], agent
+                            ).evidence()
+                            for agent in observer_ids
+                        }
+                    }
+                    if acquisition
+                    else {}
+                ),
             },
         )
         path = self._evidence_dir() / "preassignment-feasibility.json"
@@ -165,7 +191,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         self._write_json(
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.12"
+                "schema_version": "roboguide.habitat-local-how-profile/v0.13"
                 if acquisition
                 else "roboguide.habitat-local-how-profile/v0.10"
                 if recoveries
@@ -180,6 +206,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                     {
                         "observation_control": observation_control_declaration(),
                         "navigation_dispatch": navigation_dispatch_declaration(),
+                        "observation_view_search": view_scan_declaration(),
                     }
                     if acquisition
                     else {}

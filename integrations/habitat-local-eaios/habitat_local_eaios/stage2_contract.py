@@ -88,10 +88,14 @@ class Stage2ExecutionContract:
     expected_object: str | None = None
     expected_source: str | None = None
     attempt_id: str | None = None
+    allow_view_scan: bool = False
 
     @classmethod
     def for_invocation(
-        cls, invocation: CanonicalMobilityInvocation | CanonicalRelocationInvocation
+        cls,
+        invocation: CanonicalMobilityInvocation | CanonicalRelocationInvocation,
+        *,
+        allow_view_scan: bool = False,
     ) -> Stage2ExecutionContract:
         """Freeze the exact semantic fields required by the operation profile."""
         if invocation.operation in _ACQUISITION_OPERATIONS:
@@ -102,6 +106,7 @@ class Stage2ExecutionContract:
                 invocation.object_ref,
                 invocation.request_key(),
                 attempt_id=invocation.attempt_id,
+                allow_view_scan=allow_view_scan,
             )
         if invocation.operation in _NAVIGATION_OPERATIONS:
             if not isinstance(invocation, CanonicalMobilityInvocation):
@@ -145,6 +150,8 @@ class Stage2ExecutionContract:
         if self.is_relocation:
             result["expected_object"] = self.expected_object
             result["expected_source"] = self.expected_source
+        if self.allow_view_scan:
+            result["view_search_profile"] = "bounded-base-yaw-view-search/v0.1"
         return result
 
     def validate(
@@ -173,13 +180,17 @@ class Stage2ExecutionContract:
     ) -> None:
         """Validate the existing navigation-only tool profile."""
         name, arguments = self._shape(agent_name, action)
-        if name not in {"nav_to_obj", "wait", "send_request"}:
+        if name not in {"nav_to_obj", "wait", "send_request"} and not (
+            name == "scan_for_object"
+            and self.operation == "observation.acquire@v1"
+            and self.allow_view_scan
+        ):
             self._fail(agent_name, action, "tool is not authorized by this execution profile")
-        if name == "nav_to_obj":
+        if name in {"nav_to_obj", "scan_for_object"}:
             if self.expected_destination is None:
                 self._fail(agent_name, action, "unassigned agent cannot navigate")
             if set(arguments) != {"target_obj"}:
-                self._fail(agent_name, action, "nav_to_obj requires exactly target_obj")
+                self._fail(agent_name, action, f"{name} requires exactly target_obj")
             if arguments["target_obj"] != self.expected_destination:
                 self._fail(agent_name, action, "target does not match canonical destination")
         elif name == "wait":
@@ -642,7 +653,17 @@ def _guard_agent(
                     offered_actions = _bound_navigation_tools(original_actions, destination)
                     pause = feedback.observation_pause_steps() if feedback is not None else None
                     if pause is not None:
+                        assert feedback is not None
+                        scan_tool = feedback.observation_scan_tool()
+                        if scan_tool is not None and any(
+                            tool.get("name") == scan_tool["name"] for tool in offered_actions
+                        ):
+                            raise IntegrationError(
+                                "local observation scan tool conflicts with vendor tools"
+                            )
                         offered_actions = _bound_observation_tools(offered_actions, pause)
+                        if scan_tool is not None:
+                            offered_actions.append(scan_tool)
                 if feedback is not None and (
                     feedback.has_live_peer_contracts
                     or (contract.is_relocation and feedback.has_bound_relocation_completion)
@@ -833,6 +854,10 @@ def install_stage2_contract_guard(
     try:
         for agent in agents:
             contract = contracts[agent.name]
+            if contract.allow_view_scan and (
+                feedback is None or feedback.observation_scan_tool() is None
+            ):
+                raise IntegrationError("view scan contract has no loaded local implementation")
             state = states.get(agent.name) if contract.is_relocation else None
             if contract.is_relocation and state is None:
                 state = RelocationExecutionState()

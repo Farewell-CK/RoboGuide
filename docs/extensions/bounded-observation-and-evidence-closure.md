@@ -29,7 +29,7 @@ deployment v0.4 增加 `enable_observation_acquisition`、
 语义相机和导航技能可用。默认 Python adapter 开关关闭。新的感知/重排 deployment
 模板显式选择本轮开发配置，旧冻结运行继续使用自己的旧模板。
 
-开启 acquisition 的当前代码输出 Local How v0.12，保留 v0.11 的闭合
+开启 acquisition 的当前代码输出 Local How v0.13，保留 v0.11 的闭合
 `observation_control=bounded-visual-feedback/v0.1` 声明。每次真实模型动作请求包含最新的
 缓存 true/false/unavailable、原 Task/attempt/world/entity、sample step 和原始剩余预算；
 读取不到保持 unavailable，同 step 冲突、跨 attempt/world 或时间回退拒绝。初始已有真实
@@ -51,6 +51,22 @@ v0.12 还显式声明 `fresh-acquisition-navigation-command/v0.1`：仅在 Guard
 已采样目标点或路径规划器。来源 action 或目标不匹配时在修改前拒绝。其他端点、非 acquisition
 与历史声明不变。`fresh-navigation-command` 证据绑定 attempt、raw call、映射和前后标记。
 该修复不保证视野可见；导航完成后真实检测仍可能是 false，原始 acquisition 预算仍会耗尽。
+
+v0.13 的 `observation_view_search=bounded-base-yaw-view-search/v0.1` 提供显式本地工具
+`scan_for_object(target_obj)`。它只在 acquisition 与原始底盘控制接口均加载后对模型提供，
+参数必须是该 attempt 的同一实体。Guard 通过后保留原始 CrabAgent 的工具名与参数，不把
+模型选择的导航或等待替换成扫描。新的独立本地技能复用原始 HRL/Wait 的入口、计数与退出
+机制，通过原始 joint action vector 发出自身端点的 yaw 分量；仍由原 actor/Gym 执行唯一
+一次 step。支持实际 BaseVelAction、BaseVelNonCylinderAction（含 lateral layout）及
+DroneBaseVelAction，启动时检查真实实例、端点归属、action layout、角速度和控制频率。
+
+每次扫描最多32步、命令累计转角最多90度、角速度不超过1.5rad/s，并截短到原始 acquisition
+剩余预算。没有平移命令、相机节点修改、传感器创建或抓放动作；原始底盘碰撞/运动结果仍然
+有效，因此零平移命令也不承诺物理位置绝对不变。持物、来源改变、错误实体或过期 attempt
+均拒绝。普通 navigation、relocation 和 idle 不获得扫描权限；新技能在 attempt 结束或
+初始化失败时撤销，不编辑 peer 或 vendor 文件。扫描退出仅记录 `view-scan-finished`，
+不意味着检测为 true，也不建立官方或 Mission 成功。它不能保证消除遮挡或修正垂直视野，
+不能宣称与原生 EMOS 动作工具集等价。
 
 物理诊断开关还启用 `perception-diagnostics.jsonl`，以16步采样周期读取同一次既有 Gym
 缓存。每条记录保留精确 entity/attempt/world、各 detector 的自身结果、原始整数语义图像

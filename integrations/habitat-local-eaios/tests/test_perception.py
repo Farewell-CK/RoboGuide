@@ -45,7 +45,7 @@ def invocation(expected: str = "detected(object-a)") -> CanonicalObservationInvo
 
 def environment() -> Any:
     """Expose existing sensor metadata and entity mapping, with no active sensor API."""
-    sensor = type("DetectedObjectsSensor", (), {"pixel_threshold": 10})()
+    sensor = type("DetectedObjectsSensor", (), {"pixel_threshold": 10, "agent_id": None})()
     simulator = SimpleNamespace(
         _sensors={"agent_0_head_semantic": object(), "agent_1_semantic": object()},
         habitat_config=SimpleNamespace(object_ids_start=100),
@@ -183,6 +183,24 @@ def test_detection_uses_original_prefilter_cache_without_sensor_calls() -> None:
     assert result["condition_holds"] is True
     del wrapper.env._last_obs
     assert cached_detection_observations(wrapper, {}, "detected_objects") == {}
+
+
+@pytest.mark.parametrize(
+    "name,owner",
+    [
+        ("detected_objects", 0),
+        ("agent_0_detected_objects", None),
+        ("agent_0_detected_objects", 1),
+        ("agent_0_detected_objects", False),
+    ],
+)
+def test_detector_owner_must_match_its_actual_declared_scope(name: str, owner: Any) -> None:
+    """A prefixed name cannot turn a global or peer detector into an own-agent observation."""
+    env = environment()
+    sensor = type("DetectedObjectsSensor", (), {"pixel_threshold": 10, "agent_id": owner})()
+    env.task.sensor_suite.sensors = {name: sensor}
+    with pytest.raises(IntegrationError, match="scope differs"):
+        inspect_perception(env, (0,))
 
 
 def test_cache_wrapper_cycles_are_bounded() -> None:

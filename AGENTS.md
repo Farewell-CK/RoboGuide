@@ -831,7 +831,7 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   provider-level feasibility baselines and never an expansion of integrated Local EAIOS steps.
 
 ADR-0094 adds deployment-owned bounded `observation.acquire@v1`, separate from
-snapshot verification. Its opt-in Local How v0.12 retains v0.11 exact-attempt cached condition/budget
+snapshot verification. Its opt-in Local How v0.13 retains v0.11 exact-attempt cached condition/budget
 feedback and a disclosed at-most-16-step original-wait mapping; it neither edits raw model
 choices nor guarantees persistent effects. Already-observed acquisition needs no extra model
 or motion. A guarded fresh acquisition navigation call rearms only its endpoint's original
@@ -845,10 +845,14 @@ final-verifier resource lifetimes without selecting endpoints; closure observati
 actual publication and preserve archival failures separately from SUT outcomes. See
 `docs/extensions/bounded-observation-and-evidence-closure.md`. Physical release gates remain explicit.
 
-`perception_diagnostics.py` is default-off under the existing physical-diagnostics flag.
-Bounded same-cache pixel/threshold/camera comparisons separate own-agent evidence, derived
-current-world union and unavailable official truth, with no sensor/render/predicate calls.
-Failed final capture cannot skip buffered evidence flush.
+The v0.13 acquisition tool `scan_for_object` is backed by an independently scoped local HRL
+skill and verified original base-yaw interfaces. Only a real guarded model selection invokes it;
+32-step/90-degree/1.5rad/s bounds clip to the original remaining acquisition budget. Zero
+translation is commanded, no camera node is edited, and scan completion never proves detection.
+Navigation/relocation/idle retain their tools. `perception_diagnostics.py` is default-off under
+the existing physical-diagnostics flag; bounded same-cache pixel/threshold/camera comparisons
+separate own-agent evidence, derived current-world union and unavailable official truth, with
+no sensor/render/predicate calls. Failed final capture cannot skip buffered evidence flush.
 
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add

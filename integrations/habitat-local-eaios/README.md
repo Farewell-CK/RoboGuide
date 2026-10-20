@@ -13,13 +13,6 @@ Oracle navigation action used below the EMOS/CrabAgent high-level policy boundar
 resolution, agent selection, path planning, action arguments, simulator stepping, and local safety
 remain Local How.
 
-With physical diagnostics enabled, `perception-diagnostics.jsonl` records bounded same-cache
-detector results, exact target pixel counts, original thresholds and camera projection geometry
-every16steps and at acquisition boundaries. Own-agent detection, derived current cross-agent
-union, historical stage-goal latches and official goal truth remain separate. No additional
-render/sensor/predicate call is made. Read/storage faults preserve execution, original errors
-and already buffered rows. See the bounded observation extension for limits and schema.
-
 For active observation, Local How v0.12 discloses the bounded condition feedback/pause
 profile and `fresh-acquisition-navigation-command/v0.1`. After an exact guarded
 `nav_to_obj` call passes the original CrabAgent mapping, only that endpoint's
@@ -29,6 +22,22 @@ world reset, peer changed, or budget extended. This prevents a completed-target
 cache from suppressing a new acquisition command indefinitely. Other operation
 profiles retain their original lifecycle. The raw action and flag transition are
 archived separately; this does not guarantee detection or official success.
+
+Local How v0.13 additionally advertises `scan_for_object` only to an active acquisition's
+exact target. A separate attempt-scoped HRL skill emits bounded yaw through the verified
+original base controller (up to32steps/90degrees/1.5rad/s, clipped to the original budget).
+The model must select this tool; other raw calls are not changed into scans. No translation,
+camera teleportation or manipulation is commanded. Original collision behavior remains;
+occlusion and vertical camera framing can still prevent detection. A `view-scan-finished`
+receipt describes the local scan, not acquisition or official success. Native EMOS files
+and its baseline tool set remain unchanged, so this controlled-arm difference is explicit.
+
+With physical diagnostics enabled, `perception-diagnostics.jsonl` records bounded same-cache
+detector results, exact target pixel counts, original thresholds and camera projection geometry
+every16steps and at acquisition boundaries. Own-agent detection, derived current cross-agent
+union, historical stage-goal latches and official goal truth remain separate. No additional
+render/sensor/predicate call is made. Read/storage faults preserve execution, original errors
+and already buffered rows. See the bounded observation extension for limits and schema.
 
 ## Opt-in object relocation
 

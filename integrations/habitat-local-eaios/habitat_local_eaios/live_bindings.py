@@ -19,6 +19,7 @@ from .stage2_contract import (
     install_stage2_contract_guard,
 )
 from .stage2_feedback import Stage2ExecutionFeedback
+from .view_scan import ViewScanBinding
 
 _LOG = logging.getLogger(__name__)
 
@@ -102,7 +103,16 @@ class LivePolicyBindings:
         original = self.originals[agent]
         policy._high_level_policy.llm_agent = original
         self.assignment[f"agent_{agent}"] = arguments
-        contract = Stage2ExecutionContract.for_invocation(invocation)
+        scan = (
+            ViewScanBinding(
+                self.runtime._habitat_env, policy, agent, observation_control, self.record_feedback
+            )
+            if observation_control is not None
+            else None
+        )
+        contract = Stage2ExecutionContract.for_invocation(
+            invocation, allow_view_scan=scan is not None
+        )
         contracts = {original.name: contract}
         states = (
             {
@@ -128,21 +138,27 @@ class LivePolicyBindings:
             if state is not None:
                 state.complete(action, succeeded)
 
-        feedback = Stage2ExecutionFeedback(
-            contracts,
-            self.record_feedback,
-            completion=observed,
-            completion_binding=completion,
-            peer_contracts=self.peer_contracts,
-            observation_control=observation_control,
-            navigation_dispatch=(
-                NavigationDispatchLifecycle(
-                    self.runtime._habitat_env, agent, contract, self.record_feedback
-                )
-                if observation_control is not None
-                else None
-            ),
-        )
+        try:
+            feedback = Stage2ExecutionFeedback(
+                contracts,
+                self.record_feedback,
+                completion=observed,
+                completion_binding=completion,
+                peer_contracts=self.peer_contracts,
+                observation_control=observation_control,
+                navigation_dispatch=(
+                    NavigationDispatchLifecycle(
+                        self.runtime._habitat_env, agent, contract, self.record_feedback
+                    )
+                    if observation_control is not None
+                    else None
+                ),
+                view_scan=scan,
+            )
+        except BaseException:
+            if scan is not None:
+                scan.close()
+            raise
         feedback.install([policy])
         try:
             guard = install_stage2_contract_guard(

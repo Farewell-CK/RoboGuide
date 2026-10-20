@@ -1,8 +1,9 @@
 # RoboGuide
 
-只读感知诊断的来源、范围和采样界限见
-[`bounded-observation-and-evidence-closure`](docs/extensions/bounded-observation-and-evidence-closure.md)。
-检测缓存、语义像素及官方结果独立留证，不以本地技能完成替代 benchmark success。
+主动观测 Local EAIOS 的执行与诊断边界见
+[`bounded-observation-and-evidence-closure`](docs/extensions/bounded-observation-and-evidence-closure.md)：
+显式、有界的视角扫描复用真实底盘接口；检测缓存、语义像素及官方结果独立留证，不以本地
+技能完成替代 Mission satisfaction 或 benchmark success。
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 

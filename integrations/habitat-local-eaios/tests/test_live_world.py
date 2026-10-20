@@ -14,7 +14,7 @@ from typing import Any, cast
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from habitat_local_eaios import live_bindings, navigation_dispatch  # noqa: E402
+from habitat_local_eaios import live_bindings, navigation_dispatch, view_scan  # noqa: E402
 from habitat_local_eaios.backend import LocalExecutionOutcome  # noqa: E402
 from habitat_local_eaios.endpoint_registry import build_endpoint_registry  # noqa: E402
 from habitat_local_eaios.idle_endpoint import PassiveIdleAgent  # noqa: E402
@@ -42,6 +42,7 @@ from test_shared_world import (  # noqa: E402
     WaitSkillPolicy,
 )
 from test_stage2_contract import FakeModel  # noqa: E402
+from test_view_scan import BASE_TYPES, controls  # noqa: E402
 
 
 def invocation(
@@ -198,6 +199,8 @@ class Agent(ContractAgent):
     def chat(self, observation: str) -> Any:
         """Preserve CrabAgent's actual post-model mapping, including exact robot injection."""
         name, parameters = super().chat(observation)
+        if name == "scan_for_object":
+            return {"name": name, "arguments": parameters}
         return (
             {"name": "wait", "arguments": ["500"]}
             if name in {"wait", "send_request"}
@@ -308,6 +311,14 @@ class Runtime(LiveEmosStage2Runtime):
                 get_task_text_context=lambda: {},
             ),
         )
+        self._habitat_env.sim = SimpleNamespace(ctrl_freq=30.0)
+        for agent, policy in enumerate(actor._active_policies):
+            control_world, control_policy = controls(agent=agent)
+            self._habitat_env.task.actions.update(control_world.task.actions)
+            policy._idx_to_name = {1: "wait"}
+            policy._high_level_policy._action_space = (
+                control_policy._high_level_policy._action_space
+            )
         self._agent_access = SimpleNamespace(masks_shape=(1,))
         self._prepared_observations = {}
         self.test_diagnostics = RecordingDiagnostics()
@@ -407,6 +418,8 @@ def vendor_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resolve only required original type boundaries without a vendor process."""
     monkeypatch.setattr(live_bindings, "_original_wait_skill_type", lambda: WaitSkillPolicy)
     monkeypatch.setattr(navigation_dispatch, "_original_action_type", lambda: OracleCommand)
+    monkeypatch.setattr(view_scan, "_original_base_types", lambda: BASE_TYPES)
+    monkeypatch.setattr(view_scan, "_skill_factory", lambda *args: object())
     module = ModuleType("habitat_mas.utils")
     module.AgentArguments = Arguments  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "habitat_mas.utils", module)
@@ -778,10 +791,11 @@ def test_loaded_perception_initialization_archives_actual_readiness(
     robots = {
         record["agent_id"]: type(record["robot_type"], (), {})() for record in registry["endpoints"]
     }
-    sensor = type("DetectedObjectsSensor", (), {"pixel_threshold": 10})()
+    sensor = type("DetectedObjectsSensor", (), {"pixel_threshold": 10, "agent_id": None})()
     environment = runtime._habitat_env
     assert environment is not None
     environment.sim = SimpleNamespace(
+        ctrl_freq=30.0,
         _sensors={f"agent_{agent}_semantic": object() for agent in range(count)},
         get_agent_data=lambda agent: SimpleNamespace(articulated_agent=robots[agent]),
     )
@@ -807,7 +821,7 @@ def test_loaded_perception_initialization_archives_actual_readiness(
     assert runtime.test_diagnostics.terminals == []
     how = json.loads((run / "local-how-profile.json").read_bytes())
     assert how["schema_version"] == (
-        "roboguide.habitat-local-how-profile/v0.12"
+        "roboguide.habitat-local-how-profile/v0.13"
         if acquisition
         else "roboguide.habitat-local-how-profile/v0.10"
     )
@@ -816,6 +830,7 @@ def test_loaded_perception_initialization_archives_actual_readiness(
 
         assert how["observation_control"] == observation_control_declaration()
         assert how["navigation_dispatch"] == navigation_dispatch.navigation_dispatch_declaration()
+        assert how["observation_view_search"] == view_scan.view_scan_declaration()
     else:
         assert "observation_control" not in how
 
@@ -1056,7 +1071,9 @@ def test_perception_negative_read_completes_only_observation(tmp_path: Path) -> 
     runtime = Runtime(tmp_path, 2, gym, actor)
     assert runtime._habitat_env is not None
     simulator = SimpleNamespace(
-        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=list(range(8))
+        habitat_config=SimpleNamespace(object_ids_start=100),
+        scene_obj_ids=list(range(8)),
+        ctrl_freq=30.0,
     )
     runtime._habitat_env.task.pddl_problem = SimpleNamespace(
         get_ordered_entities_list=lambda: [SimpleNamespace(name="object-a")],
@@ -1110,7 +1127,9 @@ def test_active_acquisition_requires_actual_detection_not_navigation_completion(
     runtime.registry["endpoints"][0]["operations"].append("observation.acquire@v1")
     assert runtime._habitat_env is not None
     simulator = SimpleNamespace(
-        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=list(range(8))
+        habitat_config=SimpleNamespace(object_ids_start=100),
+        scene_obj_ids=list(range(8)),
+        ctrl_freq=30.0,
     )
     runtime._habitat_env.task.pddl_problem = SimpleNamespace(
         get_ordered_entities_list=lambda: [SimpleNamespace(name="object-a")],
@@ -1271,7 +1290,7 @@ def test_local_acquisition_success_does_not_latch_the_joint_terminal_goal(tmp_pa
     runtime._config.observation_acquisition_max_steps = 6
     runtime._detection_sensors = {agent: f"agent_{agent}_detected_objects" for agent in range(2)}
     simulator = SimpleNamespace(
-        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=[42, 43]
+        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=[42, 43], ctrl_freq=30.0
     )
     assert runtime._habitat_env is not None
     runtime._habitat_env.task.pddl_problem = SimpleNamespace(
