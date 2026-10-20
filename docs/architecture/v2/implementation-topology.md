@@ -24,16 +24,21 @@ flowchart TB
   DISCOVERY --> MIWORK
   MIWORK -->|Mission 唯一索引 + tenant / 精确 Request lookup| MI
   MIWORK -->|实际 Request + 原 admission / 只读 source| Entry
-  Entry --> CLAIM[原 SQL claim / 每 provider phase 唯一 nonce / wrapper v44]
+  Entry --> CLAIM[原 SQL claim / 每 provider phase 唯一 nonce / wrapper v45]
   CLAIM --> SQL
   CLAIM -->|原停止齐备后工作许可| MIWORK
   MIWORK -->|原 provider bytes / candidate / 独立实际 Review| Entry
   MIWORK --> MIREC[recovery profile v0.3 / 原 worker + inode lease / 完整原 SQL]
   MIREC --> SQL
-  Entry --> REV[原 policy / candidate / exact Review / wrapper v44]
+  Entry --> REV[原 policy / candidate / exact Review / wrapper v45]
+  Entry --> REVMEM[v0.3 原属组 child 声明 / 原 membership 与策略 / 无预绑定]
+  REVMEM --> REV
   REV --> SQL
   REV --> STOP
   STOP --> RGROUP[原 stop 与 revoke 齐全 / source 历史保留 / 新 Group]
+  REVMEM --> REVPUB[原 CAS 字节 / lineage / Review / 原预算 / Commit 后 catalog]
+  STOP --> REVPUB
+  REVPUB --> RGROUP
   RGROUP --> CTRL
   RGROUP --> ORCH
   GOAL[独立原目标 source / 实际 TLS / current version attempts / 原接收预算] --> Entry

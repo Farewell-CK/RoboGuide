@@ -22,8 +22,10 @@ fn work_active(
         .orchestrator
         .execution(mission)
         .ok_or("original Mission absent")?;
-    if command.schema_version != GENERATION_SCHEMA
-        || caller.principal != state.policy.proposer
+    if !matches!(
+        command.schema_version.as_str(),
+        GENERATION_SCHEMA | MEMORY_SCHEMA
+    ) || caller.principal != state.policy.proposer
         || !active(controller, state, now, kernel)
         || candidate.principal != caller.principal
         || candidate.budget.remaining(kernel) == 0

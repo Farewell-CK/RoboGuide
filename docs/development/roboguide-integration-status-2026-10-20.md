@@ -9,6 +9,11 @@ main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头�
 `d15543f4ec2dc99ebe565e319e141c0bf17b433b`（执行故障闭环）。后两者是祖先关系。
 代码集成和完整整改完成是不同状态；本次不宣称 SoftwareComplete。
 
+[原属组 Memory 修订](acceptance/2026-10-20-scoped-memory-plan-revision.md)已接通显式
+v0.3 声明、完整原停止/撤权、immutable child、Control 新组与各 Task 独立 import/use。
+五种真实软件配置和原 MI/迁移回归通过，共享 wrapper v45 保留原历史与预算。
+非空声明的实际 MI 整链、完整 Memory 数据面及其余阶段仍按下表继续验收。
+
 再次固定核对 `codex/e1-perception-contract-composition` 的新增头
 `983c8810b91ccbd5634dd9b3b7a9901c510d38cc`：四条维护提交保留原历史合入，
 有界扫描、原多 agent 参数/完整动作编码和缓存证据在零模型兼容门禁下检查。
@@ -18,7 +23,7 @@ main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头�
 [原文件进程与接收身份](acceptance/2026-10-20-file-process-memory-ownership.md)补齐实际
 Local EAIOS 子进程 wait/崩溃 fence、原预算读取许可和后续 Task 的独立 import。双 Node
 停止/交接/两次复算、SQL 显式恢复和负向生命周期已检查；跨 session mixed-fault 停止恢复、
-全局 Memory 引用/在线 HA 与 scoped Memory 计划修订继续为必需项。
+全局 Memory 引用/在线 HA 与完整 scoped Memory/MI 组合继续为必需项。
 
 后续以已验收 `6ca3ebb37fca940626adc0d68755fc38a0534f0f` 为 main 基线，固定核对
 `codex/e1-perception-contract-composition` 的 `b50d9e313b0660c9cc4ee1c5bca53538fa0b1de6`。
@@ -130,7 +135,7 @@ save/commit 故障后的最后提交查询、Node unavailable、上传中 chunk 
 它保留原复制 watchdog/受控 replay；F10 完整告警/SLO 和写锁 I/O 优化仍未关闭。
 
 [原生监控与通知验收](acceptance/2026-10-20-observability.md)接通真实 Prometheus/
-Alertmanager、两次 firing/resolved 与实际 replica metrics。Controller wrapper 当前 v42，
+Alertmanager、两次 firing/resolved 与实际 replica metrics。该切片引入 wrapper v42，
 Mission authorization v0.2 的专用 metrics-reader 不可业务读写；旧 writer/降级拒绝与
 v41 证据迁移均检查。长期 SLO、跨主机/值守路由和写锁 I/O 收敛继续为必需项。
 

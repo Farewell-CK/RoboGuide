@@ -222,7 +222,11 @@ fn review(
     if reason.trim().is_empty() || reason.len() > 512 || candidate.budget.remaining(kernel) == 0 {
         return Err("Review requires a bounded explicit reason".into());
     }
+    if decision == ReviewDecision::Approve {
+        super::memory::validate_review(candidate, &expected)?;
+    }
     let mut review = Review {
+        memory_digest: super::memory::authorization_digest(candidate)?,
         decision,
         reason: reason.into(),
         principal: caller.principal.into(),
@@ -262,6 +266,7 @@ pub(super) fn ticket(
         .ok_or("unknown candidate Mission")?;
     let remaining = state.budget.remaining(kernel);
     Ok(Candidate {
+        memory: BTreeMap::new(),
         claim: None,
         provider_calls: BTreeMap::new(),
         ticket_id: id.into(),
@@ -347,6 +352,20 @@ fn apply(
         return Err("switch request belongs to another original delegated principal".into());
     }
     match &command.action {
+        Action::AuthorizeMemory {
+            ticket_id,
+            authorization,
+        } => super::memory::authorize(
+            controller,
+            mission,
+            state,
+            command,
+            caller,
+            ticket_id,
+            authorization,
+            now,
+            kernel,
+        ),
         Action::ClaimRuntimeWork { ticket_id, claim } => generation::claim(
             controller, mission, state, command, caller, ticket_id, claim, now, kernel,
         ),
@@ -369,8 +388,13 @@ fn apply(
             kernel,
         ),
         Action::AuthorizeGeneration => {
-            if command.schema_version != GENERATION_SCHEMA {
-                return Err("generation delegation requires explicit runtime revision v0.2".into());
+            if !matches!(
+                command.schema_version.as_str(),
+                GENERATION_SCHEMA | MEMORY_SCHEMA
+            ) {
+                return Err(
+                    "generation delegation requires explicit runtime revision v0.2 or v0.3".into(),
+                );
             }
             super::generation::authorize(controller, state, caller, now, kernel)
         }
@@ -621,8 +645,10 @@ pub(crate) fn submit(
     feed: Option<&TaskVerifierFeed>,
 ) -> Result<serde_json::Value, String> {
     let command: Command = serde_json::from_slice(body).map_err(|e| e.to_string())?;
-    if !matches!(command.schema_version.as_str(), SCHEMA | GENERATION_SCHEMA)
-        || !identity(&command.command_id)
+    if !matches!(
+        command.schema_version.as_str(),
+        SCHEMA | GENERATION_SCHEMA | MEMORY_SCHEMA
+    ) || !identity(&command.command_id)
     {
         return Err("invalid closed revision command".into());
     }
@@ -856,6 +882,7 @@ pub(crate) fn submit(
         .lock()
         .map_err(|_| "Controller authority unavailable after Commit")?;
     *live = candidate;
+    super::memory::install_catalog(&live)?;
     if let Err(error) = flush_unisolated_commands(&mut live, clock) {
         eprintln!("revision committed; original outbox deferred: {error}");
     }
@@ -895,7 +922,7 @@ pub(crate) fn view(
         );
     }
     Ok(
-        serde_json::json!({"schema_version":SCHEMA,"generation_schema":GENERATION_SCHEMA,"mission_id":mission.as_str(),"used_task_ids":used_task_ids,"current_plan_revision":execution.plan_revision(),"current_group_id":execution.group_id().as_str(),"original_group_id":execution.original_group_id().as_str(),"current_plan_digest":orchestration::mission_plan_digest(execution.plan()),"current_plan":orchestration::mission_plan_document(execution.plan()),"history":execution.plan_revisions().iter().map(|version|serde_json::json!({"revision":version.revision,"command_id":version.command_id,"source_group_id":version.source_group_id,"target_group_id":version.target_group_id,"plan_digest":version.target_plan_digest,"review_digest":version.review_digest,"completed_tasks":version.completed_tasks,"committed_at_ms":version.committed_at.as_millis()})).collect::<Vec<_>>(),"completed_tasks":completed(controller,mission)?,"goal_contract":controller.bridge.control().mission_goal_contract(mission),"goal_source_current":controller.bridge.control().mission_goal_source_current(mission),"goal_evidence":state.map(|state|state.goal_evidence.iter().map(|(digest,progress)|serde_json::json!({"input_digest":digest,"remaining_ms":progress.budget.remaining(&kernel),"completed":progress.completed_time.is_some(),"incident":progress.incident})).collect::<Vec<_>>()),"goal_context":state.map(|state|&state.policy.goal_context),"authority":state.map(|state|serde_json::json!({"revision":state.revision,"policy":state.policy,"policy_id":state.policy.policy_id,"policy_digest":state.policy_digest,"revoked":state.revoked,"active":active(controller,state,now,&kernel),"remaining_ms":state.budget.remaining(&kernel),"candidates":state.candidates.values().map(|candidate|serde_json::json!({"ticket_id":candidate.ticket_id,"principal":candidate.principal,"base_revision":candidate.base_revision,"base_digest":candidate.base_digest,"remaining_work_ms":candidate.budget.remaining(&kernel),"remaining_switch_ms":state.switches.iter().filter(|switch|switch.ticket_id==candidate.ticket_id).map(|switch|switch.budget.remaining(&kernel)).min(),"output_received":candidate.completed_time.is_some(),"plan_digest":candidate.plan_digest,"claim":candidate.claim,"provider_calls":candidate.provider_calls,"rejection":candidate.rejected,"review":candidate.review})).collect::<Vec<_>>(),"generation":state.generation,"generation_active":generation::active(controller,state,now,&kernel),"switches":state.switches,"commands_retained":state.commands.len()}))}),
+        serde_json::json!({"schema_version":SCHEMA,"generation_schema":GENERATION_SCHEMA,"mission_id":mission.as_str(),"used_task_ids":used_task_ids,"current_plan_revision":execution.plan_revision(),"current_group_id":execution.group_id().as_str(),"original_group_id":execution.original_group_id().as_str(),"current_plan_digest":orchestration::mission_plan_digest(execution.plan()),"current_plan":orchestration::mission_plan_document(execution.plan()),"history":execution.plan_revisions().iter().map(|version|serde_json::json!({"revision":version.revision,"command_id":version.command_id,"source_group_id":version.source_group_id,"target_group_id":version.target_group_id,"plan_digest":version.target_plan_digest,"review_digest":version.review_digest,"completed_tasks":version.completed_tasks,"committed_at_ms":version.committed_at.as_millis()})).collect::<Vec<_>>(),"completed_tasks":completed(controller,mission)?,"goal_contract":controller.bridge.control().mission_goal_contract(mission),"goal_source_current":controller.bridge.control().mission_goal_source_current(mission),"goal_evidence":state.map(|state|state.goal_evidence.iter().map(|(digest,progress)|serde_json::json!({"input_digest":digest,"remaining_ms":progress.budget.remaining(&kernel),"completed":progress.completed_time.is_some(),"incident":progress.incident})).collect::<Vec<_>>()),"goal_context":state.map(|state|&state.policy.goal_context),"authority":state.map(|state|serde_json::json!({"revision":state.revision,"policy":state.policy,"policy_id":state.policy.policy_id,"policy_digest":state.policy_digest,"revoked":state.revoked,"active":active(controller,state,now,&kernel),"remaining_ms":state.budget.remaining(&kernel),"candidates":state.candidates.values().map(|candidate|serde_json::json!({"ticket_id":candidate.ticket_id,"principal":candidate.principal,"memory_authorizations":candidate.memory,"base_revision":candidate.base_revision,"base_digest":candidate.base_digest,"remaining_work_ms":candidate.budget.remaining(&kernel),"remaining_switch_ms":state.switches.iter().filter(|switch|switch.ticket_id==candidate.ticket_id).map(|switch|switch.budget.remaining(&kernel)).min(),"output_received":candidate.completed_time.is_some(),"plan_digest":candidate.plan_digest,"claim":candidate.claim,"provider_calls":candidate.provider_calls,"rejection":candidate.rejected,"review":candidate.review})).collect::<Vec<_>>(),"generation":state.generation,"generation_active":generation::active(controller,state,now,&kernel),"switches":state.switches,"commands_retained":state.commands.len()}))}),
     )
 }
 
@@ -919,7 +946,7 @@ pub(crate) fn candidate_view(
     let kernel = KernelTime::observe()?;
     Ok(
         serde_json::json!({"schema_version":SCHEMA,"mission_id":mission.as_str(),"ticket_id":candidate.ticket_id,
-        "principal":candidate.principal,"base_revision":candidate.base_revision,"base_plan_digest":candidate.base_digest,
+        "principal":candidate.principal,"memory_authorizations":candidate.memory,"base_revision":candidate.base_revision,"base_plan_digest":candidate.base_digest,
         "claim":candidate.claim,"provider_calls":candidate.provider_calls,"plan":candidate.plan,"plan_digest":candidate.plan_digest,"provenance":candidate.provenance,"review":candidate.review,
         "rejection":candidate.rejected,"remaining_work_ms":candidate.budget.remaining(&kernel)}),
     )

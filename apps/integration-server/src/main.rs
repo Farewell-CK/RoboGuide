@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper before original-owner scoped Memory permissions for plan revisions.
+const PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v44";
 /// Previous wrapper before explicit fault-triggered Mission Intelligence generation permission.
 const PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v43";
 /// Previous wrapper without versioned runtime candidate/Review and stopped-configuration authority.
@@ -340,6 +342,8 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
                 protected,
                 import_id,
                 ports::Clock::now(self.clock.as_ref()),
+            )? && !application::plan_revision::permits_parent_reference(
+                &live, protected, import_id,
             )? {
                 return Ok(false);
             }
@@ -1043,6 +1047,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -1089,6 +1094,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -1319,6 +1325,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     controller.memory_preparation.catalog = Some(artifact_catalog.clone());
+    application::plan_revision::install_catalog(&controller)?;
     controller.bridge.publish_node_identity_registry()?;
     let controller = Arc::new(Mutex::new(controller));
     application::state_policy::bootstrap_artifact(

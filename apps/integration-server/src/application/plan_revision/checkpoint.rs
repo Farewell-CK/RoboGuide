@@ -57,6 +57,7 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         return Err("revision authority bound exceeded".into());
     }
     let mut total_bytes = 0_usize;
+    let mut memory_bytes = 0_usize;
     for (key, state) in &controller.runtime_revisions {
         let mission = domain::MissionId::new(key).map_err(|e| e.to_string())?;
         admission::validate_policy(&state.policy)?;
@@ -99,6 +100,12 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         generation::validate(state)?;
         goal::validate_restored(controller, &mission, state)?;
         for (id, candidate) in &state.candidates {
+            memory_bytes = memory_bytes.saturating_add(memory::validate_restored(
+                controller, &mission, state, candidate,
+            )?);
+            if memory_bytes > 512 * 1024 {
+                return Err("restored revision Memory metadata exceeds its bound".into());
+            }
             if id != &candidate.ticket_id
                 || !identity(id)
                 || !identity(&candidate.principal)
@@ -319,7 +326,9 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
                 || receipt.result["command_id"].as_str() != Some(id.as_str())
                 || !receipt.result["schema_version"]
                     .as_str()
-                    .is_some_and(|schema| matches!(schema, SCHEMA | GENERATION_SCHEMA))
+                    .is_some_and(|schema| {
+                        matches!(schema, SCHEMA | GENERATION_SCHEMA | MEMORY_SCHEMA)
+                    })
                 || receipt.result["revision"]
                     .as_u64()
                     .is_none_or(|revision| revision == 0 || revision > state.revision)

@@ -199,6 +199,18 @@ class RuntimeReplanningWorker:
         """Recheck current delegation and source before additional work."""
         view = self._view(mission)
         authority = view.get("authority")
+        candidate = (
+            next(
+                (
+                    row
+                    for row in authority.get("candidates", [])
+                    if row.get("ticket_id") == original["ticket_id"]
+                ),
+                None,
+            )
+            if isinstance(authority, dict)
+            else None
+        )
         if (
             not isinstance(authority, dict)
             or authority.get("generation_active") is not True
@@ -206,6 +218,9 @@ class RuntimeReplanningWorker:
             or view.get("current_plan_revision") != original["base_revision"]
             or view.get("current_plan_digest") != original["base_digest"]
             or authority.get("policy", {}).get("proposer") != self.proposer.principal
+            or candidate is None
+            or candidate.get("memory_authorizations", {})
+            != original["context"].get("scoped_memory_authorizations", {})
             or not any(
                 switch.get("command_id") == original["switch_command_id"]
                 and switch.get("phase") == "generating"
@@ -500,7 +515,18 @@ class RuntimeReplanningWorker:
                 "switch_command_id": switch["command_id"],
                 "ticket_id": switch["ticket_id"],
                 "context": {
-                    "schema_version": "roboguide.runtime-replanning-context/v0.1",
+                    "schema_version": (
+                        "roboguide.runtime-replanning-context/v0.2"
+                        if candidate.get("memory_authorizations")
+                        else "roboguide.runtime-replanning-context/v0.1"
+                    ),
+                    "scoped_memory_authorizations": candidate.get("memory_authorizations", {}),
+                    "target_group_id": switch["target_group"],
+                    "memory_scope_rule": (
+                        "Use exact declared child selectors for unfinished Group-scoped inputs; "
+                        "these are permissions, not import/availability facts. Preserve source "
+                        "ownership and provenance. Do not invent aliases or broaden scope."
+                    ),
                     "mission_id": mission,
                     "ticket_id": switch["ticket_id"],
                     "source_revision": view["current_plan_revision"],

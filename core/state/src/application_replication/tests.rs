@@ -3,6 +3,36 @@
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Legacy replication cannot discard zero-event command authority from current or prior wrappers.
+#[test]
+fn legacy_batch_cannot_hide_v43_v44_or_current_authority_head() {
+    for schema in [
+        "roboguide.controller-checkpoint/v43",
+        "roboguide.controller-checkpoint/v44",
+        crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA,
+    ] {
+        let batch = ApplicationCommitBatch {
+            schema: "roboguide.application-commit/v1".into(),
+            previous_event_sequence: 0,
+            previous_checkpoint_digest: None,
+            checkpoint: PersistedCheckpoint {
+                schema: schema.into(),
+                event_sequence: 0,
+                checkpoint_json: "{}".into(),
+            },
+            events: Vec::new(),
+            commands: Vec::new(),
+        };
+        assert!(
+            batch
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("legacy replica codec")
+        );
+    }
+}
+
 /// Records the external accepted candidate while checking that private SQL is still invisible.
 struct QuorumFixture {
     /// Inactive readonly observer of the local materialized database.

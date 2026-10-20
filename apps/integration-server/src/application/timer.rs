@@ -185,6 +185,7 @@ fn drive_application_timer_synchronous(
         let has_memory_imports = !candidate.memory_imports.is_empty();
         *live = candidate;
         super::memory_handoff::install_catalog(&live)?;
+        super::plan_revision::install_catalog(&live)?;
         if !live.memory_preparation.records.is_empty() {
             super::memory_preparation::flush(&live, now, clock.now());
         }

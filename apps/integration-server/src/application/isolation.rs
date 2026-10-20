@@ -339,6 +339,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -350,6 +351,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -367,6 +369,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -377,13 +380,23 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     {
         return Err("ambiguous legacy wrapper contains fork process-exit stop authority; explicit source migration required".into());
     }
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
+    ) && saved
+        .runtime_revisions
+        .values()
+        .any(|state| state.uses_generation_authority())
+    {
+        return Err("legacy wrapper cannot carry runtime generation authority".into());
+    }
     if saved.schema != SERVER_CHECKPOINT_SCHEMA
         && saved
             .runtime_revisions
             .values()
-            .any(|state| state.uses_generation_authority())
+            .any(|state| state.uses_revision_memory_authority())
     {
-        return Err("legacy wrapper cannot carry runtime generation authority".into());
+        return Err("legacy wrapper cannot carry scoped revision Memory authority".into());
     }
     let missions: Vec<serde_json::Value> =
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
@@ -391,7 +404,9 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
     ) && (!saved.runtime_revisions.is_empty()
         || missions.iter().any(|mission| {
             ["goal_gate", "goal_receipt", "goal_completed_at"]
@@ -431,6 +446,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
     ) && integration
@@ -453,6 +469,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -467,6 +484,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -483,6 +501,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -507,6 +526,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -536,6 +556,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -565,6 +586,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -588,6 +610,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -640,6 +663,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -675,6 +699,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -707,6 +732,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -759,6 +785,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -792,6 +819,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA

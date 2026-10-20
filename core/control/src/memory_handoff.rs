@@ -7,6 +7,80 @@ use domain::{
 };
 
 impl ControlPlane {
+    /// Authorizes only an immutable child for a yet-unbound revision of the same Mission.
+    ///
+    /// No Group or resource is created here. The application must freeze the actual complete source
+    /// attempts, prove stop/revocation, retain Review and publish inside its authority transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorize_revision_memory_child(
+        &self,
+        parent: &MemoryArtifactManifest,
+        child: &MemoryArtifactManifest,
+        source: &ExecutionGroupId,
+        source_membership: &GroupMembershipVersion,
+        mission: &domain::MissionId,
+        tenant: &str,
+        principal: &str,
+    ) -> Result<(), ControlError> {
+        let invalid = |text: &str| ControlError::InvalidProposal(text.into());
+        parent.validate().map_err(|e| invalid(&e.to_string()))?;
+        child.validate().map_err(|e| invalid(&e.to_string()))?;
+        let MemoryScope::ExecutionGroup(target) = child.scope() else {
+            return Err(invalid(
+                "revision child requires its exact target Group scope",
+            ));
+        };
+        let original = self
+            .group(source)
+            .ok_or_else(|| invalid("source Group absent"))?;
+        if source == target
+            || self.group(target).is_some()
+            || original.lifecycle() == GroupLifecycle::Released
+            || original.mission_id() != mission
+            || original.membership_version() != Some(source_membership)
+            || self.mission_tenant(mission) != Some(tenant)
+            || !matches!(parent.scope(), MemoryScope::ExecutionGroup(owner) if owner == source)
+            || parent.selector() == child.selector()
+            || parent.visibility() != MemoryVisibility::Exchangeable
+            || parent.kind() == domain::MemoryKind::Spatial
+            || parent.created_at() > child.created_at()
+        {
+            return Err(invalid(
+                "revision Memory source, target, membership or tenant changed",
+            ));
+        }
+        let original_json = serde_json::to_value(parent).map_err(|e| invalid(&e.to_string()))?;
+        let mut child_json = serde_json::to_value(child).map_err(|e| invalid(&e.to_string()))?;
+        for field in ["selector", "scope", "created_at"] {
+            child_json[field] = original_json[field].clone();
+        }
+        if child_json != original_json {
+            return Err(invalid(
+                "revision child changed original owner, bytes or provenance",
+            ));
+        }
+        self.authorize_memory_principal(parent, tenant, principal, MemoryAccessOperation::Handoff)?;
+        let registry = self
+            .memory_authorization_registry()
+            .ok_or_else(|| invalid("Memory policy absent"))?;
+        let policy = registry
+            .policy(child, tenant)
+            .map_err(ControlError::InvalidProposal)?;
+        if policy.typed_map_manifest_digest.is_some()
+            || !policy.groups.iter().any(|grant| {
+                &grant.group_id == target
+                    && [MemoryAccessOperation::Read, MemoryAccessOperation::Import]
+                        .iter()
+                        .all(|operation| grant.operations.contains(operation))
+            })
+        {
+            return Err(invalid(
+                "revision child needs explicit generic target Read/Import policy",
+            ));
+        }
+        Ok(())
+    }
+
     /// Validates an exact immutable Group exchange; the application must independently prove stop,
     /// revocation, original deadlines and receiving attempts before publication or Execute.
     #[allow(clippy::too_many_arguments)]

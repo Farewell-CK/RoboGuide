@@ -9,6 +9,7 @@ mod checkpoint;
 mod discovery;
 mod generation;
 mod goal;
+mod memory;
 mod switching;
 #[cfg(test)]
 mod tests;
@@ -20,6 +21,8 @@ use time::{KernelTime, OriginalBudget};
 const SCHEMA: &str = "roboguide.runtime-plan-revision/v0.1";
 /// Explicit generation delegation; v0.1 never acquires this additional permission.
 const GENERATION_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.2";
+/// Explicit scoped Memory permission, never inferred from an older candidate or manifest alias.
+const MEMORY_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.3";
 /// Candidate and command storage bounds are independent of prospective Mission admission.
 const MAX_CANDIDATES: usize = 16;
 /// Immutable command receipts cannot grow without a deployment bound.
@@ -87,6 +90,9 @@ pub(crate) enum Trigger {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Candidate {
+    /// Immutable original administrative child declarations, frozen before output and provider claims.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    memory: BTreeMap<String, memory::Authorization>,
     /// Immutable original MI worker/store claim; replacing a database never acquires the ticket again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     claim: Option<GenerationClaim>,
@@ -179,6 +185,9 @@ struct ProviderCallReceipt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Review {
+    /// Exact pre-output child permissions reviewed with this plan; historical absence grants none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    memory_digest: Option<String>,
     /// Explicit administrative decision; this is permission, never a physical success fact.
     decision: ReviewDecision,
     /// Original bounded administrative explanation.
@@ -373,6 +382,20 @@ struct GenerationGrant {
 }
 
 impl RevisionState {
+    /// Lets migration reject new Memory permissions hidden in an older wrapper.
+    pub(crate) fn uses_revision_memory_authority(&self) -> bool {
+        self.commands
+            .values()
+            .any(|receipt| receipt.result["schema_version"].as_str() == Some(MEMORY_SCHEMA))
+            || self.candidates.values().any(|candidate| {
+                !candidate.memory.is_empty()
+                    || candidate
+                        .review
+                        .as_ref()
+                        .is_some_and(|review| review.memory_digest.is_some())
+            })
+    }
+
     /// Lets outer checkpoint migration reject hidden v0.2 permissions in any older wrapper.
     pub(crate) fn uses_generation_authority(&self) -> bool {
         self.generation.is_some()
@@ -414,6 +437,13 @@ struct Command {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 enum Action {
+    /// Declares an exact original-owner child before output, provider claims or Review.
+    AuthorizeMemory {
+        /// Original finite candidate budget; the declaration never creates another ticket.
+        ticket_id: String,
+        /// Complete immutable planned child and original policy identity, without resource selection.
+        authorization: Box<memory::AuthorizationRequest>,
+    },
     /// Freezes the original MI SQL worker and provenance identity before any model work.
     ClaimRuntimeWork {
         /// Original fault-admitted ticket.
@@ -522,4 +552,5 @@ pub(crate) use admission::{candidate_view, submit, view};
 pub(crate) use checkpoint::{attach_deployment, deserialize_states, validate_restored};
 pub(crate) use goal::apply_pending as apply_goal_pending;
 pub(crate) use goal::{observe_goal_ingress, submit_goal};
+pub(crate) use memory::{install_catalog, permits_parent_reference};
 pub(crate) use switching::{blocks_mission, close_terminal, observe_trigger, tick};

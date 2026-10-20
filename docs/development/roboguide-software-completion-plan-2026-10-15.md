@@ -4,6 +4,9 @@
 基线：`main@5285a92a6af8bf4a99bb0852b5cdb80728c9144c` 加已备份的未提交整改工作树。
 实施分支：`codex/remediation-complete-software-2026-10-15`。
 
+2026-10-20 后续连续实施使用 `codex/software-completion-2026-10-20` 隔离工作树，
+各验收工作包完成后合入并同步 main。后续记录按实际合并提交与证据 identity 保留。
+
 2026-10-20 集成工作在 `codex/main-integration-2026-10-20` 隔离工作树执行，目标合并 main；
 包含 MI 部署校验和执行故障闭环分支。全部远程分支与当前必需剩余项见
 [分支同步与剩余整改核对](roboguide-integration-status-2026-10-20.md)。
@@ -27,6 +30,12 @@ mTLS scrape、两次实际 SQL 故障的 firing/resolved、固定 histogram/queu
 短窗口不关闭长期 SLO、跨主机人工响应或写锁 I/O 优化，完整其余阶段仍必须实施。
 
 ## 交付要求
+
+[原属组 Memory 计划修订](acceptance/2026-10-20-scoped-memory-plan-revision.md)接通显式
+v0.3 许可、原 child/Review digest、完整停止/撤权和 Control 新组的正常 import/use。
+实际正常/SQL/已确认停止后重启/策略/到期五条链路通过，旧 writer 拒绝且原 MI/迁移回归
+通过；wrapper v45 fences 新权限。非空 MI 声明的整链及全局 Memory 数据面继续验收，
+不以两条各自通过的路径替代组合，也不关闭完整 F8 或其他必需阶段。
 
 [文件进程与原接收身份](acceptance/2026-10-20-file-process-memory-ownership.md)接通部署侧
 独立 OS wait、原 kernel/use 读取许可、崩溃 Unknown/GC fence 和后续 Task 自己的 import。

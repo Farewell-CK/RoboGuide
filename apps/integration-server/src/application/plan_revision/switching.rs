@@ -72,6 +72,7 @@ fn reviewed_plan(
         || candidate.base_revision != execution.plan_revision()
         || candidate.base_digest != orchestration::mission_plan_digest(execution.plan())
         || review.completion_precondition != admission::completed(controller, mission)?
+        || review.memory_digest != memory::authorization_digest(candidate)?
         || now.as_millis() >= review.certificate_expires_at_ms
         || !admission::authorized_subject(controller, &review.principal, &state.tenant, true, now)
     {
@@ -108,43 +109,6 @@ fn reviewed_plan(
         deployment.restrictions_for_plan(&plan, &group)?;
     }
     Ok(plan)
-}
-
-/// Prevents a new Group from silently broadening original Group-scoped Memory or skipping explicit handoff.
-fn memory_scopes(
-    controller: &ControllerState,
-    plan: &domain::MissionPlan,
-    target: &domain::ExecutionGroupId,
-    completed: &BTreeSet<domain::TaskId>,
-) -> Result<(), String> {
-    for task in plan
-        .task_graph()
-        .tasks()
-        .iter()
-        .filter(|task| !completed.contains(task.task_id()))
-    {
-        for input in task
-            .requirement()
-            .roles()
-            .iter()
-            .flat_map(|role| role.memories())
-        {
-            let catalog = controller
-                .memory_preparation
-                .catalog
-                .as_ref()
-                .ok_or("Memory catalog unavailable")?;
-            let (manifest, _) = catalog
-                .memory_source(&input.selector)?
-                .ok_or("original candidate Memory source unavailable")?;
-            if let domain::MemoryScope::ExecutionGroup(owner) = manifest.scope()
-                && owner != target
-            {
-                return Err("Group-scoped input requires an explicit original-owner handoff before revision switching".into());
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Persists a hold and complete original stop intent before any outbox can reach a Node.
@@ -203,11 +167,16 @@ pub(super) fn begin(
         );
     }
     if let Some(plan) = &plan {
-        memory_scopes(
+        memory::validate_inputs(
             controller,
+            mission,
+            state,
+            &state.candidates[ticket],
             plan,
             &target_group,
             &admission::completed(controller, mission)?,
+            now,
+            kernel,
         )?;
     }
     let group = controller
@@ -497,11 +466,24 @@ pub(super) fn commit(
         deployment,
         feed,
     )?;
-    memory_scopes(
+    memory::validate_inputs(
         controller,
+        mission,
+        state,
+        &state.candidates[&switch.ticket_id],
         &plan,
         &switch.target_group,
         &admission::completed(controller, mission)?,
+        now,
+        kernel,
+    )?;
+    memory::publish(
+        controller,
+        mission,
+        state,
+        &state.candidates[&switch.ticket_id],
+        &switch,
+        now,
     )?;
     let trace = domain::CorrelationId::new("runtime-plan-revision-commit").expect("fixed trace");
     let review = &state.candidates[&switch.ticket_id]

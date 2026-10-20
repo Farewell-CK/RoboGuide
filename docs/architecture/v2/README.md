@@ -1,5 +1,11 @@
 # RoboGuide V2 架构基线
 
+[ADR-0126](../../decisions/0126-scoped-memory-for-runtime-plan-revision.md)定义显式 v0.3
+修订 Memory 许可：候选/Review 前冻结原属组清单与完整 child，不预绑定新组。原停止与
+撤权证明后才能发布，目标正常 Control 绑定、独立 import/use 和每 chunk 权限仍必需。
+wrapper v45 保护新权威；[五条实际软件链路](../../development/acceptance/2026-10-20-scoped-memory-plan-revision.md)
+验证该 generic 交接，非空 MI 整链和其余全部阶段继续验收。
+
 [ADR-0125](../../decisions/0125-task-owned-memory-import-preparation.md)要求接收 import 身份
 由原 Task/attempt preparation 决定；其他 Task 的 Imported 仅保留位置证据，不能充当新
 use grant 的原 import。已有 request 的完整 owner/原期限必须一致，backend 拒绝规则不变。

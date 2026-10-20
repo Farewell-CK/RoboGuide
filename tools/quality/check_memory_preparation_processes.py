@@ -36,6 +36,7 @@ from memory_handoff_processes import (
 )
 from memory_handoff_processes import run as run_handoff
 from memory_preparation_profile import configuration, mission, node_environment, tls
+from memory_revision_processes import run as run_revision
 from memory_use_lifecycle import ActualUseScenario
 from memory_use_lifecycle import run as run_use_interruption
 from memory_use_profile import request
@@ -64,6 +65,7 @@ def identity() -> dict[str, str]:
             "memory_group_lifecycle.py",
             "memory_use_query_processes.py",
             "memory_handoff_processes.py",
+            "memory_revision_processes.py",
             "memory_content_reclamation.py",
             "authority_recovery_profile.py",
             "monitoring_processes.py",
@@ -125,6 +127,7 @@ def run(
     monitoring_tools: Path | None = None,
     async_workers: int = 8,
     process_workers: bool = False,
+    revision_old_controller: Path | None = None,
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
     if not 1 <= async_workers <= 64:
@@ -149,6 +152,15 @@ def run(
     }
     environment["PYTHONPATH"] = str(ROOT / "integrations/memory-provider")
     contexts, leaves = tls(directory, nodes, memory_id, environment, monitoring_tools is not None)
+    if handoff_case is not None and handoff_case.startswith("revision"):
+        authorization_path = directory / "operator-authorization.json"
+        authorization = json.loads(authorization_path.read_bytes())
+        authorization["grants"]["sha256:" + leaves["admin-next"]] = {
+            "principal_id": "independent-revision-goal-producer",
+            "role": "operator",
+            "tenant_ids": ["local"],
+        }
+        save(authorization_path, authorization)
     environment["TOKIO_WORKER_THREADS"] = str(async_workers)
     environment["ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS"] = "1000"
     environment["ROBOGUIDE_DIAGNOSTICS_PATH"] = str(directory / "controller-diagnostics.jsonl")
@@ -530,21 +542,22 @@ def run(
                 None if monitoring is None else monitoring.observe,
             )
         if handoff_case is not None:
-            result = run_handoff(
-                GroupScenario(
-                    directory,
-                    nodes,
-                    backends,
-                    manifest,
-                    exchange,
-                    contexts["viewer"],
-                    controller,
-                    controller_command,
-                    start,
-                    tuple(node_processes),
-                ),
-                mission_id,
-                handoff_case,
+            scenario = GroupScenario(
+                directory,
+                nodes,
+                backends,
+                manifest,
+                exchange,
+                contexts["viewer"],
+                controller,
+                controller_command,
+                start,
+                tuple(node_processes),
+            )
+            result = (
+                run_revision(scenario, mission_id, handoff_case, revision_old_controller)
+                if handoff_case.startswith("revision")
+                else run_handoff(scenario, mission_id, handoff_case)
             )
             assert identity() == initial_identity, "pinned source or binary changed"
             result.update(
@@ -1023,8 +1036,20 @@ def main() -> None:
     parser.add_argument("--monitoring-tools", type=Path)
     parser.add_argument("--async-workers", type=int, choices=range(1, 65), default=8)
     parser.add_argument("--process-workers", action="store_true")
+    parser.add_argument("--old-controller", type=Path)
     parser.add_argument(
-        "--handoff-case", choices=("complete", "expiry", "policy-change", "controller-restart")
+        "--handoff-case",
+        choices=(
+            "complete",
+            "expiry",
+            "policy-change",
+            "controller-restart",
+            "revision",
+            "revision-sql",
+            "revision-restart",
+            "revision-policy",
+            "revision-expiry",
+        ),
     )
     parser.add_argument("--use-query-recovery", action="store_true")
     parser.add_argument("--use-query-case", choices=("manual", "automatic", "unresolved"))
@@ -1032,6 +1057,10 @@ def main() -> None:
         "--use-case", choices=("revoke", "expire", "backend-restart", "controller-restart")
     )
     arguments = parser.parse_args()
+    if arguments.old_controller and not (arguments.handoff_case or "").startswith("revision"):
+        parser.error("--old-controller is an actual revision Memory downgrade check")
+    if (arguments.handoff_case or "").startswith("revision") and not arguments.process_workers:
+        parser.error("revision Memory requires original OS-process exit evidence")
     if arguments.monitoring_tools and not arguments.authority_recovery:
         parser.error("--monitoring-tools requires the actual --authority-recovery fault profile")
     if (arguments.content_reclamation or arguments.authority_recovery) and (
@@ -1065,6 +1094,7 @@ def main() -> None:
                     arguments.monitoring_tools,
                     arguments.async_workers,
                     arguments.process_workers,
+                    arguments.old_controller,
                 ),
                 sort_keys=True,
             )

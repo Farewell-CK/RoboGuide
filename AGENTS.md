@@ -1,5 +1,17 @@
 # Repository Guidelines
 
+ADR-0126 adds explicit runtime-plan-revision v0.3 original-owner Memory declarations before
+candidate output/provider claim/Review. The complete child and source membership/policy/principal
+are immutable; Review includes their digest. Original complete stop/revoke and actual CAS verification
+precede publication and normal Control creation of the new Group. Staging grants no resource or
+availability fact. Per-chunk parent-reference exceptions require the actual child import; each later
+Task retains its own preparation/import. Shared wrapper v45 fences older writers and v0.3 receipts,
+including zero-event declarations; v44 generation history migrates unchanged. Node Contract v0.12,
+config v0.13/catalog v0.15, Node journal v13, Bridge v23 and event codec v28 retain their meaning.
+`tools/quality/memory_revision_processes.py` extends the real file checker with revision, SQL rollback,
+confirmed-stop restart, policy and expiry cases. `check_revision_memory_schemas.py` validates their
+actual retained commands offline. These are software-process/file proofs, never device stopping.
+
 ## Project Structure & Module Organization
 
 ADR-0124 adds explicit Local Memory `ProcessFileJobs`: real owned CPU children, original kernel/use

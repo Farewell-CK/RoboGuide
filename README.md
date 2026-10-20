@@ -1,5 +1,9 @@
 # RoboGuide
 
+[原属组 Memory 计划修订](docs/development/runtime-plan-revision-v0.1.md)
+在候选和 Review 前冻结完整 child；原停止、撤权和 CAS 核验通过后，由 Control 创建新组，
+每个 Task 重新导入并取得当前使用许可。共享 wrapper v45 保留原历史，软件证明不升级为设备事实。
+
 [文件进程与接收身份验收](docs/development/acceptance/2026-10-20-file-process-memory-ownership.md)
 接通实际 Local Memory 子进程的独立退出证明、崩溃后的 Unknown/GC fence，以及后续 Task
 自己的 import 身份。原使用授权与停止门禁保持必需，软件退出不证明设备停止。
@@ -48,7 +52,7 @@ RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智�
 
 [运行指标与告警](docs/development/observability-v0.1.md)已接入有界 histogram/queue/drop、
 stop/recovery 信号与真实 Prometheus/Alertmanager。专用 metrics-reader 只能抓取运行指标；
-Controller wrapper 当前 v42，Mission 授权 v0.2，Node journal v13。新权限具备旧 writer/
+该监控切片引入 wrapper v42；当前共享 wrapper 为 v45，Mission 授权 v0.2，Node journal v13。新权限具备旧 writer/
 降级门禁；采集缺失不算健康，短期软件通知验证不声明长期 SLO 或设备安全。
 
 [Controller 故障恢复入口](docs/development/controller-write-recovery-v0.1.md)在实际持久化

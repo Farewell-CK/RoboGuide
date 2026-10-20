@@ -1,5 +1,7 @@
 //! Durable revision application unit fixtures with real SQL/files and zero registered Nodes or devices.
 
+mod memory_tests;
+
 use super::*;
 
 /// Owns original file authorization, SQLite and a zero-attempt Controller without fabricating transport identity.
@@ -11,7 +13,7 @@ struct Fixture {
     /// Actual composition under test, containing zero enrolled Nodes.
     controller: Arc<Mutex<ControllerState>>,
     /// Original application writer mutex; transport authorization is covered separately by process checks.
-    writer: Mutex<()>,
+    writer: Arc<Mutex<()>>,
     /// Explicit local unit clock; no distributed or device time assertion is made.
     clock: runtime::FixedClock,
     /// Original accepted semantic plan.
@@ -110,7 +112,7 @@ impl Fixture {
             root,
             log,
             controller,
-            writer: Mutex::new(()),
+            writer: Arc::new(Mutex::new(())),
             clock: runtime::FixedClock::new(domain::TimestampMs::new(10)),
             plan,
         }
@@ -162,7 +164,7 @@ impl Fixture {
         admission::submit(
             &self.controller,
             &self.log,
-            &self.writer,
+            self.writer.as_ref(),
             &self.clock,
             self.plan.goal().mission_id(),
             &body,
