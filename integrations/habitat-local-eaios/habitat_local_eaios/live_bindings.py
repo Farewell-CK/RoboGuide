@@ -9,6 +9,7 @@ from typing import Any
 
 from .idle_endpoint import PassiveIdleAgent, _original_wait_skill_type
 from .model import CanonicalInvocation, IntegrationError
+from .observation_control import ObservationAcquisitionControl
 from .relocation_completion import RelocationCompletionBinding
 from .stage2_contract import (
     RelocationExecutionState,
@@ -88,7 +89,13 @@ class LivePolicyBindings:
         policy._high_level_policy.llm_agent = passive
         policy._cur_call_high_level.fill_(True)
 
-    def bind(self, agent: int, invocation: CanonicalInvocation, arguments: Any) -> None:
+    def bind(
+        self,
+        agent: int,
+        invocation: CanonicalInvocation,
+        arguments: Any,
+        observation_control: ObservationAcquisitionControl | None = None,
+    ) -> None:
         """Initialize only the newly committed endpoint, retaining every peer's skill state."""
         policy = self.actor._active_policies[agent]
         original = self.originals[agent]
@@ -126,6 +133,7 @@ class LivePolicyBindings:
             completion=observed,
             completion_binding=completion,
             peer_contracts=self.peer_contracts,
+            observation_control=observation_control,
         )
         feedback.install([policy])
         try:

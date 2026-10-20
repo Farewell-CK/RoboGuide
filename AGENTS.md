@@ -831,7 +831,11 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   provider-level feasibility baselines and never an expansion of integrated Local EAIOS steps.
 
 ADR-0094 adds deployment-owned bounded `observation.acquire@v1`, separate from
-read-only verify, and default-off pre-dispatch Stage2 model reselection (at most three per
+snapshot verification. Its opt-in Local How v0.11 adds exact-attempt cached condition/budget
+feedback and a disclosed at-most-16-step original-wait mapping; it neither edits raw model
+choices nor guarantees persistent effects. Already-observed acquisition needs no extra model
+or motion. Earlier Local How versions retain their own semantics. Default-off pre-dispatch
+Stage2 model reselection remains separately bounded (at most three per
 bound attempt; no Provider retry or action rewriting). Reset geometry v0.4 is neutral,
 source-bound world evidence, not inventory or a route guarantee. Feasibility v0.6 checks
 final-verifier resource lifetimes without selecting endpoints; closure observations record

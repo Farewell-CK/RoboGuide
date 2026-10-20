@@ -1188,6 +1188,8 @@ ADR-0080 的有界事实批处理默认最多 8 条、单一合批窗口 2ms；r
 Deployment-owned bounded active observation, pre-dispatch model reselection and evidence closure are
 documented in [the extension guide](docs/extensions/bounded-observation-and-evidence-closure.md),
 with authority and physical release limits in [ADR-0094](docs/decisions/0094-bounded-observation-and-local-contract-recovery.md).
+Acquisition Local How v0.11 supplies actual cached condition/budget feedback and disclosed bounded
+pauses; it preserves raw model choices, the original attempt budget and official terminal authority.
 
 软件进程停止与本地执行结果是独立证据（[ADR-0110](docs/decisions/0110-execution-generation-and-process-stop-evidence.md)）。
 Habitat Local EAIOS 在原 worker 真实退出后发布 safe-state v0.3，完整绑定原 Group、attempt

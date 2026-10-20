@@ -42,6 +42,16 @@
 7. B1 deployment v0.4 冻结 acquisition/recovery 选项；Local How v0.10 披露实际子进程
    加载的选项。此前 profiles 保持显式兼容。受控 arm 的模型输入/Local How 差异应在
    对照 manifest 中列明，不声称与原生 EMOS 完全等价。
+8. Local How v0.11 为开启 acquisition 的部署显式披露
+   `bounded-visual-feedback/v0.1`。每个原始 attempt 将已有 reset/step 缓存的
+   true/false/unavailable、来源/时刻、精确 condition/world/attempt 与原始剩余步数交给下一次
+   Stage2 决策；不额外 render、调用谓词或延长预算。已为 true 的初始缓存直接完成本地
+   acquisition，不多走一步去破坏现有状态。它不锁存终态、不代替官方联合 verifier。
+9. 该本地 profile 公开将模型选择的 wait（以及原始消息派发后的 wait）映射为最多16个
+   simulator steps、且不超过原始剩余 acquisition 预算的暂停，复用原始 WaitSkillPolicy。
+   raw tool call 保留，模型在调用前看到实际持续时间，证据同时记录原始500步映射和实际
+   本地派发。没有选择替代工具、改目标或修改 vendor 源码；未启用 acquisition 的导航、
+   搬运和 idle 保持原映射。v0.9/v0.10 历史声明继续按其原合同读取，不能冒充 v0.11。
 
 ## 软件与物理验证边界
 

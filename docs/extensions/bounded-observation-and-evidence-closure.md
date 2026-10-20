@@ -29,6 +29,20 @@ deployment v0.4 增加 `enable_observation_acquisition`、
 语义相机和导航技能可用。默认 Python adapter 开关关闭。新的感知/重排 deployment
 模板显式选择本轮开发配置，旧冻结运行继续使用自己的旧模板。
 
+开启 acquisition 的当前代码输出 Local How v0.11，增加闭合
+`observation_control=bounded-visual-feedback/v0.1` 声明。每次真实模型动作请求包含最新的
+缓存 true/false/unavailable、原 Task/attempt/world/entity、sample step 和原始剩余预算；
+读取不到保持 unavailable，同 step 冲突、跨 attempt/world 或时间回退拒绝。初始已有真实
+positive sample 时直接完成 acquisition，零额外模型/运动，仍不声称联合目标已成立。
+
+该 Local EAIOS 合同将选中的 wait 映射为 `min(16, remaining_simulator_steps)` 步暂停，
+然后由原始高层策略继续决策。实际工具描述预先披露此持续时间，raw call 不变；映射证据
+保留原始500步 wait 与实际派发。它不改 vendor 文件、技能实现或官方总步数，不扩展
+导航/操作权限，也不更新原始 acquisition deadline。它是明确的 Local How 改动，不能在
+与原生 EMOS 对照中声称动作调度完全等价。普通导航、搬运、idle 与历史 v0.9/v0.10
+运行保留自己的等待合同。持续可见、驻留或多目标保持仍需实际能力和官方终态证据，不能
+由这个反馈 profile 推导。
+
 planning world v0.4 的 `entity_geometry` 是最多 64 条 reset position，字段为
 `entity_id`、`frame_id`、三项 integer `position_mm` 和 `up_axis=y`；未知位置进入 `gaps`。
 它只是一个已观测快照，不能当作 route、future goal 或检测真值。

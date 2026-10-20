@@ -190,6 +190,9 @@ class Agent(ContractAgent):
         self.task_description = task_description
         self.subtask_description = subtask_description
         self.llm_model = ContractModel(task_description.removeprefix("Navigate to "), None)
+        self.llm_model.actions.append(
+            {"name": "wait", "parameters": {"type": "object", "properties": {}}}
+        )
 
 
 class Actor:
@@ -780,6 +783,18 @@ def test_loaded_perception_initialization_archives_actual_readiness(
     assert gym.steps == actor.calls == 0
     assert all(agent.llm_model.calls == 0 for agent in actor.originals)
     assert runtime.test_diagnostics.terminals == []
+    how = json.loads((run / "local-how-profile.json").read_bytes())
+    assert how["schema_version"] == (
+        "roboguide.habitat-local-how-profile/v0.11"
+        if acquisition
+        else "roboguide.habitat-local-how-profile/v0.10"
+    )
+    if acquisition:
+        from habitat_local_eaios.observation_control import observation_control_declaration
+
+        assert how["observation_control"] == observation_control_declaration()
+    else:
+        assert "observation_control" not in how
 
 
 @pytest.mark.parametrize("count", [1, 2, 3, 4])
@@ -1120,6 +1135,44 @@ def test_active_acquisition_guard_retains_exact_entity_binding() -> None:
             contract.validate("observer", action, frozenset())
     with pytest.raises(IntegrationError, match="no Stage2 execution profile"):
         Stage2ExecutionContract.for_invocation(invocation(0, ("observer",), observation=True))
+
+
+def test_already_observed_acquisition_finishes_without_movement_or_model(tmp_path: Path) -> None:
+    """An existing true sample needs no motion; it still cannot assert official joint success."""
+    actor, gym = Actor(2), Gym({})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    runtime._config.enable_observation_acquisition = True
+    runtime._config.observation_acquisition_max_steps = 256
+    runtime.registry["endpoints"][0]["operations"].append("observation.acquire@v1")
+    assert runtime._habitat_env is not None
+    simulator = SimpleNamespace(
+        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=[42]
+    )
+    runtime._habitat_env.task.pddl_problem = SimpleNamespace(
+        get_ordered_entities_list=lambda: [SimpleNamespace(name="object-a")],
+        sim_info=SimpleNamespace(search_for_entity=lambda entity: 0, sim=simulator),
+    )
+    gym._last_obs["detected_objects"] = [142]
+    body = invocation(0, ("observer",), observation=True).as_dict()
+    body["operation"] = "observation.acquire@v1"
+    request = parse_canonical_invocation({"invocation": body})
+    outcomes: list[LocalExecutionOutcome] = []
+    _, summary = runtime.execute_live(
+        {0: request},
+        lambda: {},
+        lambda: False,
+        lambda *args: None,
+        lambda agent, request, outcome: outcomes.append(outcome),
+        0.1,
+    )
+    assert len(outcomes) == 1 and outcomes[0].state == "COMPLETED"
+    assert outcomes[0].terminal_basis == "condition-observed-true"
+    assert not outcomes[0].benchmark_task_achieved
+    assert actor.calls == gym.steps == 0
+    assert all(agent.initializations == 0 for agent in actor.originals)
+    assert summary["termination_reason"] == "all_local_slots_finished"
+    receipt = json.loads(next(tmp_path.glob("observation-*.json")).read_bytes())
+    assert receipt["condition_holds"] is True and receipt["acquisition_steps"] == 0
 
 
 def test_local_acquisition_success_does_not_latch_the_joint_terminal_goal(tmp_path: Path) -> None:

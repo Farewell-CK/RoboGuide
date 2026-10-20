@@ -117,12 +117,26 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             execution_options["enable_observation_acquisition"]
             or execution_options["contract_recovery_attempts"] > 0
         )
+        observation_control = actual_schema == "roboguide.habitat-local-how-profile/v0.11"
+        if observation_control:
+            from .observation_control import observation_control_declaration
+
+            if (
+                execution_options["enable_observation_acquisition"] is not True
+                or actual.get("observation_control") != observation_control_declaration()
+                or type(actual["observation_control"].get("max_pause_simulator_steps")) is not int
+                or type(actual["observation_control"].get("condition_persistence_guaranteed"))
+                is not bool
+            ):
+                raise IntegrationError("actual observation feedback/pause contract is invalid")
         if (
             used["schema_version"]
             not in {"roboguide.e1.b1-deployment-used/v0.3", "roboguide.e1.b1-deployment-used/v0.4"}
             or actual_schema
             != (
-                "roboguide.habitat-local-how-profile/v0.10"
+                "roboguide.habitat-local-how-profile/v0.11"
+                if observation_control
+                else "roboguide.habitat-local-how-profile/v0.10"
                 if extended
                 else "roboguide.habitat-local-how-profile/v0.9"
             )

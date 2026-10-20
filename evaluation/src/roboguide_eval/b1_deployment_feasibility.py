@@ -257,6 +257,27 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     }
     if bound_relocation:
         expected_base["relocation_completion_profile"] = "exact-object-released-place/v0.1"
+    observation_control = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.11"
+    if observation_control and (
+        execution_options["enable_observation_acquisition"] is not True
+        or how.get("observation_control")
+        != {
+            "profile": "bounded-visual-feedback/v0.1",
+            "observation_source": "existing-gym-observation",
+            "max_pause_simulator_steps": 16,
+            "pause_bound": "minimum-of-profile-limit-and-original-remaining-budget",
+            "condition_persistence_guaranteed": False,
+            "official_success_authority": "habitat-pddl",
+        }
+    ):
+        raise ValueError("loaded observation feedback/pause contract is invalid")
+    if observation_control:
+        control = how["observation_control"]
+        if (
+            type(control["max_pause_simulator_steps"]) is not int
+            or type(control["condition_persistence_guaranteed"]) is not bool
+        ):
+            raise ValueError("loaded observation feedback/pause types are invalid")
     if (
         set(how)
         != {
@@ -268,10 +289,13 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             "unassigned_policy",
             "official_success_authority",
             *({"execution_options"} if extended else set()),
+            *({"observation_control"} if observation_control else set()),
         }
         or how["schema_version"]
         != (
-            "roboguide.habitat-local-how-profile/v0.10"
+            "roboguide.habitat-local-how-profile/v0.11"
+            if observation_control
+            else "roboguide.habitat-local-how-profile/v0.10"
             if extended
             else "roboguide.habitat-local-how-profile/v0.9"
         )
