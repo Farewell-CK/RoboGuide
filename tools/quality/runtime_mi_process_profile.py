@@ -13,6 +13,7 @@ import json
 import sqlite3
 import ssl
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -64,11 +65,23 @@ class FixturePlanner:
         return plan
 
 
-def service(directory: Path, address: str, controller: str) -> None:
+def service(
+    directory: Path, address: str, controller: str, authored_mission_id: str | None = None
+) -> None:
     """Run the real Request HTTP/SQL engine with explicitly labelled initial-planning fixtures."""
     certificates = directory / "pki"
     client = ssl.create_default_context(cafile=str(certificates / "ca.crt"))
     client.load_cert_chain(certificates / "admin.crt", certificates / "admin.key")
+    tokens = iter(
+        (uuid.uuid4().hex, authored_mission_id.removeprefix("mission-"))
+        if authored_mission_id is not None
+        else ()
+    )
+
+    def identity() -> str:
+        """Use the existing UUID port for one predeclared software conformance Request."""
+        return next(tokens, uuid.uuid4().hex)
+
     engine = MissionRequestEngine(
         MissionRequestStore(directory / "mission.sqlite3"),
         FixtureInterpreter(),
@@ -76,6 +89,7 @@ def service(directory: Path, address: str, controller: str) -> None:
         HttpMissionController(controller, 5, tls_context=client),
         CanonicalCapabilityCatalog.load(directory / "software-conformance-catalog.json"),
         frozenset(),
+        id_generator=identity,
     )
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(certificates / "server.crt", certificates / "server.key")
@@ -196,13 +210,38 @@ class ProviderFixtureHandler(BaseHTTPRequestHandler):
                 for index, row in enumerate(output["tasks"])
                 if row["id"] not in runtime["completed_tasks"]
             }
+            declarations = runtime.get("scoped_memory_authorizations", {})
+            if declarations:
+                assert runtime["schema_version"] == "roboguide.runtime-replanning-context/v0.2"
+                assert len(declarations) == 1
+                declaration = next(iter(declarations.values()))["request"]
+                child = declaration["child"]
+                assert declaration["target_group_id"] == runtime["target_group_id"]
+                assert child["scope"]["execution_group_id"] == runtime["target_group_id"]
+                assert len(output["tasks"]) == 1 and not runtime["completed_tasks"]
+                task = output["tasks"][0]
+                for role in task["roles"]:
+                    role["requirements"]["memories"] = [
+                        {
+                            name: child[name]
+                            for name in ("selector", "kind", "payload_schema", "media_type")
+                        }
+                    ]
+                    role["execution_intent"]["parameters"]["rounds"] = 1
+                follow_up = copy.deepcopy(task)
+                follow_up["id"] = runtime["new_task_id_prefix"] + "follow-up"
+                follow_up["depends_on"] = [replacements[task["id"]]]
+                output["tasks"].append(follow_up)
             for task in output["tasks"]:
-                if task["id"] not in replacements:
+                if task["id"] in runtime["completed_tasks"]:
                     continue
-                task["id"] = replacements[task["id"]]
-                task["depends_on"] = [
-                    replacements.get(identity, identity) for identity in task["depends_on"]
-                ]
+                if task["id"] not in replacements:
+                    assert declarations and task["id"].endswith("follow-up")
+                else:
+                    task["id"] = replacements[task["id"]]
+                    task["depends_on"] = [
+                        replacements.get(identity, identity) for identity in task["depends_on"]
+                    ]
                 for role in task["roles"]:
                     intent = role["execution_intent"]
                     intent["parameters"] = [
@@ -243,13 +282,19 @@ def main() -> None:
     parser.add_argument("--directory", type=Path)
     parser.add_argument("--address")
     parser.add_argument("--controller")
+    parser.add_argument("--authored-mission-id")
     parser.add_argument("--profile", type=Path)
     parser.add_argument("--pause-after-generation", type=Path)
     parser.add_argument("--lose-candidate-response", type=Path)
     parser.add_argument("--snapshot-before-generation", type=Path)
     arguments = parser.parse_args()
     if arguments.role == "service":
-        service(arguments.directory, arguments.address, arguments.controller)
+        service(
+            arguments.directory,
+            arguments.address,
+            arguments.controller,
+            arguments.authored_mission_id,
+        )
         return
     store, worker, requests, _ = compose(arguments.profile, Path.cwd())
     try:

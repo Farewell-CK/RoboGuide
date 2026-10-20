@@ -6,6 +6,8 @@ import argparse
 import copy
 import hashlib
 import json
+import os
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -18,6 +20,7 @@ from check_identity_processes import client
 from check_state_verifier_processes import save, stop, wait_for
 from memory_group_lifecycle import GroupScenario
 from memory_handoff_processes import checkpoint, quiesce_node_publishers, recover_original_writer
+from memory_runtime_mi_processes import generate
 from memory_use_profile import request
 from spatial_content_policy import digest
 
@@ -171,12 +174,28 @@ def run(
                 "candidate_bytes": 65536,
                 "switch_limit": 2,
                 "switch_timeout_ms": 30000,
-                "automatic_triggers": [],
+                "automatic_triggers": ["local-execution-failed"] if case == "revision-mi" else [],
             }
         },
     )
-    ticket, target = uuid.uuid4().hex, "revision-" + uuid.uuid4().hex
-    command("request-candidate", {"ticket_id": ticket}, proposer=True)
+    automatic_switch = None
+    if case == "revision-mi":
+        command("authorize-generation", {}, schema="roboguide.runtime-plan-revision/v0.2")
+        # Terminate only the real child whose original PID was read from the actual owned ledger.
+        # The backend's independent native wait, rather than this signal, supplies stop evidence.
+        os.kill(pid, signal.SIGTERM)
+        automatic_switch = wait_for(
+            lambda: next(
+                (row for row in view()["authority"]["switches"] if row["phase"] == "generating"),
+                None,
+            ),
+            "original failed process reaches the actual automatic MI hold",
+            30,
+        )
+        ticket, target = automatic_switch["ticket_id"], automatic_switch["target_group"]
+    else:
+        ticket, target = uuid.uuid4().hex, "revision-" + uuid.uuid4().hex
+        command("request-candidate", {"ticket_id": ticket}, proposer=True)
     child = copy.deepcopy(scenario.manifest)
     child["selector"]["revision_id"] = uuid.uuid4().hex
     child["scope"] = {"kind": "execution_group", "execution_group_id": target}
@@ -280,33 +299,49 @@ def run(
     follow_up["depends_on"] = [candidate["tasks"][0]["id"]]
     candidate["tasks"].append(follow_up)
     save(scenario.directory / "revision-candidate.json", candidate)
-    _, output = command(
-        "submit-candidate",
-        {
-            "ticket_id": ticket,
-            "plan": candidate,
-            "provenance": {"kind": "operator", "principal": "independent-file-reader"},
-        },
-        proposer=True,
-    )
-    assert output["status"] == "awaiting_review", output
-    command(
-        "review-candidate",
-        {
-            "ticket_id": ticket,
-            "plan_digest": output["plan_digest"],
-            "decision": "approve",
-            "reason": "Exact original-owner child and independently checked file goal",
-        },
-    )
+    mi_result = None
+    if case == "revision-mi":
+        mi_result = generate(scenario, view, ticket)
+        candidate = view()["current_plan"]
+        save(scenario.directory / "revision-candidate.json", candidate)
+    else:
+        _, output = command(
+            "submit-candidate",
+            {
+                "ticket_id": ticket,
+                "plan": candidate,
+                "provenance": {"kind": "operator", "principal": "independent-file-reader"},
+            },
+            proposer=True,
+        )
+        assert output["status"] == "awaiting_review", output
+        command(
+            "review-candidate",
+            {
+                "ticket_id": ticket,
+                "plan_digest": output["plan_digest"],
+                "decision": "approve",
+                "reason": "Exact original-owner child and independently checked file goal",
+            },
+        )
     mutation = copy.deepcopy(declaration_command)
     mutation.update(command_id=uuid.uuid4().hex, expected_revision=view()["authority"]["revision"])
     status, late = scenario.exchange(revision_path, mutation)
     assert status == 409, late
-    switch_command, _ = command("request-switch", {"ticket_id": ticket, "target_group_id": target})
-    switch_id = switch_command["command_id"]
+    if automatic_switch is None:
+        switch_command, _ = command(
+            "request-switch", {"ticket_id": ticket, "target_group_id": target}
+        )
+        switch_id = switch_command["command_id"]
+    else:
+        switch_id = automatic_switch["command_id"]
     ready = wait_for(
-        lambda: row if (row := view()["authority"]["switches"][-1])["phase"] == "ready" else None,
+        lambda: (
+            row
+            if (row := view()["authority"]["switches"][-1])["phase"]
+            == ("applied" if automatic_switch else "ready")
+            else None
+        ),
         "actual original process exit and complete original content revocation",
         30,
     )
@@ -461,9 +496,12 @@ def run(
                 {"status": status, "response": failure},
             )
 
-    commit_command, committed = command("commit-switch", {"switch_command_id": switch_id})
-    assert committed["plan_revision"] == 1 and committed["target_group_id"] == target
-    assert scenario.exchange(revision_path, commit_command) == (200, committed)
+    if automatic_switch is None:
+        commit_command, committed = command("commit-switch", {"switch_command_id": switch_id})
+        assert committed["plan_revision"] == 1 and committed["target_group_id"] == target
+        assert scenario.exchange(revision_path, commit_command) == (200, committed)
+    else:
+        assert view()["current_plan_revision"] == 1 and view()["current_group_id"] == target
     assert (
         scenario.exchange(child_path, context=scenario.verifier_context, endpoint=cas)[1][
             "manifest"
@@ -665,6 +703,7 @@ def run(
         "new_execute_count": new_count,
         "source_auto_resume": False,
         "restored_original_budgets": True,
+        "runtime_mi": mi_result,
     }
 
 

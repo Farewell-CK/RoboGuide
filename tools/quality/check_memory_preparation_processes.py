@@ -38,6 +38,7 @@ from memory_handoff_processes import (
 from memory_handoff_processes import run as run_handoff
 from memory_preparation_profile import configuration, mission, node_environment, tls
 from memory_revision_processes import run as run_revision
+from memory_runtime_mi_processes import submit_original
 from memory_use_lifecycle import ActualUseScenario
 from memory_use_lifecycle import run as run_use_interruption
 from memory_use_profile import request
@@ -53,6 +54,7 @@ def identity() -> dict[str, str]:
     paths += [Path(__file__), Path(__file__).with_name("memory_preparation_profile.py")]
     paths += [ROOT / "tools/observability/observability_profile.py"]
     paths += sorted((ROOT / "integrations/memory-provider/roboguide_memory_provider").glob("*.py"))
+    paths += sorted((ROOT / "mission/src/mission").glob("*.py"))
     paths += [
         Path(__file__).with_name(name)
         for name in (
@@ -67,6 +69,9 @@ def identity() -> dict[str, str]:
             "memory_use_query_processes.py",
             "memory_handoff_processes.py",
             "memory_revision_processes.py",
+            "memory_runtime_mi_processes.py",
+            "runtime_mi_process_profile.py",
+            "runtime_mi_process_driver.py",
             "memory_content_reclamation.py",
             "authority_recovery_profile.py",
             "monitoring_processes.py",
@@ -140,6 +145,8 @@ def run(
     save(directory / "source-identity.json", initial_identity)
     nodes = [uuid.uuid4().hex for _ in range(2)]
     mission_id, memory_id, revision = (uuid.uuid4().hex for _ in range(3))
+    if handoff_case == "revision-mi":
+        mission_id = "mission-" + mission_id
     grpc, operator, artifact = (address() for _ in range(3))
     origin, cas = "https://" + operator, "https://" + artifact
     backends = ["http://" + address() for _ in range(2)]
@@ -501,8 +508,14 @@ def run(
         if handoff_case is not None:
             source_plan = single_mission(mission_id, manifest, False, handoff_bootstrap)
             save(directory / "handoff-source-mission.json", source_plan)
-            status, response = exchange("/v1/missions", source_plan)
-            assert status == 202, response
+            if handoff_case == "revision-mi":
+                original_request = submit_original(
+                    directory, mission_id, source_plan, origin, contexts, leaves, start
+                )
+                save(directory / "handoff-source-mission.json", original_request["plan"])
+            else:
+                status, response = exchange("/v1/missions", source_plan)
+                assert status == 202, response
         for index, name in enumerate(("source", "consumer")):
             node_processes.append(
                 start(
@@ -1070,6 +1083,7 @@ def main() -> None:
             "revision-restart",
             "revision-policy",
             "revision-expiry",
+            "revision-mi",
         ),
     )
     parser.add_argument("--use-query-recovery", action="store_true")

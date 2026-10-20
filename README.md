@@ -1,5 +1,10 @@
 # RoboGuide
 
+[运行期 MI 与 scoped Memory 整链](docs/development/acceptance/2026-10-21-runtime-mi-scoped-memory.md)
+补齐显式 v0.9 provider DTO，并将真实原 Request、自动故障、原退出/撤权、非空 child
+许可、持久 MI 调用、独立 Review 和正常新组 import/use/原目标验证连通。默认仍为 v0.8，
+跨合同输出拒绝；协议 fixture 不构成模型质量或设备证明。
+
 [Memory writer 与完整恢复](docs/development/acceptance/2026-10-21-memory-provider-writer-recovery.md)
 补齐参考 provider 的四类实际 SQL inode 租约：关闭主 Store 后，最后一个子连接关闭才释放
 writer；旧数据先排空原 SQLite 连接再升级，原 instance 与预算不变。显式 recovery v0.4

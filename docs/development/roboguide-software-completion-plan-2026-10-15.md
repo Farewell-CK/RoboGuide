@@ -38,8 +38,9 @@ mTLS scrape、两次实际 SQL 故障的 firing/resolved、固定 histogram/queu
 [原属组 Memory 计划修订](acceptance/2026-10-20-scoped-memory-plan-revision.md)接通显式
 v0.3 许可、原 child/Review digest、完整停止/撤权和 Control 新组的正常 import/use。
 实际正常/SQL/已确认停止后重启/策略/到期五条链路通过，旧 writer 拒绝且原 MI/迁移回归
-通过；wrapper v45 fences 新权限。非空 MI 声明的整链及全局 Memory 数据面继续验收，
-不以两条各自通过的路径替代组合，也不关闭完整 F8 或其他必需阶段。
+通过；wrapper v45 fences 新权限。后续[非空 MI 整链](acceptance/2026-10-21-runtime-mi-scoped-memory.md)
+已补实际原 Request、显式 v0.9 DTO、自动故障/原停止撤权、MI 中断和响应丢失、独立 Review
+与正常新组/原目标组合。全局 Memory、其他类型和跨阶段矩阵仍须完成。
 
 [文件进程与原接收身份](acceptance/2026-10-20-file-process-memory-ownership.md)接通部署侧
 独立 OS wait、原 kernel/use 读取许可、崩溃 Unknown/GC fence 和后续 Task 自己的 import。
@@ -93,7 +94,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | 动态 learner/joint membership、leader transfer、同一成员 leaf/部署 CA 迁移已通过；旧数据/二进制升级及在线 archive/CAS 仍待完成 |
 | F6 资源/调度 | R16、R20 | divisible quota、完整时间/空间承诺、真实成本 evidence 与确定性策略 | cost evidence、逻辑 quota ledger 与 Prometheus 入口已通过；物理/OS 强制、完整时空和运行中抢占仍待完成 |
 | F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | 当前 stop/recovery/hold/rebind gate 回归通过；运行中抢占、耦合迁移和 hazard/交接协议软件仍须完成，真实物理证据独立待验 |
-| F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 原目标/版本、显式 MI generation/claim/phase nonce、实际主体/tenant 自动发现、SQL 原回包/只读对账与 stop/revoke 后新 Group 已接线；普通 resume/recovery 不可绕过，scoped Memory 迁移仍实施中 |
+| F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 原目标/版本、MI generation/claim/nonce、主体/tenant 发现、原回包对账与非空 scoped Memory 通用文件组合已验收；其他类型/复杂拓扑仍须随 F4/F7 总矩阵完成 |
 | F9 层级/Federation | R20 | 控制域、跨域 prepare/commit、路由/授权与恢复 | 持久 epoch/digest/deadline prepare/commit session 已通过；跨域 transport/授权/恢复部署仍待完成 |
 | F10 运维与总验收 | R18、R19 的非发布部分 | 指标/告警、write-disabled 只读恢复、部署/迁移/回退、全功能验收 | 待完成 |
 

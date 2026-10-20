@@ -47,6 +47,7 @@ def run(
     """Reuse actual finished software work, without creating a Node inventory or device facts."""
     source = source.resolve(strict=True)
     original_result = json.loads((source / "result.json").read_bytes())
+    scoped_mi = original_result.get("case") == "revision-mi"
     cleanup = json.loads((source / "owned-process-exits.json").read_bytes())
     assert original_result["passed"] and cleanup["all_owned_processes_reaped"]
     assert (
@@ -97,6 +98,23 @@ def run(
     }
     if provider_version == 3:
         profile["artifact_replica_sets"] = []
+    if scoped_mi:
+        profile["components"].extend(
+            [
+                {
+                    "component_id": identity,
+                    "kind": kind,
+                    "root": str(source),
+                    "database": database,
+                    "trees": [],
+                    "depends_on": ["controller"],
+                }
+                for identity, kind, database in (
+                    ("mission-request", "mission", "mission.sqlite3"),
+                    ("runtime-mi", "runtime-mi", "runtime-mi.sqlite3"),
+                )
+            ]
+        )
     for name in ("source", "consumer"):
         node_root = source / name / "node-state"
         profile["components"].extend(
@@ -121,12 +139,17 @@ def run(
         )
     save(output / "profile.json", profile)
     databases = [source / "controller.sqlite3"]
+    if scoped_mi:
+        databases += [source / "mission.sqlite3", source / "runtime-mi.sqlite3"]
     for name in ("source", "consumer"):
         databases.append(source / name / "node-state/execution-journal.sqlite3")
         databases.extend(sorted((source / name / "backend").rglob("*.sqlite3")))
     before = {str(path.relative_to(source)): logical_rows(path) for path in databases}
     save(output / "original-sql-evidence.json", before)
     code_paths = sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py"))
+    code_paths += sorted(
+        (ROOT / "integrations/memory-provider/roboguide_memory_provider").glob("*.py")
+    )
     code_paths += [
         Path(__file__),
         ROOT / "target/debug/integration-server",
@@ -377,18 +400,32 @@ def run(
             lambda: tls_request(origin, context, "/healthz")[0] == 200,
             "Controller reads the actual restored authority",
         )
-        plan = json.loads((source / "mission.json").read_bytes())
+        plan = json.loads(
+            (source / ("handoff-source-mission.json" if scoped_mi else "mission.json")).read_bytes()
+        )
         mission_id = plan["mission"]["id"]
         status, mission = tls_request(origin, context, f"/v1/missions/{mission_id}")
         assert status == 200 and mission["status"] == "Completed", mission
         attempts = tls_request(origin, context, "/v1/execution-attempts")[1]["attempts"]
-        assert len(attempts) == 2 and all(value["status"] == "Completed" for value in attempts)
+        assert sorted(value["status"] for value in attempts) == (
+            ["Completed", "Completed", "Failed"] if scoped_mi else ["Completed", "Completed"]
+        )
         preparations = tls_request(origin, context, "/v1/memory/preparations")[1]["records"]
-        originals = json.loads((source / "preparations.json").read_bytes())
+        originals = (
+            json.loads((source / "revision-final-sealed-authority.json").read_bytes())[
+                "memory_preparation"
+            ]["records"]
+            if scoped_mi
+            else json.loads((source / "preparations.json").read_bytes())
+        )
         assert {key: row["deadline_ms"] for key, row in preparations.items()} == {
             key: row["deadline_ms"] for key, row in originals.items()
         }
-        memory = original_result["source_manifest"]
+        memory = (
+            json.loads((source / "manifest.json").read_bytes())
+            if scoped_mi
+            else original_result["source_manifest"]
+        )
         status, catalog = call(
             "https://" + artifact_address,
             client(source / "pki", "viewer"),
@@ -402,19 +439,49 @@ def run(
             "GET",
             "/v1/artifacts/" + memory["artifact"]["content_digest"],
         )
-        assert (
-            status == 200
-            and "sha256:" + hashlib.sha256(actual_bytes).hexdigest()
-            == memory["artifact"]["content_digest"]
-        )
+        if scoped_mi:
+            # Retired Group scope still denies ordinary HTTP byte access after a cold restore.
+            # The recovery administrator verifies original CAS files independently; it does not
+            # manufacture a fresh import or broaden a read grant to make this check pass.
+            assert status == 403, (status, actual_bytes)
+            content = next(
+                row
+                for row in manifest["files"]
+                if row["path"].startswith("stores/cas/")
+                and row["content_digest"] == memory["artifact"]["content_digest"]
+            )
+            assert (
+                "sha256:"
+                + hashlib.sha256((output / "restored" / content["path"]).read_bytes()).hexdigest()
+                == memory["artifact"]["content_digest"]
+            )
+            save(
+                output / "restored-scoped-byte-denial.json",
+                {
+                    "status": status,
+                    "response": json.loads(actual_bytes),
+                    "independent_cas_digest": content["content_digest"],
+                },
+            )
+        else:
+            assert (
+                status == 200
+                and "sha256:" + hashlib.sha256(actual_bytes).hexdigest()
+                == memory["artifact"]["content_digest"]
+            )
         save(output / "restored-mission.json", mission)
         save(output / "restored-attempts.json", attempts)
         save(output / "restored-catalog.json", json.loads(catalog))
+        backend_name = "source" if scoped_mi else "consumer"
         backend_command = json.loads((source / "deployment.json").read_bytes())["backend_commands"][
-            1
+            0 if scoped_mi else 1
         ]
-        backend_command[backend_command.index("--root") + 1] = str(restored / "consumer-backend")
-        backend_command[backend_command.index("--input-root") + 1] = str(restored / "consumer-node")
+        backend_command[backend_command.index("--root") + 1] = str(
+            restored / (backend_name + "-backend")
+        )
+        backend_command[backend_command.index("--input-root") + 1] = str(
+            restored / (backend_name + "-node")
+        )
         backend_environment = dict(environment)
         backend_environment["PYTHONPATH"] = str(ROOT / "integrations/memory-provider")
         backend_log = (output / "backend-restored.log").open("wb")
@@ -427,29 +494,53 @@ def run(
             stderr=backend_log,
         )
         processes.append(backend)
-        local_origin = "unix://" + str(restored / "consumer-backend/local.sock")
+        local_origin = "unix://" + str(restored / (backend_name + "-backend/local.sock"))
         wait_for(
             lambda: local_request(local_origin, "/v1/instance")[0] == 200,
             "actual restored original backend",
         )
-        with closing(sqlite3.connect(restored / "consumer-backend/memory.sqlite3")) as connection:
+        with closing(
+            sqlite3.connect(restored / (backend_name + "-backend/memory.sqlite3"))
+        ) as connection:
             original = json.loads(
                 connection.execute("SELECT original_json FROM imports").fetchone()[0]
             )
         status, availability = local_request(
             local_origin, "/v1/availability", {"memory_import": original}, method="GET"
         )
-        assert status == 200 and availability["availability"]["available"] is False
-        tombstone_command = json.loads((source / "reclamation-command.json").read_bytes())
-        status, reclamation = local_request(
-            local_origin,
-            "/v1/content/reclamation",
-            {"command_id": tombstone_command["command_id"]},
-            method="GET",
-        )
-        assert status == 200 and reclamation["state"] == "deleted"
+        assert status == 200
+        if scoped_mi:
+            assert availability["availability"]["available"] is True
+            revision = tls_request(origin, context, f"/v1/missions/{mission_id}/plan-revisions")[1]
+            assert revision["current_plan_revision"] == 1
+            expected = json.loads((source / "revision-final-sealed-authority.json").read_bytes())[
+                "runtime_revisions"
+            ][mission_id]
+            for row in revision["authority"]["candidates"]:
+                original_candidate = expected["candidates"][row["ticket_id"]]
+                assert row["memory_authorizations"] == original_candidate["memory"]
+                assert row["review"] == original_candidate["review"]
+            queue_status, queue = tls_request(
+                origin,
+                client(source / "pki", "viewer"),
+                "/v1/runtime-plan-work?limit=1",
+                None,
+                {"X-RoboGuide-Tenant": "local"},
+            )
+            assert queue_status == 200 and not queue["items"], queue
+            save(output / "restored-scoped-revision.json", revision)
+        else:
+            assert availability["availability"]["available"] is False
+            tombstone_command = json.loads((source / "reclamation-command.json").read_bytes())
+            status, reclamation = local_request(
+                local_origin,
+                "/v1/content/reclamation",
+                {"command_id": tombstone_command["command_id"]},
+                method="GET",
+            )
+            assert status == 200 and reclamation["state"] == "deleted"
+            save(output / "restored-provider-reclamation.json", reclamation)
         save(output / "restored-provider-availability.json", availability)
-        save(output / "restored-provider-reclamation.json", reclamation)
         result = {
             "passed": True,
             "devices": 0,
@@ -462,10 +553,16 @@ def run(
             "actual_old_node_rejected": True,
             "actual_old_controller_rejected": old_controller is not None,
             "actual_active_writer_refused": True,
-            "restored_completed_attempts": len(attempts),
+            "restored_attempts": len(attempts),
+            "restored_completed_attempts": sum(row["status"] == "Completed" for row in attempts),
+            "restored_failed_attempts": sum(row["status"] == "Failed" for row in attempts),
             "original_deadlines_preserved": True,
-            "restored_cas_http_digest": memory["artifact"]["content_digest"],
-            "original_provider_tombstone_preserved": True,
+            "restored_cas_http_digest": None if scoped_mi else memory["artifact"]["content_digest"],
+            "independent_restored_cas_digest": memory["artifact"]["content_digest"],
+            "retired_scoped_http_read_denied": scoped_mi,
+            "original_provider_tombstone_preserved": None if scoped_mi else True,
+            "complete_original_request_mi_sql_preserved": scoped_mi,
+            "original_scoped_memory_and_review_preserved": scoped_mi,
             "restored_imported_history_is_current_availability": False,
             "source_identity": identity,
             "runtime": {

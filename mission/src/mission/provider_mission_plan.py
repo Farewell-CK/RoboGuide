@@ -13,6 +13,7 @@ from typing import cast
 
 from mission.contract_values import (
     MISSION_PLAN_ACTOR_VERSION,
+    MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_VERSION,
     JSONObject,
     JSONValue,
@@ -23,6 +24,19 @@ class ProviderMissionPlanError(ValueError):
     """Report malformed provider schemas or MissionPlan DTO output."""
 
 
+def _canonical_provider_version(schema: JSONObject) -> str:
+    """Require an explicitly selected maintained canonical DTO version before any provider call."""
+    properties = _object(schema.get("properties"), "schema.properties")
+    version = _object(properties.get("schema_version"), "schema.properties.schema_version")
+    selected = version.get("const")
+    if selected not in (MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION):
+        raise ProviderMissionPlanError(
+            "provider MissionPlan adapter requires "
+            f"{MISSION_PLAN_VERSION} or explicit {MISSION_PLAN_MEMORY_VERSION}"
+        )
+    return selected
+
+
 def adapt_mission_plan_schema_for_provider(schema: JSONObject) -> JSONObject:
     """Replace the canonical dynamic parameter map with strict key/value entries.
 
@@ -30,14 +44,7 @@ def adapt_mission_plan_schema_for_provider(schema: JSONObject) -> JSONObject:
     remains the canonical MissionPlan contract used for final validation.
     """
     adapted = deepcopy(schema)
-    root_properties = _object(adapted.get("properties"), "schema.properties")
-    version_schema = _object(
-        root_properties.get("schema_version"), "schema.properties.schema_version"
-    )
-    if version_schema.get("const") != MISSION_PLAN_VERSION:
-        raise ProviderMissionPlanError(
-            f"provider MissionPlan adapter requires {MISSION_PLAN_VERSION}"
-        )
+    _canonical_provider_version(adapted)
 
     definitions = _object(adapted.get("$defs"), "schema.$defs")
     role_schema = _object(definitions.get("role"), "schema.$defs.role")
@@ -117,19 +124,21 @@ def normalize_mission_plan_provider_output(
     """Normalize provider null sentinels and parameter entries to canonical form.
 
     Provider output must target the current canonical contract; the v0.7 actor
-    contract remains an accepted compatibility output because the DTO shape is
-    identical without binding semantics. It fails closed on other versions and
+    contract remains compatible only with the v0.8 DTO. Explicit v0.9 requires
+    its exact version, preserving Memory prerequisites. It fails closed on other versions and
     malformed, duplicated, blank, or non-scalar entries. Canonical required-nullable
     values and optional properties whose canonical schema admits null are preserved.
     """
     normalized = deepcopy(value)
-    if normalized.get("schema_version") not in {
-        MISSION_PLAN_ACTOR_VERSION,
-        MISSION_PLAN_VERSION,
-    }:
+    selected = _canonical_provider_version(canonical_schema)
+    accepted = (
+        {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}
+        if selected == MISSION_PLAN_VERSION
+        else {MISSION_PLAN_MEMORY_VERSION}
+    )
+    if normalized.get("schema_version") not in accepted:
         raise ProviderMissionPlanError(
-            "provider MissionPlan output must use "
-            f"{MISSION_PLAN_ACTOR_VERSION} or {MISSION_PLAN_VERSION}"
+            f"provider MissionPlan output must use {' or '.join(sorted(accepted))}"
         )
 
     _normalize_optional_null_sentinels(normalized, canonical_schema, canonical_schema)

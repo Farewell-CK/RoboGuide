@@ -4,7 +4,8 @@
 [ADR-0123](../decisions/0123-runtime-mi-authorized-work-discovery.md)。
 此切片补齐原 fault → durable MI work → candidate → 独立实际 Review → 原安全切换。
 原 Group-scoped Memory 通过[显式 v0.3 许可](runtime-plan-revision-v0.1.md)
-接入新组；完整 F8 组合继续验收，没有总体完成声明。
+接入新组；[非空许可的实际组合验收](acceptance/2026-10-21-runtime-mi-scoped-memory.md)
+已验证通用文件路径。完整 F8/跨阶段矩阵继续验收，没有总体完成声明。
 
 ## Controller 的原工作许可
 
@@ -46,6 +47,10 @@ runtime context 包含逻辑计划版本、fault、真实 completed/used Task ID
 存在显式 scoped Memory 声明时使用 context v0.2，保留完整原 child 许可与目标组；这些声明
 不证明 import、当前可用或物理事实。SQL 原 context 与当前 Controller 声明不一致时拒绝新
 工作；不得修改未知 provider 输入、追加许可后覆盖原输出，或据此选择 Node。
+计划含 Memory requirements 时，显式配置 MissionPlan v0.9 及其 canonical schema。
+[ADR-0128](../decisions/0128-explicit-memory-plan-provider-dto.md)保留全部 requirements，
+不允许旧版本输出删除它们；默认 v0.8 保持。satisfaction freshness 必须来自部署配置，
+模型不能省略该 policy 或自行选择 max age。
 完整原 stop/attempt/owner/session 证据保留在应用审计，不能变成模型的 Node 选择权。
 
 Controller 的历史 normalized export 对 execution-report 省略 nullable `verifier`。

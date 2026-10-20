@@ -45,13 +45,17 @@ def exercise_worker(
     provider: ProviderFixtureServer,
     start: Callable[[list[str], str, dict[str, str] | None], subprocess.Popen[bytes]],
     view: Callable[[], dict[str, Any]],
+    proposer_principal: str = "revision-proposer",
+    reviewer_principal: str = "revision-administrator",
 ) -> dict[str, Any]:
     """Interrupt and resume actual workers without repeating original calls."""
     certificates = directory / "pki"
+    source_revision = view()["current_plan_revision"]
+    contract_version = view()["current_plan"]["schema_version"]
     proposer = RuntimeJsonPeer(
         controller,
         "local",
-        "revision-proposer",
+        proposer_principal,
         certificates / "viewer.crt",
         certificates / "viewer.key",
         certificates / "ca.crt",
@@ -59,7 +63,7 @@ def exercise_worker(
     administrator = RuntimeJsonPeer(
         controller,
         "local",
-        "revision-administrator",
+        reviewer_principal,
         certificates / "admin.crt",
         certificates / "admin.key",
         certificates / "ca.crt",
@@ -67,7 +71,7 @@ def exercise_worker(
     foreign = RuntimeJsonPeer(
         controller,
         "other-tenant",
-        "revision-proposer",
+        proposer_principal,
         certificates / "viewer.crt",
         certificates / "viewer.key",
         certificates / "ca.crt",
@@ -88,8 +92,8 @@ def exercise_worker(
     mission_configuration.write_text(f"""
 [mission]
 planner = "llm"
-contract_version = "roboguide.mission-plan/v0.8"
-schema_path = "contracts/mission/v0.8/mission-plan.schema.json"
+contract_version = {json.dumps(contract_version)}
+schema_path = "contracts/mission/{contract_version.rsplit("/", 1)[1]}/mission-plan.schema.json"
 capability_catalog_path = {json.dumps(str(directory / "software-conformance-catalog.json"))}
 review_enabled = true
 max_repair_attempts = 0
@@ -117,6 +121,19 @@ responses_path = "/responses"
 requires_openai_auth = false
 api_key_env = "ROBOGUIDE_PROTOCOL_FIXTURE_UNUSED_CREDENTIAL"
 """)
+    ages = {
+        task["satisfaction"]["verifier"]["max_evidence_age_ms"]
+        for task in view()["current_plan"]["tasks"]
+        if task["satisfaction"]["basis"] == "verifier-evidence"
+    }
+    if ages:
+        assert len(ages) == 1
+        with mission_configuration.open("a") as configured:
+            configured.write(
+                "\n[mission.satisfaction_policy]\n"
+                'policy_ref = "original-file-verifier-age/v0.1"\n'
+                f"max_evidence_age_ms = {next(iter(ages))}\n"
+            )
     database = directory / "runtime-mi.sqlite3"
     profile = directory / "runtime-mi-worker.toml"
     sections = [
@@ -129,9 +146,9 @@ api_key_env = "ROBOGUIDE_PROTOCOL_FIXTURE_UNUSED_CREDENTIAL"
         "max_pages = 4",
     ]
     for name, endpoint, leaf, principal in (
-        ("service", service, "viewer", "revision-proposer"),
-        ("proposer", controller, "viewer", "revision-proposer"),
-        ("reviewer", controller, "admin", "revision-administrator"),
+        ("service", service, "viewer", proposer_principal),
+        ("proposer", controller, "viewer", proposer_principal),
+        ("reviewer", controller, "admin", reviewer_principal),
     ):
         sections.append("[" + name + "]")
         for key, value in {
@@ -207,7 +224,7 @@ api_key_env = "ROBOGUIDE_PROTOCOL_FIXTURE_UNUSED_CREDENTIAL"
     save(directory / "runtime-mi-after-reply-loss.json", after_lost)
     assert len(provider.calls) == 1
     assert any(row[0] == "candidate" and row[1] == "uncertain" for row in after_lost["effects"])
-    assert view()["current_plan_revision"] == 1
+    assert view()["current_plan_revision"] == source_revision
     third = start(command, "runtime-mi-resumed", environment)
     third.wait(timeout=20)
     assert third.returncode == 0
@@ -219,8 +236,11 @@ api_key_env = "ROBOGUIDE_PROTOCOL_FIXTURE_UNUSED_CREDENTIAL"
     assert len(after["observations"]) == 1 and after["observations"][0][0] == "candidate"
     for call in provider.calls:
         logical = json.loads(call["input"])["runtime_replanning_context"]
+        semantic = {
+            key: value for key, value in logical.items() if key != "scoped_memory_authorizations"
+        }
         assert not any(
-            name in json.dumps(logical) for name in ('"node_id"', '"session_id"', '"attempt_id"')
+            name in json.dumps(semantic) for name in ('"node_id"', '"session_id"', '"attempt_id"')
         )
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
         configured = json.loads(connection.execute("SELECT identity_json FROM work").fetchone()[0])

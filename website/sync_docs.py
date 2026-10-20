@@ -142,6 +142,10 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
                 "docs/development/acceptance/2026-10-21-memory-provider-writer-recovery.md",
             ),
             (
+                "运行期 MI 与 Memory 整链",
+                "docs/development/acceptance/2026-10-21-runtime-mi-scoped-memory.md",
+            ),
+            (
                 "有界观测集成验收",
                 "docs/development/acceptance/2026-10-20-bounded-observation-integration.md",
             ),

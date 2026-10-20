@@ -1,5 +1,11 @@
 # RoboGuide V2 架构基线
 
+[ADR-0128](../../decisions/0128-explicit-memory-plan-provider-dto.md)要求 MI 的 provider DTO
+显式保留所选 v0.9 Memory prerequisites，旧 v0.8 默认与 v0.7 输出兼容保持；跨合同输出
+拒绝，模型仍不拥有执行或 Memory 可用性权威。
+[实际非空许可组合与恢复](../../development/acceptance/2026-10-21-runtime-mi-scoped-memory.md)
+已通过，其他类型、复杂拓扑与其余必需阶段继续。
+
 [ADR-0127](../../decisions/0127-memory-provider-complete-writer-leases.md)定义参考 Memory
 backend 全部 SQL inode 与 connection 的共同 writer 生命周期、v3 存储 fence 和显式
 recovery-profile v0.4。实际别名/提前解锁反例和

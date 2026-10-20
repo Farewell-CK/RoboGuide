@@ -1,5 +1,14 @@
 # Repository Guidelines
 
+ADR-0128 explicitly supports canonical MissionPlan v0.9 in the provider DTO while preserving the
+default v0.8 and its v0.7 output compatibility. A v0.9 output requires the exact selected v0.9
+schema; Memory prerequisites cannot disappear through compatibility normalization. Canonical,
+Catalog, satisfaction policy and Controller gates still apply. The actual `revision-mi` process
+case composes original Request before execution, a native failed-child wait, nonempty original
+Memory declarations, actual interrupted SQL workers, independent Review, normal Control/import/use
+and independent Task/original-goal proofs. The local Responses endpoint is an explicit protocol
+fixture; external models and devices remain zero. This does not close all F0/F4-F10 requirements.
+
 ADR-0127 gives the reference Memory provider one root/use/four-database-inode writer lease,
 retained until every actual managed SQLite connection closes. Native journal transitions drain
 legacy connections before upgrade. Memory SQL v3 preserves original instance/history/budgets;

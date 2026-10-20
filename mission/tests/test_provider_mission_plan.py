@@ -10,12 +10,68 @@ import pytest
 from mission.contract_values import JSONObject, JSONValue, MissionPlanError
 from mission.models import MissionPlan
 from mission.provider_mission_plan import (
+    ProviderMissionPlanError,
     build_mission_plan_provider_schema,
     normalize_mission_plan_provider_output,
 )
 
 FIXTURE = Path("scenarios/mission-front-half-v0.7/mission-plan.json")
 SCHEMA = Path("contracts/mission/v0.8/mission-plan.schema.json")
+
+
+def test_explicit_memory_provider_dto_retains_original_semantic_requirements() -> None:
+    """Round-trip nonempty prerequisites and audit every nullable projection under explicit v0.9."""
+    canonical = cast(
+        JSONObject, json.loads(Path("contracts/mission/v0.9/mission-plan.schema.json").read_bytes())
+    )
+    provider_schema = build_mission_plan_provider_schema(canonical, mission_id="memory-mission")
+    _audit_optional_properties(canonical, provider_schema)
+    provider = _provider_plan()
+    provider["schema_version"] = "roboguide.mission-plan/v0.9"
+    requirement: JSONObject = {
+        "selector": {"memory_id": "original-memory", "revision_id": "original-revision"},
+        "kind": "artifact",
+        "payload_schema": "actual-file/v1",
+        "media_type": "application/octet-stream",
+    }
+    for index, task in enumerate(cast(list[JSONObject], provider["tasks"])):
+        for role in cast(list[JSONObject], task["roles"]):
+            cast(JSONObject, role["requirements"])["memories"] = (
+                [requirement] if index == 0 else None
+            )
+    normalized = normalize_mission_plan_provider_output(provider, canonical)
+    parsed = MissionPlan.from_json(normalized)
+    tasks = cast(list[JSONObject], parsed.to_json()["tasks"])
+    first = cast(list[JSONObject], tasks[0]["roles"])[0]
+    assert cast(JSONObject, first["requirements"])["memories"] == [requirement]
+    assert canonical["properties"] != provider_schema["properties"]
+
+
+@pytest.mark.parametrize(
+    "canonical_version,output_version",
+    [
+        ("v0.8", "v0.9"),
+        ("v0.9", "v0.8"),
+        ("v0.9", "v0.7"),
+        ("v0.9", "v0.10"),
+    ],
+)
+def test_provider_output_cannot_cross_the_selected_memory_contract(
+    canonical_version: str, output_version: str
+) -> None:
+    """A different provider version cannot discard or smuggle Memory prerequisites."""
+    canonical = cast(
+        JSONObject,
+        json.loads(
+            (
+                Path("contracts/mission") / canonical_version / "mission-plan.schema.json"
+            ).read_bytes()
+        ),
+    )
+    provider = _provider_plan()
+    provider["schema_version"] = "roboguide.mission-plan/" + output_version
+    with pytest.raises(ProviderMissionPlanError, match="provider MissionPlan output must use"):
+        normalize_mission_plan_provider_output(provider, canonical)
 
 
 def _canonical_schema() -> JSONObject:
