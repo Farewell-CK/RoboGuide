@@ -2,8 +2,9 @@
 
 2026-10-20 [运行期修订验收](development/acceptance/2026-10-20-runtime-plan-revision.md)
 补齐原目标 gate、版本历史、原预算、精确 Review 与完整 stop/revoke 后的新 Group；普通
-resume/recovery 不能越过待完成修订。wrapper v43 / inner v23 / codec v28 已接线，真实
-旧 v42 数据与当前软件进程链已验收。自动新 MI 和 scoped Memory 迁移继续为必需软件。
+resume/recovery 不能越过待完成修订。ADR-0121 的 wrapper v44 / inner v23 / codec v28
+保留真实 v43 历史并增加显式 MI generation/claim/provider nonce 与原调用 SQL/只读对账；
+自动发现、scoped Memory 迁移及完整组合仍是必需软件，不能据此关闭整个 F8。
 
 本文件跟踪 [`RoboGuide V2 架构基线`](architecture/v2/README.md) 尚未冻结的问题，以及应由 MVP 或实现证据决定的工程选择。当前架构语义以 V2 README 和已接受 ADR 为准；历史 DOCX 不是后续演进的 source of truth。
 

@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper before explicit fault-triggered Mission Intelligence generation permission.
+const PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v43";
 /// Previous wrapper without versioned runtime candidate/Review and stopped-configuration authority.
 const PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v42";
 /// Last Memory wrapper before generation-bound process-exit authority was integrated.
@@ -1041,6 +1043,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
@@ -1086,6 +1089,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA

@@ -19,7 +19,13 @@ flowchart TB
   PREFLIGHT --> FEEDBACK[有界草案错误 / 原始输出保留]
   FEEDBACK --> MI
   Entry --> ORCH[Orchestration / DAG / Mission hold]
-  Entry --> REV[原 policy / candidate / exact Review / wrapper v43]
+  MI --> MIWORK[独立 MI worker / 原 SQL + kernel budget / 显式 Request]
+  MIWORK -->|实际 Request + 原 admission / 只读 source| Entry
+  Entry --> CLAIM[原 SQL claim / 每 provider phase 唯一 nonce / wrapper v44]
+  CLAIM --> SQL
+  CLAIM -->|原停止齐备后工作许可| MIWORK
+  MIWORK -->|原 provider bytes / candidate / 独立实际 Review| Entry
+  Entry --> REV[原 policy / candidate / exact Review / wrapper v44]
   REV --> SQL
   REV --> STOP
   STOP --> RGROUP[原 stop 与 revoke 齐全 / source 历史保留 / 新 Group]

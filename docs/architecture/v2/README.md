@@ -4,8 +4,11 @@
 权威：候选/Review/原预算先持久化，原完整 stop/revoke 门禁后才切换 Group；原目标、
 grounded identity、已满足 Task 与历史保留，MI 无资源/绑定权威。独立冻结的原 Mission goal
 gate 不被新 DAG 的完成替代；实际 peer leaf、原授权/预算、完整 stop/revoke/attempt 覆盖和
-旧 Group Execute fence 同时持久化。wrapper v43/codec v28 拒绝旧 authority；自动生成新
-MI 候选和 Group-scoped Memory 交接继续实施，完整 F8 未关闭。见
+旧 Group Execute fence 同时持久化。[ADR-0121](../../decisions/0121-durable-runtime-mission-intelligence-work.md)
+增加显式 v0.2 生成授权、SQL worker claim 和每 phase 原 nonce 许可；原 fault/stop hold
+固定后才允许 MI 工作。实际 Request/admission、原始 provider bytes 与只读对账保留，
+较早 SQL 副本不能重做调用。wrapper v44 / inner v23 / codec v28 拒绝旧 authority；
+自动发现和 Group-scoped Memory 交接继续实施，完整 F8 未关闭。见
 [运行期合同](../../development/runtime-plan-revision-v0.1.md)。
 
 [ADR-0119](../../decisions/0119-bounded-operator-network-isolation.md)将 Operator 请求的

@@ -27,6 +27,7 @@ from check_identity_processes import request as https
 from check_state_verifier_processes import ROOT, address, plan, save, stop, wait_for
 from memory_preparation_profile import node_environment
 from plan_revision_process_profile import RevisionBackend, configuration
+from runtime_mi_process_profile import ProviderFixtureServer
 
 
 def checkpoint(directory: Path) -> dict[str, Any]:
@@ -94,8 +95,15 @@ def migrate_original(
     status, receipt = https(origin, context, f"/v1/missions/{mission}/admission")
     assert status == 200
     before = checkpoint(directory)
-    assert before["schema"] == "roboguide.controller-checkpoint/v42"
-    assert before["integration"]["schema"] == "roboguide.controller-checkpoint/v22"
+    assert before["schema"] in {
+        "roboguide.controller-checkpoint/v42",
+        "roboguide.controller-checkpoint/v43",
+    }
+    assert before["integration"]["schema"] == (
+        "roboguide.controller-checkpoint/v22"
+        if before["schema"].endswith("/v42")
+        else "roboguide.controller-checkpoint/v23"
+    )
     assert not before["integration"]["nodes"]
     save(directory / "original-checkpoint.json", before)
     stop(original)
@@ -106,7 +114,7 @@ def migrate_original(
     status, observed = https(origin, context, f"/v1/missions/{mission}/admission")
     assert status == 200 and observed == receipt
     after = checkpoint(directory)
-    assert after["schema"] == "roboguide.controller-checkpoint/v43"
+    assert after["schema"] == "roboguide.controller-checkpoint/v44"
     assert after["integration"]["schema"] == "roboguide.controller-checkpoint/v23"
     assert not after["integration"]["nodes"]
     assert not after.get("runtime_revisions")
@@ -149,6 +157,7 @@ def run(
     skip_build: bool,
     old_controller: Path | None,
     controller_binary: Path | None = None,
+    automatic_generation: bool = False,
 ) -> dict[str, Any]:
     """Check stopping, both revision paths, old writers, independent goals and restart."""
     directory.mkdir(parents=True, exist_ok=False)
@@ -232,6 +241,11 @@ def run(
     backend = RevisionBackend(root)
     thread = threading.Thread(target=backend.serve_forever, daemon=True)
     thread.start()
+    provider_fixture = ProviderFixtureServer(directory) if automatic_generation else None
+    provider_thread = None
+    if provider_fixture is not None:
+        provider_thread = threading.Thread(target=provider_fixture.serve_forever, daemon=True)
+        provider_thread.start()
     node = "software-revision-node-" + uuid.uuid4().hex[:8]
     node_config = directory / "node.toml"
     node_config.write_text(
@@ -288,7 +302,9 @@ def run(
         authority = current.get("authority")
         expected = 0 if authority is None else authority["revision"]
         body: dict[str, Any] = {
-            "schema_version": "roboguide.runtime-plan-revision/v0.1",
+            "schema_version": "roboguide.runtime-plan-revision/v0.2"
+            if kind == "authorize-generation"
+            else "roboguide.runtime-plan-revision/v0.1",
             "command_id": uuid.uuid4().hex,
             "expected_revision": expected,
             "action": {"kind": kind, **values},
@@ -365,7 +381,94 @@ def run(
             "independently verify every declared immutable file digest"
         )
         save(directory / "original-plan.json", accepted)
-        exchange("/v1/missions", accepted)
+        request_id = None
+        service_origin = None
+        if automatic_generation:
+            catalog = json.loads((ROOT / "contracts/capability/v0.3/catalog.json").read_bytes())
+            role = accepted["tasks"][0]["roles"][0]
+            contracts = [
+                requirement["contract"] for requirement in role["requirements"]["capabilities"]
+            ]
+            for contract in contracts:
+                catalog["capabilities"].append(
+                    {
+                        "contract": contract,
+                        "description": "Actual software CPU/file capability.",
+                        "attributes": [],
+                    }
+                )
+            intent = role["execution_intent"]
+            catalog["operations"].append(
+                {
+                    "operation": intent["operation"],
+                    "description": "Actual software file computation; no device facts.",
+                    "required_capabilities": contracts,
+                    "parameters": [
+                        {
+                            "name": name,
+                            "type": "string",
+                            "required": True,
+                            "description": "Original authored software input selector.",
+                        }
+                        for name in intent["parameters"]
+                    ],
+                }
+            )
+            save(directory / "software-conformance-catalog.json", catalog)
+            service_address = address()
+            service_origin = "https://" + service_address
+            save(
+                directory / "mission-authorization.json",
+                {
+                    "schema_version": "roboguide.mission-authorization/v0.2",
+                    "profile_id": uuid.uuid4().hex,
+                    "revision": 1,
+                    "grants": {
+                        "sha256:" + leaves[name]: {
+                            "principal_id": principal,
+                            "role": role,
+                            "tenant_id": "local",
+                        }
+                        for name, principal, role in (
+                            ("admin", "request-author", "admin"),
+                            ("viewer", "revision-proposer", "viewer"),
+                        )
+                    },
+                },
+            )
+            start(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("runtime_mi_process_profile.py")),
+                    "service",
+                    "--directory",
+                    str(directory),
+                    "--address",
+                    service_address,
+                    "--controller",
+                    origin,
+                ],
+                "mission-service-explicit-initial-fixture",
+            )
+            wait_for(
+                lambda: https(service_origin, contexts["admin"], "/healthz")[0] == 200,
+                "actual Mission Request service",
+            )
+            status, record = https(
+                service_origin,
+                contexts["admin"],
+                "/v1/mission-requests",
+                {"instruction": accepted["mission"]["objective"]},
+                {"Idempotency-Key": uuid.uuid4().hex},
+            )
+            assert status == 201 and record["lifecycle"] == "Accepted", record
+            request_id, mission = record["request_id"], record["mission_id"]
+            accepted = record["plan"]
+            revision_path = f"/v1/missions/{mission}/plan-revisions"
+            save(directory / "original-request.json", record)
+            save(directory / "original-plan.json", accepted)
+        else:
+            exchange("/v1/missions", accepted)
         wait_for(lambda: len(backend.jobs) == 1, "original actual worker")
         source: dict[str, Any] = {
             "source_id": "original-file-goal",
@@ -492,19 +595,36 @@ def run(
         wait_for(lambda: len(backend.jobs) == 2, "fresh first replacement actual worker")
         revised = snapshot("first-revision-running")
         assert revised["revision"]["current_plan_revision"] == 1
-        command(
-            "approve-alternative",
-            {
-                "ticket_id": "automatic-reviewed",
-                "plan": alternative(accepted, "replacement-final"),
-                "completion_precondition": [],
-            },
-        )
+        if automatic_generation:
+            command("authorize-generation", {})
+        else:
+            command(
+                "approve-alternative",
+                {
+                    "ticket_id": "automatic-reviewed",
+                    "plan": alternative(accepted, "replacement-final"),
+                    "completion_precondition": [],
+                },
+            )
         failed, _, _ = current_worker()
         assert failed.stdin is not None
         failed.stdin.close()
         failed.wait(timeout=5)
         assert failed.returncode == 7
+        generation_result = None
+        if automatic_generation:
+            assert provider_fixture is not None and service_origin is not None and request_id
+            wait_for(
+                lambda: any(
+                    row["phase"] == "generating" for row in view()["authority"]["switches"]
+                ),
+                "actual fault/stop admits original generation ticket",
+            )
+            from runtime_mi_process_driver import exercise_worker
+
+            generation_result = exercise_worker(
+                directory, origin, service_origin, request_id, provider_fixture, start, view
+            )
         wait_for(
             lambda: view()["current_plan_revision"] == 2,
             "actual local failure activates exact pre-reviewed alternative",
@@ -681,6 +801,8 @@ def run(
             "actual_worker_exit_codes": [row["exit_code"] for row in backend.snapshot()],
             "manual_revisions": 1,
             "automatic_reviewed_revisions": 1,
+            "automatic_generated_revisions": 1 if automatic_generation else 0,
+            "runtime_mi": generation_result,
             "provider_calls": 0,
             "simulators": 0,
             "original_goal_independent_recomputation": True,
@@ -698,6 +820,11 @@ def run(
             stop(process)
         backend.close()
         thread.join(timeout=5)
+        if provider_fixture is not None:
+            provider_fixture.shutdown()
+            provider_fixture.server_close()
+            assert provider_thread is not None
+            provider_thread.join(timeout=5)
         for log in logs:
             log.close()
 
@@ -709,13 +836,18 @@ def main() -> None:
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--old-controller", type=Path)
     parser.add_argument("--controller-binary", type=Path)
+    parser.add_argument("--automatic-generation", action="store_true")
     arguments = parser.parse_args()
     if arguments.controller_binary is not None and not arguments.skip_build:
         parser.error("--controller-binary requires --skip-build")
     output = arguments.output.resolve()
     try:
         result = run(
-            output, arguments.skip_build, arguments.old_controller, arguments.controller_binary
+            output,
+            arguments.skip_build,
+            arguments.old_controller,
+            arguments.controller_binary,
+            arguments.automatic_generation,
         )
     except Exception as error:
         if output.is_dir():

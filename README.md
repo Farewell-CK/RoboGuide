@@ -3,7 +3,10 @@
 [运行期计划修订与原目标验证](docs/development/runtime-plan-revision-v0.1.md)保留原计划、
 已满足事实和历史，完整停止/撤销门禁后重新交由 Control 绑定；当前 Task 全完成仍须独立
 确认原 Mission 目标。普通 resume 不能绕过待完成修订，取消与重启保留原证据和预算。
-自动新 MI 候选、scoped Memory 交接及其余全部非发布整改继续实施。
+[显式运行期 MI 工作](docs/development/runtime-mission-intelligence-v0.2.md)增加故障生成票据、
+原 SQL worker claim、逐 phase 调用许可、原始回包、重启与只读对账；较早数据库不能
+重新调用 provider。独立 Review、完整 stop/revoke、Control 和原目标 gate 保持必需。
+scoped Memory 交接、自动发现和其余全部非发布整改继续实施。
 
 Operator HTTP 现有 TLS 前连接预算、完整请求 worker handoff 与 response I/O 期限，
 真实权限仍在原 writer 下复核；慢 SQL 期间已提交健康读取可用。部署与失败语义见

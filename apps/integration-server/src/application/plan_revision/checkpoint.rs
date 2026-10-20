@@ -96,6 +96,7 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
             return Err("inconsistent original revision policy or immutable Mission tenant".into());
         }
         state.budget.validate()?;
+        generation::validate(state)?;
         goal::validate_restored(controller, &mission, state)?;
         for (id, candidate) in &state.candidates {
             if id != &candidate.ticket_id
@@ -175,6 +176,14 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
                 || switch.source_group == switch.target_group
                 || switch.requested_at < state.accepted_at
                 || candidate.base_revision != switch.source_revision
+                || switch.generation
+                    && (!switch.automatic
+                        || state
+                            .generation
+                            .as_ref()
+                            .is_none_or(|permission| permission.admitted_at > switch.requested_at)
+                        || candidate.principal != state.policy.proposer)
+                || switch.phase == Phase::Generating && !switch.generation
                 || switch.automatic
                     && switch
                         .trigger
@@ -308,7 +317,9 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
                     .is_none_or(|grant| grant.principal_id != receipt.principal)
                 || receipt.received_at < state.accepted_at
                 || receipt.result["command_id"].as_str() != Some(id.as_str())
-                || receipt.result["schema_version"] != SCHEMA
+                || !receipt.result["schema_version"]
+                    .as_str()
+                    .is_some_and(|schema| matches!(schema, SCHEMA | GENERATION_SCHEMA))
                 || receipt.result["revision"]
                     .as_u64()
                     .is_none_or(|revision| revision == 0 || revision > state.revision)

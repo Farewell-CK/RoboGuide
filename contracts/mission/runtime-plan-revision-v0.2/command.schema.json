@@ -1,0 +1,502 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.dev/contracts/mission/runtime-plan-revision-v0.2/command.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.runtime-plan-revision/v0.2"
+    },
+    "command_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "install-policy"
+            },
+            "policy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "goal_verifier": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "verifier": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "namespace": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "version": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "namespace",
+                        "name",
+                        "version"
+                      ]
+                    },
+                    "predicate": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "max_evidence_age_ms": {
+                      "type": "integer",
+                      "minimum": 100,
+                      "maximum": 60000
+                    }
+                  },
+                  "required": [
+                    "verifier",
+                    "predicate",
+                    "max_evidence_age_ms"
+                  ]
+                },
+                "goal_context": {
+                  "type": "object",
+                  "x-max-encoded-bytes": 65536
+                },
+                "policy_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "proposer": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "lifetime_ms": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 3600000
+                },
+                "candidate_limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16
+                },
+                "candidate_timeout_ms": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 300000
+                },
+                "candidate_bytes": {
+                  "type": "integer",
+                  "minimum": 1024,
+                  "maximum": 262144
+                },
+                "switch_limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16
+                },
+                "switch_timeout_ms": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 300000
+                },
+                "automatic_triggers": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "local-execution-failed",
+                      "satisfaction-rejected",
+                      "runtime-unknown"
+                    ]
+                  },
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "goal_verifier",
+                "goal_context",
+                "policy_id",
+                "proposer",
+                "lifetime_ms",
+                "candidate_limit",
+                "candidate_timeout_ms",
+                "candidate_bytes",
+                "switch_limit",
+                "switch_timeout_ms",
+                "automatic_triggers"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "policy"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "revoke-policy"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "request-candidate"
+            },
+            "ticket_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "kind",
+            "ticket_id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "submit-candidate"
+            },
+            "ticket_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "plan": {
+              "type": "object"
+            },
+            "provenance": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "const": "operator"
+                    },
+                    "principal": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "principal"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "const": "mission-intelligence"
+                    },
+                    "principal": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "provider_call_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "code_digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "config_digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "catalog_digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "prompt_digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "dependency_digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "original_output_digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "principal",
+                    "request_id",
+                    "provider_call_id",
+                    "code_digest",
+                    "config_digest",
+                    "catalog_digest",
+                    "prompt_digest",
+                    "dependency_digest",
+                    "original_output_digest"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "ticket_id",
+            "plan",
+            "provenance"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "review-candidate"
+            },
+            "ticket_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "plan_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "decision": {
+              "enum": [
+                "approve",
+                "reject"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "kind",
+            "ticket_id",
+            "plan_digest",
+            "decision",
+            "reason"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "approve-alternative"
+            },
+            "ticket_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "plan": {
+              "type": "object"
+            },
+            "completion_precondition": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "kind",
+            "ticket_id",
+            "plan",
+            "completion_precondition"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "request-switch"
+            },
+            "ticket_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "target_group_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "ticket_id",
+            "target_group_id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "commit-switch"
+            },
+            "switch_command_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "kind",
+            "switch_command_id"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "authorize-generation"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "claim-runtime-work"
+            },
+            "ticket_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "claim": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "store_instance_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "work_id": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
+                },
+                "identity_digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[a-f0-9]{64}$"
+                },
+                "request_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "required": [
+                "store_instance_id",
+                "work_id",
+                "identity_digest",
+                "request_id"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "ticket_id",
+            "claim"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "admit-provider-call"
+            },
+            "ticket_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "phase": {
+              "enum": [
+                "provider-generate",
+                "provider-review"
+              ]
+            },
+            "nonce": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "request_digest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "kind",
+            "ticket_id",
+            "phase",
+            "nonce",
+            "request_digest"
+          ]
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "command_id",
+    "expected_revision",
+    "action"
+  ]
+}

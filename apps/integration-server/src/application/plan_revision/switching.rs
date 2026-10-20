@@ -168,7 +168,22 @@ pub(super) fn begin(
     {
         return Err("original switch policy permission/budget exhausted".into());
     }
-    let plan = reviewed_plan(controller, mission, state, ticket, now, deployment, feed)?;
+    let generation = automatic
+        && trigger.is_some()
+        && state
+            .candidates
+            .get(ticket)
+            .is_some_and(|candidate| candidate.review.is_none());
+    let plan = if generation {
+        if !generation::active(controller, state, now, kernel) {
+            return Err("original generation delegation is unavailable".into());
+        }
+        None
+    } else {
+        Some(reviewed_plan(
+            controller, mission, state, ticket, now, deployment, feed,
+        )?)
+    };
     let execution = controller
         .orchestrator
         .execution(mission)
@@ -187,12 +202,14 @@ pub(super) fn begin(
             "original source already owns a switch/handoff or target identity was used".into(),
         );
     }
-    memory_scopes(
-        controller,
-        &plan,
-        &target_group,
-        &admission::completed(controller, mission)?,
-    )?;
+    if let Some(plan) = &plan {
+        memory_scopes(
+            controller,
+            plan,
+            &target_group,
+            &admission::completed(controller, mission)?,
+        )?;
+    }
     let group = controller
         .bridge
         .control()
@@ -214,19 +231,29 @@ pub(super) fn begin(
             }
         }
     }
-    let review = state.candidates[ticket]
-        .review
-        .as_ref()
-        .expect("reviewed candidate");
+    let candidate = &state.candidates[ticket];
+    let review_remaining = if generation {
+        candidate.budget.remaining(kernel).min(
+            state
+                .generation
+                .as_ref()
+                .expect("explicit generation delegation")
+                .certificate_expires_at_ms
+                .saturating_sub(now.as_millis()),
+        )
+    } else {
+        candidate
+            .review
+            .as_ref()
+            .expect("reviewed candidate")
+            .certificate_expires_at_ms
+            .saturating_sub(now.as_millis())
+    };
     let duration = state
         .budget
         .remaining(kernel)
         .min(state.policy.switch_timeout_ms)
-        .min(
-            review
-                .certificate_expires_at_ms
-                .saturating_sub(now.as_millis()),
-        );
+        .min(review_remaining);
     let current_attempts = attempts(controller, &source_group)?;
     let current_ids: BTreeSet<_> = current_attempts
         .iter()
@@ -258,6 +285,7 @@ pub(super) fn begin(
         }
     }
     let mut switch = Switch {
+        generation,
         command_id: command_id.into(),
         ticket_id: ticket.into(),
         source_revision,
@@ -349,6 +377,12 @@ fn barriers(
 ) -> Result<bool, String> {
     if !admission::active(controller, state, now, kernel) || switch.budget.remaining(kernel) == 0 {
         return Err("original switch policy, time domain or stop/revoke budget expired".into());
+    }
+    if switch.generation
+        && (!generation::active(controller, state, now, kernel)
+            || state.candidates[&switch.ticket_id].budget.remaining(kernel) == 0)
+    {
+        return Err("original generation permission or work budget expired".into());
     }
     let execution = controller
         .orchestrator
@@ -637,9 +671,6 @@ pub(crate) fn observe_trigger(
                     .is_ok()
             })
             .map(|candidate| candidate.ticket_id.clone());
-        let Some(ticket) = ticket else {
-            return Ok(false);
-        };
         let id = format!(
             "revision-auto-{}",
             &digest(&(
@@ -654,6 +685,24 @@ pub(crate) fn observe_trigger(
         );
         let target =
             domain::ExecutionGroupId::new(format!("group-{id}")).map_err(|e| e.to_string())?;
+        let ticket = if let Some(ticket) = ticket {
+            ticket
+        } else if generation::active(controller, &state, now, &kernel) {
+            let ticket = format!("work-{id}");
+            let candidate = admission::ticket(
+                controller,
+                mission,
+                &state,
+                &ticket,
+                &state.policy.proposer,
+                &kernel,
+                false,
+            )?;
+            state.candidates.insert(ticket.clone(), candidate);
+            ticket
+        } else {
+            return Ok(false);
+        };
         begin(
             controller,
             mission,
@@ -685,10 +734,12 @@ pub(crate) fn tick(
     feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), String> {
     if !controller.runtime_revisions.values().any(|state| {
-        state
-            .switches
-            .iter()
-            .any(|switch| matches!(switch.phase, Phase::Stopping | Phase::Ready))
+        state.switches.iter().any(|switch| {
+            matches!(
+                switch.phase,
+                Phase::Stopping | Phase::Ready | Phase::Generating
+            )
+        })
     }) {
         return Ok(());
     }
@@ -697,7 +748,10 @@ pub(crate) fn tick(
         Err(reason) => {
             for state in controller.runtime_revisions.values_mut() {
                 for switch in &mut state.switches {
-                    if matches!(switch.phase, Phase::Stopping | Phase::Ready) {
+                    if matches!(
+                        switch.phase,
+                        Phase::Stopping | Phase::Ready | Phase::Generating
+                    ) {
                         switch.phase = Phase::Manual;
                         switch.reason = Some(reason.clone());
                         state.revision =
@@ -722,7 +776,10 @@ pub(crate) fn tick(
         let result: Result<(), String> = (|| {
             if let Err(reason) = admission::refresh_authority(controller, &state) {
                 for switch in &mut state.switches {
-                    if matches!(switch.phase, Phase::Stopping | Phase::Ready) {
+                    if matches!(
+                        switch.phase,
+                        Phase::Stopping | Phase::Ready | Phase::Generating
+                    ) {
                         switch.phase = Phase::Manual;
                         switch.reason = Some(reason.clone());
                         state.revision =
@@ -753,7 +810,10 @@ pub(crate) fn tick(
                     state.revision = state.revision.checked_add(1).ok_or("revision overflow")?;
                     continue;
                 }
-                if !matches!(switch.phase, Phase::Stopping | Phase::Ready) {
+                if !matches!(
+                    switch.phase,
+                    Phase::Stopping | Phase::Ready | Phase::Generating
+                ) {
                     continue;
                 }
                 match barriers(controller, &mission, &state, &switch, now, &kernel) {
@@ -765,6 +825,31 @@ pub(crate) fn tick(
                     }
                     Ok(false) => {}
                     Ok(true) => {
+                        if switch.generation {
+                            let candidate = &state.candidates[&switch.ticket_id];
+                            if candidate.rejected.is_some()
+                                || candidate
+                                    .review
+                                    .as_ref()
+                                    .is_some_and(|review| review.decision == ReviewDecision::Reject)
+                            {
+                                state.switches[index].phase = Phase::Manual;
+                                state.switches[index].reason = Some(
+                                    "original generated candidate or Review was rejected".into(),
+                                );
+                                state.revision =
+                                    state.revision.checked_add(1).ok_or("revision overflow")?;
+                                continue;
+                            }
+                            if candidate.review.is_none() {
+                                if switch.phase != Phase::Generating {
+                                    state.switches[index].phase = Phase::Generating;
+                                    state.revision =
+                                        state.revision.checked_add(1).ok_or("revision overflow")?;
+                                }
+                                continue;
+                            }
+                        }
                         if switch.phase != Phase::Ready {
                             state.switches[index].phase = Phase::Ready;
                             state.revision =

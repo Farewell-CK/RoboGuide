@@ -6,6 +6,7 @@ use sha2::{Digest as _, Sha256};
 
 mod admission;
 mod checkpoint;
+mod generation;
 mod goal;
 mod switching;
 #[cfg(test)]
@@ -15,6 +16,8 @@ use time::{KernelTime, OriginalBudget};
 
 /// Explicit current application protocol; old wrappers cannot acquire its permissions.
 const SCHEMA: &str = "roboguide.runtime-plan-revision/v0.1";
+/// Explicit generation delegation; v0.1 never acquires this additional permission.
+const GENERATION_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.2";
 /// Candidate and command storage bounds are independent of prospective Mission admission.
 const MAX_CANDIDATES: usize = 16;
 /// Immutable command receipts cannot grow without a deployment bound.
@@ -82,6 +85,12 @@ pub(crate) enum Trigger {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Candidate {
+    /// Immutable original MI worker/store claim; replacing a database never acquires the ticket again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    claim: Option<GenerationClaim>,
+    /// At most one original generation and one semantic-review provider permission.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    provider_calls: BTreeMap<String, ProviderCallReceipt>,
     /// Stable ticket identity, separate from the transport command.
     ticket_id: String,
     /// Frozen original proposing principal and Mission version.
@@ -104,6 +113,64 @@ struct Candidate {
     rejected: Option<String>,
     /// Actual reviewer decision or explicit pre-review of a complete alternative.
     review: Option<Review>,
+}
+
+/// Exact SQL worker identity declared before a provider call; the authenticated proposer owns this claim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GenerationClaimInput {
+    /// Actual persistent SQL instance UUID, independent of filename or host path.
+    store_instance_id: String,
+    /// Complete original service/tenant/Mission/ticket identity digest.
+    work_id: String,
+    /// Original code/configuration/Catalog/Prompt/dependency and peer identity digest.
+    identity_digest: String,
+    /// Original actual MI Request identity, subsequently retained in candidate provenance.
+    request_id: String,
+}
+
+/// Original authenticated claim receipt, without mutable call progress or renewed deadlines.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GenerationClaim {
+    /// Exact immutable original worker input.
+    input: GenerationClaimInput,
+    /// Actual original authenticated proposer.
+    principal: String,
+    /// Actual original peer leaf.
+    certificate_digest: String,
+    /// Actual original leaf expiry.
+    certificate_expires_at_ms: u64,
+    /// First actual Controller admission time.
+    admitted_at: domain::TimestampMs,
+    /// Original nonrenewable candidate clock at claim admission.
+    admitted_kernel: KernelTime,
+    /// Immutable original receipt digest.
+    digest: String,
+}
+
+/// One actual provider-call permission; an older SQL copy cannot obtain a different nonce for this phase.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProviderCallReceipt {
+    /// Actual original proposer leaf at this separate provider permission.
+    certificate_digest: String,
+    /// Exact original SQL claim.
+    claim_digest: String,
+    /// Fresh original SQL effect nonce, committed before requesting this permission.
+    nonce: String,
+    /// Complete original provider request/endpoint digest, excluding credentials.
+    request_digest: String,
+    /// Actual current proposer receiving this original permission.
+    principal: String,
+    /// Actual original peer leaf expiry.
+    certificate_expires_at_ms: u64,
+    /// First actual Controller admission time.
+    admitted_at: domain::TimestampMs,
+    /// Actual original clock inside the already admitted candidate budget.
+    admitted_kernel: KernelTime,
+    /// Immutable receipt identity.
+    digest: String,
 }
 
 /// Original exact-candidate approval, tied to a current stable administrative principal.
@@ -166,6 +233,8 @@ enum Phase {
     Stopping,
     /// All original barriers are confirmed; explicit or authorized automatic Commit remains.
     Ready,
+    /// Original stop barriers are confirmed while a bounded new candidate or Review remains absent.
+    Generating,
     /// Complete original transaction accepted the new Group/plan version.
     Applied,
     /// Original Mission explicitly terminated through its existing complete release gates.
@@ -178,6 +247,9 @@ enum Phase {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Switch {
+    /// Explicit v0.2 permission admitted generation before an exact reviewed candidate existed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    generation: bool,
     /// Actual immutable application switch command.
     command_id: String,
     /// Original candidate ticket and exact reviewed candidate identity.
@@ -230,6 +302,9 @@ struct CommandReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RevisionState {
+    /// Explicit additive v0.2 permission; historical absence grants no provider work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    generation: Option<GenerationGrant>,
     /// Original actual issuer leaf, retained across stable-principal certificate rotation.
     authority_certificate_digest: String,
     /// Complete actual original grant at acceptance, never reconstructed from today's role.
@@ -273,6 +348,40 @@ pub(crate) struct RevisionState {
     commands: BTreeMap<String, CommandReceipt>,
 }
 
+/// Actual administrative delegation bound once to the original immutable policy and budgets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GenerationGrant {
+    /// Original actual granting principal, never a model-supplied identity.
+    principal: String,
+    /// Exact authenticated original leaf; another rotation leaf cannot replace this evidence.
+    certificate_digest: String,
+    /// Complete original certificate-mapped grant at acceptance.
+    grant: domain::OperatorCertificateGrant,
+    /// Original TLS leaf expiry.
+    certificate_expires_at_ms: u64,
+    /// Immutable original policy identity; generation cannot replace or extend it.
+    policy_digest: String,
+    /// First actual delegation receive time.
+    admitted_at: domain::TimestampMs,
+    /// Actual original kernel clock inside the policy budget.
+    admitted_kernel: KernelTime,
+    /// Complete original permission digest.
+    digest: String,
+}
+
+impl RevisionState {
+    /// Lets outer checkpoint migration reject hidden v0.2 permissions in any older wrapper.
+    pub(crate) fn uses_generation_authority(&self) -> bool {
+        self.generation.is_some()
+            || self.switches.iter().any(|switch| switch.generation)
+            || self
+                .candidates
+                .values()
+                .any(|candidate| candidate.claim.is_some() || !candidate.provider_calls.is_empty())
+    }
+}
+
 /// Application proof of original receive-relative timing, separate from Control source admission.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -303,6 +412,26 @@ struct Command {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 enum Action {
+    /// Freezes the original MI SQL worker and provenance identity before any model work.
+    ClaimRuntimeWork {
+        /// Original fault-admitted ticket.
+        ticket_id: String,
+        /// Exact original persistent worker identity.
+        claim: GenerationClaimInput,
+    },
+    /// Consumes a phase-specific provider permission before its actual network request.
+    AdmitProviderCall {
+        /// Original claimed fault ticket.
+        ticket_id: String,
+        /// Exactly provider-generate or provider-review; each may be admitted once.
+        phase: String,
+        /// Fresh original SQL effect nonce.
+        nonce: String,
+        /// Exact original request and endpoint digest.
+        request_digest: String,
+    },
+    /// Explicit v0.2 administrative delegation of bounded fault-triggered candidate generation.
+    AuthorizeGeneration,
     /// Freezes original bounded permission; subsequent install is an immutable replay only.
     InstallPolicy {
         /// Complete original permission and independent goal contract input.

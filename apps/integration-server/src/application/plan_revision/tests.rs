@@ -124,6 +124,18 @@ impl Fixture {
         action: serde_json::Value,
         principal: &str,
     ) -> Result<serde_json::Value, String> {
+        self.command_schema(SCHEMA, id, expected, action, principal)
+    }
+
+    /// Exercises explicit protocol negotiation using only labelled unit principals.
+    fn command_schema(
+        &self,
+        schema: &str,
+        id: &str,
+        expected: u64,
+        action: serde_json::Value,
+        principal: &str,
+    ) -> Result<serde_json::Value, String> {
         let path = self.root.path().join("operator.json");
         let caller = Caller {
             certificate_digest: &format!(
@@ -146,7 +158,7 @@ impl Fixture {
             certificate_expires_at_ms: 100_000,
             tenant: "unit-tenant",
         };
-        let body=serde_json::to_vec(&serde_json::json!({"schema_version":SCHEMA,"command_id":id,"expected_revision":expected,"action":action})).unwrap();
+        let body=serde_json::to_vec(&serde_json::json!({"schema_version":schema,"command_id":id,"expected_revision":expected,"action":action})).unwrap();
         admission::submit(
             &self.controller,
             &self.log,
@@ -162,10 +174,31 @@ impl Fixture {
 
     /// Installs one original independently measured goal and finite candidate/switch budgets.
     fn install(&self) -> serde_json::Value {
+        self.install_for_trigger(false)
+    }
+
+    /// Runs unit timer/fault inputs through their real SQL batch and checkpoint boundary.
+    fn transition<R>(&self, action: impl FnOnce(&mut ControllerState) -> R) -> R {
+        let _writer = self.writer.lock().unwrap();
+        self.log.begin_batch().unwrap();
+        let mut controller = self.controller.lock().unwrap();
+        let result = action(&mut controller);
+        self.log
+            .save_checkpoint(
+                SERVER_CHECKPOINT_SCHEMA,
+                &server_checkpoint_json(&controller).unwrap(),
+            )
+            .unwrap();
+        self.log.commit_batch().unwrap();
+        result
+    }
+
+    /// Keeps optional typed triggers explicit without fabricating any Runtime failure observation.
+    fn install_for_trigger(&self, automatic: bool) -> serde_json::Value {
         self.command("install-original",0,serde_json::json!({"kind":"install-policy","policy":{
             "goal_verifier":{"verifier":{"namespace":"observation","name":"goal","version":"v1"},"predicate":"original goal independently measured","max_evidence_age_ms":1000},
             "goal_context":{"measurement":"original frozen objective"},"policy_id":"unit-revision-policy","proposer":"proposer","lifetime_ms":60000,
-            "candidate_limit":4,"candidate_timeout_ms":10000,"candidate_bytes":65536,"switch_limit":2,"switch_timeout_ms":10000,"automatic_triggers":[]
+            "candidate_limit":4,"candidate_timeout_ms":10000,"candidate_bytes":65536,"switch_limit":2,"switch_timeout_ms":10000,"automatic_triggers":if automatic {vec!["local-execution-failed"]}else{Vec::<&str>::new()}
         }}),"administrator").unwrap()
     }
 
@@ -180,6 +213,224 @@ impl Fixture {
         }
         plan
     }
+}
+
+/// Explicit generation freezes a zero-attempt unit source and never bypasses exact Review or old-writer fences.
+#[test]
+fn generation_waits_for_original_candidate_and_review_without_renewing_ownership() {
+    let fixture = Fixture::new();
+    fixture.install_for_trigger(true);
+    let action = serde_json::json!({"kind":"authorize-generation"});
+    assert!(
+        fixture
+            .command("old-generation", 1, action.clone(), "administrator")
+            .is_err()
+    );
+    assert!(
+        fixture
+            .command_schema(
+                GENERATION_SCHEMA,
+                "proposer-generation",
+                1,
+                action.clone(),
+                "proposer"
+            )
+            .is_err()
+    );
+    let authorized = fixture
+        .command_schema(
+            GENERATION_SCHEMA,
+            "authorize-generation",
+            1,
+            action,
+            "administrator",
+        )
+        .unwrap();
+    assert_eq!(authorized["review_authorized"], false);
+    let mission = fixture.plan.goal().mission_id();
+    let (ticket, budget, policy_digest) = fixture.transition(|controller| {
+        assert!(
+            switching::observe_trigger(
+                controller,
+                mission,
+                Trigger::LocalExecutionFailed,
+                fixture.clock.now()
+            )
+            .unwrap()
+        );
+        switching::tick(controller, &fixture.clock, None, None).unwrap();
+        validate_restored(controller).unwrap();
+        let state = &controller.runtime_revisions[mission.as_str()];
+        assert_eq!(state.switches.len(), 1);
+        assert_eq!(state.switches[0].phase, Phase::Generating);
+        assert!(state.switches[0].generation);
+        let ticket = state.switches[0].ticket_id.clone();
+        assert!(state.candidates[&ticket].plan.is_none());
+        let mut saved: ServerCheckpoint =
+            serde_json::from_str(&server_checkpoint_json(controller).unwrap()).unwrap();
+        saved.schema = PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA.into();
+        assert!(super::super::isolation::validate_isolation_checkpoint_schema(&saved).is_err());
+        (
+            ticket,
+            state.switches[0].budget.clone(),
+            state.policy_digest.clone(),
+        )
+    });
+    let revision = |fixture: &Fixture| {
+        fixture.controller.lock().unwrap().runtime_revisions[mission.as_str()].revision
+    };
+    let submitted=fixture.command("generated-output",revision(&fixture),serde_json::json!({"kind":"submit-candidate","ticket_id":ticket,"plan":fixture.alternative(),"provenance":{"kind":"operator","principal":"proposer"}}),"proposer").unwrap();
+    assert_eq!(submitted["status"], "awaiting_review");
+    fixture.transition(|controller| {
+        switching::tick(controller, &fixture.clock, None, None).unwrap();
+        let state = &controller.runtime_revisions[mission.as_str()];
+        assert_eq!(state.switches[0].phase, Phase::Generating);
+        assert_eq!(state.switches[0].budget, budget);
+        assert!(
+            controller
+                .orchestrator
+                .execution(mission)
+                .unwrap()
+                .plan_revisions()
+                .is_empty()
+        );
+    });
+    fixture.command("review-generated",revision(&fixture),serde_json::json!({"kind":"review-candidate","ticket_id":ticket,"plan_digest":submitted["plan_digest"],"decision":"approve","reason":"explicit unit administrative review"}),"administrator").unwrap();
+    fixture.transition(|controller| {
+        switching::tick(controller, &fixture.clock, None, None).unwrap();
+        let state = &controller.runtime_revisions[mission.as_str()];
+        assert_eq!(state.switches[0].phase, Phase::Applied);
+        assert_eq!(state.switches[0].budget, budget);
+        assert_eq!(state.policy_digest, policy_digest);
+        assert_eq!(
+            controller
+                .orchestrator
+                .execution(mission)
+                .unwrap()
+                .plan_revision(),
+            1
+        );
+        assert!(controller.bridge.attempt_history().is_empty());
+        validate_restored(controller).unwrap();
+    });
+}
+
+/// Original idempotency, stopped zero-attempt switching, version history and old-writer fences survive SQL.
+#[test]
+fn generation_claim_and_provider_nonce_fence_replaced_or_regressed_sql_workers() {
+    let fixture = Fixture::new();
+    fixture.install_for_trigger(true);
+    fixture
+        .command_schema(
+            GENERATION_SCHEMA,
+            "authorize-generation",
+            1,
+            serde_json::json!({"kind":"authorize-generation"}),
+            "administrator",
+        )
+        .unwrap();
+    let mission = fixture.plan.goal().mission_id();
+    let ticket = fixture.transition(|controller| {
+        switching::observe_trigger(
+            controller,
+            mission,
+            Trigger::LocalExecutionFailed,
+            fixture.clock.now(),
+        )
+        .unwrap();
+        switching::tick(controller, &fixture.clock, None, None).unwrap();
+        controller.runtime_revisions[mission.as_str()].switches[0]
+            .ticket_id
+            .clone()
+    });
+    let revision =
+        || fixture.controller.lock().unwrap().runtime_revisions[mission.as_str()].revision;
+    let hash = format!("sha256:{}", "a".repeat(64));
+    let claim = serde_json::json!({"store_instance_id":"original-unit-sql","work_id":hash,
+                               "identity_digest":hash,"request_id":"original-unit-request"});
+    fixture
+        .command_schema(
+            GENERATION_SCHEMA,
+            "claim",
+            revision(),
+            serde_json::json!({"kind":"claim-runtime-work","ticket_id":ticket,"claim":claim}),
+            "proposer",
+        )
+        .unwrap();
+    let mut other = claim.clone();
+    other["store_instance_id"] = "replacement-unit-sql".into();
+    assert!(
+        fixture
+            .command_schema(
+                GENERATION_SCHEMA,
+                "other-store",
+                revision(),
+                serde_json::json!({"kind":"claim-runtime-work","ticket_id":ticket,"claim":other}),
+                "proposer"
+            )
+            .is_err()
+    );
+    let first = fixture
+        .command_schema(
+            GENERATION_SCHEMA,
+            "first-call",
+            revision(),
+            serde_json::json!({"kind":"admit-provider-call","ticket_id":ticket,
+            "phase":"provider-generate","nonce":"original-unit-nonce","request_digest":hash}),
+            "proposer",
+        )
+        .unwrap();
+    assert!(
+        fixture
+            .command_schema(
+                GENERATION_SCHEMA,
+                "regressed-copy",
+                revision(),
+                serde_json::json!({"kind":"admit-provider-call","ticket_id":ticket,
+            "phase":"provider-generate","nonce":"new-nonce-from-old-copy","request_digest":hash}),
+                "proposer"
+            )
+            .is_err()
+    );
+    let replay = fixture
+        .command_schema(
+            GENERATION_SCHEMA,
+            "same-original-call",
+            revision(),
+            serde_json::json!({"kind":"admit-provider-call","ticket_id":ticket,
+            "phase":"provider-generate","nonce":"original-unit-nonce","request_digest":hash}),
+            "proposer",
+        )
+        .unwrap();
+    assert_eq!(replay["receipt_digest"], first["receipt_digest"]);
+    let provenance = serde_json::json!({"kind":"mission-intelligence","principal":"proposer",
+        "request_id":"original-unit-request","provider_call_id":format!("{hash}:provider-generate"),
+        "code_digest":hash,"config_digest":hash,"catalog_digest":hash,"prompt_digest":hash,
+        "dependency_digest":hash,"original_output_digest":hash});
+    fixture
+        .command(
+            "actual-unit-output",
+            revision(),
+            serde_json::json!({"kind":"submit-candidate",
+        "ticket_id":ticket,"plan":fixture.alternative(),"provenance":provenance}),
+            "proposer",
+        )
+        .unwrap();
+    let controller = fixture.controller.lock().unwrap();
+    validate_restored(&controller).unwrap();
+    let mut forged = controller.clone();
+    forged
+        .runtime_revisions
+        .get_mut(mission.as_str())
+        .unwrap()
+        .candidates
+        .get_mut(&ticket)
+        .unwrap()
+        .provider_calls
+        .get_mut("provider-generate")
+        .unwrap()
+        .nonce = "changed".into();
+    assert!(validate_restored(&forged).is_err());
 }
 
 /// Original idempotency, stopped zero-attempt switching, version history and old-writer fences survive SQL.

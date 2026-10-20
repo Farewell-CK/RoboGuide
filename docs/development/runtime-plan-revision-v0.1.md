@@ -3,6 +3,7 @@
 设计：[ADR-0120](../decisions/0120-versioned-runtime-plan-revision.md)。当前协议完成版本化
 候选、实际权限 Review、预审替代计划、安全切换和独立原目标 gate。自动生成新 MI 候选、
 原 Group-scoped Memory 的新 Group 交接及完整 F8 组合仍继续实施，不能据此关闭整个 F8。
+新 MI 工作另用[显式 v0.2](runtime-mission-intelligence-v0.2.md)授权；本 v0.1 不隐含其权限。
 这不是设备部署或实验 profile。
 
 ## 权威与原目标
@@ -102,6 +103,7 @@ receive-relative valid_for_ms。若 source 要求 CAS，必须实际验证完整
 Controller 在完整请求到达时固定 receive/kernel budget；排 writer、授权与 CAS 校验期间
 的耗时都不能变成新期限。重复输入返回原 receipt；旧版本原有效 scope 的输入保留为历史。
 
-shared wrapper v43、inner v23 和 event codec v28 防止旧 writer 忽略新权限，包括零事件 policy。
+原切片使用 wrapper v43；当前 wrapper v44 保留其原 history/预算并另保护 v0.2 生成权威。
+inner v23 和 event codec v28 保持原义，旧 writer 不能忽略新增权限，包括零事件 policy。
 旧 v42 不含这些权限时可迁移；旧 wrapper 含 revision/goal authority 必须拒绝。
 支持显式候选和软件进程路径不等于模型有效性、设备停止、硬实时或完整 SoftwareComplete。

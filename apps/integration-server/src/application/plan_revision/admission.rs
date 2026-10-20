@@ -241,7 +241,7 @@ fn review(
 }
 
 /// Starts one original candidate work budget before returning any model input or calling a provider.
-fn ticket(
+pub(super) fn ticket(
     controller: &ControllerState,
     mission: &domain::MissionId,
     state: &RevisionState,
@@ -262,6 +262,8 @@ fn ticket(
         .ok_or("unknown candidate Mission")?;
     let remaining = state.budget.remaining(kernel);
     Ok(Candidate {
+        claim: None,
+        provider_calls: BTreeMap::new(),
         ticket_id: id.into(),
         principal: principal.into(),
         base_revision: execution.plan_revision(),
@@ -345,6 +347,33 @@ fn apply(
         return Err("switch request belongs to another original delegated principal".into());
     }
     match &command.action {
+        Action::ClaimRuntimeWork { ticket_id, claim } => generation::claim(
+            controller, mission, state, command, caller, ticket_id, claim, now, kernel,
+        ),
+        Action::AdmitProviderCall {
+            ticket_id,
+            phase,
+            nonce,
+            request_digest,
+        } => generation::admit_call(
+            controller,
+            mission,
+            state,
+            command,
+            caller,
+            ticket_id,
+            phase,
+            nonce,
+            request_digest,
+            now,
+            kernel,
+        ),
+        Action::AuthorizeGeneration => {
+            if command.schema_version != GENERATION_SCHEMA {
+                return Err("generation delegation requires explicit runtime revision v0.2".into());
+            }
+            super::generation::authorize(controller, state, caller, now, kernel)
+        }
         Action::InstallPolicy { .. } => {
             Err("an original revision policy cannot be replaced or its budget renewed".into())
         }
@@ -384,6 +413,7 @@ fn apply(
                 );
             }
             validate_provenance(provenance, caller.principal)?;
+            generation::validate_provenance(state, ticket_id, candidate, provenance)?;
             let execution = controller
                 .orchestrator
                 .execution(mission)
@@ -591,7 +621,9 @@ pub(crate) fn submit(
     feed: Option<&TaskVerifierFeed>,
 ) -> Result<serde_json::Value, String> {
     let command: Command = serde_json::from_slice(body).map_err(|e| e.to_string())?;
-    if command.schema_version != SCHEMA || !identity(&command.command_id) {
+    if !matches!(command.schema_version.as_str(), SCHEMA | GENERATION_SCHEMA)
+        || !identity(&command.command_id)
+    {
         return Err("invalid closed revision command".into());
     }
     let input_digest = digest(&command)?;
@@ -726,6 +758,7 @@ pub(crate) fn submit(
             &authority_grant,
         ))?;
         RevisionState {
+            generation: None,
             authority_certificate_digest: caller.certificate_digest.into(),
             authority_grant,
             goal_contract_digest: goal_contract.digest,
@@ -781,7 +814,7 @@ pub(crate) fn submit(
             return Err(error);
         }
         state.revision = state.revision.checked_add(1).ok_or("revision overflow")?;
-        response["schema_version"] = SCHEMA.into();
+        response["schema_version"] = command.schema_version.clone().into();
         response["command_id"] = command.command_id.clone().into();
         response["revision"] = state.revision.into();
         state.commands.insert(
@@ -843,8 +876,26 @@ pub(crate) fn view(
         .ok_or("unknown revision Mission")?;
     let state = controller.runtime_revisions.get(mission.as_str());
     let kernel = KernelTime::observe()?;
+    let mut used_task_ids: BTreeSet<_> = execution
+        .plan()
+        .task_graph()
+        .tasks()
+        .iter()
+        .map(|task| task.task_id().clone())
+        .collect();
+    for version in execution.plan_revisions() {
+        let original = orchestration::decode_mission_plan(&version.source_plan.to_string())
+            .map_err(|error| error.to_string())?;
+        used_task_ids.extend(
+            original
+                .task_graph()
+                .tasks()
+                .iter()
+                .map(|task| task.task_id().clone()),
+        );
+    }
     Ok(
-        serde_json::json!({"schema_version":SCHEMA,"mission_id":mission.as_str(),"current_plan_revision":execution.plan_revision(),"current_group_id":execution.group_id().as_str(),"original_group_id":execution.original_group_id().as_str(),"current_plan_digest":orchestration::mission_plan_digest(execution.plan()),"current_plan":orchestration::mission_plan_document(execution.plan()),"history":execution.plan_revisions().iter().map(|version|serde_json::json!({"revision":version.revision,"command_id":version.command_id,"source_group_id":version.source_group_id,"target_group_id":version.target_group_id,"plan_digest":version.target_plan_digest,"review_digest":version.review_digest,"completed_tasks":version.completed_tasks,"committed_at_ms":version.committed_at.as_millis()})).collect::<Vec<_>>(),"completed_tasks":completed(controller,mission)?,"goal_contract":controller.bridge.control().mission_goal_contract(mission),"goal_source_current":controller.bridge.control().mission_goal_source_current(mission),"goal_evidence":state.map(|state|state.goal_evidence.iter().map(|(digest,progress)|serde_json::json!({"input_digest":digest,"remaining_ms":progress.budget.remaining(&kernel),"completed":progress.completed_time.is_some(),"incident":progress.incident})).collect::<Vec<_>>()),"goal_context":state.map(|state|&state.policy.goal_context),"authority":state.map(|state|serde_json::json!({"revision":state.revision,"policy":state.policy,"policy_id":state.policy.policy_id,"policy_digest":state.policy_digest,"revoked":state.revoked,"active":active(controller,state,now,&kernel),"remaining_ms":state.budget.remaining(&kernel),"candidates":state.candidates.values().map(|candidate|serde_json::json!({"ticket_id":candidate.ticket_id,"principal":candidate.principal,"base_revision":candidate.base_revision,"base_digest":candidate.base_digest,"remaining_work_ms":candidate.budget.remaining(&kernel),"output_received":candidate.completed_time.is_some(),"plan_digest":candidate.plan_digest,"rejection":candidate.rejected,"review":candidate.review})).collect::<Vec<_>>(),"switches":state.switches,"commands_retained":state.commands.len()}))}),
+        serde_json::json!({"schema_version":SCHEMA,"generation_schema":GENERATION_SCHEMA,"mission_id":mission.as_str(),"used_task_ids":used_task_ids,"current_plan_revision":execution.plan_revision(),"current_group_id":execution.group_id().as_str(),"original_group_id":execution.original_group_id().as_str(),"current_plan_digest":orchestration::mission_plan_digest(execution.plan()),"current_plan":orchestration::mission_plan_document(execution.plan()),"history":execution.plan_revisions().iter().map(|version|serde_json::json!({"revision":version.revision,"command_id":version.command_id,"source_group_id":version.source_group_id,"target_group_id":version.target_group_id,"plan_digest":version.target_plan_digest,"review_digest":version.review_digest,"completed_tasks":version.completed_tasks,"committed_at_ms":version.committed_at.as_millis()})).collect::<Vec<_>>(),"completed_tasks":completed(controller,mission)?,"goal_contract":controller.bridge.control().mission_goal_contract(mission),"goal_source_current":controller.bridge.control().mission_goal_source_current(mission),"goal_evidence":state.map(|state|state.goal_evidence.iter().map(|(digest,progress)|serde_json::json!({"input_digest":digest,"remaining_ms":progress.budget.remaining(&kernel),"completed":progress.completed_time.is_some(),"incident":progress.incident})).collect::<Vec<_>>()),"goal_context":state.map(|state|&state.policy.goal_context),"authority":state.map(|state|serde_json::json!({"revision":state.revision,"policy":state.policy,"policy_id":state.policy.policy_id,"policy_digest":state.policy_digest,"revoked":state.revoked,"active":active(controller,state,now,&kernel),"remaining_ms":state.budget.remaining(&kernel),"candidates":state.candidates.values().map(|candidate|serde_json::json!({"ticket_id":candidate.ticket_id,"principal":candidate.principal,"base_revision":candidate.base_revision,"base_digest":candidate.base_digest,"remaining_work_ms":candidate.budget.remaining(&kernel),"remaining_switch_ms":state.switches.iter().filter(|switch|switch.ticket_id==candidate.ticket_id).map(|switch|switch.budget.remaining(&kernel)).min(),"output_received":candidate.completed_time.is_some(),"plan_digest":candidate.plan_digest,"claim":candidate.claim,"provider_calls":candidate.provider_calls,"rejection":candidate.rejected,"review":candidate.review})).collect::<Vec<_>>(),"generation":state.generation,"generation_active":generation::active(controller,state,now,&kernel),"switches":state.switches,"commands_retained":state.commands.len()}))}),
     )
 }
 
@@ -869,7 +920,7 @@ pub(crate) fn candidate_view(
     Ok(
         serde_json::json!({"schema_version":SCHEMA,"mission_id":mission.as_str(),"ticket_id":candidate.ticket_id,
         "principal":candidate.principal,"base_revision":candidate.base_revision,"base_plan_digest":candidate.base_digest,
-        "plan":candidate.plan,"plan_digest":candidate.plan_digest,"provenance":candidate.provenance,"review":candidate.review,
+        "claim":candidate.claim,"provider_calls":candidate.provider_calls,"plan":candidate.plan,"plan_digest":candidate.plan_digest,"provenance":candidate.provenance,"review":candidate.review,
         "rejection":candidate.rejected,"remaining_work_ms":candidate.budget.remaining(&kernel)}),
     )
 }

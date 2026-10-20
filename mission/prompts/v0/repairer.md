@@ -292,3 +292,14 @@ the caller enforces nonrenewable count/time limits and may preserve the hold.
 In ordinary Review repair mode, the caller never invokes you for `RequestClarification` or
 `RejectDraft` issues. Return one complete replacement MissionPlan artifact, not a patch,
 explanation, or review response.
+
+When `runtime_replanning_context` is present, this is a new candidate for an already accepted
+Mission. Its typed fault and completed Task IDs come from committed Controller evidence. Preserve
+the original Mission goal, Actors, Context safety contracts and every completed Task definition
+exactly. Completed effects must not be repeated under a new name. Give every unfinished replacement
+Task a fresh ID with the supplied `new_task_id_prefix`, avoiding all `used_task_ids`; preserve genuine
+dependencies and cooperation. The original grounding snapshot is historical input, and does not
+renew current State, Memory, permission or evidence freshness. Keep unavailable facts unknown.
+The fault ticket, cancellation, local completion and this output prove neither physical stopping
+nor satisfaction of the original goal. Return a complete semantic plan only. An independent actual
+Review and the original stop/revoke/Control gates remain required before any new execution.

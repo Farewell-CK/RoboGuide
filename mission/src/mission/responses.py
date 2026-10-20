@@ -623,6 +623,19 @@ class ResponsesMissionReviewer:
         grounding_context: GroundingContextSnapshot,
     ) -> MissionPlanReview:
         """Review the plan against its exact grounded input and authority boundaries."""
+        return self.review_runtime(
+            grounded_intent, plan, capability_catalog, grounding_context, None
+        )
+
+    def review_runtime(
+        self,
+        grounded_intent: GroundedIntent,
+        plan: MissionPlan,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+        runtime_context: JSONObject | None,
+    ) -> MissionPlanReview:
+        """Review runtime advice while retaining separate administrative permission."""
         validate_satisfaction_policy(
             plan, self._settings.satisfaction_policy, grounding_context.semantic_evidence
         )
@@ -649,6 +662,11 @@ class ResponsesMissionReviewer:
                             "satisfaction_policy": self._client._satisfaction_policy_input(),
                             "capability_catalog": capability_catalog.to_json(),
                             "grounding_context": grounding_context.to_json(),
+                            **(
+                                {"runtime_replanning_context": runtime_context}
+                                if runtime_context is not None
+                                else {}
+                            ),
                             **(
                                 {"deployment_execution_profile": self._execution_profile.to_json()}
                                 if self._execution_profile is not None
@@ -859,6 +877,27 @@ class ResponsesMissionRepairer:
             error.recovery_provider_output = raw  # type: ignore[attr-defined]
             raise
 
+    def replan(
+        self,
+        mission_id: str,
+        grounded_intent: GroundedIntent,
+        original_plan: MissionPlan,
+        capability_catalog: CanonicalCapabilityCatalog,
+        grounding_context: GroundingContextSnapshot,
+        runtime_context: JSONObject,
+    ) -> MissionPlan:
+        """Generate a runtime candidate from actual evidence without inventing Review."""
+        return self._repair_attempt(
+            mission_id,
+            grounded_intent,
+            original_plan,
+            None,
+            capability_catalog,
+            grounding_context,
+            feedback=None,
+            runtime_context=runtime_context,
+        )
+
     def repair(
         self,
         mission_id: str,
@@ -909,10 +948,11 @@ class ResponsesMissionRepairer:
         mission_id: str,
         grounded_intent: GroundedIntent,
         rejected_plan: MissionPlan,
-        review: MissionPlanReview,
+        review: MissionPlanReview | None,
         capability_catalog: CanonicalCapabilityCatalog,
         grounding_context: GroundingContextSnapshot,
         feedback: JSONObject | None,
+        runtime_context: JSONObject | None = None,
     ) -> MissionPlan:
         """Call Repairer once and preserve raw output on model-draft validation failure."""
         _validate_planning_world(self._execution_planning_evidence, grounding_context)
@@ -922,7 +962,7 @@ class ResponsesMissionRepairer:
             "grounded_intent": grounded_intent.to_json(),
             "rejected_plan": rejected_plan.to_json(),
             "satisfaction_policy": self._client._satisfaction_policy_input(),
-            "review": review.to_json(),
+            "review": review.to_json() if review is not None else None,
             "capability_catalog": capability_catalog.to_json(),
             "grounding_context": grounding_context.to_json(),
             **(
@@ -943,6 +983,8 @@ class ResponsesMissionRepairer:
         }
         if feedback is not None:
             payload["repair_prevalidation_recovery_feedback"] = feedback
+        if runtime_context is not None:
+            payload["runtime_replanning_context"] = runtime_context
         response = self._client._request(
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.repairer_path),

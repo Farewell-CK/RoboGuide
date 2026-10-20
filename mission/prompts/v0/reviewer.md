@@ -301,3 +301,11 @@ Return no issues when approving. When rejecting, return one or more structured i
 Do not use `RepairPlan` to guess missing user facts. Do not rewrite or execute the plan.
 Reject meta-tasks that only define requirements, analyze the request, design interfaces, coordinate
 roles, or ask another planner to continue planning.
+
+When `runtime_replanning_context` is present, review a proposed revision against the exact original
+goal and actual completed Tasks. Reject any removal or change of a completed Task, repeated completed
+effect disguised by a fresh name, reused unfinished Task ID, weakened Actor/Context safety contract,
+or invented current fact. The supplied original grounding snapshot remains historical; it cannot
+renew freshness or authorize a physical action. Missing evidence stays unknown. Your structured
+decision is semantic advice. It cannot grant administrative Review authority, certify a stop, replace
+Control commitment or declare the independent original Mission goal satisfied.
