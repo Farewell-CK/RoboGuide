@@ -1,5 +1,10 @@
 # RoboGuide V2 架构基线
 
+[ADR-0116](../../decisions/0116-replicated-member-certificate-rotation.md)定义显式 replica
+v0.3 的同一成员 leaf 生命周期、原始身份/确认、不可逆退役、lost-key Abort 与 CA 材料
+迁移。Raft 事务和快照保留基础设施 revision，应用 authority 不被证书操作改写；实际
+TLS chain/身份在 member writer 排队后复核。旧 profile 不自动取得新权威。
+
 [ADR-0115](../../decisions/0115-bounded-observability-and-alert-delivery.md) 定义有界只读
 运行指标和真实 Prometheus/Alertmanager 投递。固定标签、丢样和 queue 不完整保持可见，
 监控不参与 Control/Runtime 决策，也不生成 Node 或设备事实。

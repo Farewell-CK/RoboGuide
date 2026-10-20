@@ -39,6 +39,7 @@ flowchart TB
   RT --> SQL
   STATE --> SQL
   SQL -. 显式 HA profile .-> HA[quorum / 动态成员 / leader transfer / epoch / materialization]
+  HA --> CERT[显式 replica v0.3 / Raft Stage Retire Abort / 实际 TLS 与 CA 迁移]
   SQL --> DEGRADED[原进程 write-disabled / 禁止 mutations ACK outbox / 最后提交查询]
   Entry --> PROBE[全局 recovery-admin / 原 generation + checkpoint + journal revision]
   PROBE --> SQL

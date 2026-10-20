@@ -41,6 +41,35 @@ struct Request {
 /// Private consensus and durability operations never carry an embodied Node selector.
 #[derive(Serialize, Deserialize)]
 enum Command {
+    /// Observes actual loaded TLS credentials and local committed trust without claiming quorum.
+    CertificateObserve,
+    /// Reads quorum-current committed certificate authority, without modifying lifecycle.
+    AdminCertificateTrust,
+    /// Closed administration request; the real connection supplies caller identity.
+    AdminRotateCertificate {
+        /// Original leader epoch obtained by the administration client.
+        epoch: ControllerEpoch,
+        /// Exact public request; no caller identity or confirmation booleans are accepted.
+        request: CertificateRequest,
+    },
+    /// Requests one member's independent TLS contact with the original staged target.
+    CertificateProbe {
+        /// Original complete committed stage to observe.
+        revision: u64,
+        /// Exact original trust projection identity.
+        trust_digest: String,
+        /// Stable member being rotated.
+        target: u64,
+        /// Exact staged new leaf required before target application bytes.
+        target_leaf: String,
+    },
+    /// Confirms the target's actual served TLS leaf and exact original stage.
+    CertificateTarget {
+        /// Original stage revision; unavailable or stale stages fail.
+        revision: u64,
+        /// Original trust identity; no caller-supplied success flags.
+        trust_digest: String,
+    },
     /// Upstream log replication.
     Append(AppendEntriesRequest<ControllerRaftConfig>),
     /// Upstream election.
@@ -103,9 +132,32 @@ enum Command {
     },
 }
 
+impl Command {
+    /// Keeps actual member credentials current while queued administration waits for its writer.
+    fn requires_member_writer(&self) -> bool {
+        matches!(
+            self,
+            Self::Commit { .. }
+                | Self::AdminRotateCertificate { .. }
+                | Self::AdminAddLearner { .. }
+                | Self::AdminChangeMembership { .. }
+                | Self::AdminRequestTransfer { .. }
+                | Self::TransferLeadership { .. }
+        )
+    }
+}
+
 /// Closed response preserves upstream Raft errors separately from child acceptance.
 #[derive(Serialize, Deserialize)]
 enum Reply {
+    /// Exact original committed trust, separate from application state.
+    CertificateTrust(Result<CertificateTrust, String>),
+    /// Immutable accepted rotation result, including original actual confirmations.
+    CertificateReceipt(Result<CertificateReceipt, String>),
+    /// Actual endpoint TLS proof, bound to both current member and original stage.
+    CertificateProbe(Result<CertificateProbe, String>),
+    /// Actual target endpoint and served leaf from this very TLS connection.
+    CertificateTarget(Result<CertificateObservation, String>),
     /// Upstream append outcome.
     Append(Result<AppendEntriesResponse<u64>, RaftError<u64>>),
     /// Upstream vote outcome.
@@ -171,18 +223,29 @@ impl ReplicaServer {
 /// Dispatches one bounded request; the existing OpenRaft engine alone interprets consensus messages.
 async fn serve_connection(stream: tokio::net::TcpStream, node: ReplicaNode) -> Result<(), String> {
     if let Some(tls) = &node.tls {
+        let tls = tls.refreshed()?;
         let acceptor = TlsAcceptor::from(tls.server.clone());
         let stream = acceptor
             .accept(stream)
             .await
             .map_err(|error| format!("replica TLS handshake failed: {error}"))?;
-        let peer_digest = stream
+        let peer_chain = stream
             .get_ref()
             .1
             .peer_certificates()
-            .and_then(|certificates| certificates.first())
-            .map(|certificate| format!("sha256:{:x}", Sha256::digest(certificate.as_ref())));
-        return serve_framed_connection(stream, node, peer_digest).await;
+            .ok_or("mutual TLS peer chain is absent")?
+            .iter()
+            .map(|certificate| certificate.clone().into_owned())
+            .collect();
+        return serve_framed_connection(
+            stream,
+            node,
+            Some(crate::tls::VerifiedTlsConnection {
+                local: tls,
+                peer_chain,
+            }),
+        )
+        .await;
     }
     serve_framed_connection(stream, node, None).await
 }
@@ -191,7 +254,7 @@ async fn serve_connection(stream: tokio::net::TcpStream, node: ReplicaNode) -> R
 async fn serve_framed_connection<S>(
     mut stream: S,
     node: ReplicaNode,
-    peer_certificate_digest: Option<String>,
+    certificate_connection: Option<crate::tls::VerifiedTlsConnection>,
 ) -> Result<(), String>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -207,6 +270,15 @@ where
         .map_err(|error| error.to_string())?;
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     #[cfg(test)]
+    if request.command.requires_member_writer() {
+        node.framed_member_mutations.fetch_add(1, Ordering::SeqCst);
+    }
+    let _member_writer = if request.command.requires_member_writer() {
+        Some(node.member_writer.lock().await)
+    } else {
+        None
+    };
+    #[cfg(test)]
     if !node.network_online.load(Ordering::SeqCst) {
         return Err("test replica is partitioned".into());
     }
@@ -217,11 +289,22 @@ where
         request.sender,
         &request.command,
     );
-    let certificate_authenticated = node.tls.as_ref().is_none_or(|tls| {
-        tls.peer_certificate_digests
-            .get(&request.sender)
-            .is_some_and(|expected| peer_certificate_digest.as_deref() == Some(expected))
-    });
+    let peer_certificate_digest = certificate_connection
+        .as_ref()
+        .and_then(|connection| connection.peer_digest());
+    let local_certificate_digest = certificate_connection
+        .as_ref()
+        .map(|connection| connection.local.local_certificate_digest.clone());
+    let ca_bundle_digest = certificate_connection
+        .as_ref()
+        .map(|connection| connection.local.ca_bundle_digest.clone());
+    let certificate_authenticated = match &node.tls {
+        None => true,
+        Some(_) => match &certificate_connection {
+            Some(connection) => connection.authorize(request.sender, node.config.replica_id)?,
+            None => false,
+        },
+    };
     let reply = if request.profile != node.profile_identity()
         || request.target != node.config.replica_id
         || !node.member_allowed(request.sender)
@@ -231,6 +314,63 @@ where
         Reply::Rejected("replica profile/member identity mismatch".into())
     } else {
         match request.command {
+            Command::CertificateObserve => {
+                Reply::CertificateTarget(node.current_certificate_trust().and_then(|trust| {
+                    node.confirm_certificate_target(
+                        trust.revision,
+                        trust.digest(),
+                        local_certificate_digest.as_deref().unwrap_or(""),
+                        ca_bundle_digest.as_deref().unwrap_or(""),
+                    )
+                }))
+            }
+            Command::AdminCertificateTrust => {
+                let result = match node.current_epoch() {
+                    Some(epoch) => node
+                        .check_epoch(epoch)
+                        .await
+                        .and_then(|()| node.current_certificate_trust()),
+                    None => Err("certificate authority requires the current quorum leader".into()),
+                };
+                Reply::CertificateTrust(result)
+            }
+            Command::AdminRotateCertificate {
+                epoch,
+                request: operation,
+            } => Reply::CertificateReceipt(
+                node.rotate_certificate(
+                    epoch,
+                    operation,
+                    request.sender,
+                    peer_certificate_digest.as_deref().unwrap_or(""),
+                )
+                .await,
+            ),
+            Command::CertificateProbe {
+                revision,
+                trust_digest,
+                target,
+                target_leaf,
+            } => Reply::CertificateProbe(
+                node.probe_certificate(
+                    revision,
+                    trust_digest,
+                    target,
+                    target_leaf,
+                    local_certificate_digest.as_deref().unwrap_or(""),
+                    ca_bundle_digest.as_deref().unwrap_or(""),
+                )
+                .await,
+            ),
+            Command::CertificateTarget {
+                revision,
+                trust_digest,
+            } => Reply::CertificateTarget(node.confirm_certificate_target(
+                revision,
+                trust_digest,
+                local_certificate_digest.as_deref().unwrap_or(""),
+                ca_bundle_digest.as_deref().unwrap_or(""),
+            )),
             Command::Append(rpc) => Reply::Append(node.raft.append_entries(rpc).await),
             Command::Vote(rpc) => Reply::Vote(node.raft.vote(rpc).await),
             Command::Snapshot(rpc) => {
@@ -362,7 +502,11 @@ pub(crate) async fn request_leader_transfer(
 }
 
 /// Builds a member-authenticated administration connection without opening replica storage.
-fn admin_network(config: &ReplicaConfig, leader: u64) -> Result<ReplicaNetwork, String> {
+fn admin_network(
+    config: &ReplicaConfig,
+    leader: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
+) -> Result<ReplicaNetwork, String> {
     let address = *config
         .members
         .get(&leader)
@@ -374,16 +518,153 @@ fn admin_network(config: &ReplicaConfig, leader: u64) -> Result<ReplicaNetwork, 
         sender: config.replica_id,
         online: Arc::new(AtomicBool::new(true)),
         shared_secret: config.shared_secret.clone(),
-        tls: crate::tls::load(config.tls.as_ref())?.map(Arc::new),
+        tls,
     })
+}
+
+/// Reads quorum-current infrastructure trust using the actual current member credential source.
+pub(crate) async fn admin_certificate_trust(
+    config: &ReplicaConfig,
+    leader: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
+) -> Result<CertificateTrust, String> {
+    match admin_network(config, leader, tls)?
+        .exchange(
+            Command::AdminCertificateTrust,
+            RPCOption::new(Duration::from_secs(5)),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::CertificateTrust(result) => result,
+        Reply::Rejected(error) => Err(error),
+        _ => Err("certificate trust response was invalid".into()),
+    }
+}
+
+/// Binds an endpoint's actual presented leaf to its readonly local trust and CA material observation.
+pub(crate) async fn admin_certificate_observation(
+    config: &ReplicaConfig,
+    member: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
+) -> Result<CertificateObservation, String> {
+    let (reply, actual_leaf) = admin_network(config, member, tls)?
+        .exchange_observed(
+            Command::CertificateObserve,
+            RPCOption::new(Duration::from_secs(5)),
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    match reply {
+        Reply::CertificateTarget(Ok(observation))
+            if observation.member == member
+                && actual_leaf.as_deref() == Some(observation.leaf.as_str()) =>
+        {
+            Ok(observation)
+        }
+        Reply::CertificateTarget(Err(error)) | Reply::Rejected(error) => Err(error),
+        _ => Err("certificate observation differs from actual authenticated endpoint".into()),
+    }
+}
+
+/// Sends no asserted proof; the leader derives actual caller identity and all retirement observations.
+pub(crate) async fn admin_rotate_certificate(
+    config: &ReplicaConfig,
+    leader: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
+    epoch: ControllerEpoch,
+    request: CertificateRequest,
+) -> Result<CertificateReceipt, String> {
+    match admin_network(config, leader, tls)?
+        .exchange(
+            Command::AdminRotateCertificate { epoch, request },
+            RPCOption::new(Duration::from_secs(15)),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::CertificateReceipt(result) => result,
+        Reply::Rejected(error) => Err(error),
+        _ => Err("certificate rotation response was invalid".into()),
+    }
+}
+
+/// Captures the actual member leaf and rejects replies not bound to this real TLS connection.
+pub(crate) async fn certificate_probe(
+    node: &ReplicaNode,
+    member: u64,
+    target: u64,
+    revision: u64,
+    digest: &str,
+    target_leaf: &str,
+) -> Result<CertificateProbe, String> {
+    let (reply, actual_leaf) = admin_network(&node.config, member, node.tls.clone())?
+        .exchange_observed(
+            Command::CertificateProbe {
+                revision,
+                trust_digest: digest.into(),
+                target,
+                target_leaf: target_leaf.into(),
+            },
+            RPCOption::new(Duration::from_secs(4)),
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    match reply {
+        Reply::CertificateProbe(Ok(probe))
+            if probe.member == member
+                && actual_leaf.as_deref() == Some(probe.presented_leaf.as_str()) =>
+        {
+            Ok(probe)
+        }
+        Reply::CertificateProbe(Err(error)) | Reply::Rejected(error) => Err(error),
+        _ => Err("certificate member proof differs from actual TLS identity".into()),
+    }
+}
+
+/// Requires the exact staged new leaf before sending any original-stage query to the target.
+pub(crate) async fn certificate_target(
+    node: &ReplicaNode,
+    target: u64,
+    revision: u64,
+    digest: &str,
+    target_leaf: &str,
+) -> Result<CertificateObservation, String> {
+    let (reply, actual_leaf) = admin_network(&node.config, target, node.tls.clone())?
+        .exchange_observed(
+            Command::CertificateTarget {
+                revision,
+                trust_digest: digest.into(),
+            },
+            RPCOption::new(Duration::from_secs(2)),
+            Some(target_leaf),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    match reply {
+        Reply::CertificateTarget(Ok(observation))
+            if observation.member == target
+                && observation.revision == revision
+                && observation.trust_digest == digest
+                && observation.leaf == target_leaf
+                && actual_leaf.as_deref() == Some(target_leaf) =>
+        {
+            Ok(observation)
+        }
+        Reply::CertificateTarget(Err(error)) | Reply::Rejected(error) => Err(error),
+        _ => Err("certificate target proof differs from original stage and actual TLS".into()),
+    }
 }
 
 /// Reads the current leader epoch through the private authenticated member envelope.
 pub(crate) async fn admin_epoch(
     config: &ReplicaConfig,
     leader: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
 ) -> Result<Option<ControllerEpoch>, String> {
-    match admin_network(config, leader)?
+    match admin_network(config, leader, tls)?
         .exchange(Command::AdminEpoch, RPCOption::new(Duration::from_secs(5)))
         .await
         .map_err(|error| error.to_string())?
@@ -398,7 +679,7 @@ pub(crate) async fn member_epoch(
     node: &ReplicaNode,
     member: u64,
 ) -> Result<Option<ControllerEpoch>, String> {
-    match admin_network(&node.config, member)?
+    match admin_network(&node.config, member, node.tls.clone())?
         .exchange(Command::AdminEpoch, RPCOption::new(Duration::from_secs(2)))
         .await
         .map_err(|error| error.to_string())?
@@ -412,8 +693,9 @@ pub(crate) async fn member_epoch(
 pub(crate) async fn admin_membership(
     config: &ReplicaConfig,
     leader: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
 ) -> Result<std::collections::BTreeSet<u64>, String> {
-    match admin_network(config, leader)?
+    match admin_network(config, leader, tls)?
         .exchange(
             Command::AdminMembership,
             RPCOption::new(Duration::from_secs(5)),
@@ -430,10 +712,11 @@ pub(crate) async fn admin_membership(
 pub(crate) async fn admin_add_learner(
     config: &ReplicaConfig,
     leader: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
     epoch: ControllerEpoch,
     member_id: u64,
 ) -> Result<(), String> {
-    match admin_network(config, leader)?
+    match admin_network(config, leader, tls)?
         .exchange(
             Command::AdminAddLearner { epoch, member_id },
             RPCOption::new(Duration::from_secs(15)),
@@ -450,11 +733,12 @@ pub(crate) async fn admin_add_learner(
 pub(crate) async fn admin_change_membership(
     config: &ReplicaConfig,
     leader: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
     epoch: ControllerEpoch,
     voters: std::collections::BTreeSet<u64>,
     retain_removed_as_learners: bool,
 ) -> Result<(), String> {
-    match admin_network(config, leader)?
+    match admin_network(config, leader, tls)?
         .exchange(
             Command::AdminChangeMembership {
                 epoch,
@@ -475,11 +759,12 @@ pub(crate) async fn admin_change_membership(
 pub(crate) async fn admin_request_transfer(
     config: &ReplicaConfig,
     leader: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
     epoch: ControllerEpoch,
     target: u64,
     transfer_id: String,
 ) -> Result<LeaderTransferReceipt, String> {
-    match admin_network(config, leader)?
+    match admin_network(config, leader, tls)?
         .exchange(
             Command::AdminRequestTransfer {
                 epoch,
@@ -567,6 +852,18 @@ impl RaftNetworkFactory<ControllerRaftConfig> for ReplicaNetworkFactory {
 impl ReplicaNetwork {
     /// Sends one bounded frame within the upstream request budget.
     async fn exchange(&self, command: Command, option: RPCOption) -> Result<Reply, std::io::Error> {
+        self.exchange_observed(command, option, None)
+            .await
+            .map(|(reply, _)| reply)
+    }
+
+    /// Captures the actual target leaf and optionally requires the original staged replacement.
+    async fn exchange_observed(
+        &self,
+        command: Command,
+        option: RPCOption,
+        required_leaf: Option<&str>,
+    ) -> Result<(Reply, Option<String>), std::io::Error> {
         if !self.online.load(Ordering::Relaxed) {
             return Err(std::io::Error::other("test partition is active"));
         }
@@ -590,6 +887,7 @@ impl ReplicaNetwork {
         let operation = async {
             let stream = tokio::net::TcpStream::connect(&self.node.addr).await?;
             if let Some(tls) = &self.tls {
+                let tls = tls.refreshed().map_err(std::io::Error::other)?;
                 let connector = TlsConnector::from(tls.client.clone());
                 let name = rustls::pki_types::ServerName::try_from(tls.server_name.clone())
                     .map_err(std::io::Error::other)?;
@@ -599,14 +897,32 @@ impl ReplicaNetwork {
                     .map_err(std::io::Error::other)?;
                 tls.authenticate_peer(self.target, stream.get_ref().1.peer_certificates())
                     .map_err(std::io::Error::other)?;
+                let actual_leaf = stream
+                    .get_ref()
+                    .1
+                    .peer_certificates()
+                    .and_then(|chain| chain.first())
+                    .map(|leaf| format!("sha256:{:x}", Sha256::digest(leaf.as_ref())));
+                if required_leaf.is_some_and(|required| actual_leaf.as_deref() != Some(required)) {
+                    return Err(std::io::Error::other(
+                        "target has not presented the original staged new certificate",
+                    ));
+                }
                 stream.write_u64(encoded.len() as u64).await?;
                 stream.write_all(&encoded).await?;
-                read_reply(&mut stream).await
+                read_reply(&mut stream)
+                    .await
+                    .map(|reply| (reply, actual_leaf))
             } else {
                 let mut stream = stream;
                 stream.write_u64(encoded.len() as u64).await?;
                 stream.write_all(&encoded).await?;
-                read_reply(&mut stream).await
+                if required_leaf.is_some() {
+                    return Err(std::io::Error::other(
+                        "certificate evidence requires actual mutual TLS",
+                    ));
+                }
+                read_reply(&mut stream).await.map(|reply| (reply, None))
             }
         };
         tokio::time::timeout(option.hard_ttl(), operation)
@@ -764,6 +1080,27 @@ impl ReplicaFenceClient {
         })
     }
 
+    /// Uses the original WAL-aware trust authority and atomic PEM bundle for a v0.3 owned child.
+    pub fn new_with_current_trust(
+        address: SocketAddr,
+        profile: String,
+        epoch: ControllerEpoch,
+        tls_config: ReplicaTlsConfig,
+        path: &Path,
+    ) -> Result<Self, String> {
+        if address.port() == 0 || profile.is_empty() || epoch.replica_id == 0 {
+            return Err("invalid current-trust Controller child fence".into());
+        }
+        let tls = crate::tls::with_readonly_trust(&tls_config, path, &profile, epoch.replica_id)?;
+        Ok(Self {
+            address,
+            profile,
+            epoch,
+            shared_secret: None,
+            tls: Some(Arc::new(tls)),
+        })
+    }
+
     /// Reads the complete startup triple; partial or non-Unicode configuration rejects before serving.
     pub fn from_environment() -> Result<Option<Self>, String> {
         let read = |name| match std::env::var(name) {
@@ -776,7 +1113,14 @@ impl ReplicaFenceClient {
             read("ROBOGUIDE_REPLICA_PROFILE")?,
             read("ROBOGUIDE_REPLICA_EPOCH")?,
         ) {
-            (None, None, None) => Ok(None),
+            (None, None, None) => {
+                if read("ROBOGUIDE_REPLICA_TRUST_DATABASE")?.is_some() {
+                    return Err(
+                        "current trust requires the complete child replica environment".into(),
+                    );
+                }
+                Ok(None)
+            }
             (Some(address), Some(profile), Some(epoch)) => {
                 let address = address.parse().map_err(|_| "invalid replica endpoint")?;
                 let epoch = serde_json::from_str(&epoch).map_err(|_| "invalid replica epoch")?;
@@ -816,8 +1160,20 @@ impl ReplicaFenceClient {
                         )
                         .map_err(|_| "replica TLS child fence has invalid peer digest map")?,
                     };
-                    Self::new_with_tls(address, profile, epoch, tls_config)?
+                    match read("ROBOGUIDE_REPLICA_TRUST_DATABASE")? {
+                        Some(path) => Self::new_with_current_trust(
+                            address,
+                            profile,
+                            epoch,
+                            tls_config,
+                            Path::new(&path),
+                        )?,
+                        None => Self::new_with_tls(address, profile, epoch, tls_config)?,
+                    }
                 } else {
+                    if read("ROBOGUIDE_REPLICA_TRUST_DATABASE")?.is_some() {
+                        return Err("current trust child requires mandatory mutual TLS".into());
+                    }
                     Self::new(address, profile, epoch)?
                 };
                 client.shared_secret = read("ROBOGUIDE_REPLICA_SHARED_SECRET")?;
@@ -860,6 +1216,7 @@ impl ReplicaFenceClient {
             .set_write_timeout(Some(Duration::from_secs(12)))
             .map_err(|error| error.to_string())?;
         let mut stream = if let Some(tls) = &self.tls {
+            let tls = tls.refreshed()?;
             let name = rustls::pki_types::ServerName::try_from(tls.server_name.clone())
                 .map_err(|error| error.to_string())?;
             let mut connection = rustls::ClientConnection::new(tls.client.clone(), name)

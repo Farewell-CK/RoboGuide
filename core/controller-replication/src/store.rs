@@ -182,6 +182,9 @@ struct StoreSnapshot {
     membership: StoredMembership<u64, BasicNode>,
     /// Exact complete accepted application metadata.
     view: ReplicaView,
+    /// Optional v0.3 infrastructure trust; absent in unchanged legacy snapshot bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    certificate_trust: Option<CertificateTrust>,
 }
 
 /// One serialized durable connection implements distinct Raft storage responsibility traits.
@@ -312,6 +315,99 @@ fn read_commands(
 }
 
 impl SqliteRaftStore {
+    /// Initializes explicit v0.3 bootstrap only before any consensus/application history exists.
+    pub(crate) fn initialize_certificate_trust(
+        &self,
+        bootstrap: &BTreeMap<u64, String>,
+    ) -> Result<(), String> {
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        if let Some(trust) = read_meta::<CertificateTrust>(&transaction, "certificate_trust")
+            .map_err(|error| error.to_string())?
+        {
+            trust.validate()?;
+            if trust.bootstrap != *bootstrap {
+                return Err("original certificate bootstrap differs".into());
+            }
+        } else {
+            let logs: u64 = transaction
+                .query_row("SELECT COUNT(*) FROM replica_log", [], |row| row.get(0))
+                .map_err(|error| error.to_string())?;
+            let authority: u64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM replica_meta WHERE key != 'identity'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            if logs != 0 || authority != 0 {
+                return Err(
+                    "existing replica history lacks required original certificate authority".into(),
+                );
+            }
+            write_meta(
+                &transaction,
+                "certificate_trust",
+                &CertificateTrust::initial(bootstrap.clone())?,
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        transaction.commit().map_err(|error| error.to_string())
+    }
+
+    /// Reads only complete committed infrastructure identity; no bootstrap fallback or mutation.
+    pub fn certificate_trust(&self) -> Result<Option<CertificateTrust>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let trust: Option<CertificateTrust> =
+            read_meta(&connection, "certificate_trust").map_err(|error| error.to_string())?;
+        if let Some(trust) = &trust {
+            trust.validate()?;
+        }
+        Ok(trust)
+    }
+
+    /// Reads an original live WAL-aware local trust database without obtaining a second writer.
+    pub(crate) fn readonly_certificate_trust(
+        path: &Path,
+        profile: &str,
+        bootstrap: &BTreeMap<u64, String>,
+    ) -> Result<CertificateTrust, String> {
+        let connection = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|error| error.to_string())?;
+        connection
+            .busy_timeout(Duration::from_millis(100))
+            .map_err(|error| error.to_string())?;
+        let identity: Option<(String, String)> =
+            read_meta(&connection, "identity").map_err(|error| error.to_string())?;
+        if identity
+            .as_ref()
+            .is_none_or(|identity| identity.0 != profile)
+        {
+            return Err("readonly trust database profile differs".into());
+        }
+        let value: String = connection
+            .query_row(
+                "SELECT value FROM replica_meta WHERE key='certificate_trust'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if value.len() > 4 * 1024 * 1024 {
+            return Err("certificate trust exceeds explicit read bounds".into());
+        }
+        let trust: CertificateTrust =
+            serde_json::from_str(&value).map_err(|error| error.to_string())?;
+        trust.validate()?;
+        if trust.bootstrap != *bootstrap {
+            return Err("readonly original certificate bootstrap differs".into());
+        }
+        Ok(trust)
+    }
     /// Opens a private consensus database and rejects a conflicting stored cluster/schema profile.
     pub fn open(path: &Path, profile: &str, application_schema: &str) -> Result<Self, String> {
         let canonical = if path.exists() {
@@ -459,6 +555,7 @@ impl SqliteRaftStore {
                 revision,
                 checkpoint_digest: current_digest,
                 rejection: Some(rejection),
+                certificate: None,
             });
         }
         let encoded = batch
@@ -526,6 +623,7 @@ impl SqliteRaftStore {
             revision,
             checkpoint_digest: Some(state::checkpoint_identity(&batch.checkpoint)),
             rejection: None,
+            certificate: None,
         })
     }
 
@@ -845,7 +943,27 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
                     )?;
                     CommitReceipt::default()
                 }
-                EntryPayload::Normal(batch) => self.apply_batch(&transaction, batch)?,
+                EntryPayload::Normal(ReplicaCommand::Application(batch)) => {
+                    self.apply_batch(&transaction, batch)?
+                }
+                EntryPayload::Normal(ReplicaCommand::Certificate { certificate }) => {
+                    let mut trust: CertificateTrust = read_meta(&transaction, "certificate_trust")?
+                        .ok_or_else(|| io_error("legacy authority refuses certificate commands"))?;
+                    match trust.apply(certificate.clone()) {
+                        Ok(receipt) => {
+                            write_meta(&transaction, "certificate_trust", &trust)?;
+                            CommitReceipt {
+                                accepted: true,
+                                certificate: Some(receipt),
+                                ..CommitReceipt::default()
+                            }
+                        }
+                        Err(error) => CommitReceipt {
+                            rejection: Some(error),
+                            ..CommitReceipt::default()
+                        },
+                    }
+                }
             };
             write_meta(&transaction, "applied", &entry.log_id)?;
             replies.push(receipt);
@@ -886,8 +1004,27 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
             return Err(io_error("replica snapshot identity/pointers differ"));
         }
         restored.view.validate(&self.application_schema)?;
+        if let Some(trust) = &restored.certificate_trust {
+            trust.validate().map_err(io_error)?;
+        }
         let mut connection = self.connection.lock().map_err(io_error)?;
         let transaction = connection.transaction().map_err(io_error)?;
+        let original: Option<CertificateTrust> = read_meta(&transaction, "certificate_trust")?;
+        match (&original, &restored.certificate_trust) {
+            (None, None) => {}
+            (Some(original), Some(incoming))
+                if original.bootstrap == incoming.bootstrap
+                    && incoming.revision >= original.revision
+                    && incoming.receipts.starts_with(&original.receipts) =>
+            {
+                write_meta(&transaction, "certificate_trust", incoming)?;
+            }
+            _ => {
+                return Err(io_error(
+                    "snapshot certificate authority is absent, stale or forked",
+                ));
+            }
+        }
         transaction
             .execute("DELETE FROM replica_events", [])
             .map_err(io_error)?;
@@ -1004,6 +1141,7 @@ impl RaftSnapshotBuilder<ControllerRaftConfig> for SqliteRaftStore {
             last_applied: read_meta(&connection, "applied")?,
             membership: read_meta(&connection, "membership")?.unwrap_or_default(),
             view: read_view(&connection)?,
+            certificate_trust: read_meta(&connection, "certificate_trust")?,
         };
         let data = serde_json::to_vec(&snapshot).map_err(io_error)?;
         let meta = SnapshotMeta {

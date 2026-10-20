@@ -4,6 +4,7 @@
 
 //! Quorum durability for one Controller authority; replicas never match, bind or execute work.
 
+mod certificates;
 mod store;
 #[cfg(test)]
 mod tests;
@@ -19,13 +20,17 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use certificates::{
+    CertificateAction, CertificateMutation, CertificateObservation, CertificateProbe,
+    CertificateReceipt, CertificateRequest, CertificateTrust, MemberCertificates, ReplicaCommand,
+};
 pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};
 pub use transport::{ReplicaFenceClient, ReplicaServer};
 
 openraft::declare_raft_types!(
     /// Consensus types use infrastructure replica identities independently of embodied Node identities.
     pub ControllerRaftConfig:
-        D = state::ApplicationCommitBatch,
+        D = ReplicaCommand,
         R = CommitReceipt,
         NodeId = u64,
         Node = BasicNode,
@@ -72,6 +77,9 @@ pub struct CommitReceipt {
     pub checkpoint_digest: Option<String>,
     /// Bounded rejection description, never interpreted as lifecycle policy.
     pub rejection: Option<String>,
+    /// Separate infrastructure outcome; absent on ordinary application acceptance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<CertificateReceipt>,
 }
 
 /// Software-only leader handoff receipt; it never asserts physical continuity or device safety.
@@ -94,6 +102,8 @@ pub struct ReplicaAdminClient {
     config: ReplicaConfig,
     /// Current leader endpoint selected by an operator or deployment supervisor.
     leader: u64,
+    /// Actual current member credentials and optional original committed trust reader.
+    tls: Option<Arc<tls::TlsMaterial>>,
 }
 
 impl ReplicaAdminClient {
@@ -103,25 +113,65 @@ impl ReplicaAdminClient {
         if !config.members.contains_key(&leader) {
             return Err("administration leader is not pre-enrolled".into());
         }
-        Ok(Self { config, leader })
+        if config.rotates_certificates() {
+            return Err("replica v0.3 administration requires its original trust database".into());
+        }
+        let tls = tls::load(config.tls.as_ref())?.map(Arc::new);
+        Ok(Self {
+            config,
+            leader,
+            tls,
+        })
+    }
+
+    /// Uses the original local replica authority for exact current target pins during rotation.
+    pub fn with_trust_database(
+        config: ReplicaConfig,
+        leader: u64,
+        path: &Path,
+    ) -> Result<Self, String> {
+        config.validate()?;
+        if !config.rotates_certificates() || !config.members.contains_key(&leader) {
+            return Err(
+                "current trust administration requires replica v0.3 and an enrolled leader".into(),
+            );
+        }
+        let tls = tls::with_readonly_trust(
+            config.tls.as_ref().ok_or("rotation requires TLS")?,
+            path,
+            &config.profile_identity(),
+            config.replica_id,
+        )?;
+        Ok(Self {
+            config,
+            leader,
+            tls: Some(Arc::new(tls)),
+        })
     }
 
     /// Reads the current leader epoch, rejecting a follower or unavailable endpoint.
     pub async fn epoch(&self) -> Result<ControllerEpoch, String> {
-        transport::admin_epoch(&self.config, self.leader)
+        transport::admin_epoch(&self.config, self.leader, self.tls.clone())
             .await?
             .ok_or_else(|| "administration endpoint is not the current leader".into())
     }
 
     /// Reads the current committed voter set for an operator audit.
     pub async fn membership(&self) -> Result<BTreeSet<u64>, String> {
-        transport::admin_membership(&self.config, self.leader).await
+        transport::admin_membership(&self.config, self.leader, self.tls.clone()).await
     }
 
     /// Adds one configured member as a learner and waits for its log catch-up.
     pub async fn add_learner(&self, member_id: u64) -> Result<(), String> {
         let epoch = self.epoch().await?;
-        transport::admin_add_learner(&self.config, self.leader, epoch, member_id).await
+        transport::admin_add_learner(
+            &self.config,
+            self.leader,
+            self.tls.clone(),
+            epoch,
+            member_id,
+        )
+        .await
     }
 
     /// Applies one voter set through OpenRaft joint consensus.
@@ -134,6 +184,7 @@ impl ReplicaAdminClient {
         transport::admin_change_membership(
             &self.config,
             self.leader,
+            self.tls.clone(),
             epoch,
             voters,
             retain_removed_as_learners,
@@ -151,9 +202,36 @@ impl ReplicaAdminClient {
         transport::admin_request_transfer(
             &self.config,
             self.leader,
+            self.tls.clone(),
             epoch,
             target,
             transfer_id.into(),
+        )
+        .await
+    }
+
+    /// Reads quorum-current trust without creating or repeating a rotation operation.
+    pub async fn certificate_trust(&self) -> Result<CertificateTrust, String> {
+        transport::admin_certificate_trust(&self.config, self.leader, self.tls.clone()).await
+    }
+
+    /// Observes the selected endpoint's actual leaf/root material without claiming quorum.
+    pub async fn certificate_observation(&self) -> Result<CertificateObservation, String> {
+        transport::admin_certificate_observation(&self.config, self.leader, self.tls.clone()).await
+    }
+
+    /// Submits only the closed request; the leader independently collects actual TLS evidence.
+    pub async fn rotate_certificate(
+        &self,
+        request: CertificateRequest,
+    ) -> Result<CertificateReceipt, String> {
+        let epoch = self.epoch().await?;
+        transport::admin_rotate_certificate(
+            &self.config,
+            self.leader,
+            self.tls.clone(),
+            epoch,
+            request,
         )
         .await
     }
@@ -187,6 +265,10 @@ pub struct ReplicaConfig {
 }
 
 impl ReplicaConfig {
+    /// New trust authority is never hidden inside legacy single-pin deployment profiles.
+    pub fn rotates_certificates(&self) -> bool {
+        self.schema == "roboguide.controller-replica/v0.3"
+    }
     /// Returns the startup voter set while preserving the v0.1 three-member compatibility profile.
     pub fn initial_voters(&self) -> BTreeSet<u64> {
         self.initial_voters
@@ -198,7 +280,8 @@ impl ReplicaConfig {
     pub fn validate(&self) -> Result<(), String> {
         let initial_voters = self.initial_voters();
         if !(self.schema == "roboguide.controller-replica/v0.1"
-            || self.schema == "roboguide.controller-replica/v0.2")
+            || self.schema == "roboguide.controller-replica/v0.2"
+            || self.rotates_certificates())
             || self.cluster_id.trim().is_empty()
             || self.cluster_id.len() > 128
             || self.members.len() < 3
@@ -213,7 +296,13 @@ impl ReplicaConfig {
                 .all(|id| self.members.contains_key(id))
             || (self.schema == "roboguide.controller-replica/v0.1"
                 && (self.members.len() != 3 || self.initial_voters.is_some()))
-            || (self.schema == "roboguide.controller-replica/v0.2" && self.initial_voters.is_none())
+            || ((self.schema == "roboguide.controller-replica/v0.2" || self.rotates_certificates())
+                && self.initial_voters.is_none())
+            || (self.rotates_certificates()
+                && self
+                    .tls
+                    .as_ref()
+                    .is_none_or(|tls| tls.cert_path != tls.key_path))
             || (self
                 .members
                 .values()
@@ -287,6 +376,11 @@ impl ReplicaConfig {
 /// Live consensus service and durable accepted history, independent of any executing Controller child.
 #[derive(Clone)]
 pub struct ReplicaNode {
+    /// Test-only actual framed-ingress ordinal, never an authority or success receipt.
+    #[cfg(test)]
+    framed_member_mutations: Arc<std::sync::atomic::AtomicU64>,
+    /// Serializes authenticated member mutations; consensus traffic never waits on this gate.
+    pub(crate) member_writer: Arc<tokio::sync::Mutex<()>>,
     /// Private network fault switch for deterministic partition verification only.
     network_online: Arc<std::sync::atomic::AtomicBool>,
     /// Infrastructure identity and exact cluster profile.
@@ -306,12 +400,25 @@ impl ReplicaNode {
         path: &Path,
     ) -> Result<(Self, ReplicaServer), String> {
         config.validate()?;
-        let tls = tls::load(config.tls.as_ref())?.map(Arc::new);
+        let store =
+            SqliteRaftStore::open(path, &config.profile_identity(), &config.application_schema)?;
+        let tls = if config.rotates_certificates() {
+            let configuration = config.tls.as_ref().ok_or("rotation requires TLS")?;
+            store.initialize_certificate_trust(&configuration.peer_certificate_digests)?;
+            Some(Arc::new(tls::with_store_trust(
+                configuration,
+                store.clone(),
+                config.replica_id,
+            )?))
+        } else {
+            if store.certificate_trust()?.is_some() {
+                return Err("legacy replica cannot consume current certificate authority".into());
+            }
+            tls::load(config.tls.as_ref())?.map(Arc::new)
+        };
         if let Some(tls) = &tls {
             tls.authenticate_local(config.replica_id)?;
         }
-        let store =
-            SqliteRaftStore::open(path, &config.profile_identity(), &config.application_schema)?;
         let settings = Arc::new(
             openraft::Config {
                 cluster_name: config.cluster_id.clone(),
@@ -345,6 +452,9 @@ impl ReplicaNode {
         .await
         .map_err(|error| error.to_string())?;
         let node = Self {
+            #[cfg(test)]
+            framed_member_mutations: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            member_writer: Arc::new(tokio::sync::Mutex::new(())),
             network_online,
             config: Arc::new(config),
             raft,
@@ -381,6 +491,10 @@ impl ReplicaNode {
 
     /// Requires current leadership and majority confirmation under the exact original epoch.
     pub async fn check_epoch(&self, epoch: ControllerEpoch) -> Result<(), String> {
+        if let Some(tls) = &self.tls {
+            tls.refreshed()?
+                .authenticate_local(self.config.replica_id)?;
+        }
         if self.current_epoch() != Some(epoch) {
             return Err("Controller epoch is no longer current".into());
         }
@@ -413,10 +527,11 @@ impl ReplicaNode {
     ) -> Result<CommitReceipt, String> {
         self.check_epoch(epoch).await?;
         batch.validate().map_err(|error| error.to_string())?;
-        let reply = tokio::time::timeout(Duration::from_secs(5), self.raft.client_write(batch))
-            .await
-            .map_err(|_| "Controller quorum acceptance timed out".to_string())?
-            .map_err(|error| error.to_string())?;
+        let reply =
+            tokio::time::timeout(Duration::from_secs(5), self.raft.client_write(batch.into()))
+                .await
+                .map_err(|_| "Controller quorum acceptance timed out".to_string())?
+                .map_err(|error| error.to_string())?;
         self.check_epoch(epoch).await?;
         if !reply.data.accepted {
             return Err(reply

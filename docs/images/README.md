@@ -2,6 +2,9 @@
 
 本目录集中保存出现在 README、架构说明和后续设计文档中的图片资源。
 
+2026-10-20 当前部署 Mermaid 同步 ADR-0116 的 Raft 基础设施证书 authority、实际 TLS
+确认及独立应用权威；证书不绘制成 Node、资源或设备证明。
+
 2026-10-20 当前部署 Mermaid 同步 ADR-0114/0115：SQL 故障写入禁用、原 checkpoint/
 journal probe、专用 metrics-reader、wrapper v42 与真实监控通知链路。观察不授予恢复或
 设备安全权限，概念 PNG 继续保留其基线含义。

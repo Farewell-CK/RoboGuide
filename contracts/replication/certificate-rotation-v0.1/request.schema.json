@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "roboguide.replica-certificate-request/v0.1",
+  "title": "Explicit same-member leaf rotation request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command_id", "expected_revision", "member", "action"],
+  "properties": {
+    "command_id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "\\S"},
+    "expected_revision": {"type": "integer", "minimum": 0, "maximum": 512},
+    "member": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "previous_leaf", "new_leaf"],
+          "properties": {
+            "kind": {"const": "stage"},
+            "previous_leaf": {"$ref": "#/$defs/leaf"},
+            "new_leaf": {"$ref": "#/$defs/leaf"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "stage_command_id", "previous_leaf", "new_leaf"],
+          "properties": {
+            "kind": {"enum": ["retire", "abort"]},
+            "stage_command_id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "\\S"},
+            "previous_leaf": {"$ref": "#/$defs/leaf"},
+            "new_leaf": {"$ref": "#/$defs/leaf"}
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {"leaf": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+}

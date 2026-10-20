@@ -10,6 +10,7 @@ mod supervisor;
 
 use controller_replication::ReplicaAdminClient;
 use std::collections::BTreeSet;
+use std::io::Read as _;
 
 /// Validates configuration before opening consensus storage; standalone Controller remains unchanged.
 #[tokio::main(worker_threads = 4)]
@@ -30,8 +31,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let operation = arguments.next().ok_or("missing administration operation")?;
         let configuration: config::ProcessConfig = serde_json::from_slice(&std::fs::read(&path)?)?;
         configuration.validate()?;
-        let client = ReplicaAdminClient::new(configuration.replica, leader)?;
+        let client = if configuration.replica.rotates_certificates() {
+            ReplicaAdminClient::with_trust_database(
+                configuration.replica,
+                leader,
+                &configuration.storage_directory.join("replica.sqlite3"),
+            )?
+        } else {
+            ReplicaAdminClient::new(configuration.replica, leader)?
+        };
         match operation.as_str() {
+            "--certificate-observation" => {
+                if arguments.next().is_some() {
+                    return Err("unexpected certificate observation arguments".into());
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&client.certificate_observation().await?)?
+                );
+            }
+            "--certificate-trust" => {
+                if arguments.next().is_some() {
+                    return Err("unexpected certificate trust arguments".into());
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&client.certificate_trust().await?)?
+                );
+            }
+            "--rotate-certificate" => {
+                let path = arguments
+                    .next()
+                    .ok_or("certificate rotation requires a closed request.json")?;
+                if arguments.next().is_some() {
+                    return Err("unexpected certificate rotation arguments".into());
+                }
+                let mut bytes = Vec::new();
+                std::fs::File::open(path)?
+                    .take(4097)
+                    .read_to_end(&mut bytes)?;
+                if bytes.len() > 4096 {
+                    return Err("certificate request exceeds bounds".into());
+                }
+                let request = serde_json::from_slice(&bytes)?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&client.rotate_certificate(request).await?)?
+                );
+            }
             "--membership" => {
                 if arguments.next().is_some() {
                     return Err("unexpected admin arguments".into());

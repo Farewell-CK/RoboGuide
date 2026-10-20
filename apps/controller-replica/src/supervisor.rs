@@ -153,6 +153,12 @@ fn start_controller(
                     .map_err(|error| error.to_string())?,
             );
     }
+    if configuration.replica.rotates_certificates() {
+        command.env(
+            "ROBOGUIDE_REPLICA_TRUST_DATABASE",
+            configuration.storage_directory.join("replica.sqlite3"),
+        );
+    }
     let child = command.spawn().map_err(|error| error.to_string())?;
     eprintln!(
         "Controller child {} started under epoch {epoch:?}",
@@ -230,11 +236,14 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
     )
     .await?;
     let mut leader_transfer_attempted = false;
+    let shutdown_signal = tokio::signal::ctrl_c();
+    tokio::pin!(shutdown_signal);
     let mut timer = tokio::time::interval(Duration::from_millis(200));
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let result = loop {
         tokio::select! {
-            result = tokio::signal::ctrl_c() => { break result.map_err(|error| error.to_string()); }
+            biased;
+            result = &mut shutdown_signal => { break result.map_err(|error| error.to_string()); }
             _ = timer.tick() => {
                 let current = match node.current_epoch() {
                     Some(epoch) => match node.check_epoch(epoch).await {
@@ -243,12 +252,16 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     },
                     None => None,
                 };
-                let child_dead = match owned.as_mut() {
-                    Some(OwnedController { child, .. }) => child.try_wait().map_err(|error| error.to_string())?.is_some(),
-                    None => false,
+                if let Some(result) = ready_shutdown(shutdown_signal.as_mut()).await {
+                    break result.map_err(|error| error.to_string());
+                }
+                let child_exit = match owned.as_mut() {
+                    Some(OwnedController { child, .. }) => child.try_wait().map_err(|error| error.to_string())?,
+                    None => None,
                 };
+                let child_dead = child_exit.is_some();
                 if child_dead || owned.as_ref().is_some_and(|controller| Some(controller.epoch) != current) {
-                    eprintln!("Stopping owned Controller: exited={child_dead}, current_epoch={current:?}");
+                    eprintln!("Stopping owned Controller: exit_status={child_exit:?}, current_epoch={current:?}");
                     stop_controller(&mut owned).await?;
                 }
                 if !leader_transfer_attempted
@@ -278,6 +291,9 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     configuration.validate()?;
                     materialize(&configuration.storage_directory, &node.accepted_view()?)?;
                     if node.check_epoch(epoch).await.is_ok() {
+                        if let Some(result) = ready_shutdown(shutdown_signal.as_mut()).await {
+                            break result.map_err(|error| error.to_string());
+                        }
                         owned = Some(start_controller(&configuration, &node, epoch)?);
                     }
                 }
@@ -291,4 +307,17 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
     stop_controller(&mut owned).await?;
     node.shutdown().await?;
     result
+}
+
+/// Observes the original latched OS signal after an await without replacing its subscription.
+async fn ready_shutdown(
+    mut signal: std::pin::Pin<&mut impl std::future::Future<Output = std::io::Result<()>>>,
+) -> Option<std::io::Result<()>> {
+    std::future::poll_fn(|context| {
+        std::task::Poll::Ready(match signal.as_mut().poll(context) {
+            std::task::Poll::Ready(result) => Some(result),
+            std::task::Poll::Pending => None,
+        })
+    })
+    .await
 }

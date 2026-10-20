@@ -41,7 +41,7 @@ fn upstream_storage_conformance() {
 }
 
 /// Builds exact typed evidence without creating a physical Node or lifecycle transition.
-fn batch(
+pub(crate) fn batch(
     previous: Option<&state::PersistedCheckpoint>,
     revision: u64,
 ) -> state::ApplicationCommitBatch {
@@ -85,7 +85,7 @@ async fn accepted_history_snapshot_and_identity_reopen() {
     let accepted = store
         .apply([Entry {
             log_id: LogId::new(CommittedLeaderId::new(1, 1), 1),
-            payload: EntryPayload::Normal(first.clone()),
+            payload: EntryPayload::Normal(first.clone().into()),
         }])
         .await
         .unwrap();
@@ -93,7 +93,7 @@ async fn accepted_history_snapshot_and_identity_reopen() {
     let rejected = store
         .apply([Entry {
             log_id: LogId::new(CommittedLeaderId::new(1, 1), 2),
-            payload: EntryPayload::Normal(first.clone()),
+            payload: EntryPayload::Normal(first.clone().into()),
         }])
         .await
         .unwrap();
@@ -138,7 +138,7 @@ async fn accepted_application_identity_matches_checkpoint_digest() {
     store
         .apply([Entry {
             log_id: LogId::new(CommittedLeaderId::new(1, 1), 1),
-            payload: EntryPayload::Normal(first.clone()),
+            payload: EntryPayload::Normal(first.clone().into()),
         }])
         .await
         .unwrap();
@@ -161,7 +161,7 @@ async fn compacted_history_reopens_and_materializes_from_checkpoint() {
     store
         .apply([Entry {
             log_id: LogId::new(CommittedLeaderId::new(1, 1), 1),
-            payload: EntryPayload::Normal(first.clone()),
+            payload: EntryPayload::Normal(first.clone().into()),
         }])
         .await
         .unwrap();
@@ -283,7 +283,7 @@ fn configuration(id: u64, members: &BTreeMap<u64, SocketAddr>) -> ReplicaConfig 
 }
 
 /// Waits only within the test deadline for a currently majority-confirmed leader.
-async fn leader(nodes: &[(ReplicaNode, ReplicaServer)]) -> usize {
+pub(crate) async fn leader(nodes: &[(ReplicaNode, ReplicaServer)]) -> usize {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             for (index, (node, _)) in nodes.iter().enumerate() {
@@ -565,7 +565,7 @@ async fn sql_failure_and_corrupt_accepted_evidence_fail_closed() {
     .unwrap();
     let entry = Entry {
         log_id: LogId::new(CommittedLeaderId::new(1, 1), 1),
-        payload: EntryPayload::Normal(batch(None, 1)),
+        payload: EntryPayload::Normal(batch(None, 1).into()),
     };
     assert!(store.apply([entry.clone()]).await.is_err());
     assert_eq!(store.accepted_view().unwrap().revision, 0);

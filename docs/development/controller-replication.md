@@ -1,5 +1,11 @@
 # 可选 Controller 三副本软件部署
 
+显式 [v0.3 证书生命周期](replica-certificate-rotation-v0.1.md)由
+[ADR-0116](../decisions/0116-replicated-member-certificate-rotation.md)定义：同一成员的
+原 Stage/Retire/Abort、实际全成员 TLS 证明、不可逆退役和部署 CA overlap/removal。
+初始 pins 仍绑定 profile，当前授权随原 Raft 事务/快照保留；旧 v0.1/v0.2 数据不得只改
+schema 原地启动。滚动二进制升级和完整 archive/CAS 恢复仍须各自完成与验收。
+
 ADR-0083 的当前实现是三个静态成员的软件 profile，默认不启动；loopback 可保持开发兼容，
 任一非 loopback member 必须启用 ADR-0091 的双向 TLS。
 每个 `controller-replica` 有独立 FULL-synchronous SQLite log/state machine，OpenRaft

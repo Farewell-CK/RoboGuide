@@ -2,6 +2,11 @@
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
+[副本证书生命周期](docs/development/replica-certificate-rotation-v0.1.md)以显式 v0.3 profile
+持久化同一成员的 Stage/Retire/Abort，实际 TLS 证明后撤销旧 leaf，并支持部署 CA 根迁移。
+换证不重置应用预算或 epoch；排队请求取得 writer 后复核实际证书，丢失新 key 不锁死
+后续轮换。旧数据升级与完整 HA/CAS 恢复仍按非发布整改计划继续实施。
+
 [运行指标与告警](docs/development/observability-v0.1.md)已接入有界 histogram/queue/drop、
 stop/recovery 信号与真实 Prometheus/Alertmanager。专用 metrics-reader 只能抓取运行指标；
 Controller wrapper 当前 v42，Mission 授权 v0.2，Node journal v13。新权限具备旧 writer/
