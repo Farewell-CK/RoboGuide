@@ -17,7 +17,11 @@ from memory_use_profile import configuration as use_configuration
 
 
 def tls(
-    output: Path, nodes: list[str], memory_id: str, environment: dict[str, str]
+    output: Path,
+    nodes: list[str],
+    memory_id: str,
+    environment: dict[str, str],
+    monitoring: bool = False,
 ) -> tuple[dict[str, ssl.SSLContext], dict[str, str]]:
     """Issue private credentials and scoped grants; enrollment remains an API action."""
     certificates = output / "pki"
@@ -26,7 +30,7 @@ def tls(
         name: client(certificates, name)
         for name in ("admin", "viewer", "enrolment-first", "enrolment-next")
     }
-    operator = {
+    operator: dict[str, Any] = {
         "schema_version": "roboguide.operator-authorization/v0.1",
         "registry_id": "file-operators-" + uuid.uuid4().hex,
         "revision": 1,
@@ -44,6 +48,13 @@ def tls(
         },
     }
     artifact_grants = {}
+    if monitoring:
+        operator["schema_version"] = "roboguide.operator-authorization/v0.2"
+        operator["grants"]["sha256:" + digests["admin-next"]] = {
+            "principal_id": "independent-monitor-reader",
+            "role": "metrics-reader",
+            "tenant_ids": ["*"],
+        }
     for index, name in enumerate(("enrolment-first", "enrolment-next")):
         value = grant("file-node-" + str(index), "writer", "local")
         value.update(node_id=nodes[index], provider_ids=["files"], memory_ids=[memory_id])

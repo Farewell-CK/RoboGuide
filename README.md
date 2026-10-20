@@ -2,6 +2,11 @@
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
+[运行指标与告警](docs/development/observability-v0.1.md)已接入有界 histogram/queue/drop、
+stop/recovery 信号与真实 Prometheus/Alertmanager。专用 metrics-reader 只能抓取运行指标；
+Controller wrapper 当前 v42，Mission 授权 v0.2，Node journal v13。新权限具备旧 writer/
+降级门禁；采集缺失不算健康，短期软件通知验证不声明长期 SLO 或设备安全。
+
 [Controller 故障恢复入口](docs/development/controller-write-recovery-v0.1.md)在实际持久化
 失败后封住写入与 Node durable ACK，保留最后提交查询；全局 recovery-admin 的原
 process/generation/checkpoint/revision 探针 Commit 成功后才能继续。复制不确定性仍经
@@ -11,7 +16,7 @@ process/generation/checkpoint/revision 探针 Commit 成功后才能继续。复
 原 import/revoke、worker 与 Active Map 引用，先持久 tombstone，再删除并对账；调用方布尔
 声明不授予 GC 权限。[恢复工具](apps/recovery-tool/README.md)在全部原 writer 退出后备份
 完整 SQL 与实际内容，校验后恢复到新目录。Node journal 当前为 v13，原唯一 writer 在
-任何 recovery 前取得锁；Node Protocol 与共享 wrapper 保持 v0.12/v41。全局 Memory/HA
+任何 recovery 前取得锁；Node Contract 保持 v0.12，共享 wrapper 后续升级见上文。全局 Memory/HA
 数据面及后续完整整改仍按原计划验收。
 
 2026-10-20 的[分支同步与剩余整改核对](docs/development/roboguide-integration-status-2026-10-20.md)

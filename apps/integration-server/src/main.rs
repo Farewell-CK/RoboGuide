@@ -8,6 +8,7 @@ mod application;
 mod artifact_http;
 mod controller_http;
 mod diagnostics;
+mod observability;
 
 use diagnostics::StageObservation;
 use integration::grpc::v0_2::robo_guide_node_protocol_server::RoboGuideNodeProtocolServer as LegacyRoboGuideNodeProtocolServer;
@@ -36,6 +37,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
 /// Last Memory wrapper before generation-bound process-exit authority was integrated.
 const PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v40";
+/// Prior integrated wrapper before the explicit metrics-only authorization role.
+const PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v41";
 /// Previous wrapper without durable stopped-Group Memory handoff authority.
 const PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v39";
 /// Prior wrapper without independent readonly Memory-use evidence.
@@ -957,7 +960,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         event_log.latest_timestamp()?,
     ));
     let diagnostic_writer = diagnostics::DiagnosticWriter::configured();
-    let diagnostic_handle = diagnostic_writer.handle();
+    let diagnostic_handle = observability::MetricsObserver::handle(diagnostic_writer.handle());
     let event_log = event_log.with_diagnostics(diagnostic_handle.clone());
     let artifact_store = artifact_store::FileSystemArtifactStore::new(&artifact_root)?;
     let artifact_catalog =
@@ -1027,6 +1030,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -1070,6 +1074,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA

@@ -323,7 +323,9 @@ pub(crate) fn flush_unisolated_commands(
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
     ) && !saved.memory_handoffs.is_empty()
     {
         return Err("legacy wrapper contains Group Memory handoff authority".into());
@@ -331,6 +333,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
     ) && saved
@@ -342,11 +345,13 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     {
         return Err("legacy wrapper contains independent Memory use observation authority".into());
     }
-    if saved.schema != SERVER_CHECKPOINT_SCHEMA
-        && saved
-            .safety_stops
-            .values()
-            .any(|purpose| purpose.uses_process_exit_contract())
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
+    ) && saved
+        .safety_stops
+        .values()
+        .any(|purpose| purpose.uses_process_exit_contract())
     {
         return Err("ambiguous legacy wrapper contains fork process-exit stop authority; explicit source migration required".into());
     }
@@ -354,9 +359,28 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA
+        && integration
+            .get("control")
+            .and_then(|control| control.get("operator_authorization"))
+            .is_some_and(|profile| {
+                profile["schema_version"] == "roboguide.operator-authorization/v0.2"
+                    || profile
+                        .get("grants")
+                        .and_then(serde_json::Value::as_object)
+                        .is_some_and(|grants| {
+                            grants
+                                .values()
+                                .any(|grant| grant["role"] == "metrics-reader")
+                        })
+            })
+    {
+        return Err("legacy wrapper cannot contain metrics-only authorization authority".into());
+    }
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -368,6 +392,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -381,6 +406,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -402,6 +428,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -428,6 +455,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -454,6 +482,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -474,6 +503,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -523,6 +553,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -555,6 +586,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -584,6 +616,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -633,6 +666,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA
@@ -663,6 +697,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_QUERY_SERVER_CHECKPOINT_SCHEMA

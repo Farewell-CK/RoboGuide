@@ -25,7 +25,7 @@ pub struct OperatorCertificateGrant {
     pub principal_id: String,
     /// Controller permission tier.
     pub role: String,
-    /// Tenant delegation; global * is restricted to recovery administrator.
+    /// Tenant delegation; global * requires recovery administration or the metrics-only role.
     pub tenant_ids: BTreeSet<String>,
     /// Inclusive deployment validity start.
     #[serde(default)]
@@ -41,8 +41,10 @@ pub struct OperatorCertificateGrant {
 impl OperatorAuthorization {
     /// Checks closed schema, bounds and explicit global delegation before admission.
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema_version != "roboguide.operator-authorization/v0.1"
-            || self.registry_id.trim().is_empty()
+        if !matches!(
+            self.schema_version.as_str(),
+            "roboguide.operator-authorization/v0.1" | "roboguide.operator-authorization/v0.2"
+        ) || self.registry_id.trim().is_empty()
             || self.registry_id.len() > 128
             || self.revision == 0
             || self.grants.is_empty()
@@ -60,7 +62,7 @@ impl OperatorAuthorization {
                 || grant.principal_id.len() > 128
                 || !matches!(
                     grant.role.as_str(),
-                    "viewer" | "operator" | "recovery-admin"
+                    "viewer" | "operator" | "recovery-admin" | "metrics-reader"
                 )
                 || grant.tenant_ids.is_empty()
                 || grant.tenant_ids.len() > 64
@@ -68,7 +70,12 @@ impl OperatorAuthorization {
                     .tenant_ids
                     .iter()
                     .any(|tenant| tenant.trim().is_empty() || tenant.len() > 128)
-                || grant.tenant_ids.contains("*") && grant.role != "recovery-admin"
+                || grant.tenant_ids.contains("*")
+                    && !matches!(grant.role.as_str(), "recovery-admin" | "metrics-reader")
+                || grant.role == "metrics-reader"
+                    && grant.tenant_ids != BTreeSet::from(["*".into()])
+                || grant.role == "metrics-reader"
+                    && self.schema_version != "roboguide.operator-authorization/v0.2"
                 || grant.expires_at_ms != 0 && grant.expires_at_ms <= grant.not_before_ms
             {
                 return Err("operator certificate grant is invalid".into());
@@ -81,6 +88,8 @@ impl OperatorAuthorization {
     pub fn validates_successor(&self, next: &Self) -> Result<(), String> {
         next.validate()?;
         if self.registry_id != next.registry_id
+            || self.schema_version == "roboguide.operator-authorization/v0.2"
+                && next.schema_version != self.schema_version
             || self.revision > next.revision
             || self.revision == next.revision && self != next
         {
@@ -106,5 +115,71 @@ impl OperatorCertificateGrant {
         !self.revoked
             && now_ms >= self.not_before_ms
             && (self.expires_at_ms == 0 || now_ms < self.expires_at_ms)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Global metrics delegation is purpose-limited; ordinary viewers/operators retain tenant fences.
+    #[test]
+    fn global_metrics_role_cannot_be_used_as_a_tenant_or_generic_viewer_grant() {
+        for (role, tenants, valid) in [
+            ("metrics-reader", vec!["*"], true),
+            ("metrics-reader", vec!["tenant"], false),
+            ("metrics-reader", vec!["*", "tenant"], false),
+            ("viewer", vec!["*"], false),
+            ("operator", vec!["*"], false),
+            ("recovery-admin", vec!["*"], true),
+        ] {
+            let profile = OperatorAuthorization {
+                schema_version: "roboguide.operator-authorization/v0.2".into(),
+                registry_id: "unit-authorization".into(),
+                revision: 1,
+                grants: BTreeMap::from([(
+                    format!("sha256:{}", "a".repeat(64)),
+                    OperatorCertificateGrant {
+                        principal_id: "unit-principal".into(),
+                        role: role.into(),
+                        tenant_ids: tenants.into_iter().map(str::to_string).collect(),
+                        not_before_ms: 0,
+                        expires_at_ms: 0,
+                        revoked: false,
+                    },
+                )]),
+            };
+            assert_eq!(profile.validate().is_ok(), valid, "{role}");
+        }
+    }
+
+    /// The explicit metrics-role codec can upgrade original grants but cannot be downgraded by revision.
+    #[test]
+    fn metrics_authorization_upgrade_retains_a_codec_downgrade_fence() {
+        let original = OperatorAuthorization {
+            schema_version: "roboguide.operator-authorization/v0.1".into(),
+            registry_id: "original".into(),
+            revision: 1,
+            grants: BTreeMap::from([(
+                format!("sha256:{}", "a".repeat(64)),
+                OperatorCertificateGrant {
+                    principal_id: "administrator".into(),
+                    role: "recovery-admin".into(),
+                    tenant_ids: BTreeSet::from(["*".into()]),
+                    not_before_ms: 0,
+                    expires_at_ms: 0,
+                    revoked: false,
+                },
+            )]),
+        };
+        let mut upgraded = original.clone();
+        upgraded.schema_version = "roboguide.operator-authorization/v0.2".into();
+        upgraded.revision = 2;
+        assert!(original.validates_successor(&upgraded).is_ok());
+        let mut downgraded = original;
+        downgraded.revision = 3;
+        assert!(upgraded.validates_successor(&downgraded).is_err());
+        downgraded.grants.values_mut().next().unwrap().role = "metrics-reader".into();
+        assert!(downgraded.validate().is_err());
     }
 }

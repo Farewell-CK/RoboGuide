@@ -5,6 +5,7 @@
 //! Opt-in trusted-loopback consensus supervisor for exactly one owned Controller child.
 
 mod config;
+mod metrics;
 mod supervisor;
 
 use controller_replication::ReplicaAdminClient;

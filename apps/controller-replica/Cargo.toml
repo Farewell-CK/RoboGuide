@@ -10,7 +10,7 @@ state = { path = "../../core/state" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = { version = "0.10", features = ["asm"] }
-tokio = { version = "1.53", features = ["macros", "process", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1.53", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
 tempfile = "3"

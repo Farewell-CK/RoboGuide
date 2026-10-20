@@ -11,16 +11,18 @@ use std::time::Duration;
 use tokio::process::{Child, Command};
 
 /// Observable local status only; readers cannot use it to grant Control commitment or delivery.
-#[derive(Serialize)]
-struct Status {
+#[derive(Serialize, serde::Deserialize)]
+pub(super) struct Status {
+    /// Actual supervisor's local status publication time, never a source/State freshness receipt.
+    pub(super) observed_unix_ms: u64,
     /// Immutable cluster/application identity.
     profile: String,
     /// Latest locally confirmed leader epoch, absent without current majority.
-    epoch: Option<ControllerEpoch>,
+    pub(super) epoch: Option<ControllerEpoch>,
     /// Only the child owned by this supervisor.
-    child_pid: Option<u32>,
+    pub(super) child_pid: Option<u32>,
     /// Complete application revision already applied at this replica.
-    revision: u64,
+    pub(super) revision: u64,
 }
 
 /// Owns exactly one child and the epoch under which it was originally started.
@@ -189,6 +191,7 @@ fn write_status(
     owned: &Option<OwnedController>,
 ) -> Result<(), String> {
     let status = Status {
+        observed_unix_ms: crate::metrics::unix_ms()?,
         profile: node.profile_identity(),
         epoch,
         child_pid: owned.as_ref().and_then(|controller| controller.child.id()),
@@ -221,6 +224,11 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
     )
     .await?;
     let mut owned = None;
+    let metrics_task = crate::metrics::start(
+        configuration.metrics_address,
+        configuration.storage_directory.join("status.json"),
+    )
+    .await?;
     let mut leader_transfer_attempted = false;
     let mut timer = tokio::time::interval(Duration::from_millis(200));
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -277,6 +285,9 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
             }
         }
     };
+    if let Some(task) = metrics_task {
+        task.abort();
+    }
     stop_controller(&mut owned).await?;
     node.shutdown().await?;
     result

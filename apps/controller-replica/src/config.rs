@@ -53,6 +53,9 @@ pub(super) struct ProcessConfig {
     /// Optional one-shot software leader transfer requested by the supervisor after startup.
     #[serde(default)]
     pub leader_transfer: Option<LeaderTransferConfig>,
+    /// Optional private loopback metrics route; observations do not alter policy identity.
+    #[serde(default)]
+    pub metrics_address: Option<SocketAddr>,
 }
 
 /// Closed one-shot leader handoff command; it never asserts physical continuity.
@@ -114,6 +117,18 @@ impl ProcessConfig {
             return Err("leader transfer target or identity is invalid".into());
         }
         let routes = [self.grpc_address, self.http_address, self.artifact_address];
+        if self.metrics_address.is_some_and(|metrics| {
+            !metrics.ip().is_loopback()
+                || metrics.port() == 0
+                || routes.contains(&metrics)
+                || self
+                    .replica
+                    .members
+                    .values()
+                    .any(|member| member.port() == metrics.port())
+        }) {
+            return Err("replica metrics requires a distinct nonzero private loopback port".into());
+        }
         let distinct = routes.into_iter().collect::<BTreeSet<_>>();
         if distinct.len() != 3
             || routes.iter().any(|address| {

@@ -17,9 +17,10 @@ mod task_satisfaction;
 
 pub use allocation::{AllocationStateError, AllocationStateReader, AllocationStateWriter};
 pub use diagnostics::{
+    DIAGNOSTIC_DURATION_BUCKETS_US, DiagnosticAggregate, DiagnosticAggregateSnapshot,
     DiagnosticHandle, DiagnosticIdentity, DiagnosticKind, DiagnosticObserver, DiagnosticQueue,
-    DiagnosticQueueSnapshot, DiagnosticQueueTicket, DiagnosticRecord, DiagnosticStage,
-    NodeFactMetadata,
+    DiagnosticQueueAggregate, DiagnosticQueueSnapshot, DiagnosticQueueTicket, DiagnosticRecord,
+    DiagnosticStage, NodeFactMetadata,
 };
 pub use memory::{MemoryCatalogError, MemoryCatalogReader, MemoryCatalogWriter};
 pub use node_gateway::{NodeGateway, NodeGatewayError, NodeGatewayErrorKind};

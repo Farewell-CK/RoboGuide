@@ -41,6 +41,7 @@ from memory_use_lifecycle import run as run_use_interruption
 from memory_use_profile import request
 from memory_use_query_processes import Setup as UseQuerySetup
 from memory_use_query_processes import run as run_use_query
+from monitoring_processes import MonitoringProcesses
 from spatial_content_policy import digest
 
 
@@ -48,6 +49,7 @@ def identity() -> dict[str, str]:
     """Pin the actual binaries, maintained checker and backend source before process admission."""
     paths = [ROOT / "target/debug" / name for name in ("integration-server", "roboguide-node")]
     paths += [Path(__file__), Path(__file__).with_name("memory_preparation_profile.py")]
+    paths += [ROOT / "tools/observability/observability_profile.py"]
     paths += sorted((ROOT / "integrations/memory-provider/roboguide_memory_provider").glob("*.py"))
     paths += [
         Path(__file__).with_name(name)
@@ -64,6 +66,7 @@ def identity() -> dict[str, str]:
             "memory_handoff_processes.py",
             "memory_content_reclamation.py",
             "authority_recovery_profile.py",
+            "monitoring_processes.py",
         )
     ]
     result = {
@@ -119,6 +122,7 @@ def run(
     handoff_case: str | None = None,
     content_reclamation: bool = False,
     authority_recovery: bool = False,
+    monitoring_tools: Path | None = None,
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
     use_lifecycle = use_lifecycle or use_case is not None or use_query_recovery
@@ -140,7 +144,7 @@ def run(
         if not key.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
     }
     environment["PYTHONPATH"] = str(ROOT / "integrations/memory-provider")
-    contexts, leaves = tls(directory, nodes, memory_id, environment)
+    contexts, leaves = tls(directory, nodes, memory_id, environment, monitoring_tools is not None)
     environment["ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS"] = "1000"
     environment["ROBOGUIDE_DIAGNOSTICS_PATH"] = str(directory / "controller-diagnostics.jsonl")
     source_root = directory / "source/node-state/memory/files"
@@ -232,6 +236,7 @@ def run(
     backend_processes: list[subprocess.Popen[bytes]] = []
     backend_commands: list[list[str]] = []
     node_processes: list[subprocess.Popen[bytes]] = []
+    monitoring = None
     try:
         for index, name in enumerate(("source", "consumer")):
             owned = directory / name
@@ -496,6 +501,9 @@ def run(
         assert published == manifest, published
         authority_recovery_result = None
         if authority_recovery:
+            if monitoring_tools is not None:
+                monitoring = MonitoringProcesses(directory, monitoring_tools, origin, start)
+                monitoring.start()
             authority_recovery_result = run_authority_recovery(
                 directory,
                 exchange,
@@ -507,6 +515,7 @@ def run(
                 cas,
                 contexts["enrolment-first"],
                 leaves["enrolment-first"],
+                None if monitoring is None else monitoring.observe,
             )
         if handoff_case is not None:
             result = run_handoff(
@@ -903,6 +912,7 @@ def run(
             "actual_backend_restarts": 3 if content_reclamation else 2,
             "content_reclamation": reclamation_result,
             "authority_recovery": authority_recovery_result,
+            "monitoring": None if monitoring is None else monitoring.result(),
             "original_receiver_budget_unchanged": True,
             "transport_profile": "actual-mutual-tls-and-enrolled-nodes",
             "source_manifest": manifest,
@@ -924,6 +934,8 @@ def run(
         )
         raise
     finally:
+        if monitoring is not None:
+            monitoring.close()
         for process in reversed(processes):
             stop(process)
         for log in logs:
@@ -951,6 +963,7 @@ def main() -> None:
     parser.add_argument("--group-lifecycle", action="store_true")
     parser.add_argument("--content-reclamation", action="store_true")
     parser.add_argument("--authority-recovery", action="store_true")
+    parser.add_argument("--monitoring-tools", type=Path)
     parser.add_argument(
         "--handoff-case", choices=("complete", "expiry", "policy-change", "controller-restart")
     )
@@ -960,6 +973,8 @@ def main() -> None:
         "--use-case", choices=("revoke", "expire", "backend-restart", "controller-restart")
     )
     arguments = parser.parse_args()
+    if arguments.monitoring_tools and not arguments.authority_recovery:
+        parser.error("--monitoring-tools requires the actual --authority-recovery fault profile")
     if (arguments.content_reclamation or arguments.authority_recovery) and (
         arguments.group_lifecycle
         or arguments.handoff_case
@@ -988,6 +1003,7 @@ def main() -> None:
                     arguments.handoff_case,
                     arguments.content_reclamation,
                     arguments.authority_recovery,
+                    arguments.monitoring_tools,
                 ),
                 sort_keys=True,
             )

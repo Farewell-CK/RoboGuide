@@ -16,7 +16,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import BinaryIO
 
-from mission.authorization import AUTHORIZATION_SCHEMA, AuthorizationProfile
+from mission.authorization import (
+    AUTHORIZATION_SCHEMA,
+    LEGACY_AUTHORIZATION_SCHEMA,
+    AuthorizationProfile,
+)
 from mission.deployment_recovery import DeploymentRecoverySession
 from mission.grounding_context import GroundingContextSnapshot
 from mission.models import JSONObject, JSONValue
@@ -306,8 +310,16 @@ class MissionRequestStore:
                 ):
                     raise MissionRequestError("authorization profile rollback or revision conflict")
                 previous = json.loads(str(prior[3]))
-                if previous.get("schema_version") != AUTHORIZATION_SCHEMA:
+                previous_schema = previous.get("schema_version")
+                if previous_schema not in {AUTHORIZATION_SCHEMA, LEGACY_AUTHORIZATION_SCHEMA}:
                     raise MissionRequestError("stored authorization schema is invalid")
+                if (
+                    previous_schema == AUTHORIZATION_SCHEMA
+                    and profile.document.get("schema_version") != AUTHORIZATION_SCHEMA
+                ):
+                    raise MissionRequestError(
+                        "metrics authorization cannot downgrade to an old writer"
+                    )
                 for certificate, grant in previous["grants"].items():
                     current = profile.grants.get(certificate)
                     if current is None:

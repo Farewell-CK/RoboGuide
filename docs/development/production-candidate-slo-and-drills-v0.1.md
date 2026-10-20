@@ -6,6 +6,10 @@
 覆盖保存/Commit 两窗口、最后提交查询、Node unavailable、原探针和上传 chunk fence。
 这不证明下表恢复时限或人工响应 SLA 已达标；完整采集/告警部署仍须实际演练。
 
+[原生监控 profile](observability-v0.1.md)和[实际通知验收](acceptance/2026-10-20-observability.md)
+已证明受限 mTLS scrape、真实规则评估、Alertmanager 至独立 owned loopback receiver 的
+firing/resolved。该短窗口仅报告实际投递，尚不证明 30 天 SLO、跨主机或值守人工确认。
+
 ## 指标和 SLO
 
 | 信号 | 指标来源 | 候选阈值 | 告警动作 |

@@ -2,6 +2,23 @@
 
 use crate::*;
 use domain::{SafetyStopIdentity, SafetyStopPhase, SafetyStopRecord, TaskRef, TimestampMs};
+
+/// Reads existing retained stop purposes without confirming, expiring or releasing any authority.
+pub(crate) fn metrics(controller: &ControllerState, now: TimestampMs) -> (usize, usize, usize) {
+    let mut pending = 0;
+    let mut manual = 0;
+    let mut overdue = 0;
+    for purpose in controller.safety_stops.values() {
+        if purpose.record.phase == SafetyStopPhase::ManualEscalation {
+            manual += 1;
+        }
+        if !purpose.record.phase.confirms_stop() {
+            pending += 1;
+            overdue += usize::from(now >= purpose.record.deadline);
+        }
+    }
+    (pending, manual, overdue)
+}
 use sha2::{Digest, Sha256};
 
 /// Bounded observation emitted by the operation's registered LocalSystem, never by Control.

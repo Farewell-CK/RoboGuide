@@ -42,6 +42,7 @@ convention = "google"
 addopts = "-q"
 pythonpath = ["integrations/spatial-provider", "apps/recovery-tool"]
 testpaths = [
+    "tools/observability/tests",
     "apps/recovery-tool/tests",
     "mission/tests",
     "integrations/robonix-map-service/tests",
@@ -55,6 +56,7 @@ testpaths = [
 python_version = "3.13"
 strict = true
 files = [
+    "tools/observability",
     "apps/recovery-tool/roboguide_recovery",
     "apps/recovery-tool/tests",
     "integrations/memory-provider/roboguide_memory_provider",

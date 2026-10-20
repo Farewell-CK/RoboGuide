@@ -10,8 +10,9 @@ from typing import cast
 from mission.models import JSONObject
 from mission.service_config import MissionServiceConfigError
 
-AUTHORIZATION_SCHEMA = "roboguide.mission-authorization/v0.1"
-ROLES = frozenset({"viewer", "submitter", "approver", "operator", "admin"})
+AUTHORIZATION_SCHEMA = "roboguide.mission-authorization/v0.2"
+LEGACY_AUTHORIZATION_SCHEMA = "roboguide.mission-authorization/v0.1"
+ROLES = frozenset({"viewer", "submitter", "approver", "operator", "admin", "metrics-reader"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,10 +57,9 @@ def load_authorization(path: Path | None) -> AuthorizationProfile:
     profile_id: str | None = None
     revision = 0
     if "schema_version" in value:
-        if (
-            set(value) != {"schema_version", "profile_id", "revision", "grants"}
-            or value["schema_version"] != AUTHORIZATION_SCHEMA
-        ):
+        if set(value) != {"schema_version", "profile_id", "revision", "grants"} or value[
+            "schema_version"
+        ] not in {AUTHORIZATION_SCHEMA, LEGACY_AUTHORIZATION_SCHEMA}:
             raise MissionServiceConfigError("unsupported authorization profile")
         profile_id = _text(value["profile_id"], "profile_id")
         revision = _integer(value["revision"], "revision", positive=True)
@@ -93,7 +93,14 @@ def load_authorization(path: Path | None) -> AuthorizationProfile:
         principal = _text(raw["principal_id"], "principal_id")
         tenant = _text(raw["tenant_id"], "tenant_id")
         role = raw["role"]
-        if not isinstance(role, str) or role not in ROLES or tenant == "*" and role != "admin":
+        if (
+            not isinstance(role, str)
+            or role not in ROLES
+            or tenant == "*"
+            and role not in {"admin", "metrics-reader"}
+            or role == "metrics-reader"
+            and (tenant != "*" or value.get("schema_version") != AUTHORIZATION_SCHEMA)
+        ):
             raise MissionServiceConfigError("certificate grant role is invalid")
         not_before = _integer(raw.get("not_before_ms", 0), "not_before_ms")
         expires = _integer(raw.get("expires_at_ms", 0), "expires_at_ms")

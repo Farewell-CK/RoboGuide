@@ -67,6 +67,7 @@ def run(
     cas: str,
     source: ssl.SSLContext,
     source_leaf: str,
+    monitoring: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
     """Require real degraded reads, unavailable Node facts and exact idempotent recovery twice."""
     database = directory / "controller.sqlite3"
@@ -203,6 +204,9 @@ def run(
         assert later_inventory[1]["observed_at_ms"] >= original_inventory[1]["observed_at_ms"]
         assert disabled() == original
         assert sql_evidence(database) == (frozen_digest, frozen)
+        if monitoring is not None:
+            monitoring("firing", kind)
+            assert sql_evidence(database) == (frozen_digest, frozen)
         with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute("DROP TRIGGER actual_authority_failure")
         status, receipt = exchange("/v1/authority/recover", command)
@@ -230,6 +234,8 @@ def run(
             )
         ]
         wait_for(lambda: exchange("/readyz")[0] == 200, "original authority explicitly recovers")
+        if monitoring is not None:
+            monitoring("resolved", kind)
         assert controller.poll() is None
         record = {
             "kind": kind,

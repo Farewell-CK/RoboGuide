@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:roboguide:operator-authorization:v0.2",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "registry_id", "revision", "grants"],
+  "properties": {
+    "schema_version": {"const": "roboguide.operator-authorization/v0.2"},
+    "registry_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "revision": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "grants": {"type": "object", "minProperties": 1, "maxProperties": 4096,
+      "propertyNames": {"pattern": "^sha256:[0-9a-f]{64}$"},
+      "additionalProperties": {"$ref": "#/$defs/grant"}}
+  },
+  "$defs": {"grant": {
+    "type": "object", "additionalProperties": false,
+    "required": ["principal_id", "role", "tenant_ids"],
+    "properties": {
+      "principal_id": {"type": "string", "minLength": 1, "maxLength": 128},
+      "role": {"enum": ["viewer", "operator", "recovery-admin", "metrics-reader"]},
+      "tenant_ids": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+      "not_before_ms": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+      "expires_at_ms": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+      "revoked": {"type": "boolean"}
+    },
+    "allOf": [
+      {"if": {"properties": {"role": {"const": "metrics-reader"}}}, "then": {"properties": {"tenant_ids": {"const": ["*"]}}}},
+      {"if": {"properties": {"tenant_ids": {"contains": {"const": "*"}}}}, "then": {"properties": {"role": {"enum": ["recovery-admin", "metrics-reader"]}}}}
+    ]
+  }}
+}

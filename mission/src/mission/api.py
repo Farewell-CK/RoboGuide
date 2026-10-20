@@ -485,7 +485,13 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
         if principal is None:
             self._send(HTTPStatus.UNAUTHORIZED, {"error": "mission principal is not authenticated"})
             return False
-        if not self.server.role_grants(principal, required):
+        local_metrics = (
+            required == "metrics-reader"
+            and not self.server.mtls_enabled
+            and not isinstance(self.connection, ssl.SSLSocket)
+            and principal[0] == "loopback:operator"
+        )
+        if not local_metrics and not self.server.role_grants(principal, required):
             self._send(HTTPStatus.FORBIDDEN, {"error": "mission principal is not authorized"})
             return False
         selector = self.headers.get("X-RoboGuide-Tenant")
@@ -827,8 +833,8 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
 
     def required_role(self, path: str, method: str) -> str | None:
         """Return the minimum role required by one Mission Service route."""
-        if method == "GET" and path == "/metrics":
-            return "viewer"
+        if method == "GET" and path in {"/metrics", "/metrics/prometheus"}:
+            return "metrics-reader"
         if method == "POST" and path == "/v1/tenant-migrations":
             return "admin"
         if method == "POST" and path == "/v1/http-commands/observe":
@@ -879,6 +885,10 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
     @staticmethod
     def role_grants(principal: Principal, required: str) -> bool:
         """Return whether a mapped role grants one bounded Mission Service permission."""
+        if required == "metrics-reader":
+            return principal[1] in {"metrics-reader", "admin"} and principal[2] == "*"
+        if principal[1] == "metrics-reader":
+            return False
         rank = {"viewer": 0, "submitter": 1, "approver": 2, "operator": 3, "admin": 4}
         return rank.get(principal[1], -1) >= rank.get(required, 99)
 

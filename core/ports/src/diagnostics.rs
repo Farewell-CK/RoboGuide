@@ -177,10 +177,64 @@ pub struct DiagnosticRecord {
     pub queue: Option<DiagnosticQueueSnapshot>,
 }
 
+/// Fixed microsecond boundaries shared by observation producers and composition renderers.
+pub const DIAGNOSTIC_DURATION_BUCKETS_US: [u64; 12] = [
+    100, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000, 10_000_000,
+    30_000_000,
+];
+
+/// One bounded fixed-label aggregate; optional data is never synthesized from another category.
+#[derive(Clone, Debug)]
+pub struct DiagnosticAggregate {
+    /// Original fixed message category.
+    pub kind: DiagnosticKind,
+    /// Original fixed stage.
+    pub stage: DiagnosticStage,
+    /// Actual duration samples observed, excluding scalar/queue-only records.
+    pub duration_count: u64,
+    /// Saturating total of actual local elapsed microseconds.
+    pub duration_sum_us: u64,
+    /// Cumulative duration counts at the fixed boundaries above, excluding infinity.
+    pub duration_buckets: [u64; 12],
+    /// Last actual scalar sample; missing remains unavailable.
+    pub value: Option<u64>,
+}
+
+/// One queue-stage total whose completeness is explicit, independent of current application authority.
+#[derive(Clone, Debug)]
+pub struct DiagnosticQueueAggregate {
+    /// Fixed queue stage, never an arbitrary user label.
+    pub stage: DiagnosticStage,
+    /// Sum of the actual tracked live queues; incomplete totals are only a lower bound.
+    pub depth: u64,
+    /// Sum of tracked queued wire bytes.
+    pub bytes: u64,
+    /// Oldest tracked queue age, unavailable when any contributing timestamp is missing.
+    pub oldest_age_us: Option<u64>,
+    /// False when observer loss, missing identity or a tracking bound prevents complete coverage.
+    pub complete: bool,
+}
+
+/// Bounded observation-only export; no source identity/payload or authority timestamp is exposed.
+#[derive(Clone, Debug)]
+pub struct DiagnosticAggregateSnapshot {
+    /// Fixed category/stage statistical observations, bounded by the enum product.
+    pub aggregates: Vec<DiagnosticAggregate>,
+    /// Aggregate transport queue observations, independent of Task ownership.
+    pub queues: Vec<DiagnosticQueueAggregate>,
+    /// Actual best-effort records omitted due to contention or capacity.
+    pub dropped: u64,
+}
+
 /// Non-blocking diagnostic observation port; failure must never reach application authority.
 pub trait DiagnosticObserver: Send + Sync {
     /// Attempts to retain a bounded record; implementations may discard it without affecting work.
     fn try_record(&self, record: DiagnosticRecord);
+
+    /// Optionally exports a bounded observation snapshot; absence never means zero failures.
+    fn snapshot(&self) -> Option<DiagnosticAggregateSnapshot> {
+        None
+    }
 }
 
 /// Optional observation handle; disabled construction retains no sink or queue bookkeeping.
@@ -201,6 +255,12 @@ impl std::fmt::Debug for DiagnosticHandle {
 }
 
 impl DiagnosticHandle {
+    /// Reads a bounded optional aggregate without interpreting it as permission or fresh State.
+    pub fn snapshot(&self) -> Option<DiagnosticAggregateSnapshot> {
+        self.observer
+            .as_ref()
+            .and_then(|observer| observer.snapshot())
+    }
     /// Enables a deployment-owned sink whose implementation follows the non-blocking contract.
     pub fn new(observer: Arc<dyn DiagnosticObserver>) -> Self {
         Self {

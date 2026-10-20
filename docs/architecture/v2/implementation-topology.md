@@ -52,6 +52,11 @@ flowchart TB
   COLD --> NJ
   COLD --> MEM
   COLD --> SNAP[完整 SQL / 实际内容 / pinned manifest / 新目录恢复]
+  Entry --> METRICS[专用 metrics-reader / 有界 histogram queue drop / wrapper v42]
+  MI --> METRICS
+  HA --> METRICS
+  METRICS --> PROM[声明部署 profile / 原生 Prometheus / Alertmanager]
+  PROM --> INCIDENT[实际 firing resolved / 明确授权 receiver / 不授予恢复权]
   MEM --> QUERY[原实例 GET query / 实际 bytes 与原始日志]
   QUERY --> PROTO
   Entry --> MINT[持久 Memory intent / 对账 generation 与预算]

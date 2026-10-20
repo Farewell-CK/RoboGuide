@@ -9,6 +9,119 @@ mod plan_validation_tests;
 #[path = "write_recovery_tests.rs"]
 mod write_recovery_tests;
 
+/// Metrics-only identity is explicitly global yet cannot read business projections or any mutation.
+#[tokio::test]
+async fn metrics_reader_cannot_read_business_or_acquire_mutation_authority() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let controller = controller(&log);
+    let principal = OperatorPrincipal {
+        tenants: Some(BTreeSet::from(["*".into()])),
+        subject: Some("monitoring-only".into()),
+        role: Some("metrics-reader".into()),
+        ..Default::default()
+    };
+    for path in ["/metrics", "/healthz", "/readyz"] {
+        let response = route(
+            &controller,
+            &log,
+            &principal,
+            &request("GET", path, b"", None),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200"), "{path}: {response}");
+    }
+    for path in [
+        "/v1/inventory",
+        "/v1/authority-status",
+        "/v1/events",
+        "/v1/execution-attempts",
+        "/v1/node-identities",
+        "/v1/state/records",
+        "/v1/missions/unknown",
+    ] {
+        let response = route(
+            &controller,
+            &log,
+            &principal,
+            &request("GET", path, b"", None),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{path}: {response}");
+    }
+    for path in [
+        "/v1/missions",
+        "/v1/authority/recover",
+        "/v1/node-identities/commands",
+        "/v1/missions/validate-plan",
+    ] {
+        let response = route(
+            &controller,
+            &log,
+            &principal,
+            &request("POST", path, b"{}", None),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{path}: {response}");
+    }
+    assert!(
+        route(
+            &controller,
+            &log,
+            &principal,
+            &request("GET", "/metrics", b"", Some("recovery-admin"))
+        )
+        .await
+        .starts_with("HTTP/1.1 401")
+    );
+    assert!(log.events().unwrap().is_empty());
+    assert_eq!(log.control_command_count().unwrap(), 0);
+    let mut before: ServerCheckpoint =
+        serde_json::from_str(&server_checkpoint_json(&controller.lock().unwrap()).unwrap())
+            .unwrap();
+    before.schema = PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA.into();
+    let mut integration: serde_json::Value =
+        serde_json::from_str(&before.integration_json).unwrap();
+    integration["control"]["operator_authorization"] =
+        serde_json::json!({"grants":{"leaf":{"role":"metrics-reader"}}});
+    before.integration_json = integration.to_string();
+    assert!(application::validate_isolation_checkpoint_schema(&before).is_err());
+}
+
+/// Modern retained wrappers cannot quietly replace the original terminal verifier after restore.
+#[test]
+fn integrated_legacy_wrappers_retain_original_verifier_configuration_fence() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let controller = controller(&log);
+    let mut saved: ServerCheckpoint =
+        serde_json::from_str(&server_checkpoint_json(&controller.lock().unwrap()).unwrap())
+            .unwrap();
+    saved.verifier_source_digest = Some("original-source-digest".into());
+    for schema in [
+        SERVER_CHECKPOINT_SCHEMA,
+        PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA,
+        PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA,
+        PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA,
+        PRE_MEMORY_PREPARATION_SERVER_CHECKPOINT_SCHEMA,
+        PRE_MEMORY_SERVER_CHECKPOINT_SCHEMA,
+    ] {
+        saved.schema = schema.into();
+        assert!(
+            validate_restored_verifier_source(&saved, Some("original-source-digest")).is_ok(),
+            "{schema}"
+        );
+        assert!(
+            validate_restored_verifier_source(&saved, Some("replacement-source-digest")).is_err(),
+            "{schema}"
+        );
+        assert!(
+            validate_restored_verifier_source(&saved, None).is_err(),
+            "{schema}"
+        );
+    }
+}
+
 /// Creates an empty Controller using the existing application and SQLite authority only.
 fn controller(log: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
     Arc::new(Mutex::new(ControllerState {

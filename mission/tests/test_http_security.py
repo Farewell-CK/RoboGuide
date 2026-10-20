@@ -16,10 +16,14 @@ from typing import cast
 
 import pytest
 from mission.api import MissionRequestHttpServer, _build_mtls_context, _load_role_map
-from mission.authorization import AUTHORIZATION_SCHEMA
+from mission.authorization import (
+    AUTHORIZATION_SCHEMA,
+    LEGACY_AUTHORIZATION_SCHEMA,
+    load_authorization,
+)
 from mission.models import JSONObject
 from mission.requests import MissionRequestError
-from mission.service_config import load_service_settings
+from mission.service_config import MissionServiceConfigError, load_service_settings
 from mission.submission_evidence import canonical_plan_digest
 from test_requests import (
     FakeController,
@@ -121,6 +125,127 @@ def _client(directory: Path, name: str | None) -> ssl.SSLContext:
     if name is not None:
         context.load_cert_chain(directory / f"{name}.crt", directory / f"{name}.key")
     return context
+
+
+def test_metrics_mtls_role_cannot_read_requests_or_bypass_revocation(tmp_path: Path) -> None:
+    """Use real TLS/SQL for both metrics formats; no interpreter/model/Controller call is made."""
+    directory = tmp_path / "metrics-pki"
+    digests = _pki(directory)
+    profile: dict[str, object] = {
+        "schema_version": AUTHORIZATION_SCHEMA,
+        "profile_id": "metrics-deployment",
+        "revision": 1,
+        "grants": {
+            digests["viewer"]: {
+                "principal_id": "monitor",
+                "role": "metrics-reader",
+                "tenant_id": "*",
+            },
+            digests["tenant-a"]: {
+                "principal_id": "administrator",
+                "role": "admin",
+                "tenant_id": "*",
+            },
+            digests["tenant-b"]: {
+                "principal_id": "tenant-viewer",
+                "role": "viewer",
+                "tenant_id": "b",
+            },
+        },
+    }
+    profile_path = tmp_path / "metrics-authorization.json"
+    profile_path.write_text(json.dumps(profile))
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(directory / "server.crt", directory / "server.key")
+    context.load_verify_locations(directory / "ca.crt")
+    context.verify_mode = ssl.CERT_REQUIRED
+    interpreter = FakeInterpreter([])
+    engine = _engine(tmp_path, interpreter, FakePlanner(), FakeController(_inventory()))
+    server = MissionRequestHttpServer(
+        ("127.0.0.1", 0),
+        engine,
+        65536,
+        role_map=_load_role_map(profile_path),
+        tls_context=context,
+        authorization_path=profile_path,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    endpoint = f"https://127.0.0.1:{server.server_port}"
+    try:
+        for path in ("/metrics", "/metrics/prometheus"):
+            for name, expected in (
+                ("viewer", 200),
+                ("tenant-a", 200),
+                ("tenant-b", 403),
+                ("unmapped", 401),
+            ):
+                request = urllib.request.Request(endpoint + path)
+                try:
+                    response = urllib.request.urlopen(
+                        request, context=_client(directory, name), timeout=2
+                    )  # noqa: S310
+                except urllib.error.HTTPError as error:
+                    response = error
+                with response:
+                    assert response.status == expected
+                    raw = response.read(65537)
+                    assert len(raw) <= 65536
+                    if expected == 200 and path.endswith("prometheus"):
+                        assert b"roboguide_mission_requests_total 0\n" in raw
+        for path, body in (
+            ("/v1/mission-requests/unknown", None),
+            ("/v1/mission-requests", b'{"instruction":"must not call a model"}'),
+        ):
+            request = urllib.request.Request(
+                endpoint + path,
+                data=body,
+                headers={"X-RoboGuide-Role": "admin", "Idempotency-Key": "denied"},
+            )
+            with pytest.raises(urllib.error.HTTPError) as denied:
+                urllib.request.urlopen(request, context=_client(directory, "viewer"), timeout=2)  # noqa: S310
+            assert denied.value.code == 403
+        grants = cast(dict[str, dict[str, object]], profile["grants"])
+        grants[digests["viewer"]]["revoked"] = True
+        profile["revision"] = 2
+        profile_path.write_text(json.dumps(profile))
+        with pytest.raises(urllib.error.HTTPError) as revoked:
+            urllib.request.urlopen(
+                endpoint + "/metrics/prometheus", context=_client(directory, "viewer"), timeout=2
+            )  # noqa: S310
+        assert revoked.value.code == 401
+        assert interpreter.calls == []
+        assert engine.metrics()["mission_requests_total"] == 0
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_metrics_authorization_codec_upgrade_fences_old_profile_writers(tmp_path: Path) -> None:
+    """Retain original grants across v0.1 upgrade, then refuse a higher-revision downgrade."""
+    path = tmp_path / "authorization.json"
+    leaf = "sha256:" + "a" * 64
+    profile = {
+        "schema_version": LEGACY_AUTHORIZATION_SCHEMA,
+        "profile_id": "original",
+        "revision": 1,
+        "grants": {leaf: {"principal_id": "original-admin", "role": "admin", "tenant_id": "*"}},
+    }
+    path.write_text(json.dumps(profile))
+    engine = _engine(tmp_path, FakeInterpreter([]), FakePlanner(), FakeController(_inventory()))
+    engine.accept_authorization(load_authorization(path))
+    profile.update(schema_version=AUTHORIZATION_SCHEMA, revision=2)
+    path.write_text(json.dumps(profile))
+    engine.accept_authorization(load_authorization(path))
+    profile.update(schema_version=LEGACY_AUTHORIZATION_SCHEMA, revision=3)
+    path.write_text(json.dumps(profile))
+    with pytest.raises(MissionRequestError, match="cannot downgrade"):
+        engine.accept_authorization(load_authorization(path))
+    profile["grants"][leaf]["role"] = "metrics-reader"  # type: ignore[index]
+    path.write_text(json.dumps(profile))
+    with pytest.raises(MissionServiceConfigError):
+        load_authorization(path)
 
 
 def test_mtls_identity_tenant_forgery_and_slow_handshake(tmp_path: Path) -> None:

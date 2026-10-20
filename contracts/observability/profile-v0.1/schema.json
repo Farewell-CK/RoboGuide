@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:roboguide:observability-profile:v0.1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema", "profile_id", "revision", "cluster", "domain", "scrape_seconds", "evaluation_seconds", "pending_seconds", "latency_seconds", "backlog_messages", "alertmanager", "receiver", "services"],
+  "properties": {
+    "schema": {"const": "roboguide.observability-profile/v0.1"},
+    "profile_id": {"$ref": "#/$defs/identifier"},
+    "cluster": {"$ref": "#/$defs/identifier"},
+    "domain": {"$ref": "#/$defs/identifier"},
+    "revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+    "scrape_seconds": {"type": "integer", "minimum": 1, "maximum": 300},
+    "evaluation_seconds": {"type": "integer", "minimum": 1, "maximum": 300},
+    "pending_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "latency_seconds": {"type": "integer", "minimum": 1, "maximum": 300},
+    "backlog_messages": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "alertmanager": {"$ref": "#/$defs/endpoint"},
+    "receiver": {"$ref": "#/$defs/endpoint"},
+    "services": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/service"}}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$"},
+    "path": {"type": ["string", "null"], "maxLength": 4096},
+    "endpoint": {
+      "type": "object", "additionalProperties": false,
+      "required": ["url", "ca_file", "cert_file", "key_file", "server_name"],
+      "properties": {
+        "url": {"type": "string", "format": "uri", "maxLength": 2048},
+        "ca_file": {"$ref": "#/$defs/path"}, "cert_file": {"$ref": "#/$defs/path"},
+        "key_file": {"$ref": "#/$defs/path"}, "server_name": {"type": ["string", "null"], "maxLength": 253}
+      }
+    },
+    "service": {
+      "type": "object", "additionalProperties": false,
+      "required": ["service_id", "kind", "url", "ca_file", "cert_file", "key_file", "server_name"],
+      "properties": {
+        "service_id": {"$ref": "#/$defs/identifier"},
+        "kind": {"enum": ["controller", "mission", "artifact", "replica"]},
+        "url": {"type": "string", "format": "uri", "maxLength": 2048},
+        "ca_file": {"$ref": "#/$defs/path"}, "cert_file": {"$ref": "#/$defs/path"},
+        "key_file": {"$ref": "#/$defs/path"}, "server_name": {"type": ["string", "null"], "maxLength": 253}
+      }
+    }
+  }
+}

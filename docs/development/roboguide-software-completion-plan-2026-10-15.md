@@ -21,6 +21,11 @@ SQL 故障路径：原进程/代际、完整 checkpoint 与 journal revision、�
 Commit；事实/ACK/命令被封住时保留最后提交查询。复制/catalog 不确定性仍经受控重放，
 告警/SLO、写锁内 I/O 收敛和全部其余阶段继续必需。
 
+[运行指标与实际告警验收](acceptance/2026-10-20-observability.md)补齐原生配置生成、受限
+mTLS scrape、两次实际 SQL 故障的 firing/resolved、固定 histogram/queue/drop/stop 信号
+与 replica status。wrapper v42/Mission 授权 v0.2 保护 metrics-only 角色和降级门禁；实际
+短窗口不关闭长期 SLO、跨主机人工响应或写锁 I/O 优化，完整其余阶段仍必须实施。
+
 ## 交付要求
 
 原审计 14 层、R01–R20 的全部非发布工作均为必需项，原 P2 不再是本轮的排除项。

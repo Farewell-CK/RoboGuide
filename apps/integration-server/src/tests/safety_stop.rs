@@ -747,6 +747,8 @@ fn previous_wrapper_cannot_contain_process_stop_authority() {
         )
         .unwrap();
         application::validate_isolation_checkpoint_schema(&saved).unwrap();
+        saved.schema = PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA.into();
+        application::validate_isolation_checkpoint_schema(&saved).unwrap();
         for schema in [
             PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA,
             "roboguide.controller-checkpoint/v32",

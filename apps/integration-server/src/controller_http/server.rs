@@ -51,10 +51,12 @@ struct OperatorPrincipal {
 /// Validates an optional role hint against the connection principal; headers never grant authority.
 fn operator_role(request: &ControlHttpRequest, principal: &OperatorPrincipal) -> Option<String> {
     let header = request.headers.get("x-roboguide-operator-role").cloned();
-    if header
-        .as_deref()
-        .is_some_and(|role| !matches!(role, "viewer" | "operator" | "recovery-admin"))
-    {
+    if header.as_deref().is_some_and(|role| {
+        !matches!(
+            role,
+            "viewer" | "operator" | "recovery-admin" | "metrics-reader"
+        )
+    }) {
         return None;
     }
     let role = principal
@@ -209,6 +211,16 @@ fn authorize_operator_request(
     method: &str,
     path: &str,
 ) -> Result<(), (&'static str, &'static str)> {
+    if operator_role(request, principal).as_deref() == Some("metrics-reader") {
+        return if method == "GET" && matches!(path, "/metrics" | "/healthz" | "/readyz") {
+            Ok(())
+        } else {
+            Err((
+                "403 Forbidden",
+                "metrics-only principal cannot access this route",
+            ))
+        };
+    }
     let required = match (method, path) {
         (
             "GET",
@@ -3034,8 +3046,23 @@ fn controller_metrics(
     let (memory_unresolved, memory_queries, memory_exhausted) =
         application::memory_use_query::metrics(controller, now);
     let (handoffs_pending, handoffs_manual) = application::memory_handoff::metrics(controller);
-    Ok(format!(
-        "# HELP roboguide_authority_write_enabled Whether this process admits durable authority writes.\n\
+    let (stop_pending, stop_manual, stop_overdue) =
+        application::safety_stop::metrics(controller, now);
+    let dispatch_pending = controller.bridge.pending_dispatch_intents().len();
+    let mut output = format!(
+        "# HELP roboguide_stop_purposes_pending Retained stop purposes without confirmed original evidence.\n\
+         # TYPE roboguide_stop_purposes_pending gauge\n\
+         roboguide_stop_purposes_pending {stop_pending}\n\
+         # HELP roboguide_stop_purposes_manual Retained stop purposes requiring manual escalation.\n\
+         # TYPE roboguide_stop_purposes_manual gauge\n\
+         roboguide_stop_purposes_manual {stop_manual}\n\
+         # HELP roboguide_stop_purposes_overdue Unconfirmed original stop deadlines already elapsed.\n\
+         # TYPE roboguide_stop_purposes_overdue gauge\n\
+         roboguide_stop_purposes_overdue {stop_overdue}\n\
+         # HELP roboguide_execute_dispatch_intents_pending Actual pending durable Execute intents.\n\
+         # TYPE roboguide_execute_dispatch_intents_pending gauge\n\
+         roboguide_execute_dispatch_intents_pending {dispatch_pending}\n\
+         # HELP roboguide_authority_write_enabled Whether this process admits durable authority writes.\n\
          # TYPE roboguide_authority_write_enabled gauge\n\
          roboguide_authority_write_enabled {writes_enabled}\n\
          # HELP roboguide_authority_disabled_generation Last process-local write failure generation.\n\
@@ -3091,5 +3118,9 @@ fn controller_metrics(
         pending_groups,
         latest_sequence,
         journal_entries,
-    ))
+    );
+    output.push_str(&crate::observability::render(
+        controller.bridge.diagnostics(),
+    ));
+    Ok(output)
 }

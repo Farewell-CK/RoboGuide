@@ -41,7 +41,9 @@ def logical_rows(path: Path) -> dict[str, Any]:
         return result
 
 
-def run(source: Path, output: Path, old_node: Path) -> dict[str, Any]:
+def run(
+    source: Path, output: Path, old_node: Path, old_controller: Path | None = None
+) -> dict[str, Any]:
     """Reuse actual finished software work, without creating a Node inventory or device facts."""
     source = source.resolve(strict=True)
     original_result = json.loads((source / "result.json").read_bytes())
@@ -123,6 +125,8 @@ def run(source: Path, output: Path, old_node: Path) -> dict[str, Any]:
         ROOT / "target/debug/roboguide-node",
         old_node,
     ]
+    if old_controller is not None:
+        code_paths.append(old_controller)
     identity = {
         str(path): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() for path in code_paths
     }
@@ -321,6 +325,27 @@ def run(source: Path, output: Path, old_node: Path) -> dict[str, Any]:
                 source / (plane.lower() + "-authorization.json")
             )
         grpc, operator, artifact_address = address(), address(), address()
+        if old_controller is not None:
+            controller_database = restored / "controller/controller.sqlite3"
+            original_controller_rows = logical_rows(controller_database)
+            refused = subprocess.run(
+                [
+                    str(old_controller),
+                    grpc,
+                    str(controller_database),
+                    operator,
+                    artifact_address,
+                    str(restored / "cas"),
+                ],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                timeout=15,
+            )
+            (output / "old-controller.stderr").write_bytes(refused.stderr)
+            assert refused.returncode != 0 and b"unsupported checkpoint schema" in refused.stderr
+            assert wrapper["schema"].encode() in refused.stderr
+            assert logical_rows(controller_database) == original_controller_rows
         controller_log = (output / "controller-restored.log").open("wb")
         logs.append(controller_log)
         controller = subprocess.Popen(
@@ -427,6 +452,7 @@ def run(source: Path, output: Path, old_node: Path) -> dict[str, Any]:
             "verified_sql_tables": verified_tables,
             "manifest_digest": created["manifest_digest"],
             "actual_old_node_rejected": True,
+            "actual_old_controller_rejected": old_controller is not None,
             "actual_active_writer_refused": True,
             "restored_completed_attempts": len(attempts),
             "original_deadlines_preserved": True,
@@ -475,8 +501,13 @@ def main() -> None:
     parser.add_argument("--from", dest="source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--old-node", required=True, type=Path)
+    parser.add_argument("--old-controller", type=Path)
     args = parser.parse_args()
-    print(json.dumps(run(args.source, args.output, args.old_node), sort_keys=True))
+    print(
+        json.dumps(
+            run(args.source, args.output, args.old_node, args.old_controller), sort_keys=True
+        )
+    )
 
 
 if __name__ == "__main__":

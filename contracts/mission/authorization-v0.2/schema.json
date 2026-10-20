@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:roboguide:mission-authorization:v0.2",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "profile_id", "revision", "grants"],
+  "properties": {
+    "schema_version": {"const": "roboguide.mission-authorization/v0.2"},
+    "profile_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+    "grants": {"type": "object", "minProperties": 1, "maxProperties": 4096,
+      "propertyNames": {"pattern": "^sha256:[0-9a-f]{64}$"},
+      "additionalProperties": {"$ref": "#/$defs/grant"}}
+  },
+  "$defs": {"grant": {
+    "type": "object", "additionalProperties": false,
+    "required": ["principal_id", "role", "tenant_id"],
+    "properties": {
+      "principal_id": {"type": "string", "minLength": 1, "maxLength": 128},
+      "role": {"enum": ["viewer", "submitter", "approver", "operator", "admin", "metrics-reader"]},
+      "tenant_id": {"type": "string", "minLength": 1, "maxLength": 128},
+      "not_before_ms": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+      "expires_at_ms": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+      "revoked": {"type": "boolean"}
+    },
+    "allOf": [
+      {"if": {"properties": {"role": {"const": "metrics-reader"}}}, "then": {"properties": {"tenant_id": {"const": "*"}}}},
+      {"if": {"properties": {"tenant_id": {"const": "*"}}}, "then": {"properties": {"role": {"enum": ["admin", "metrics-reader"]}}}}
+    ]
+  }}
+}

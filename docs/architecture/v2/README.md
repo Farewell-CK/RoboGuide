@@ -1,5 +1,11 @@
 # RoboGuide V2 架构基线
 
+[ADR-0115](../../decisions/0115-bounded-observability-and-alert-delivery.md) 定义有界只读
+运行指标和真实 Prometheus/Alertmanager 投递。固定标签、丢样和 queue 不完整保持可见，
+监控不参与 Control/Runtime 决策，也不生成 Node 或设备事实。
+专用 metrics-reader 的权威由 wrapper v42 与 Mission authorization v0.2 保护，旧 wrapper
+不能夹带新角色，v41 原 process-exit/Memory/verifier 证据可按原启动事务迁移。
+
 [ADR-0114](../../decisions/0114-write-disabled-controller-recovery.md) 定义持久化错误后的
 write-disabled 进程策略、最后提交查询与绑定原 checkpoint 的显式恢复。原 writer ordering、
 Node durable ACK、来源时间和全部资源所有权不变；不确定复制/catalog 仍要求受控重放。

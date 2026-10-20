@@ -100,6 +100,11 @@ Active Map 全输入门禁已接通。Node journal v13 增加唯一 writer；静
 save/commit 故障后的最后提交查询、Node unavailable、上传中 chunk fence 与原证据探针。
 它保留原复制 watchdog/受控 replay；F10 完整告警/SLO 和写锁 I/O 优化仍未关闭。
 
+[原生监控与通知验收](acceptance/2026-10-20-observability.md)接通真实 Prometheus/
+Alertmanager、两次 firing/resolved 与实际 replica metrics。Controller wrapper 当前 v42，
+Mission authorization v0.2 的专用 metrics-reader 不可业务读写；旧 writer/降级拒绝与
+v41 证据迁移均检查。长期 SLO、跨主机/值守路由和写锁 I/O 收敛继续为必需项。
+
 | 阶段 | 剩余必需交付 | 下一项可验收结果 |
 | --- | --- | --- |
 | F0 | 将部署 profile 的拓扑、目录、故障域、身份/协议支持矩阵与退出条件做成可验证输入 | 配置驱动的零 Node 启动和软件部署门禁；真实地址/设备证据缺失保持显式 |

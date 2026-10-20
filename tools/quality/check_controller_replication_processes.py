@@ -16,6 +16,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,7 @@ def run(
 
     members = {str(index): member_address() for index in range(1, 4)}
     routes = [[free_address() for _ in range(3)] for _ in range(3)]
+    metric_routes = [free_address() for _ in range(3)]
     configurations: list[Path] = []
     replicas: list[subprocess.Popen[bytes] | None] = [None, None, None]
     result: dict[str, Any] = {
@@ -101,6 +103,16 @@ def run(
             (directory / f"replica-{index + 1}/status.json").read_text()
         )
         return value
+
+    def metrics(index: int) -> str:
+        """Read this actual supervisor's private observation endpoint, never a failover command."""
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open("http://" + metric_routes[index] + "/metrics", timeout=3) as response:  # noqa: S310
+            raw = response.read(64 * 1024 + 1)
+        if not isinstance(raw, bytes):
+            raise ValueError("replica metrics response is not bytes")
+        assert len(raw) <= 64 * 1024
+        return raw.decode()
 
     def live_leader(exclude: int | None = None) -> tuple[int, str] | None:
         """Confirm an observed owned child through its actual HTTP route."""
@@ -260,6 +272,7 @@ def run(
                 "grpc_address": routes[index][0],
                 "http_address": routes[index][1],
                 "artifact_address": routes[index][2],
+                "metrics_address": metric_routes[index],
                 "controller_environment": {"ROBOGUIDE_CHECKPOINT_STORAGE": "full"},
             }
             if tls_profiles is not None:
@@ -285,6 +298,10 @@ def run(
         time.sleep(0.3)
         assert status(0)["child_pid"] is None, "minority started an executing Controller"
         result["minority_startup_fenced"] = True
+        initial_metrics = metrics(0)
+        assert "roboguide_replica_owned_controller 0\n" in initial_metrics
+        assert "roboguide_replica_quorum_epoch_present 0\n" in initial_metrics
+        (directory / "minority-metrics.prom").write_text(initial_metrics)
         for index in (1, 2):
             replicas[index] = start(
                 [str(ROOT / "target/debug/controller-replica"), str(configurations[index])],
@@ -441,6 +458,11 @@ def run(
                     return True
 
             await_condition(majority_loss_fenced, "leader loses actual majority")
+            await_condition(
+                lambda: "roboguide_replica_quorum_epoch_present 0\n" in metrics(new_index),
+                "actual supervisor metrics observe quorum loss",
+            )
+            (directory / "quorum-loss-metrics.prom").write_text(metrics(new_index))
             assert [fixture.records() for fixture in fixtures] == after["local"]
             result["majority_loss_fences_without_repeating_or_stopping_local_work"] = True
         finally:
@@ -461,6 +483,9 @@ def run(
             return evidence(index, endpoint)
 
         restored = await_condition(restored_evidence, "majority restores with fresh Node sessions")
+        for index in range(3):
+            (directory / f"restored-replica-{index + 1}.prom").write_text(metrics(index))
+        result["actual_supervisor_metrics"] = True
         save(directory / "after-majority-restore.json", restored)
         assert [fixture.records() for fixture in fixtures] == after["local"]
         result["passed"] = True
