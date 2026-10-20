@@ -117,6 +117,8 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
                 "内容回收与恢复验收",
                 "docs/development/acceptance/2026-10-20-content-reclamation-and-recovery.md",
             ),
+            ("Controller 写入恢复", "docs/development/controller-write-recovery-v0.1.md"),
+            ("写入恢复验收", "docs/development/acceptance/2026-10-20-authority-write-recovery.md"),
             ("运行时可靠性故障矩阵", "docs/development/runtime-reliability-fault-matrix.md"),
             ("ADR 遗留核验", "docs/development/adr-follow-up-register.md"),
             ("Controller 事务性能", "docs/development/controller-persistence-performance.md"),

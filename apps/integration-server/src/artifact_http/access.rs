@@ -113,6 +113,13 @@ pub(super) fn authorize_blob_read(
         .write_gate
         .lock()
         .map_err(|_| HttpError::service_unavailable("content authority ordering unavailable"))?;
+    catalog
+        .event_log
+        .require_writes_enabled()
+        .map_err(|_| HttpError::service_unavailable("content authority is write-disabled"))?;
+    catalog.event_log.require_read_authority().map_err(|_| {
+        HttpError::service_unavailable("current content authority epoch or quorum is unavailable")
+    })?;
     authority
         .revalidate_artifact_principal(principal)
         .map_err(HttpError::forbidden)?;

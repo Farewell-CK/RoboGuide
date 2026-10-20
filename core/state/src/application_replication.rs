@@ -189,6 +189,7 @@ impl SqliteEventLog {
         history_floor: Option<u64>,
         commands: &[ControlCommandJournalEntry],
     ) -> Result<(), SqliteEventLogError> {
+        self.require_writes_enabled()?;
         self.ensure_no_open_batch()?;
         if self.replicator.is_some()
             || history_floor.is_some_and(|floor| floor > checkpoint.event_sequence)
@@ -266,6 +267,11 @@ impl SqliteEventLog {
             )?;
         }
         transaction.commit()?;
+        *self
+            .committed_authority_revision
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)? =
+            authority_journal::revision(&connection)?;
         *self
             .next_event_number
             .lock()

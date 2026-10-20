@@ -438,6 +438,12 @@ impl ArtifactCatalog {
         Ok(())
     }
 
+    /// Requires complete post-Commit catalog installation before a local authority probe can resume.
+    /// The caller owns the original application writer; a fenced projection must replay at startup.
+    pub(crate) fn require_recovery_projection(&self) -> Result<(), String> {
+        self.ensure_available().map_err(|error| error.message)
+    }
+
     /// Fences this catalog and returns a retryable service-unavailable response.
     pub(super) fn fence(&self, reason: impl Into<String>) -> HttpError {
         let reason = reason.into();

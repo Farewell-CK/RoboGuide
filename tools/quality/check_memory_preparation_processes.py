@@ -22,6 +22,7 @@ import uuid
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from authority_recovery_profile import run as run_authority_recovery
 from check_identity_processes import request as tls_request
 from check_state_verifier_processes import ROOT, address, save, stop, wait_for
 from memory_content_reclamation import run as run_reclamation
@@ -62,6 +63,7 @@ def identity() -> dict[str, str]:
             "memory_use_query_processes.py",
             "memory_handoff_processes.py",
             "memory_content_reclamation.py",
+            "authority_recovery_profile.py",
         )
     ]
     result = {
@@ -116,6 +118,7 @@ def run(
     use_query_case: str = "manual",
     handoff_case: str | None = None,
     content_reclamation: bool = False,
+    authority_recovery: bool = False,
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
     use_lifecycle = use_lifecycle or use_case is not None or use_query_recovery
@@ -491,6 +494,20 @@ def run(
             25 * 60 if large_transfer else (60 if handoff_case is not None else 20),
         )
         assert published == manifest, published
+        authority_recovery_result = None
+        if authority_recovery:
+            authority_recovery_result = run_authority_recovery(
+                directory,
+                exchange,
+                origin,
+                contexts["admin"],
+                contexts["viewer"],
+                controller,
+                mission(mission_id, manifest),
+                cas,
+                contexts["enrolment-first"],
+                leaves["enrolment-first"],
+            )
         if handoff_case is not None:
             result = run_handoff(
                 GroupScenario(
@@ -885,6 +902,7 @@ def run(
             "actual_node_restarts": 2,
             "actual_backend_restarts": 3 if content_reclamation else 2,
             "content_reclamation": reclamation_result,
+            "authority_recovery": authority_recovery_result,
             "original_receiver_budget_unchanged": True,
             "transport_profile": "actual-mutual-tls-and-enrolled-nodes",
             "source_manifest": manifest,
@@ -932,6 +950,7 @@ def main() -> None:
     parser.add_argument("--large-transfer", action="store_true")
     parser.add_argument("--group-lifecycle", action="store_true")
     parser.add_argument("--content-reclamation", action="store_true")
+    parser.add_argument("--authority-recovery", action="store_true")
     parser.add_argument(
         "--handoff-case", choices=("complete", "expiry", "policy-change", "controller-restart")
     )
@@ -941,14 +960,14 @@ def main() -> None:
         "--use-case", choices=("revoke", "expire", "backend-restart", "controller-restart")
     )
     arguments = parser.parse_args()
-    if arguments.content_reclamation and (
+    if (arguments.content_reclamation or arguments.authority_recovery) and (
         arguments.group_lifecycle
         or arguments.handoff_case
         or arguments.use_query_recovery
         or arguments.use_query_case
         or arguments.use_case
     ):
-        parser.error("--content-reclamation extends the independently verified completion profile")
+        parser.error("reclamation/recovery extend the independently verified completion profile")
     if arguments.group_lifecycle and (
         arguments.use_lifecycle or arguments.use_case or arguments.large_transfer
     ):
@@ -968,6 +987,7 @@ def main() -> None:
                     arguments.use_query_case or "manual",
                     arguments.handoff_case,
                     arguments.content_reclamation,
+                    arguments.authority_recovery,
                 ),
                 sort_keys=True,
             )

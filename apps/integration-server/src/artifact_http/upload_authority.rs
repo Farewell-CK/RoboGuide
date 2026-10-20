@@ -485,6 +485,14 @@ impl ArtifactCatalog {
         id: &str,
         principal: &ArtifactPrincipal,
     ) -> Result<ArtifactUploadRecord, HttpError> {
+        self.event_log
+            .require_writes_enabled()
+            .map_err(|_| HttpError::service_unavailable("upload authority is write-disabled"))?;
+        self.event_log.require_read_authority().map_err(|_| {
+            HttpError::service_unavailable(
+                "current upload authority epoch or quorum is unavailable",
+            )
+        })?;
         let record = self
             .upload_record(id)?
             .ok_or_else(|| HttpError::not_found("unknown upload authority"))?;

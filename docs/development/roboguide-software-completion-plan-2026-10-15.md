@@ -16,6 +16,11 @@ journal v12，并保持旧 Memory 证据和原预算。集成完成不等于全�
 唯一 writer，以及 6 stores/72 tables/实际 CAS 的静止恢复。该结果不关闭 F4/F5 的全局引用
 与在线 HA 数据面，不改变 R01–R20 或后续必需交付。
 
+[写入禁用与显式恢复](acceptance/2026-10-20-authority-write-recovery.md)接通 R09/F10 的本地
+SQL 故障路径：原进程/代际、完整 checkpoint 与 journal revision、原主体和零事件探针
+Commit；事实/ACK/命令被封住时保留最后提交查询。复制/catalog 不确定性仍经受控重放，
+告警/SLO、写锁内 I/O 收敛和全部其余阶段继续必需。
+
 ## 交付要求
 
 原审计 14 层、R01–R20 的全部非发布工作均为必需项，原 P2 不再是本轮的排除项。

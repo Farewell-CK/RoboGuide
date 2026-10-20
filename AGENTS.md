@@ -5,6 +5,17 @@
 RoboGuide has a current V2 architecture baseline plus development and MVP documents.
 The first core bootstrap has started; the full runtime and MVP are not complete.
 
+ADR-0114 adds opt-in shared EventLog write isolation, enabled by the runnable Controller with a
+random actual process identity. Persistence failures latch the original generation before the
+writer releases; timers/facts remain available while mutations/ACK/outbox are fenced. Operator
+status reads committed memory; global recovery-admin rechecks the actual witness under the same
+writer before an unchanged-checkpoint/journal-head zero-event probe can clear the latch. Original
+timestamps/budgets/ownership remain. Replica uncertainty and catalog fences require startup replay;
+protected replica reads still require current epoch/quorum. Artifact admission/chunks retain the
+same fence and original audit. See `docs/development/controller-write-recovery-v0.1.md` and the actual
+two-Node `check_memory_preparation_processes.py --authority-recovery` gate. This does not close all
+F10 alerting/SLO or remaining F4-F9 requirements.
+
 ADR-0112 replaces caller-asserted GC permission with original-provider reclamation over actual
 imports, irreversible revoke receipts, workers and map references. Tombstone precedes unlink;
 original completed import history is retained while current availability stays false. Active Map

@@ -152,7 +152,11 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             .lock()
             .map_err(|_| "event-log write gate is poisoned")?;
         drop(wait);
-        self.events.begin_batch()?;
+        if let Err(error) = self.events.begin_batch() {
+            self.events
+                .disable_writes(&format!("Node transaction unavailable: {error}"), true)?;
+            return Err(error.into());
+        }
         let input_digest = format!(
             "sha256:{:x}",
             Sha256::digest(serde_json::to_vec(&inputs.iter().map(|(event, metadata)| {
@@ -162,6 +166,10 @@ impl<C: Clock> NodeFactDriver<'_, C> {
         let result = self.apply_open_batch(inputs, input_digest);
         if result.is_err() {
             let _ = self.events.rollback_batch();
+            if let Err(error) = &result {
+                self.events
+                    .disable_writes(&format!("shared Node fact failure: {error}"), true)?;
+            }
         }
         result
     }

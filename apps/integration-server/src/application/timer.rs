@@ -34,7 +34,13 @@ pub(crate) fn drive_application_timer_with_clock(
         .lock()
         .map_err(|_| "event-log write gate is poisoned")?;
     let gate_elapsed = gate_started.elapsed();
-    event_log.begin_batch()?;
+    if let Err(error) = event_log.begin_batch() {
+        event_log.disable_writes(
+            &format!("application timer transaction unavailable: {error}"),
+            true,
+        )?;
+        return Err(error.into());
+    }
     let transition = (|| {
         let lock_started = std::time::Instant::now();
         let live = controller
@@ -180,6 +186,7 @@ pub(crate) fn drive_application_timer_with_clock(
     })();
     if let Err(error) = transition {
         let _ = event_log.rollback_batch();
+        event_log.disable_writes(&format!("shared application timer failure: {error}"), true)?;
         return Err(error);
     }
     Ok(())

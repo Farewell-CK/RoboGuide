@@ -6,6 +6,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[path = "plan_validation_tests.rs"]
 mod plan_validation_tests;
 
+#[path = "write_recovery_tests.rs"]
+mod write_recovery_tests;
+
 /// Creates an empty Controller using the existing application and SQLite authority only.
 fn controller(log: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
     Arc::new(Mutex::new(ControllerState {

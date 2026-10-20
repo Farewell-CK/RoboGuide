@@ -2,12 +2,17 @@
 
 状态：验收草案。指标端点已经提供聚合观察；阈值、告警路由和跨主机演练需要部署环境冻结后执行。
 
+本地 SQL 故障已有[写入禁用与恢复指南](controller-write-recovery-v0.1.md)，实际软件门禁
+覆盖保存/Commit 两窗口、最后提交查询、Node unavailable、原探针和上传 chunk fence。
+这不证明下表恢复时限或人工响应 SLA 已达标；完整采集/告警部署仍须实际演练。
+
 ## 指标和 SLO
 
 | 信号 | 指标来源 | 候选阈值 | 告警动作 |
 | --- | --- | --- | --- |
 | Mission API availability | Mission `/readyz`、`/metrics` | 30 天 99.9% | 停止远程 mutation，保留本地审计查询 |
 | Controller readiness | Controller `/readyz`、event high-water | 5 分钟内恢复 | 进入 quorum/epoch fence，禁止新物理命令 |
+| Controller write-disabled | `/metrics` 的 `roboguide_authority_write_enabled`、`disabled_generation` | 1 分钟内告警、5 分钟内确认原故障 | 保留原目录和模式证据，核对 restart_required；只使用原探针或受控重放 |
 | Artifact readiness | Artifact `/readyz`、CAS/catalog counters | 5 分钟内恢复 | 禁止新的 publish/import，保留 replay evidence |
 | Node route freshness | Controller node/session metrics | 不超过 lease policy | 对绑定 Task 进入 reconciliation/Unknown |
 | Runtime Unknown | Controller metrics/recovery view | 0 个未解释增长 | 禁止 release、repeat、handoff |
@@ -22,6 +27,7 @@
 | --- | --- | --- | --- |
 | Mission restart | 杀进程并重启 | idempotency replay、audit continuity | 不重复创建 Mission，不丢 committed request |
 | Controller restart | 关闭 composition root | checkpoint/journal/reconciliation 顺序 | 未完成 physical attempt 不被自动重放 |
+| SQL save/Commit failure | 实际数据库的独立失败窗口 | first failure、原 SQL/State 时间、Node unavailable、上传 chunk fence | 查询保留、无未提交 ACK/派生命令，原探针 Commit 后恢复；原 receipt 不解除下一代故障 |
 | Route loss | 断开 Node gRPC | route/session fence、Runtime Unknown | 不释放 ownership，不接受旧 session fact |
 | Leader loss | 停止当前 replica | epoch/quorum、child supervisor | 旧 epoch 不发命令；新 leader 先物化完整视图 |
 | Quorum loss | 隔离两成员 | readiness、command delivery fence | no new mutation/physical command |

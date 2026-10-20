@@ -222,6 +222,7 @@ fn authorize_operator_request(
         | ("POST", "/v1/missions/assess-initial-support" | "/v1/missions/validate-plan") => 0,
         ("POST", "/v1/missions") => 1,
         ("POST", "/v1/maintenance/archive") => 2,
+        ("POST", "/v1/authority/recover") => 2,
         ("POST", "/v1/memory/imports") => 2,
         ("POST", "/v1/memory/import-queries") => 2,
         ("POST", "/v1/memory/use-queries") => 2,
@@ -681,6 +682,14 @@ where
             .await;
         }
     };
+    if !matches!(path, "/healthz" | "/readyz") && event_log.require_read_authority().is_err() {
+        return write_http_response(
+            stream,
+            "503 Service Unavailable",
+            serde_json::json!({"error":"current Controller epoch or quorum is unavailable"}),
+        )
+        .await;
+    }
     let tenant_check = {
         let live = controller
             .lock()
@@ -721,6 +730,78 @@ where
         authorization_time,
     ));
     let event_write_gate = &authorized_write_gate;
+    if method == "GET" && path == "/v1/authority-status" {
+        let body = serde_json::to_value(event_log.write_status()?)?;
+        return write_http_response(stream, "200 OK", body).await;
+    }
+    if method == "POST" && path == "/v1/authority/recover" {
+        let command = match serde_json::from_slice::<state::WriteRecoveryCommand>(&request.body) {
+            Ok(command) if request.body.len() <= 4096 => command,
+            _ => {
+                return write_http_response(
+                    stream,
+                    "400 Bad Request",
+                    serde_json::json!({"error":"invalid bounded write-recovery command"}),
+                )
+                .await;
+            }
+        };
+        let subject = principal
+            .subject
+            .clone()
+            .unwrap_or_else(|| "trusted-loopback:recovery-admin".into());
+        let shared = controller.clone();
+        let gate = event_write_gate.clone();
+        let log = event_log.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let _guard = gate.lock().map_err(|error| ("403 Forbidden", error))?;
+            {
+                let live = shared.lock().map_err(|_| {
+                    (
+                        "503 Service Unavailable",
+                        "controller lock is poisoned".into(),
+                    )
+                })?;
+                if let Some(catalog) = &live.memory_preparation.catalog {
+                    catalog
+                        .require_recovery_projection()
+                        .map_err(|error| ("503 Service Unavailable", error))?;
+                }
+            }
+            log.recover_writes(&command, &subject).map_err(|error| {
+                let status = match &error {
+                    state::SqliteEventLogError::Codec(_)
+                    | state::SqliteEventLogError::WriteDisabled(_) => "409 Conflict",
+                    _ => "503 Service Unavailable",
+                };
+                (status, error.to_string())
+            })
+        })
+        .await
+        .map_err(|error| format!("write-recovery worker failed: {error}"))?;
+        return match result {
+            Ok(receipt) => {
+                write_http_response(stream, "200 OK", serde_json::to_value(receipt)?).await
+            }
+            Err((status, error)) => {
+                write_http_response(stream, status, serde_json::json!({"error":error})).await
+            }
+        };
+    }
+    if method != "GET"
+        && !matches!(
+            path,
+            "/v1/missions/assess-initial-support" | "/v1/missions/validate-plan"
+        )
+        && let Err(error) = event_log.require_writes_enabled()
+    {
+        return write_http_response(
+            stream,
+            "503 Service Unavailable",
+            serde_json::json!({"error":error.to_string(),"authority":event_log.write_status()?}),
+        )
+        .await;
+    }
     if method == "GET" && path == "/metrics" {
         let metrics = controller
             .lock()
@@ -2936,12 +3017,16 @@ fn controller_metrics(
             )
         })
         .count();
-    let latest_sequence = event_log
-        .latest_sequence()
-        .map_err(|error| format!("event high-water unavailable: {error}"))?;
-    let journal_entries = event_log
-        .control_command_count()
-        .map_err(|error| format!("Control journal unavailable: {error}"))?;
+    let availability = event_log
+        .write_status()
+        .map_err(|error| error.to_string())?;
+    let latest_sequence = event_log.latest_sequence();
+    let journal_entries = event_log.control_command_count();
+    let storage_read_available = u8::from(latest_sequence.is_ok() && journal_entries.is_ok());
+    let latest_sequence = latest_sequence.map_or_else(|_| "NaN".into(), |value| value.to_string());
+    let journal_entries = journal_entries.map_or_else(|_| "NaN".into(), |value| value.to_string());
+    let writes_enabled = u8::from(availability.write_enabled);
+    let disabled_generation = availability.generation;
     let health_online = nodes
         .iter()
         .filter(|node| node.reported_status().health().is_schedulable())
@@ -2950,7 +3035,16 @@ fn controller_metrics(
         application::memory_use_query::metrics(controller, now);
     let (handoffs_pending, handoffs_manual) = application::memory_handoff::metrics(controller);
     Ok(format!(
-        "# HELP roboguide_memory_handoffs_pending Exchanges awaiting original barriers or explicit commit.\n\
+        "# HELP roboguide_authority_write_enabled Whether this process admits durable authority writes.\n\
+         # TYPE roboguide_authority_write_enabled gauge\n\
+         roboguide_authority_write_enabled {writes_enabled}\n\
+         # HELP roboguide_authority_disabled_generation Last process-local write failure generation.\n\
+         # TYPE roboguide_authority_disabled_generation gauge\n\
+         roboguide_authority_disabled_generation {disabled_generation}\n\
+         # HELP roboguide_storage_read_available Whether SQL event and journal counts were readable.\n\
+         # TYPE roboguide_storage_read_available gauge\n\
+         roboguide_storage_read_available {storage_read_available}\n\
+         # HELP roboguide_memory_handoffs_pending Exchanges awaiting original barriers or explicit commit.\n\
          # TYPE roboguide_memory_handoffs_pending gauge\n\
          roboguide_memory_handoffs_pending {handoffs_pending}\n\
          # HELP roboguide_memory_handoffs_manual Exchanges retaining ownership for manual reconciliation.\n\

@@ -275,6 +275,16 @@ impl SqliteEventLog {
         end_sequence: u64,
         sink: &S,
     ) -> Result<ArchiveManifest, SqliteEventLogError> {
+        self.require_writes_enabled()?;
+        self.observe_write_result(self.archive_and_gc_inner(end_sequence, sink))
+    }
+
+    /// Performs only the already-authorized local maintenance transaction and immutable sink check.
+    fn archive_and_gc_inner<S: ArchiveSink>(
+        &self,
+        end_sequence: u64,
+        sink: &S,
+    ) -> Result<ArchiveManifest, SqliteEventLogError> {
         self.ensure_no_open_batch()?;
         if end_sequence == 0 {
             return Err(SqliteEventLogError::ArchivePolicy(

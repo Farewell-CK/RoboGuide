@@ -96,6 +96,10 @@ Artifact 的最后一个应用 store/clone/upload 显式释放 writer lease，�
 Active Map 全输入门禁已接通。Node journal v13 增加唯一 writer；静止 SQL/CAS 恢复通过，
 全局 reference、在线内容恢复和下表其余项继续必需。
 
+[写入禁用与显式恢复](acceptance/2026-10-20-authority-write-recovery.md)接通真实 SQL
+save/commit 故障后的最后提交查询、Node unavailable、上传中 chunk fence 与原证据探针。
+它保留原复制 watchdog/受控 replay；F10 完整告警/SLO 和写锁 I/O 优化仍未关闭。
+
 | 阶段 | 剩余必需交付 | 下一项可验收结果 |
 | --- | --- | --- |
 | F0 | 将部署 profile 的拓扑、目录、故障域、身份/协议支持矩阵与退出条件做成可验证输入 | 配置驱动的零 Node 启动和软件部署门禁；真实地址/设备证据缺失保持显式 |

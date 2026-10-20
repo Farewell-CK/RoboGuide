@@ -53,9 +53,10 @@ pub use decision_policy::{
 pub use decision_state::DecisionStateSnapshot;
 pub use event_log::{
     APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch, ArchiveManifest,
-    ArchiveSink, CheckpointStoragePolicy, CheckpointWriteStats, ControlCommandJournalEntry,
-    FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS, PersistedCheckpoint, PersistedEvent,
-    SqliteEventLog, SqliteEventLogError, checkpoint_identity, validate_persisted_event,
+    ArchiveSink, AuthorityWriteStatus, CheckpointStoragePolicy, CheckpointWriteStats,
+    ControlCommandJournalEntry, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,
+    PersistedCheckpoint, PersistedEvent, SqliteEventLog, SqliteEventLogError, WriteFailure,
+    WriteRecoveryCommand, WriteRecoveryReceipt, checkpoint_identity, validate_persisted_event,
 };
 pub use memory::MemoryCatalogProjection;
 pub use node::InMemorySharedNodeState;

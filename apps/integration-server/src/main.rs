@@ -939,6 +939,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut event_log =
         state::SqliteEventLog::open_with_checkpoint_policy(&event_path, checkpoint_policy)?;
+    let mut availability_nonce = [0_u8; 16];
+    ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut availability_nonce)
+        .map_err(|_| "Controller process identity entropy unavailable")?;
+    let availability_process = availability_nonce
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    event_log = event_log.with_write_failure_fence(&availability_process)?;
     let replica_fence =
         controller_replication::ReplicaFenceClient::from_environment()?.map(Arc::new);
     if let Some(fence) = &replica_fence {
@@ -1349,9 +1357,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
-    let timer_fatal_sender = fatal_sender.clone();
     let http_fatal_sender = fatal_sender.clone();
     let artifact_fatal_sender = fatal_sender.clone();
+    drop(fatal_sender);
     let artifact_tls_for_server = artifact_tls.clone();
     let timer_diagnostics = diagnostic_handle.clone();
     let receiver_diagnostics = diagnostic_handle.clone();
@@ -1389,6 +1397,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             let scheduled = interval.tick().await;
+            if !timer_event_log
+                .write_status()
+                .is_ok_and(|status| status.write_enabled)
+            {
+                continue;
+            }
             timer_diagnostics.timing(
                 DiagnosticKind::Timer,
                 DiagnosticStage::TimerLag,
@@ -1402,14 +1416,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 timer_clock.as_ref(),
                 timer_verifier_feed.as_deref(),
             ) {
-                let reason = format!("application timer stopped: {error}");
-                let _ = timer_fatal_sender.send(reason);
-                return;
+                eprintln!("Controller entered write-disabled mode: {error}");
             }
         }
     });
     tokio::spawn(async move {
         let mut barrier = None;
+        let mut reported_generation = None;
         loop {
             let first = match barrier.take() {
                 Some(delivery) => delivery,
@@ -1435,8 +1448,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 diagnostics: &receiver_diagnostics,
             };
             if let Err(error) = driver.run(deliveries) {
-                let _ = fatal_sender.send(format!("durable Node fact driver failed: {error}"));
-                return;
+                let generation = receiver_event_log
+                    .write_status()
+                    .ok()
+                    .map(|status| status.generation);
+                if generation != reported_generation {
+                    eprintln!(
+                        "Node facts unavailable while Controller writes are disabled: {error}"
+                    );
+                    reported_generation = generation;
+                }
             }
         }
     });

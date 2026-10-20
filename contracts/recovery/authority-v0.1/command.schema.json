@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:roboguide:authority-write-recovery:v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "command_id", "process_id", "generation", "checkpoint_identity", "authority_revision"],
+  "properties": {
+    "schema_version": {"const": "roboguide.authority-write-recovery/v0.1"},
+    "command_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "process_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "generation": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "checkpoint_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "authority_revision": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615}
+  }
+}

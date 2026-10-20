@@ -2,6 +2,11 @@
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
+[Controller 故障恢复入口](docs/development/controller-write-recovery-v0.1.md)在实际持久化
+失败后封住写入与 Node durable ACK，保留最后提交查询；全局 recovery-admin 的原
+process/generation/checkpoint/revision 探针 Commit 成功后才能继续。复制不确定性仍经
+受控重放；恢复回执不解除设备安全或原执行预算门禁。
+
 原 provider 的[内容回收合同](contracts/memory/content-reclamation-v0.1/README.md)现核对实际
 原 import/revoke、worker 与 Active Map 引用，先持久 tombstone，再删除并对账；调用方布尔
 声明不授予 GC 权限。[恢复工具](apps/recovery-tool/README.md)在全部原 writer 退出后备份

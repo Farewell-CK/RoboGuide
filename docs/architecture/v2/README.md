@@ -1,5 +1,9 @@
 # RoboGuide V2 架构基线
 
+[ADR-0114](../../decisions/0114-write-disabled-controller-recovery.md) 定义持久化错误后的
+write-disabled 进程策略、最后提交查询与绑定原 checkpoint 的显式恢复。原 writer ordering、
+Node durable ACK、来源时间和全部资源所有权不变；不确定复制/catalog 仍要求受控重放。
+
 [ADR-0113](../../decisions/0113-quiescent-recovery-bundles-and-node-writer-lease.md) 定义静止恢复包：
 完整 metadata、原 command/receipt 与实际内容共同校验；备份取得各原 writer lease，恢复到
 新目录且不续原预算。Node journal v13 在 recovery 前取得唯一 writer，Engine clone 共用它。

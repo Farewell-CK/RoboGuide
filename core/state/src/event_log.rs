@@ -25,6 +25,8 @@ mod application_replication;
 mod archive;
 #[path = "authority_journal.rs"]
 mod authority_journal;
+#[path = "write_availability.rs"]
+mod write_availability;
 pub use application_replication::{
     APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch,
     checkpoint_identity, validate_persisted_event,
@@ -33,6 +35,9 @@ pub use archive::{
     ArchiveManifest, ArchiveSink, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,
 };
 pub use checkpoint_store::{CheckpointStoragePolicy, CheckpointWriteStats};
+pub use write_availability::{
+    AuthorityWriteStatus, WriteFailure, WriteRecoveryCommand, WriteRecoveryReceipt,
+};
 
 /// Previous JSON payload codec retained for Mission/Execution evidence compatibility.
 const EVENT_PAYLOAD_SCHEMA_V2: &str = "domain.EventPayload.json/v2";
@@ -182,6 +187,8 @@ pub enum SqliteEventLogError {
     ArchiveSink(String),
     /// Required replica epoch/quorum acceptance was unavailable or rejected this batch.
     Replication(String),
+    /// The application latched a prior write failure and requires explicit recovery.
+    WriteDisabled(String),
     /// SQLite returned an operational or schema error.
     Sqlite(rusqlite::Error),
     /// The event log mutex was poisoned by a previous panic.
@@ -202,6 +209,7 @@ impl std::fmt::Display for SqliteEventLogError {
                 formatter,
                 "controller replication acceptance failed: {error}"
             ),
+            Self::WriteDisabled(error) => write!(formatter, "authority writes disabled: {error}"),
             Self::Sqlite(error) => write!(formatter, "event log SQLite failure: {error}"),
             Self::LockPoisoned => formatter.write_str("event log lock is poisoned"),
             Self::Codec(error) => write!(formatter, "event log payload codec failure: {error}"),
@@ -221,6 +229,8 @@ impl From<rusqlite::Error> for SqliteEventLogError {
 /// SQLite WAL-backed immutable event envelope store.
 #[derive(Clone)]
 pub struct SqliteEventLog {
+    /// Opt-in application availability policy, shared by every clone of the actual store.
+    write_availability: Arc<Mutex<write_availability::WriteAvailability>>,
     /// Optional quorum acceptance port, installed before any Controller authority uses the store.
     replicator: Option<Arc<dyn ApplicationBatchReplicator>>,
     /// Optional bounded checkpoint-write observations; failure never changes storage authority.
@@ -229,6 +239,8 @@ pub struct SqliteEventLog {
     checkpoint_policy: CheckpointStoragePolicy,
     /// Last complete committed snapshot; shared copies never duplicate its byte buffer.
     checkpoint_cache: Arc<Mutex<Option<StoredCheckpoint>>>,
+    /// Original locally committed journal high-water, including revisions with no domain events.
+    committed_authority_revision: Arc<Mutex<u64>>,
     /// Candidate cache installed only after the existing SQLite transaction commits.
     pending_checkpoint_cache: Arc<Mutex<Option<StoredCheckpoint>>>,
     /// Serialized access to one SQLite connection.
@@ -398,11 +410,14 @@ impl SqliteEventLog {
         let next_event_number = metadata_event_number
             .max(max_sequence)
             .max(checkpoint_sequence);
+        let committed_authority_revision = authority_journal::revision(&connection)?;
         Ok(Self {
+            write_availability: Arc::new(Mutex::new(Default::default())),
             replicator: None,
             diagnostics: ports::DiagnosticHandle::default(),
             checkpoint_policy,
             checkpoint_cache: Arc::new(Mutex::new(checkpoint_cache)),
+            committed_authority_revision: Arc::new(Mutex::new(committed_authority_revision)),
             pending_checkpoint_cache: Arc::new(Mutex::new(None)),
             connection: Arc::new(Mutex::new(connection)),
             next_event_number: Arc::new(Mutex::new(next_event_number)),
@@ -611,6 +626,21 @@ impl SqliteEventLog {
         &self,
         schema: &str,
         checkpoint_json: &str,
+        command: ControlCommandJournalEntry,
+    ) -> Result<(), SqliteEventLogError> {
+        self.require_writes_enabled()?;
+        self.observe_write_result(self.save_checkpoint_command_inner(
+            schema,
+            checkpoint_json,
+            command,
+        ))
+    }
+
+    /// Writes one already-admitted checkpoint candidate inside the original application transaction.
+    fn save_checkpoint_command_inner(
+        &self,
+        schema: &str,
+        checkpoint_json: &str,
         mut command: ControlCommandJournalEntry,
     ) -> Result<(), SqliteEventLogError> {
         let batch_start = self
@@ -757,6 +787,22 @@ impl SqliteEventLog {
         path: &str,
         decision: &str,
     ) -> Result<(), SqliteEventLogError> {
+        self.require_writes_enabled()?;
+        self.observe_write_result(
+            self.record_service_access_inner(service, principal, method, path, decision),
+        )
+    }
+
+    /// Appends admission evidence only while the embedding application's actual writer is held.
+    fn record_service_access_inner(
+        &self,
+        service: &str,
+        principal: &str,
+        method: &str,
+        path: &str,
+        decision: &str,
+    ) -> Result<(), SqliteEventLogError> {
+        self.require_read_authority()?;
         self.ensure_no_open_batch()?;
         if [service, principal, method, path, decision]
             .iter()
@@ -776,6 +822,7 @@ impl SqliteEventLog {
 
     /// Verifies local authority coherence and the current quorum/epoch before advertising writes.
     pub fn readiness(&self) -> Result<(), SqliteEventLogError> {
+        self.require_writes_enabled()?;
         self.ensure_no_open_batch()?;
         if let Some(replicator) = &self.replicator {
             replicator
@@ -802,6 +849,12 @@ impl SqliteEventLog {
 
     /// Begins an application-level SQLite event batch.
     pub fn begin_batch(&self) -> Result<(), SqliteEventLogError> {
+        self.require_writes_enabled()?;
+        self.observe_write_result(self.begin_batch_inner())
+    }
+
+    /// Opens only the real application SQL transaction after the availability check.
+    fn begin_batch_inner(&self) -> Result<(), SqliteEventLogError> {
         if let Some(replicator) = &self.replicator {
             replicator
                 .assert_write_authority()
@@ -831,6 +884,12 @@ impl SqliteEventLog {
 
     /// Commits the current application-level event batch.
     pub fn commit_batch(&self) -> Result<(), SqliteEventLogError> {
+        self.require_writes_enabled()?;
+        self.observe_write_result(self.commit_batch_inner())
+    }
+
+    /// Completes replica acceptance and local Commit without publishing an uncommitted cache.
+    fn commit_batch_inner(&self) -> Result<(), SqliteEventLogError> {
         let mut batch_start = self
             .batch_start_number
             .lock()
@@ -900,8 +959,13 @@ impl SqliteEventLog {
                 .confirm_batch(batch)
                 .map_err(SqliteEventLogError::Replication)?;
         }
-        connection.execute("INSERT INTO event_log_metadata(key,value) VALUES ('journal_committed_revision',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [authority_journal::revision(&connection)?.to_string()])?;
+        let authority_revision = authority_journal::revision(&connection)?;
+        connection.execute("INSERT INTO event_log_metadata(key,value) VALUES ('journal_committed_revision',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [authority_revision.to_string()])?;
         connection.execute_batch("COMMIT")?;
+        *self
+            .committed_authority_revision
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)? = authority_revision;
         if let Some(candidate) = self
             .pending_checkpoint_cache
             .lock()
@@ -1160,10 +1224,11 @@ impl EventSink for SqliteEventLog {
         payload: EventPayload,
     ) {
         let result = self.append_inner(timestamp, correlation_id, causation_id, payload);
-        if let Err(error) = result
-            && let Ok(mut last_error) = self.last_error.lock()
-        {
-            *last_error = Some(error);
+        if let Err(error) = result {
+            let _ = self.disable_writes(&error, false);
+            if let Ok(mut last_error) = self.last_error.lock() {
+                *last_error = Some(error);
+            }
         }
     }
 }
@@ -1177,6 +1242,8 @@ impl SqliteEventLog {
         causation_id: Option<&EventId>,
         payload: EventPayload,
     ) -> Result<(), String> {
+        self.require_writes_enabled()
+            .map_err(|error| error.to_string())?;
         let batch_start = self
             .batch_start_number
             .lock()
