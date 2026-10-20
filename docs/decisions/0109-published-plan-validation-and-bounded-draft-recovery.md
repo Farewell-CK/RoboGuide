@@ -40,6 +40,24 @@
    绕过。已有的不可执行复用可能因此更早在 source gate 返回 422，而不再等待部署 gate
    的 409；两者都保留确定拒绝、零承诺的含义。通用独立 verifier 不使用此终态规则。
 
+## v0.2：显式拓扑与具体恢复反馈
+
+2026-10-20 扩展发布合同为 `execution-planning-evidence/v0.2` 与
+`plan-validation/v0.2`：在同一冻结来源下增加 `execution_topology`，区分支持的 effective
+coupling modes、DAG、Context relations 与 Actor binding lifetime。旧 v0.1 保留可读，
+缺失字段不被推断为新能力，旧回复不能代替配置要求的 v0.2 拓扑证明。
+
+Controller 将模式错误指向实际 Context/Task 的 `coupling_mode`，与资源存活期、意图和
+能力错误分开；不再用 endpoint 不足替代已知的模式原因。候选检查仍在 application，
+真实 Matching/Commit/Bind/release 权威不变。错误信息不包含 Node/Resource 候选。
+
+通用规划/审查/恢复指导区分终态事实、Task/Actor 边界、本地前置工作与完整终局验证。
+ordinary DAG 不自动要求 handoff；检查 P 不等于使 P 成立；不同时间的观测不能合成
+同时成立的目标。实际需要合作或状态共享时仍保留需求并暴露部署缺口。
+
+字段、兼容性与共享的合成回归见
+[执行规划合同 v0.2](../../contracts/mission/execution-planning-v0.2/README.md)。
+
 ## 边界与验收
 
 不改变 MissionPlan v0.8、Node Protocol、Core 的承诺/释放权威、正式样本准入、

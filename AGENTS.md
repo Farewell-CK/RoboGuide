@@ -845,7 +845,12 @@ empty placeholders or a top-level `src/`.
 ## Build, Test, and Development Commands
 
 ADR-0109 adds the inventory-free, read-only Controller `POST /v1/missions/validate-plan`
-query (`roboguide.plan-validation/v0.1`). Published deployment/verifier checks are shared with
+query (`roboguide.plan-validation/v0.2`, with explicit v0.1 read compatibility). The digest-bound
+execution-planning evidence v0.2 publishes supported modes, DAG/Context-relation support and
+session-stable Actor binding without inventory. Missing v0.1 fields never grant new support;
+configured v0.2 topology must match the Controller response. Typed logical code/path feedback
+separates mode, capability and retained-resource conflicts without rewriting real cooperation.
+Published deployment/verifier checks are shared with
 submission; the query never creates Groups, events, bindings or reservations. Configured MI
 execution-planning evidence enables the query for every newly generated or repaired candidate.
 Source drift and HTTP failure are system failures, while exact-plan negative findings retain

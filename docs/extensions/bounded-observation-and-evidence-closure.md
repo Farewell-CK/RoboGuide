@@ -46,9 +46,10 @@ feasibility v0.6 的 `finality_profile` 固定三个中立字段：
 有界候选匹配，并在创建 Group 前拒绝无法闭合的容量冲突；这不授予任何预留或释放权限。
 
 感知与重排的 live deployment 还在每次 reset 后、Mission Service 启动前发布
-`roboguide.execution-planning-evidence/v0.1`。该 artifact 将同一份 semantic evidence 的
+`roboguide.execution-planning-evidence/v0.2`。该 artifact 将同一份 semantic evidence 的
 `run/episode/scene/dataset` identity、Habitat 官方 terminal verifier source，以及
-endpoint 数量、capacity-one、resource release 和 verifier publication 绑定到一个 digest。
+endpoint 数量、capacity-one、resource release、verifier publication 和明确的
+`execution_topology` 支持绑定到一个 digest。旧 v0.1 保持可读，不获得其未发布的能力。
 Planner、Reviewer 和 Repairer 看到的是这份不可变的 deployment declaration；它不是 live
 Node inventory，也不选择 Actor 或 Physical Entity。MI 检查同一 Task 的同时 Role 需求和
 终态 verifier 在所有 session slots 结束前持有的容量；independent Tasks 只有在 Control
@@ -57,6 +58,9 @@ Node inventory，也不选择 Actor 或 Physical Entity。MI 检查同一 Task �
 进入原有有界恢复。HTTP 失败、缺失接口和来源不匹配保持系统失败；前检不能授予提交、
 调度、资源或物理可达性保证。需同步部署包含该接口的 Controller，不能回退为跳过前检。
 逐 Task 可及时发布的独立 verifier 不受全局终态 source 的生命周期限制。
+只读回复 v0.2 回显同一拓扑声明；模式、能力与资源生命周期的具体错误保持各自 code/path。
+当任务需要条件为 true，snapshot verify 的负读数不能代替主动 acquisition；局部 acquisition
+先后成功也不能被锁存为联合终态成功。诊断复用原缓存，不额外调用官方谓词或 render。
 详见 [ADR-0109](../decisions/0109-published-plan-validation-and-bounded-draft-recovery.md)。缺失、篡改或跨 reset
 的 artifact 会让 live Mission Service 在请求前 fail closed；offline prepare 可以只验证配置
 模板，不宣称已经拥有本次 reset 的 verifier evidence。

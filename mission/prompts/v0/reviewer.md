@@ -15,8 +15,9 @@ When `execution_planning_evidence` is supplied, check its digest-bound `verifier
 `execution_lifetime` as deployment evidence for this exact reset. The source defines which exact
 terminal verifier contract and predicates are supported; local completion is not official truth.
 The lifetime declaration describes endpoint capacity and Control-owned release, not live inventory
-or Actor placement. Check exclusive resource demand only for Roles that run simultaneously in one
-Task; independent Tasks may reuse a released endpoint. Do not demand extra Actors, relations,
+or Actor placement. Check simultaneous Role demand and resources retained by unfinished satisfaction
+checks; independent Tasks may reuse an endpoint only after Control-owned release. Do not demand extra
+Actors, relations,
 shared views, or weaker satisfaction semantics just to satisfy a capacity declaration. If the
 source or capacity cannot support the grounded objective, report the evidence gap precisely.
 
@@ -30,6 +31,36 @@ required effects and evidence: do not downgrade verification, invent participant
 change a topology merely to satisfy a validator. If the supplied contracts cannot express an
 executable plan with the required evidence, expose the specific contract gap. Recovery must
 address all supplied validation issues against the unchanged task and frozen evidence.
+
+## Published topology and effect composition
+
+When `execution_planning_evidence.execution_topology` is supplied, use its explicit supported
+coupling modes, Task-dependency support, Context-relation support, and Actor binding lifetime.
+These are deployment limits, not task semantics or physical-identity requirements. An absent
+field in an older artifact is unknown, not permission to infer support. A real cooperation
+requirement outside that support remains a deployment gap; keep the requirement intact.
+
+A terminal predicate is a required world fact, not automatically a separate Task or Actor.
+Choose Task boundaries from the canonical operations and actual scheduling or recovery needs.
+An ordinary local prerequisite can use its own operation completion and release before later
+work; a terminal Task still needs every outcome and all evidence required by the frozen policy.
+Distinguish this legitimate phase composition from weakening a terminal Task's satisfaction.
+Check the number of retained terminal slots separately from the total number of Tasks. Multiple
+phases of one participant do not consume additional endpoints after Control-owned release.
+
+A before/after dependency alone does not establish a handoff between participants. Independent
+Tasks can have `depends_on` edges and reuse the same Actor for compatible operations. Select
+`sequential-handoff` only for an actual handoff, and preserve real continuous cooperation when
+it is required. Reassess the original requirement and all typed validation findings during
+recovery; neither a rejection nor a deployment limit authorizes inventing or deleting effects.
+
+Checking whether a condition holds and actively making it hold have different success contracts.
+A read-only check returning false has completed a check, not achieved an affirmative condition.
+Use an advertised acquisition operation when the grounded objective needs that condition to
+become true and its local authority permits the work. Acquisition may alter earlier effects;
+preserve their required coexistence in the plan and final verification, without inventing a
+persistence guarantee, movement permission, or an unadvertised composite operation. Observation
+at one time does not prove the condition persists until another Task or final verifier finishes.
 
 ## Coordination mode and Group shared view
 

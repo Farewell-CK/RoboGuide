@@ -206,6 +206,9 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 草案恢复，接口不可用或来源不匹配保留系统失败。前检不做资源承诺，也不证明物理可达。
 普通顺序复用与终态 verifier 持有资源使用各自的声明规则，见
 [ADR-0109](docs/decisions/0109-published-plan-validation-and-bounded-draft-recovery.md)。
+执行声明及只读回复 v0.2 将支持的协作模式、DAG 与 Actor 生命周期显式绑定到冻结来源，
+以具体 code/path 区分模式、能力和资源冲突；旧 v0.1 缺失字段不被推断为新能力。
+字段与共享合成回归见[发布的执行拓扑合同](contracts/mission/execution-planning-v0.2/README.md)。
 
 负责 Mission Understanding、Clarification、Task Planning、Task Graph 和 Execution
 Requirements，回答 `What needs to be achieved?`。外部用户只提交文本 instruction；仅当存在

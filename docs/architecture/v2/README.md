@@ -276,11 +276,13 @@ profile，阻止 verifier 资源存活期无法闭合的拓扑；这些事实不
 contract 下重新选择，不具有 MI 重规划或 Control 重绑定权限。见 ADR-0094。
 Perception 与 rearrangement 的 live deployment 还会在 reset identity、官方 terminal verifier
 source 和 endpoint lifetime 都已发布后生成 digest-bound
-`roboguide.execution-planning-evidence/v0.1`。它作为同一份 deployment evidence 进入
+`roboguide.execution-planning-evidence/v0.2`。它作为同一份 deployment evidence 进入
 Planner、Reviewer、Repairer，并随 B1 archive 保留；它不是 live Node inventory、placement
-选择或资源预留。MI 只用它核对 exact verifier 与同一 Task 的同时 resource demand，独立
-Tasks 仍由 Control 在释放后复用 endpoint；缺失、篡改或跨 reset 的 artifact 在 MI 请求前
-fail closed。离线 prepare 只检查模板，不能宣称拥有本次 reset 的 verifier evidence。
+选择或资源预留。MI 用它核对 exact verifier、同时需求、等待终局的资源存活期及显式
+`execution_topology` 支持；独立 Tasks 可具有 DAG 边，仍由 Control 在释放后复用 endpoint。
+Context/Task mode、relations、容量与能力冲突以具体逻辑字段反馈，不能自动改写真实协作需求。
+旧 v0.1 保留其原字段和摘要，不推断缺失能力；缺失、篡改或跨 reset 的 artifact 在 MI
+请求前 fail closed。离线 prepare 只检查模板，不能宣称拥有本次 reset 的 verifier evidence。
 
 Mission Intelligence 的 verifier freshness 来自显式、版本化的系统 satisfaction policy；
 Planner、Reviewer、Repairer 消费同一不可变 policy 和 digest，不能为了填满 schema 猜测数值。

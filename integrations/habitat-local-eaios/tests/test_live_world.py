@@ -1122,6 +1122,72 @@ def test_active_acquisition_guard_retains_exact_entity_binding() -> None:
         Stage2ExecutionContract.for_invocation(invocation(0, ("observer",), observation=True))
 
 
+def test_local_acquisition_success_does_not_latch_the_joint_terminal_goal(tmp_path: Path) -> None:
+    """Different successful observation times cannot manufacture simultaneous official truth."""
+
+    class TransientDetectionGym(Gym):
+        """Expose non-overlapping actual cached detections while leaving official failure intact."""
+
+        def step(self, action: Any) -> tuple[Any, float, bool, dict[str, bool]]:
+            """Advance exactly once and publish the detections from that same fake step."""
+            result = super().step(action)
+            self._last_obs = {
+                "agent_0_detected_objects": [142] if self.steps == 2 else [],
+                "agent_1_detected_objects": [143] if self.steps == 4 else [],
+            }
+            return result
+
+    actor, gym = Actor(2), TransientDetectionGym({0: 1, 1: 1})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    runtime._config.enable_observation_acquisition = True
+    runtime._config.observation_acquisition_max_steps = 6
+    runtime._detection_sensors = {agent: f"agent_{agent}_detected_objects" for agent in range(2)}
+    simulator = SimpleNamespace(
+        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=[42, 43]
+    )
+    assert runtime._habitat_env is not None
+    runtime._habitat_env.task.pddl_problem = SimpleNamespace(
+        get_ordered_entities_list=lambda: [
+            SimpleNamespace(name="object-a"),
+            SimpleNamespace(name="object-b"),
+        ],
+        sim_info=SimpleNamespace(
+            search_for_entity=lambda entity: 0 if entity.name == "object-a" else 1,
+            sim=simulator,
+        ),
+    )
+    requests = {}
+    for agent, entity in enumerate(("object-a", "object-b")):
+        runtime.registry["endpoints"][agent]["operations"].append("observation.acquire@v1")
+        body = invocation(agent, ("observer-a", "observer-b"), observation=True).as_dict()
+        body.update(
+            operation="observation.acquire@v1",
+            objective=f"Navigate to {entity}",
+            parameters={"expected": f"detected({entity})"},
+        )
+        requests[agent] = parse_canonical_invocation({"invocation": body})
+    terminal: dict[int, LocalExecutionOutcome] = {}
+    _, summary = runtime.execute_live(
+        requests,
+        lambda: {},
+        lambda: False,
+        lambda *args: None,
+        lambda agent, request, outcome: terminal.update({agent: outcome}),
+        0.1,
+    )
+    assert actor.calls == gym.steps == 4
+    assert {agent: outcome.simulator_steps for agent, outcome in terminal.items()} == {0: 2, 1: 4}
+    assert all(outcome.state == "COMPLETED" for outcome in terminal.values())
+    assert all(not outcome.benchmark_task_achieved for outcome in terminal.values())
+    assert [agent.llm_model.calls for agent in actor.originals] == [2, 4]
+    assert gym._last_obs["agent_0_detected_objects"] == []
+    assert summary["final_info"]["pddl_success"] is False
+    assert summary["identity"]["episode_reset_count"] == 1
+    receipts = [json.loads(path.read_bytes()) for path in tmp_path.glob("observation-*.json")]
+    assert sorted(receipt["simulator_steps"] for receipt in receipts) == [2, 4]
+    assert all(receipt["condition_holds"] is True for receipt in receipts)
+
+
 def test_live_coordinator_has_no_unused_endpoint_barrier(tmp_path: Path) -> None:
     """One of three registered endpoints can finish its one-slot session without peer dispatch."""
     import threading
