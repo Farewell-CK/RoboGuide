@@ -264,7 +264,7 @@ def main() -> None:
             worker.proposer = LostCandidateResponse(
                 worker.proposer, arguments.lose_candidate_response
             )
-        for request in requests:
+        for request in worker.poll_requests(requests):
             print(json.dumps(worker.run_once(request), sort_keys=True), flush=True)
     finally:
         store.close()

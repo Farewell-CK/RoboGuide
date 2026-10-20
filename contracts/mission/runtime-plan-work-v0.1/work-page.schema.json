@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Authorized runtime MI work page v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "tenant", "principal", "items", "next_after"],
+  "properties": {
+    "schema_version": {"const": "roboguide.runtime-plan-work/v0.1"},
+    "tenant": {"type": "string", "minLength": 1, "maxLength": 128, "not": {"const": "*"}},
+    "principal": {"type": "string", "minLength": 1, "maxLength": 128},
+    "next_after": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+    "items": {
+      "type": "array", "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["mission_id", "ticket_id", "source_revision", "source_plan_digest", "remaining_ms"],
+        "properties": {
+          "mission_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "ticket_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "source_revision": {"type": "integer", "minimum": 1},
+          "source_plan_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+          "remaining_ms": {"type": "integer", "minimum": 1, "maximum": 3600000}
+        }
+      }
+    }
+  }
+}

@@ -2,6 +2,12 @@
 
 ## Project Structure & Module Organization
 
+ADR-0123 adds bounded read-only runtime MI discovery from committed current Generating tickets,
+filtered by actual TLS stable principal and exact tenant. Mission's unique-index/tenant JOIN resolves
+the original Request without deliberation. Worker v0.2 explicitly opts into paging; v0.1 retains
+static IDs. Listing never creates permission, renews budgets or bypasses original source/claim/nonce/
+Review/stop/revoke/Control gates. No authority checkpoint or Node contract changes are implied.
+
 RoboGuide has a current V2 architecture baseline plus development and MVP documents.
 The first core bootstrap has started; the full runtime and MVP are not complete.
 

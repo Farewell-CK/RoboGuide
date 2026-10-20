@@ -122,6 +122,7 @@ fn authorize_tenant_path(
                 | "/v1/node-identities"
                 | "/v1/verifier-evidence"
                 | "/v1/mission-goal-evidence"
+                | "/v1/runtime-plan-work"
                 | "/v1/state/records"
                 | "/v1/state/providers"
                 | "/v1/memory/use-queries"
@@ -907,6 +908,46 @@ where
                     serde_json::json!({"error": error}),
                 )
                 .await
+            }
+        };
+    }
+    if method == "GET" && path == "/v1/runtime-plan-work" {
+        let (Some(subject), Some(tenant), Some(_)) = (
+            principal.subject.as_deref(),
+            tenant.as_deref(),
+            principal.certificate.as_ref(),
+        ) else {
+            return write_http_response(stream,"403 Forbidden",serde_json::json!({"error":"runtime work requires actual TLS identity and one exact tenant"})).await;
+        };
+        let (after, limit) = match application::plan_revision::work_query(query) {
+            Ok(page) => page,
+            Err(error) => {
+                return write_http_response(
+                    stream,
+                    "400 Bad Request",
+                    serde_json::json!({"error":error}),
+                )
+                .await;
+            }
+        };
+        let result = {
+            let snapshot = controller
+                .lock()
+                .map_err(|_| "Controller authority unavailable")?;
+            application::plan_revision::work_page(
+                &snapshot,
+                subject,
+                tenant,
+                after.as_deref(),
+                limit,
+                clock.now(),
+            )
+        };
+        return match result {
+            Ok(body) => write_http_response(stream, "200 OK", body).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
             }
         };
     }

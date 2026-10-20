@@ -130,7 +130,7 @@ v41 证据迁移均检查。长期 SLO、跨主机/值守路由和写锁 I/O 收
 | F5 | 副本证书轮换、兼容升级协议、archive + snapshot + catalog + CAS 数据面恢复 | HA 接管后原内容可读或明确缺失；升级与回退不丢历史/预算/权限 |
 | F6 | divisible quota 的精确单位与 Local EAIOS 强制、完整时空承诺、真实成本源 | 缺 GPU/定位/交通 evidence 为 unavailable；逻辑账本不冒充 OS/物理强制 |
 | F7 | 策略授权的运行中抢占、耦合多 Role 恢复、异构 handoff/regrasp 与 hazard 合同 | 原完整 stop 集合、上下文验证、新 Commit/Rebind 和不确定性保留；设备证明独立 |
-| F8 | ADR-0120/0121 原目标/版本、显式 MI generation/claim/provider nonce、SQL 原回包/只读对账与安全新 Group 已接线；自动发现、scoped Memory 迁移继续实施 | 保留既成事实与原目标，经 Review/Control/stop gate 切换，不重做已完成副作用或未知模型调用；普通 resume/recovery 不绕过待完成修订 |
+| F8 | ADR-0120/0121/0123 原目标/版本、显式 MI generation/claim/provider nonce、实际主体/tenant 自动发现、SQL 原回包/只读对账与安全新 Group 已接线；scoped Memory 迁移继续实施 | 保留既成事实与原目标，经 Review/Control/stop gate 切换，不重做已完成副作用或未知模型调用；普通 resume/recovery 不绕过待完成修订 |
 | F9 | 真正跨控制域 transport、证书/tenant/domain 路由与多域恢复 | prepare/commit session 经真实服务边界消费，不把单进程记录当跨域完成 |
 | F10 | write-disabled 只读恢复、写锁内阻塞 I/O 收敛、完整指标/告警/SLO/runbook 和总验收 | 已提交快照仍可查询，恢复入口可审计；实际采集和告警演练后再关闭 |
 

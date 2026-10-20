@@ -58,7 +58,11 @@ def compose(
         "service",
         "proposer",
         "reviewer",
-    } or document.get("schema_version") != ("roboguide.runtime-mi-worker/v0.1"):
+        "discovery",
+    } or document.get("schema_version") not in {
+        "roboguide.runtime-mi-worker/v0.1",
+        "roboguide.runtime-mi-worker/v0.2",
+    }:
         raise RuntimeWorkError("unsupported runtime MI worker profile")
     requests = document.get("request_ids", [])
     poll = document.get("poll_ms", 1000)
@@ -73,6 +77,22 @@ def compose(
         or not 250 <= poll <= 60000
     ):
         raise RuntimeWorkError("runtime MI request/poll bounds invalid")
+    discovery = None
+    if document["schema_version"] == "roboguide.runtime-mi-worker/v0.2":
+        configured = document.get("discovery")
+        if (
+            requests
+            or not isinstance(configured, dict)
+            or set(configured) != {"page_size", "max_pages"}
+            or type(configured["page_size"]) is not int
+            or type(configured["max_pages"]) is not int
+            or not 1 <= configured["page_size"] <= 32
+            or not 1 <= configured["max_pages"] <= 4
+        ):
+            raise RuntimeWorkError("runtime MI discovery requires explicit bounded v0.2 input")
+        discovery = (configured["page_size"], configured["max_pages"])
+    elif "discovery" in document:
+        raise RuntimeWorkError("legacy runtime MI profile grants no discovery")
     for field in ("state_db", "mission_config"):
         if not isinstance(document.get(field), str) or not document[field].strip():
             raise RuntimeWorkError("runtime MI storage/configuration path absent")
@@ -124,6 +144,7 @@ def compose(
             semantic_reviewer,
             catalog,
             identity,
+            discovery,
         )
     except BaseException:
         store.close()
@@ -145,7 +166,16 @@ def main() -> int:
             print(json.dumps(worker.observe(arguments.observe_work), sort_keys=True), flush=True)
             return 0
         while True:
-            for request_id in requests:
+            try:
+                current = worker.poll_requests(requests)
+            except (RuntimeWorkError, OSError, ValueError) as error:
+                print(
+                    json.dumps({"status": "discovery_held", "reason": str(error)[:512]}), flush=True
+                )
+                if arguments.once:
+                    return 1
+                current = []
+            for request_id in current:
                 result: dict[str, Any]
                 try:
                     result = worker.run_once(request_id)

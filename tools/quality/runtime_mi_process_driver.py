@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from check_state_verifier_processes import save, stop, wait_for
+from mission.runtime_replanning_http import RuntimeJsonPeer
 from runtime_mi_process_profile import ProviderFixtureServer
 
 
@@ -47,6 +48,41 @@ def exercise_worker(
 ) -> dict[str, Any]:
     """Interrupt and resume actual workers without repeating original calls."""
     certificates = directory / "pki"
+    proposer = RuntimeJsonPeer(
+        controller,
+        "local",
+        "revision-proposer",
+        certificates / "viewer.crt",
+        certificates / "viewer.key",
+        certificates / "ca.crt",
+    )
+    administrator = RuntimeJsonPeer(
+        controller,
+        "local",
+        "revision-administrator",
+        certificates / "admin.crt",
+        certificates / "admin.key",
+        certificates / "ca.crt",
+    )
+    foreign = RuntimeJsonPeer(
+        controller,
+        "other-tenant",
+        "revision-proposer",
+        certificates / "viewer.crt",
+        certificates / "viewer.key",
+        certificates / "ca.crt",
+    )
+    status, discovered = proposer.request("GET", "/v1/runtime-plan-work?limit=1")
+    assert status == 200 and len(discovered["items"]) == 1
+    assert discovered["items"][0]["mission_id"] == view()["mission_id"]
+    assert not {"plan", "nodes", "inventory"} & discovered["items"][0].keys()
+    assert administrator.request("GET", "/v1/runtime-plan-work?limit=1")[1]["items"] == []
+    assert foreign.request("GET", "/v1/runtime-plan-work?limit=1")[0] == 403
+    assert (
+        proposer.request("GET", "/v1/runtime-plan-work?principal=revision-administrator")[0] == 400
+    )
+    discovery_evidence = directory / "runtime-mi-actual-discovery.json"
+    save(discovery_evidence, discovered)
     fixture_endpoint = f"http://127.0.0.1:{provider.server_port}"
     mission_configuration = directory / "runtime-mi-mission.toml"
     mission_configuration.write_text(f"""
@@ -84,11 +120,13 @@ api_key_env = "ROBOGUIDE_PROTOCOL_FIXTURE_UNUSED_CREDENTIAL"
     database = directory / "runtime-mi.sqlite3"
     profile = directory / "runtime-mi-worker.toml"
     sections = [
-        'schema_version = "roboguide.runtime-mi-worker/v0.1"',
+        'schema_version = "roboguide.runtime-mi-worker/v0.2"',
         "state_db = " + json.dumps(str(database)),
         "mission_config = " + json.dumps(str(mission_configuration)),
-        "request_ids = " + json.dumps([request_id]),
         "poll_ms = 1000",
+        "[discovery]",
+        "page_size = 1",
+        "max_pages = 4",
     ]
     for name, endpoint, leaf, principal in (
         ("service", service, "viewer", "revision-proposer"),
@@ -196,6 +234,11 @@ api_key_env = "ROBOGUIDE_PROTOCOL_FIXTURE_UNUSED_CREDENTIAL"
             third.returncode,
         ],
         "actual_request_service": True,
+        "actual_authorized_discovery": True,
+        "static_request_ids": 0,
+        "other_principal_queue_empty": True,
+        "foreign_tenant_discovery_rejected": True,
+        "discovery_evidence_sha256": hashlib.sha256(discovery_evidence.read_bytes()).hexdigest(),
         "actual_mtls_controller_commands": True,
         "original_provider_result_reused": True,
         "original_work_budget_preserved": True,

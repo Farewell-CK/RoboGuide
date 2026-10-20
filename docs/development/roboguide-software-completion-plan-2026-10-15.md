@@ -75,7 +75,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | 动态 learner/joint membership、leader transfer、同一成员 leaf/部署 CA 迁移已通过；旧数据/二进制升级及在线 archive/CAS 仍待完成 |
 | F6 资源/调度 | R16、R20 | divisible quota、完整时间/空间承诺、真实成本 evidence 与确定性策略 | cost evidence、逻辑 quota ledger 与 Prometheus 入口已通过；物理/OS 强制、完整时空和运行中抢占仍待完成 |
 | F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | 当前 stop/recovery/hold/rebind gate 回归通过；运行中抢占、耦合迁移和 hazard/交接协议软件仍须完成，真实物理证据独立待验 |
-| F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 原目标/版本、显式 MI generation/claim/phase nonce、SQL 原回包/只读对账与 stop/revoke 后新 Group 已接线；普通 resume/recovery 不可绕过，自动发现与 scoped Memory 迁移仍实施中 |
+| F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 原目标/版本、显式 MI generation/claim/phase nonce、实际主体/tenant 自动发现、SQL 原回包/只读对账与 stop/revoke 后新 Group 已接线；普通 resume/recovery 不可绕过，scoped Memory 迁移仍实施中 |
 | F9 层级/Federation | R20 | 控制域、跨域 prepare/commit、路由/授权与恢复 | 持久 epoch/digest/deadline prepare/commit session 已通过；跨域 transport/授权/恢复部署仍待完成 |
 | F10 运维与总验收 | R18、R19 的非发布部分 | 指标/告警、write-disabled 只读恢复、部署/迁移/回退、全功能验收 | 待完成 |
 

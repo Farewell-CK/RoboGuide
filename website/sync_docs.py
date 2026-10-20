@@ -129,6 +129,10 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
             ("运行期计划修订与原目标", "docs/development/runtime-plan-revision-v0.1.md"),
             ("运行期修订验收", "docs/development/acceptance/2026-10-20-runtime-plan-revision.md"),
             ("运行期 MI 工作", "docs/development/runtime-mission-intelligence-v0.2.md"),
+            (
+                "运行期 MI 自动发现",
+                "docs/development/acceptance/2026-10-20-runtime-mi-discovery.md",
+            ),
             ("运行期 MI 恢复验收", "docs/development/acceptance/2026-10-20-runtime-mi-recovery.md"),
             (
                 "运行期 MI 验收",

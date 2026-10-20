@@ -215,6 +215,214 @@ impl Fixture {
     }
 }
 
+/// Discovery is current evidence filtered by actual subject/tenant and cannot renew original authority.
+#[test]
+fn generation_work_discovery_is_readonly_current_and_tenant_principal_scoped() {
+    let fixture = Fixture::new();
+    fixture.install_for_trigger(true);
+    fixture
+        .command_schema(
+            GENERATION_SCHEMA,
+            "authorize-discovery",
+            1,
+            serde_json::json!({"kind":"authorize-generation"}),
+            "administrator",
+        )
+        .unwrap();
+    let mission = fixture.plan.goal().mission_id();
+    fixture.transition(|controller| {
+        switching::observe_trigger(
+            controller,
+            mission,
+            Trigger::LocalExecutionFailed,
+            fixture.clock.now(),
+        )
+        .unwrap();
+        switching::tick(controller, &fixture.clock, None, None).unwrap();
+    });
+    let mut controller = fixture.controller.lock().unwrap();
+    let original = serde_json::to_value(&controller.runtime_revisions).unwrap();
+    let page = work_page(
+        &controller,
+        "proposer",
+        "unit-tenant",
+        None,
+        1,
+        fixture.clock.now(),
+    )
+    .unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page["items"][0]["mission_id"], mission.as_str());
+    assert!(page["items"][0].get("plan").is_none());
+    assert!(page["items"][0].get("nodes").is_none());
+    assert_eq!(
+        serde_json::to_value(&controller.runtime_revisions).unwrap(),
+        original
+    );
+    for (principal, tenant, after) in [
+        ("administrator", "unit-tenant", None),
+        ("proposer", "other-tenant", None),
+        ("proposer", "unit-tenant", Some(mission.as_str())),
+    ] {
+        assert!(
+            work_page(
+                &controller,
+                principal,
+                tenant,
+                after,
+                32,
+                fixture.clock.now()
+            )
+            .unwrap()["items"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    assert!(work_page(&controller, "proposer", "*", None, 32, fixture.clock.now()).is_err());
+    let state = controller
+        .runtime_revisions
+        .get_mut(mission.as_str())
+        .unwrap();
+    state.candidates.values_mut().next().unwrap().base_revision += 1;
+    assert!(
+        work_page(
+            &controller,
+            "proposer",
+            "unit-tenant",
+            None,
+            32,
+            fixture.clock.now()
+        )
+        .unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let state = controller
+        .runtime_revisions
+        .get_mut(mission.as_str())
+        .unwrap();
+    state.candidates.values_mut().next().unwrap().base_revision -= 1;
+    state.revoked = true;
+    assert!(
+        work_page(
+            &controller,
+            "proposer",
+            "unit-tenant",
+            None,
+            32,
+            fixture.clock.now()
+        )
+        .unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        work_query("after=Mission%2B%E4%B8%80&limit=1").unwrap(),
+        (Some("Mission+一".into()), 1)
+    );
+    for query in [
+        "limit=0",
+        "limit=33",
+        "limit=1&limit=2",
+        "principal=proposer",
+        "after=a&after=b",
+        "after=%ff",
+        "after=%0a",
+        "after=%",
+    ] {
+        assert!(work_query(query).is_err(), "{query}");
+    }
+}
+
+/// Pagination covers multiple actual Orchestration admissions without inventing any Node or attempt.
+#[test]
+fn generation_discovery_pages_do_not_drop_or_repeat_active_missions() {
+    let mut fixture = Fixture::new();
+    for index in 0..3 {
+        if index > 0 {
+            let mut document = orchestration::mission_plan_document(&fixture.plan);
+            document["mission"]["id"] = serde_json::json!(format!("paged-mission-{index}"));
+            let plan = orchestration::decode_mission_plan(&document.to_string()).unwrap();
+            {
+                let mut controller = fixture.controller.lock().unwrap();
+                controller
+                    .bridge
+                    .control_mut()
+                    .register_mission_tenant(plan.goal().mission_id().clone(), "unit-tenant")
+                    .unwrap();
+                let ControllerState {
+                    orchestrator,
+                    bridge,
+                    ..
+                } = &mut *controller;
+                orchestrator
+                    .submit(
+                        plan.clone(),
+                        domain::ExecutionGroupId::new(format!("paged-group-{index}")).unwrap(),
+                        bridge.control_mut(),
+                        fixture.clock.now(),
+                        &domain::CorrelationId::new("page-admission").unwrap(),
+                        &mut fixture.log.clone(),
+                    )
+                    .unwrap();
+            }
+            fixture.plan = plan;
+        }
+        fixture.install_for_trigger(true);
+        fixture
+            .command_schema(
+                GENERATION_SCHEMA,
+                "authorize-paged-work",
+                1,
+                serde_json::json!({"kind":"authorize-generation"}),
+                "administrator",
+            )
+            .unwrap();
+        fixture.transition(|controller| {
+            switching::observe_trigger(
+                controller,
+                fixture.plan.goal().mission_id(),
+                Trigger::LocalExecutionFailed,
+                fixture.clock.now(),
+            )
+            .unwrap();
+            switching::tick(controller, &fixture.clock, None, None).unwrap();
+        });
+    }
+    let controller = fixture.controller.lock().unwrap();
+    let expected = controller
+        .runtime_revisions
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    let original = serde_json::to_value(&controller.runtime_revisions).unwrap();
+    let mut cursor = None;
+    let mut actual = Vec::new();
+    for _ in 0..3 {
+        let page = work_page(
+            &controller,
+            "proposer",
+            "unit-tenant",
+            cursor.as_deref(),
+            1,
+            fixture.clock.now(),
+        )
+        .unwrap();
+        assert_eq!(page["items"].as_array().unwrap().len(), 1);
+        actual.push(page["items"][0]["mission_id"].as_str().unwrap().to_string());
+        cursor = page["next_after"].as_str().map(str::to_string);
+    }
+    assert!(cursor.is_none());
+    assert_eq!(actual, expected);
+    assert_eq!(
+        serde_json::to_value(&controller.runtime_revisions).unwrap(),
+        original
+    );
+}
+
 /// Explicit generation freezes a zero-attempt unit source and never bypasses exact Review or old-writer fences.
 #[test]
 fn generation_waits_for_original_candidate_and_review_without_renewing_ownership() {

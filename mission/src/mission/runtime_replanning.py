@@ -83,6 +83,7 @@ class RuntimeReplanningWorker:
         semantic_reviewer: ResponsesMissionReviewer,
         catalog: CanonicalCapabilityCatalog,
         identity: dict[str, Any],
+        discovery: tuple[int, int] | None = None,
     ) -> None:
         """Freeze actual peers and an explicitly configured separate reviewer."""
         if (
@@ -98,7 +99,71 @@ class RuntimeReplanningWorker:
         self.store, self.service, self.proposer, self.reviewer = store, service, proposer, reviewer
         self.transport, self.generator = transport, generator
         self.semantic_reviewer, self.catalog, self.identity = semantic_reviewer, catalog, identity
+        if discovery is not None and not (1 <= discovery[0] <= 32 and 1 <= discovery[1] <= 4):
+            raise RuntimeWorkError("runtime MI discovery bounds invalid")
+        self.discovery = discovery
+        self._discovery_cursor: str | None = None
         self.transport.before_call = self._admit_provider_call
+
+    def poll_requests(self, configured: list[str]) -> list[str]:
+        """Discover bounded original Requests; the queue grants no model or execution authority."""
+        if self.discovery is None:
+            return list(configured)
+        if configured:
+            raise RuntimeWorkError("discovery cannot silently combine a static Request list")
+        page_size, max_pages = self.discovery
+        requests: list[str] = []
+        for _ in range(max_pages):
+            query = f"?limit={page_size}"
+            if self._discovery_cursor is not None:
+                query += "&after=" + quote(self._discovery_cursor, safe="")
+            page = _read(self.proposer, "/v1/runtime-plan-work" + query)
+            items = page.get("items")
+            if (
+                page.get("schema_version") != "roboguide.runtime-plan-work/v0.1"
+                or page.get("tenant") != self.proposer.tenant
+                or page.get("principal") != self.proposer.principal
+                or not isinstance(items, list)
+                or len(items) > page_size
+            ):
+                raise RuntimeWorkError("runtime MI discovery identity/page is detached")
+            previous = self._discovery_cursor or ""
+            for item in items:
+                mission = item.get("mission_id") if isinstance(item, dict) else None
+                if (
+                    not isinstance(mission, str)
+                    or not 1 <= len(mission) <= 128
+                    or mission <= previous
+                    or not isinstance(item.get("ticket_id"), str)
+                    or not _digest(item.get("source_plan_digest"))
+                    or type(item.get("remaining_ms")) is not int
+                    or item["remaining_ms"] <= 0
+                ):
+                    raise RuntimeWorkError("runtime MI discovery row is invalid or unordered")
+                previous = mission
+                status, lookup = self.service.request(
+                    "GET", "/v1/mission-requests/by-mission/" + quote(mission, safe="")
+                )
+                if status == 404:
+                    continue
+                request_id = lookup.get("request_id")
+                if (
+                    status != 200
+                    or lookup.get("schema_version") != "roboguide.mission-request-lookup/v0.1"
+                    or lookup.get("mission_id") != mission
+                    or not isinstance(request_id, str)
+                    or not 1 <= len(request_id) <= 128
+                    or request_id in requests
+                ):
+                    raise RuntimeWorkError("runtime MI original Request lookup is detached")
+                requests.append(request_id)
+            cursor = page.get("next_after")
+            if cursor is not None and (not items or cursor != previous):
+                raise RuntimeWorkError("runtime MI discovery cursor is detached")
+            self._discovery_cursor = cursor
+            if cursor is None:
+                break
+        return requests
 
     def _admit_provider_call(
         self, work_id: str, phase: str, nonce: str, request_digest: str

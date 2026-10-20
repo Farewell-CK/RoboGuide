@@ -328,6 +328,23 @@ def test_mtls_identity_tenant_forgery_and_slow_handshake(tmp_path: Path) -> None
             timeout=2,
         ) as response:
             assert json.loads(response.read()) == first
+        lookup = f"{endpoint}/v1/mission-requests/by-mission/{first['mission_id']}"
+        for name in ("tenant-a", "viewer"):
+            with urllib.request.urlopen(
+                lookup, context=_client(directory, name), timeout=2
+            ) as response:  # noqa: S310
+                found = json.loads(response.read())
+                assert found["request_id"] == first["request_id"]
+                assert found["mission_id"] == first["mission_id"]
+        for address, name in ((lookup, "tenant-b"), (lookup + "-absent", "viewer")):
+            with pytest.raises(urllib.error.HTTPError) as hidden:
+                urllib.request.urlopen(address, context=_client(directory, name), timeout=2)  # noqa: S310
+            assert hidden.value.code == 404
+        forged = urllib.request.Request(lookup, headers={"X-RoboGuide-Tenant": "a"})
+        with pytest.raises(urllib.error.HTTPError) as denied_lookup:
+            urllib.request.urlopen(forged, context=_client(directory, "tenant-b"), timeout=2)  # noqa: S310
+        assert denied_lookup.value.code == 403
+        assert len(interpreter.calls) == 1
         with pytest.raises((urllib.error.URLError, ssl.SSLError)):
             urllib.request.urlopen(
                 f"{endpoint}/healthz", context=_client(directory, None), timeout=2

@@ -574,6 +574,26 @@ class MissionRequestStore:
         decoded: object = json.loads(str(row[0]))
         return _restore_record(decoded)
 
+    def request_for_mission(self, mission_id: str, tenant_id: str) -> str | None:
+        """Use the original unique Mission index and tenant join; legacy absence stays hidden."""
+        if (
+            not isinstance(mission_id, str)
+            or not 1 <= len(mission_id) <= 128
+            or mission_id.strip() != mission_id
+            or any(ord(char) < 32 for char in mission_id)
+            or not tenant_id
+            or tenant_id == "*"
+        ):
+            raise MissionRequestError("Mission lookup requires an exact identity and tenant")
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT r.request_id FROM mission_requests r "
+                "JOIN mission_request_tenants t ON t.request_id=r.request_id "
+                "WHERE r.mission_id=? AND t.tenant_id=?",
+                (mission_id, tenant_id),
+            ).fetchone()
+        return None if row is None else str(row[0])
+
     def grounding_context(
         self, request_id: str, context_digest: str
     ) -> GroundingContextSnapshot | None:

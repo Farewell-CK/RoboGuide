@@ -1,5 +1,9 @@
 # RoboGuide
 
+[运行期 MI 自动发现](docs/development/acceptance/2026-10-20-runtime-mi-discovery.md)按实际
+证书主体和 tenant 读取当前原任务，再查回原 Request；部署不必预填未来 Mission 的 ID。
+发现后仍经过原 claim/nonce、Review 和停止/撤销门禁。
+
 [运行期 MI 完整恢复](docs/development/acceptance/2026-10-20-runtime-mi-recovery.md)将新 worker
 纳入实际 writer 冻结，完整恢复原调用/nonce/预算与独立观察；活动 worker、硬链接别名和
 旧工具均拒绝。该恢复不启动服务，不把数据可读当作执行连续性。
@@ -10,7 +14,7 @@
 [显式运行期 MI 工作](docs/development/runtime-mission-intelligence-v0.2.md)增加故障生成票据、
 原 SQL worker claim、逐 phase 调用许可、原始回包、重启与只读对账；较早数据库不能
 重新调用 provider。独立 Review、完整 stop/revoke、Control 和原目标 gate 保持必需。
-scoped Memory 交接、自动发现和其余全部非发布整改继续实施。
+scoped Memory 修订交接和其余全部非发布整改继续实施。
 
 Operator HTTP 现有 TLS 前连接预算、完整请求 worker handoff 与 response I/O 期限，
 真实权限仍在原 writer 下复核；慢 SQL 期间已提交健康读取可用。部署与失败语义见

@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 from mission.authorization import CertificateGrant, load_authorization
 from mission.capability_catalog import CanonicalCapabilityCatalog
@@ -268,6 +268,33 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/metrics/prometheus":
             self._send_text(HTTPStatus.OK, self.server.engine.metrics_prometheus())
+            return
+        lookup = "/v1/mission-requests/by-mission/"
+        if path.startswith(lookup):
+            principal = self._principal
+            if principal is None or principal[2] == "*":
+                self._send(HTTPStatus.FORBIDDEN, {"error": "Mission lookup requires one tenant"})
+                return
+            try:
+                mission = unquote(path[len(lookup) :], errors="strict")
+                request_id = self.server.engine.request_for_mission(mission, principal[2])
+            except (MissionRequestError, UnicodeError):
+                self._send(HTTPStatus.BAD_REQUEST, {"error": "invalid Mission lookup"})
+                return
+            except (OSError, sqlite3.Error):
+                self._send(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "Mission lookup unavailable"})
+                return
+            if request_id is None:
+                self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            else:
+                self._send(
+                    HTTPStatus.OK,
+                    {
+                        "schema_version": "roboguide.mission-request-lookup/v0.1",
+                        "mission_id": mission,
+                        "request_id": request_id,
+                    },
+                )
             return
         prefix = "/v1/mission-requests/"
         if path.startswith(prefix):

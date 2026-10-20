@@ -1,5 +1,9 @@
 # RoboGuide V2 架构基线
 
+[ADR-0123](../../decisions/0123-runtime-mi-authorized-work-discovery.md)增加按实际主体和 tenant
+过滤的只读运行期 MI 任务发现；Mission Service 以原 Mission 唯一索引定位 Request。
+发现结果不授予模型调用或执行权限，消费仍使用原 claim、nonce、Review 和安全切换门禁。
+
 [ADR-0122](../../decisions/0122-runtime-mi-recovery-writer-closure.md)以 recovery profile v0.3
 纳入 MI worker 的实际双 writer lease 和原 storage marker。完整原 SQL/nonce/budget/
 回包与独立观察可恢复；旧工具、活动 writer 与硬链接别名拒绝，不启动服务或推断连续性。
@@ -12,7 +16,7 @@ gate 不被新 DAG 的完成替代；实际 peer leaf、原授权/预算、完�
 增加显式 v0.2 生成授权、SQL worker claim 和每 phase 原 nonce 许可；原 fault/stop hold
 固定后才允许 MI 工作。实际 Request/admission、原始 provider bytes 与只读对账保留，
 较早 SQL 副本不能重做调用。wrapper v44 / inner v23 / codec v28 拒绝旧 authority；
-自动发现和 Group-scoped Memory 交接继续实施，完整 F8 未关闭。见
+自动发现已接线；Group-scoped Memory 交接继续实施，完整 F8 未关闭。见
 [运行期合同](../../development/runtime-plan-revision-v0.1.md)。
 
 [ADR-0119](../../decisions/0119-bounded-operator-network-isolation.md)将 Operator 请求的
@@ -1075,8 +1079,8 @@ V2 取代 V1.1，成为当前权威架构基线。V1.1 保存在
 
 [ADR-0100](../../decisions/0100-selective-memory-import-authority.md) 定义 exact current binding 的 selective-import：Application 持久化有界 outbox/receipt，Control 与 Runtime 分别核对绑定和 attempt，Node 在本地 Execute journal 上核对消费身份。Group scope 只授予同 Group 当前参与者，不隐式授予 handoff 或自动复制。Local EAIOS 仍拥有内容语义。
 
-[ADR-0101](../../decisions/0101-relation-stop-and-explicit-safe-state-evidence.md) 要求 relation reconciliation 使用持久 Cancel outbox、Mission hold，以及 exact-session、schema、TTL 和来源受限的安全状态证据。当前 Application 只完成部分接入，Mission hold、完整证据校验、deadline 和全释放/恢复 gate 尚未闭合，RT-G9 仍未完成。Local EAIOS 的即时安全权威保持不变。
+[ADR-0101](../../decisions/0101-relation-stop-and-explicit-safe-state-evidence.md) 最初要求 relation reconciliation 使用持久 Cancel outbox、Mission hold，以及 exact-session、schema、TTL 和来源受限的安全状态证据。后续 ADR-0102/0110 已接通软件 stop authority、deadline、完整 release/resume gate 和独立原进程退出证据，见 [F1 验收](../../development/acceptance/2026-10-15-f1.md)。设备停止证据与 Local EAIOS 的即时安全权威保持独立。
 
-当前工作树的分层剩余项和验收条件见[原审计剩余整改清单](../../development/roboguide-remediation-remaining-2026-10-14.md)。Controller v27 与 HA supervisor v26 的 composition 不一致也仍需整改；库级复制能力不能代替整套 HA 进程验收。
+原切片的分层发现见[历史审计清单](../../development/roboguide-remediation-remaining-2026-10-14.md)。当前 Controller/supervisor 已共享 wrapper v44，早期 v27/v26 不一致已关闭；当前剩余工作以[全部非发布计划](../../development/roboguide-software-completion-plan-2026-10-15.md)为准，仍包含完整 HA 升级和在线数据面恢复。
 
 停止证据补充（[ADR-0110](../../decisions/0110-execution-generation-and-process-stop-evidence.md)）：软件进程退出证明与执行终态、Cancel receipt 分离。v0.3 明确绑定原进程实例和完整当前 attempt 集；自然失败保持 Failed，缺失证明继续持有资源。该软件部署不建立设备停止保证。

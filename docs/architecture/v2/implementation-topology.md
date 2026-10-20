@@ -19,7 +19,10 @@ flowchart TB
   PREFLIGHT --> FEEDBACK[有界草案错误 / 原始输出保留]
   FEEDBACK --> MI
   Entry --> ORCH[Orchestration / DAG / Mission hold]
-  MI --> MIWORK[独立 MI worker / 原 SQL + kernel budget / 显式 Request]
+  MI --> MIWORK[独立 MI worker / 原 SQL + kernel budget / 原 Request]
+  Entry --> DISCOVERY[只读当前 Generating 队列 / 实际 principal + tenant / 有界分页]
+  DISCOVERY --> MIWORK
+  MIWORK -->|Mission 唯一索引 + tenant / 精确 Request lookup| MI
   MIWORK -->|实际 Request + 原 admission / 只读 source| Entry
   Entry --> CLAIM[原 SQL claim / 每 provider phase 唯一 nonce / wrapper v44]
   CLAIM --> SQL

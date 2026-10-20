@@ -6,12 +6,14 @@ use sha2::{Digest as _, Sha256};
 
 mod admission;
 mod checkpoint;
+mod discovery;
 mod generation;
 mod goal;
 mod switching;
 #[cfg(test)]
 mod tests;
 mod time;
+pub(crate) use discovery::{work_page, work_query};
 use time::{KernelTime, OriginalBudget};
 
 /// Explicit current application protocol; old wrappers cannot acquire its permissions.

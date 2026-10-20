@@ -260,6 +260,10 @@ class MissionRequestEngine:
             raise MissionRequestError(f"unknown Mission Request {request_id}")
         return record
 
+    def request_for_mission(self, mission_id: str, tenant_id: str) -> str | None:
+        """Resolve an original Request without deliberation, submission or tenant migration."""
+        return self._store.request_for_mission(mission_id, tenant_id)
+
     def record_http_audit(
         self,
         *,
