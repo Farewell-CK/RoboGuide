@@ -1,5 +1,11 @@
 # RoboGuide recovery tool
 
+[Profile v0.3](../../contracts/recovery/bundle-v0.3/README.md) adds the actual `runtime-mi` SQL
+writer: both `database.worker.lock` and the database inode lease are mandatory, together with the
+original work instance/nonce format. Active or hardlink-alias workers refuse backup. It preserves
+every original call, budget, raw response and independent observation. Earlier profile semantics
+stay explicit; older tools refuse v0.3. See [ADR-0122](../../docs/decisions/0122-runtime-mi-recovery-writer-closure.md).
+
 This administrative composition backs up the **declared stores** under their actual process
 writer leases. It preserves complete SQLite tables, checkpoint/command/receipt history, CAS and
 configured file/archive trees. It creates no Node, device, current-use or physical-stop evidence.

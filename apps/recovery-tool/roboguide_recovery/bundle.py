@@ -502,7 +502,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.2"
+        "roboguide.restore-receipt/v0.3"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.3"
+        else "roboguide.restore-receipt/v0.2"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.2"
         else "roboguide.restore-receipt/v0.1"
     )
@@ -575,7 +577,7 @@ def restore(
             for value in validate(manifest["profile"])
         ],
     }
-    if receipt_schema == "roboguide.restore-receipt/v0.2":
+    if receipt_schema in {"roboguide.restore-receipt/v0.2", "roboguide.restore-receipt/v0.3"}:
         receipt["artifact_replica_placements"] = replica_placements
     with (partial / "restore-receipt.json").open("xb") as handle:
         handle.write(canonical(receipt))

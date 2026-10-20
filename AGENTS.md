@@ -5,6 +5,14 @@
 RoboGuide has a current V2 architecture baseline plus development and MVP documents.
 The first core bootstrap has started; the full runtime and MVP are not complete.
 
+ADR-0122 adds explicit recovery-profile v0.3 `runtime-mi` stores, taking both the actual worker
+sidecar and database inode leases and checking original instance/nonce storage markers. Actual active
+and hardlink-alias workers refuse backup. Complete Controller/Node/Request/MI SQL survives cold
+restore without renewing budgets or changing uncertain outcomes; restore never starts a service.
+v0.1/v0.2 keep their original semantics, and old tools refuse v0.3. See
+`tools/quality/check_runtime_mi_recovery_processes.py`; this is declared-data recovery, not online HA
+or physical continuity. Full F0/F4-F10 requirements remain mandatory.
+
 ADR-0121 adds explicit runtime-plan-revision v0.2 generation delegation, immutable SQL worker claims and
 one original provider nonce per phase under shared wrapper v44. Actual fault/hold/complete stop/revoke
 precedes MI work; SQL intent precedes provider/HTTP I/O. Replaced or regressed worker stores cannot

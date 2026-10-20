@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 IDENTIFIER = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\Z")
-KINDS = {"controller", "replica", "node", "mission", "artifact", "memory", "files"}
+KINDS = {"controller", "replica", "node", "mission", "runtime-mi", "artifact", "memory", "files"}
 MAX_PROFILE_BYTES = 1024 * 1024
 MAX_COMPONENTS = 1024
 
@@ -56,11 +56,15 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "budget_seconds",
         "components",
     }
-    if profile.get("schema") == "roboguide.recovery-profile/v0.2":
+    if profile.get("schema") in {
+        "roboguide.recovery-profile/v0.2",
+        "roboguide.recovery-profile/v0.3",
+    }:
         expected.add("artifact_replica_sets")
     if set(profile) != expected or profile["schema"] not in {
         "roboguide.recovery-profile/v0.1",
         "roboguide.recovery-profile/v0.2",
+        "roboguide.recovery-profile/v0.3",
     }:
         raise ValueError("recovery profile is not closed or versioned")
     if (
@@ -101,8 +105,13 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         ):
             raise ValueError("recovery component identity/kind is invalid or repeated")
         identifiers.add(identifier)
-        if item["kind"] == "replica" and profile["schema"] != "roboguide.recovery-profile/v0.2":
+        if item["kind"] == "replica" and profile["schema"] not in {
+            "roboguide.recovery-profile/v0.2",
+            "roboguide.recovery-profile/v0.3",
+        }:
             raise ValueError("replica supervisor leases require explicit recovery profile v0.2")
+        if item["kind"] == "runtime-mi" and profile["schema"] != "roboguide.recovery-profile/v0.3":
+            raise ValueError("runtime MI leases require explicit recovery profile v0.3")
         if (
             not isinstance(item["root"], str)
             or not Path(item["root"]).is_absolute()
@@ -113,7 +122,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         root = Path(item["root"])
         if ".." in root.parts:
             raise ValueError("recovery source root contains ambiguous parent traversal")
-        if item["kind"] in {"controller", "replica", "node", "mission"}:
+        if item["kind"] in {"controller", "replica", "node", "mission", "runtime-mi"}:
             relative(item["database"])
             if "/" in item["database"]:
                 raise ValueError("authority database must be directly inside its configured root")
@@ -214,6 +223,8 @@ def layout(component: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
         return [], ["blobs", "staging"], [".writer.lock"]
     if kind == "files":
         return [], list(component["trees"]) or ["."], []
+    if kind == "runtime-mi":
+        return [database], list(component["trees"]), [database + ".worker.lock", database]
     lock = database + (".service.lock" if kind == "mission" else ".writer.lock")
     if kind == "replica":
         return [database], list(component["trees"]), [lock, "supervisor.writer.lock"]
@@ -240,6 +251,28 @@ def acquire_all(components: list[dict[str, Any]]) -> Iterator[None]:
                 raise ValueError("original service writer is still active: " + str(path)) from error
             stack.callback(fcntl.flock, descriptor, fcntl.LOCK_UN)
         for component in components:
+            if component["kind"] == "runtime-mi":
+                path = Path(component["root"]) / component["database"]
+                try:
+                    with closing(
+                        sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+                    ) as connection:
+                        marker = connection.execute(
+                            "SELECT schema,instance_id FROM format"
+                        ).fetchall()
+                        columns = {
+                            row[1] for row in connection.execute("PRAGMA table_info(effects)")
+                        }
+                    if (
+                        len(marker) != 1
+                        or marker[0][0] != "roboguide.runtime-mi-work/v0.1"
+                        or re.fullmatch(r"[a-f0-9]{32}", str(marker[0][1])) is None
+                        or not {"nonce", "request_digest", "kernel_json", "finished_kernel_json"}
+                        <= columns
+                    ):
+                        raise ValueError("runtime MI original writer/nonce marker is unavailable")
+                except sqlite3.Error as error:
+                    raise ValueError("runtime MI original storage schema is unavailable") from error
             if component["kind"] == "node":
                 path = Path(component["root"]) / component["database"]
                 with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:

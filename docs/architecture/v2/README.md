@@ -1,5 +1,9 @@
 # RoboGuide V2 架构基线
 
+[ADR-0122](../../decisions/0122-runtime-mi-recovery-writer-closure.md)以 recovery profile v0.3
+纳入 MI worker 的实际双 writer lease 和原 storage marker。完整原 SQL/nonce/budget/
+回包与独立观察可恢复；旧工具、活动 writer 与硬链接别名拒绝，不启动服务或推断连续性。
+
 [ADR-0120](../../decisions/0120-versioned-runtime-plan-revision.md)定义运行期版本
 权威：候选/Review/原预算先持久化，原完整 stop/revoke 门禁后才切换 Group；原目标、
 grounded identity、已满足 Task 与历史保留，MI 无资源/绑定权威。独立冻结的原 Mission goal

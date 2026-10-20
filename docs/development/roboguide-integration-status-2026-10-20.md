@@ -105,6 +105,10 @@ wrapper v44 保留实际 v43 原数据；恢复旧 MI SQL 不能重复 provider 
 
 ## 仍必须完成的非发布工作
 
+[MI writer 联合恢复](acceptance/2026-10-20-runtime-mi-recovery.md)以显式 v0.3 纳入新 SQL
+worker 的 sibling/inode 双锁和原 nonce 格式。实际四个 SQL/46 tables 的 schema/rows
+相同；活动与硬链接别名拒绝，旧工具拒绝，新目录不启动服务。完整在线与跨域门禁仍继续。
+
 后续实现与实际证据见[原 provider 回收与静止恢复](acceptance/2026-10-20-content-reclamation-and-recovery.md)。
 本地布尔 GC 已改为无删除权；实际 original revoke、tombstone、unlink/SQL 中断对账和
 Active Map 全输入门禁已接通。Node journal v13 增加唯一 writer；静止 SQL/CAS 恢复通过，

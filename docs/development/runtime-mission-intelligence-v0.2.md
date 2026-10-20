@@ -52,6 +52,9 @@ SQL 上界为 1024 个原 work、每 work 16 个 effect、单 document 2MiB、�
 耗尽先拒绝新 I/O，不静默删除历史。该 SQL 是独立恢复组件，必须与 Controller 的 claim/
 phase receipts 一起保留；丢失或较早副本不授权重做调用，保持 hold 并暴露原不确定性。
 完整在线备份/跨主机恢复仍按原 F4/F5 门禁推进。
+显式 [Recovery profile v0.3](../../contracts/recovery/bundle-v0.3/README.md)已补实际 worker/
+inode 双锁和原格式检查；[联合静止恢复验收](acceptance/2026-10-20-runtime-mi-recovery.md)
+逐项核对原 Controller、Node、Request 和 MI work SQL。其恢复不会自动启动或续期。
 
 `--observe-work <work digest>` 只查询原 ticket 下的实际 claim/provider permission/candidate/
 Review，查询意图也先记录。独立匹配的观察另存，原 HTTP outcome 保持 uncertain；不重发

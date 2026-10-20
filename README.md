@@ -1,5 +1,9 @@
 # RoboGuide
 
+[运行期 MI 完整恢复](docs/development/acceptance/2026-10-20-runtime-mi-recovery.md)将新 worker
+纳入实际 writer 冻结，完整恢复原调用/nonce/预算与独立观察；活动 worker、硬链接别名和
+旧工具均拒绝。该恢复不启动服务，不把数据可读当作执行连续性。
+
 [运行期计划修订与原目标验证](docs/development/runtime-plan-revision-v0.1.md)保留原计划、
 已满足事实和历史，完整停止/撤销门禁后重新交由 Control 绑定；当前 Task 全完成仍须独立
 确认原 Mission 目标。普通 resume 不能绕过待完成修订，取消与重启保留原证据和预算。

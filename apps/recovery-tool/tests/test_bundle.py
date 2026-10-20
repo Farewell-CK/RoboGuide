@@ -246,6 +246,31 @@ def test_explicit_finalized_cas_recovery_preserves_sql_and_never_repeats_missing
     assert not missing.exists()
 
 
+def test_v3_keeps_original_replica_content_placement_and_receipt_rules(
+    replica_files: dict[str, Any], tmp_path: Path
+) -> None:
+    """The new worker profile retains the complete original v0.2 replica/CAS contract."""
+    replica_files["schema"] = "roboguide.recovery-profile/v0.3"
+    created = backup(replica_files, tmp_path / "v3-bundle", "original-v3-all-stores")
+    receipt = restore(
+        tmp_path / "v3-bundle",
+        created["manifest_digest"],
+        tmp_path / "v3-restored",
+        "original-v3-restore",
+    )
+    assert receipt["schema"] == "roboguide.restore-receipt/v0.3"
+    assert len(receipt["artifact_replica_placements"]) == 2
+    assert (
+        restore(
+            tmp_path / "v3-bundle",
+            created["manifest_digest"],
+            tmp_path / "v3-restored",
+            "original-v3-restore",
+        )
+        == receipt
+    )
+
+
 def test_replica_content_recovery_rejects_cross_cluster_or_incomplete_original_universe(
     replica_files: dict[str, Any], tmp_path: Path
 ) -> None:

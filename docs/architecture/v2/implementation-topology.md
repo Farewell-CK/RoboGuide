@@ -25,6 +25,8 @@ flowchart TB
   CLAIM --> SQL
   CLAIM -->|原停止齐备后工作许可| MIWORK
   MIWORK -->|原 provider bytes / candidate / 独立实际 Review| Entry
+  MIWORK --> MIREC[recovery profile v0.3 / 原 worker + inode lease / 完整原 SQL]
+  MIREC --> SQL
   Entry --> REV[原 policy / candidate / exact Review / wrapper v44]
   REV --> SQL
   REV --> STOP
