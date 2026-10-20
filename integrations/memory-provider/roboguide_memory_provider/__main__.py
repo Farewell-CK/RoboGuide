@@ -17,6 +17,7 @@ from typing import Any
 
 from .active_map import ActiveMapLedger
 from .jobs import FileJobs
+from .process_jobs import ProcessFileJobs
 from .reclamation import ContentReclamation
 from .store import MAX_METADATA_BYTES, MemoryStore, canonical
 from .use_leases import UseLeases
@@ -205,6 +206,7 @@ def main() -> None:
     parser.add_argument("--listen-port", type=int, default=0)
     parser.add_argument("--export-config", type=Path)
     parser.add_argument("--enable-file-jobs", action="store_true")
+    parser.add_argument("--worker-processes", action="store_true")
     parser.add_argument("--max-job-seconds", type=int, default=5)
     parser.add_argument("--max-job-rounds", type=int, default=256)
     parser.add_argument("--enable-use-leases", action="store_true")
@@ -217,6 +219,8 @@ def main() -> None:
         parser.error("this Local EAIOS facade requires a literal loopback address")
     if args.enable_use_leases and not args.listen_unix:
         parser.error("Memory-use leases require the explicit cohosted private Unix profile")
+    if args.worker_processes and not args.enable_file_jobs:
+        parser.error("owned process workers require explicit file jobs")
     if args.enable_active_map and (not args.enable_use_leases or not args.listen_unix):
         parser.error(
             "active-map requires current-use leases on the explicit cohosted private Unix profile"
@@ -252,7 +256,9 @@ def main() -> None:
     try:
         leases = UseLeases(store) if args.enable_use_leases else None
         jobs = (
-            FileJobs(store, leases, args.max_job_seconds, args.max_job_rounds)
+            (ProcessFileJobs if args.worker_processes else FileJobs)(
+                store, leases, args.max_job_seconds, args.max_job_rounds
+            )
             if args.enable_file_jobs
             else None
         )

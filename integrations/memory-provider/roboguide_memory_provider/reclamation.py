@@ -105,11 +105,7 @@ class ContentReclamation:
             (digest,),
         ):
             blockers.append(f"{kind}:{owner}:{reference}")
-        for execution, worker in self.jobs._workers.items():
-            if worker.is_alive():
-                # Conservative: an actual worker may be between admission and opening its inputs.
-                blockers.append("live_worker:" + execution)
-        blockers.extend("active_execution:" + key for key in sorted(self.jobs._active))
+        blockers.extend(self.jobs.reclamation_blockers())
         blockers.extend(self.leases.content_retention_blockers(digest))
         for original in originals:
             try:

@@ -1,5 +1,13 @@
 # RoboGuide V2 架构基线
 
+[ADR-0125](../../decisions/0125-task-owned-memory-import-preparation.md)要求接收 import 身份
+由原 Task/attempt preparation 决定；其他 Task 的 Imported 仅保留位置证据，不能充当新
+use grant 的原 import。已有 request 的完整 owner/原期限必须一致，backend 拒绝规则不变。
+
+[ADR-0124](../../decisions/0124-original-file-computation-process-exit.md)为部署侧文件参考
+backend 增加显式 owned-process 模式；原 PID/预算先持久化，每个有界读取取得当前许可。
+独立 OS wait 证据与 Cancel/执行终态分离；旧线程观察不能升级为进程退出或设备停止。
+
 [ADR-0123](../../decisions/0123-runtime-mi-authorized-work-discovery.md)增加按实际主体和 tenant
 过滤的只读运行期 MI 任务发现；Mission Service 以原 Mission 唯一索引定位 Request。
 发现结果不授予模型调用或执行权限，消费仍使用原 claim、nonce、Review 和安全切换门禁。

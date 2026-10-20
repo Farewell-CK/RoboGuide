@@ -147,21 +147,11 @@ fn build(
                 now,
             )
             .map_err(|e| e.to_string())?;
-        let existing = controller.memory_imports.values().find(|import| {
-            import.request.node_id == *command.node_id()
-                && import.request.consumer_provider_id == consumer.provider_id()
-                && import.request.manifest == manifest
-                && import.phase == super::memory_import::ImportPhase::Completed
-        });
-        let import_id = existing
-            .map(|import| import.request.import_id.clone())
-            .unwrap_or_else(|| {
-                let content = serde_json::json!([id, requirement.selector, consumer.provider_id()]);
-                format!(
-                    "import-{:x}",
-                    Sha256::digest(serde_json::to_vec(&content).expect("metadata JSON"))
-                )
-            });
+        let content = serde_json::json!([id, requirement.selector, consumer.provider_id()]);
+        let import_id = format!(
+            "import-{:x}",
+            Sha256::digest(serde_json::to_vec(&content).expect("metadata JSON"))
+        );
         inputs.push(domain::PreparedMemoryInput {
             requirement: requirement.clone(),
             manifest,
@@ -283,7 +273,27 @@ fn admit_inputs(
         .ok_or("Memory context is unavailable")?;
     let mut completed = true;
     for input in &preparation.inputs {
+        let request = super::memory_import::MemoryImportRequest {
+            import_id: input.import_id.clone(),
+            group_id: preparation.group_id.clone(),
+            task_ref: preparation.task_ref.clone(),
+            role_id: preparation.role_id.clone(),
+            execution_id: preparation.execution_id.clone(),
+            node_id: preparation.node_id.clone(),
+            consumer_provider_id: input.consumer.provider_id().into(),
+            manifest: input.manifest.clone(),
+            deadline_ms: record.deadline_ms,
+            evidence_gate: None,
+            preparation_id: Some(preparation.preparation_id.clone()),
+            typed_map: input.typed_map.clone(),
+        };
         if let Some(existing) = controller.memory_imports.get(&input.import_id) {
+            if existing.request != request {
+                return Err(
+                    "original Memory import belongs to another preparation owner or deadline"
+                        .into(),
+                );
+            }
             match existing.phase {
                 super::memory_import::ImportPhase::Completed => continue,
                 super::memory_import::ImportPhase::Unknown => {
@@ -305,20 +315,6 @@ fn admit_inputs(
                 }
             }
         }
-        let request = super::memory_import::MemoryImportRequest {
-            import_id: input.import_id.clone(),
-            group_id: preparation.group_id.clone(),
-            task_ref: preparation.task_ref.clone(),
-            role_id: preparation.role_id.clone(),
-            execution_id: preparation.execution_id.clone(),
-            node_id: preparation.node_id.clone(),
-            consumer_provider_id: input.consumer.provider_id().into(),
-            manifest: input.manifest.clone(),
-            deadline_ms: record.deadline_ms,
-            evidence_gate: None,
-            preparation_id: Some(preparation.preparation_id.clone()),
-            typed_map: input.typed_map.clone(),
-        };
         super::memory_import::admit(controller, request, now)?;
         controller
             .memory_imports

@@ -5,11 +5,15 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import signal
 import sqlite3
 import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -86,7 +90,7 @@ def bootstrap_source(directory: Path, manifest: dict[str, Any]) -> dict[str, Any
     return bootstrap
 
 
-def source_configuration(text: str, node: str) -> str:
+def source_configuration(text: str, node: str, process_workers: bool = False) -> str:
     """Declare real file-worker exit observation with explicit software-only assurance."""
     text = text.replace("node-config/v0.11", "node-config/v0.13").replace(
         "node-config/v0.12", "node-config/v0.13"
@@ -134,7 +138,82 @@ kind = "http"
 method = "GET"
 path = "/v1/file-jobs/safe-state"
 '''
+    if process_workers:
+        text = text.replace("safe-state-observation/v0.2", "safe-state-observation/v0.3")
     return text
+
+
+def recover_original_writer(scenario: GroupScenario, stage: str) -> None:
+    """Explicitly recover the actual disabled generation after the SQL fault has been removed."""
+    original = scenario.get("/v1/authority-status")
+    assert original["write_enabled"] is False
+    command = {
+        "schema_version": "roboguide.authority-write-recovery/v0.1",
+        "command_id": "handoff-writer-recovery-" + uuid.uuid4().hex,
+        **{
+            field: original[field]
+            for field in ("process_id", "generation", "checkpoint_identity", "authority_revision")
+        },
+    }
+    status, result = scenario.exchange("/v1/authority/recover", command)
+    assert status == 200, result
+    save(
+        scenario.directory / ("handoff-" + stage + "-writer-recovery.json"),
+        {"original": original, "command": command, "result": result},
+    )
+
+
+@contextmanager
+def quiesce_node_publishers(scenario: GroupScenario, stage: str) -> Iterator[None]:
+    """Isolate SQL rollback from reconnect by suspending the actual owned publishers."""
+    if not scenario.node_processes:
+        raise ValueError("SQL isolation requires the actual owned Node processes")
+    paused = []
+    try:
+        for process in scenario.node_processes:
+            assert process.poll() is None
+            os.kill(process.pid, signal.SIGSTOP)
+            paused.append(process)
+        wait_for(
+            lambda: all(
+                Path(f"/proc/{process.pid}/status")
+                .read_text()
+                .split("State:", 1)[1]
+                .lstrip()
+                .startswith("T")
+                for process in paused
+            ),
+            "actual Node publisher suspension",
+        )
+        previous = None
+        stable = 0
+        deadline = time.monotonic() + 3
+        while stable < 3:
+            with sqlite3.connect(
+                f"file:{scenario.directory / 'controller.sqlite3'}?mode=ro", uri=True
+            ) as connection:
+                sequence = connection.execute(
+                    "SELECT coalesce(max(sequence),0) FROM events"
+                ).fetchone()[0]
+            stable = stable + 1 if previous == sequence else 0
+            previous = sequence
+            if time.monotonic() >= deadline:
+                raise TimeoutError("actual Node facts did not drain before isolated SQL fault")
+            time.sleep(0.02)
+        save(
+            scenario.directory / ("handoff-" + stage + "-sql-quiescence.json"),
+            {
+                "node_pids": [process.pid for process in paused],
+                "event_sequence": previous,
+                "stable_observations": stable,
+                "fact_injection": False,
+            },
+        )
+        yield
+    finally:
+        for process in paused:
+            if process.poll() is None:
+                os.kill(process.pid, signal.SIGCONT)
 
 
 def checkpoint(directory: Path) -> dict[str, Any]:
@@ -272,26 +351,33 @@ def run(scenario: GroupScenario, source_id: str, case: str) -> dict[str, Any]:
         assert status == 409, response
     before = checkpoint(scenario.directory)
     if case == "complete":
-        with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
-            db.execute("""CREATE TRIGGER fail_handoff_admission BEFORE INSERT ON events
-                WHEN json_extract(NEW.payload_json,'$.MemoryHandoffTransition.phase')='stopping'
-                BEGIN SELECT RAISE(ABORT,'actual handoff admission rollback window'); END""")
-        status, failed = scenario.exchange("/v1/memory/handoffs", command)
-        assert status == 409, failed
-        assert scenario.get(source_path)["isolation"] is None
-        rolled_back = checkpoint(scenario.directory)
-        assert rolled_back["memory_handoffs"] == before["memory_handoffs"]
-        assert rolled_back["safety_stops"] == before["safety_stops"]
-        assert (
-            json.loads(rolled_back["integration_json"])["control"]["reservations"]
-            == json.loads(before["integration_json"])["control"]["reservations"]
-        )
-        with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
-            db.execute("DROP TRIGGER fail_handoff_admission")
-        save(
-            scenario.directory / "handoff-sql-admission-rollback.json",
-            {"status": status, "error": failed, "source_held": False, "ownership_retained": True},
-        )
+        with quiesce_node_publishers(scenario, "admission"):
+            with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
+                db.execute("""CREATE TRIGGER fail_handoff_admission BEFORE INSERT ON events
+                    WHEN json_extract(NEW.payload_json,'$.MemoryHandoffTransition.phase')='stopping'
+                    BEGIN SELECT RAISE(ABORT,'actual handoff admission rollback window'); END""")
+            status, failed = scenario.exchange("/v1/memory/handoffs", command)
+            assert status == 409, failed
+            assert scenario.get(source_path)["isolation"] is None
+            rolled_back = checkpoint(scenario.directory)
+            assert rolled_back["memory_handoffs"] == before["memory_handoffs"]
+            assert rolled_back["safety_stops"] == before["safety_stops"]
+            assert (
+                json.loads(rolled_back["integration_json"])["control"]["reservations"]
+                == json.loads(before["integration_json"])["control"]["reservations"]
+            )
+            with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
+                db.execute("DROP TRIGGER fail_handoff_admission")
+            recover_original_writer(scenario, "admission")
+            save(
+                scenario.directory / "handoff-sql-admission-rollback.json",
+                {
+                    "status": status,
+                    "error": failed,
+                    "source_held": False,
+                    "ownership_retained": True,
+                },
+            )
     status, response = scenario.exchange("/v1/memory/handoffs", command)
     assert status == 202, response
     original_admitted = response["record"]["admitted_at_ms"]
@@ -412,16 +498,18 @@ def run(scenario: GroupScenario, source_id: str, case: str) -> dict[str, Any]:
     )
     with sqlite3.connect(scenario.directory / "consumer/backend/file-jobs.sqlite3") as db:
         assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
-    with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
-        db.execute("""CREATE TRIGGER fail_handoff_commit BEFORE INSERT ON events
-            WHEN json_extract(NEW.payload_json,'$.MemoryHandoffTransition.phase')='committed'
-            BEGIN SELECT RAISE(ABORT,'actual handoff commit rollback window'); END""")
-    status, failed = scenario.exchange(commit_path, {})
-    assert status == 409 and progress()["phase"] == "ready", failed
-    with sqlite3.connect(scenario.directory / "consumer/backend/file-jobs.sqlite3") as db:
-        assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
-    with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
-        db.execute("DROP TRIGGER fail_handoff_commit")
+    with quiesce_node_publishers(scenario, "commit"):
+        with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
+            db.execute("""CREATE TRIGGER fail_handoff_commit BEFORE INSERT ON events
+                WHEN json_extract(NEW.payload_json,'$.MemoryHandoffTransition.phase')='committed'
+                BEGIN SELECT RAISE(ABORT,'actual handoff commit rollback window'); END""")
+        status, failed = scenario.exchange(commit_path, {})
+        assert status == 409 and progress()["phase"] == "ready", failed
+        with sqlite3.connect(scenario.directory / "consumer/backend/file-jobs.sqlite3") as db:
+            assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+        with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
+            db.execute("DROP TRIGGER fail_handoff_commit")
+        recover_original_writer(scenario, "commit")
     save(
         scenario.directory / "handoff-sql-commit-rollback.json",
         {"status": status, "error": failed, "target_execute_count": 0},
@@ -522,6 +610,7 @@ def run(scenario: GroupScenario, source_id: str, case: str) -> dict[str, Any]:
         "source_software_stop_confirmed": True,
         "original_source_context_and_provider_revocation": True,
         "actual_sql_rollback_windows": 2,
+        "node_publishers_quiesced_during_sql_faults": True,
         "target_execute_before_commit": False,
         "independent_verifiers": 2,
         "original_budget_unchanged_after_restart": True,

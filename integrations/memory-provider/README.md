@@ -67,12 +67,34 @@ budgets persist before worker admission; `--max-job-seconds` is an explicit depl
 requested count is part of the immutable invocation. Tightening admission does not rerun or hide
 historical results. The original computation budget still bounds actual work at every read phase.
 
-GET `/v1/file-jobs/safe-state` exposes only actual software worker exit after an original cancel.
+The legacy thread profile's GET `/v1/file-jobs/safe-state` observes its worker after original cancel.
 The backend retains the original canonical invocation, validated generation and actual cancel
 command identity. A live worker, natural completion or UNKNOWN does not emit confirmation.
 The configured State export must explicitly declare `SoftwareProcess`; these observations cannot
 establish device stopping. ADR-0108's Controller handoff separately requires durable Cancel receipt,
 terminal cancellation, independent current-session observation and original context/provider revokes.
+
+ADR-0124 adds explicit `--worker-processes` alongside `--enable-file-jobs`. This mode owns one actual
+OS child per computation. The parent journals the original instance/kernel budget before launch and
+the PID before permitting reads. Only actual OS reaping through `Popen.poll()/wait()` supplies exit
+evidence. Natural Completed/
+Failed retains its outcome without inventing Cancel receipts. Node config v0.13/Contract v0.12 must explicitly
+negotiate safety/generation metadata and the existing `roboguide.safe-state-observation/v0.3` export.
+The default thread mode supplies no v0.3 OS process proof.
+
+Children check absolute permit expiry after OS suspension. Each permit ends at the earliest original
+compute/use deadline or 100ms; current revocation/cancellation is checked by the parent. Only verified
+readonly input descriptors and control pipes are inherited. Restart cannot manufacture a missing
+wait, release an uncertain reader or rerun an old job. Unverified originals retain capacity/GC fences
+and `health.safe = false`. The new SQL format preserves results behind a readonly old `jobs` view
+and refuses old writers; historical thread results gain no PID. Retention is bounded at 4096 process
+records; State observations rotate within 60KiB, under the 64KiB limit. Polling/retention configuration
+determines observation latency; this is software assurance, without a hard realtime guarantee.
+
+ADR-0125 fixes later Tasks: each original preparation has its own import identity. Existing CAS bytes
+can be verified under a new authorized receiver; another Task's import is never relabelled. Full
+import/availability/use/revoke checks remain mandatory. See the
+[actual process and handoff acceptance](../../docs/development/acceptance/2026-10-20-file-process-memory-ownership.md).
 
 `tools/quality/check_memory_preparation_processes.py` uses this shipped code through actual TLS
 and two formally enrolled software Nodes. It proves the explicit pre-Execute permission barrier,

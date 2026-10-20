@@ -9,6 +9,11 @@ main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头�
 `d15543f4ec2dc99ebe565e319e141c0bf17b433b`（执行故障闭环）。后两者是祖先关系。
 代码集成和完整整改完成是不同状态；本次不宣称 SoftwareComplete。
 
+[原文件进程与接收身份](acceptance/2026-10-20-file-process-memory-ownership.md)补齐实际
+Local EAIOS 子进程 wait/崩溃 fence、原预算读取许可和后续 Task 的独立 import。双 Node
+停止/交接/两次复算、SQL 显式恢复和负向生命周期已检查；跨 session mixed-fault 停止恢复、
+全局 Memory 引用/在线 HA 与 scoped Memory 计划修订继续为必需项。
+
 后续以已验收 `6ca3ebb37fca940626adc0d68755fc38a0534f0f` 为 main 基线，固定核对
 `codex/e1-perception-contract-composition` 的 `b50d9e313b0660c9cc4ee1c5bca53538fa0b1de6`。
 其六条新增修复通过三方合并保留原提交，不回退整改权威版本，也没有启动实验；组合证据见

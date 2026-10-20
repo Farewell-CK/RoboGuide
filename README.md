@@ -1,5 +1,9 @@
 # RoboGuide
 
+[文件进程与接收身份验收](docs/development/acceptance/2026-10-20-file-process-memory-ownership.md)
+接通实际 Local Memory 子进程的独立退出证明、崩溃后的 Unknown/GC fence，以及后续 Task
+自己的 import 身份。原使用授权与停止门禁保持必需，软件退出不证明设备停止。
+
 [运行期 MI 自动发现](docs/development/acceptance/2026-10-20-runtime-mi-discovery.md)按实际
 证书主体和 tenant 读取当前原任务，再查回原 Request；部署不必预填未来 Mission 的 ID。
 发现后仍经过原 claim/nonce、Review 和停止/撤销门禁。

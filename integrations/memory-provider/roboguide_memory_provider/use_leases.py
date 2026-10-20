@@ -492,6 +492,17 @@ class UseLeases:
             ):
                 raise UsePermissionEnded("current Memory-use permission ended")
 
+    def compute_budget(self, lease_id: str, execution_id: str) -> dict[str, Any]:
+        """Freeze the current original deadline for one bounded child read without renewing it."""
+        with self._mutex:
+            self.guard(lease_id, execution_id)
+            row = self._db.execute(
+                "SELECT budget_json FROM leases WHERE lease_id=?", (lease_id,)
+            ).fetchone()
+            if row is None or row[0] is None:
+                raise UsePermissionEnded("original Memory-use budget unavailable")
+            return cast(dict[str, Any], json.loads(row[0]))
+
     def guard_map(self, context: dict[str, Any]) -> None:
         """Authorize only the original provider's exact typed map and full current attempt owner."""
         with self.store._mutex, self._mutex:

@@ -130,6 +130,10 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
             ("运行期修订验收", "docs/development/acceptance/2026-10-20-runtime-plan-revision.md"),
             ("运行期 MI 工作", "docs/development/runtime-mission-intelligence-v0.2.md"),
             (
+                "文件进程与接收身份",
+                "docs/development/acceptance/2026-10-20-file-process-memory-ownership.md",
+            ),
+            (
                 "运行期 MI 自动发现",
                 "docs/development/acceptance/2026-10-20-runtime-mi-discovery.md",
             ),

@@ -28,6 +28,11 @@ mTLS scrape、两次实际 SQL 故障的 firing/resolved、固定 histogram/queu
 
 ## 交付要求
 
+[文件进程与原接收身份](acceptance/2026-10-20-file-process-memory-ownership.md)接通部署侧
+独立 OS wait、原 kernel/use 读取许可、崩溃 Unknown/GC fence 和后续 Task 自己的 import。
+实际双 Node 停止/交接/复算与四种生命周期、单 worker 内容/恢复/告警组合通过；源 session
+变化的复合故障保留 hold，完整跨 session 停止恢复、F4/F8 及其余阶段继续必需。
+
 [运行期修订与原目标验收](acceptance/2026-10-20-runtime-plan-revision.md)验证原计划/事实、
 当前版本完整 attempt、真实进程停止、预审自动替代、独立目标、普通 resume 拒绝、取消和
 重启，以及实际 v42/inner v22 → v43/inner v23 原数据迁移。完整新 MI/Memory 组合仍实施中。

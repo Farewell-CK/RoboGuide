@@ -124,6 +124,7 @@ def run(
     authority_recovery: bool = False,
     monitoring_tools: Path | None = None,
     async_workers: int = 8,
+    process_workers: bool = False,
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
     if not 1 <= async_workers <= 64:
@@ -258,7 +259,12 @@ def run(
                 configured = configured.replace("node-config/v0.11", "node-config/v0.13")
             if handoff_case is not None and index == 0:
                 configured = configured.replace("hash-imported-file@v1", "hash-exported-file@v1")
-                configured = source_configuration(configured, nodes[index])
+                configured = source_configuration(configured, nodes[index], process_workers)
+            if process_workers:
+                for config_version in ("v0.10", "v0.11", "v0.12"):
+                    configured = configured.replace(
+                        "node-config/" + config_version, "node-config/v0.13"
+                    )
             if query_setup is not None:
                 configured = query_setup.configure(configured, index == 1)
                 if index == 1:
@@ -294,6 +300,8 @@ def run(
                 str(owned),
                 "--enable-file-jobs",
             ]
+            if process_workers:
+                command += ["--worker-processes"]
             if use_lifecycle or large_transfer or group_lifecycle or handoff_case is not None:
                 # A large-transfer conformance run must not use the five-second default compute
                 # budget: hashing the admitted multi-hundred-megabyte file is the real provider
@@ -533,6 +541,7 @@ def run(
                     controller,
                     controller_command,
                     start,
+                    tuple(node_processes),
                 ),
                 mission_id,
                 handoff_case,
@@ -541,6 +550,49 @@ def run(
             result.update(
                 source_identity=initial_identity, configuration_identity=configuration_identity
             )
+            result["process_workers"] = process_workers
+            if process_workers and handoff_case == "complete":
+                with sqlite3.connect(
+                    f"file:{directory / 'consumer/backend/memory.sqlite3'}?mode=ro", uri=True
+                ) as connection:
+                    rows = connection.execute(
+                        "SELECT import_id,original_json FROM imports ORDER BY import_id"
+                    ).fetchall()
+                originals = []
+                for import_id, encoded in rows:
+                    original = json.loads(encoded)["original_invocation"]
+                    originals.append(
+                        {
+                            "import_id": import_id,
+                            "execution_id": original["execution_id"],
+                            "preparation_id": original["memory_preparation_id"],
+                            "original_sha256": hashlib.sha256(
+                                encoded if isinstance(encoded, bytes) else encoded.encode()
+                            ).hexdigest(),
+                        }
+                    )
+                assert len(originals) == 2
+                assert len({row["import_id"] for row in originals}) == 2
+                assert len({row["execution_id"] for row in originals}) == 2
+                assert len({row["preparation_id"] for row in originals}) == 2
+                receiving = json.loads(
+                    (directory / "handoff-follow-up-authority.json").read_bytes()
+                )["records"]
+                for original in originals:
+                    context = receiving[original["execution_id"]]["preparation"]
+                    assert context["preparation_id"] == original["preparation_id"]
+                    assert [item["import_id"] for item in context["inputs"]] == [
+                        original["import_id"]
+                    ]
+                save(directory / "handoff-original-target-imports.json", originals)
+                result["separate_original_task_imports"] = originals
+                stop_proof = json.loads((directory / "handoff-actual-stop.json").read_bytes())
+                assert (
+                    stop_proof["export"]["payload_schema"]
+                    == "roboguide.safe-state-observation/v0.3"
+                )
+                assert stop_proof["safe_proof"]["observation"]["process_exit"] is not None
+                result["original_process_exit_proven"] = True
             save(directory / "result.json", result)
             return result
         if query_setup is not None:
@@ -970,6 +1022,7 @@ def main() -> None:
     parser.add_argument("--authority-recovery", action="store_true")
     parser.add_argument("--monitoring-tools", type=Path)
     parser.add_argument("--async-workers", type=int, choices=range(1, 65), default=8)
+    parser.add_argument("--process-workers", action="store_true")
     parser.add_argument(
         "--handoff-case", choices=("complete", "expiry", "policy-change", "controller-restart")
     )
@@ -1011,6 +1064,7 @@ def main() -> None:
                     arguments.authority_recovery,
                     arguments.monitoring_tools,
                     arguments.async_workers,
+                    arguments.process_workers,
                 ),
                 sort_keys=True,
             )

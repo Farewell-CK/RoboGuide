@@ -70,6 +70,9 @@ flowchart TB
   PROBE --> DEGRADED
   NODE <--> ART[Artifact CAS / 内容授权]
   NODE --> MEM[配置固定的 Local Memory provider]
+  MEM --> FILEPROC[显式 owned CPU child / 原预算与 PID / 有期限 read permit]
+  FILEPROC --> EXITPROOF[真实 OS wait / 原 instance PID generation / 非设备证明]
+  EXITPROOF --> OBS
   NODE --> NJ[Node journal v13 / 原唯一 writer / inode 与 canonical lease]
   MEM --> GC[实际原 import + revoke + worker + map 引用 / tombstone / unlink 对账]
   COLD[显式静止恢复工具 / 全部原 writer lease] --> SQL
@@ -101,6 +104,8 @@ flowchart TB
   MAUTH --> MINT
   MAUTH --> ART
   RT --> PREP[原 Memory context / Prepare ACK / Group pending barrier]
+  PREP --> IMPORTOWNER[原 Task attempt preparation / 自己的 import identity / 完整 request 比较]
+  IMPORTOWNER --> MINT
   MAUTH --> PREP
   CAT --> PREP
   PREP --> SQL

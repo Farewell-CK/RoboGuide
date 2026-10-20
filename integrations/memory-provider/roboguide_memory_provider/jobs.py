@@ -9,6 +9,7 @@ import sqlite3
 import stat
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -18,6 +19,8 @@ from .use_leases import UseLeases, UsePermissionEnded
 
 class FileJobs:
     """Own software computations over declared files, without any robot or Task authority."""
+
+    _table = "jobs"
 
     def __init__(
         self,
@@ -43,8 +46,22 @@ class FileJobs:
         self._db = sqlite3.connect(store.root / "file-jobs.sqlite3", check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
+        version = self._db.execute("PRAGMA user_version").fetchone()[0]
+        if version not in (0, 1) or version == 1 and self._table == "jobs":
+            self._db.close()
+            raise ValueError(
+                "file process authority requires the explicitly configured worker mode"
+            )
+        if version == 1:
+            try:
+                marker = self._db.execute("SELECT schema FROM file_job_format").fetchall()
+                if marker != [("roboguide.file-process-jobs/v0.1",)]:
+                    raise ValueError("unknown original file process format")
+            except BaseException:
+                self._db.close()
+                raise
         self._db.execute(
-            "CREATE TABLE IF NOT EXISTS jobs (execution_id TEXT PRIMARY KEY, "
+            f"CREATE TABLE IF NOT EXISTS {self._table} (execution_id TEXT PRIMARY KEY, "
             "invocation_json BLOB, state TEXT NOT NULL, result_json BLOB, reason TEXT NOT NULL)"
         )
         self._db.execute(
@@ -57,7 +74,8 @@ class FileJobs:
             "command_id TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation>0))"
         )
         self._db.execute(
-            "UPDATE jobs SET state='UNKNOWN',reason='original computation was interrupted' "
+            f"UPDATE {self._table} SET state='UNKNOWN',"
+            "reason='original computation was interrupted' "
             "WHERE state='RUNNING'"
         )
         self._db.commit()
@@ -98,11 +116,21 @@ class FileJobs:
                 "assurance": "software-computation",
             }
 
+    def reclamation_blockers(self) -> list[str]:
+        """Retain content during admission, actual thread work and open-input processing."""
+        with self._mutex:
+            return [
+                "live_worker:" + execution
+                for execution, worker in self._workers.items()
+                if worker.is_alive()
+            ] + ["active_execution:" + execution for execution in sorted(self._active)]
+
     def status(self, execution_id: str) -> dict[str, object]:
         """Read the exact original outcome, with unavailable evidence left UNKNOWN."""
         with self._mutex:
             row = self._db.execute(
-                "SELECT state,result_json,reason FROM jobs WHERE execution_id=?", (execution_id,)
+                f"SELECT state,result_json,reason FROM {self._table} WHERE execution_id=?",
+                (execution_id,),
             ).fetchone()
             return {
                 "execution_id": execution_id,
@@ -116,7 +144,7 @@ class FileJobs:
         """Fence a late start or request a current worker stop, without early CANCELLED status."""
         with self._mutex:
             row = self._db.execute(
-                "SELECT invocation_json FROM jobs WHERE execution_id=?", (execution_id,)
+                f"SELECT invocation_json FROM {self._table} WHERE execution_id=?", (execution_id,)
             ).fetchone()
             if row is not None and row[0] is not None:
                 invocation = json.loads(row[0])
@@ -132,7 +160,7 @@ class FileJobs:
                 event.set()
             else:
                 self._db.execute(
-                    "INSERT OR IGNORE INTO jobs VALUES (?,NULL,'CANCELLED',NULL,"
+                    f"INSERT OR IGNORE INTO {self._table} VALUES (?,NULL,'CANCELLED',NULL,"
                     "'durable cancellation preceded computation admission')",
                     (execution_id,),
                 )
@@ -165,7 +193,7 @@ class FileJobs:
         with self._mutex:
             rows = self._db.execute(
                 "SELECT c.execution_id,c.command_id,c.generation FROM software_stop_commands c "
-                "JOIN jobs j ON j.execution_id=c.execution_id WHERE j.state='CANCELLED' "
+                f"JOIN {self._table} j ON j.execution_id=c.execution_id WHERE j.state='CANCELLED' "
                 "ORDER BY c.execution_id LIMIT 256"
             ).fetchall()
             observations = []
@@ -246,7 +274,7 @@ class FileJobs:
             raise ValueError("actual computation metadata exceeds its bound")
         with self._mutex:
             original = self._db.execute(
-                "SELECT invocation_json FROM jobs WHERE execution_id=?", (execution,)
+                f"SELECT invocation_json FROM {self._table} WHERE execution_id=?", (execution,)
             ).fetchone()
             if original is not None:
                 if original[0] is not None and original[0] != encoded:
@@ -263,14 +291,23 @@ class FileJobs:
             admitted_ns = time.monotonic_ns()
             with self._db:
                 self._db.execute(
-                    "INSERT INTO jobs VALUES (?,?,'RUNNING',NULL,'')", (execution, encoded)
+                    f"INSERT INTO {self._table} VALUES (?,?,'RUNNING',NULL,'')",
+                    (execution, encoded),
                 )
-                self._db.execute(
-                    "INSERT INTO job_budgets VALUES (?,?,?)",
-                    (execution, admitted_ns, self.max_job_ms),
-                )
+                self._save_budget(invocation, admitted_ns, self.max_job_ms)
             self._active[execution] = event
             return event, use_lease, admitted_ns, self.max_job_ms
+
+    def _save_budget(self, invocation: dict[str, Any], admitted_ns: int, budget_ms: int) -> None:
+        """Persist the original compute budget in the same transaction as job admission."""
+        self._db.execute(
+            "INSERT INTO job_budgets VALUES (?,?,?)",
+            (invocation["execution_id"], admitted_ns, budget_ms),
+        )
+
+    def _retire(self, execution: str) -> None:
+        """Retire a completed thread computation after its own input processing has ended."""
+        self._active.pop(execution, None)
 
     def submit(self, invocation: dict[str, Any]) -> dict[str, object]:
         """Return a durable original handle promptly while a bounded owned worker does real work."""
@@ -293,7 +330,7 @@ class FileJobs:
                 self._active.pop(execution)
                 with self._db:
                     self._db.execute(
-                        "UPDATE jobs SET state='UNKNOWN',"
+                        f"UPDATE {self._table} SET state='UNKNOWN',"
                         "reason='original worker start was interrupted' "
                         "WHERE execution_id=?",
                         (execution,),
@@ -339,31 +376,9 @@ class FileJobs:
                     raise ValueError("actual computation input is not a regular file")
                 if os.fstat(descriptor).st_size != manifest["artifact"]["byte_size"]:
                     raise ValueError("actual computation input size changed")
-            digests: list[str] = []
-            for _ in range(rounds):
-                current_permission()
-                if event.is_set():
-                    raise InterruptedError("actual computation cancellation observed")
-                if time.monotonic_ns() - admitted_ns >= budget_ms * 1_000_000:
-                    raise TimeoutError("original actual computation budget expired")
-                digests = []
-                for (manifest, _), stream in zip(inputs, opened, strict=True):
-                    stream.seek(0)
-                    hashed = hashlib.sha256()
-                    while True:
-                        current_permission()
-                        chunk = stream.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        if event.is_set():
-                            raise InterruptedError("actual computation cancellation observed")
-                        if time.monotonic_ns() - admitted_ns >= budget_ms * 1_000_000:
-                            raise TimeoutError("original actual computation budget expired")
-                        hashed.update(chunk)
-                    digest = "sha256:" + hashed.hexdigest()
-                    if digest != manifest["artifact"]["content_digest"]:
-                        raise ValueError("actual computation bytes differ from original content")
-                    digests.append(digest)
+            digests = self._hash_inputs(
+                invocation, inputs, opened, current_permission, event, admitted_ns, budget_ms
+            )
             result = {
                 "schema": "roboguide.file-hash-result/v0.1",
                 "execution_id": execution,
@@ -392,10 +407,48 @@ class FileJobs:
                         "cancellation preceded outcome commit",
                         None,
                     )
-                self._active.pop(execution, None)
+                self._retire(execution)
                 self._db.execute(
-                    "UPDATE jobs SET state=?,result_json=?,reason=? WHERE execution_id=?",
+                    f"UPDATE {self._table} SET state=?,result_json=?,reason=? WHERE execution_id=?",
                     (state, canonical(result) if result is not None else None, reason, execution),
                 )
                 self._db.commit()
         return self.status(execution)
+
+    def _hash_inputs(
+        self,
+        invocation: dict[str, Any],
+        inputs: list[tuple[dict[str, Any], Path]],
+        opened: list[BinaryIO],
+        current_permission: Callable[[], None],
+        event: threading.Event,
+        admitted_ns: int,
+        budget_ms: int,
+    ) -> list[str]:
+        """Hash bounded reads under the thread profile; this creates no process evidence."""
+        digests: list[str] = []
+        for _ in range(invocation.get("parameters", {}).get("rounds", 1)):
+            current_permission()
+            if event.is_set():
+                raise InterruptedError("actual computation cancellation observed")
+            if time.monotonic_ns() - admitted_ns >= budget_ms * 1_000_000:
+                raise TimeoutError("original actual computation budget expired")
+            digests = []
+            for (manifest, _), stream in zip(inputs, opened, strict=True):
+                stream.seek(0)
+                hashed = hashlib.sha256()
+                while True:
+                    current_permission()
+                    chunk = stream.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    if event.is_set():
+                        raise InterruptedError("actual computation cancellation observed")
+                    if time.monotonic_ns() - admitted_ns >= budget_ms * 1_000_000:
+                        raise TimeoutError("original actual computation budget expired")
+                    hashed.update(chunk)
+                digest = "sha256:" + hashed.hexdigest()
+                if digest != manifest["artifact"]["content_digest"]:
+                    raise ValueError("actual computation bytes differ from original content")
+                digests.append(digest)
+        return digests

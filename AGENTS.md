@@ -2,6 +2,16 @@
 
 ## Project Structure & Module Organization
 
+ADR-0124 adds explicit Local Memory `ProcessFileJobs`: real owned CPU children, original kernel/use
+budgets, PID-before-read, expiring read permits and durable actual OS wait evidence. The process SQL
+marker/readonly old view fences thread writers; history gains no process proof. Restarted uncertain
+readers retain capacity/GC fences; observations rotate below the State payload limit. Existing
+Node v0.12/config v0.13 and safe-state v0.3 are explicitly negotiated; this never proves device safety.
+ADR-0125 binds imports to the exact original Task/attempt preparation. Another Task's Completed
+import is placement history, not a new use grant. Full requests must match before receipt reuse.
+Actual gates are `check_file_process_workers.py` and
+`check_memory_preparation_processes.py --process-workers`; both create zero device facts.
+
 ADR-0123 adds bounded read-only runtime MI discovery from committed current Generating tickets,
 filtered by actual TLS stable principal and exact tenant. Mission's unique-index/tenant JOIN resolves
 the original Request without deliberation. Worker v0.2 explicitly opts into paging; v0.1 retains
@@ -1032,6 +1042,14 @@ Recovery-tool and Memory lifecycle changes additionally run tests in `apps/recov
 and `integrations/memory-provider/tests`, strict typing of `apps/recovery-tool/roboguide_recovery` plus
 its tests, and the actual process gates above. The recovery CLI is a separate standard-library
 Python application, never a dependency of Mission Intelligence or a substitute for online HA.
+
+Memory process changes include `integrations/memory-provider/roboguide_memory_provider` in the main
+strict-mypy source group. Check that package plus `integrations/memory-provider/tests` separately:
+independent test roots contain distinct `conftest.py` modules. Run its Ruff/format/function-doc checks,
+actual parent-death/old-writer gate and formal two-Node handoff cases. Isolated handoff SQL rollback
+checks suspend the actual owned publishers and drain facts before each SQL window, then use the
+real generation-bound recovery API. Compound SQL/reconnect cases retain their original safety holds;
+do not loosen session fences to make a test pass.
 
 Observability changes additionally check `tools/observability` with Ruff, strict mypy, function
 documentation and its tests. Native Promtool/amtool validate generated configs; the real scrape/
