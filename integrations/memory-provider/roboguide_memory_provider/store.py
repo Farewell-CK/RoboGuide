@@ -132,7 +132,7 @@ class MemoryStore:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1):
+        if version not in (0, 1, 2):
             self.close()
             raise ValueError("unsupported Memory backend schema")
         with self._db:
@@ -149,7 +149,26 @@ class MemoryStore:
             self._db.execute(
                 "INSERT OR IGNORE INTO identity VALUES (1,?,?)", (str(uuid.uuid4()), provider_id)
             )
-            self._db.execute("PRAGMA user_version=1")
+            self._db.execute(
+                "CREATE TABLE IF NOT EXISTS content_tombstones (content_digest TEXT PRIMARY KEY, "
+                "command_id TEXT UNIQUE NOT NULL, state TEXT NOT NULL "
+                "CHECK(state IN ('tombstoned','deleted')))"
+            )
+            self._db.execute(
+                "CREATE TABLE IF NOT EXISTS reclamation_commands (command_id TEXT PRIMARY KEY, "
+                "request_json BLOB NOT NULL, imports_json BLOB NOT NULL, state TEXT NOT NULL, "
+                "file_json BLOB, receipt_json BLOB)"
+            )
+            self._db.execute(
+                "CREATE TABLE IF NOT EXISTS retired_imports (import_id TEXT PRIMARY KEY, "
+                "command_id TEXT NOT NULL, completion_json BLOB NOT NULL)"
+            )
+            self._db.execute(
+                "CREATE TABLE IF NOT EXISTS content_references (reference_id TEXT PRIMARY KEY, "
+                "content_digest TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, "
+                "generation INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)))"
+            )
+            self._db.execute("PRAGMA user_version=2")
         instance, saved_provider = self._db.execute(
             "SELECT instance,provider FROM identity WHERE singleton=1"
         ).fetchone()
@@ -175,6 +194,14 @@ class MemoryStore:
     def identity(self) -> dict[str, str]:
         """Return the persistent identity actually read from this backend."""
         return {"instance_id": self.instance_id, "provider_id": self.provider_id}
+
+    def require_content_live(self, digest: str) -> None:
+        """Fence a local tombstone independently of new import IDs, leases or retained history."""
+        with self._mutex:
+            if self._db.execute(
+                "SELECT 1 FROM content_tombstones WHERE content_digest=?", (digest,)
+            ).fetchone():
+                raise ValueError("original provider content is durably tombstoned")
 
     def _export_path(self, binding: dict[str, Any]) -> Path:
         """Resolve and rehash one configured immutable export from its controlled handoff root."""
@@ -301,6 +328,10 @@ class MemoryStore:
     def _verify_content(self, digest: str, size: int) -> bool:
         """Rehash current backend bytes; catalog Imported history alone never proves presence."""
         try:
+            self.require_content_live(digest)
+        except ValueError:
+            return False
+        try:
             descriptor = os.open(self._content / digest[7:], os.O_RDONLY | os.O_NOFOLLOW)
         except FileNotFoundError:
             return False
@@ -324,6 +355,7 @@ class MemoryStore:
             if manifest != expected_manifest:
                 raise ValueError("import manifest differs from original authorization")
             digest, size = self._artifact(manifest)
+            self.require_content_live(digest)
             identity, manifest_bytes = canonical(original), canonical(manifest)
             existing = self._db.execute(
                 "SELECT original_json,manifest_json FROM imports WHERE import_id=?",
@@ -407,6 +439,13 @@ class MemoryStore:
                 size,
             ):
                 raise ValueError("stored original-import evidence conflicts")
+            retired = self._db.execute(
+                "SELECT completion_json FROM retired_imports WHERE import_id=?",
+                (original["import_id"],),
+            ).fetchone()
+            if retired is not None:
+                # Original completion remains history; availability independently fences tombstones.
+                return dict(json.loads(retired[0]))
             # For this file backend the entire semantic effect is exact immutable content plus
             # its durable original manifest row. A pending intent with matching bytes therefore
             # proves that effect, including a crash after fsync and before the final SQL update.
@@ -436,7 +475,14 @@ class MemoryStore:
             manifest = self._validate_original(original)
             digest, size = self._artifact(manifest)
             observed = self.query(original)
-            available = observed["outcome"] == "completed" and observed["durable"] is True
+            available = (
+                observed["outcome"] == "completed"
+                and observed["durable"] is True
+                and self._db.execute(
+                    "SELECT 1 FROM content_tombstones WHERE content_digest=?", (digest,)
+                ).fetchone()
+                is None
+            )
             return {
                 "schema": "roboguide.memory-provider-availability/v0.1",
                 "import_id": original["import_id"],

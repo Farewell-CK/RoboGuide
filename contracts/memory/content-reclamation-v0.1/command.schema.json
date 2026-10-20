@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "roboguide.content-reclamation-command/v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "command_id", "provider_id", "provider_instance_id", "content_digest", "byte_size"],
+  "properties": {
+    "schema": {"const": "roboguide.content-reclamation-command/v0.1"},
+    "command_id": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000\\r\\n]+$"},
+    "provider_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "provider_instance_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "byte_size": {"type": "integer", "minimum": 0, "maximum": 1073741824}
+  }
+}

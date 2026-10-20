@@ -214,12 +214,14 @@ impl ExecutionJournal {
     /// known pre-dispatch failures or ambiguous calls; rows with a handle are also fenced until a
     /// status fact confirms what happened after the acceptance fact's crash window.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, JournalError> {
+        let (path, writer) = acquire_writer(path.as_ref())?;
         let mut connection = Connection::open(path)?;
         configure_connection(&connection)?;
         create_schema(&mut connection)?;
         recover_ambiguous_dispatches(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
+            _writer: writer,
         })
     }
 
@@ -762,4 +764,50 @@ impl ExecutionJournal {
     pub(super) fn lock_connection(&self) -> Result<MutexGuard<'_, Connection>, JournalError> {
         self.connection.lock().map_err(|_| JournalError::Poisoned)
     }
+}
+
+/// Resolves one real database and locks both its canonical sibling and inode before any SQL.
+fn acquire_writer(path: &Path) -> Result<(PathBuf, JournalWriterLease), JournalError> {
+    let acquire = || -> std::io::Result<(PathBuf, JournalWriterLease)> {
+        let path = if path.exists() {
+            path.canonicalize()?
+        } else {
+            let parent = path
+                .parent()
+                .filter(|value| !value.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            parent.canonicalize()?.join(
+                path.file_name()
+                    .ok_or_else(|| std::io::Error::other("journal database must name a file"))?,
+            )
+        };
+        let mut name = path.as_os_str().to_os_string();
+        name.push(".writer.lock");
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        let lock = options.open(PathBuf::from(name))?;
+        if !lock.metadata()?.is_file() {
+            return Err(std::io::Error::other(
+                "journal lease must be a regular file",
+            ));
+        }
+        lock.try_lock().map_err(std::io::Error::other)?;
+        let database = options.open(&path)?;
+        if !database.metadata()?.is_file() {
+            return Err(std::io::Error::other(
+                "journal database must be a regular file",
+            ));
+        }
+        database.try_lock().map_err(std::io::Error::other)?;
+        Ok((path, JournalWriterLease { lock, database }))
+    };
+    acquire().map_err(|source| JournalError::WriterLease {
+        path: path.to_path_buf(),
+        source,
+    })
 }

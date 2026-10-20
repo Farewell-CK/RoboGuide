@@ -1389,7 +1389,7 @@ fn current_journal_keeps_legacy_inspection_but_refuses_legacy_writes() {
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        12
+        13
     );
 }
 
@@ -1399,7 +1399,7 @@ fn future_journal_and_dual_authorities_refuse_without_migration() {
     let (directory, path, journal) = journal();
     drop(journal);
     let connection = rusqlite::Connection::open(&path).unwrap();
-    connection.pragma_update(None, "user_version", 13).unwrap();
+    connection.pragma_update(None, "user_version", 14).unwrap();
     drop(connection);
     assert!(ExecutionJournal::open(&path).is_err());
     let connection = rusqlite::Connection::open(&path).unwrap();
@@ -1407,7 +1407,7 @@ fn future_journal_and_dual_authorities_refuse_without_migration() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        13
+        14
     );
     connection.pragma_update(None, "user_version", 12).unwrap();
     connection
@@ -1416,4 +1416,62 @@ fn future_journal_and_dual_authorities_refuse_without_migration() {
     drop(connection);
     assert!(ExecutionJournal::open(&path).is_err());
     drop(directory);
+}
+
+/// A second actual writer cannot run startup recovery against a live dispatch authority.
+#[test]
+fn second_writer_refuses_before_mutating_live_dispatch() {
+    let (_directory, path, journal) = journal();
+    let spec = ExecutionSpec::new(b"original invocation".to_vec(), "original workflow", [])
+        .expect("original spec");
+    journal.prepare_dispatch("inflight", &spec).unwrap();
+    assert!(matches!(
+        ExecutionJournal::open(&path),
+        Err(JournalError::WriterLease { .. })
+    ));
+    assert_eq!(
+        journal.get("inflight").unwrap().unwrap().status(),
+        JournalStatus::Dispatching
+    );
+    drop(journal);
+    let reopened = ExecutionJournal::open(&path).unwrap();
+    assert_ne!(
+        reopened.get("inflight").unwrap().unwrap().status(),
+        JournalStatus::Dispatching
+    );
+}
+
+/// Both symlink names and hard-linked database inodes share one actual process authority.
+#[cfg(unix)]
+#[test]
+fn database_aliases_cannot_create_another_node_writer() {
+    let (directory, path, journal) = journal();
+    let symlink = directory.path().join("alias.sqlite3");
+    let hardlink = directory.path().join("hardlink.sqlite3");
+    std::os::unix::fs::symlink(&path, &symlink).unwrap();
+    std::fs::hard_link(&path, &hardlink).unwrap();
+    assert!(matches!(
+        ExecutionJournal::open(symlink),
+        Err(JournalError::WriterLease { .. })
+    ));
+    assert!(matches!(
+        ExecutionJournal::open(hardlink),
+        Err(JournalError::WriterLease { .. })
+    ));
+    drop(journal);
+    ExecutionJournal::open(path).unwrap();
+}
+
+/// Leaked/inherited duplicate descriptors do not extend the final application's writer lifetime.
+#[test]
+fn final_node_writer_explicitly_unlocks_duplicated_descriptors() {
+    let (_directory, path, journal) = journal();
+    let inherited_name = journal._writer.lock.try_clone().unwrap();
+    let inherited_inode = journal._writer.database.try_clone().unwrap();
+    assert!(ExecutionJournal::open(&path).is_err());
+    drop(journal);
+    let reopened = ExecutionJournal::open(path).unwrap();
+    drop(inherited_name);
+    drop(inherited_inode);
+    drop(reopened);
 }

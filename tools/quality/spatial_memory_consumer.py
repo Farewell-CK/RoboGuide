@@ -28,6 +28,43 @@ Exchange = Callable[[str, str, Any], tuple[int, Any]]
 Start = Callable[[list[str], str, dict[str, str] | None], subprocess.Popen[bytes]]
 
 
+def await_verifier_application(
+    origin: str, exchange: Exchange, response: dict[str, Any]
+) -> dict[str, Any]:
+    """Read exact original evidence progress while provider revoke ACKs finish, without renewal."""
+    original = response["receipt"]
+
+    def observed() -> dict[str, Any] | None:
+        """Accept only the same original receipt after its real durable application gate passes."""
+        if original["applied"] is True:
+            return dict(original)
+        status, page = exchange(origin, "/v1/verifier-evidence", None)
+        assert status == 200, page
+        for receipt in page["receipts"]:
+            if receipt["evidence"]["evidence_id"] != original["evidence"]["evidence_id"]:
+                continue
+            for key in (
+                "evidence",
+                "input_digest",
+                "received_at_ms",
+                "valid_until_ms",
+                "authority_subject",
+            ):
+                assert receipt[key] == original[key], "original verifier identity/budget changed"
+            assert receipt["incident"] is None, receipt
+            if receipt["applied"] is True:
+                return dict(receipt)
+        return None
+
+    return dict(
+        wait_for(
+            observed,
+            "original verifier applies after actual provider revoke ACKs",
+            original["evidence"]["valid_for_ms"] / 1000,
+        )
+    )
+
+
 def verify(output: Path) -> dict[str, Any]:
     """Independently hash the actual receiver bytes and check full raw source/attempt binding."""
     source = json.loads((output / "catalog-manifest.json").read_bytes())["manifest"]
@@ -410,12 +447,14 @@ class SpatialMemoryConsumer:
             "artifact_size_bytes": map_manifest["byte_size"],
         }
         status, response = exchange(origin, "/v1/verifier-evidence", evidence)
-        assert status == 200 and response["receipt"]["applied"] is True, response
+        assert status == 200, response
+        applied = await_verifier_application(origin, exchange, response)
         return {
             "passed": True,
             "actual_software_receiver": self.node,
             "independent": verified,
             "verifier_receipt": response,
+            "applied_verifier_receipt": applied,
             "configuration_digest": "sha256:"
             + hashlib.sha256(self.config.read_bytes()).hexdigest(),
             "physical_localization": "HardwareEvidencePending",

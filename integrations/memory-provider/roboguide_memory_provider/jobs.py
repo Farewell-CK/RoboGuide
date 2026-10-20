@@ -35,7 +35,8 @@ class FileJobs:
         self.leases = leases
         self.max_job_ms = max_job_seconds * 1000
         self.max_job_rounds = max_job_rounds
-        self._mutex = threading.RLock()
+        # Actual admission, opened content and local reclamation share one ordering authority.
+        self._mutex = store._mutex
         self._active: dict[str, threading.Event] = {}
         self._workers: dict[str, threading.Thread] = {}
         self._closing = False

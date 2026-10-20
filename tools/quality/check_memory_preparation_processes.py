@@ -24,6 +24,7 @@ from typing import Any, BinaryIO
 
 from check_identity_processes import request as tls_request
 from check_state_verifier_processes import ROOT, address, save, stop, wait_for
+from memory_content_reclamation import run as run_reclamation
 from memory_group_lifecycle import GroupScenario
 from memory_group_lifecycle import run as run_group
 from memory_handoff_processes import (
@@ -60,6 +61,7 @@ def identity() -> dict[str, str]:
             "memory_group_lifecycle.py",
             "memory_use_query_processes.py",
             "memory_handoff_processes.py",
+            "memory_content_reclamation.py",
         )
     ]
     result = {
@@ -113,6 +115,7 @@ def run(
     use_query_recovery: bool = False,
     use_query_case: str = "manual",
     handoff_case: str | None = None,
+    content_reclamation: bool = False,
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
     use_lifecycle = use_lifecycle or use_case is not None or use_query_recovery
@@ -304,6 +307,8 @@ def run(
                     "--export-directory",
                     str(source_root),
                 ]
+            if content_reclamation and index == 1:
+                command += ["--enable-content-reclamation"]
             backend_commands.append(command)
             backend_processes.append(start(command, name + "-backend"))
             wait_for(
@@ -783,8 +788,9 @@ def run(
         }
         for process in backend_processes:
             stop(process)
+        restored_backends = []
         for index, name in enumerate(("source", "consumer")):
-            start(backend_commands[index], name + "-backend-restored")
+            restored_backends.append(start(backend_commands[index], name + "-backend-restored"))
             wait_for(
                 lambda index=index: (
                     request(backends[index], "/v1/instance")[1].get("instance_id")
@@ -832,6 +838,20 @@ def run(
             )
         assert next(iter(preparations().values()))["deadline_ms"] == original_budget
         assert exchange("/v1/memory/imports/" + import_id)[1]["phase"] == "completed"
+        reclamation_result = None
+        if content_reclamation:
+
+            def restart_consumer() -> None:
+                """Reap the exact owned backend and reopen its original command and files."""
+                stop(restored_backends[1])
+                restored_backends[1] = start(backend_commands[1], "consumer-backend-gc-restored")
+                wait_for(
+                    lambda: request(backends[1], "/v1/instance")[1]["instance_id"] == instances[1],
+                    "original backend reclamation authority restored",
+                )
+
+            reclamation_result = run_reclamation(directory, backends[1], restart_consumer)
+            assert exchange(f"/v1/missions/{mission_id}")[1]["status"] == "Completed"
         assert identity() == initial_identity, "pinned code or binary changed during conformance"
         assert {
             str(path.relative_to(directory)): "sha256:"
@@ -863,7 +883,8 @@ def run(
             "execute_before_group_grant": False,
             "restart_renewed_budget": False,
             "actual_node_restarts": 2,
-            "actual_backend_restarts": 2,
+            "actual_backend_restarts": 3 if content_reclamation else 2,
+            "content_reclamation": reclamation_result,
             "original_receiver_budget_unchanged": True,
             "transport_profile": "actual-mutual-tls-and-enrolled-nodes",
             "source_manifest": manifest,
@@ -910,6 +931,7 @@ def main() -> None:
     parser.add_argument("--use-lifecycle", action="store_true")
     parser.add_argument("--large-transfer", action="store_true")
     parser.add_argument("--group-lifecycle", action="store_true")
+    parser.add_argument("--content-reclamation", action="store_true")
     parser.add_argument(
         "--handoff-case", choices=("complete", "expiry", "policy-change", "controller-restart")
     )
@@ -919,6 +941,14 @@ def main() -> None:
         "--use-case", choices=("revoke", "expire", "backend-restart", "controller-restart")
     )
     arguments = parser.parse_args()
+    if arguments.content_reclamation and (
+        arguments.group_lifecycle
+        or arguments.handoff_case
+        or arguments.use_query_recovery
+        or arguments.use_query_case
+        or arguments.use_case
+    ):
+        parser.error("--content-reclamation extends the independently verified completion profile")
     if arguments.group_lifecycle and (
         arguments.use_lifecycle or arguments.use_case or arguments.large_transfer
     ):
@@ -937,6 +967,7 @@ def main() -> None:
                     arguments.use_query_recovery or arguments.use_query_case is not None,
                     arguments.use_query_case or "manual",
                     arguments.handoff_case,
+                    arguments.content_reclamation,
                 ),
                 sort_keys=True,
             )

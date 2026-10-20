@@ -17,6 +17,7 @@ from typing import Any
 
 from .active_map import ActiveMapLedger
 from .jobs import FileJobs
+from .reclamation import ContentReclamation
 from .store import MAX_METADATA_BYTES, MemoryStore, canonical
 from .use_leases import UseLeases
 
@@ -47,6 +48,7 @@ def handler_type(
     jobs: FileJobs | None = None,
     leases: UseLeases | None = None,
     active_maps: ActiveMapLedger | None = None,
+    reclamation: ContentReclamation | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     """Bind an already configured actual backend to fixed readonly and import routes."""
 
@@ -89,6 +91,12 @@ def handler_type(
             try:
                 if leases is not None and self.path == "/v1/memory-use/query":
                     self._respond(200, leases.query(self._body()))
+                elif reclamation is not None and self.path == "/v1/content/reclamation":
+                    if not isinstance(self.server, UnixServer):
+                        raise ValueError(
+                            "content reclamation requires the actual private Unix transport"
+                        )
+                    self._respond(200, reclamation.observe(self._body()["command_id"]))
                 elif jobs is not None and self.path == "/v1/file-jobs/health":
                     self._respond(200, jobs.health())
                 elif jobs is not None and self.path == "/v1/file-jobs/status":
@@ -119,6 +127,22 @@ def handler_type(
         def do_POST(self) -> None:  # noqa: N802 - stdlib HTTP dispatch contract.
             """Import an exact actual staged file once under its complete original identity."""
             try:
+                if reclamation is not None and self.path in {
+                    "/v1/content/tombstone",
+                    "/v1/content/collect",
+                }:
+                    if not isinstance(self.server, UnixServer):
+                        raise ValueError(
+                            "content reclamation requires the actual private Unix transport"
+                        )
+                    body = self._body()
+                    result = (
+                        reclamation.tombstone(body)
+                        if self.path.endswith("/tombstone")
+                        else reclamation.collect(body)
+                    )
+                    self._respond(200, result)
+                    return
                 if leases is not None and self.path == "/v1/memory-use/control":
                     self._respond(200, leases.apply(self._body()))
                     return
@@ -187,6 +211,7 @@ def main() -> None:
     parser.add_argument("--listen-unix", action="store_true")
     parser.add_argument("--export-directory", type=Path)
     parser.add_argument("--enable-active-map", action="store_true")
+    parser.add_argument("--enable-content-reclamation", action="store_true")
     args = parser.parse_args()
     if not ipaddress.ip_address(args.listen_host).is_loopback:
         parser.error("this Local EAIOS facade requires a literal loopback address")
@@ -198,6 +223,10 @@ def main() -> None:
         )
     if args.listen_unix and args.listen_port:
         parser.error("the Unix profile cannot bind a TCP port")
+    if args.enable_content_reclamation and not (
+        args.listen_unix and args.enable_use_leases and args.enable_file_jobs
+    ):
+        parser.error("content reclamation requires actual Unix, use-lease and file-job owners")
     store = MemoryStore(
         args.root,
         args.provider_id,
@@ -232,6 +261,11 @@ def main() -> None:
             if args.enable_active_map
             else None
         )
+        reclamation = (
+            ContentReclamation(store, leases, jobs, active_maps)
+            if args.enable_content_reclamation and leases is not None and jobs is not None
+            else None
+        )
         server: ThreadingHTTPServer | UnixServer
         if args.listen_unix:
             metadata = store.root.stat()
@@ -242,7 +276,9 @@ def main() -> None:
                 if not stat.S_ISSOCK(metadata.st_mode) or metadata.st_uid != os.getuid():
                     raise ValueError("existing Local Memory socket is not an owned socket")
                 socket_path.unlink()
-            server = UnixServer(str(socket_path), handler_type(store, jobs, leases, active_maps))
+            server = UnixServer(
+                str(socket_path), handler_type(store, jobs, leases, active_maps, reclamation)
+            )
             socket_path.chmod(0o600)
             socket_inode = socket_path.stat().st_ino
             endpoint = "unix://" + str(socket_path)

@@ -244,9 +244,7 @@ async fn transport_timeout_requires_reconciliation_without_replay() {
         event.phase,
         integration::grpc::v0_4::ExecutionPhase::Unknown
     );
-    let journal =
-        crate::ExecutionJournal::open(crate::journal_path(engine.catalog().state_directory()))
-            .expect("journal opens");
+    let journal = engine.owned_journal();
     assert_eq!(
         journal
             .get("timeout-execution")

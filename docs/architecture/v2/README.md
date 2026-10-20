@@ -1,5 +1,14 @@
 # RoboGuide V2 架构基线
 
+[ADR-0113](../../decisions/0113-quiescent-recovery-bundles-and-node-writer-lease.md) 定义静止恢复包：
+完整 metadata、原 command/receipt 与实际内容共同校验；备份取得各原 writer lease，恢复到
+新目录且不续原预算。Node journal v13 在 recovery 前取得唯一 writer，Engine clone 共用它。
+
+[ADR-0112](../../decisions/0112-original-provider-content-reclamation.md) 限定原 provider 的内容
+回收权威：实际原 import/revoke/worker/active-map 引用核对、先持久 tombstone 再删除，
+副本删除不等于全局 Memory 或设备停止。Active Map 当前权限绑定原完整输入，兼容布尔 GC
+不授予删除权。完整 F4/F5 验收仍包含 Controller、snapshot、archive 与 CAS 的一致恢复。
+
 2026-10-20 [ADR-0111](../../decisions/0111-branch-integration-and-authority-version-fences.md)
 组合 Memory、发布合同前检与独立进程停止证据。Node v0.12/config v0.13/catalog v0.15
 分别保留 Memory tags 8–10 与 generation tag 11，preparation/Execute 固定原代次。

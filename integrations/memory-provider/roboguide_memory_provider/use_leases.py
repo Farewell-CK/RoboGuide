@@ -105,6 +105,8 @@ class UseLeases:
     def close(self) -> None:
         """Close the local lease database after the owner joins all content users."""
         with self._mutex:
+            if self._writer is None:
+                return
             self._db.close()
             if self._writer is not None:
                 os.close(self._writer)
@@ -246,6 +248,17 @@ class UseLeases:
             seen.add(identifier)
             item = selected[identifier]
             manifest = self.store._validate_original(original)
+            invocation = original["original_invocation"]
+            if (
+                invocation.get("memory_preparation_id") != control["preparation_id"]
+                or invocation.get("session_id") != control["source_session_id"]
+                or any(invocation.get(key) != control[key] for key in ("execution_id", "group_id"))
+                or any(
+                    invocation.get(key) != preparation["invocation"].get(key)
+                    for key in ("mission_id", "task_id", "role_id")
+                )
+            ):
+                raise ValueError("Memory-use import differs from its original preparation owner")
             if manifest != item["manifest"] or not self.store.availability(original)["available"]:
                 raise ValueError("Memory-use original backend bytes are not currently available")
             raw = original["original_invocation"].get("typed_map_manifest_json", "")
@@ -271,7 +284,7 @@ class UseLeases:
         control = self._control(request)
         request_digest = content_digest(request)
         purpose = self._purpose(control)
-        with self._mutex, self.store._mutex:
+        with self.store._mutex, self._mutex:
             original = self._db.execute(
                 "SELECT request_digest,receipt_json FROM commands WHERE command_id=?",
                 (control["command_id"],),
@@ -478,3 +491,119 @@ class UseLeases:
                 or not self._effective(lease_id)
             ):
                 raise UsePermissionEnded("current Memory-use permission ended")
+
+    def guard_map(self, context: dict[str, Any]) -> None:
+        """Authorize only the original provider's exact typed map and full current attempt owner."""
+        with self.store._mutex, self._mutex:
+            self.guard(context["use_lease_id"], context["execution_id"])
+            row = self._db.execute(
+                "SELECT purpose_json,preparation_json FROM leases WHERE lease_id=?",
+                (context["use_lease_id"],),
+            ).fetchone()
+            if row is None or row[1] is None:
+                raise UsePermissionEnded("original typed-map preparation is unavailable")
+            purpose, preparation = json.loads(row[0]), json.loads(row[1])
+            if any(context[key] != purpose[key] for key in ("execution_id", "node_id", "group_id")):
+                raise UsePermissionEnded("active-map changed its original Node/Group/attempt")
+            if context["attempt_id"] != purpose["execution_id"]:
+                raise UsePermissionEnded("active-map attempt differs from its original execution")
+            matches = []
+            for item in preparation["inputs"]:
+                typed = item.get("typed_map")
+                if item["consumer"]["provider_id"] == self.store.provider_id and typed is not None:
+                    if (
+                        typed["map_id"] == context["map_id"]
+                        and typed["revision_id"] == context["revision_id"]
+                        and typed["content_digest"] == context["content_digest"]
+                        and typed["byte_size"] == context["byte_size"]
+                        and typed["root_frame"] == context["frame_id"]
+                        and typed["spatial_anchor"]["id"] == context["spatial_anchor_id"]
+                    ):
+                        matches.append(item)
+            if len(matches) != 1:
+                raise UsePermissionEnded("active-map is not one exact original typed-map input")
+            self.store.require_content_live(context["content_digest"])
+
+    def retired_import_evidence(self, original: dict[str, Any]) -> dict[str, Any]:
+        """Read an irreversible original revoke receipt covering this exact backend import."""
+        with self.store._mutex, self._mutex:
+            invocation = original["original_invocation"]
+            preparation_id = invocation.get("memory_preparation_id")
+            if not isinstance(preparation_id, str) or not preparation_id:
+                raise ValueError("legacy original import has no frozen preparation identity")
+            lease_id = "use-" + hashlib.sha256(preparation_id.encode()).hexdigest()
+            row = self._db.execute(
+                "SELECT l.lease_id,l.purpose_json,l.preparation_json,c.receipt_json "
+                "FROM leases l JOIN commands c ON c.lease_id=l.lease_id "
+                "WHERE l.lease_id=? AND l.revoked=1 AND c.generation=0",
+                (lease_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("original import lacks a durable original-provider revoke receipt")
+            _, purpose_json, preparation_json, receipt_json = row
+            purpose, receipt = json.loads(purpose_json), json.loads(receipt_json)
+            manifest = self.store._validate_original(original)
+            if (
+                purpose["backend_instance_id"] != self.store.instance_id
+                or purpose["provider_id"] != self.store.provider_id
+                or receipt["status"] != "revoked"
+                or receipt["provider_instance_id"] != self.store.instance_id
+                or receipt["provider_id"] != self.store.provider_id
+                or receipt["lease_id"] != lease_id
+                or receipt["generation"] != 0
+                or receipt["preparation_digest"] != purpose["preparation_digest"]
+                or receipt["configuration_digest"] != purpose["configuration_digest"]
+                or purpose["preparation_id"] != preparation_id
+                or purpose["source_session_id"] != invocation.get("session_id")
+                or any(purpose[key] != invocation.get(key) for key in ("execution_id", "group_id"))
+            ):
+                raise ValueError("original import retirement proof conflicts")
+            if preparation_json is not None:
+                preparation = json.loads(preparation_json)
+                selected = [
+                    item
+                    for item in preparation["inputs"]
+                    if item["import_id"] == original["import_id"]
+                    and item["consumer"]["provider_id"] == self.store.provider_id
+                ]
+                if (
+                    len(selected) != 1
+                    or selected[0]["manifest"] != manifest
+                    or any(
+                        preparation["invocation"].get(key) != invocation.get(key)
+                        for key in ("mission_id", "task_id", "role_id")
+                    )
+                ):
+                    raise ValueError("original import retirement preparation conflicts")
+            return {
+                "import_id": original["import_id"],
+                "revocations": [
+                    {
+                        "lease_id": lease_id,
+                        "purpose": purpose,
+                        "receipt": receipt,
+                        "revoke_preceded_first_grant": preparation_json is None,
+                    }
+                ],
+            }
+
+    def content_retention_blockers(self, digest: str) -> list[str]:
+        """Inspect current/unconfirmed leases once with bounded streaming metadata coverage."""
+        with self.store._mutex, self._mutex:
+            blockers, total, count = [], 0, 0
+            for lease_id, encoded in self._db.execute(
+                "SELECT lease_id,preparation_json FROM leases WHERE revoked=0 ORDER BY lease_id"
+            ):
+                count += 1
+                total += len(encoded) if encoded is not None else 0
+                if count > MAX_LEASES or total > 16 * MAX_METADATA_BYTES:
+                    return ["current_lease_reference_coverage_exceeds_bound"]
+                if encoded is None:
+                    blockers.append("unknown_current_lease:" + lease_id)
+                    continue
+                if any(
+                    item["manifest"].get("artifact", {}).get("content_digest") == digest
+                    for item in json.loads(encoded)["inputs"]
+                ):
+                    blockers.append("current_or_unconfirmed_use_lease:" + lease_id)
+            return blockers

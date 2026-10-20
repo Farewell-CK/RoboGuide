@@ -11,6 +11,11 @@ ADR-0111 统一独立分支冲突合同为 Node v0.12/config v0.13/catalog v0.15
 journal v12，并保持旧 Memory 证据和原预算。集成完成不等于全部阶段 SoftwareComplete。
 本工作包结果见 [main 分支集成与软件组合验收](acceptance/2026-10-20-main-integration.md)。
 
+后续 [原 provider 回收与内容恢复验收](acceptance/2026-10-20-content-reclamation-and-recovery.md)
+接通实际原引用/revoke/tombstone/unlink 对账、完整 Active Map 输入门禁、Node journal v13
+唯一 writer，以及 6 stores/72 tables/实际 CAS 的静止恢复。该结果不关闭 F4/F5 的全局引用
+与在线 HA 数据面，不改变 R01–R20 或后续必需交付。
+
 ## 交付要求
 
 原审计 14 层、R01–R20 的全部非发布工作均为必需项，原 P2 不再是本轮的排除项。

@@ -9,7 +9,6 @@ import hashlib
 import json
 import sqlite3
 import stat
-import threading
 import time
 import zipfile
 from pathlib import Path
@@ -32,6 +31,9 @@ class LeaseGuard(Protocol):
 
     def guard(self, lease_id: str, execution_id: str) -> None:
         """Reject an expired, revoked or mismatched current-use context."""
+
+    def guard_map(self, context: dict[str, Any]) -> None:
+        """Bind the original map and complete Node/Group/attempt owner before effects."""
 
 
 def _digest_bytes(value: bytes) -> str:
@@ -239,10 +241,14 @@ class ActiveMapLedger:
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.store = store
         self.leases = leases
-        self._lock = threading.RLock()
+        self._lock = store._mutex
         self._db = sqlite3.connect(root / "active-map.sqlite3", check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
+        version = self._db.execute("PRAGMA user_version").fetchone()[0]
+        if version not in (0, 1, 2):
+            self._db.close()
+            raise ActiveMapError("unsupported active-map ledger schema")
         with self._db:
             self._db.execute(
                 "CREATE TABLE IF NOT EXISTS heads(selector TEXT PRIMARY KEY, generation INTEGER NOT NULL, state TEXT NOT NULL, context_json BLOB NOT NULL, proof_json BLOB NOT NULL, updated_at_ms INTEGER NOT NULL)"
@@ -261,6 +267,7 @@ class ActiveMapLedger:
             )
             self._db.execute("UPDATE heads SET state='stale_after_restart' WHERE state='active'")
             self._db.execute("UPDATE refs SET active=0 WHERE ref_kind='active_map'")
+            self._db.execute("PRAGMA user_version=2")
 
     def close(self) -> None:
         """Close the durable active-map ledger without deleting historical selection evidence."""
@@ -275,6 +282,8 @@ class ActiveMapLedger:
         execution_id = _text(request.get("execution_id"), "execution_id", 1024)
         try:
             self.leases.guard(lease_id, execution_id)
+            self.leases.guard_map(request)
+            self.store.require_content_live(request["content_digest"])
         except Exception as error:
             raise ActiveMapError(str(error)) from error
 
@@ -319,6 +328,11 @@ class ActiveMapLedger:
         return values
 
     def select(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Serialize actual map validation, current authorization and installation with reclamation."""
+        with self._lock:
+            return self._select(request)
+
+    def _select(self, request: dict[str, Any]) -> dict[str, Any]:
         """Select one verified immutable map revision with generation CAS and current lease proof."""
         context = self._closed_context(request)
         self._lease(context)
@@ -326,6 +340,7 @@ class ActiveMapLedger:
         selector = f"{context['map_id']}:{context['revision_id']}"
         now = time.time_ns() // 1_000_000
         with self._lock, self._db:
+            self._lease(context)
             row = self._db.execute(
                 "SELECT generation,state,context_json,proof_json,updated_at_ms FROM heads WHERE selector=?",
                 (selector,),
@@ -360,6 +375,11 @@ class ActiveMapLedger:
         }
 
     def query(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Hold the actual content ordering through all bytes and the final permission recheck."""
+        with self._lock:
+            return self._query(request)
+
+    def _query(self, request: dict[str, Any]) -> dict[str, Any]:
         """Run a bounded semantic tile query against the selected file map, never localization."""
         base = self._closed_context(
             {
@@ -445,6 +465,7 @@ class ActiveMapLedger:
             "proof": bundle,
         }
         with self._lock, self._db:
+            self._lease(base)
             if self._db.execute("SELECT COUNT(*) FROM queries").fetchone()[0] >= MAX_QUERIES:
                 raise ActiveMapError("active-map query history is full")
             self._db.execute(
@@ -524,6 +545,11 @@ class ActiveMapLedger:
         }
 
     def prepare_handoff(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Serialize the frozen source/target purpose with original content and use authority."""
+        with self._lock:
+            return self._prepare_handoff(request)
+
+    def _prepare_handoff(self, request: dict[str, Any]) -> dict[str, Any]:
         """Persist a whole-group software stop barrier before any target map rebind."""
         required = {"schema", "barrier_id", "group_id", "source", "target", "stop_barrier"}
         if set(request) != required or request["schema"] != "roboguide.active-map-handoff/v0.1":
@@ -537,7 +563,12 @@ class ActiveMapLedger:
         target_context = self._closed_context(target)
         if source_context["group_id"] != group_id or target_context["group_id"] != group_id:
             raise ActiveMapError("active-map handoff crosses the source Group")
-        if target_context["generation"] != source_context["generation"] + 1:
+        if (
+            target_context["generation"] != source_context["generation"] + 1
+            or source_context["map_id"] != target_context["map_id"]
+            or source_context["revision_id"] != target_context["revision_id"]
+            or source_context["content_digest"] != target_context["content_digest"]
+        ):
             raise ActiveMapError("active-map handoff generation is not contiguous")
         stop_barrier = request["stop_barrier"]
         if (
@@ -549,12 +580,15 @@ class ActiveMapLedger:
             or not isinstance(stop_barrier["confirmed_attempts"], list)
             or sorted(stop_barrier["attempts"]) != sorted(stop_barrier["confirmed_attempts"])
             or len(set(stop_barrier["attempts"])) != len(stop_barrier["attempts"])
+            or not stop_barrier["attempts"]
+            or source_context["execution_id"] not in stop_barrier["attempts"]
         ):
             raise ActiveMapError("handoff requires a complete software stop barrier")
         self._lease(source_context)
         selector = f"{source_context['map_id']}:{source_context['revision_id']}"
         now = time.time_ns() // 1_000_000
         with self._lock, self._db:
+            self._lease(source_context)
             row = self._db.execute(
                 "SELECT generation,state,context_json FROM heads WHERE selector=?", (selector,)
             ).fetchone()
@@ -577,6 +611,11 @@ class ActiveMapLedger:
         }
 
     def commit_handoff(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Commit only the frozen source/target under the same actual local-content ordering."""
+        with self._lock:
+            return self._commit_handoff(request)
+
+    def _commit_handoff(self, request: dict[str, Any]) -> dict[str, Any]:
         """Atomically bind the verified target revision after the durable stop barrier."""
         required = {"schema", "barrier_id", "target"}
         if (
@@ -599,9 +638,12 @@ class ActiveMapLedger:
             source = dict(prepared["source"])
             source["schema"] = "roboguide.active-map/v0.1"
             source_context = self._closed_context(source)
+            prepared_target = dict(prepared["target"])
+            prepared_target["schema"] = "roboguide.active-map/v0.1"
             if (
                 target_context["group_id"] != barrier_row[0]
                 or target_context["generation"] != source_context["generation"] + 1
+                or target_context != self._closed_context(prepared_target)
             ):
                 raise ActiveMapError("handoff target differs from the prepared source barrier")
             proof = _load_bundle(self.store, target_context)
@@ -615,12 +657,20 @@ class ActiveMapLedger:
                 "context_digest": _digest_bytes(canonical(target_context)),
             }
             with self._db:
+                self._lease(target_context)
                 source_head = self._db.execute(
                     "SELECT selector,generation,state,context_json,proof_json,updated_at_ms FROM heads WHERE selector=?",
                     (source_selector,),
                 ).fetchone()
-                if source_head is None:
-                    raise ActiveMapError("handoff source selection disappeared")
+                if (
+                    source_head is None
+                    or source_head[1] != source_context["generation"]
+                    or source_head[2] != "active"
+                    or json.loads(source_head[3]) != source_context
+                ):
+                    raise ActiveMapError("handoff source selection changed after preparation")
+                if source_selector != target_selector:
+                    raise ActiveMapError("handoff cannot overwrite an unrelated map selection")
                 self._db.execute(
                     "INSERT OR REPLACE INTO history VALUES (?,?,?,?,?,?)",
                     (
@@ -673,7 +723,7 @@ class ActiveMapLedger:
         }
 
     def gc(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Delete nothing unless every execution/import/active-map/lineage/snapshot/archive ref is explicit."""
+        """Retain the legacy route without granting deletion authority to caller booleans."""
         required = {"schema", "content_digest", "selector", "refs"}
         if set(request) != required or request["schema"] != "roboguide.active-map-gc/v0.1":
             raise ActiveMapError("active-map GC request is not closed")
@@ -706,25 +756,43 @@ class ActiveMapLedger:
                     else kinds
                 ),
             }
-        with self._lock, self._db:
-            active = self._db.execute(
-                "SELECT 1 FROM refs WHERE selector=? AND digest=? AND active=1", (selector, digest)
-            ).fetchone()
-            if active:
-                return {
-                    "schema": "roboguide.active-map-gc/v0.1",
-                    "state": "blocked",
-                    "digest": digest,
-                    "selector": selector,
-                    "reasons": ["active_map"],
-                }
-            self._db.execute("DELETE FROM refs WHERE selector=? AND digest=?", (selector, digest))
-        path = _bundle_path(self.store, digest)
-        path.unlink()
         return {
             "schema": "roboguide.active-map-gc/v0.1",
-            "state": "deleted",
+            "state": "blocked",
             "digest": digest,
             "selector": selector,
-            "reasons": [],
+            "reasons": ["caller_booleans_are_not_reference_authority"],
         }
+
+    def retire_content(self, digest: str) -> None:
+        """Retire only local active-map heads after the owner has verified all original revokes."""
+        with self._lock, self._db:
+            rows = self._db.execute(
+                "SELECT selector,generation,state,context_json,proof_json,updated_at_ms FROM heads"
+            ).fetchall()
+            for row in rows:
+                if json.loads(row[3])["content_digest"] == digest and row[2] == "active":
+                    retired = (*row[:2], "revoked", *row[3:])
+                    self._db.execute("INSERT OR REPLACE INTO history VALUES (?,?,?,?,?,?)", retired)
+                    self._db.execute("UPDATE heads SET state='revoked' WHERE selector=?", (row[0],))
+                    self._db.execute(
+                        "UPDATE refs SET active=0 WHERE selector=? AND ref_kind='active_map'",
+                        (row[0],),
+                    )
+
+    def reclamation_blockers(self, digest: str) -> list[str]:
+        """Read actual local map/handoff references without accepting external all-clear flags."""
+        with self._lock:
+            blockers = [
+                "active_map:" + row[0]
+                for row in self._db.execute(
+                    "SELECT ref_id FROM refs WHERE digest=? AND active=1 ORDER BY ref_id", (digest,)
+                )
+            ]
+            for barrier, encoded in self._db.execute(
+                "SELECT barrier_id,request_json FROM handoffs WHERE state='prepared' ORDER BY barrier_id"
+            ):
+                purpose = json.loads(encoded)
+                if any(purpose[key]["content_digest"] == digest for key in ("source", "target")):
+                    blockers.append("pending_handoff:" + barrier)
+            return blockers

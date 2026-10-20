@@ -128,9 +128,7 @@ async fn memory_provider_import_is_exact_once_across_receipt_loss_and_unknown() 
         vec![Arc::new(MemoryDriver(Arc::clone(&count))) as Arc<dyn LocalDriver>],
     )
     .unwrap();
-    let journal =
-        crate::ExecutionJournal::open(crate::journal_path(&directory.path().join("state")))
-            .unwrap();
+    let journal = engine.owned_journal();
     let spec=crate::ExecutionSpec::new(serde_json::to_vec(&serde_json::json!({"mission_id":"mission-a","group_id":"group-a","task_id":"task-a","role_id":"role-a"})).unwrap(),"immutable-workflow",Vec::<String>::new()).unwrap();
     journal.prepare_dispatch("execution-a", &spec).unwrap();
     journal.authorize_local_dispatch("execution-a").unwrap();

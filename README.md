@@ -2,6 +2,13 @@
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
+原 provider 的[内容回收合同](contracts/memory/content-reclamation-v0.1/README.md)现核对实际
+原 import/revoke、worker 与 Active Map 引用，先持久 tombstone，再删除并对账；调用方布尔
+声明不授予 GC 权限。[恢复工具](apps/recovery-tool/README.md)在全部原 writer 退出后备份
+完整 SQL 与实际内容，校验后恢复到新目录。Node journal 当前为 v13，原唯一 writer 在
+任何 recovery 前取得锁；Node Protocol 与共享 wrapper 保持 v0.12/v41。全局 Memory/HA
+数据面及后续完整整改仍按原计划验收。
+
 2026-10-20 的[分支同步与剩余整改核对](docs/development/roboguide-integration-status-2026-10-20.md)
 记录所有远程分支与尚未关闭的非发布工作。整改、MI 校验和执行故障闭环按
 [ADR-0111](docs/decisions/0111-branch-integration-and-authority-version-fences.md)组合：

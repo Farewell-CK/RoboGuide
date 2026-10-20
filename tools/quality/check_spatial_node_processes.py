@@ -25,7 +25,7 @@ from check_artifact_authority_processes import call as tls_call
 from check_spatial_local_processes import request as local_request
 from check_state_verifier_processes import ROOT, address, request, save, stop, wait_for
 from spatial_content_policy import check as check_content_policy
-from spatial_memory_consumer import SpatialMemoryConsumer
+from spatial_memory_consumer import SpatialMemoryConsumer, await_verifier_application
 from spatial_process_tls import configure as configure_tls
 
 
@@ -677,8 +677,10 @@ def run(
             "artifact_size_bytes": manifest["byte_size"],
         }
         status, receipt = exchange(origin, "/v1/verifier-evidence", evidence)
-        assert status == 200 and receipt["receipt"]["applied"] is True, receipt
-        assert exchange(origin, "/v1/verifier-evidence", evidence)[1] == receipt
+        assert status == 200, receipt
+        applied_receipt = await_verifier_application(origin, exchange, receipt)
+        replay = exchange(origin, "/v1/verifier-evidence", evidence)[1]["receipt"]
+        assert replay == applied_receipt
         consumed = (
             consumer.finish(origin, exchange, mission, "independent-file-reader")
             if consumer
@@ -750,6 +752,7 @@ def run(
             "rejected_remote_claims": rejected_claims,
             "full_map_content_policy": content_policy,
             "verifier_receipt": receipt,
+            "applied_verifier_receipt": applied_receipt,
             "transport_profile": "actual-mutual-tls-and-enrolled-node"
             if mtls
             else "explicit-trusted-loopback-compatibility",

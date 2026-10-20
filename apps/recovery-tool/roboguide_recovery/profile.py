@@ -1,0 +1,216 @@
+"""Validate explicit storage topology and acquire the actual original process writer leases."""
+
+from __future__ import annotations
+
+import fcntl
+import os
+import re
+import sqlite3
+import stat
+from collections.abc import Iterator
+from contextlib import ExitStack, closing, contextmanager
+from itertools import pairwise
+from pathlib import Path
+from typing import Any
+
+IDENTIFIER = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\Z")
+KINDS = {"controller", "replica", "node", "mission", "artifact", "memory", "files"}
+MAX_PROFILE_BYTES = 1024 * 1024
+MAX_COMPONENTS = 1024
+
+
+def relative(value: object) -> str:
+    """Require a bounded POSIX relative path without symlink or traversal normalization."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode()) > 4096
+        or value.startswith("/")
+        or "\\" in value
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise ValueError("recovery path must be a bounded, unambiguous relative POSIX path")
+    return value
+
+
+def real_directory(path: Path) -> Path:
+    """Reject symlinks at every existing ancestor and require a real configured directory."""
+    path = path.absolute()
+    for parent in (*reversed(path.parents), path):
+        metadata = parent.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("recovery directory and its ancestors must be real directories")
+    return path
+
+
+def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    """Validate complete configured components and explicit content dependencies without Nodes."""
+    if (
+        set(profile)
+        != {
+            "schema",
+            "profile_id",
+            "revision",
+            "max_bytes",
+            "max_files",
+            "budget_seconds",
+            "components",
+        }
+        or profile["schema"] != "roboguide.recovery-profile/v0.1"
+    ):
+        raise ValueError("recovery profile is not closed or versioned")
+    if (
+        not isinstance(profile["profile_id"], str)
+        or IDENTIFIER.fullmatch(profile["profile_id"]) is None
+    ):
+        raise ValueError("recovery profile identity is invalid")
+    for name, maximum in (
+        ("revision", 2**63 - 1),
+        ("max_bytes", 2**50),
+        ("max_files", 1_000_000),
+        ("budget_seconds", 3600),
+    ):
+        if type(profile[name]) is not int or not 0 < profile[name] <= maximum:
+            raise ValueError("recovery profile bound is invalid: " + name)
+    components = profile["components"]
+    if not isinstance(components, list) or not 1 <= len(components) <= MAX_COMPONENTS:
+        raise ValueError("recovery requires a bounded explicit storage component list")
+    identifiers: set[str] = set()
+    managed_paths: list[Path] = []
+    for item in components:
+        if not isinstance(item, dict) or set(item) != {
+            "component_id",
+            "kind",
+            "root",
+            "database",
+            "trees",
+            "depends_on",
+        }:
+            raise ValueError("recovery storage component is not closed")
+        identifier = item["component_id"]
+        if (
+            not isinstance(identifier, str)
+            or IDENTIFIER.fullmatch(identifier) is None
+            or identifier in identifiers
+            or not isinstance(item["kind"], str)
+            or item["kind"] not in KINDS
+        ):
+            raise ValueError("recovery component identity/kind is invalid or repeated")
+        identifiers.add(identifier)
+        if (
+            not isinstance(item["root"], str)
+            or not Path(item["root"]).is_absolute()
+            or len(item["root"].encode()) > 4096
+            or any(ord(character) < 32 for character in item["root"])
+        ):
+            raise ValueError("recovery source root must be an explicit absolute path")
+        root = Path(item["root"])
+        if ".." in root.parts:
+            raise ValueError("recovery source root contains ambiguous parent traversal")
+        if item["kind"] in {"controller", "replica", "node", "mission"}:
+            relative(item["database"])
+            if "/" in item["database"]:
+                raise ValueError("authority database must be directly inside its configured root")
+        elif item["database"] is not None:
+            raise ValueError("this storage kind cannot select an arbitrary authority database")
+        for name in ("trees", "depends_on"):
+            if not isinstance(item[name], list) or len(item[name]) > MAX_COMPONENTS:
+                raise ValueError("recovery component list is unavailable or unbounded")
+            if any(not isinstance(value, str) for value in item[name]):
+                raise ValueError("recovery component list must contain text")
+            if len(set(item[name])) != len(item[name]):
+                raise ValueError("recovery component list repeats identities")
+        selected = [relative(value) for value in item["trees"]]
+        for index, tree in enumerate(selected):
+            if any(
+                Path(tree).is_relative_to(Path(other)) or Path(other).is_relative_to(Path(tree))
+                for other in selected[:index]
+            ):
+                raise ValueError("recovery content tree selections overlap")
+        if item["kind"] in {"artifact", "memory"} and selected:
+            raise ValueError("Artifact/Memory managed directories are selected by their exact kind")
+        if item["kind"] == "files" and not item["depends_on"]:
+            raise ValueError("file/archive root requires actual writer dependencies")
+        if item["database"] is not None and any(
+            Path(item["database"]).is_relative_to(Path(tree)) for tree in selected
+        ):
+            raise ValueError("authority database cannot be duplicated inside a content tree")
+        databases, trees, locks = layout(item)
+        selected_paths = {root / path for path in databases + trees + locks}
+        managed_paths.extend(selected_paths)
+    ordered_paths = sorted(path.parts for path in managed_paths)
+    if any(current[: len(previous)] == previous for previous, current in pairwise(ordered_paths)):
+        raise ValueError("recovery managed storage paths overlap")
+    for item in components:
+        if any(
+            value not in identifiers or value == item["component_id"]
+            for value in item["depends_on"]
+        ):
+            raise ValueError("recovery dependency is missing or refers to itself")
+    pending = {item["component_id"]: set(item["depends_on"]) for item in components}
+    visited: set[str] = set()
+    while pending:
+        ready = {
+            identifier for identifier, dependencies in pending.items() if dependencies <= visited
+        }
+        if not ready:
+            raise ValueError("recovery writer dependency graph contains a cycle")
+        visited.update(ready)
+        for identifier in ready:
+            del pending[identifier]
+    return sorted(components, key=lambda value: str(value["component_id"]))
+
+
+def layout(component: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
+    """Derive maintained databases, content roots and actual lease paths for one component kind."""
+    kind, database = component["kind"], component["database"]
+    if kind == "memory":
+        return (
+            [
+                "memory.sqlite3",
+                "memory-use.sqlite3",
+                "file-jobs.sqlite3",
+                "active-map/active-map.sqlite3",
+            ],
+            ["content"],
+            ["writer.lock"],
+        )
+    if kind == "artifact":
+        return [], ["blobs", "staging"], [".writer.lock"]
+    if kind == "files":
+        return [], list(component["trees"]) or ["."], []
+    lock = database + (".service.lock" if kind == "mission" else ".writer.lock")
+    return [database], list(component["trees"]), [lock, database] if kind == "node" else [lock]
+
+
+@contextmanager
+def acquire_all(components: list[dict[str, Any]]) -> Iterator[None]:
+    """Hold every real process lease before scanning any data; active or unknown owners refuse."""
+    with ExitStack() as stack:
+        paths: list[Path] = []
+        for component in components:
+            root = real_directory(Path(component["root"]))
+            _, _, locks = layout(component)
+            paths.extend(root / name for name in locks)
+        for path in sorted(paths):
+            descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+            stack.callback(os.close, descriptor)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ValueError("original recovery writer lease is not a regular file")
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise ValueError("original service writer is still active: " + str(path)) from error
+            stack.callback(fcntl.flock, descriptor, fcntl.LOCK_UN)
+        for component in components:
+            if component["kind"] == "node":
+                path = Path(component["root"]) / component["database"]
+                with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+                    if connection.execute("PRAGMA user_version").fetchone() != (13,):
+                        raise ValueError("Node backup requires the actual v13 writer-lease fence")
+                    if connection.execute(
+                        "SELECT version FROM node_journal_storage_schema"
+                    ).fetchone() != (13,):
+                        raise ValueError("Node writer-lease storage marker is unavailable")
+        yield

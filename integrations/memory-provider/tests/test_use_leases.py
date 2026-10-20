@@ -18,6 +18,7 @@ import pytest
 from roboguide_memory_provider import use_leases
 from roboguide_memory_provider.__main__ import UnixServer, handler_type
 from roboguide_memory_provider.jobs import FileJobs
+from roboguide_memory_provider.reclamation import ContentReclamation
 from roboguide_memory_provider.store import MemoryStore, canonical, original_content_digest
 from roboguide_memory_provider.use_leases import UseLeases, kernel_clock
 
@@ -41,6 +42,7 @@ def prepared(
             "mission_id",
             "task_id",
             "role_id",
+            "source_session_id",
         )
     }
     manifest = {
@@ -63,6 +65,8 @@ def prepared(
         "command_id": "memory-import-" + import_id,
         "consumer_provider_id": store.provider_id,
         "manifest_json": canonical(manifest).decode(),
+        "memory_preparation_id": identifiers["preparation_id"],
+        "session_id": identifiers["source_session_id"],
     }
     original = {
         "import_id": import_id,
@@ -85,7 +89,7 @@ def prepared(
         "schema": "roboguide.memory-preparation/v0.2",
         **identifiers,
         "tenant_id": "local",
-        "source_session_id": uuid.uuid4().hex,
+        "source_session_id": identifiers["source_session_id"],
         "registry_id": uuid.uuid4().hex,
         "inputs": [
             {
@@ -364,6 +368,273 @@ def test_actual_file_computation_checks_the_live_lease_and_retains_historical_ou
         leases.apply(revoke(request))
         assert jobs.compute(invocation) == result
         assert jobs.health()["safe"] is True
+    finally:
+        jobs.close()
+
+
+def reclamation_request(store: MemoryStore, grant: dict[str, Any]) -> dict[str, Any]:
+    """Address actual imported bytes and the persistent original provider, never a Node device."""
+    artifact = json.loads(grant["preparation_json"])["inputs"][0]["manifest"]["artifact"]
+    return {
+        "schema": "roboguide.content-reclamation-command/v0.1",
+        "command_id": "reclaim-" + uuid.uuid4().hex,
+        "provider_id": store.provider_id,
+        "provider_instance_id": store.instance_id,
+        "content_digest": artifact["content_digest"],
+        "byte_size": artifact["byte_size"],
+    }
+
+
+def test_reclamation_requires_actual_original_revoke_and_preserves_history(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """Live, never-granted and revoked content have distinct actual local reclamation gates."""
+    store, leases, grant, invocation = prepared
+    jobs = FileJobs(store, leases)
+    owner = ContentReclamation(store, leases, jobs, None)
+    command = reclamation_request(store, grant)
+    original = grant["imports"][0]
+    try:
+        assert owner.tombstone(command)["state"] == "blocked"
+        leases.apply(grant)
+        assert jobs.compute(invocation)["state"] == "COMPLETED"
+        assert owner.tombstone(command)["state"] == "blocked"
+        completion = store.query(original)
+        leases.apply(revoke(grant))
+        tombstone = owner.tombstone(command)
+        assert tombstone["state"] == "tombstoned"
+        assert store._content.joinpath(command["content_digest"][7:]).is_file()
+        assert store.query(original) == completion
+        assert store.availability(original)["available"] is False
+        with pytest.raises(ValueError, match="tombstoned"):
+            store.import_artifact(
+                original,
+                json.loads(original["original_invocation"]["manifest_json"]),
+                str(store.input_roots[0] / "source"),
+            )
+        assert owner.tombstone(command) == tombstone
+        receipt = owner.collect(command)
+        assert receipt["state"] == "deleted" and receipt["local_copy_only"] is True
+        assert not store._content.joinpath(command["content_digest"][7:]).exists()
+        assert owner.collect(command) == receipt
+        before = list(store._db.iterdump())
+        assert owner.observe(command["command_id"]) == receipt
+        assert store.query(original) == completion
+        assert list(store._db.iterdump()) == before
+        changed = {**command, "byte_size": command["byte_size"] - 1}
+        with pytest.raises(ValueError, match="conflicts"):
+            owner.tombstone(changed)
+    finally:
+        jobs.close()
+
+
+def test_reclamation_final_sql_failure_requires_original_explicit_reconciliation(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """A real unlink followed by failed SQL retains uncertainty until the same explicit command."""
+    store, leases, grant, _ = prepared
+    jobs = FileJobs(store, leases)
+    owner = ContentReclamation(store, leases, jobs, None)
+    command = reclamation_request(store, grant)
+    try:
+        leases.apply(grant)
+        leases.apply(revoke(grant))
+        tombstone = owner.tombstone(command)
+        store._db.execute(
+            "CREATE TRIGGER reject_gc_receipt BEFORE UPDATE ON reclamation_commands "
+            "WHEN NEW.state='deleted' BEGIN SELECT RAISE(ABORT,'actual receipt fault'); END"
+        )
+        store._db.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="actual receipt fault"):
+            owner.collect(command)
+        assert not store._content.joinpath(command["content_digest"][7:]).exists()
+        assert owner.observe(command["command_id"]) == tombstone
+        assert store._db.execute("SELECT state FROM content_tombstones").fetchone() == (
+            "tombstoned",
+        )
+        store._db.execute("DROP TRIGGER reject_gc_receipt")
+        store._db.commit()
+        receipt = owner.collect(command)
+        assert receipt["state"] == "deleted"
+        assert receipt["reconciled_missing_after_tombstone"] is True
+    finally:
+        jobs.close()
+
+
+def test_reclamation_failed_tombstone_never_deletes_or_retires_imports(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """A real tombstone transaction rollback leaves original bytes and availability intact."""
+    store, leases, grant, _ = prepared
+    jobs = FileJobs(store, leases)
+    owner = ContentReclamation(store, leases, jobs, None)
+    command = reclamation_request(store, grant)
+    try:
+        leases.apply(grant)
+        leases.apply(revoke(grant))
+        store._db.execute(
+            "CREATE TRIGGER reject_tombstone BEFORE INSERT ON content_tombstones "
+            "BEGIN SELECT RAISE(ABORT,'actual tombstone fault'); END"
+        )
+        store._db.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="actual tombstone fault"):
+            owner.tombstone(command)
+        assert store._db.execute("SELECT COUNT(*) FROM retired_imports").fetchone() == (0,)
+        assert store.availability(grant["imports"][0])["available"] is True
+        assert owner.observe(command["command_id"])["state"] == "requested"
+    finally:
+        jobs.close()
+
+
+def test_backend_restart_fence_is_not_an_original_revoke_receipt(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """Actual lease reopen fences access but cannot invent the original Control revocation."""
+    store, leases, grant, _ = prepared
+    leases.apply(grant)
+    leases.close()
+    reopened = UseLeases(store)
+    jobs = FileJobs(store, reopened)
+    owner = ContentReclamation(store, reopened, jobs, None)
+    try:
+        assert reopened.query(grant)["effective"] is False
+        assert owner.tombstone(reclamation_request(store, grant))["state"] == "blocked"
+    finally:
+        jobs.close()
+        reopened.close()
+
+
+def test_original_revoke_before_first_grant_can_retire_an_unused_import(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """An actual original revoke can retire unused imported bytes without inventing a grant."""
+    store, leases, grant, _ = prepared
+    jobs = FileJobs(store, leases)
+    owner = ContentReclamation(store, leases, jobs, None)
+    command = reclamation_request(store, grant)
+    try:
+        leases.apply(revoke(grant))
+        assert leases._db.execute("SELECT preparation_json FROM leases").fetchone() == (None,)
+        assert owner.tombstone(command)["state"] == "tombstoned"
+        assert owner.collect(command)["state"] == "deleted"
+        assert jobs._db.execute("SELECT COUNT(*) FROM jobs").fetchone() == (0,)
+        with pytest.raises(ValueError):
+            leases.apply(grant)
+    finally:
+        jobs.close()
+
+
+def test_reclamation_rejects_changed_or_symlinked_original_bytes(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """A same-hash replacement inode or symlink after tombstone is never unlinked by retry."""
+    store, leases, grant, _ = prepared
+    jobs = FileJobs(store, leases)
+    owner = ContentReclamation(store, leases, jobs, None)
+    command = reclamation_request(store, grant)
+    try:
+        leases.apply(grant)
+        leases.apply(revoke(grant))
+        owner.tombstone(command)
+        path = store._content / command["content_digest"][7:]
+        moved = store.root / "actual-original"
+        path.rename(moved)
+        path.write_bytes(moved.read_bytes())
+        with pytest.raises(ValueError, match="inode"):
+            owner.collect(command)
+        path.unlink()
+        path.symlink_to(moved)
+        with pytest.raises(OSError):
+            owner.collect(command)
+        assert path.is_symlink() and moved.is_file()
+        assert owner.observe(command["command_id"])["state"] == "tombstoned"
+    finally:
+        jobs.close()
+
+
+def test_current_map_requires_original_typed_input_and_complete_owner(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """A real non-map lease cannot authorize a map merely through its known lease/attempt IDs."""
+    _, leases, grant, _ = prepared
+    leases.apply(grant)
+    context = {
+        "use_lease_id": grant["control"]["lease_id"],
+        "execution_id": grant["control"]["execution_id"],
+        "attempt_id": grant["control"]["execution_id"],
+        "node_id": grant["control"]["node_id"],
+        "group_id": grant["control"]["group_id"],
+    }
+    with pytest.raises(ValueError, match="typed-map input"):
+        leases.guard_map(context)
+    with pytest.raises(ValueError, match="Node/Group/attempt"):
+        leases.guard_map({**context, "node_id": "another-owner"})
+
+
+def test_shadow_preparation_cannot_reuse_another_original_import(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """A different otherwise valid grant cannot borrow imported bytes or their retirement proof."""
+    _, leases, grant, _ = prepared
+    shadow = copy.deepcopy(grant)
+    preparation = json.loads(shadow["preparation_json"])
+    replacement = uuid.uuid4().hex
+    preparation["preparation_id"] = replacement
+    shadow["preparation_json"] = canonical(preparation).decode()
+    control = shadow["control"]
+    control["preparation_id"] = replacement
+    control["preparation_digest"] = (
+        "sha256:" + hashlib.sha256(shadow["preparation_json"].encode()).hexdigest()
+    )
+    control["lease_id"] = "use-" + hashlib.sha256(replacement.encode()).hexdigest()
+    control["command_id"] = f"memory-use-grant-{control['lease_id']}-1"
+    before = list(leases._db.iterdump())
+    with pytest.raises(ValueError, match="original preparation owner"):
+        leases.apply(shadow)
+    assert list(leases._db.iterdump()) == before
+    assert leases.apply(grant)["status"] == "granted"
+
+
+def test_private_unix_reclamation_consumes_real_original_revocation(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """Exercise HTTP progress, durable tombstone and actual unlink through shipped handlers."""
+    store, leases, grant, _ = prepared
+    jobs = FileJobs(store, leases)
+    owner = ContentReclamation(store, leases, jobs, None)
+    command = reclamation_request(store, grant)
+    try:
+        with tempfile.TemporaryDirectory(prefix="rg-content-") as directory:
+            path = Path(directory) / "local.sock"
+            server = UnixServer(str(path), handler_type(store, jobs, leases, None, owner))
+            thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
+            thread.start()
+            try:
+                assert (
+                    unix_request(path, "/v1/content/tombstone", command, "POST")["state"]
+                    == "blocked"
+                )
+                unix_request(path, "/v1/memory-use/control", grant, "POST")
+                unix_request(path, "/v1/memory-use/control", revoke(grant), "POST")
+                tombstone = unix_request(path, "/v1/content/tombstone", command, "POST")
+                assert tombstone["state"] == "tombstoned"
+                assert (
+                    unix_request(
+                        path,
+                        "/v1/content/reclamation",
+                        {"command_id": command["command_id"]},
+                        "GET",
+                    )
+                    == tombstone
+                )
+                assert (
+                    unix_request(path, "/v1/content/collect", command, "POST")["state"] == "deleted"
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                assert not thread.is_alive()
     finally:
         jobs.close()
 

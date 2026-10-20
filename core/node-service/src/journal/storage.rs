@@ -15,7 +15,7 @@ pub(super) fn configure_connection(connection: &Connection) -> Result<(), Journa
 pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
     let prior_version =
         connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
-    if prior_version > 12 {
+    if prior_version > 13 {
         return Err(JournalError::Corrupt(
             "journal was written by a newer storage authority".into(),
         ));
@@ -30,7 +30,7 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
             |row| row.get(0),
         )
         .optional()?;
-    if marker.is_some_and(|version| !matches!(version, 7..=12))
+    if marker.is_some_and(|version| !matches!(version, 7..=13))
         || (prior_version >= 7 && marker.is_none())
     {
         return Err(JournalError::Corrupt(
@@ -175,11 +175,11 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
         CREATE VIEW IF NOT EXISTS memory_imports AS SELECT * FROM memory_import_authority_v7;",
     )?;
     transaction.execute(
-        "INSERT INTO node_journal_storage_schema VALUES (1,12)
-         ON CONFLICT(singleton) DO UPDATE SET version=12",
+        "INSERT INTO node_journal_storage_schema VALUES (1,13)
+         ON CONFLICT(singleton) DO UPDATE SET version=13",
         [],
     )?;
-    transaction.pragma_update(None, "user_version", 12_i64)?;
+    transaction.pragma_update(None, "user_version", 13_i64)?;
     transaction.commit()?;
     Ok(())
 }

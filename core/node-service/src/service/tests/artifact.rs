@@ -63,8 +63,8 @@ async fn artifact_finalization_marker_blocks_implicit_restart_resume() {
         .recover()
         .expect("ambiguous artifact finalization remains fenced");
     assert_eq!(
-        crate::ExecutionJournal::open(&journal_path)
-            .expect("audit journal opens")
+        engine
+            .owned_journal()
             .get("artifact-ambiguous")
             .expect("record reads")
             .expect("record exists")
@@ -177,7 +177,7 @@ async fn artifact_preparation_marker_blocks_mutable_source_reread_after_restart(
             .is_err(),
         "an exact Execute retry must not grant another source read"
     );
-    let audit = crate::ExecutionJournal::open(&journal_path).expect("audit journal opens");
+    let audit = engine.owned_journal();
     assert_eq!(
         audit
             .get("build-recovery")
@@ -403,7 +403,7 @@ async fn artifact_input_retry_reproves_local_bytes_before_replica_evidence() {
         .expect("recovery fence event arrives")
         .expect("recovery fence event exists");
     assert_eq!(event.phase, ExecutionPhase::Unknown);
-    let audit = crate::ExecutionJournal::open(&journal_path).expect("audit journal opens");
+    let audit = engine.owned_journal();
     assert_eq!(
         audit
             .get("import-recovery")

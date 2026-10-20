@@ -41,6 +41,13 @@ flowchart TB
   SQL -. 显式 HA profile .-> HA[quorum / 动态成员 / leader transfer / epoch / materialization]
   NODE <--> ART[Artifact CAS / 内容授权]
   NODE --> MEM[配置固定的 Local Memory provider]
+  NODE --> NJ[Node journal v13 / 原唯一 writer / inode 与 canonical lease]
+  MEM --> GC[实际原 import + revoke + worker + map 引用 / tombstone / unlink 对账]
+  COLD[显式静止恢复工具 / 全部原 writer lease] --> SQL
+  COLD --> ART
+  COLD --> NJ
+  COLD --> MEM
+  COLD --> SNAP[完整 SQL / 实际内容 / pinned manifest / 新目录恢复]
   MEM --> QUERY[原实例 GET query / 实际 bytes 与原始日志]
   QUERY --> PROTO
   Entry --> MINT[持久 Memory intent / 对账 generation 与预算]

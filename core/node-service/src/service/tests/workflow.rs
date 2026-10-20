@@ -48,7 +48,7 @@ fn active_execution_does_not_reconcile_through_changed_workflow() {
         engine.recover(),
         Err(crate::EngineError::ReconciliationRequired(_))
     ));
-    let audit = crate::ExecutionJournal::open(&journal_path).expect("audit journal opens");
+    let audit = engine.owned_journal();
     assert_eq!(
         audit
             .get("running-old-config")

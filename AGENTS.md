@@ -5,6 +5,18 @@
 RoboGuide has a current V2 architecture baseline plus development and MVP documents.
 The first core bootstrap has started; the full runtime and MVP are not complete.
 
+ADR-0112 replaces caller-asserted GC permission with original-provider reclamation over actual
+imports, irreversible revoke receipts, workers and map references. Tombstone precedes unlink;
+original completed import history is retained while current availability stays false. Active Map
+effects bind the complete original typed input/Node/Group/attempt and freeze the handoff target.
+ADR-0113 adds `apps/recovery-tool/` for quiescent complete SQLite/content bundles, pinned manifest
+verification and restoration to new roots. All actual writer leases precede source reads. Node
+journal v13 now owns canonical sibling and inode leases before SQL/recovery, fencing v12 writers;
+Engine clones retain the original journal. Controller wrapper v41 and Node contracts are unchanged.
+The actual six-store/SQL/CAS/old-binary recovery gate is
+`tools/quality/check_recovery_bundle_processes.py`. Local-copy deletion or a recovery receipt never
+establishes global content/physical continuity; complete F4/F5 and F6–F10 remain required.
+
 ADR-0111 integrates Memory remediation, published plan validation and independent process-exit
 evidence under Node Contract v0.12 / config v0.13 / catalog v0.15. Published Memory tags 8–10
 retain their meaning; original attempt generation uses tag 11 and is identical in preparation
@@ -896,6 +908,11 @@ uv run mypy --strict evaluation/src evaluation/tests
 uv run python tools/quality/check_python_function_docs.py evaluation
 uv run pytest -q
 ```
+
+Recovery-tool and Memory lifecycle changes additionally run tests in `apps/recovery-tool/tests`
+and `integrations/memory-provider/tests`, strict typing of `apps/recovery-tool/roboguide_recovery` plus
+its tests, and the actual process gates above. The recovery CLI is a separate standard-library
+Python application, never a dependency of Mission Intelligence or a substitute for online HA.
 
 For documentation site changes, run:
 

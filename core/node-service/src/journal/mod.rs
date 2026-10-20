@@ -450,6 +450,24 @@ impl ArtifactFinalizationKind {
 pub struct ExecutionJournal {
     /// Single process-local connection serialized for atomic read-modify-write operations.
     connection: Mutex<Connection>,
+    /// Actual file leases outlive the SQLite connection and fence a second process before recovery.
+    _writer: JournalWriterLease,
+}
+
+/// Owns both canonical name and database inode so aliases cannot fork local execution authority.
+struct JournalWriterLease {
+    /// Canonical sibling used by deployment backup and process admission.
+    lock: std::fs::File,
+    /// Database inode also fences hard-link aliases whose sibling names differ.
+    database: std::fs::File,
+}
+
+impl Drop for JournalWriterLease {
+    /// Releases at the final application owner, independently of inherited child descriptors.
+    fn drop(&mut self) {
+        let _ = self.database.unlock();
+        let _ = self.lock.unlock();
+    }
 }
 
 /// Monotonic Controller identity persisted by the Node before accepting replicated commands.
@@ -465,6 +483,14 @@ struct ControllerEpoch {
 /// Execution journal storage or invariant failure.
 #[derive(Debug, Error)]
 pub enum JournalError {
+    /// Another process owns the journal, or its real lease paths could not be safely opened.
+    #[error("execution journal writer lease failure at {path}: {source}")]
+    WriterLease {
+        /// Exact rejected canonical authority path.
+        path: PathBuf,
+        /// Actual OS path, lock, or descriptor failure.
+        source: std::io::Error,
+    },
     /// The original host boot/monotonic observation is unavailable; no budget may be inferred.
     #[error("receiver clock observation unavailable: {0}")]
     ReceiverClock(#[from] std::io::Error),

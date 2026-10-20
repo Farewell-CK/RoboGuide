@@ -129,6 +129,14 @@ pub struct LocalIntegrationEngine {
     inner: Arc<EngineInner>,
 }
 
+#[cfg(test)]
+impl LocalIntegrationEngine {
+    /// Borrows the actual owned journal in tests without opening a second recovery-capable writer.
+    pub(crate) fn owned_journal(&self) -> Arc<ExecutionJournal> {
+        Arc::clone(&self.inner.journal)
+    }
+}
+
 /// Process-owned engine state shared by workflow tasks.
 struct EngineInner {
     /// Orders prepared Execute admission against irreversible context revocation.

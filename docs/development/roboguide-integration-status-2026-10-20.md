@@ -91,6 +91,11 @@ Artifact 的最后一个应用 store/clone/upload 显式释放 writer lease，�
 
 ## 仍必须完成的非发布工作
 
+后续实现与实际证据见[原 provider 回收与静止恢复](acceptance/2026-10-20-content-reclamation-and-recovery.md)。
+本地布尔 GC 已改为无删除权；实际 original revoke、tombstone、unlink/SQL 中断对账和
+Active Map 全输入门禁已接通。Node journal v13 增加唯一 writer；静止 SQL/CAS 恢复通过，
+全局 reference、在线内容恢复和下表其余项继续必需。
+
 | 阶段 | 剩余必需交付 | 下一项可验收结果 |
 | --- | --- | --- |
 | F0 | 将部署 profile 的拓扑、目录、故障域、身份/协议支持矩阵与退出条件做成可验证输入 | 配置驱动的零 Node 启动和软件部署门禁；真实地址/设备证据缺失保持显式 |

@@ -23,6 +23,10 @@ class NoopLease:
         if not lease_id or not execution_id:
             raise ValueError("lease context is empty")
 
+    def guard_map(self, context: dict[str, Any]) -> None:
+        """Keep this ZIP parser unit fixture explicitly separate from real lease admission tests."""
+        self.guard(context["use_lease_id"], context["execution_id"])
+
 
 def bundle() -> tuple[bytes, dict[str, Any]]:
     """Build one ZIP_STORED map bundle whose manifest and tile are independently digestable."""
@@ -123,10 +127,10 @@ def test_select_query_release_and_restart_fence(
     assert store._content.joinpath(digest[7:]).is_file()
 
 
-def test_gc_requires_complete_positive_reference_proof(
+def test_legacy_gc_booleans_cannot_authorize_deletion(
     ledger: tuple[ActiveMapLedger, MemoryStore, dict[str, Any], str],
 ) -> None:
-    """GC blocks incomplete/active references and deletes only after explicit all-ref proof."""
+    """Even all eight caller assertions cannot authorize removal of actual local CAS bytes."""
     active, store, selection, digest = ledger
     active.select(selection)
     blocked = active.gc(
@@ -160,8 +164,9 @@ def test_gc_requires_complete_positive_reference_proof(
             "refs": refs,
         }
     )
-    assert deleted["state"] == "deleted"
-    assert not store._content.joinpath(digest[7:]).exists()
+    assert deleted["state"] == "blocked"
+    assert deleted["reasons"] == ["caller_booleans_are_not_reference_authority"]
+    assert store._content.joinpath(digest[7:]).is_file()
 
 
 def test_non_stored_bundle_is_rejected(
@@ -240,3 +245,76 @@ def test_handoff_preserves_source_generation_and_requires_software_stop(
     assert any(
         item["generation"] == 1 and item["state"] == "handed_off" for item in state["history"]
     )
+
+
+@pytest.mark.parametrize("changed", ["content_digest", "frame_id", "node_id", "use_lease_id"])
+def test_handoff_commit_cannot_substitute_the_frozen_target(
+    ledger: tuple[ActiveMapLedger, MemoryStore, dict[str, Any], str], changed: str
+) -> None:
+    """A prepared software map handoff cannot substitute another target field at Commit."""
+    active, store, selection, digest = ledger
+    active.select(selection)
+    target = {**selection, "generation": 2}
+    active.prepare_handoff(
+        {
+            "schema": "roboguide.active-map-handoff/v0.1",
+            "barrier_id": "exact-target",
+            "group_id": selection["group_id"],
+            "source": selection,
+            "target": target,
+            "stop_barrier": {
+                "schema": "roboguide.software-stop-barrier/v0.1",
+                "status": "software_stopped",
+                "attempts": [selection["execution_id"]],
+                "confirmed_attempts": [selection["execution_id"]],
+            },
+        }
+    )
+    alternate = {
+        **target,
+        changed: "sha256:" + "f" * 64 if changed == "content_digest" else "other",
+    }
+    with pytest.raises(ActiveMapError, match="target differs"):
+        active.commit_handoff(
+            {
+                "schema": "roboguide.active-map-handoff-commit/v0.1",
+                "barrier_id": "exact-target",
+                "target": alternate,
+            }
+        )
+    assert active.state()["heads"][0]["generation"] == 1
+    assert store._content.joinpath(digest[7:]).is_file()
+
+
+def test_handoff_commit_rechecks_the_actual_source_head(
+    ledger: tuple[ActiveMapLedger, MemoryStore, dict[str, Any], str],
+) -> None:
+    """A source released after prepare cannot be silently revived through handoff Commit."""
+    active, _, selection, _ = ledger
+    active.select(selection)
+    target = {**selection, "generation": 2}
+    active.prepare_handoff(
+        {
+            "schema": "roboguide.active-map-handoff/v0.1",
+            "barrier_id": "source-race",
+            "group_id": selection["group_id"],
+            "source": selection,
+            "target": target,
+            "stop_barrier": {
+                "schema": "roboguide.software-stop-barrier/v0.1",
+                "status": "software_stopped",
+                "attempts": [selection["execution_id"]],
+                "confirmed_attempts": [selection["execution_id"]],
+            },
+        }
+    )
+    active.release(selection)
+    with pytest.raises(ActiveMapError, match="source selection changed"):
+        active.commit_handoff(
+            {
+                "schema": "roboguide.active-map-handoff-commit/v0.1",
+                "barrier_id": "source-race",
+                "target": target,
+            }
+        )
+    assert active.state()["heads"][0]["state"] == "released"
