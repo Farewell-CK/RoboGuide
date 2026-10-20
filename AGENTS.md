@@ -845,6 +845,11 @@ final-verifier resource lifetimes without selecting endpoints; closure observati
 actual publication and preserve archival failures separately from SUT outcomes. See
 `docs/extensions/bounded-observation-and-evidence-closure.md`. Physical release gates remain explicit.
 
+`perception_diagnostics.py` is default-off under the existing physical-diagnostics flag.
+Bounded same-cache pixel/threshold/camera comparisons separate own-agent evidence, derived
+current-world union and unavailable official truth, with no sensor/render/predicate calls.
+Failed final capture cannot skip buffered evidence flush.
+
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add
 empty placeholders or a top-level `src/`.

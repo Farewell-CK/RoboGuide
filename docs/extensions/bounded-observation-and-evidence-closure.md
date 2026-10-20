@@ -52,6 +52,18 @@ v0.12 还显式声明 `fresh-acquisition-navigation-command/v0.1`：仅在 Guard
 与历史声明不变。`fresh-navigation-command` 证据绑定 attempt、raw call、映射和前后标记。
 该修复不保证视野可见；导航完成后真实检测仍可能是 false，原始 acquisition 预算仍会耗尽。
 
+物理诊断开关还启用 `perception-diagnostics.jsonl`，以16步采样周期读取同一次既有 Gym
+缓存。每条记录保留精确 entity/attempt/world、各 detector 的自身结果、原始整数语义图像
+中目标像素数、原传感器的严格 `count > pixel_threshold` 比较、相机矩阵几何及当前缓存的
+跨 agent 并集。相机锥内只表示几何推导，遮挡未知；缓存并集也不冒充官方谓词执行结果。
+单 agent false 与官方 any-agent 条件必须区分，历史正样本不锁存为当前 truth。
+
+诊断不调用 sensor/render/predicate/Gym/actor/RNG；不序列化完整图像。每条最多4个 detector、
+每个最多8个相机、总计4,194,304像素比较；最多4096条记录，32条有界批写，报告丢样与开销。
+读取与写盘失败不影响执行，终态补采失败也必须 flush 已有批次，并保留原执行异常。
+关闭物理诊断时不读取图像或相机矩阵。该证据用于定位缓存/像素/视角差异，不能代替
+正式 verifier。实际检测保持原始缓存语义，官方 `is_detected` 仍由 Habitat 独立计算。
+
 planning world v0.4 的 `entity_geometry` 是最多 64 条 reset position，字段为
 `entity_id`、`frame_id`、三项 integer `position_mm` 和 `up_axis=y`；未知位置进入 `gaps`。
 它只是一个已观测快照，不能当作 route、future goal 或检测真值。

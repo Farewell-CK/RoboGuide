@@ -1160,6 +1160,58 @@ def test_active_acquisition_guard_retains_exact_entity_binding() -> None:
         Stage2ExecutionContract.for_invocation(invocation(0, ("observer",), observation=True))
 
 
+def test_perception_diagnostics_flush_even_when_terminal_sampling_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed actor and final cache read preserve prior rows and the original exception."""
+    from habitat_local_eaios import live_world as live_module
+    from habitat_local_eaios.perception import cached_detection_observations
+
+    monkeypatch.setenv("ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS", "1")
+    actor, gym = Actor(2, fail_at=3), Gym({0: 99})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    runtime._config.enable_observation_acquisition = True
+    runtime._config.observation_acquisition_max_steps = 256
+    runtime.registry["endpoints"][0]["operations"].append("observation.acquire@v1")
+    env = runtime._habitat_env
+    assert env is not None
+    env.sim = SimpleNamespace(
+        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=[42], ctrl_freq=30.0
+    )
+    env.task.sensor_suite = SimpleNamespace(
+        sensors={"detected_objects": SimpleNamespace(agent_id=None, pixel_threshold=2)}
+    )
+    env.task.pddl_problem = SimpleNamespace(
+        get_ordered_entities_list=lambda: [SimpleNamespace(name="object-a")],
+        sim_info=SimpleNamespace(
+            sim=env.sim,
+            search_for_entity=lambda entity: 0,
+            get_entity_pos=lambda entity: (0.0, 0.0, 0.0),
+        ),
+    )
+    original_cache = cached_detection_observations
+
+    def failed_terminal_cache(*args: Any) -> Any:
+        """Fail the final optional read only, after two original fake physical steps."""
+        if actor.calls == 3:
+            raise OSError("terminal cache unavailable")
+        return original_cache(*args)
+
+    monkeypatch.setattr(live_module, "cached_detection_observations", failed_terminal_cache)
+    body = invocation(0, ("observer",), observation=True).as_dict()
+    body.update(operation="observation.acquire@v1", objective="Navigate to object-a")
+    request = parse_canonical_invocation({"invocation": body})
+    with pytest.raises(RuntimeError, match="original actor sentinel"):
+        runtime.execute_live(
+            {0: request}, lambda: {}, lambda: False, lambda *args: None, lambda *args: None, 0.1
+        )
+    assert gym.steps == 2
+    audit = json.loads((tmp_path / "perception-diagnostics-audit.json").read_bytes())
+    assert audit["writer"]["records_written"] == 1
+    assert audit["writer"]["pending_records"] == 0
+    assert (tmp_path / "perception-diagnostics.jsonl").is_file()
+
+
 def test_already_observed_acquisition_finishes_without_movement_or_model(tmp_path: Path) -> None:
     """An existing true sample needs no motion; it still cannot assert official joint success."""
     actor, gym = Actor(2), Gym({})

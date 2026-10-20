@@ -13,6 +13,13 @@ Oracle navigation action used below the EMOS/CrabAgent high-level policy boundar
 resolution, agent selection, path planning, action arguments, simulator stepping, and local safety
 remain Local How.
 
+With physical diagnostics enabled, `perception-diagnostics.jsonl` records bounded same-cache
+detector results, exact target pixel counts, original thresholds and camera projection geometry
+every16steps and at acquisition boundaries. Own-agent detection, derived current cross-agent
+union, historical stage-goal latches and official goal truth remain separate. No additional
+render/sensor/predicate call is made. Read/storage faults preserve execution, original errors
+and already buffered rows. See the bounded observation extension for limits and schema.
+
 For active observation, Local How v0.12 discloses the bounded condition feedback/pause
 profile and `fresh-acquisition-navigation-command/v0.1`. After an exact guarded
 `nav_to_obj` call passes the original CrabAgent mapping, only that endpoint's

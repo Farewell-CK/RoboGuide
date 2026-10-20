@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .backend import LocalExecutionOutcome, _observation_true
+from .diagnostics import diagnostics_enabled
 from .endpoint_registry import FINALITY_PROFILE, LIVE_PROFILE, load_endpoint_registry
 from .evidence_io import json_observation
 from .live_bindings import LivePolicyBindings as LivePolicyBindings
@@ -36,6 +37,7 @@ from .observation_control import (
 )
 from .operation_admission import OPERATION_FEASIBILITY_SCHEMA
 from .perception import cached_detection_observations, inspect_perception, observe_detection
+from .perception_diagnostics import PerceptionDiagnostics
 from .preassignment_feasibility import preassignment_digest
 from .shared_world import SharedEmosStage2Runtime
 
@@ -320,6 +322,9 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         acquisition_starts: dict[int, int] = {}
         acquisition_digests: dict[int, str] = {}
         observation_controls: dict[int, ObservationAcquisitionControl] = {}
+        perception_diagnostics = PerceptionDiagnostics(
+            self._evidence_dir(), enabled=diagnostics_enabled()
+        )
         sequence: list[str] = []
         steps, done = 0, False
         info: dict[str, Any] = {}
@@ -424,6 +429,17 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                             acquisition_digests[agent],
                         )
                         control.update(observed)
+                        perception_diagnostics.record(
+                            invocation,
+                            environment,
+                            cached_detection_observations(
+                                gym, observations, self._detection_sensors[agent]
+                            ),
+                            self._detection_sensors,
+                            steps,
+                            acquisition_digests[agent],
+                            force=True,
+                        )
                         if observed["condition_holds"] is True:
                             observed.update(
                                 acquisition_profile="bounded-visual-acquisition/v0.1",
@@ -618,6 +634,18 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                             acquisition_max_steps=budget,
                         )
                         observation_controls[agent].update(acquisition_receipt)
+                        perception_diagnostics.record(
+                            invocation,
+                            environment,
+                            cached_detection_observations(
+                                gym, observations, self._detection_sensors[agent]
+                            ),
+                            self._detection_sensors,
+                            steps,
+                            acquisition_digests[agent],
+                            force=acquisition_expired
+                            or acquisition_receipt["condition_holds"] is True,
+                        )
                     local_finished = (
                         acquisition_receipt["condition_holds"] is True
                         if acquisition_receipt is not None
@@ -699,6 +727,32 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             reason = f"execution_exception:{type(error).__name__}"
             raise
         finally:
+            try:
+                if perception_diagnostics.enabled:
+                    for agent, invocation in ledger.active.items():
+                        if isinstance(invocation, CanonicalObservationAcquisitionInvocation):
+                            perception_diagnostics.record(
+                                invocation,
+                                environment,
+                                cached_detection_observations(
+                                    gym, observations, self._detection_sensors[agent]
+                                ),
+                                self._detection_sensors,
+                                steps,
+                                acquisition_digests[agent],
+                                force=True,
+                            )
+            except Exception:
+                _LOG.exception("cached perception terminal sample unavailable")
+            try:
+                if perception_diagnostics.enabled:
+                    self._best_effort_write_json(
+                        "perception-diagnostics-audit.json",
+                        perception_diagnostics.close(),
+                        "cached perception diagnostic closure",
+                    )
+            except Exception:
+                _LOG.exception("cached perception terminal diagnostic unavailable")
             try:
                 if bindings is not None:
                     bindings.close()
