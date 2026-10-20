@@ -35,10 +35,10 @@ pub use conformance::{
     CapabilityConformance, CapabilityProfileConformance, ConformanceChecks, ConformanceDiagnostic,
     ConformanceError, ConnectionConformance, EXTENSION_CONFORMANCE_SCHEMA_V0_1,
     EXTENSION_CONFORMANCE_SCHEMA_V0_2, EXTENSION_CONFORMANCE_SCHEMA_V0_3,
-    ExtensionConformanceReport, LifecycleConformanceInvariant, MemoryProviderConformance,
-    NODE_SERVICE_IMPLEMENTATION_GUARANTEES, OperationConformance, PeerChannelObserverConformance,
-    SHARED_LIFECYCLE_CONFORMANCE, StateExportConformance, StepConformance, WorkflowConformance,
-    compile_extension_config, compile_extension_config_json,
+    EXTENSION_CONFORMANCE_SCHEMA_V0_4, ExtensionConformanceReport, LifecycleConformanceInvariant,
+    MemoryProviderConformance, NODE_SERVICE_IMPLEMENTATION_GUARANTEES, OperationConformance,
+    PeerChannelObserverConformance, SHARED_LIFECYCLE_CONFORMANCE, StateExportConformance,
+    StepConformance, WorkflowConformance, compile_extension_config, compile_extension_config_json,
 };
 pub use engine::{
     EngineError, ExecuteDisposition, LocalExecutionEvent, LocalIntegrationEngine,

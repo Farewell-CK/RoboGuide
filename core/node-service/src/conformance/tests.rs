@@ -22,6 +22,148 @@ fn checked_in_config_compiles_offline() {
     );
 }
 
+/// Current authored generations retain exact versions without weakening readiness or mapping checks.
+#[test]
+fn current_config_generations_compile_without_report_downgrade() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+    )
+    .unwrap();
+    for schema in [
+        crate::CONFIG_SCHEMA_V0_7,
+        crate::CONFIG_SCHEMA_V0_8,
+        crate::CONFIG_SCHEMA_V0_9,
+        crate::CONFIG_SCHEMA_V0_10,
+        crate::CONFIG_SCHEMA_V0_11,
+        crate::CONFIG_SCHEMA_V0_12,
+        crate::CONFIG_SCHEMA_V0_13,
+    ] {
+        let path = directory.path().join("current.toml");
+        let text = source.replacen(crate::CONFIG_SCHEMA_V0_7, schema, 1);
+        std::fs::write(&path, &text).unwrap();
+        let report = compile_extension_config(&path).unwrap();
+        let compiled = NodeServiceConfig::load_compiled(&path).unwrap();
+        if schema != crate::CONFIG_SCHEMA_V0_7 && schema != crate::CONFIG_SCHEMA_V0_8 {
+            assert_eq!(report.schema, EXTENSION_CONFORMANCE_SCHEMA_V0_4);
+            assert_eq!(report.config_schema.as_deref(), Some(schema));
+            assert_eq!(
+                report.node_contract_version.as_deref(),
+                Some(compiled.node_contract_version())
+            );
+            assert!(
+                report
+                    .memory_providers
+                    .iter()
+                    .all(|provider| provider.original_provider_continuity == Some(false))
+            );
+        } else {
+            assert!(report.config_schema.is_none() && report.node_contract_version.is_none());
+        }
+        assert!(report.offline_compile && !report.controller_contacted);
+        assert!(!report.runtime_probes_executed && !report.hardware_probes_executed);
+        assert!(report.checks.exact_readiness && report.checks.execution_state_mapping);
+        std::fs::write(
+            &path,
+            text.replacen("accepted = [\"ACCEPTED\"]", "accepted = []", 1),
+        )
+        .unwrap();
+        assert!(
+            matches!(compile_extension_config(&path), Err(ConformanceError::Diagnostic(ConformanceDiagnostic{code,..})) if code == "execution-state-incomplete")
+        );
+    }
+    let path = directory.path().join("future.toml");
+    std::fs::write(
+        &path,
+        source.replacen(crate::CONFIG_SCHEMA_V0_7, "roboguide.node-config/v99", 1),
+    )
+    .unwrap();
+    assert!(compile_extension_config(&path).is_err());
+}
+
+/// A future change to maintained deployment schemas must exercise the actual CLI's compiler boundary.
+#[test]
+fn maintained_habitat_nodes_pass_current_offline_conformance() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for scenario in [
+        "e1-shared-world-episode-51",
+        "e1-shared-world-perception",
+        "e1-shared-world-rearrangement",
+    ] {
+        for letter in ["a", "b"] {
+            let path = root.join(format!("scenarios/{scenario}/node-{letter}.toml"));
+            let compiled = NodeServiceConfig::load_compiled(&path).unwrap();
+            let report = compile_extension_config(&path).unwrap();
+            assert_eq!(report.schema, EXTENSION_CONFORMANCE_SCHEMA_V0_4);
+            assert_eq!(report.config_schema.as_deref(), Some(compiled.schema()));
+            assert_eq!(
+                report.node_contract_version.as_deref(),
+                Some(compiled.node_contract_version())
+            );
+            assert!(
+                !report.controller_contacted
+                    && !report.runtime_probes_executed
+                    && !report.hardware_probes_executed
+            );
+        }
+    }
+}
+
+/// Inheriting schemas retain admitted original-provider facts; mutating queries remain forbidden.
+#[test]
+fn current_reports_preserve_original_provider_continuity() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config: NodeServiceConfig = toml::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/node.toml"
+    )))
+    .unwrap();
+    let step = |id: &str, method: &str| crate::WorkflowStepConfig {
+        id: id.into(),
+        connection: "local-http".into(),
+        operation: LocalOperationConfig::Http {
+            method: method.into(),
+            path: format!("/memory/{id}"),
+        },
+        request: crate::RequestMappingConfig::default(),
+    };
+    config.memory_providers[0].import = Some(crate::MemoryWorkflowConfig {
+        steps: vec![step("import", "POST")],
+        manifests_pointer: None,
+        artifact_path_pointer: None,
+    });
+    config.memory_providers[0].continuity = Some(crate::MemoryContinuityConfig {
+        import_result_pointer: "/steps/import/result".into(),
+        instance: step("instance", "GET"),
+        instance_pointer: "/instance_id".into(),
+        query: step("query", "GET"),
+        result_pointer: "/result".into(),
+    });
+    for schema in [
+        crate::CONFIG_SCHEMA_V0_8,
+        crate::CONFIG_SCHEMA_V0_9,
+        crate::CONFIG_SCHEMA_V0_10,
+        crate::CONFIG_SCHEMA_V0_11,
+        crate::CONFIG_SCHEMA_V0_12,
+        crate::CONFIG_SCHEMA_V0_13,
+    ] {
+        config.schema = schema.into();
+        let compiled = CompiledLocalCatalog::compile(config.clone(), directory.path()).unwrap();
+        let report = report_for_catalog(Path::new("synthetic-continuity.toml"), &compiled);
+        assert_eq!(
+            report.memory_providers[0].original_provider_continuity,
+            Some(true)
+        );
+        let mut changed = config.clone();
+        changed.memory_providers[0]
+            .continuity
+            .as_mut()
+            .unwrap()
+            .query = step("query", "POST");
+        assert!(CompiledLocalCatalog::compile(changed, directory.path()).is_err());
+    }
+}
+
 /// The conformance fixture exercises the shared lifecycle contract for all three drivers.
 #[test]
 fn all_supported_driver_families_share_lifecycle_shape() {
