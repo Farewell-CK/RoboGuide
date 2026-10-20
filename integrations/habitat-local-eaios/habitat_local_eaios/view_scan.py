@@ -117,12 +117,14 @@ def inspect_view_scan(environment: Any, policy: Any, agent: int) -> ViewScanSpec
         base = spaces["base_velocity"]
         children = base.spaces
         if name == "DroneBaseVelAction":
-            expected = {"lin_vel": 3, "ang_vel": 1}
-            yaw_key, yaw_local = "ang_vel", 0
+            expected = {f"{prefix}lin_vel": 3, f"{prefix}ang_vel": 1}
+            yaw_key, yaw_local = f"{prefix}ang_vel", 0
         else:
             lateral = bool(getattr(action, "_enable_lateral_move", False))
-            expected = {"base_vel": 3 if lateral else 2}
-            yaw_key, yaw_local = "base_vel", 2 if lateral else 1
+            expected = {f"{prefix}base_vel": 3 if lateral else 2}
+            yaw_key, yaw_local = f"{prefix}base_vel", 2 if lateral else 1
+        # The original multi-agent projection strips the outer action name,
+        # retaining each original action's agent-prefixed argument space.
         if {key: _width(child) for key, child in children.items()} != expected:
             raise ValueError("original base layout differs from the supported interface")
         offset = 0

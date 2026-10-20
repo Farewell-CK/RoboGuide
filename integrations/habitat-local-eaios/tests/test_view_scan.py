@@ -52,9 +52,9 @@ def controls(
         spaces={
             "before": leaf(3),
             "base_velocity": SimpleNamespace(
-                spaces={"lin_vel": leaf(3), "ang_vel": leaf(1)}
+                spaces={f"agent_{agent}_lin_vel": leaf(3), f"agent_{agent}_ang_vel": leaf(1)}
                 if name == "DroneBaseVelAction"
-                else {"base_vel": leaf(3 if lateral else 2)}
+                else {f"agent_{agent}_base_vel": leaf(3 if lateral else 2)}
             ),
             "wait": leaf(1),
             "rearrange_stop": leaf(1),
@@ -89,16 +89,17 @@ def original_interfaces(monkeypatch: pytest.MonkeyPatch) -> None:
         ("DroneBaseVelAction", False, 6, 9),
     ],
 )
+@pytest.mark.parametrize("agent", [0, 1])
 def test_actual_control_layout_and_motion_bounds(
-    name: str, lateral: bool, yaw: int, width: int
+    name: str, lateral: bool, yaw: int, width: int, agent: int
 ) -> None:
     """Yaw indices follow the supplied layout; zero translation and original rates are retained."""
-    world, policy = controls(name, lateral=lateral)
-    spec = inspect_view_scan(world, policy, 0)
+    world, policy = controls(name, agent=agent, lateral=lateral)
+    spec = inspect_view_scan(world, policy, agent)
     assert spec.yaw_index == yaw and spec.width == width
     assert spec.normalized_yaw * spec.angular_scale <= 1.5
     assert MAX_SCAN_STEPS * spec.normalized_yaw * spec.angular_scale / spec.ctrl_freq <= math.pi / 2
-    assert world.task.actions["agent_0_base_velocity"] is spec.action
+    assert world.task.actions[f"agent_{agent}_base_velocity"] is spec.action
 
 
 def test_one_agent_uses_the_original_unprefixed_interface() -> None:
@@ -108,10 +109,14 @@ def test_one_agent_uses_the_original_unprefixed_interface() -> None:
     action._multi_agent, action._action_arg_prefix = False, ""
     world.task.actions["base_velocity"] = action
     world.sim.agents_mgr = [object()]
+    policy._high_level_policy._action_space.spaces["base_velocity"].spaces = {"base_vel": leaf(2)}
     assert inspect_view_scan(world, policy, 0).action is action
 
 
-@pytest.mark.parametrize("failure", ["missing", "other-agent", "rate", "layout", "type"])
+@pytest.mark.parametrize(
+    "failure",
+    ["missing", "other-agent", "rate", "layout", "type", "unprefixed", "peer-prefix"],
+)
 def test_unavailable_control_cannot_be_advertised(failure: str) -> None:
     """Missing or mismatched real control facts refuse readiness instead of assuming capacity."""
     world, policy = controls()
@@ -123,9 +128,14 @@ def test_unavailable_control_cannot_be_advertised(failure: str) -> None:
     elif failure == "rate":
         world.sim.ctrl_freq = float("nan")
     elif failure == "layout":
-        policy._high_level_policy._action_space.spaces["base_velocity"].spaces["base_vel"] = leaf(7)
-    else:
+        policy._high_level_policy._action_space.spaces["base_velocity"].spaces[
+            "agent_0_base_vel"
+        ] = leaf(7)
+    elif failure == "type":
         world.task.actions["agent_0_base_velocity"] = type("BaseVelAction", (), vars(action))()
+    else:
+        key = "base_vel" if failure == "unprefixed" else "agent_1_base_vel"
+        policy._high_level_policy._action_space.spaces["base_velocity"].spaces = {key: leaf(2)}
     with pytest.raises(IntegrationError, match="no supported"):
         inspect_view_scan(world, policy, 0)
 
