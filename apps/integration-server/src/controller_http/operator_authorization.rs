@@ -229,16 +229,28 @@ pub(super) fn synchronize_authority(
     gate: &Arc<Mutex<()>>,
     profile: Option<domain::OperatorAuthorization>,
 ) -> Result<(), String> {
+    // Unchanged read authority must not wait for a writer blocked on unrelated SQL.
+    if controller
+        .lock()
+        .map_err(|_| "controller lock is poisoned")?
+        .bridge
+        .control()
+        .operator_authorization()
+        == profile.as_ref()
+    {
+        return Ok(());
+    }
     let _gate = gate
         .lock()
         .map_err(|_| "application write gate is poisoned")?;
-    let mut live = controller
+    let live = controller
         .lock()
         .map_err(|_| "controller lock is poisoned")?;
     if live.bridge.control().operator_authorization() == profile.as_ref() {
         return Ok(());
     }
     let mut candidate = live.clone();
+    drop(live);
     candidate
         .bridge
         .control_mut()
@@ -254,7 +266,9 @@ pub(super) fn synchronize_authority(
             "operator authorization commit failed: {error}; rollback={rollback:?}"
         ));
     }
-    *live = candidate;
+    *controller
+        .lock()
+        .map_err(|_| "controller lock is poisoned")? = candidate;
     Ok(())
 }
 

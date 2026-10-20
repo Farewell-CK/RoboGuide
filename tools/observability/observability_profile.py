@@ -228,6 +228,13 @@ def rules(profile: dict[str, Any]) -> dict[str, Any]:
             "inspect the original write-recovery status.",
         ),
         (
+            "RoboGuideOperatorCapacityExhausted",
+            "increase(roboguide_operator_connections_rejected_total[5m]) > 0",
+            "warning",
+            "Operator transports exceeded the declared budget; "
+            "rejected connections admitted no command.",
+        ),
+        (
             "RoboGuideRuntimeUnknown",
             "roboguide_runtime_unknown_attempts > 0",
             "critical",

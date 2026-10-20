@@ -13,6 +13,8 @@ flowchart TB
   ID --> PROTO
   ID --> ART
   MI --> Entry[Controller 用户与高权限入口]
+  Entry --> HTTPBOUND[有界 TLS 前连接 / 同步 poll handoff / response I/O 期限]
+  HTTPBOUND --> WIT
   MI --> PREFLIGHT[只读发布合同前检 / exact plan + source digests]
   PREFLIGHT --> FEEDBACK[有界草案错误 / 原始输出保留]
   FEEDBACK --> MI

@@ -227,7 +227,7 @@ fn commit_registry<R: Serialize>(
     crate::application::run_synchronous_transaction(|| {
         let input_digest = digest(input)?;
         let _gate = gate.lock()?;
-        let mut live = controller
+        let live = controller
             .lock()
             .map_err(|_| "controller lock is poisoned")?;
         if let Some(receipt) = live
@@ -241,6 +241,7 @@ fn commit_registry<R: Serialize>(
             );
         }
         let mut candidate = live.clone();
+        drop(live);
         apply(candidate.bridge.control_mut()).map_err(|error| error.to_string())?;
         let revision = serde_json::to_value(&input.registry)
             .map_err(|error| error.to_string())?
@@ -280,6 +281,9 @@ fn commit_registry<R: Serialize>(
                 "source registry commit failed: {error}; rollback={rollback:?}"
             ));
         }
+        let mut live = controller
+            .lock()
+            .map_err(|_| "controller lock is poisoned")?;
         *live = candidate;
         Ok(
             serde_json::json!({"schema_version":"roboguide.registry-command-receipt/v0.1","receipt":receipt}),

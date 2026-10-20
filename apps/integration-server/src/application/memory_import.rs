@@ -606,10 +606,11 @@ pub(crate) fn submit(
     let _guard = gate.lock()?;
     events.begin_batch().map_err(|error| error.to_string())?;
     let result = (|| {
-        let mut live = controller
+        let live = controller
             .lock()
             .map_err(|_| "Controller authority is unavailable")?;
         let mut candidate = live.clone();
+        drop(live);
         let now = clock.now();
         if candidate
             .memory_imports
@@ -661,6 +662,9 @@ pub(crate) fn submit(
         let checkpoint = server_checkpoint_json(&candidate).map_err(|error| error.to_string())?;
         save_controller_checkpoint(events, &checkpoint).map_err(|error| error.to_string())?;
         events.commit_batch().map_err(|error| error.to_string())?;
+        let mut live = controller
+            .lock()
+            .map_err(|_| "Controller authority is unavailable")?;
         *live = candidate;
         // A fresh delivery-time clock may refuse a command whose authorization just expired.
         flush(&live, now, clock.now());

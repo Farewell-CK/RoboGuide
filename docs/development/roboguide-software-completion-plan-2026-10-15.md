@@ -28,6 +28,10 @@ mTLS scrape、两次实际 SQL 故障的 firing/resolved、固定 histogram/queu
 
 ## 交付要求
 
+[Operator 网络边界验收](acceptance/2026-10-20-operator-network-isolation.md)以真实单
+worker/TLS/SQL 排队和旧源码反例验证：有界连接、原 writer 授权、慢 SQL 期间健康读取、
+完整文件/告警与三副本恢复链。其他 listener 容量、完整 HA 升级及全部其余阶段继续必需。
+
 [单 worker 与重复 transfer 验收](acceptance/2026-10-20-worker-and-transfer-liveness.md)
 复现旧 timer/transfer 的三项反例，当前代码用 1 network worker 完成实际双 Node 文件/
 监控与三副本证书/完整恢复。其他 Operator 同步工作、完整升级/在线恢复及其余阶段继续必需。

@@ -59,6 +59,12 @@ impl DiagnosticKind {
 pub enum DiagnosticStage {
     /// Complete internal HTTP request handling, including response delivery.
     Request,
+    /// Sampled simultaneous Operator transports, including TLS and response I/O.
+    OperatorConnectionsActive,
+    /// Configured maximum simultaneous Operator transports.
+    OperatorConnectionLimit,
+    /// Cumulative transports closed before TLS because no original permit was available.
+    OperatorConnectionRejections,
     /// Validated reader-to-session queue.
     IngressQueue,
     /// Session-to-application queue.
@@ -106,6 +112,9 @@ impl DiagnosticStage {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Request => "http_request",
+            Self::OperatorConnectionsActive => "operator_connections_active",
+            Self::OperatorConnectionLimit => "operator_connection_limit",
+            Self::OperatorConnectionRejections => "operator_connection_rejections",
             Self::IngressQueue => "ingress_queue",
             Self::ApplicationQueue => "application_queue",
             Self::WriteGate => "write_gate",

@@ -13,6 +13,7 @@ pub(super) const APPLICATION_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOI
 /// Controller environment allowed by the current static software deployment.
 const ALLOWED_ENVIRONMENT: &[&str] = &[
     "TOKIO_WORKER_THREADS",
+    "ROBOGUIDE_OPERATOR_CONNECTION_LIMIT",
     "ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN",
     "ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS",
     "ROBOGUIDE_NODE_LEASE_DURATION_MS",
@@ -99,6 +100,17 @@ impl ProcessConfig {
     /// Rejects broad network/configuration scope before owning files or creating a Controller.
     pub fn validate(&self) -> Result<(), String> {
         self.replica.validate()?;
+        if self
+            .controller_environment
+            .get("ROBOGUIDE_OPERATOR_CONNECTION_LIMIT")
+            .is_some_and(|value| {
+                value
+                    .parse::<usize>()
+                    .map_or(true, |limit| !(1..=1024).contains(&limit))
+            })
+        {
+            return Err("Operator connection limit must be an integer in 1..1024".into());
+        }
         if self
             .controller_environment
             .get("TOKIO_WORKER_THREADS")
@@ -210,5 +222,19 @@ mod tests {
         changed.replica.application_policy_digest = changed.policy_digest().unwrap();
         changed.validate().unwrap();
         profile("64").validate().unwrap();
+    }
+
+    /// Transport capacity is deployment-owned, bounded and part of the original application policy.
+    #[test]
+    fn operator_connections_are_bounded_and_policy_bound() {
+        for value in ["0", "1025", "-1", "invalid", "1.5", "2"] {
+            let mut candidate = profile("1");
+            candidate
+                .controller_environment
+                .insert("ROBOGUIDE_OPERATOR_CONNECTION_LIMIT".into(), value.into());
+            assert!(candidate.validate().is_err(), "{value} bypassed policy");
+            candidate.replica.application_policy_digest = candidate.policy_digest().unwrap();
+            assert_eq!(candidate.validate().is_ok(), value == "2");
+        }
     }
 }

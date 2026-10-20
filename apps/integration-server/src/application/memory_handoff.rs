@@ -1187,10 +1187,11 @@ pub(crate) fn submit(
     let _guard = gate.lock()?;
     events.begin_batch().map_err(|e| e.to_string())?;
     let result = (|| {
-        let mut live = controller
+        let live = controller
             .lock()
             .map_err(|_| "handoff authority unavailable")?;
         let mut candidate = live.clone();
+        drop(live);
         let now = clock.now();
         let id = if let Some(id) = commit_id {
             commit(&mut candidate, id, principal, tenant, now)?
@@ -1206,6 +1207,9 @@ pub(crate) fn submit(
         let checkpoint = server_checkpoint_json(&candidate).map_err(|e| e.to_string())?;
         save_controller_checkpoint(events, &checkpoint).map_err(|e| e.to_string())?;
         events.commit_batch().map_err(|e| e.to_string())?;
+        let mut live = controller
+            .lock()
+            .map_err(|_| "handoff authority unavailable")?;
         *live = candidate;
         if let Err(error) = flush_unisolated_commands(&mut live, clock) {
             eprintln!("committed handoff command delivery deferred: {error}");

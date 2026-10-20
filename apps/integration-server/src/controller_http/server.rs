@@ -468,17 +468,46 @@ pub(crate) async fn serve_http(
     deployment_feasibility: Option<Arc<DeploymentFeasibility>>,
     verifier_feed: Option<Arc<TaskVerifierFeed>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let operator_tls = configured_operator_tls()?;
-    let profile = operator_tls
-        .as_ref()
-        .map(|tls| load_grants(&tls.role_map_path).map(|(_, profile)| profile))
-        .transpose()?
-        .flatten();
-    synchronize_authority(&controller, &event_log, &event_write_gate, profile)?;
+    let limit = super::network::parse_connection_limit(
+        std::env::var("ROBOGUIDE_OPERATOR_CONNECTION_LIMIT")
+            .ok()
+            .as_deref(),
+    )?;
+    let operator_tls = application::run_synchronous_transaction(configured_operator_tls)?;
+    application::run_synchronous_transaction(|| {
+        let profile = operator_tls
+            .as_ref()
+            .map(|tls| load_grants(&tls.role_map_path).map(|(_, profile)| profile))
+            .transpose()?
+            .flatten();
+        synchronize_authority(&controller, &event_log, &event_write_gate, profile)
+    })?;
+    let diagnostics = application::run_synchronous_transaction(|| {
+        controller
+            .lock()
+            .map(|live| live.bridge.diagnostics().clone())
+            .map_err(|_| "controller lock is poisoned")
+    })?;
+    let permits = Arc::new(tokio::sync::Semaphore::new(limit));
+    let mut rejected = 0_u64;
+    let mut sampling = tokio::time::interval(std::time::Duration::from_secs(1));
+    sampling.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let listener = tokio::net::TcpListener::bind(address).await?;
     let local_principal = local_operator_principal(address, operator_tls.is_some())?;
     loop {
-        let (mut stream, _) = listener.accept().await?;
+        let (mut stream, _) = tokio::select! {
+            accepted = listener.accept() => accepted?,
+            _ = sampling.tick() => {
+                super::network::observe_connections(&diagnostics, &permits, limit, rejected);
+                continue;
+            }
+        };
+        let Ok(permit) = permits.clone().try_acquire_owned() else {
+            rejected = rejected.saturating_add(1);
+            super::network::observe_connections(&diagnostics, &permits, limit, rejected);
+            drop(stream);
+            continue;
+        };
         let shared_controller = controller.clone();
         let log = event_log.clone();
         let write_gate = event_write_gate.clone();
@@ -488,6 +517,7 @@ pub(crate) async fn serve_http(
         let operator_tls = operator_tls.clone();
         let local_principal = local_principal.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             let result = if let Some(profile) = operator_tls {
                 match tokio::time::timeout(
                     CONTROL_HTTP_REQUEST_TIMEOUT,
@@ -496,7 +526,9 @@ pub(crate) async fn serve_http(
                 .await
                 {
                     Ok(Ok(mut tls_stream)) => {
-                        let principal = match profile.principal(&tls_stream) {
+                        let principal = match application::run_synchronous_transaction(|| {
+                            profile.principal(&tls_stream)
+                        }) {
                             Ok(principal) => principal,
                             Err(error) => {
                                 eprintln!("operator mTLS identity rejected: {error}");
@@ -601,6 +633,34 @@ pub(crate) async fn handle_recovery_admin_test_connection<
 /// Handles one bounded request over either raw loopback TCP or an authenticated TLS stream.
 #[allow(clippy::too_many_arguments)]
 async fn handle_http_connection_with_principal<S>(
+    stream: &mut S,
+    controller: &Arc<Mutex<ControllerState>>,
+    event_log: &state::SqliteEventLog,
+    event_write_gate: &Arc<Mutex<()>>,
+    clock: &(impl Clock + Sync),
+    deployment_feasibility: Option<&DeploymentFeasibility>,
+    verifier_feed: Option<&TaskVerifierFeed>,
+    principal: &OperatorPrincipal,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    super::network::isolate_synchronous_polls(apply_http_request(
+        stream,
+        controller,
+        event_log,
+        event_write_gate,
+        clock,
+        deployment_feasibility,
+        verifier_feed,
+        principal,
+    ))
+    .await
+}
+
+/// Reduces the original request with unchanged authority checks and asynchronous socket I/O.
+#[allow(clippy::too_many_arguments)]
+async fn apply_http_request<S>(
     stream: &mut S,
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
@@ -818,7 +878,8 @@ where
         let metrics = controller
             .lock()
             .map_err(|_| "controller lock is poisoned".to_string())
-            .and_then(|live| controller_metrics(&live, event_log, clock.now()));
+            .map(|live| live.clone())
+            .and_then(|snapshot| controller_metrics(&snapshot, event_log, clock.now()));
         return match metrics {
             Ok(metrics) => write_text_response(stream, "200 OK", &metrics).await,
             Err(error) => {
@@ -1769,6 +1830,7 @@ where
                 );
                 let mut candidate = controller.clone();
                 drop(clone_sample);
+                drop(controller);
                 let mut events = event_log.clone();
                 let operation = {
                     let ControllerState {
@@ -2186,10 +2248,11 @@ where
             }
             let result: Result<(), (&str, String)> = (|| {
                 let unavailable = |error: String| ("503 Service Unavailable", error);
-                let mut live = controller
+                let live = controller
                     .lock()
                     .map_err(|_| unavailable("controller lock is poisoned".into()))?;
                 let mut candidate = live.clone();
+                drop(live);
                 let now = clock.now();
                 let correlation = domain::CorrelationId::new(format!("resume-{mission}"))
                     .map_err(|error| unavailable(error.to_string()))?;
@@ -2226,6 +2289,9 @@ where
                     .map_err(|error| unavailable(error.to_string()))?;
                 crate::diagnostics::http_commit(event_log, &diagnostics)
                     .map_err(|error| unavailable(error.to_string()))?;
+                let mut live = controller
+                    .lock()
+                    .map_err(|_| unavailable("controller lock is poisoned".into()))?;
                 *live = candidate;
                 if let Err(error) = flush_unisolated_commands(&mut live, clock) {
                     eprintln!("durable resumed outbox deferred: {error}");
@@ -2312,10 +2378,11 @@ where
             let now = clock.now();
             let mut failure_status = "503 Service Unavailable";
             let result: Result<(), String> = (|| {
-                let mut live = controller
+                let live = controller
                     .lock()
                     .map_err(|_| "controller lock is poisoned".to_string())?;
                 let mut candidate = live.clone();
+                drop(live);
                 let correlation = domain::CorrelationId::new(format!("review-{mission}"))
                     .map_err(|error| error.to_string())?;
                 let resume = resume_mission_candidate_with_policy(
@@ -2348,6 +2415,9 @@ where
                     .map_err(|error| error.to_string())?;
                 crate::diagnostics::http_commit(event_log, &diagnostics)
                     .map_err(|error| error.to_string())?;
+                let mut live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned".to_string())?;
                 *live = candidate;
                 if let Err(error) = flush_unisolated_commands(&mut live, clock) {
                     eprintln!("durable reviewed outbox deferred: {error}");

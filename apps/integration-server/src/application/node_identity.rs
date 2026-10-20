@@ -14,10 +14,11 @@ pub(crate) fn submit(
     let command: domain::IdentityCommand =
         serde_json::from_slice(body).map_err(|error| error.to_string())?;
     let _gate = event_write_gate.lock()?;
-    let mut live = controller
+    let live = controller
         .lock()
         .map_err(|_| "controller lock is poisoned")?;
     let mut candidate = live.clone();
+    drop(live);
     let receipt = candidate
         .bridge
         .control_mut()
@@ -33,6 +34,9 @@ pub(crate) fn submit(
             "Node identity commit failed: {error}; rollback={rollback:?}"
         ));
     }
+    let mut live = controller
+        .lock()
+        .map_err(|_| "controller lock is poisoned")?;
     *live = candidate;
     live.bridge.publish_node_identity_registry()?;
     Ok(

@@ -187,6 +187,33 @@ pub(crate) fn render(diagnostics: &DiagnosticHandle) -> String {
             writeln!(output, "roboguide_controller_stage_duration_seconds_bucket{{kind=\"{kind}\",stage=\"{stage}\",le=\"+Inf\"}} {}\nroboguide_controller_stage_duration_seconds_count{{kind=\"{kind}\",stage=\"{stage}\"}} {}\nroboguide_controller_stage_duration_seconds_sum{{kind=\"{kind}\",stage=\"{stage}\"}} {}", aggregate.duration_count, aggregate.duration_count, aggregate.duration_sum_us as f64 / 1_000_000.0).expect("String formatting is infallible");
         }
         if let Some(value) = aggregate.value {
+            let connection_metric = match aggregate.stage {
+                DiagnosticStage::OperatorConnectionsActive => Some((
+                    "roboguide_operator_connections_active",
+                    "gauge",
+                    "Last one-second sample of actual live Operator transports.",
+                )),
+                DiagnosticStage::OperatorConnectionLimit => Some((
+                    "roboguide_operator_connections_limit",
+                    "gauge",
+                    "Configured maximum simultaneous Operator transports.",
+                )),
+                DiagnosticStage::OperatorConnectionRejections => Some((
+                    "roboguide_operator_connections_rejected_total",
+                    "counter",
+                    "Actual Operator transports closed before TLS because all permits were held.",
+                )),
+                _ => None,
+            };
+            if aggregate.kind == DiagnosticKind::Http
+                && let Some((name, metric_type, help)) = connection_metric
+            {
+                writeln!(
+                    output,
+                    "# HELP {name} {help}\n# TYPE {name} {metric_type}\n{name} {value}"
+                )
+                .expect("String formatting is infallible");
+            }
             writeln!(
                 output,
                 "roboguide_controller_stage_value{{kind=\"{kind}\",stage=\"{stage}\"}} {value}"

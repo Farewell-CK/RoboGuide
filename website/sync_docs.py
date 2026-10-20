@@ -125,6 +125,11 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
             ("副本证书验收", "docs/development/acceptance/2026-10-20-replica-certificates.md"),
             ("完整副本静止恢复", "docs/development/acceptance/2026-10-20-replica-cold-recovery.md"),
             ("Controller worker 隔离", "docs/development/controller-worker-isolation-v0.1.md"),
+            ("Operator 网络边界", "docs/development/operator-network-bounds-v0.1.md"),
+            (
+                "Operator 网络边界验收",
+                "docs/development/acceptance/2026-10-20-operator-network-isolation.md",
+            ),
             (
                 "Worker 与 transfer 验收",
                 "docs/development/acceptance/2026-10-20-worker-and-transfer-liveness.md",

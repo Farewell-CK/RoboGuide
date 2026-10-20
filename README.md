@@ -1,5 +1,9 @@
 # RoboGuide
 
+Operator HTTP 现有 TLS 前连接预算、完整请求 worker handoff 与 response I/O 期限，
+真实权限仍在原 writer 下复核；慢 SQL 期间已提交健康读取可用。部署与失败语义见
+[Operator 网络边界](docs/development/operator-network-bounds-v0.1.md)。
+
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
 [网络 worker 与重复 leader transfer 修复](docs/development/acceptance/2026-10-20-worker-and-transfer-liveness.md)

@@ -1,5 +1,10 @@
 # RoboGuide V2 架构基线
 
+[ADR-0119](../../decisions/0119-bounded-operator-network-isolation.md)将 Operator 请求的
+同步 poll 归还网络 worker，入口在 TLS 前限制连接并约束 response I/O。完整相同授权
+profile 的只读检查不排 writer；变化和 mutation 继续在原实际 writer 内复核。
+已提交只读快照与私有 candidate 不在慢 SQL 期间占 live Controller mutex。
+
 [ADR-0118](../../decisions/0118-synchronous-application-worker-isolation.md)归还原完整同步
 timer/Node/Artifact 的异步 network worker，并恢复所有 transfer 退出路径的正常 Raft
 heartbeat/election。原 writer/证书/ACK/预算权威不变；不从线程隔离推断全部历史故障因果。

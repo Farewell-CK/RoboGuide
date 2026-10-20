@@ -122,15 +122,18 @@ pub(super) async fn write_http_response<S>(
 where
     S: tokio::io::AsyncWrite + Unpin,
 {
-    use tokio::io::AsyncWriteExt;
     let body = serde_json::to_string(&body)?;
     let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    stream.write_all(response.as_bytes()).await?;
-    stream.shutdown().await?;
-    Ok(())
+    write_response_parts(
+        stream,
+        response.as_bytes(),
+        body.as_bytes(),
+        crate::CONTROL_HTTP_REQUEST_TIMEOUT,
+    )
+    .await
 }
 
 /// Writes one bounded Prometheus text response and closes the connection.
@@ -142,15 +145,35 @@ pub(super) async fn write_text_response<S>(
 where
     S: tokio::io::AsyncWrite + Unpin,
 {
-    use tokio::io::AsyncWriteExt;
     let body = body.as_bytes();
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/plain; version=0.0.4; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    stream.write_all(response.as_bytes()).await?;
-    stream.write_all(body).await?;
-    stream.shutdown().await?;
+    write_response_parts(
+        stream,
+        response.as_bytes(),
+        body,
+        crate::CONTROL_HTTP_REQUEST_TIMEOUT,
+    )
+    .await
+}
+
+/// Bounds socket writes only; an already committed command is never cancelled or repeated here.
+async fn write_response_parts<S: tokio::io::AsyncWrite + Unpin>(
+    stream: &mut S,
+    headers: &[u8],
+    body: &[u8],
+    budget: std::time::Duration,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use tokio::io::AsyncWriteExt;
+    tokio::time::timeout(budget, async {
+        stream.write_all(headers).await?;
+        stream.write_all(body).await?;
+        stream.shutdown().await
+    })
+    .await
+    .map_err(|_| "control HTTP response I/O timed out")??;
     Ok(())
 }
 
@@ -160,4 +183,24 @@ pub(crate) fn parse_query(query: &str) -> std::collections::BTreeMap<&str, &str>
         .split('&')
         .filter_map(|pair| pair.split_once('='))
         .collect()
+}
+
+#[cfg(test)]
+mod response_tests {
+    use super::*;
+
+    /// Backpressure from a reader that never consumes bytes cannot retain a transport indefinitely.
+    #[tokio::test]
+    async fn response_io_has_its_own_bounded_budget() {
+        let (mut writer, _unread) = tokio::io::duplex(1);
+        let failure = write_response_parts(
+            &mut writer,
+            b"headers",
+            b"already-committed-body",
+            std::time::Duration::from_millis(25),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(failure.to_string(), "control HTTP response I/O timed out");
+    }
 }

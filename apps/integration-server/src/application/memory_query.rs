@@ -682,10 +682,11 @@ pub(crate) fn submit(
     let _guard = gate.lock()?;
     events.begin_batch().map_err(|e| e.to_string())?;
     let result = (|| {
-        let mut live = controller
+        let live = controller
             .lock()
             .map_err(|_| "Controller authority unavailable")?;
         let mut candidate = live.clone();
+        drop(live);
         let now = clock.now();
         let count = candidate
             .memory_imports
@@ -715,6 +716,9 @@ pub(crate) fn submit(
         let checkpoint = server_checkpoint_json(&candidate).map_err(|e| e.to_string())?;
         save_controller_checkpoint(events, &checkpoint).map_err(|e| e.to_string())?;
         events.commit_batch().map_err(|e| e.to_string())?;
+        let mut live = controller
+            .lock()
+            .map_err(|_| "Controller authority unavailable")?;
         *live = candidate;
         flush(&live, now, clock.now());
         serde_json::to_value(&live.memory_imports[&id]).map_err(|e| e.to_string())

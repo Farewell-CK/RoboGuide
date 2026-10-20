@@ -5,6 +5,16 @@
 RoboGuide has a current V2 architecture baseline plus development and MVP documents.
 The first core bootstrap has started; the full runtime and MVP are not complete.
 
+ADR-0119 bounds Operator transports before TLS (default 128, explicit 1–1024), returns the network
+worker before each complete request poll, and bounds response I/O without cancelling committed work.
+Unchanged complete committed grants have a read fast path; actual mutation witnesses still recheck
+current authority under the original writer through Commit/rollback. Registry/identity/attestation,
+verifier, Memory and Mission candidates release live Controller mutex during work and SQL; metrics
+query storage after a short committed snapshot. Replica child connection environment remains
+policy-bound. Sampled active/limit and actual rejection counter are observation-only. See
+`docs/development/operator-network-bounds-v0.1.md`; other listener budgets, long-term SLO and all
+remaining F0/F4–F10 requirements remain mandatory. No Node or physical facts are created.
+
 ADR-0118 returns the Tokio network worker before complete timer/Node-fact/Artifact synchronous
 authority, audit, SQL and content work. Original writer/TLS witness/Commit/ACK/outbox ordering and
 budgets stay. Explicit replica child TOKIO_WORKER_THREADS is limited to 1–64 and remains policy-bound.

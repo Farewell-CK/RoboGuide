@@ -1,5 +1,8 @@
 # 文档图片资源
 
+2026-10-20 当前部署 Mermaid 同步 ADR-0119 的 Operator TLS 前连接预算、完整请求 poll
+handoff 和 response I/O 期限；实际 writer/TLS witness/Commit 权威保留。
+
 本目录集中保存出现在 README、架构说明和后续设计文档中的图片资源。
 
 2026-10-20 当前部署 Mermaid 同步 ADR-0118 同步事务/network worker 边界，以及 transfer

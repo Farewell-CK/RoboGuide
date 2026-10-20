@@ -54,5 +54,7 @@ uv run python tools/quality/check_replica_certificate_processes.py \
 文件链使用正式配置接入的两个软件 Node、实际文件计算和独立 verifier，零设备/模型/模拟器。
 三副本 profile 不创建 Node。Observer loss、未知/stop/Memory 仍按原权威处理。
 
-Operator 的其余同步 query/registry 路径、长期 SLO、跨主机压力和原恢复/升级矩阵仍按
-F10/F5 继续收敛。不能把本项当成所有异步阻塞、所有历史 HTTP 故障或整体整改已关闭。
+后续 [Operator 网络边界](operator-network-bounds-v0.1.md)将完整请求 poll、连接预算与
+response I/O 接入，并缩短 registry/Memory/verifier 等 live mutex 的持有范围。
+长期 SLO、其他 listener 的完整容量与跨主机压力、原恢复/升级矩阵仍按 F10/F5 收敛。
+不能把本项当成所有历史 HTTP 故障或整体整改已关闭。

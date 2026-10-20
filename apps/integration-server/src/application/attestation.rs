@@ -254,10 +254,11 @@ pub(crate) fn submit(
     is_challenge: bool,
 ) -> Result<serde_json::Value, String> {
     let _gate = event_write_gate.lock()?;
-    let mut live = controller
+    let live = controller
         .lock()
         .map_err(|_| "controller lock is poisoned")?;
     let mut candidate = live.clone();
+    drop(live);
     let mut registry = candidate
         .bridge
         .control()
@@ -393,6 +394,9 @@ pub(crate) fn submit(
             "attestation commit failed: {error}; rollback={rollback:?}"
         ));
     }
+    let mut live = controller
+        .lock()
+        .map_err(|_| "controller lock is poisoned")?;
     *live = candidate;
     live.bridge.publish_node_identity_registry()?;
     Ok(

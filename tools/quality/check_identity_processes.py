@@ -164,6 +164,81 @@ def stop(process: subprocess.Popen[bytes]) -> None:
             process.wait(timeout=5)
 
 
+def metrics_text(origin: str, context: ssl.SSLContext) -> str:
+    """Read bounded actual Prometheus text over the original authenticated transport."""
+    with urllib.request.urlopen(origin + "/metrics", context=context, timeout=3) as response:  # noqa: S310
+        content: bytes = response.read(2 * 1024 * 1024 + 1)
+        if len(content) > 2 * 1024 * 1024:
+            raise ValueError("Controller metrics exceeded the observation bound")
+        return content.decode()
+
+
+def operator_capacity(
+    origin: str, context: ssl.SSLContext, artifact_origin: str, limit: int, directory: Path
+) -> dict[str, Any]:
+    """Occupy actual TLS permits, reject excess transport and probe the Artifact listener."""
+    endpoint = urllib.parse.urlsplit(origin)
+    assert endpoint.hostname == "127.0.0.1" and endpoint.port is not None
+    held: list[ssl.SSLSocket] = []
+    rejected = False
+    try:
+        for _ in range(limit):
+            raw = socket.create_connection((endpoint.hostname, endpoint.port), timeout=3)
+            try:
+                held.append(context.wrap_socket(raw, server_hostname=endpoint.hostname))
+            except BaseException:
+                raw.close()
+                raise
+        try:
+            with socket.create_connection((endpoint.hostname, endpoint.port), timeout=3) as raw:
+                with context.wrap_socket(raw, server_hostname=endpoint.hostname) as excess:
+                    excess.sendall(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    rejected = not excess.recv(1)
+        except OSError:
+            rejected = True
+        assert rejected, "over-capacity transport received an application response"
+        with urllib.request.urlopen(artifact_origin + "/healthz", timeout=3) as independent:  # noqa: S310
+            assert independent.status == 200
+    finally:
+        for connection in held:
+            connection.close()
+    deadline = time.monotonic() + 4
+    observed = ""
+    values: dict[str, int] = {}
+    while time.monotonic() < deadline:
+        try:
+            observed = metrics_text(origin, context)
+            for stage in (
+                "operator_connection_limit",
+                "operator_connection_rejections",
+                "operator_connections_active",
+            ):
+                prefix = 'roboguide_controller_stage_value{kind="http",stage="' + stage + '"} '
+                for line in observed.splitlines():
+                    if line.startswith(prefix):
+                        values[stage] = int(line.removeprefix(prefix))
+            if (
+                values.get("operator_connection_limit") == limit
+                and values.get("operator_connection_rejections", 0) >= 1
+                and values.get("operator_connections_active") == 0
+            ):
+                break
+        except (OSError, urllib.error.URLError):
+            pass
+        time.sleep(0.05)
+    else:
+        raise TimeoutError("original connection permits or observations did not recover")
+    (directory / "operator-capacity-metrics.prom").write_text(observed)
+    return {
+        "actual_held_tls_transports": limit,
+        "excess_transport_rejected_before_request": rejected,
+        "independent_artifact_http_status": 200,
+        "released_permits_observed": True,
+        "actual_observed_values": values,
+        "registered_node_facts": 0,
+    }
+
+
 def queued_revocation(
     origin: str,
     admin: ssl.SSLContext,
@@ -247,7 +322,7 @@ def queued_revocation(
 
                 with sqlite3.connect(database, timeout=1) as lock:
                     lock.execute("BEGIN IMMEDIATE")
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as workers:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as workers:
                         try:
                             original = workers.submit(
                                 request, origin, admin, "/v1/memory-authorizations", first
@@ -266,6 +341,12 @@ def queued_revocation(
                                     json.dumps(observed_failure, indent=2) + "\n"
                                 )
                                 raise
+                            metrics = workers.submit(metrics_text, origin, next_admin)
+                            metrics_reads = reads(2)
+                            health_started = time.monotonic()
+                            health = request(origin, next_admin, "/healthz")
+                            health_elapsed = time.monotonic() - health_started
+                            assert health[0] == 200, health
                             profile["revision"] += 1
                             profile["grants"][revoked_digest]["revoked"] = True
                             temporary = profile_path.with_suffix(".pending")
@@ -275,12 +356,17 @@ def queued_revocation(
                             lock.rollback()
                         original_result = original.result(timeout=4)
                         queued_result = queued.result(timeout=4)
+                        blocked_metrics = metrics.result(timeout=4)
+                        assert "roboguide_storage_read_available" in blocked_metrics
         observed = {
             "original_result": original_result,
             "queued_result": queued_result,
             "original_file_reads": first_reads,
             "queued_transport_file_reads": transport_reads,
             "queued_original_file_reads": queued_reads,
+            "health_during_actual_sql_writer_lock": health[0],
+            "health_elapsed_seconds": health_elapsed,
+            "concurrent_metrics_original_file_reads": metrics_reads,
         }
         (directory / "queued-observation.json").write_text(json.dumps(observed, indent=2) + "\n")
         assert original_result[0] == 200, original_result
@@ -303,7 +389,14 @@ def queued_revocation(
         os.close(descriptor)
 
 
-def run(directory: Path, skip_build: bool) -> dict[str, Any]:
+def run(
+    directory: Path,
+    skip_build: bool,
+    async_workers: int = 8,
+    connection_limit: int = 128,
+    capacity_probe: bool = False,
+    controller_binary: Path | None = None,
+) -> dict[str, Any]:
     """Validate public identity transactions, restart, rollback and principal rotation."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     if not skip_build:
@@ -313,7 +406,7 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
             check=True,
             timeout=180,
         )
-    binary = ROOT / "target/debug/integration-server"
+    binary = (controller_binary or ROOT / "target/debug/integration-server").resolve(strict=True)
     binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
     certificates = directory / "pki"
     digests = pki(certificates)
@@ -348,7 +441,8 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
     }
     environment.update(
         {
-            "TOKIO_WORKER_THREADS": "8",
+            "TOKIO_WORKER_THREADS": str(async_workers),
+            "ROBOGUIDE_OPERATOR_CONNECTION_LIMIT": str(connection_limit),
             "ROBOGUIDE_NODE_MTLS_SERVER_CERT": str(certificates / "server.crt"),
             "ROBOGUIDE_NODE_MTLS_SERVER_KEY": str(certificates / "server.key"),
             "ROBOGUIDE_NODE_MTLS_CLIENT_CA": str(certificates / "ca.crt"),
@@ -365,13 +459,14 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
         .strip()
     )
     http_port = port()
+    artifact_port = port()
     origin = f"https://127.0.0.1:{http_port}"
     args = [
         str(binary),
         f"127.0.0.1:{port()}",
         str(directory / "events.sqlite3"),
         f"127.0.0.1:{http_port}",
-        f"127.0.0.1:{port()}",
+        f"127.0.0.1:{artifact_port}",
         str(directory / "artifacts"),
     ]
     admin = client(certificates, "admin")
@@ -404,6 +499,13 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
 
     process = start(admin)
     try:
+        capacity = (
+            operator_capacity(
+                origin, admin, f"http://127.0.0.1:{artifact_port}", connection_limit, directory
+            )
+            if capacity_probe
+            else None
+        )
         node_id = "credential-" + str(uuid.uuid4())
         command = {
             "command_id": str(uuid.uuid4()),
@@ -475,6 +577,9 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
             "passed": True,
             "application_schema": schema,
             "binary_sha256": binary_sha256,
+            "async_workers": async_workers,
+            "operator_connection_limit": connection_limit,
+            "operator_capacity": capacity,
             "queued_revocation": queued,
             "registry_records": len(before["records"]),
             "registered_node_facts": 0,
@@ -490,8 +595,23 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--async-workers", type=int, choices=range(1, 65), default=8)
+    parser.add_argument(
+        "--operator-connection-limit", type=int, choices=range(4, 1025), default=128
+    )
+    parser.add_argument("--capacity-probe", action="store_true")
+    parser.add_argument("--controller-binary", type=Path)
     args = parser.parse_args()
-    result = run(args.output.resolve(), args.skip_build)
+    if args.controller_binary is not None and not args.skip_build:
+        parser.error("--controller-binary requires --skip-build and explicit archived bytes")
+    result = run(
+        args.output.resolve(),
+        args.skip_build,
+        args.async_workers,
+        args.operator_connection_limit,
+        args.capacity_probe,
+        args.controller_binary,
+    )
     (args.output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))
 

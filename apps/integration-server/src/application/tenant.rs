@@ -28,11 +28,12 @@ pub(crate) fn migrate(
     let command: control::MissionTenantMigration =
         serde_json::from_slice(body).map_err(|error| error.to_string())?;
     let _gate = gate.lock()?;
-    let mut live = controller
+    let live = controller
         .lock()
         .map_err(|_| "controller lock is poisoned")?;
     let digest = source_digest(&live, &command.mission_id)?;
     let mut candidate = live.clone();
+    drop(live);
     let receipt = candidate
         .bridge
         .control_mut()
@@ -53,6 +54,9 @@ pub(crate) fn migrate(
             "tenant migration commit failed: {error}; rollback={rollback:?}"
         ));
     }
+    let mut live = controller
+        .lock()
+        .map_err(|_| "controller lock is poisoned")?;
     *live = candidate;
     Ok(
         serde_json::json!({"schema_version":"roboguide.mission-tenant-migration/v0.1","receipt":receipt,"execution_repeated":false}),

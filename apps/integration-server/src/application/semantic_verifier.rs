@@ -163,11 +163,12 @@ pub(crate) fn submit(
         return Err("verifier evidence belongs to another tenant".into());
     }
     let _gate = gate.lock()?;
-    let mut live = controller
+    let live = controller
         .lock()
         .map_err(|_| "controller lock is poisoned")?;
-    validate_input(&live, &input)?;
     let mut candidate = live.clone();
+    drop(live);
+    validate_input(&candidate, &input)?;
     let now = clock.now();
     let old_count = candidate
         .bridge
@@ -236,6 +237,9 @@ pub(crate) fn submit(
             "semantic verifier commit failed: {error}; rollback={rollback:?}"
         ));
     }
+    let mut live = controller
+        .lock()
+        .map_err(|_| "controller lock is poisoned")?;
     *live = candidate;
     if let Err(error) = flush_unisolated_commands(&mut live, clock) {
         eprintln!("verifier committed; durable command delivery deferred: {error}");
