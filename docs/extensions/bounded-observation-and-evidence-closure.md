@@ -29,7 +29,7 @@ deployment v0.4 增加 `enable_observation_acquisition`、
 语义相机和导航技能可用。默认 Python adapter 开关关闭。新的感知/重排 deployment
 模板显式选择本轮开发配置，旧冻结运行继续使用自己的旧模板。
 
-开启 acquisition 的当前代码输出 Local How v0.13，保留 v0.11 的闭合
+开启 acquisition 的当前代码输出 Local How v0.14，保留 v0.11 的闭合
 `observation_control=bounded-visual-feedback/v0.1` 声明。每次真实模型动作请求包含最新的
 缓存 true/false/unavailable、原 Task/attempt/world/entity、sample step 和原始剩余预算；
 读取不到保持 unavailable，同 step 冲突、跨 attempt/world 或时间回退拒绝。初始已有真实
@@ -67,6 +67,17 @@ DroneBaseVelAction，启动时检查真实实例、端点归属、action layout�
 初始化失败时撤销，不编辑 peer 或 vendor 文件。扫描退出仅记录 `view-scan-finished`，
 不意味着检测为 true，也不建立官方或 Mission 成功。它不能保证消除遮挡或修正垂直视野，
 不能宣称与原生 EMOS 动作工具集等价。
+
+v0.14 增加 `observation_motion_feedback=observed-own-scan-rotation/v0.1`。每个真实scan调用
+在派发前冻结自身原始quaternion，只在自身scan skill的既有成功Gym step后读当前quaternion。
+下一次模型输入、tool receipt和终止归档保留同一call ID/sequence的rotation-observed、
+no-rotation-observed或unavailable。完全缺失基线或部分读取失败不能证明静止；q与-q不表示
+不同朝向。内存只保留起点、最新值和标量计数，不在每步写盘或序列化JSON。
+
+原始计时技能仍返回原始结果；扫描计时结束不证明已经转动，更不证明检测或benchmark成功。
+读取失败不影响原动作或异常；运动阻塞的原因保持unavailable，不能由零转角猜测碰撞。
+没有自动重试、改写动作、替换目标、改变footprint/碰撞容差/NavMesh或增加物理控制权限。
+不同Local How控制器的几何可行性不一致需要独立的部署合同审查，不能靠放宽检查掩盖。
 
 物理诊断开关还启用 `perception-diagnostics.jsonl`，以16步采样周期读取同一次既有 Gym
 缓存。每条记录保留精确 entity/attempt/world、各 detector 的自身结果、原始整数语义图像

@@ -40,6 +40,7 @@ from .perception import cached_detection_observations, inspect_perception, obser
 from .perception_diagnostics import PerceptionDiagnostics
 from .preassignment_feasibility import preassignment_digest
 from .shared_world import SharedEmosStage2Runtime
+from .view_motion import motion_feedback_declaration
 from .view_scan import inspect_view_scan, view_scan_declaration
 
 _LOG = logging.getLogger(__name__)
@@ -191,7 +192,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         self._write_json(
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.13"
+                "schema_version": "roboguide.habitat-local-how-profile/v0.14"
                 if acquisition
                 else "roboguide.habitat-local-how-profile/v0.10"
                 if recoveries
@@ -207,6 +208,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                         "observation_control": observation_control_declaration(),
                         "navigation_dispatch": navigation_dispatch_declaration(),
                         "observation_view_search": view_scan_declaration(),
+                        "observation_motion_feedback": motion_feedback_declaration(),
                     }
                     if acquisition
                     else {}

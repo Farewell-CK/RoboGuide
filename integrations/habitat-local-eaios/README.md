@@ -32,6 +32,13 @@ occlusion and vertical camera framing can still prevent detection. A `view-scan-
 receipt describes the local scan, not acquisition or official success. Native EMOS files
 and its baseline tool set remain unchanged, so this controlled-arm difference is explicit.
 
+Local How v0.14 adds exact-call post-step orientation feedback. The next model input and
+tool receipt distinguish actual rotation, fully observed no rotation and unavailable evidence.
+Original timer completion stays a timer fact; it never proves motion or detection. Reads use
+the existing own-agent quaternion, without extra actions, steps, sensor queries or RNG access.
+Footprint checks, collision thresholds and NavMesh constraints remain unchanged. A stationary
+scan does not identify its blocking cause or authorize weakening those constraints.
+
 With physical diagnostics enabled, `perception-diagnostics.jsonl` records bounded same-cache
 detector results, exact target pixel counts, original thresholds and camera projection geometry
 every16steps and at acquisition boundaries. Own-agent detection, derived current cross-agent

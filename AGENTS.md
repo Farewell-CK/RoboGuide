@@ -831,7 +831,7 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   provider-level feasibility baselines and never an expansion of integrated Local EAIOS steps.
 
 ADR-0094 adds deployment-owned bounded `observation.acquire@v1`, separate from
-snapshot verification. Its opt-in Local How v0.13 retains v0.11 exact-attempt cached condition/budget
+snapshot verification. Its opt-in Local How v0.14 retains v0.11 exact-attempt cached condition/budget
 feedback and a disclosed at-most-16-step original-wait mapping; it neither edits raw model
 choices nor guarantees persistent effects. Already-observed acquisition needs no extra model
 or motion. A guarded fresh acquisition navigation call rearms only its endpoint's original
@@ -853,6 +853,10 @@ Navigation/relocation/idle retain their tools. `perception_diagnostics.py` is de
 the existing physical-diagnostics flag; bounded same-cache pixel/threshold/camera comparisons
 separate own-agent evidence, derived current-world union and unavailable official truth, with
 no sensor/render/predicate calls. Failed final capture cannot skip buffered evidence flush.
+`view_motion.py` adds exact-call post-step quaternion observations to scan receipts and subsequent
+model inputs. A completed skill timer never proves rotation; fully observed stationarity and
+unavailable evidence remain separate. No actuator, collision threshold, NavMesh or benchmark
+predicate is changed. The v0.14 declaration is checked independently of legacy v0.13 evidence.
 
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add

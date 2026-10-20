@@ -4,6 +4,8 @@
 [`bounded-observation-and-evidence-closure`](docs/extensions/bounded-observation-and-evidence-closure.md)：
 显式、有界的视角扫描复用真实底盘接口；检测缓存、语义像素及官方结果独立留证，不以本地
 技能完成替代 Mission satisfaction 或 benchmark success。
+Local How v0.14 还将自身真实旋转与扫描计时结束分开反馈，未转动和不可观测保持不同结果，
+不修改原始碰撞、足迹或 NavMesh 约束。
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 

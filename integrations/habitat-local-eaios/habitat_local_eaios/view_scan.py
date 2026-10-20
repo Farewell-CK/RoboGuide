@@ -17,6 +17,7 @@ from typing import Any
 
 from .model import IntegrationError
 from .observation_control import ObservationAcquisitionControl
+from .view_motion import ScanRotationObservation
 
 VIEW_SCAN_TOOL = "scan_for_object"
 VIEW_SCAN_PROFILE = "bounded-base-yaw-view-search/v0.1"
@@ -252,6 +253,7 @@ class ViewScanBinding:
         policy._high_level_policy._skill_name_to_idx[VIEW_SCAN_TOOL] = self.index
         self.skill = skill
         self._last_sequence = 0
+        self._motion: ScanRotationObservation | None = None
 
     def tool(self) -> dict[str, Any]:
         """Describe the real limited scan before selection, without changing the task objective."""
@@ -266,6 +268,7 @@ class ViewScanBinding:
                 "This can change the observer's heading and view, cannot remove every occlusion "
                 "or correct vertical framing. Detection and preservation of prior views "
                 "are not guaranteed. "
+                "The actual orientation feedback distinguishes a completed timer from rotation. "
                 "After the scan, use the current detection feedback to decide the next action."
             ),
             "parameters": {
@@ -299,6 +302,7 @@ class ViewScanBinding:
                 "view scan dispatch is detached, exhausted or would transport an object"
             )
         self._last_sequence = sequence
+        self._motion = ScanRotationObservation(self.spec.action, call_id, sequence)
         try:
             self.record(
                 {
@@ -317,6 +321,27 @@ class ViewScanBinding:
             )
         except Exception:  # noqa: BLE001 - evidence storage does not authorize or block physics
             _LOG.exception("view scan dispatch evidence unavailable")
+
+    def observe_physical_step(self) -> None:
+        """Sample only an existing step of this exact own skill; peers and idle are excluded."""
+        if self._motion is None:
+            return
+        try:
+            if self.policy._cur_skills[0] != self.index:
+                return
+        except Exception:  # noqa: BLE001 - unexposed skill ownership remains unknown
+            return
+        self._motion.observe()
+
+    def motion_feedback(self, call_id: str, sequence: int) -> dict[str, Any] | None:
+        """Return only evidence for the exact original pending call, never a prior scan."""
+        if (
+            self._motion is None
+            or self._motion.call_id != call_id
+            or self._motion.sequence != sequence
+        ):
+            return None
+        return self._motion.snapshot()
 
     def close(self) -> None:
         """Remove only this attempt's exact skill registration after its feedback hooks close."""

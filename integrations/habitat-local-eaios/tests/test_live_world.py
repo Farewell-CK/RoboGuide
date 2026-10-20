@@ -822,16 +822,18 @@ def test_loaded_perception_initialization_archives_actual_readiness(
     assert runtime.test_diagnostics.terminals == []
     how = json.loads((run / "local-how-profile.json").read_bytes())
     assert how["schema_version"] == (
-        "roboguide.habitat-local-how-profile/v0.13"
+        "roboguide.habitat-local-how-profile/v0.14"
         if acquisition
         else "roboguide.habitat-local-how-profile/v0.10"
     )
     if acquisition:
         from habitat_local_eaios.observation_control import observation_control_declaration
+        from habitat_local_eaios.view_motion import motion_feedback_declaration
 
         assert how["observation_control"] == observation_control_declaration()
         assert how["navigation_dispatch"] == navigation_dispatch.navigation_dispatch_declaration()
         assert how["observation_view_search"] == view_scan.view_scan_declaration()
+        assert how["observation_motion_feedback"] == motion_feedback_declaration()
     else:
         assert "observation_control" not in how
 
