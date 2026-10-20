@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 pub(super) const APPLICATION_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
 /// Controller environment allowed by the current static software deployment.
 const ALLOWED_ENVIRONMENT: &[&str] = &[
+    "TOKIO_WORKER_THREADS",
     "ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN",
     "ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS",
     "ROBOGUIDE_NODE_LEASE_DURATION_MS",
@@ -98,6 +99,19 @@ impl ProcessConfig {
     /// Rejects broad network/configuration scope before owning files or creating a Controller.
     pub fn validate(&self) -> Result<(), String> {
         self.replica.validate()?;
+        if self
+            .controller_environment
+            .get("TOKIO_WORKER_THREADS")
+            .is_some_and(|value| {
+                value
+                    .parse::<usize>()
+                    .map_or(true, |threads| !(1..=64).contains(&threads))
+            })
+        {
+            return Err(
+                "Controller async worker count must be an explicit integer in 1..64".into(),
+            );
+        }
         if self.schema != "roboguide.controller-replica-process/v0.1"
             || self.replica.application_schema != APPLICATION_SCHEMA
             || !self.controller_binary.is_absolute()
@@ -152,5 +166,49 @@ impl ProcessConfig {
             );
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Closed resource configuration must remain policy-bound and reject unbounded thread counts.
+
+    use super::*;
+
+    /// Uses an actual compiled file for policy hashing, without starting any process or Node.
+    fn profile(workers: &str) -> ProcessConfig {
+        let directory = tempfile::tempdir().unwrap();
+        let mut profile: ProcessConfig = serde_json::from_value(serde_json::json!({
+            "schema":"roboguide.controller-replica-process/v0.1",
+            "replica":{"schema":"roboguide.controller-replica/v0.1","cluster_id":"worker-config-unit",
+                "replica_id":1,"members":{"1":"127.0.0.1:10001","2":"127.0.0.1:10002","3":"127.0.0.1:10003"},
+                "application_schema":APPLICATION_SCHEMA,"application_policy_digest":"pending"},
+            "storage_directory":directory.path(),"controller_binary":std::env::current_exe().unwrap(),
+            "grpc_address":"127.0.0.1:11001","http_address":"127.0.0.1:11002","artifact_address":"127.0.0.1:11003",
+            "controller_environment":{"TOKIO_WORKER_THREADS":workers}
+        })).unwrap();
+        profile.replica.application_policy_digest = profile.policy_digest().unwrap();
+        profile
+    }
+
+    /// Actual thread-resource configuration is bounded and changes the already-frozen policy identity.
+    #[test]
+    fn async_workers_are_explicit_bounded_and_application_policy_bound() {
+        for value in ["0", "65", "-1", "invalid", "1.5"] {
+            assert!(profile(value).validate().is_err());
+        }
+        let original = profile("1");
+        original.validate().unwrap();
+        let mut changed = original;
+        changed
+            .controller_environment
+            .insert("TOKIO_WORKER_THREADS".into(), "2".into());
+        assert!(
+            changed.validate().is_err(),
+            "changed worker resources bypassed the original policy digest"
+        );
+        changed.replica.application_policy_digest = changed.policy_digest().unwrap();
+        changed.validate().unwrap();
+        profile("64").validate().unwrap();
     }
 }

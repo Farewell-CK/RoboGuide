@@ -28,6 +28,10 @@ mTLS scrape、两次实际 SQL 故障的 firing/resolved、固定 histogram/queu
 
 ## 交付要求
 
+[单 worker 与重复 transfer 验收](acceptance/2026-10-20-worker-and-transfer-liveness.md)
+复现旧 timer/transfer 的三项反例，当前代码用 1 network worker 完成实际双 Node 文件/
+监控与三副本证书/完整恢复。其他 Operator 同步工作、完整升级/在线恢复及其余阶段继续必需。
+
 [完整副本静止恢复](acceptance/2026-10-20-replica-cold-recovery.md)验证实际全 writer 门禁、
 6 SQL/39 tables/原换证历史与显式 CAS 内容恢复；三个实际 leader endpoint 读取相同原
 内容/receipt。在线内容、版本升级与前两轮间歇 HTTP 中断仍须继续解决，不关闭完整 F5/F10。

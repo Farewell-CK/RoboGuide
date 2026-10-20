@@ -383,7 +383,7 @@ impl Fixture {
 }
 
 /// 1/N keep exact event/checkpoint authority for the same ordered inputs and original receive times.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn single_and_multi_fact_batches_have_equivalent_durable_traces() {
     let mut one = Fixture::new().await;
     let mut many = Fixture::new().await;

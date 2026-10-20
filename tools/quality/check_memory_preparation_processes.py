@@ -123,8 +123,11 @@ def run(
     content_reclamation: bool = False,
     authority_recovery: bool = False,
     monitoring_tools: Path | None = None,
+    async_workers: int = 8,
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
+    if not 1 <= async_workers <= 64:
+        raise ValueError("async workers must be an explicit integer in 1..64")
     use_lifecycle = use_lifecycle or use_case is not None or use_query_recovery
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     directory = directory.resolve()
@@ -145,6 +148,7 @@ def run(
     }
     environment["PYTHONPATH"] = str(ROOT / "integrations/memory-provider")
     contexts, leaves = tls(directory, nodes, memory_id, environment, monitoring_tools is not None)
+    environment["TOKIO_WORKER_THREADS"] = str(async_workers)
     environment["ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS"] = "1000"
     environment["ROBOGUIDE_DIAGNOSTICS_PATH"] = str(directory / "controller-diagnostics.jsonl")
     source_root = directory / "source/node-state/memory/files"
@@ -912,6 +916,7 @@ def run(
             "actual_backend_restarts": 3 if content_reclamation else 2,
             "content_reclamation": reclamation_result,
             "authority_recovery": authority_recovery_result,
+            "controller_async_workers": async_workers,
             "monitoring": None if monitoring is None else monitoring.result(),
             "original_receiver_budget_unchanged": True,
             "transport_profile": "actual-mutual-tls-and-enrolled-nodes",
@@ -964,6 +969,7 @@ def main() -> None:
     parser.add_argument("--content-reclamation", action="store_true")
     parser.add_argument("--authority-recovery", action="store_true")
     parser.add_argument("--monitoring-tools", type=Path)
+    parser.add_argument("--async-workers", type=int, choices=range(1, 65), default=8)
     parser.add_argument(
         "--handoff-case", choices=("complete", "expiry", "policy-change", "controller-restart")
     )
@@ -1004,6 +1010,7 @@ def main() -> None:
                     arguments.content_reclamation,
                     arguments.authority_recovery,
                     arguments.monitoring_tools,
+                    arguments.async_workers,
                 ),
                 sort_keys=True,
             )

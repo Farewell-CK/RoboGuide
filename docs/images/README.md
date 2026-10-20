@@ -2,6 +2,9 @@
 
 本目录集中保存出现在 README、架构说明和后续设计文档中的图片资源。
 
+2026-10-20 当前部署 Mermaid 同步 ADR-0118 同步事务/network worker 边界，以及 transfer
+所有退出路径恢复原 Raft timers；原资源/证书/预算权威与物理证据边界保持。
+
 2026-10-20 当前部署 Mermaid 同步 ADR-0117 全 supervisor/Raft/child/Artifact 静止恢复，
 显式新 CAS placement 与原 SQL/ACL/预算分开；不绘制为在线跨主机或物理连续性。
 

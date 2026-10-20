@@ -33,6 +33,7 @@ mod safety_stop;
 mod scheduling_disposition;
 mod semantic_verifier;
 mod stop_recovery;
+mod worker_isolation;
 
 /// A rejected execution cancellation closes its transaction and leaves the writer usable.
 #[tokio::test]

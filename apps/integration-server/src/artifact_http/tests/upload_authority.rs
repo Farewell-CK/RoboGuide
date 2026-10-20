@@ -39,7 +39,7 @@ async fn staged(
 }
 
 /// CAS completion before SQL completion is reconciled under the same original staged-byte proof.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn upload_finalization_sql_failure_preserves_original_byte_proof_without_reupload() {
     let directory = tempfile::tempdir().unwrap();
     let store = FileSystemArtifactStore::new(directory.path().join("cas")).unwrap();

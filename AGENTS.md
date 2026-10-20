@@ -5,6 +5,17 @@
 RoboGuide has a current V2 architecture baseline plus development and MVP documents.
 The first core bootstrap has started; the full runtime and MVP are not complete.
 
+ADR-0118 returns the Tokio network worker before complete timer/Node-fact/Artifact synchronous
+authority, audit, SQL and content work. Original writer/TLS witness/Commit/ACK/outbox ordering and
+budgets stay. Explicit replica child TOKIO_WORKER_THREADS is limited to 1–64 and remains policy-bound.
+Leader transfer now serializes each source and restores automatic heartbeat/election through Drop
+on success, error, deadline and future cancellation, including after becoming follower. Cancelling
+the wait never proves a previously sent target request had no effect. Old-source timer/round-trip/
+eight-second cancellation counterexamples fail; current actual single-worker file/monitoring and
+three-replica certificate/full cold recovery paths pass. See
+`docs/development/acceptance/2026-10-20-worker-and-transfer-liveness.md`. Other Operator blocking paths,
+full upgrade/durable transfer/online content and complete F0/F4–F10 remain required; no physical proof.
+
 ADR-0117 requires recovery profile v0.2 for replica components, acquiring original supervisor plus
 Raft writer leases; old v0.1 replica profiles refuse. Explicit complete same-cluster Artifact sets
 verify actual locked cluster/schema/bootstrap and copy only finalized manifest-verified CAS blobs

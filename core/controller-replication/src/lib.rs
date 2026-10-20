@@ -376,6 +376,8 @@ impl ReplicaConfig {
 /// Live consensus service and durable accepted history, independent of any executing Controller child.
 #[derive(Clone)]
 pub struct ReplicaNode {
+    /// Prevents overlapping temporary heartbeat/election suspension for one original source.
+    leader_transfer_writer: Arc<tokio::sync::Mutex<()>>,
     /// Test-only actual framed-ingress ordinal, never an authority or success receipt.
     #[cfg(test)]
     framed_member_mutations: Arc<std::sync::atomic::AtomicU64>,
@@ -452,6 +454,7 @@ impl ReplicaNode {
         .await
         .map_err(|error| error.to_string())?;
         let node = Self {
+            leader_transfer_writer: Arc::new(tokio::sync::Mutex::new(())),
             #[cfg(test)]
             framed_member_mutations: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             member_writer: Arc::new(tokio::sync::Mutex::new(())),
@@ -616,6 +619,7 @@ impl ReplicaNode {
         member_id: u64,
         transfer_id: impl Into<String>,
     ) -> Result<LeaderTransferReceipt, String> {
+        let _transfer_writer = self.leader_transfer_writer.lock().await;
         let transfer_id = transfer_id.into();
         if transfer_id.trim().is_empty() || transfer_id.len() > 128 {
             return Err("leader transfer identity is empty or unbounded".into());
@@ -650,6 +654,7 @@ impl ReplicaNode {
         }
         self.raft.runtime_config().heartbeat(false);
         self.raft.runtime_config().elect(false);
+        let _resume_ticker = LeaderTransferTickerGuard { raft: &self.raft };
         let receipt = transport::request_leader_transfer(
             self,
             member_id,
@@ -658,14 +663,7 @@ impl ReplicaNode {
             required_last_log_index,
         )
         .await;
-        let receipt = match receipt {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                self.raft.runtime_config().heartbeat(true);
-                self.raft.runtime_config().elect(true);
-                return Err(error);
-            }
-        };
+        let receipt = receipt?;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
         loop {
             if let Ok(Some(target_epoch)) = transport::member_epoch(self, member_id).await
@@ -675,10 +673,6 @@ impl ReplicaNode {
                 return Ok(receipt);
             }
             if tokio::time::Instant::now() >= deadline {
-                if self.current_epoch() == Some(epoch) {
-                    self.raft.runtime_config().heartbeat(true);
-                    self.raft.runtime_config().elect(true);
-                }
                 return Err(
                     "leader transfer target did not become leader before its deadline".into(),
                 );
@@ -775,5 +769,19 @@ impl ReplicaNode {
             .shutdown()
             .await
             .map_err(|error| error.to_string())
+    }
+}
+
+/// Temporary process-local suppression must never survive success, failure or future cancellation.
+struct LeaderTransferTickerGuard<'a> {
+    /// Original source engine whose automatic timers resume when this exact request stops waiting.
+    raft: &'a ControllerRaft,
+}
+
+impl Drop for LeaderTransferTickerGuard<'_> {
+    /// Restores ordinary Raft timers even after this member has become a follower in a newer term.
+    fn drop(&mut self) {
+        self.raft.runtime_config().heartbeat(true);
+        self.raft.runtime_config().elect(true);
     }
 }

@@ -1,5 +1,9 @@
 # RoboGuide V2 架构基线
 
+[ADR-0118](../../decisions/0118-synchronous-application-worker-isolation.md)归还原完整同步
+timer/Node/Artifact 的异步 network worker，并恢复所有 transfer 退出路径的正常 Raft
+heartbeat/election。原 writer/证书/ACK/预算权威不变；不从线程隔离推断全部历史故障因果。
+
 [ADR-0117](../../decisions/0117-quiescent-replica-cluster-recovery.md)要求完整副本恢复取得
 所有原 supervisor/Raft/child/Artifact writers。显式 v0.2 同集群 finalized CAS 恢复集合
 保留原 SQL、ACL 和预算，原 placements 与新恢复副本分开记账；重试不偷偷补做。

@@ -428,6 +428,109 @@ async fn controlled_leader_transfer_moves_to_caught_up_voter() {
     }
 }
 
+/// A former source must serve idle heartbeats again after leadership explicitly returns to it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn repeated_transfer_back_to_original_source_preserves_idle_quorum() {
+    let directory = tempfile::tempdir().unwrap();
+    let members = members_with_count(3);
+    let mut nodes = Vec::new();
+    for id in 1..=3 {
+        nodes.push(
+            ReplicaNode::start(
+                configuration(id, &members),
+                &directory.path().join(format!("member-{id}.sqlite3")),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    let source = leader(&nodes).await;
+    let target = (source + 1) % nodes.len();
+    nodes[source]
+        .0
+        .request_leader_transfer(nodes[target].0.config.replica_id, "round-trip-first")
+        .await
+        .unwrap();
+    nodes[target]
+        .0
+        .request_leader_transfer(
+            nodes[source].0.config.replica_id,
+            "round-trip-original-owner",
+        )
+        .await
+        .unwrap();
+    let expected = nodes[source].0.current_epoch().unwrap();
+    // No application writes or linearizable probes may mask the missing idle heartbeat.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert_eq!(
+        nodes[source].0.current_epoch(),
+        Some(expected),
+        "former source did not restore its automatic idle heartbeats"
+    );
+    nodes[source].0.check_epoch(expected).await.unwrap();
+    for (node, _) in &nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
+/// Cancelling a request waiting at the actual target writer cannot leave its source ticker disabled.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancelled_actual_transfer_wait_restores_original_automatic_heartbeat() {
+    let directory = tempfile::tempdir().unwrap();
+    let members = members_with_count(3);
+    let mut nodes = Vec::new();
+    for id in 1..=3 {
+        nodes.push(
+            ReplicaNode::start(
+                configuration(id, &members),
+                &directory.path().join(format!("member-{id}.sqlite3")),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    let source = leader(&nodes).await;
+    let target = (source + 1) % nodes.len();
+    let expected = nodes[source].0.current_epoch().unwrap();
+    let target_writer = nodes[target].0.member_writer.lock().await;
+    let before = nodes[target]
+        .0
+        .framed_member_mutations
+        .load(Ordering::SeqCst);
+    let target_id = nodes[target].0.config.replica_id;
+    let original_source = nodes[source].0.clone();
+    let request = tokio::spawn(async move {
+        original_source
+            .request_leader_transfer(target_id, "cancelled-target-wait")
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while nodes[target]
+            .0
+            .framed_member_mutations
+            .load(Ordering::SeqCst)
+            == before
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("actual transfer frame reached the original held target writer");
+    request.abort();
+    assert!(request.await.unwrap_err().is_cancelled());
+    // Cover both the maximum election timeout and the retained follower leader lease.
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    assert_eq!(
+        nodes[source].0.current_epoch(),
+        Some(expected),
+        "cancelled source left election or heartbeat disabled"
+    );
+    drop(target_writer);
+    for (node, _) in &nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
 /// A pre-enrolled learner catches up before joint consensus admits and later removes its vote.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn dynamic_membership_uses_learner_catchup_and_joint_consensus() {

@@ -104,7 +104,7 @@ impl<C: Clock> NodeFactDriver<'_, C> {
                 ((event, metadata), completion)
             })
             .unzip();
-        let result = self.apply(inputs);
+        let result = super::run_synchronous_transaction(|| self.apply(inputs));
         match result {
             Ok(dispositions) => {
                 for (completion, disposition) in completions.into_iter().zip(dispositions) {

@@ -29,6 +29,25 @@ pub(crate) fn drive_application_timer_with_clock(
     clock: &impl Clock,
     verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    super::run_synchronous_transaction(|| {
+        drive_application_timer_synchronous(
+            controller,
+            event_log,
+            event_write_gate,
+            clock,
+            verifier_feed,
+        )
+    })
+}
+
+/// Owns the complete original writer transaction after the asynchronous network worker is returned.
+fn drive_application_timer_synchronous(
+    controller: &Arc<Mutex<ControllerState>>,
+    event_log: &state::SqliteEventLog,
+    event_write_gate: &Arc<Mutex<()>>,
+    clock: &impl Clock,
+    verifier_feed: Option<&TaskVerifierFeed>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let gate_started = std::time::Instant::now();
     let _write_guard = event_write_gate
         .lock()

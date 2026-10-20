@@ -198,8 +198,12 @@ def old_leaf_request(
         return {"TLSRejected": str(error)}
 
 
-def run(output: Path, skip_build: bool, old_binary: Path | None) -> dict[str, Any]:
+def run(
+    output: Path, skip_build: bool, old_binary: Path | None, async_workers: int | None = None
+) -> dict[str, Any]:
     """Exercise new-key proof, missing peers, irreversible revoke, leader rotation and restart."""
+    if async_workers is not None and not 1 <= async_workers <= 64:
+        raise ValueError("async workers must be an explicit integer in 1..64")
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     if not skip_build:
         subprocess.run(
@@ -231,6 +235,7 @@ def run(output: Path, skip_build: bool, old_binary: Path | None) -> dict[str, An
         "devices": 0,
         "models": 0,
         "simulators": 0,
+        "controller_async_workers": async_workers,
     }
 
     def status(member: int) -> dict[str, Any]:
@@ -367,6 +372,8 @@ def run(output: Path, skip_build: bool, old_binary: Path | None) -> dict[str, An
                 "controller_environment": {"ROBOGUIDE_CHECKPOINT_STORAGE": "full"},
             }
             path = output / f"member-{member}.json"
+            if async_workers is not None:
+                config["controller_environment"]["TOKIO_WORKER_THREADS"] = str(async_workers)
             save(path, config)
             config["replica"]["application_policy_digest"] = subprocess.check_output(
                 [str(replica_binary), "--policy-digest", str(path)],
@@ -644,8 +651,14 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--old-binary", type=Path)
+    parser.add_argument("--async-workers", type=int, choices=range(1, 65))
     arguments = parser.parse_args()
-    result = run(arguments.output.resolve(), arguments.skip_build, arguments.old_binary)
+    result = run(
+        arguments.output.resolve(),
+        arguments.skip_build,
+        arguments.old_binary,
+        arguments.async_workers,
+    )
     print(
         json.dumps(
             {key: result[key] for key in ("passed", "nodes", "devices", "owned_processes_reaped")}

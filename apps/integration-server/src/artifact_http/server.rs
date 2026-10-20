@@ -173,8 +173,8 @@ pub async fn serve_artifact_http(
     localization_observer: Arc<dyn LocalizationEvidenceObserver>,
     tls: Option<ArtifactTlsProfile>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let uploads =
-        restore_uploads(&store, &catalog).map_err(|error| std::io::Error::other(error.message))?;
+    let uploads = run_blocking(|| restore_uploads(&store, &catalog))
+        .map_err(|error| std::io::Error::other(error.message))?;
     let connections = Arc::new(tokio::sync::Semaphore::new(128));
     let mut sweep = interval(UPLOAD_SWEEP_INTERVAL);
     sweep.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -195,7 +195,7 @@ pub async fn serve_artifact_http(
                         let Ok(accepted) = timeout(Duration::from_secs(5), profile.acceptor.accept(stream)).await else { return; };
                         match accepted {
                             Ok(mut tls_stream) => {
-                                let role = match profile.principal(&tls_stream).and_then(|p| shared_memory_admission.refresh_artifact_principal(&p)) {
+                                let role = match run_blocking(|| profile.principal(&tls_stream).and_then(|p| shared_memory_admission.refresh_artifact_principal(&p))) {
                                     Ok(role) => role,
                                     Err(error) => {
                                         eprintln!("Artifact mTLS identity rejected: {error}");
@@ -230,7 +230,7 @@ pub async fn serve_artifact_http(
                 });
             }
             _ = sweep.tick() => {
-                if let Err(error) = expire_uploads(&uploads, Instant::now()) {
+                if let Err(error) = run_blocking(|| expire_uploads(&uploads, Instant::now())) {
                     eprintln!("artifact upload expiration failed: {}", error.message);
                 }
             }
@@ -333,23 +333,26 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     let mut head = read_request_head(stream).await?;
-    let principal = memory_admission
-        .refresh_artifact_principal(&principal)
-        .map_err(HttpError::forbidden)?;
     let method = head.method.clone();
     let path = head.path.clone();
-    let authorization = principal.authorize_head(&head, catalog);
-    catalog.audit_access(
-        &principal.subject,
-        &method,
-        &path,
-        if authorization.is_ok() {
-            "route_allowed"
-        } else {
-            "route_denied"
-        },
-    )?;
-    authorization?;
+    let principal = run_blocking(|| {
+        let principal = memory_admission
+            .refresh_artifact_principal(&principal)
+            .map_err(HttpError::forbidden)?;
+        let authorization = principal.authorize_head(&head, catalog);
+        catalog.audit_access(
+            &principal.subject,
+            &method,
+            &path,
+            if authorization.is_ok() {
+                "route_allowed"
+            } else {
+                "route_denied"
+            },
+        )?;
+        authorization?;
+        Ok::<_, HttpError>(principal)
+    })?;
     let import_id = head.memory_import_id.clone();
     let authenticated = super::authenticated::AuthenticatedAdmission {
         authority: memory_admission,
@@ -363,24 +366,28 @@ where
             Response::Json("200 OK", serde_json::json!({"status": "ok"}))
         }
         ("GET", "/readyz") => {
-            catalog.readiness()?;
+            run_blocking(|| catalog.readiness())?;
             Response::Json("200 OK", serde_json::json!({"status": "ok", "ready": true}))
         }
-        ("GET", "/metrics") => artifact_metrics(catalog, uploads)?,
-        ("GET", "/metrics/prometheus") => artifact_metrics_prometheus(catalog, uploads)?,
+        ("GET", "/metrics") => run_blocking(|| artifact_metrics(catalog, uploads))?,
+        ("GET", "/metrics/prometheus") => {
+            run_blocking(|| artifact_metrics_prometheus(catalog, uploads))?
+        }
         ("POST", "/v1/artifact-uploads") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            super::upload_authority::start_authorized_upload(
-                &request,
-                store,
-                uploads,
-                catalog,
-                &authenticated,
-                &principal,
-            )?
+            run_blocking(|| {
+                super::upload_authority::start_authorized_upload(
+                    &request,
+                    store,
+                    uploads,
+                    catalog,
+                    &authenticated,
+                    &principal,
+                )
+            })?
         }
-        ("GET", "/v1/maps") => {
+        ("GET", "/v1/maps") => run_blocking(|| {
             let revisions = catalog
                 .revisions()?
                 .into_iter()
@@ -396,21 +403,19 @@ where
                     .is_ok()
                 })
                 .collect::<Vec<_>>();
-            Response::Json("200 OK", serde_json::json!({"revisions": revisions}))
+            Ok(Response::Json(
+                "200 OK",
+                serde_json::json!({"revisions": revisions}),
+            ))
+        })?,
+        ("GET", "/v1/memories") => {
+            run_blocking(|| list_authorized_memories(catalog, memory_admission, &principal))?
         }
-        ("GET", "/v1/memories") => list_authorized_memories(catalog, memory_admission, &principal)?,
         ("GET", path) if path.starts_with("/v1/artifacts/") => {
             let digest =
                 artifact_store::normalize_digest(path.trim_start_matches("/v1/artifacts/"))
                     .map_err(map_cas_error)?;
-            authorize_blob_read(
-                catalog,
-                memory_admission,
-                &principal,
-                &digest,
-                import_id.as_deref(),
-            )?;
-            stream_artifact(stream, store, &digest, &mut || {
+            run_blocking(|| {
                 authorize_blob_read(
                     catalog,
                     memory_admission,
@@ -418,11 +423,22 @@ where
                     &digest,
                     import_id.as_deref(),
                 )
+            })?;
+            stream_artifact(stream, store, &digest, &mut || {
+                run_blocking(|| {
+                    authorize_blob_read(
+                        catalog,
+                        memory_admission,
+                        &principal,
+                        &digest,
+                        import_id.as_deref(),
+                    )
+                })
             })
             .await?;
             return Ok(());
         }
-        ("GET", path) if path.starts_with("/v1/maps/") => {
+        ("GET", path) if path.starts_with("/v1/maps/") => run_blocking(|| {
             let response = get_revision(catalog, path)?;
             let Response::Json(_, ref value) = response else {
                 return Err(HttpError::internal(
@@ -443,9 +459,9 @@ where
                 },
                 import_id.as_deref(),
             )?;
-            response
-        }
-        ("GET", path) if path.starts_with("/v1/memories/") => {
+            Ok(response)
+        })?,
+        ("GET", path) if path.starts_with("/v1/memories/") => run_blocking(|| {
             let selector = memory_selector_from_path(path, false)?;
             if let Some(manifest) = catalog.memory(&selector)? {
                 memory_admission
@@ -474,9 +490,9 @@ where
                     import_id.as_deref(),
                 )?;
             }
-            get_memory(catalog, path)?
-        }
-        ("GET", path) if path.starts_with("/v1/artifact-uploads/") => {
+            get_memory(catalog, path)
+        })?,
+        ("GET", path) if path.starts_with("/v1/artifact-uploads/") => run_blocking(|| {
             let id = path.trim_start_matches("/v1/artifact-uploads/");
             memory_admission
                 .revalidate_artifact_principal(&principal)
@@ -490,11 +506,11 @@ where
                 .received_bytes(id)
                 .or(record.byte_size)
                 .unwrap_or(0);
-            Response::Json(
+            Ok(Response::Json(
                 "200 OK",
                 serde_json::json!({"schema_version":"roboguide.artifact-upload-observation/v0.1","record":record,"received_bytes":received_bytes}),
-            )
-        }
+            ))
+        })?,
         (method, path)
             if matches!(method, "POST" | "PUT")
                 && path.starts_with("/v1/artifact-uploads/")
@@ -515,56 +531,60 @@ where
         {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            super::upload_authority::finalize_authorized_upload(
-                &request,
-                store,
-                uploads,
-                catalog,
-                &authenticated,
-                &principal,
-            )?
+            run_blocking(|| {
+                super::upload_authority::finalize_authorized_upload(
+                    &request,
+                    store,
+                    uploads,
+                    catalog,
+                    &authenticated,
+                    &principal,
+                )
+            })?
         }
-        ("DELETE", path) if path.starts_with("/v1/artifact-uploads/") => {
+        ("DELETE", path) if path.starts_with("/v1/artifact-uploads/") => run_blocking(|| {
             super::upload_authority::abandon_authorized_upload(
                 path,
                 uploads,
                 catalog,
                 &authenticated,
                 &principal,
-            )?
-        }
+            )
+        })?,
         ("POST", path)
             if path.starts_with("/v1/maps/") && path.ends_with("/localization-evidence") =>
         {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            record_localization_evidence(
-                catalog,
-                &authenticated,
-                localization_observer,
-                &request,
-                path,
-            )?
+            run_blocking(|| {
+                record_localization_evidence(
+                    catalog,
+                    &authenticated,
+                    localization_observer,
+                    &request,
+                    path,
+                )
+            })?
         }
         ("POST", path) if path.starts_with("/v1/maps/") && path.ends_with("/replicas") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            record_replica(catalog, &authenticated, &request, path)?
+            run_blocking(|| record_replica(catalog, &authenticated, &request, path))?
         }
         ("POST", path) if path.starts_with("/v1/memories/") && path.ends_with("/replicas") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            record_memory_replica(catalog, store, &authenticated, &request, path)?
+            run_blocking(|| record_memory_replica(catalog, store, &authenticated, &request, path))?
         }
         ("POST", path) if path.starts_with("/v1/memories/") && path.contains("/revisions/") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            publish_memory(catalog, store, &authenticated, &request, path)?
+            run_blocking(|| publish_memory(catalog, store, &authenticated, &request, path))?
         }
         ("POST", path) if path.starts_with("/v1/maps/") && path.contains("/revisions/") => {
             let request = head.read_json(stream).await?;
             principal.authorize_body(&request)?;
-            publish_revision(catalog, store, &authenticated, &request, path)?
+            run_blocking(|| publish_revision(catalog, store, &authenticated, &request, path))?
         }
         _ => return Err(HttpError::not_found("artifact endpoint not found")),
     };
@@ -928,17 +948,18 @@ pub(super) async fn append_upload(
     if head.content_length > MAX_ARTIFACT_BYTES {
         return Err(HttpError::too_large("artifact exceeds v0 size limit"));
     }
-    let mut in_flight = take_for_append(uploads, upload_id, head.content_length)?;
+    let mut in_flight = run_blocking(|| take_for_append(uploads, upload_id, head.content_length))?;
     let mut write_chunk = |upload: &mut ArtifactUpload, bytes: &[u8]| {
-        let _gate = catalog
-            .write_gate
-            .lock()
-            .map_err(|_| HttpError::service_unavailable("upload writer ordering unavailable"))?;
-        authority
-            .revalidate_artifact_principal(principal)
-            .map_err(HttpError::forbidden)?;
-        super::upload_authority::check_live_upload(catalog, upload_id, principal)?;
-        run_blocking(|| upload.write_chunk(bytes)).map_err(map_cas_error)
+        run_blocking(|| {
+            let _gate = catalog.write_gate.lock().map_err(|_| {
+                HttpError::service_unavailable("upload writer ordering unavailable")
+            })?;
+            authority
+                .revalidate_artifact_principal(principal)
+                .map_err(HttpError::forbidden)?;
+            super::upload_authority::check_live_upload(catalog, upload_id, principal)?;
+            run_blocking(|| upload.write_chunk(bytes)).map_err(map_cas_error)
+        })
     };
     let stream_result = timeout(
         UPLOAD_BODY_TIMEOUT,
@@ -949,21 +970,21 @@ pub(super) async fn append_upload(
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
             if matches!(error.status, "400 Bad Request" | "408 Request Timeout") {
-                restore_after_append(uploads, upload_id, in_flight)?;
+                run_blocking(|| restore_after_append(uploads, upload_id, in_flight))?;
             } else {
-                abort_in_flight(uploads, in_flight)?;
+                run_blocking(|| abort_in_flight(uploads, in_flight))?;
             }
             return Err(error);
         }
         Err(_) => {
-            restore_after_append(uploads, upload_id, in_flight)?;
+            run_blocking(|| restore_after_append(uploads, upload_id, in_flight))?;
             return Err(HttpError::request_timeout(
                 "artifact request body timed out",
             ));
         }
     }
     let size = in_flight.session.upload.size();
-    let final_check = (|| {
+    let final_check = run_blocking(|| {
         let _gate = catalog
             .write_gate
             .lock()
@@ -973,12 +994,12 @@ pub(super) async fn append_upload(
             .map_err(HttpError::forbidden)?;
         super::upload_authority::check_live_upload(catalog, upload_id, principal)?;
         Ok(())
-    })();
+    });
     if let Err(error) = final_check {
-        abort_in_flight(uploads, in_flight)?;
+        run_blocking(|| abort_in_flight(uploads, in_flight))?;
         return Err(error);
     }
-    restore_after_append(uploads, upload_id, in_flight)?;
+    run_blocking(|| restore_after_append(uploads, upload_id, in_flight))?;
     Ok(Response::Json(
         "202 Accepted",
         serde_json::json!({"upload_id": upload_id, "received_bytes": size}),
@@ -993,17 +1014,7 @@ pub(super) async fn append_upload(
 /// Unit tests use a current-thread runtime, where `block_in_place` is unavailable, so the same
 /// operation is called directly there.
 pub(super) fn run_blocking<T>(operation: impl FnOnce() -> T) -> T {
-    let multi_thread = tokio::runtime::Handle::try_current().is_ok_and(|handle| {
-        matches!(
-            handle.runtime_flavor(),
-            tokio::runtime::RuntimeFlavor::MultiThread
-        )
-    });
-    if multi_thread {
-        tokio::task::block_in_place(operation)
-    } else {
-        operation()
-    }
+    crate::application::run_synchronous_transaction(operation)
 }
 
 /// Explicitly aborts one staged upload and releases its count and byte quota.
@@ -1028,10 +1039,13 @@ pub(super) async fn stream_artifact(
     authorize: &mut impl FnMut() -> Result<(), HttpError>,
 ) -> Result<(), HttpError> {
     authorize()?;
-    let file = store.open_artifact(digest).map_err(map_cas_error)?;
-    let metadata = file
-        .metadata()
-        .map_err(|error| HttpError::internal(format!("stat artifact: {error}")))?;
+    let (file, metadata) = run_blocking(|| {
+        let file = store.open_artifact(digest).map_err(map_cas_error)?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| HttpError::internal(format!("stat artifact: {error}")))?;
+        Ok::<_, HttpError>((file, metadata))
+    })?;
     let mut file = tokio::fs::File::from_std(file);
     let header = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",

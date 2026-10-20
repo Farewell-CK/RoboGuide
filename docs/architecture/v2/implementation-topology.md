@@ -35,6 +35,8 @@ flowchart TB
   STOP --> ORCH
   STOP --> CTRL
   ORCH --> SQL[应用事务 / 完整 checkpoint / authority journal]
+  Entry --> IOBOUND[同步 writer SQL fence 归还异步网络 worker / 原事务顺序]
+  HA --> TICKER[串行 transfer source / 所有退出路径恢复 heartbeat election]
   CTRL --> SQL
   RT --> SQL
   STATE --> SQL

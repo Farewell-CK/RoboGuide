@@ -2,6 +2,11 @@
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
+[网络 worker 与重复 leader transfer 修复](docs/development/acceptance/2026-10-20-worker-and-transfer-liveness.md)
+让完整 timer/Node/Artifact 同步事务归还异步 worker；transfer 临时停用的 heartbeat/election
+在成功、错误和取消后恢复。旧源码的三项反例与新单 worker 的真实文件/监控/三副本恢复
+证据均保留。完整 F5/F10 及其余整改仍继续，不从短期软件路径推断设备或长期 SLO。
+
 [完整副本静止恢复](docs/development/acceptance/2026-10-20-replica-cold-recovery.md)覆盖
 实际 supervisor/Raft/child/Artifact writer、原日志投票和完整 SQL。显式 v0.2 同集群 CAS
 集合恢复已核验内容，三个真实 endpoint 接续原 receipt；旧工具拒绝新 profile。
