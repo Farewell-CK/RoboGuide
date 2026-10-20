@@ -3,7 +3,7 @@
 use super::super::*;
 
 /// Serializes a validated domain MissionPlan into its minimal wire shape.
-pub(crate) fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
+pub fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
     if is_v0_6_compatible(plan) {
         return legacy_mission_plan_json(plan);
     }

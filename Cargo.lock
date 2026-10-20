@@ -1398,6 +1398,7 @@ dependencies = [
  "runtime",
  "serde",
  "serde_json",
+ "sha2",
  "state",
  "testkit",
  "tonic",

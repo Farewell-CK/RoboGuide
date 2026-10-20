@@ -121,6 +121,7 @@ fn authorize_tenant_path(
                 | "/v1/inventory"
                 | "/v1/node-identities"
                 | "/v1/verifier-evidence"
+                | "/v1/mission-goal-evidence"
                 | "/v1/state/records"
                 | "/v1/state/providers"
                 | "/v1/memory/use-queries"
@@ -252,7 +253,7 @@ fn authorize_operator_request(
             | "/v1/memory-authorizations",
         ) => 2,
         ("POST", "/v1/artifact-authorizations") => 2,
-        ("POST", "/v1/verifier-evidence") => 1,
+        ("POST", "/v1/verifier-evidence" | "/v1/mission-goal-evidence") => 1,
         ("POST", "/v1/attestation/challenges" | "/v1/attestation/evidence") => 2,
         ("POST", path)
             if path.starts_with("/v1/missions/")
@@ -260,6 +261,7 @@ fn authorize_operator_request(
                     "/cancel",
                     "/scheduling-policy",
                     "/scheduling-preemption",
+                    "/plan-revisions",
                     "/resume",
                 ]
                 .iter()
@@ -722,12 +724,28 @@ where
     let method = request.method.as_str();
     let target = request.target.as_str();
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let received_at = clock.now();
+    let goal_ingress = if method == "POST" && path == "/v1/mission-goal-evidence" {
+        match application::plan_revision::observe_goal_ingress(received_at) {
+            Ok(ingress) => Some(ingress),
+            Err(error) => {
+                return write_http_response(
+                    stream,
+                    "503 Service Unavailable",
+                    serde_json::json!({"error":error}),
+                )
+                .await;
+            }
+        }
+    } else {
+        None
+    };
     let current_principal = match refresh_principal(
         principal,
         controller,
         event_log,
         event_write_gate,
-        clock.now(),
+        received_at,
     ) {
         Ok(current) => current,
         Err(error) => {
@@ -891,6 +909,84 @@ where
                 .await
             }
         };
+    }
+    if let Some(id) = path
+        .strip_prefix("/v1/missions/")
+        .and_then(|path| path.strip_suffix("/plan-revisions"))
+        && !id.is_empty()
+        && !id.contains('/')
+    {
+        let mission = domain::MissionId::new(id)?;
+        if method == "GET" {
+            let snapshot = controller
+                .lock()
+                .map_err(|_| "Controller authority unavailable")?
+                .clone();
+            let parameters = parse_query(query);
+            let result = if let Some(ticket) = parameters.get("candidate") {
+                application::plan_revision::candidate_view(&snapshot, &mission, ticket)
+            } else {
+                application::plan_revision::view(&snapshot, &mission, clock.now())
+            };
+            return match result {
+                Ok(body) => write_http_response(stream, "200 OK", body).await,
+                Err(error) => {
+                    write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                        .await
+                }
+            };
+        }
+        if method == "POST" {
+            let Some(subject) = principal.subject.as_deref() else {
+                return write_http_response(stream,"403 Forbidden",serde_json::json!({"error":"runtime revision requires an authenticated stable principal"})).await;
+            };
+            let mission_tenant = controller
+                .lock()
+                .map_err(|_| "Controller authority unavailable")?
+                .bridge
+                .control()
+                .mission_tenant(&mission)
+                .map(str::to_string)
+                .ok_or("Mission has no immutable tenant")?;
+            let caller = application::plan_revision::Caller {
+                certificate_digest: principal
+                    .certificate
+                    .as_ref()
+                    .map_or("", |certificate| certificate.digest.as_str()),
+                authorization_path: principal
+                    .certificate
+                    .as_ref()
+                    .map(|certificate| certificate.path.as_path()),
+                principal: subject,
+                role: principal.role.as_deref().unwrap_or("operator"),
+                certificate_expires_at_ms: principal
+                    .certificate
+                    .as_ref()
+                    .map_or(0, |certificate| certificate.expires_at_ms),
+                tenant: &mission_tenant,
+            };
+            return match application::plan_revision::submit(
+                controller,
+                event_log,
+                event_write_gate.as_ref(),
+                clock,
+                &mission,
+                &request.body,
+                &caller,
+                deployment_feasibility,
+                verifier_feed,
+            ) {
+                Ok(body) => write_http_response(stream, "200 OK", body).await,
+                Err(error) => {
+                    let status = if event_log.require_writes_enabled().is_err() {
+                        "503 Service Unavailable"
+                    } else {
+                        "409 Conflict"
+                    };
+                    write_http_response(stream, status, serde_json::json!({"error":error})).await
+                }
+            };
+        }
     }
     if method == "POST"
         && (path == "/v1/memory/handoffs"
@@ -1171,6 +1267,42 @@ where
             clock.now(),
         ) {
             Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/mission-goal-evidence" {
+        let Some(subject) = principal.subject.as_deref() else {
+            return write_http_response(stream,"403 Forbidden",serde_json::json!({"error":"goal evidence requires an independently enrolled authenticated principal"})).await;
+        };
+        return match application::plan_revision::submit_goal(
+            controller,
+            event_log,
+            event_write_gate.as_ref(),
+            clock,
+            &request.body,
+            &application::plan_revision::Caller {
+                authorization_path: principal
+                    .certificate
+                    .as_ref()
+                    .map(|certificate| certificate.path.as_path()),
+                principal: subject,
+                role: principal.role.as_deref().unwrap_or("operator"),
+                certificate_digest: principal
+                    .certificate
+                    .as_ref()
+                    .map_or("", |certificate| certificate.digest.as_str()),
+                certificate_expires_at_ms: principal
+                    .certificate
+                    .as_ref()
+                    .map_or(0, |certificate| certificate.expires_at_ms),
+                tenant: tenant.as_deref().unwrap_or("*"),
+            },
+            goal_ingress.expect("actual original goal ingress"),
+        ) {
+            Ok(body) => write_http_response(stream, "200 OK", body).await,
             Err(error) => {
                 write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
                     .await
@@ -2139,6 +2271,10 @@ where
                         serde_json::json!({
                             "mission_id": mission_id.as_str(),
                             "group_id": execution.group_id().as_str(),
+                            "original_group_id": execution.original_group_id().as_str(),
+                            "plan_revision": execution.plan_revision(),
+                            "goal_gate": execution.goal_gate(),
+                            "goal_completion_receipt": execution.goal_receipt_digest(),
                             "status": format!("{:?}", execution.lifecycle()),
                             "isolation": execution.isolation(),
                             "failure_state": execution.failure_state(),

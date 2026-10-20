@@ -786,7 +786,7 @@ impl ControlPlane {
             .ok_or_else(|| ControlError::UnknownGroup(group_id.clone()))?;
         if !matches!(
             group.lifecycle,
-            GroupLifecycle::Completed | GroupLifecycle::Failed
+            GroupLifecycle::Completed | GroupLifecycle::Failed | GroupLifecycle::Superseded
         ) {
             return Err(ControlError::InvalidLifecycle(group.lifecycle));
         }

@@ -23,9 +23,11 @@ mod mission {
 
     pub(super) mod checkpoint;
     pub(super) mod dispatch_policy;
+    pub(super) mod goal;
     pub(super) mod isolation;
     pub(super) mod lifecycle;
     pub(super) mod preemption;
+    pub(super) mod revision;
     pub(super) mod scheduling;
     pub(super) mod serialization;
     pub(super) mod timing;
@@ -49,6 +51,10 @@ pub use mission::isolation::{
     MissionFailureClass, MissionFailureState, MissionIsolation, MissionIsolationSource,
 };
 pub use mission::preemption::FutureSchedulingPreemption;
+pub use mission::revision::{
+    AcceptedPlanRevision, MAX_MISSION_PLAN_REVISIONS, mission_plan_digest,
+};
+pub use mission::serialization::mission_plan_json as mission_plan_document;
 pub use mission_contract::decode_mission_plan;
 pub use scheduling_status::{SchedulingDeferral, SchedulingDisposition};
 
@@ -72,6 +78,18 @@ pub enum MissionExecutionLifecycle {
 /// One accepted MissionPlan and its single default Phase 1 Execution Group.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MissionExecution {
+    /// Immutable independent original-goal gate; Task completion alone cannot satisfy it.
+    #[serde(default)]
+    goal_gate: Option<String>,
+    /// Exact original independent receipt used for terminal Mission completion.
+    #[serde(default)]
+    goal_receipt: Option<String>,
+    /// Original goal decision time; restore never refreshes historical freshness.
+    #[serde(default)]
+    goal_completed_at: Option<TimestampMs>,
+    /// Immutable prior accepted configurations; the current plan remains the active authority.
+    #[serde(default)]
+    revisions: Vec<AcceptedPlanRevision>,
     /// Durable logical priority and waiting/service history.
     #[serde(default)]
     dispatch_policy: MissionDispatchState,
@@ -121,6 +139,33 @@ impl MissionExecution {
     /// Returns the complete accepted MissionPlan.
     pub const fn plan(&self) -> &MissionPlan {
         &self.plan
+    }
+
+    /// Returns the original goal/source interpretation digest independently of current candidate text.
+    pub fn goal_gate(&self) -> Option<&str> {
+        self.goal_gate.as_deref()
+    }
+
+    /// Returns the exact independent goal receipt that originally completed this Mission.
+    pub fn goal_receipt_digest(&self) -> Option<&str> {
+        self.goal_receipt.as_deref()
+    }
+
+    /// Returns the accepted runtime revision, with zero denoting the original immutable admission.
+    pub fn plan_revision(&self) -> u64 {
+        self.revisions.len() as u64
+    }
+
+    /// Returns original accepted versions and their exact completed-Task lineage.
+    pub fn plan_revisions(&self) -> &[AcceptedPlanRevision] {
+        &self.revisions
+    }
+
+    /// Returns the immutable original admission Group independently of the current configuration.
+    pub fn original_group_id(&self) -> &ExecutionGroupId {
+        self.revisions
+            .first()
+            .map_or(&self.group_id, |version| &version.source_group_id)
     }
 
     /// Returns the Mission-level Execution Group identity.

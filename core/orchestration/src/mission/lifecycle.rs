@@ -602,6 +602,22 @@ impl MissionOrchestrator {
         mission_id: &MissionId,
         control: &ControlPlane,
     ) -> Result<bool, OrchestrationError> {
+        if self
+            .executions
+            .get(mission_id)
+            .is_some_and(|execution| execution.goal_gate.is_some())
+        {
+            return Ok(false);
+        }
+        self.tasks_are_satisfied(mission_id, control)
+    }
+
+    /// Checks only actual current Task facts; an independent original-goal gate remains separate.
+    pub(super) fn tasks_are_satisfied(
+        &self,
+        mission_id: &MissionId,
+        control: &ControlPlane,
+    ) -> Result<bool, OrchestrationError> {
         let execution = self
             .executions
             .get(mission_id)
@@ -617,7 +633,7 @@ impl MissionOrchestrator {
     }
 
     /// Ends Context bindings and releases the Group after explicit full-plan completion.
-    fn complete_mission<E: EventSink>(
+    pub(super) fn complete_mission<E: EventSink>(
         &mut self,
         mission_id: &MissionId,
         control: &mut ControlPlane,

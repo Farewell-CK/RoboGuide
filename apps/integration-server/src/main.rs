@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper without versioned runtime candidate/Review and stopped-configuration authority.
+const PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v42";
 /// Last Memory wrapper before generation-bound process-exit authority was integrated.
 const PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v40";
 /// Prior integrated wrapper before the explicit metrics-only authorization role.
@@ -120,6 +122,8 @@ struct ControlHttpRequest {
 /// Live process state sharing one Control authority with Mission orchestration.
 #[derive(Clone)]
 struct ControllerState {
+    /// Original bounded runtime candidate/Review/stop-switch authority, separate from execution facts.
+    runtime_revisions: BTreeMap<String, application::plan_revision::RevisionState>,
     /// Immutable HTTP receipts; Orchestration still owns complete plan and Mission lifecycle.
     mission_admissions: BTreeMap<String, controller_http::MissionAdmission>,
     /// Memory prerequisite authority plus a startup-reacquired read-only catalog federation.
@@ -637,6 +641,13 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
 /// Durable Phase 1 process checkpoint saved in the same event-log transaction.
 #[derive(Clone, Serialize, Deserialize)]
 struct ServerCheckpoint {
+    /// Original policy, candidate, Review and switch receipts; historical absence grants no authority.
+    #[serde(
+        default,
+        deserialize_with = "application::plan_revision::deserialize_states",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    runtime_revisions: BTreeMap<String, application::plan_revision::RevisionState>,
     /// Required cluster/profile identity; standalone restore cannot bypass quorum authority.
     #[serde(default)]
     replication_profile: Option<String>,
@@ -1030,6 +1041,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -1074,6 +1086,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -1119,6 +1132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 memory_preparation: saved.memory_preparation,
                 memory_use: saved.memory_use,
                 memory_handoffs: saved.memory_handoffs,
+                runtime_revisions: saved.runtime_revisions,
                 safety_stops: saved.safety_stops,
                 bridge: IntegrationRuntimeBridge::restore_from_checkpoint_with_lease_policy(
                     &saved.integration_json,
@@ -1145,6 +1159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             memory_preparation: Default::default(),
             memory_use: Default::default(),
             memory_handoffs: BTreeMap::new(),
+            runtime_revisions: Default::default(),
             safety_stops: BTreeMap::new(),
             bridge: IntegrationRuntimeBridge::new_with_lease_policy(
                 control::ControlPlane::new(),
@@ -1190,6 +1205,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .validate_mission_tenant_authority()?;
     application::memory_import::validate_restored(&controller)?;
     application::memory_handoff::validate_restored(&controller)?;
+    application::plan_revision::attach_deployment(&mut controller, deployment_feasibility.clone())?;
+    application::plan_revision::validate_restored(&controller)?;
     let restored_memory_fences =
         application::memory_preparation::restore(&mut controller, process_clock.now())?;
     let restored_use_fences =

@@ -70,6 +70,8 @@ fn single_task_mission_plan(requirement: TaskRequirement) -> MissionPlan {
 /// Extracts the mission-scoped task identity carried by a task-level event.
 fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
     match payload {
+        EventPayload::MissionGoalEvidenceAdmitted { .. }
+        | EventPayload::MissionPlanRevisionCommitted { .. } => None,
         EventPayload::StatePolicyDecision { task_ref, .. }
         | EventPayload::MemoryUseReconciliationEvidence { task_ref, .. }
         | EventPayload::MemoryCommandEvidence { task_ref, .. } => Some(task_ref),

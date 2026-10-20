@@ -19,6 +19,7 @@ fn controller(events: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
         memory_preparation: Default::default(),
         memory_use: Default::default(),
         memory_handoffs: BTreeMap::new(),
+        runtime_revisions: Default::default(),
         safety_stops: BTreeMap::new(),
         verifier_seen: Default::default(),
         verifier_artifact_store: None,

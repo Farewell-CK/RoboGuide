@@ -41,7 +41,7 @@ impl MissionAdmission {
             .ok_or_else(|| "admission receipt has no accepted Mission".to_string())?;
         let digest = self.accepted_request_body_sha256.as_bytes();
         if key != self.mission_id.as_str()
-            || execution.group_id() != &self.group_id
+            || execution.original_group_id() != &self.group_id
             || digest.len() != 71
             || !digest.starts_with(b"sha256:")
             || !digest[7..]

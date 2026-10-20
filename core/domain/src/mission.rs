@@ -302,6 +302,11 @@ impl TaskGraph {
         &self.tasks
     }
 
+    /// Returns an exact logical Task without inferring dependencies, execution or satisfaction.
+    pub fn task(&self, task_id: &TaskId) -> Option<&PlannedTask> {
+        self.tasks.iter().find(|task| task.task_id() == task_id)
+    }
+
     /// Returns tasks whose dependencies are all present in the completed set.
     pub fn ready_tasks(&self, completed: &BTreeSet<TaskId>) -> Vec<&PlannedTask> {
         self.tasks

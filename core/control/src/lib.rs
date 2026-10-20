@@ -15,6 +15,7 @@ mod initial_preferences;
 mod matching;
 mod memory_authority;
 mod memory_handoff;
+mod mission_goal;
 mod node;
 mod node_identity;
 mod node_session;
@@ -104,6 +105,12 @@ pub struct ControlCheckpoint {
     /// Accepted Task source bindings; policy reload cannot silently replace semantic authority.
     #[serde(default)]
     mission_verifier_sources: BTreeMap<String, domain::SemanticVerifierSource>,
+    /// Frozen original independent Mission-goal contracts; candidates cannot redefine these sources.
+    #[serde(default)]
+    mission_goal_contracts: BTreeMap<MissionId, domain::MissionGoalContract>,
+    /// Complete immutable independently attributed Mission-goal measurement receipts.
+    #[serde(default)]
+    mission_goal_receipts: BTreeMap<String, domain::MissionGoalReceipt>,
     /// Original continuous-verification grace fences for exact attempt sets.
     #[serde(default)]
     semantic_verifier_watches: BTreeMap<String, domain::SemanticVerifierWatch>,
@@ -470,6 +477,10 @@ pub struct ControlPlane {
     semantic_verifier_receipts: BTreeMap<String, domain::SemanticVerifierReceipt>,
     /// Accepted Task source bindings; policy reload cannot silently replace semantic authority.
     mission_verifier_sources: BTreeMap<String, domain::SemanticVerifierSource>,
+    /// Frozen original independent Mission-goal contracts; candidates cannot redefine these sources.
+    mission_goal_contracts: BTreeMap<MissionId, domain::MissionGoalContract>,
+    /// Complete immutable independently attributed Mission-goal measurement receipts.
+    mission_goal_receipts: BTreeMap<String, domain::MissionGoalReceipt>,
     /// Original continuous-verification grace fences for exact attempt sets.
     semantic_verifier_watches: BTreeMap<String, domain::SemanticVerifierWatch>,
     /// Durable explicit source/consumer contracts; absence is the legacy no-extra-gate profile.
@@ -651,6 +662,8 @@ impl ControlPlane {
             semantic_verifier_history: BTreeMap::new(),
             semantic_verifier_receipts: BTreeMap::new(),
             mission_verifier_sources: BTreeMap::new(),
+            mission_goal_contracts: BTreeMap::new(),
+            mission_goal_receipts: BTreeMap::new(),
             semantic_verifier_watches: BTreeMap::new(),
             decision_policy_registry: None,
             decision_policy_history: BTreeMap::new(),
@@ -692,6 +705,8 @@ impl ControlPlane {
             semantic_verifier_history: self.semantic_verifier_history.clone(),
             semantic_verifier_receipts: self.semantic_verifier_receipts.clone(),
             mission_verifier_sources: self.mission_verifier_sources.clone(),
+            mission_goal_contracts: self.mission_goal_contracts.clone(),
+            mission_goal_receipts: self.mission_goal_receipts.clone(),
             semantic_verifier_watches: self.semantic_verifier_watches.clone(),
             decision_policy_registry: self.decision_policy_registry.clone(),
             decision_policy_history: self.decision_policy_history.clone(),
@@ -937,6 +952,8 @@ impl ControlPlane {
             semantic_verifier_history: checkpoint.semantic_verifier_history,
             semantic_verifier_receipts: checkpoint.semantic_verifier_receipts,
             mission_verifier_sources: checkpoint.mission_verifier_sources,
+            mission_goal_contracts: checkpoint.mission_goal_contracts,
+            mission_goal_receipts: checkpoint.mission_goal_receipts,
             semantic_verifier_watches: checkpoint.semantic_verifier_watches,
             decision_policy_registry: checkpoint.decision_policy_registry,
             decision_policy_history: checkpoint.decision_policy_history,
@@ -976,6 +993,7 @@ impl ControlPlane {
         restored.validate_belief_policy_checkpoint()?;
         restored.validate_decision_policy_checkpoint()?;
         restored.validate_semantic_verifier_checkpoint()?;
+        restored.validate_mission_goal_checkpoint()?;
         restored.validate_group_checkpoint_authority()?;
         restored.validate_scheduling_checkpoint_authority()?;
         restored.allocation_snapshot(TimestampMs::new(0))?;

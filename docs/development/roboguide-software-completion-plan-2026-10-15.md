@@ -28,6 +28,10 @@ mTLS scrape、两次实际 SQL 故障的 firing/resolved、固定 histogram/queu
 
 ## 交付要求
 
+[运行期修订与原目标验收](acceptance/2026-10-20-runtime-plan-revision.md)验证原计划/事实、
+当前版本完整 attempt、真实进程停止、预审自动替代、独立目标、普通 resume 拒绝、取消和
+重启，以及实际 v42/inner v22 → v43/inner v23 原数据迁移。完整新 MI/Memory 组合仍实施中。
+
 [Operator 网络边界验收](acceptance/2026-10-20-operator-network-isolation.md)以真实单
 worker/TLS/SQL 排队和旧源码反例验证：有界连接、原 writer 授权、慢 SQL 期间健康读取、
 完整文件/告警与三副本恢复链。其他 listener 容量、完整 HA 升级及全部其余阶段继续必需。
@@ -70,8 +74,8 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F4 Memory/Spatial | R10、R11、R12、R20 | reconciliation、Group 授权/handoff、active-map/GC/revocation、自动配准/融合/增量 | 实施中，见 ADR-0105；不得提前报告完成 |
 | F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | 动态 learner/joint membership、leader transfer、同一成员 leaf/部署 CA 迁移已通过；旧数据/二进制升级及在线 archive/CAS 仍待完成 |
 | F6 资源/调度 | R16、R20 | divisible quota、完整时间/空间承诺、真实成本 evidence 与确定性策略 | cost evidence、逻辑 quota ledger 与 Prometheus 入口已通过；物理/OS 强制、完整时空和运行中抢占仍待完成 |
-| F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | 软件 stop/recovery/hold/rebind gate 回归通过；物理停止、运行中抢占、耦合迁移和 hazard 仍待部署 |
-| F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 待完成 |
+| F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | 当前 stop/recovery/hold/rebind gate 回归通过；运行中抢占、耦合迁移和 hazard/交接协议软件仍须完成，真实物理证据独立待验 |
+| F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 原计划历史、独立 goal gate、有界候选/实际 Review、预审替代和 stop/revoke 后新 Group 已接线；普通 resume/recovery 不可绕过，自动新 MI 与 scoped Memory 迁移仍实施中 |
 | F9 层级/Federation | R20 | 控制域、跨域 prepare/commit、路由/授权与恢复 | 持久 epoch/digest/deadline prepare/commit session 已通过；跨域 transport/授权/恢复部署仍待完成 |
 | F10 运维与总验收 | R18、R19 的非发布部分 | 指标/告警、write-disabled 只读恢复、部署/迁移/回退、全功能验收 | 待完成 |
 

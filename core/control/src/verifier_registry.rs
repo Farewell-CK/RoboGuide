@@ -39,10 +39,44 @@ impl ControlPlane {
         plan: &domain::MissionPlan,
         tenant: &str,
     ) -> Result<(), ControlError> {
+        self.freeze_verifier_sources_except(plan, tenant, &std::collections::BTreeSet::new())
+    }
+
+    /// Retains actual satisfied source contracts while admitting only new revision Tasks from current sources.
+    pub fn freeze_revision_verifier_sources(
+        &mut self,
+        source_group: &domain::ExecutionGroupId,
+        plan: &domain::MissionPlan,
+        tenant: &str,
+    ) -> Result<(), ControlError> {
+        let source = self
+            .group(source_group)
+            .ok_or_else(|| ControlError::UnknownGroup(source_group.clone()))?;
+        if source.mission_id() != plan.goal().mission_id() {
+            return Err(ControlError::InvalidProposal(
+                "revision verifier source belongs to another Mission".into(),
+            ));
+        }
+        let completed = source
+            .task_executions()
+            .filter(|task| task.lifecycle() == domain::TaskExecutionLifecycle::Completed)
+            .map(|task| task.task_ref().task_id().clone())
+            .collect();
+        self.freeze_verifier_sources_except(plan, tenant, &completed)
+    }
+
+    /// Resolves the complete current source set before any immutable Task-source map changes.
+    fn freeze_verifier_sources_except(
+        &mut self,
+        plan: &domain::MissionPlan,
+        tenant: &str,
+        completed: &std::collections::BTreeSet<domain::TaskId>,
+    ) -> Result<(), ControlError> {
         let sources = plan
             .task_graph()
             .tasks()
             .iter()
+            .filter(|task| !completed.contains(task.task_id()))
             .filter_map(|task| match task.satisfaction_basis() {
                 domain::TaskSatisfactionBasis::VerifierEvidence(spec) => {
                     Some((task.requirement().task_ref(), spec))

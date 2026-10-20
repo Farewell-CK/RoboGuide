@@ -4,6 +4,7 @@ use crate::{CapabilityContractRef, DomainError, StateSource, TaskRef, TimestampM
 
 /// External verifier contract required to establish one Task's semantic effect.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VerifierSatisfactionSpec {
     /// Canonical evidence/verifier contract selected by Mission Intelligence.
     verifier: CapabilityContractRef,

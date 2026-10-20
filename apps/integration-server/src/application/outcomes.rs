@@ -41,6 +41,20 @@ fn apply_selected_outcomes(
     let outcomes = controller.bridge.terminal_task_execution_outcomes();
     for outcome in outcomes {
         let mission_id = outcome.task_ref().mission_id().clone();
+        if controller
+            .orchestrator
+            .execution(&mission_id)
+            .is_some_and(|execution| {
+                execution.group_id() != outcome.group_id()
+                    || execution
+                        .plan()
+                        .task_graph()
+                        .task(outcome.task_ref().task_id())
+                        .is_none()
+            })
+        {
+            continue;
+        }
         if only_mission.is_some_and(|selected| selected != &mission_id) {
             continue;
         }
@@ -57,6 +71,19 @@ fn apply_selected_outcomes(
                 )
             })
         {
+            continue;
+        }
+        if matches!(outcome.result(), ObservedTaskExecutionResult::Failed)
+            && super::plan_revision::observe_trigger(
+                controller,
+                &mission_id,
+                super::plan_revision::Trigger::LocalExecutionFailed,
+                timestamp,
+            )?
+        {
+            continue;
+        }
+        if super::plan_revision::blocks_mission(controller, &mission_id) {
             continue;
         }
         if matches!(outcome.result(), ObservedTaskExecutionResult::Failed) {
@@ -330,6 +357,7 @@ pub(crate) fn close_terminal_mission_coordination(
         .map(|execution| execution.group_id().clone());
     if let Some(group_id) = group_id {
         controller.bridge.close_group_peer_channels(&group_id);
+        super::plan_revision::close_terminal(controller, mission_id);
     }
 }
 

@@ -5,6 +5,11 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Complete independently authorized original-goal measurement, separate from Task or stop facts.
+    MissionGoalEvidenceAdmitted {
+        /// Immutable source/principal/input identity and original Controller receive time.
+        receipt: MissionGoalReceipt,
+    },
     /// Durable application exchange lineage and stage; no second resource authority is created.
     MemoryHandoffTransition {
         /// Stable exact-request identity.
@@ -809,6 +814,21 @@ pub enum EventPayload {
         task_ref: TaskRef,
         /// Resource reservations released in deterministic assignment order.
         resource_ids: Vec<ResourceId>,
+    },
+    /// Orchestration replaced a stopped configuration while preserving its original Task facts.
+    MissionPlanRevisionCommitted {
+        /// Original Mission identity and user goal remain unchanged.
+        mission_id: MissionId,
+        /// New monotonic accepted plan revision.
+        revision: u64,
+        /// Original configuration, retained as released history.
+        source_group_id: ExecutionGroupId,
+        /// Newly created unbound configuration.
+        target_group_id: ExecutionGroupId,
+        /// Complete immutable candidate identity reviewed before switching.
+        target_plan_digest: String,
+        /// Task identities whose actual original semantic satisfaction was inherited.
+        completed_tasks: Vec<TaskId>,
     },
 }
 

@@ -68,6 +68,25 @@ impl Default for MissionDispatchState {
 }
 
 impl MissionDispatchState {
+    /// Retains original Mission waiting age without granting fresh work another service ordinal.
+    pub(super) fn retain_revision_waiting(
+        &mut self,
+        plan: &MissionPlan,
+        completed: &BTreeSet<TaskId>,
+    ) {
+        let oldest = self.waiting.values().copied().min();
+        self.waiting.clear();
+        if let Some(ordinal) = oldest {
+            for task in plan
+                .task_graph()
+                .tasks()
+                .iter()
+                .filter(|task| !completed.contains(task.task_id()))
+            {
+                self.waiting.insert(task.task_id().clone(), ordinal);
+            }
+        }
+    }
     /// Returns the persisted priority without implying a Control commitment.
     pub const fn priority(&self) -> u8 {
         self.priority

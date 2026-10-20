@@ -41,8 +41,11 @@ pub use memory_preparation::MemoryDispatchPermit;
 
 /// Schema marker for the complete Integration/Control/State controller checkpoint.
 ///
-/// Version 21 additionally fences exact Control-owned Memory membership authority.
-pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v22";
+/// Version 23 fences independent original-goal authority and superseded Control Groups.
+pub const CONTROLLER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v23";
+/// Last inner wrapper without independent original Mission goal or retired-plan lineage authority.
+const PRE_RUNTIME_REVISION_CONTROLLER_CHECKPOINT_SCHEMA: &str =
+    "roboguide.controller-checkpoint/v22";
 /// Last inner wrapper without accepted Memory prerequisite command identity.
 const PRE_MEMORY_PREPARATION_CONTROLLER_CHECKPOINT_SCHEMA: &str =
     "roboguide.controller-checkpoint/v21";

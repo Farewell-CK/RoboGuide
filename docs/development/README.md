@@ -1,5 +1,10 @@
 # 开发基线
 
+运行期候选、计划历史、独立原目标完成 gate 和新 Group 的停止/撤销门禁见
+[运行期计划修订合同](runtime-plan-revision-v0.1.md)与 ADR-0120。shared wrapper v43/
+inner v23 / event codec v28 保护新增权威；当前独立 goal 验证不被 Task 本地完成或新计划结果替代。
+完整自动 MI 和 scoped Memory 迁移仍为必需工作，其他阶段不因此关闭。
+
 > 状态：Bootstrap 进行中；MVP 定义仍为 Draft。起草日期：2026-08-17。
 > V2 架构仍是权威基线。本文档将 V2 的职责转换为工程边界，但不冻结传输、
 > 数据库、Schema 或算法。

@@ -1,5 +1,13 @@
 # RoboGuide V2 架构基线
 
+[ADR-0120](../../decisions/0120-versioned-runtime-plan-revision.md)定义运行期版本
+权威：候选/Review/原预算先持久化，原完整 stop/revoke 门禁后才切换 Group；原目标、
+grounded identity、已满足 Task 与历史保留，MI 无资源/绑定权威。独立冻结的原 Mission goal
+gate 不被新 DAG 的完成替代；实际 peer leaf、原授权/预算、完整 stop/revoke/attempt 覆盖和
+旧 Group Execute fence 同时持久化。wrapper v43/codec v28 拒绝旧 authority；自动生成新
+MI 候选和 Group-scoped Memory 交接继续实施，完整 F8 未关闭。见
+[运行期合同](../../development/runtime-plan-revision-v0.1.md)。
+
 [ADR-0119](../../decisions/0119-bounded-operator-network-isolation.md)将 Operator 请求的
 同步 poll 归还网络 worker，入口在 TLS 前限制连接并约束 response I/O。完整相同授权
 profile 的只读检查不排 writer；变化和 mutation 继续在原实际 writer 内复核。

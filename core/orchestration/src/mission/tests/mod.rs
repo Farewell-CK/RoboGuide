@@ -12,5 +12,7 @@ use testkit::InMemoryEventLog;
 
 mod contracts;
 mod dispatch_policy;
+mod goal;
 mod lifecycle;
+mod revision;
 mod scheduling;

@@ -14,7 +14,21 @@ pub(crate) fn validate_plan(
     tenant: &str,
     feed: Option<&TaskVerifierFeed>,
 ) -> Result<bool, String> {
+    validate_revision_plan(controller, plan, tenant, feed, &BTreeSet::new())
+}
+
+/// Admits only new consumer contracts while preserving already satisfied original Task facts.
+pub(crate) fn validate_revision_plan(
+    controller: &ControllerState,
+    plan: &domain::MissionPlan,
+    tenant: &str,
+    feed: Option<&TaskVerifierFeed>,
+    completed: &BTreeSet<domain::TaskId>,
+) -> Result<bool, String> {
     if plan.task_graph().tasks().iter().any(|task| {
+        if completed.contains(task.task_id()) {
+            return false;
+        }
         task.requirement()
             .roles()
             .iter()
@@ -36,6 +50,7 @@ pub(crate) fn validate_plan(
         .task_graph()
         .tasks()
         .iter()
+        .filter(|task| !completed.contains(task.task_id()))
         .all(|task| match task.satisfaction_basis() {
             domain::TaskSatisfactionBasis::ExecutionReport => true,
             domain::TaskSatisfactionBasis::VerifierEvidence(spec) => controller
@@ -519,6 +534,16 @@ pub(crate) fn apply_pending(
         if !awaiting
             || execution.isolation().is_some()
             || safety_stop::blocks_release(controller, input.task_ref.mission_id())
+        {
+            continue;
+        }
+        if input.verdict == SemanticVerdict::Unsatisfied
+            && super::plan_revision::observe_trigger(
+                controller,
+                input.task_ref.mission_id(),
+                super::plan_revision::Trigger::SatisfactionRejected,
+                now,
+            )?
         {
             continue;
         }

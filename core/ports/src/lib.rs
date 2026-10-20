@@ -11,6 +11,7 @@ mod diagnostics;
 mod memory;
 mod node_gateway;
 mod node_liveness;
+mod pending_events;
 mod spatial_memory;
 mod state_record;
 mod task_satisfaction;
@@ -29,6 +30,7 @@ pub use node_liveness::{
     DEFAULT_NODE_LEASE_DURATION_MS, NodeLeasePolicy, NodeLeasePolicyError, NodeProtocolPolicy,
     NodeProtocolPolicyError,
 };
+pub use pending_events::PendingEvents;
 pub use spatial_memory::{
     ArtifactBlobReader, ArtifactBlobStore, ArtifactBlobWriter, ArtifactStoreError, MapCatalogError,
     MapCatalogReader, MapCatalogWriter,

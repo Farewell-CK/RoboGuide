@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.dev/contracts/mission/goal-evidence-v0.1/evidence.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.mission-goal-evidence/v0.1"
+    },
+    "evidence_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "mission_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contract_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "plan_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 16
+    },
+    "group_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "attempts": {
+      "type": "array",
+      "maxItems": 4096,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task_ref": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "mission_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "task_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "mission_id",
+              "task_id"
+            ]
+          },
+          "role_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attempt_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "task_ref",
+          "role_id",
+          "attempt_id"
+        ]
+      }
+    },
+    "predicate": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verdict": {
+      "enum": [
+        "satisfied",
+        "unsatisfied",
+        "unknown"
+      ]
+    },
+    "finality": {
+      "enum": [
+        "provisional",
+        "final"
+      ]
+    },
+    "source_observed_at_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615
+    },
+    "valid_for_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 60000
+    },
+    "artifact_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "artifact_size_bytes": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "evidence_id",
+    "mission_id",
+    "tenant_id",
+    "contract_digest",
+    "source_id",
+    "source_revision",
+    "plan_revision",
+    "group_id",
+    "plan_digest",
+    "attempts",
+    "predicate",
+    "verdict",
+    "finality",
+    "source_observed_at_ms",
+    "sequence",
+    "valid_for_ms"
+  ],
+  "allOf": [
+    {
+      "anyOf": [
+        {
+          "properties": {
+            "artifact_digest": {
+              "type": "null"
+            },
+            "artifact_size_bytes": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "artifact_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "artifact_size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          },
+          "required": [
+            "artifact_digest",
+            "artifact_size_bytes"
+          ]
+        }
+      ]
+    }
+  ]
+}

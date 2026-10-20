@@ -47,7 +47,9 @@ pub(crate) fn recovery_view(
                         orchestration::MissionExecutionLifecycle::Accepted
                             | orchestration::MissionExecutionLifecycle::Running
                             | orchestration::MissionExecutionLifecycle::Cancelling
-                    ) && (execution.isolation().is_some() || execution.is_crash_loop_quarantined())
+                    ) && (execution.isolation().is_some()
+                        || execution.is_crash_loop_quarantined()
+                        || super::plan_revision::blocks_mission(controller, mission))
                 })
         })
         .map(|mission| mission.as_str().to_string())
@@ -182,9 +184,32 @@ pub(crate) fn apply_recovery_required(
     if controller
         .orchestrator
         .execution(command.mission_id())
+        .is_none_or(|execution| {
+            execution.group_id() != command.group_id()
+                || execution
+                    .plan()
+                    .task_graph()
+                    .task(command.task_ref().task_id())
+                    .is_none()
+        })
+    {
+        return Ok(());
+    }
+    if super::plan_revision::observe_trigger(
+        controller,
+        command.mission_id(),
+        super::plan_revision::Trigger::RuntimeUnknown,
+        timestamp,
+    )? {
+        return Ok(());
+    }
+    if controller
+        .orchestrator
+        .execution(command.mission_id())
         .is_some_and(|execution| {
             execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
                 || execution.isolation().is_some()
+                || super::plan_revision::blocks_mission(controller, command.mission_id())
         })
     {
         return Ok(());
@@ -268,6 +293,7 @@ pub(crate) fn begin_current_ambiguity_recoveries(
                             && mission.lifecycle()
                                 == orchestration::MissionExecutionLifecycle::Running
                             && mission.isolation().is_none()
+                            && !super::plan_revision::blocks_mission(controller, mission_id)
                     })
             });
         if let Some(mission) = mission {
@@ -309,6 +335,10 @@ pub(crate) fn resume_pending_recoveries(
             .is_some_and(|execution| {
                 execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
                     || execution.isolation().is_some()
+                    || super::plan_revision::blocks_mission(
+                        controller,
+                        need.task_ref().mission_id(),
+                    )
             })
         {
             continue;

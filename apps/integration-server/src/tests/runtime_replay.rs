@@ -120,6 +120,7 @@ impl ParallelMission {
             memory_preparation: Default::default(),
             memory_use: Default::default(),
             memory_handoffs: BTreeMap::new(),
+            runtime_revisions: Default::default(),
             safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_artifact_store: None,

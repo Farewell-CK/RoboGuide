@@ -157,6 +157,9 @@ pub(crate) fn revalidate_mission_resume(
     now: domain::TimestampMs,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     validate_isolation_authority(controller, now)?;
+    if super::plan_revision::blocks_mission(controller, mission_id) {
+        return Err("Mission resume cannot bypass its original pending revision intent".into());
+    }
     if safety_stop::blocks_release(controller, mission_id) {
         return Err(
             "Mission resume requires confirmed stop evidence for every retained attempt".into(),
@@ -276,7 +279,7 @@ pub(crate) fn flush_unisolated_dispatch(
     controller: &mut ControllerState,
     clock: &impl Clock,
 ) -> Result<usize, IntegrationRuntimeError> {
-    let held = controller
+    let mut held = controller
         .orchestrator
         .mission_ids()
         .into_iter()
@@ -286,6 +289,7 @@ pub(crate) fn flush_unisolated_dispatch(
                 .execution(&mission)
                 .filter(|execution| {
                     execution.isolation().is_some()
+                        || super::plan_revision::blocks_mission(controller, &mission)
                         || super::memory_handoff::holds_dispatch(controller, execution.group_id())
                         || execution.is_crash_loop_quarantined()
                         || !super::semantic_verifier::delivery_permitted(
@@ -296,6 +300,17 @@ pub(crate) fn flush_unisolated_dispatch(
                 .map(|execution| execution.group_id().clone())
         })
         .collect::<BTreeSet<_>>();
+    // A retired configuration remains fenced even after its current Mission hold is cleared.
+    for mission in controller.orchestrator.mission_ids() {
+        if let Some(execution) = controller.orchestrator.execution(&mission) {
+            held.extend(
+                execution
+                    .plan_revisions()
+                    .iter()
+                    .map(|version| version.source_group_id.clone()),
+            );
+        }
+    }
     let mut preparations = if controller.memory_preparation.records.is_empty() {
         BTreeMap::new()
     } else {
@@ -324,6 +339,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
     ) && !saved.memory_handoffs.is_empty()
@@ -333,6 +349,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -347,7 +364,9 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     }
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
+            | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
     ) && saved
         .safety_stops
         .values()
@@ -360,26 +379,66 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
     if saved.schema != SERVER_CHECKPOINT_SCHEMA
-        && integration
-            .get("control")
-            .and_then(|control| control.get("operator_authorization"))
-            .is_some_and(|profile| {
-                profile["schema_version"] == "roboguide.operator-authorization/v0.2"
-                    || profile
-                        .get("grants")
-                        .and_then(serde_json::Value::as_object)
-                        .is_some_and(|grants| {
-                            grants
-                                .values()
-                                .any(|grant| grant["role"] == "metrics-reader")
-                        })
+        && (!saved.runtime_revisions.is_empty()
+            || missions.iter().any(|mission| {
+                ["goal_gate", "goal_receipt", "goal_completed_at"]
+                    .iter()
+                    .any(|field| mission.get(field).is_some_and(|value| !value.is_null()))
+                    || mission.get("plan_revisions").is_some_and(|versions| {
+                        versions
+                            .as_array()
+                            .is_none_or(|versions| !versions.is_empty())
+                    })
             })
+            || integration.get("control").is_some_and(|control| {
+                ["mission_goal_contracts", "mission_goal_receipts"]
+                    .iter()
+                    .any(|field| {
+                        control.get(field).is_some_and(|value| {
+                            value.as_object().is_none_or(|object| !object.is_empty())
+                        })
+                    })
+            })
+            || integration
+                .get("control")
+                .and_then(|control| control.get("groups"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|groups| {
+                    groups.iter().any(|group| {
+                        group
+                            .get("superseded_by")
+                            .is_some_and(|value| !value.is_null())
+                    })
+                }))
+    {
+        return Err(
+            "legacy wrapper cannot carry runtime plan revision permission or history".into(),
+        );
+    }
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
+    ) && integration
+        .get("control")
+        .and_then(|control| control.get("operator_authorization"))
+        .is_some_and(|profile| {
+            profile["schema_version"] == "roboguide.operator-authorization/v0.2"
+                || profile
+                    .get("grants")
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|grants| {
+                        grants
+                            .values()
+                            .any(|grant| grant["role"] == "metrics-reader")
+                    })
+        })
     {
         return Err("legacy wrapper cannot contain metrics-only authorization authority".into());
     }
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -392,6 +451,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -406,6 +466,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -428,6 +489,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -455,6 +517,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -482,6 +545,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -503,6 +567,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -553,6 +618,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -586,6 +652,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -616,6 +683,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -666,6 +734,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA
@@ -697,6 +766,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_INTEGRATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_MEMORY_HANDOFF_SERVER_CHECKPOINT_SCHEMA

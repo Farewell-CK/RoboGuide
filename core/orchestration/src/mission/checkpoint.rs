@@ -23,6 +23,10 @@ impl MissionOrchestrator {
             .map(|execution| {
                 serde_json::json!({
                     "plan": mission_plan_json(execution.plan()),
+                    "plan_revisions": execution.revisions,
+                    "goal_gate": execution.goal_gate,
+                    "goal_receipt": execution.goal_receipt,
+                    "goal_completed_at": execution.goal_completed_at,
                     "group_id": execution.group_id().as_str(),
                     "lifecycle": execution.lifecycle(),
                     "accepted_at_ms": execution.accepted_at().as_millis(),
@@ -139,6 +143,46 @@ impl MissionOrchestrator {
                 }
             }
             let execution = MissionExecution {
+                goal_receipt: value
+                    .get("goal_receipt")
+                    .filter(|value| !value.is_null())
+                    .map(|value| {
+                        value.as_str().map(str::to_string).ok_or_else(|| {
+                            OrchestrationError::Mission("invalid goal receipt identity".into())
+                        })
+                    })
+                    .transpose()?,
+                goal_completed_at: value
+                    .get("goal_completed_at")
+                    .filter(|value| !value.is_null())
+                    .map(|value| {
+                        serde_json::from_value(value.clone()).map_err(|error| {
+                            OrchestrationError::Mission(format!(
+                                "invalid goal completion time: {error}"
+                            ))
+                        })
+                    })
+                    .transpose()?,
+                goal_gate: value
+                    .get("goal_gate")
+                    .filter(|value| !value.is_null())
+                    .map(|value| {
+                        value.as_str().map(str::to_string).ok_or_else(|| {
+                            OrchestrationError::Mission("invalid original goal gate".into())
+                        })
+                    })
+                    .transpose()?,
+                revisions: value
+                    .get("plan_revisions")
+                    .map(|versions| {
+                        serde_json::from_value(versions.clone()).map_err(|error| {
+                            OrchestrationError::Mission(format!(
+                                "invalid plan revision history: {error}"
+                            ))
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or_default(),
                 dispatch_policy: value
                     .get("dispatch_policy")
                     .map(|policy| {
@@ -189,6 +233,7 @@ impl MissionOrchestrator {
             if let Some(failure) = &execution.failure_state {
                 failure.validate_checkpoint(execution.accepted_at)?;
             }
+            super::revision::validate_version_chain(&execution)?;
             if let Some(hold) = &execution.isolation {
                 hold.failure.validate_checkpoint(execution.accepted_at)?;
                 if execution
@@ -275,6 +320,10 @@ impl MissionOrchestrator {
         self.executions.insert(
             mission_id.clone(),
             MissionExecution {
+                goal_receipt: None,
+                goal_completed_at: None,
+                goal_gate: None,
+                revisions: Vec::new(),
                 dispatch_policy: MissionDispatchState::default(),
                 isolation: None,
                 failure_state: None,
@@ -323,12 +372,39 @@ impl MissionOrchestrator {
         &self,
         control: &ControlPlane,
     ) -> Result<(), OrchestrationError> {
+        if control.mission_goal_contracts().any(|contract| {
+            self.executions
+                .get(&contract.mission_id)
+                .is_none_or(|execution| execution.goal_gate.as_ref() != Some(&contract.digest))
+        }) {
+            return Err(OrchestrationError::Mission(
+                "orphan original goal authority has no accepted Mission gate".into(),
+            ));
+        }
         let orchestration_groups = self
             .executions
             .values()
-            .map(MissionExecution::group_id)
+            .flat_map(|execution| {
+                std::iter::once(execution.group_id()).chain(
+                    execution
+                        .plan_revisions()
+                        .iter()
+                        .map(|version| &version.source_group_id),
+                )
+            })
             .collect::<BTreeSet<_>>();
         for (mission_id, execution) in &self.executions {
+            super::goal::validate_goal_authority(execution, control)?;
+            if execution.goal_gate.as_deref()
+                != control
+                    .mission_goal_contract(mission_id)
+                    .map(|contract| contract.digest.as_str())
+            {
+                return Err(OrchestrationError::Mission(
+                    "original Mission goal gate differs from Control source authority".into(),
+                ));
+            }
+            super::revision::validate_version_authority(execution, control)?;
             control.validate_mission_group_plan(execution.group_id(), execution.plan())?;
             let group = control
                 .group(execution.group_id())

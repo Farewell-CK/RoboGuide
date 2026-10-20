@@ -19,6 +19,7 @@ pub(crate) fn drive_ready_tasks(
                     .bridge
                     .group_recovery_holds_dispatch(execution.group_id(), timestamp)
                     || super::memory_handoff::holds_binding(controller, execution.group_id())
+                    || super::plan_revision::blocks_mission(controller, &mission)
             })
         {
             attempted.extend(
@@ -120,6 +121,7 @@ fn drive_ready_task(
                 .bridge
                 .group_recovery_holds_dispatch(mission.group_id(), timestamp)
                 || super::memory_handoff::holds_binding(controller, mission.group_id())
+                || super::plan_revision::blocks_mission(controller, mission_id)
         })
     {
         return Ok(false);
@@ -238,7 +240,9 @@ pub(crate) fn drive_rebound_attempts(
         let Some(execution) = controller.orchestrator.execution(&mission_id) else {
             continue;
         };
-        if execution.isolation().is_some() {
+        if execution.isolation().is_some()
+            || super::plan_revision::blocks_mission(controller, &mission_id)
+        {
             continue;
         }
         let Some(group) = controller.bridge.control().group(execution.group_id()) else {

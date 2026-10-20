@@ -6,6 +6,41 @@ impl ControlPlane {
     /// Validates checkpointed Group role metadata against bindings and recovery authority.
     pub(crate) fn validate_group_checkpoint_authority(&self) -> Result<(), ControlError> {
         for group in self.groups.values() {
+            if group.lifecycle == GroupLifecycle::Superseded {
+                return Err(ControlError::InvalidProposal(
+                    "incomplete Group supersession cannot be restored".into(),
+                ));
+            }
+            if let Some(target_id) = &group.superseded_by {
+                let target = self.groups.get(target_id).ok_or_else(|| {
+                    ControlError::InvalidProposal(
+                        "superseded Group lacks its actual successor".into(),
+                    )
+                })?;
+                if target_id == group.group_id()
+                    || target.mission_id() != group.mission_id()
+                    || group.lifecycle != GroupLifecycle::Released
+                {
+                    return Err(ControlError::InvalidProposal(
+                        "invalid superseded Group authority".into(),
+                    ));
+                }
+                let mut visited = BTreeSet::from([group.group_id().clone()]);
+                let mut current = target;
+                loop {
+                    if !visited.insert(current.group_id().clone()) {
+                        return Err(ControlError::InvalidProposal(
+                            "superseded Group history contains a cycle".into(),
+                        ));
+                    }
+                    let Some(next) = &current.superseded_by else {
+                        break;
+                    };
+                    current = self.groups.get(next).ok_or_else(|| {
+                        ControlError::InvalidProposal("superseded Group chain is incomplete".into())
+                    })?;
+                }
+            }
             for role in group.role_requirements.values() {
                 domain::MemoryRequirement::validate_set(role.memories())
                     .map_err(ControlError::InvalidProposal)?;

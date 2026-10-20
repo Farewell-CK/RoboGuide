@@ -53,6 +53,10 @@ pub use memory_use_query::{
     MemoryUseQuery, MemoryUseQueryObservation, MemoryUseQueryReceipt, MemoryUseQueryStatus,
 };
 mod mission;
+mod mission_goal_verification;
+pub use mission_goal_verification::{
+    MissionGoalAttempt, MissionGoalContract, MissionGoalEvidence, MissionGoalReceipt,
+};
 mod mission_plan;
 mod node_health;
 mod node_identity;

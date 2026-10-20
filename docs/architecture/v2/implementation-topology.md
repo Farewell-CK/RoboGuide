@@ -19,6 +19,15 @@ flowchart TB
   PREFLIGHT --> FEEDBACK[有界草案错误 / 原始输出保留]
   FEEDBACK --> MI
   Entry --> ORCH[Orchestration / DAG / Mission hold]
+  Entry --> REV[原 policy / candidate / exact Review / wrapper v43]
+  REV --> SQL
+  REV --> STOP
+  STOP --> RGROUP[原 stop 与 revoke 齐全 / source 历史保留 / 新 Group]
+  RGROUP --> CTRL
+  RGROUP --> ORCH
+  GOAL[独立原目标 source / 实际 TLS / current version attempts / 原接收预算] --> Entry
+  Entry --> GGATE[Control 原 goal contract 与 receipt / Orchestration 完成 gate]
+  GGATE --> ORCH
   ORCH --> CTRL[Control / commitment / binding / calendar]
   CTRL --> RT[Runtime / attempts / durable intents]
   RT --> PROTO[Integration / Node Protocol / 独立 generation + Memory 字段]
@@ -58,7 +67,7 @@ flowchart TB
   COLD --> MEM
   COLD --> SNAP[完整 SQL / 实际内容 / pinned manifest / 新目录恢复]
   COLD --> REPLICACOLD[v0.2 全部 supervisor Raft child Artifact writer / 原日志投票 / 显式 CAS 恢复集合]
-  Entry --> METRICS[专用 metrics-reader / 有界 histogram queue drop / wrapper v42]
+  Entry --> METRICS[专用 metrics-reader / 有界 histogram queue drop / 原角色 fence]
   MI --> METRICS
   HA --> METRICS
   METRICS --> PROM[声明部署 profile / 原生 Prometheus / Alertmanager]

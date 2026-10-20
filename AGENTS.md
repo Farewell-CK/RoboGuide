@@ -5,6 +5,18 @@
 RoboGuide has a current V2 architecture baseline plus development and MVP documents.
 The first core bootstrap has started; the full runtime and MVP are not complete.
 
+ADR-0120 adds Orchestration plan history under shared wrapper v43/inner v23/event codec v28. Runtime revision
+requires an independently frozen original Mission goal/source; all Task completion alone cannot
+complete that Mission. Source Group retirement preserves completed facts and Runtime history, and
+permanently fences its Execute outbox. Actual original stop/revoke/current ownership and nonrenewable
+same-kernel budgets precede a fresh Control Group and normal Match/Commit/Bind. Pending revisions
+independently fence resume, dispatch and recovery; explicit Mission cancellation closes their retained
+history in the same authority transaction. New policy/work/Review checks the actual peer leaf under
+the original writer; stable-principal rotation cannot lend another leaf's permission. Original grant,
+leaf, goal receipts and decision clocks survive restore. Software-process proofs never establish
+device safety. See `docs/development/runtime-plan-revision-v0.1.md`; automatic new MI work and scoped
+Memory transfer remain required alongside the other F0/F4–F10 work.
+
 ADR-0119 bounds Operator transports before TLS (default 128, explicit 1–1024), returns the network
 worker before each complete request poll, and bounds response I/O without cancelling committed work.
 Unchanged complete committed grants have a read fast path; actual mutation witnesses still recheck

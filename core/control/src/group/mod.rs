@@ -19,6 +19,7 @@ pub use continuation::{CommittedGroupContinuation, GroupContinuationProposal};
 mod group_lifecycle;
 mod membership;
 mod mission_binding;
+mod revision;
 mod task_lifecycle;
 
 /// Runtime binding retained by a Mission Context independently of any one TaskExecution.
@@ -79,6 +80,8 @@ pub enum GroupLifecycle {
     Completed,
     /// The terminal group released all current bindings and reservations.
     Released,
+    /// The original stopped configuration was replaced, without declaring Task or Mission failure.
+    Superseded,
     /// The current execution configuration cannot progress without reconciliation.
     Blocked,
 }
@@ -95,6 +98,9 @@ pub(crate) struct UnboundRole {
 /// A dynamic group of members, roles, and resource bindings.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionGroup {
+    /// Immutable successor of a superseded configuration; retained after ownership release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) superseded_by: Option<ExecutionGroupId>,
     /// Current Control-owned membership version; historical absence remains unavailable.
     #[serde(default)]
     pub(crate) membership_version: Option<domain::GroupMembershipVersion>,
@@ -235,6 +241,7 @@ impl ExecutionGroup {
     #[cfg(test)]
     pub(crate) fn new(group_id: ExecutionGroupId, plan: &CommittedPlan) -> Self {
         Self {
+            superseded_by: None,
             membership_version: None,
             group_id,
             mission_id: plan.task_ref().mission_id().clone(),
@@ -257,6 +264,7 @@ impl ExecutionGroup {
         initial_task_ref: TaskRef,
     ) -> Self {
         Self {
+            superseded_by: None,
             membership_version: None,
             group_id,
             mission_id,
@@ -275,6 +283,11 @@ impl ExecutionGroup {
     /// Returns the group identity.
     pub fn group_id(&self) -> &ExecutionGroupId {
         &self.group_id
+    }
+
+    /// Returns the exact successor configuration without implying that its work has executed.
+    pub const fn superseded_by(&self) -> Option<&ExecutionGroupId> {
+        self.superseded_by.as_ref()
     }
 
     /// Returns the Mission owning this long-lived Execution Group.
