@@ -38,6 +38,27 @@ For node-config/v0.7, the current report identity is
 The report does not prove endpoint reachability, Local EAIOS field meaning, physical safety, or
 hardware behavior. Those remain deployment-owned runtime and hardware tests.
 
+### Later configuration generations
+
+The same offline entry point accepts the explicitly supported configuration generations through
+`roboguide.node-config/v0.13`; it still uses the production catalog compiler and its generation-specific
+validation. It does not reinterpret a newer configuration as v0.7 or bypass its Memory or safety
+negotiation rules. Unknown future generations remain rejected.
+
+The report versions retain their original meaning:
+
+| Authored Node configuration | Extension Conformance report | Additional metadata |
+| --- | --- | --- |
+| v0.6 | v0.1 | Original combined capability/workflow profile |
+| v0.7 | v0.2 | Separate capability profiles and canonical operations |
+| v0.8 | v0.3 | Explicit original-provider continuity declaration |
+| v0.9–v0.13 | v0.4 | Exact `config_schema` and compiled `node_contract_version` |
+
+Inheriting generations retain the original-provider continuity declaration in the report. The v0.4
+metadata identifies the configuration and negotiated contract that were compiled; it is not runtime
+evidence of Memory availability, process exit, device stopping, or completion of the later conformance
+gates. No Controller, Local EAIOS, model, or simulator is contacted by `--validate`.
+
 Validate the current generic configuration without contacting a Controller or Local EAIOS:
 
 ```bash

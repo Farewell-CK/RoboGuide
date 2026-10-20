@@ -18,6 +18,8 @@ pub const EXTENSION_CONFORMANCE_SCHEMA_V0_1: &str = "roboguide.extension-conform
 pub const EXTENSION_CONFORMANCE_SCHEMA_V0_2: &str = "roboguide.extension-conformance/v0.2";
 /// Report schema adding explicitly negotiated original-provider Memory continuity evidence.
 pub const EXTENSION_CONFORMANCE_SCHEMA_V0_3: &str = "roboguide.extension-conformance/v0.3";
+/// Report schema retaining authored configuration and negotiated contract for current generations.
+pub const EXTENSION_CONFORMANCE_SCHEMA_V0_4: &str = "roboguide.extension-conformance/v0.4";
 
 /// One diagnostic emitted when a configuration cannot be compiled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -198,7 +200,7 @@ pub struct MemoryProviderConformance {
     pub export_workflow: bool,
     /// Whether a provider-local import workflow is configured.
     pub import_workflow: bool,
-    /// Explicit v0.8 original-instance and readonly-query contract; never inferred from Imported.
+    /// Explicit v0.8+ original-instance and readonly-query contract; never inferred from Imported.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_provider_continuity: Option<bool>,
 }
@@ -258,6 +260,12 @@ pub const SHARED_LIFECYCLE_CONFORMANCE: &[LifecycleConformanceInvariant] =
 pub struct ExtensionConformanceReport {
     /// Report schema marker.
     pub schema: &'static str,
+    /// Exact authored generation for v0.9+; never downgrade it to the report's older base profile.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_schema: Option<String>,
+    /// Existing compiled Node Contract; this is negotiation metadata, not a runtime or safety proof.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_contract_version: Option<String>,
     /// Authored configuration path used for compilation.
     pub config_path: String,
     /// Stable node identity from the configuration.
@@ -320,6 +328,19 @@ pub struct ConformanceChecks {
     pub selective_state_memory: bool,
 }
 
+/// Keeps original-provider continuity reporting for every explicitly supported inheriting schema.
+fn supports_original_provider_continuity(schema: &str) -> bool {
+    matches!(
+        schema,
+        crate::CONFIG_SCHEMA_V0_8
+            | crate::CONFIG_SCHEMA_V0_9
+            | crate::CONFIG_SCHEMA_V0_10
+            | crate::CONFIG_SCHEMA_V0_11
+            | crate::CONFIG_SCHEMA_V0_12
+            | crate::CONFIG_SCHEMA_V0_13
+    )
+}
+
 /// Compiles one authored Node configuration and returns an offline conformance report.
 pub fn compile_extension_config(
     path: &Path,
@@ -327,13 +348,15 @@ pub fn compile_extension_config(
     let config = NodeServiceConfig::load_compiled(path).map_err(catalog_error)?;
     if !matches!(
         config.schema(),
-        crate::CONFIG_SCHEMA_V0_6 | crate::CONFIG_SCHEMA_V0_7 | crate::CONFIG_SCHEMA_V0_8
-    ) {
+        crate::CONFIG_SCHEMA_V0_6 | crate::CONFIG_SCHEMA_V0_7
+    ) && !supports_original_provider_continuity(config.schema())
+    {
         return Err(ConformanceError::Diagnostic(ConformanceDiagnostic {
             location: "schema".to_string(),
             code: "state-memory-contract-required".to_string(),
-            message: "Extension Conformance requires node-config/v0.6, v0.7 or v0.8 semantics"
-                .to_string(),
+            message:
+                "Extension Conformance requires supported node-config/v0.6 through v0.13 semantics"
+                    .to_string(),
         }));
     }
     if let Some(capability) = config
@@ -413,6 +436,8 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
         .map(connection_report)
         .collect::<Vec<_>>();
     let legacy = catalog.schema() == crate::CONFIG_SCHEMA_V0_6;
+    let continuity = supports_original_provider_continuity(catalog.schema());
+    let current = continuity && catalog.schema() != crate::CONFIG_SCHEMA_V0_8;
     let capabilities = if legacy {
         catalog
             .operations()
@@ -451,11 +476,15 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
     ExtensionConformanceReport {
         schema: if legacy {
             EXTENSION_CONFORMANCE_SCHEMA_V0_1
-        } else if catalog.schema() == crate::CONFIG_SCHEMA_V0_8 {
+        } else if current {
+            EXTENSION_CONFORMANCE_SCHEMA_V0_4
+        } else if continuity {
             EXTENSION_CONFORMANCE_SCHEMA_V0_3
         } else {
             EXTENSION_CONFORMANCE_SCHEMA_V0_2
         },
+        config_schema: current.then(|| catalog.schema().to_string()),
+        node_contract_version: current.then(|| catalog.node_contract_version().to_string()),
         config_path: path.display().to_string(),
         node_id: catalog.node_id().to_string(),
         offline_compile: true,
@@ -499,8 +528,7 @@ fn report_for_catalog(path: &Path, catalog: &CompiledLocalCatalog) -> ExtensionC
                 discovery_workflow: provider.discover().is_some(),
                 export_workflow: provider.export().is_some(),
                 import_workflow: provider.import().is_some(),
-                original_provider_continuity: (catalog.schema() == crate::CONFIG_SCHEMA_V0_8)
-                    .then_some(provider.continuity().is_some()),
+                original_provider_continuity: continuity.then_some(provider.continuity().is_some()),
             })
             .collect(),
         checks: ConformanceChecks {

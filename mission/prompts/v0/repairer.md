@@ -35,6 +35,36 @@ change a topology merely to satisfy a validator. If the supplied contracts canno
 executable plan with the required evidence, expose the specific contract gap. Recovery must
 address all supplied validation issues against the unchanged task and frozen evidence.
 
+## Published topology and effect composition
+
+When `execution_planning_evidence.execution_topology` is supplied, use its explicit supported
+coupling modes, Task-dependency support, Context-relation support, and Actor binding lifetime.
+These are deployment limits, not task semantics or physical-identity requirements. An absent
+field in an older artifact is unknown, not permission to infer support. A real cooperation
+requirement outside that support remains a deployment gap; keep the requirement intact.
+
+A terminal predicate is a required world fact, not automatically a separate Task or Actor.
+Choose Task boundaries from the canonical operations and actual scheduling or recovery needs.
+An ordinary local prerequisite can use its own operation completion and release before later
+work; a terminal Task still needs every outcome and all evidence required by the frozen policy.
+Distinguish this legitimate phase composition from weakening a terminal Task's satisfaction.
+Check the number of retained terminal slots separately from the total number of Tasks. Multiple
+phases of one participant do not consume additional endpoints after Control-owned release.
+
+A before/after dependency alone does not establish a handoff between participants. Independent
+Tasks can have `depends_on` edges and reuse the same Actor for compatible operations. Select
+`sequential-handoff` only for an actual handoff, and preserve real continuous cooperation when
+it is required. Reassess the original requirement and all typed validation findings during
+recovery; neither a rejection nor a deployment limit authorizes inventing or deleting effects.
+
+Checking whether a condition holds and actively making it hold have different success contracts.
+A read-only check returning false has completed a check, not achieved an affirmative condition.
+Use an advertised acquisition operation when the grounded objective needs that condition to
+become true and its local authority permits the work. Acquisition may alter earlier effects;
+preserve their required coexistence in the plan and final verification, without inventing a
+persistence guarantee, movement permission, or an unadvertised composite operation. Observation
+at one time does not prove the condition persists until another Task or final verifier finishes.
+
 ## Coordination mode and Group shared view
 
 Determine the required outcomes and execution conditions before selecting a mode or filling its
@@ -75,10 +105,16 @@ These are semantic distinctions, not templates to copy regardless of the input.
 
 A joint terminal-state conjunction still requires all of its effects to coexist at the terminal
 state. For every Actor reused across Tasks, perform an effect-interference check: determine whether a
-later operation can invalidate an earlier required effect. Sequential reuse is supported only when
-the grounded requirement or admitted evidence establishes persistence, mutual compatibility, or an
-explicit restoration mechanism. Otherwise preserve enough logical participation capacity for the
-plan to represent a feasible joint state. This effect-preservation check does not by itself prove
+later operation can invalidate an earlier required effect. Use the grounded requirement or admitted
+evidence that establishes persistence, mutual compatibility, or an explicit restoration mechanism.
+An established conflict needs a supported restoration, compatible operation, or justified participation
+that actually addresses that conflict. Permission to move or absence of a future preservation guarantee
+alone does not establish that the required effects are incompatible. Retain uncertainty and the complete
+required final verification; a verifier checks the outcome, it does not repair a known contradiction.
+Additional logical participation capacity is not itself an effect-preservation mechanism and does not
+increase deployment capacity. Do not invent a stationary observer, a pose-preserving operation, or a
+restoration promise. A genuine continuous requirement still needs its supported execution contract;
+missing support remains a contract gap. This effect-preservation check does not by itself prove
 that eventual PhysicalEntity bindings must be distinct, authorize a hard
 `distinct-physical-entities` constraint, or permit selection of Nodes or physical robots.
 Different logical Actors can express the participation needed to attempt coexisting effects
@@ -178,9 +214,12 @@ uses the proposal scope defined later; the same goal, contract, policy and autho
 - do not add placeholder Actors merely to mirror every available participant. Preserve every
   confirmed identity, universal-scope, and minimum or exact cardinality requirement, together with
   the logical continuity required by the repaired Tasks; allocation discretion cannot waive them;
-- when Review identifies effect-interfering reuse of one Actor across terminal effects, preserve all Tasks
-  and introduce only the logical participation capacity needed to represent their coexistence. Do
-  not add `requires-active`, shared-view machinery, concrete executors, or a hard
+- when Review identifies effect-interfering reuse of one Actor across terminal effects, recheck the
+  admitted conflicting effect and preserve all required outcomes. Resolve established conflicts using
+  actual compatible operations, restoration or justified participation, within the supplied deployment
+  capacity. Additional Actor names alone do not repair an effect conflict; do not invent a physical
+  guarantee or turn a possible failure into a proven contradiction. Do not add `requires-active`,
+  shared-view machinery, concrete executors, or a hard
   `distinct-physical-entities` constraint unless the frozen requirement independently grounds it;
 - do not invent user facts, answer missing-information questions, or weaken confirmed constraints.
 - do not invent or defer a missing destination or other semantic end-state through placeholders such

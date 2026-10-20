@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from mission.execution_planning_evidence import ExecutionPlanningEvidence
+from mission.execution_planning_evidence import (
+    EXECUTION_PLANNING_SCHEMA,
+    LEGACY_EXECUTION_PLANNING_SCHEMA,
+    ExecutionPlanningEvidence,
+)
 from mission.models import JSONObject, MissionPlan, MissionPlanError
 from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticExpression
 
@@ -62,7 +66,7 @@ def _evidence(
     }
     source = {**source_body, "digest": _digest(source_body)}
     body: JSONObject = {
-        "schema_version": "roboguide.execution-planning-evidence/v0.1",
+        "schema_version": EXECUTION_PLANNING_SCHEMA,
         "authority": "deployment-published",
         "identity": {
             "run_id": semantic.run_id,
@@ -81,6 +85,12 @@ def _evidence(
             "max_slots": 32,
             "resource_release": "after-task-satisfaction",
             "verifier_publication": "after-all-session-slots",
+        },
+        "execution_topology": {
+            "supported_coupling_modes": ["independent"],
+            "supports_task_dependencies": True,
+            "supports_context_relations": False,
+            "actor_binding": "session-stable",
         },
     }
     return ExecutionPlanningEvidence.from_json({**body, "digest": _digest(body)}), semantic
@@ -118,6 +128,42 @@ def test_published_verifier_and_world_identity_are_bound() -> None:
     evidence, semantic = _evidence()
     evidence.validate_world(semantic)
     evidence.validate_plan(_plan(1))
+
+
+def test_legacy_evidence_remains_readable_without_inventing_topology_support() -> None:
+    """Historical artifacts retain their original bytes and do not acquire v0.2 declarations."""
+    document = _evidence()[0].to_json()
+    document["schema_version"] = LEGACY_EXECUTION_PLANNING_SCHEMA
+    document.pop("execution_topology")
+    document["digest"] = _digest({key: value for key, value in document.items() if key != "digest"})
+    restored = ExecutionPlanningEvidence.from_json(document)
+    assert restored.to_json() == document
+    assert "execution_topology" not in restored.to_json()
+    restored.validate_plan(_plan(2))
+
+
+@pytest.mark.parametrize(
+    "fault", ["missing", "unknown_mode", "duplicate_mode", "wrong_type", "inventory", "schema"]
+)
+def test_topology_declarations_fail_closed_even_with_recomputed_digest(fault: str) -> None:
+    """Digest validity cannot legitimize missing, invented or inventory-shaped support."""
+    document = _evidence()[0].to_json()
+    topology = cast(JSONObject, document["execution_topology"])
+    if fault == "missing":
+        document.pop("execution_topology")
+    elif fault == "unknown_mode":
+        topology["supported_coupling_modes"] = ["automatically-repaired"]
+    elif fault == "duplicate_mode":
+        topology["supported_coupling_modes"] = ["independent", "independent"]
+    elif fault == "wrong_type":
+        topology["supports_task_dependencies"] = 1
+    elif fault == "inventory":
+        topology["node_id"] = "untrusted-selector"
+    else:
+        document["schema_version"] = "roboguide.execution-planning-evidence/v9"
+    document["digest"] = _digest({key: value for key, value in document.items() if key != "digest"})
+    with pytest.raises(ValueError):
+        ExecutionPlanningEvidence.from_json(document)
 
 
 def test_wrong_world_identity_fails_closed() -> None:

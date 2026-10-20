@@ -922,7 +922,14 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   provider-level feasibility baselines and never an expansion of integrated Local EAIOS steps.
 
 ADR-0094 adds deployment-owned bounded `observation.acquire@v1`, separate from
-read-only verify, and default-off pre-dispatch Stage2 model reselection (at most three per
+snapshot verification. Its opt-in Local How v0.12 retains v0.11 exact-attempt cached condition/budget
+feedback and a disclosed at-most-16-step original-wait mapping; it neither edits raw model
+choices nor guarantees persistent effects. Already-observed acquisition needs no extra model
+or motion. A guarded fresh acquisition navigation call rearms only its endpoint's original
+completed-command latches; arrival is recomputed by the original action with its target cache,
+pathfinder and budgets intact. It never writes a true sensor value or establishes visibility.
+Earlier Local How versions retain their own semantics. Default-off pre-dispatch
+Stage2 model reselection remains separately bounded (at most three per
 bound attempt; no Provider retry or action rewriting). Reset geometry v0.4 is neutral,
 source-bound world evidence, not inventory or a route guarantee. Feasibility v0.6 checks
 final-verifier resource lifetimes without selecting endpoints; closure observations record
@@ -936,7 +943,12 @@ empty placeholders or a top-level `src/`.
 ## Build, Test, and Development Commands
 
 ADR-0109 adds the inventory-free, read-only Controller `POST /v1/missions/validate-plan`
-query (`roboguide.plan-validation/v0.1`). Published deployment/verifier checks are shared with
+query (`roboguide.plan-validation/v0.2`, with explicit v0.1 read compatibility). The digest-bound
+execution-planning evidence v0.2 publishes supported modes, DAG/Context-relation support and
+session-stable Actor binding without inventory. Missing v0.1 fields never grant new support;
+configured v0.2 topology must match the Controller response. Typed logical code/path feedback
+separates mode, capability and retained-resource conflicts without rewriting real cooperation.
+Published deployment/verifier checks are shared with
 submission; the query never creates Groups, events, bindings or reservations. Configured MI
 execution-planning evidence enables the query for every newly generated or repaired candidate.
 Source drift and HTTP failure are system failures, while exact-plan negative findings retain

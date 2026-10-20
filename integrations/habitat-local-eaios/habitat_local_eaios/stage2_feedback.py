@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 from .model import IntegrationError
 
 if TYPE_CHECKING:
+    from .navigation_dispatch import NavigationDispatchLifecycle
+    from .observation_control import ObservationAcquisitionControl
     from .relocation_completion import RelocationCompletionBinding
     from .stage2_contract import Stage2ExecutionContract
 
@@ -148,6 +150,8 @@ class Stage2ExecutionFeedback:
         completion: Callable[[str, str, bool], None] | None = None,
         completion_binding: RelocationCompletionBinding | None = None,
         peer_contracts: Callable[[], Mapping[str, Stage2ExecutionContract]] | None = None,
+        observation_control: ObservationAcquisitionControl | None = None,
+        navigation_dispatch: NavigationDispatchLifecycle | None = None,
     ) -> None:
         """Freeze own contracts, optionally reading a deployment-owned active-peer projection."""
         self._contracts = dict(contracts)
@@ -155,6 +159,19 @@ class Stage2ExecutionFeedback:
         self._record = record
         self._completion = completion
         self._completion_binding = completion_binding
+        self._observation_control = observation_control
+        self._navigation_dispatch = navigation_dispatch
+        if navigation_dispatch is not None and observation_control is None:
+            raise IntegrationError("fresh navigation dispatch requires acquisition feedback")
+        if observation_control is not None and (
+            len(contracts) != 1
+            or any(
+                contract.operation != "observation.acquire@v1"
+                or contract.invocation_digest != observation_control.invocation.request_key()
+                for contract in contracts.values()
+            )
+        ):
+            raise IntegrationError("observation feedback must bind exactly its own acquisition")
         self._pending: dict[str, _PendingAction] = {}
         self._sequences: dict[str, int] = {}
         self._operation_completed: dict[str, bool] = {}
@@ -269,7 +286,59 @@ class Stage2ExecutionFeedback:
             content += "\n\nCommitted peer execution scope:\n" + json.dumps(
                 self.peer_execution_scope(agent_name), allow_nan=False, sort_keys=True
             )
+        if self._observation_control is not None:
+            document = self._observation_control.snapshot()
+            content += "\n\nCurrent operation observation:\n" + json.dumps(
+                document, allow_nan=False, sort_keys=True
+            )
+            self._emit("operation-observation-input", document)
         return content
+
+    def observation_pause_steps(self) -> int | None:
+        """Return a disclosed pause bound only for an active acquisition contract."""
+        return (
+            self._observation_control.pause_steps()
+            if self._observation_control is not None
+            else None
+        )
+
+    def bind_observation_dispatch(self, agent_name: str, action: Any) -> Any:
+        """Translate an admitted pause to its advertised Local EAIOS duration.
+
+        The original raw model choice and arguments are unchanged. Only the
+        vendor's fixed 500-step wait mapping is replaced in this opt-in local
+        profile; navigation, relocation and unassigned policies retain theirs.
+        """
+        if self._observation_control is None:
+            return action
+        pending = self._pending.get(agent_name)
+        if pending is None:
+            raise IntegrationError("observation dispatch has no admitted model action")
+        if pending.action["name"] == "nav_to_obj" and self._navigation_dispatch is not None:
+            self._navigation_dispatch.dispatch(
+                action,
+                pending.action,
+                pending.document["tool_call_id"],
+                pending.document["action_sequence"],
+            )
+        if pending.action["name"] not in {"wait", "send_request"}:
+            return action
+        if action != {"name": "wait", "arguments": ["500"]}:
+            raise IntegrationError("original observation pause mapping changed")
+        steps = self._observation_control.pause_steps()
+        result = {"name": "wait", "arguments": [str(steps)]}
+        self._emit(
+            "local-pause-dispatch-bound",
+            {
+                "contract": self._contracts[agent_name].as_dict(),
+                "tool_call_id": pending.document["tool_call_id"],
+                "raw_selected_action": deepcopy(pending.action),
+                "original_vendor_mapping": deepcopy(action),
+                "local_dispatch": result,
+                "observation_control": self._observation_control.snapshot(),
+            },
+        )
+        return result
 
     def _observe_manipulation(self, agent_name: str, timing: str) -> dict[str, Any]:
         """Keep sparse observation faults and oversized data out of model/physical decisions."""

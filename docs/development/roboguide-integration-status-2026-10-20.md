@@ -9,6 +9,11 @@ main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头�
 `d15543f4ec2dc99ebe565e319e141c0bf17b433b`（执行故障闭环）。后两者是祖先关系。
 代码集成和完整整改完成是不同状态；本次不宣称 SoftwareComplete。
 
+后续以已验收 `6ca3ebb37fca940626adc0d68755fc38a0534f0f` 为 main 基线，固定核对
+`codex/e1-perception-contract-composition` 的 `b50d9e313b0660c9cc4ee1c5bca53538fa0b1de6`。
+其六条新增修复通过三方合并保留原提交，不回退整改权威版本，也没有启动实验；组合证据见
+[新增执行合同集成验收](acceptance/2026-10-20-current-execution-contract-integration.md)。
+
 后续 [ADR-0116 证书验收](acceptance/2026-10-20-replica-certificates.md)补齐显式 v0.3
 同一成员换证、lost-key Abort、实际 CA 迁移与重启。旧 profile/二进制升级和完整 HA 内容
 恢复继续 F5；F0/F4/F6–F10 不因证书软件验收关闭。

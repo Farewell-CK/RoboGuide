@@ -3,6 +3,7 @@
 #[cfg(test)]
 use super::deployment_document::content_digest;
 use super::deployment_operation_admission::DeploymentOperationAdmission;
+use super::plan_validation::{MAX_PLAN_ISSUES, PlanIssue};
 use crate::*;
 #[cfg(test)]
 use sha2::{Digest, Sha256};
@@ -106,6 +107,79 @@ impl DeploymentFeasibility {
                 "verifier_publication": "after-all-session-slots",
             })
         })
+    }
+
+    /// Publishes implemented live topology only, without candidate or physical identities.
+    pub(crate) fn published_topology(&self) -> Option<serde_json::Value> {
+        self.live_operations.as_ref().map(|_| {
+            serde_json::json!({
+                "supported_coupling_modes": ["independent"],
+                "supports_task_dependencies": true,
+                "supports_context_relations": false,
+                "actor_binding": "session-stable",
+            })
+        })
+    }
+
+    /// Explains unsupported effective modes and relations at the original logical paths.
+    fn coordination_issues(&self, plan: &domain::MissionPlan) -> Vec<PlanIssue> {
+        let mut issues = Vec::new();
+        let mut seen = BTreeSet::new();
+        for (index, task) in plan.task_graph().tasks().iter().enumerate() {
+            let Some((context_index, context)) = plan
+                .contexts()
+                .iter()
+                .enumerate()
+                .find(|(_, context)| context.context_id() == task.continuity().context_id())
+            else {
+                continue;
+            };
+            let mode = task
+                .continuity()
+                .coupling_mode_override()
+                .unwrap_or_else(|| context.coupling_mode());
+            if mode != domain::ExecutionCouplingMode::Independent {
+                let path = if task.continuity().coupling_mode_override().is_some() {
+                    format!("/tasks/{index}/coupling_mode")
+                } else {
+                    format!("/contexts/{context_index}/coupling_mode")
+                };
+                if seen.insert(("mode", path.clone())) {
+                    issues.push(PlanIssue::new(
+                        "deployment.coupling_mode_unsupported",
+                        path,
+                        "Effective coupling mode is outside the supported modes [independent]. Task dependencies are separate from execution cooperation; preserve real cooperation requirements when reassessing the mode.",
+                    ));
+                }
+            }
+            if !context.relations().is_empty() {
+                let path = format!("/contexts/{context_index}/relations");
+                if seen.insert(("relations", path.clone())) {
+                    issues.push(PlanIssue::new(
+                        "deployment.context_relations_unsupported",
+                        path,
+                        "The deployment does not support Context execution relations. Preserve required relations and expose the deployment gap; do not delete real cooperation to pass admission.",
+                    ));
+                }
+            }
+            if issues.len() > MAX_PLAN_ISSUES {
+                break;
+            }
+        }
+        issues
+    }
+
+    /// Reuses submission checks while retaining independently identifiable contract conflicts.
+    pub(crate) fn plan_issues(
+        &self,
+        plan: &domain::MissionPlan,
+        group_id: &domain::ExecutionGroupId,
+    ) -> Vec<PlanIssue> {
+        let mut issues = self.coordination_issues(plan);
+        if let Err(issue) = self.candidate_restrictions(plan, group_id) {
+            issues.push(issue);
+        }
+        issues
     }
 
     /// Preserves the actual snapshot identity without copying Node/agent bindings into MI.
@@ -215,19 +289,34 @@ impl DeploymentFeasibility {
         plan: &domain::MissionPlan,
         group_id: &domain::ExecutionGroupId,
     ) -> Result<Vec<(domain::ActorId, BTreeSet<domain::NodeId>)>, String> {
+        if let Some(issue) = self.coordination_issues(plan).into_iter().next() {
+            return Err(issue.message);
+        }
+        self.candidate_restrictions(plan, group_id)
+            .map_err(|issue| issue.message)
+    }
+
+    /// Computes the original frozen candidate bounds; errors grant no placement authority.
+    fn candidate_restrictions(
+        &self,
+        plan: &domain::MissionPlan,
+        group_id: &domain::ExecutionGroupId,
+    ) -> Result<Vec<(domain::ActorId, BTreeSet<domain::NodeId>)>, PlanIssue> {
         let session = domain::ExecutionSessionDescriptor::from_plan(plan, group_id.clone())?
             .ok_or("deployment feasibility requires MissionPlan v0.8 session metadata")?;
         let mut candidates = BTreeMap::<domain::ActorId, BTreeSet<domain::NodeId>>::new();
         let mut relocation_actors = BTreeMap::<String, BTreeSet<domain::ActorId>>::new();
-        for task in plan.task_graph().tasks() {
-            for role in task.requirement().roles() {
+        for (task_index, task) in plan.task_graph().tasks().iter().enumerate() {
+            for (role_index, role) in task.requirement().roles().iter().enumerate() {
+                let role_path = format!("/tasks/{task_index}/roles/{role_index}");
                 if !role.resource_requirements().iter().any(|resource| {
                     resource.kind() == domain::ResourceKind::Space && resource.units() == 1
                 }) {
-                    return Err(
-                        "shared-world deployment requires one exclusive space:1 slot per Task role"
-                            .into(),
-                    );
+                    return Err(PlanIssue::new(
+                        "deployment.resource_requirement_invalid",
+                        format!("{role_path}/requirements/resources"),
+                        "shared-world deployment requires one exclusive space:1 slot per Task role",
+                    ));
                 }
                 let actor = role
                     .actor_id()
@@ -239,16 +328,25 @@ impl DeploymentFeasibility {
                     intent.operation().to_string().as_str(),
                     "observation.verify@v1" | "observation.acquire@v1"
                 ) {
-                    let profiles = self
-                        .live_operations
-                        .as_ref()
-                        .ok_or("observation requires explicit live deployment support")?;
+                    let profiles = self.live_operations.as_ref().ok_or_else(|| {
+                        PlanIssue::new(
+                            "deployment.operation_unsupported",
+                            format!("{role_path}/execution_intent/operation"),
+                            "observation requires explicit live deployment support",
+                        )
+                    })?;
                     let condition = match (
                         intent.parameters().len(),
                         intent.parameters().get("expected"),
                     ) {
                         (1, Some(domain::ExecutionValue::String(value))) => value,
-                        _ => return Err("observation requires one exact expected condition".into()),
+                        _ => {
+                            return Err(PlanIssue::new(
+                                "deployment.intent_invalid",
+                                format!("{role_path}/execution_intent/parameters"),
+                                "observation requires one exact expected condition",
+                            ));
+                        }
                     };
                     let entity = condition
                         .strip_prefix("detected(")
@@ -258,13 +356,23 @@ impl DeploymentFeasibility {
                                 && !value.contains(['(', ')', '\n', '\r'])
                                 && value.len() <= 502
                         })
-                        .ok_or("observation condition is outside the local read-only profile")?;
+                        .ok_or_else(|| {
+                            PlanIssue::new(
+                                "deployment.intent_invalid",
+                                format!("{role_path}/execution_intent/parameters/expected"),
+                                "observation condition is outside the local read-only profile",
+                            )
+                        })?;
                     if !self
                         .entries
                         .keys()
                         .any(|(_, destination)| destination == entity)
                     {
-                        return Err("observation entity is not in the frozen world".into());
+                        return Err(PlanIssue::new(
+                            "deployment.intent_invalid",
+                            format!("{role_path}/execution_intent/parameters/expected"),
+                            "observation entity is not in the frozen world",
+                        ));
                     }
                     let allowed = profiles
                         .iter()
@@ -273,6 +381,13 @@ impl DeploymentFeasibility {
                         })
                         .map(|(node, _)| node.clone())
                         .collect::<BTreeSet<_>>();
+                    if allowed.is_empty() {
+                        return Err(PlanIssue::new(
+                            "deployment.operation_unsupported",
+                            format!("{role_path}/execution_intent/operation"),
+                            "No configured live endpoint supports this exact observation operation",
+                        ));
+                    }
                     candidates
                         .entry(actor.clone())
                         .and_modify(|existing| existing.retain(|node| allowed.contains(node)))
@@ -280,11 +395,20 @@ impl DeploymentFeasibility {
                     continue;
                 }
                 if intent.operation().to_string() == "object.relocate@v1" {
-                    let admitted = self
-                        .operation_admission
-                        .as_ref()
-                        .ok_or("relocation requires reset-bound deployment operation admission")?;
-                    let mut allowed = admitted.candidates(intent)?;
+                    let admitted = self.operation_admission.as_ref().ok_or_else(|| {
+                        PlanIssue::new(
+                            "deployment.operation_unsupported",
+                            format!("{role_path}/execution_intent/operation"),
+                            "relocation requires reset-bound deployment operation admission",
+                        )
+                    })?;
+                    let mut allowed = admitted.candidates(intent).map_err(|message| {
+                        PlanIssue::new(
+                            "deployment.intent_invalid",
+                            format!("{role_path}/execution_intent/parameters"),
+                            message,
+                        )
+                    })?;
                     if let Some(profiles) = &self.live_operations {
                         allowed.retain(|node| {
                             profiles
@@ -313,16 +437,23 @@ impl DeploymentFeasibility {
                 ) {
                     (1, Some(domain::ExecutionValue::String(value))) if !value.is_empty() => value,
                     _ => {
-                        return Err(
-                            "deployment feasibility requires one exact destination parameter"
-                                .into(),
-                        );
+                        return Err(PlanIssue::new(
+                            "deployment.intent_invalid",
+                            format!("{role_path}/execution_intent/parameters"),
+                            "deployment feasibility requires one exact destination parameter",
+                        ));
                     }
                 };
                 let statuses = self
                     .entries
                     .get(&(intent.operation().to_string(), destination.clone()))
-                    .ok_or("deployment feasibility has no record for an accepted intent")?;
+                    .ok_or_else(|| {
+                        PlanIssue::new(
+                            "deployment.intent_invalid",
+                            format!("{role_path}/execution_intent"),
+                            "deployment feasibility has no record for an accepted intent",
+                        )
+                    })?;
                 let allowed = statuses
                     .iter()
                     .filter(|(node, status)| {
@@ -342,31 +473,40 @@ impl DeploymentFeasibility {
             }
         }
         if candidates.values().any(BTreeSet::is_empty) {
-            return Err("deployment feasibility leaves a logical Actor without a candidate".into());
+            return Err(PlanIssue::new(
+                "deployment.actor_placement_unavailable",
+                "/mission/actors",
+                "deployment feasibility leaves a logical Actor without a candidate",
+            ));
         }
         if relocation_actors.values().any(|actors| actors.len() > 1) {
-            return Err(
-                "shared-world deployment does not support concurrent relocation of one object"
-                    .into(),
-            );
+            return Err(PlanIssue::new(
+                "deployment.object_relocation_conflict",
+                "/tasks",
+                "shared-world deployment does not support concurrent relocation of one object",
+            ));
         }
         if self.live_operations.is_some() {
             let mut actors_by_task = BTreeMap::<domain::TaskId, Vec<domain::ActorId>>::new();
             for slot in &session.slots {
                 let actors = actors_by_task.entry(slot.task_id.clone()).or_default();
                 if actors.contains(&slot.actor_id) {
-                    return Err(
-                        "live shared-world Task roles must use distinct logical Actors".into(),
-                    );
+                    return Err(PlanIssue::new(
+                        "deployment.concurrent_actor_reuse",
+                        "/tasks",
+                        "live shared-world Task roles must use distinct logical Actors",
+                    ));
                 }
                 actors.push(slot.actor_id.clone());
             }
             if actors_by_task.values().any(|actors| {
                 actors.len() > 1 && !has_distinct_endpoint_assignment(actors, &candidates)
             }) {
-                return Err(
-                    "live shared-world Task roles have no distinct endpoint assignment".into(),
-                );
+                return Err(PlanIssue::new(
+                    "deployment.concurrent_placement_unavailable",
+                    "/tasks",
+                    "live shared-world Task roles have no distinct endpoint assignment",
+                ));
             }
         }
         if self.terminal_verifier_barrier {
@@ -395,7 +535,19 @@ impl DeploymentFeasibility {
             if retained.iter().collect::<BTreeSet<_>>().len() != retained.len()
                 || !has_distinct_endpoint_assignment(&retained, &candidates)
             {
-                return Err("final verifier resource lifetime has no feasible shared-world endpoint assignment".into());
+                return Err(PlanIssue::new(
+                    if retained.len() > self.node_agents.len() {
+                        "verifier.retained_capacity_exceeded"
+                    } else {
+                        "verifier.retained_placement_unavailable"
+                    },
+                    "/tasks",
+                    format!(
+                        "final verifier resource lifetime has no feasible shared-world endpoint assignment: {} retained slots, {} configured capacity-one endpoints; final publication waits for all session slots",
+                        retained.len(),
+                        self.node_agents.len()
+                    ),
+                ));
             }
         }
         let actors = session
@@ -427,10 +579,16 @@ impl DeploymentFeasibility {
         } else {
             supported_serial || supported_pair
         };
-        if !session.slots.iter().all(|slot| slot.independent) || !supported_topology {
-            return Err(
-                "accepted-plan topology has no feasible shared-world endpoint assignment".into(),
-            );
+        if !supported_topology {
+            return Err(PlanIssue::new(
+                if self.live_operations.is_some() {
+                    "deployment.slot_limit_exceeded"
+                } else {
+                    "deployment.topology_unsupported"
+                },
+                "/tasks",
+                "accepted-plan topology has no feasible shared-world endpoint assignment",
+            ));
         }
         Ok(candidates.into_iter().collect())
     }
@@ -444,6 +602,161 @@ impl DeploymentFeasibility {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Loads synthetic composition cases shared with Mission's closed contract consumer.
+    fn composition_fixture() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../contracts/mission/execution-planning-v0.2/fixtures/regression-cases.json"
+        ))
+        .unwrap()
+    }
+
+    /// Applies fixture edits only; no runtime recovery path rewrites an accepted draft.
+    fn composition_plan(case: &serde_json::Value) -> serde_json::Value {
+        let mut plan = composition_fixture()["plan"].clone();
+        for change in case["changes"].as_array().unwrap() {
+            let (parent, key) = change["path"].as_str().unwrap().rsplit_once('/').unwrap();
+            plan.pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert(key.into(), change["value"].clone());
+        }
+        plan
+    }
+
+    /// Retains the original source validation with generic fixture entities and actual live support.
+    fn composition_deployment(path: &Path) -> DeploymentFeasibility {
+        finality_snapshot(path, true);
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        for record in document["records"].as_array_mut().unwrap() {
+            record["destination"] = if record["destination"] == "any_targets|0" {
+                "landmark-a"
+            } else {
+                "landmark-b"
+            }
+            .into();
+        }
+        for endpoint in document["execution_profile"]["endpoints"]
+            .as_array_mut()
+            .unwrap()
+        {
+            endpoint["operations"] = serde_json::json!([
+                "mobility.navigate@v1",
+                "observation.verify@v1",
+                "observation.acquire@v1"
+            ]);
+        }
+        seal(&mut document);
+        std::fs::write(path, document.to_string()).unwrap();
+        DeploymentFeasibility::load(path).unwrap()
+    }
+
+    /// Publishes a synthetic complete-goal feed without generating any world verdict.
+    fn composition_feed(directory: &Path) -> super::super::task_verifier::TaskVerifierFeed {
+        let mut source = serde_json::json!({
+            "schema_version":"roboguide.task-verifier-source/v0.1",
+            "source_id":"synthetic-final-world", "source_revision":format!("sha256:{}", "a".repeat(64)),
+            "identity":{"run_id":"run", "episode_id":"synthetic", "scene_id":"scene",
+                "dataset_revision":"synthetic", "dataset_sha256":"a".repeat(64)},
+            "verifier":{"namespace":"observation","name":"verify","version":"v1"},
+            "supported_predicates":[composition_fixture()["predicate"]], "verdict_finality":"terminal"
+        });
+        source["digest"] = serde_json::json!(format!(
+            "sha256:{:x}",
+            Sha256::digest(serde_json::to_vec(&source).unwrap())
+        ));
+        let path = directory.join("source.json");
+        std::fs::write(&path, source.to_string()).unwrap();
+        super::super::task_verifier::TaskVerifierFeed::load(
+            &path,
+            directory.join("no-verdict.json"),
+        )
+        .unwrap()
+    }
+
+    /// Effective modes, retained slots and real dependencies match Python without selecting Nodes.
+    #[test]
+    fn published_composition_cases_match_mission_contract_feedback() {
+        let directory = tempfile::tempdir().unwrap();
+        let deployment = composition_deployment(&directory.path().join("deployment.json"));
+        let feed = composition_feed(directory.path());
+        let group = domain::ExecutionGroupId::new("composition-group").unwrap();
+        let fixture = composition_fixture();
+        assert_eq!(
+            deployment.published_topology().unwrap(),
+            fixture["execution_topology"]
+        );
+        for case in fixture["cases"].as_array().unwrap() {
+            let document = composition_plan(case);
+            let original = document.clone();
+            let plan = orchestration::decode_mission_plan(&document.to_string()).unwrap();
+            let mut issues = feed.plan_issues(&plan);
+            issues.extend(deployment.plan_issues(&plan, &group));
+            let codes = issues
+                .iter()
+                .map(|issue| issue.code)
+                .collect::<BTreeSet<_>>();
+            let expected = case["expected_codes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|code| code.as_str().unwrap())
+                .collect::<BTreeSet<_>>();
+            assert_eq!(codes, expected, "{}", case["id"]);
+            let paths = issues
+                .iter()
+                .map(|issue| issue.path.as_str())
+                .collect::<BTreeSet<_>>();
+            let expected_paths = case
+                .get("expected_paths")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|path| path.as_str().unwrap())
+                .collect::<BTreeSet<_>>();
+            assert_eq!(paths, expected_paths, "{}", case["id"]);
+            assert_eq!(
+                deployment.restrictions_for_plan(&plan, &group).is_ok(),
+                expected.is_empty()
+            );
+            assert_eq!(document, original);
+            let serialized = serde_json::to_string(&issues).unwrap();
+            assert!(!serialized.contains("node-a") && !serialized.contains("node-b"));
+        }
+        let path = directory.path().join("legacy.json");
+        snapshot(&path, true);
+        assert!(
+            DeploymentFeasibility::load(&path)
+                .unwrap()
+                .published_topology()
+                .is_none()
+        );
+    }
+
+    /// Real submission keeps a mode mismatch rejected before Groups, events or checkpoints exist.
+    #[tokio::test]
+    async fn unsupported_effective_mode_stays_rejected_at_submission() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("deployment.json");
+        live_snapshot(&path, true);
+        let deployment = DeploymentFeasibility::load(&path).unwrap();
+        let mut document = plan_document(false, true);
+        document["contexts"][0]["coupling_mode"] = "sequential-handoff".into();
+        document["tasks"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("coupling_mode");
+        let decoded = orchestration::decode_mission_plan(&document.to_string()).unwrap();
+        let group = domain::ExecutionGroupId::new("mode-group").unwrap();
+        let issues = deployment.plan_issues(&decoded, &group);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].code, "deployment.coupling_mode_unsupported");
+        assert_eq!(issues[0].path, "/contexts/0/coupling_mode");
+        assert_http_topology_rejection(&deployment, document, (409, "Effective coupling mode"))
+            .await;
+    }
 
     /// Load the synthetic, language-shared cases; these are not B1 experiment results.
     fn support_regression_fixture() -> serde_json::Value {

@@ -473,6 +473,26 @@ def _bound_navigation_tools(actions: object, destination: str) -> list[dict[str,
     return offered
 
 
+def _bound_observation_tools(
+    actions: list[dict[str, Any]], pause_steps: int
+) -> list[dict[str, Any]]:
+    """Expose only authorized observation tools and their actual bounded pause semantics."""
+    offered = [
+        tool for tool in actions if tool.get("name") in {"nav_to_obj", "wait", "send_request"}
+    ]
+    if sum(tool.get("name") == "wait" for tool in offered) != 1:
+        raise IntegrationError("observation control requires an exact original wait tool")
+    for tool in offered:
+        if tool.get("name") in {"wait", "send_request"}:
+            tool["description"] = (
+                str(tool.get("description", ""))
+                + f" This execution's declared local profile pauses for {pause_steps} "
+                "simulator steps, then returns control for the next observed-condition decision. "
+                "A pause or message does not establish detection or peer completion."
+            ).strip()
+    return offered
+
+
 def _bound_relocation_tools(
     actions: object, object_ref: str, destination: str, *, navigation_target: str | None = None
 ) -> list[dict[str, Any]]:
@@ -620,6 +640,9 @@ def _guard_agent(
                     if destination is None:
                         raise IntegrationError("navigation contract is missing destination")
                     offered_actions = _bound_navigation_tools(original_actions, destination)
+                    pause = feedback.observation_pause_steps() if feedback is not None else None
+                    if pause is not None:
+                        offered_actions = _bound_observation_tools(offered_actions, pause)
                 if feedback is not None and (
                     feedback.has_live_peer_contracts
                     or (contract.is_relocation and feedback.has_bound_relocation_completion)
@@ -760,7 +783,12 @@ def _guard_agent(
 
         model.chat = guarded_model_chat
         try:
-            return original_chat(observation)
+            result = original_chat(observation)
+            return (
+                feedback.bind_observation_dispatch(agent_name, result)
+                if feedback is not None
+                else result
+            )
         finally:
             _restore_attribute(model, "chat", previous_model_chat)
 

@@ -14,7 +14,7 @@ from typing import Any, cast
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from habitat_local_eaios import live_bindings  # noqa: E402
+from habitat_local_eaios import live_bindings, navigation_dispatch  # noqa: E402
 from habitat_local_eaios.backend import LocalExecutionOutcome  # noqa: E402
 from habitat_local_eaios.endpoint_registry import build_endpoint_registry  # noqa: E402
 from habitat_local_eaios.idle_endpoint import PassiveIdleAgent  # noqa: E402
@@ -32,6 +32,7 @@ from habitat_local_eaios.shared_world import NodeEndpoint  # noqa: E402
 from habitat_local_eaios.stage2_feedback import Stage2ExecutionFeedback  # noqa: E402
 from habitat_local_eaios.store import ExecutionStore  # noqa: E402
 from test_endpoint_registry import node_sources  # noqa: E402
+from test_navigation_dispatch import OracleCommand  # noqa: E402
 from test_shared_world import (  # noqa: E402
     ContractAgent,
     ContractModel,
@@ -190,6 +191,18 @@ class Agent(ContractAgent):
         self.task_description = task_description
         self.subtask_description = subtask_description
         self.llm_model = ContractModel(task_description.removeprefix("Navigate to "), None)
+        self.llm_model.actions.append(
+            {"name": "wait", "parameters": {"type": "object", "properties": {}}}
+        )
+
+    def chat(self, observation: str) -> Any:
+        """Preserve CrabAgent's actual post-model mapping, including exact robot injection."""
+        name, parameters = super().chat(observation)
+        return (
+            {"name": "wait", "arguments": ["500"]}
+            if name in {"wait", "send_request"}
+            else {"name": name, "arguments": dict(parameters, robot=self.name)}
+        )
 
 
 class Actor:
@@ -285,7 +298,15 @@ class Runtime(LiveEmosStage2Runtime):
             current_episode=SimpleNamespace(scene_id="scene", episode_id="episode"),
             episode_over=False,
             get_metrics=lambda: {"pddl_success": False},
-            task=SimpleNamespace(actions={}, get_task_text_context=lambda: {}),
+            task=SimpleNamespace(
+                actions={
+                    f"agent_{agent}_oracle_nav_action": OracleCommand(
+                        tuple(f"target-{i}" for i in range(32)) + ("object-a", "object-b")
+                    )
+                    for agent in range(count)
+                },
+                get_task_text_context=lambda: {},
+            ),
         )
         self._agent_access = SimpleNamespace(masks_shape=(1,))
         self._prepared_observations = {}
@@ -385,6 +406,7 @@ class Runtime(LiveEmosStage2Runtime):
 def vendor_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resolve only required original type boundaries without a vendor process."""
     monkeypatch.setattr(live_bindings, "_original_wait_skill_type", lambda: WaitSkillPolicy)
+    monkeypatch.setattr(navigation_dispatch, "_original_action_type", lambda: OracleCommand)
     module = ModuleType("habitat_mas.utils")
     module.AgentArguments = Arguments  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "habitat_mas.utils", module)
@@ -499,7 +521,7 @@ def test_live_guard_accepts_only_current_model_bearing_peers(
         with pytest.raises(IntegrationError, match="another active agent"):
             actor.originals[0].chat("before peer activation")
         bind_task(bindings, 1, 1, relocation=relocation)
-        assert actor.originals[0].chat("after peer activation")[0] == "send_request"
+        assert actor.originals[0].chat("after peer activation")["name"] == "wait"
         observe_wait_exit(bindings, 0)
         assert actor.originals[0].dispatches == 1
         assert first_model.offered_actions is not None
@@ -510,7 +532,7 @@ def test_live_guard_accepts_only_current_model_bearing_peers(
         assert bindings.feedbacks[0].request_peer_names("agent_0") == frozenset({"agent_1"})
         assert bindings.feedbacks[1].request_peer_names("agent_1") == frozenset({"agent_0"})
         cast(Any, actor.originals[1]).llm_model = request_model("agent_0", relocation=relocation)
-        assert actor.originals[1].chat("reciprocal peer request")[0] == "send_request"
+        assert actor.originals[1].chat("reciprocal peer request")["name"] == "wait"
         observe_wait_exit(bindings, 1)
         assert (
             bindings.feedbacks[0].peer_execution_scope("agent_0")["operation_delegation_supported"]
@@ -523,7 +545,7 @@ def test_live_guard_accepts_only_current_model_bearing_peers(
         later = bind_task(bindings, 1, 2, relocation=relocation)
         scope = bindings.feedbacks[0].peer_execution_scope("agent_0")
         assert scope["peers"][0]["canonical_contract"]["invocation_digest"] == later.request_key()
-        assert actor.originals[0].chat("new peer attempt")[0] == "send_request"
+        assert actor.originals[0].chat("new peer attempt")["name"] == "wait"
         observe_wait_exit(bindings, 0)
         assert actor.originals[0].initializations == 1
         assert bindings.feedbacks[0]._contracts["agent_0"].invocation_digest == own.request_key()
@@ -553,7 +575,10 @@ def test_failed_live_binding_does_not_advertise_a_peer(
             bind_task(bindings, 1, 1)
         assert bindings.feedbacks[0].request_peer_names("agent_0") == frozenset()
         assert actor.originals[0].initializations == 1
-        assert actor.originals[0].chat("untouched own navigation")[1] == {"target_obj": "target-0"}
+        assert actor.originals[0].chat("untouched own navigation")["arguments"] == {
+            "target_obj": "target-0",
+            "robot": "agent_0",
+        }
     finally:
         bindings.close()
 
@@ -780,6 +805,19 @@ def test_loaded_perception_initialization_archives_actual_readiness(
     assert gym.steps == actor.calls == 0
     assert all(agent.llm_model.calls == 0 for agent in actor.originals)
     assert runtime.test_diagnostics.terminals == []
+    how = json.loads((run / "local-how-profile.json").read_bytes())
+    assert how["schema_version"] == (
+        "roboguide.habitat-local-how-profile/v0.12"
+        if acquisition
+        else "roboguide.habitat-local-how-profile/v0.10"
+    )
+    if acquisition:
+        from habitat_local_eaios.observation_control import observation_control_declaration
+
+        assert how["observation_control"] == observation_control_declaration()
+        assert how["navigation_dispatch"] == navigation_dispatch.navigation_dispatch_declaration()
+    else:
+        assert "observation_control" not in how
 
 
 @pytest.mark.parametrize("count", [1, 2, 3, 4])
@@ -1120,6 +1158,110 @@ def test_active_acquisition_guard_retains_exact_entity_binding() -> None:
             contract.validate("observer", action, frozenset())
     with pytest.raises(IntegrationError, match="no Stage2 execution profile"):
         Stage2ExecutionContract.for_invocation(invocation(0, ("observer",), observation=True))
+
+
+def test_already_observed_acquisition_finishes_without_movement_or_model(tmp_path: Path) -> None:
+    """An existing true sample needs no motion; it still cannot assert official joint success."""
+    actor, gym = Actor(2), Gym({})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    runtime._config.enable_observation_acquisition = True
+    runtime._config.observation_acquisition_max_steps = 256
+    runtime.registry["endpoints"][0]["operations"].append("observation.acquire@v1")
+    assert runtime._habitat_env is not None
+    simulator = SimpleNamespace(
+        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=[42]
+    )
+    runtime._habitat_env.task.pddl_problem = SimpleNamespace(
+        get_ordered_entities_list=lambda: [SimpleNamespace(name="object-a")],
+        sim_info=SimpleNamespace(search_for_entity=lambda entity: 0, sim=simulator),
+    )
+    gym._last_obs["detected_objects"] = [142]
+    body = invocation(0, ("observer",), observation=True).as_dict()
+    body["operation"] = "observation.acquire@v1"
+    request = parse_canonical_invocation({"invocation": body})
+    outcomes: list[LocalExecutionOutcome] = []
+    _, summary = runtime.execute_live(
+        {0: request},
+        lambda: {},
+        lambda: False,
+        lambda *args: None,
+        lambda agent, request, outcome: outcomes.append(outcome),
+        0.1,
+    )
+    assert len(outcomes) == 1 and outcomes[0].state == "COMPLETED"
+    assert outcomes[0].terminal_basis == "condition-observed-true"
+    assert not outcomes[0].benchmark_task_achieved
+    assert actor.calls == gym.steps == 0
+    assert all(agent.initializations == 0 for agent in actor.originals)
+    assert summary["termination_reason"] == "all_local_slots_finished"
+    receipt = json.loads(next(tmp_path.glob("observation-*.json")).read_bytes())
+    assert receipt["condition_holds"] is True and receipt["acquisition_steps"] == 0
+
+
+def test_local_acquisition_success_does_not_latch_the_joint_terminal_goal(tmp_path: Path) -> None:
+    """Different successful observation times cannot manufacture simultaneous official truth."""
+
+    class TransientDetectionGym(Gym):
+        """Expose non-overlapping actual cached detections while leaving official failure intact."""
+
+        def step(self, action: Any) -> tuple[Any, float, bool, dict[str, bool]]:
+            """Advance exactly once and publish the detections from that same fake step."""
+            result = super().step(action)
+            self._last_obs = {
+                "agent_0_detected_objects": [142] if self.steps == 2 else [],
+                "agent_1_detected_objects": [143] if self.steps == 4 else [],
+            }
+            return result
+
+    actor, gym = Actor(2), TransientDetectionGym({0: 1, 1: 1})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    runtime._config.enable_observation_acquisition = True
+    runtime._config.observation_acquisition_max_steps = 6
+    runtime._detection_sensors = {agent: f"agent_{agent}_detected_objects" for agent in range(2)}
+    simulator = SimpleNamespace(
+        habitat_config=SimpleNamespace(object_ids_start=100), scene_obj_ids=[42, 43]
+    )
+    assert runtime._habitat_env is not None
+    runtime._habitat_env.task.pddl_problem = SimpleNamespace(
+        get_ordered_entities_list=lambda: [
+            SimpleNamespace(name="object-a"),
+            SimpleNamespace(name="object-b"),
+        ],
+        sim_info=SimpleNamespace(
+            search_for_entity=lambda entity: 0 if entity.name == "object-a" else 1,
+            sim=simulator,
+        ),
+    )
+    requests = {}
+    for agent, entity in enumerate(("object-a", "object-b")):
+        runtime.registry["endpoints"][agent]["operations"].append("observation.acquire@v1")
+        body = invocation(agent, ("observer-a", "observer-b"), observation=True).as_dict()
+        body.update(
+            operation="observation.acquire@v1",
+            objective=f"Navigate to {entity}",
+            parameters={"expected": f"detected({entity})"},
+        )
+        requests[agent] = parse_canonical_invocation({"invocation": body})
+    terminal: dict[int, LocalExecutionOutcome] = {}
+    _, summary = runtime.execute_live(
+        requests,
+        lambda: {},
+        lambda: False,
+        lambda *args: None,
+        lambda agent, request, outcome: terminal.update({agent: outcome}),
+        0.1,
+    )
+    assert actor.calls == gym.steps == 4
+    assert {agent: outcome.simulator_steps for agent, outcome in terminal.items()} == {0: 2, 1: 4}
+    assert all(outcome.state == "COMPLETED" for outcome in terminal.values())
+    assert all(not outcome.benchmark_task_achieved for outcome in terminal.values())
+    assert [agent.llm_model.calls for agent in actor.originals] == [2, 4]
+    assert gym._last_obs["agent_0_detected_objects"] == []
+    assert summary["final_info"]["pddl_success"] is False
+    assert summary["identity"]["episode_reset_count"] == 1
+    receipts = [json.loads(path.read_bytes()) for path in tmp_path.glob("observation-*.json")]
+    assert sorted(receipt["simulator_steps"] for receipt in receipts) == [2, 4]
+    assert all(receipt["condition_holds"] is True for receipt in receipts)
 
 
 def test_live_coordinator_has_no_unused_endpoint_barrier(tmp_path: Path) -> None:

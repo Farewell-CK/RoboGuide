@@ -121,7 +121,10 @@ def format_stage2_subtask(invocation: CanonicalInvocation, mode: str) -> str:
             "The local acquisition profile permits nav_to_obj only for "
             f"{json.dumps(invocation.object_ref)} "
             "and wait. Completion requires actual detection from the existing visual sensor; "
-            "navigation completion alone is not detection."
+            "navigation completion alone is not detection. Use the current operation observation "
+            "feedback to distinguish negative detection from unavailable evidence. The declared "
+            "local observation control returns from each selected pause within its published "
+            "cadence and remaining acquisition budget; it does not guarantee persistent detection."
         )
     if isinstance(invocation, CanonicalRelocationInvocation):
         object_ref = json.dumps(invocation.object_ref, ensure_ascii=False)

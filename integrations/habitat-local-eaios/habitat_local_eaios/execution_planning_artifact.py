@@ -12,7 +12,7 @@ from .endpoint_registry import load_endpoint_registry
 from .model import IntegrationError
 from .task_verifier import build_task_verifier_source
 
-SCHEMA = "roboguide.execution-planning-evidence/v0.1"
+SCHEMA = "roboguide.execution-planning-evidence/v0.2"
 
 
 def _digest(value: object) -> str:
@@ -67,6 +67,12 @@ def build(semantic_path: Path, verifier_path: Path, registry_path: Path) -> dict
             "max_slots": 32,
             "resource_release": "after-task-satisfaction",
             "verifier_publication": "after-all-session-slots",
+        },
+        "execution_topology": {
+            "supported_coupling_modes": ["independent"],
+            "supports_task_dependencies": True,
+            "supports_context_relations": False,
+            "actor_binding": "session-stable",
         },
     }
     if any(value is None for value in body["identity"].values()):

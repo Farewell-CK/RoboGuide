@@ -247,6 +247,9 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 草案恢复，接口不可用或来源不匹配保留系统失败。前检不做资源承诺，也不证明物理可达。
 普通顺序复用与终态 verifier 持有资源使用各自的声明规则，见
 [ADR-0109](docs/decisions/0109-published-plan-validation-and-bounded-draft-recovery.md)。
+执行声明及只读回复 v0.2 将支持的协作模式、DAG 与 Actor 生命周期显式绑定到冻结来源，
+以具体 code/path 区分模式、能力和资源冲突；旧 v0.1 缺失字段不被推断为新能力。
+字段与共享合成回归见[发布的执行拓扑合同](contracts/mission/execution-planning-v0.2/README.md)。
 
 负责 Mission Understanding、Clarification、Task Planning、Task Graph 和 Execution
 Requirements，回答 `What needs to be achieved?`。外部用户只提交文本 instruction；仅当存在
@@ -1226,6 +1229,8 @@ ADR-0080 的有界事实批处理默认最多 8 条、单一合批窗口 2ms；r
 Deployment-owned bounded active observation, pre-dispatch model reselection and evidence closure are
 documented in [the extension guide](docs/extensions/bounded-observation-and-evidence-closure.md),
 with authority and physical release limits in [ADR-0094](docs/decisions/0094-bounded-observation-and-local-contract-recovery.md).
+Acquisition Local How v0.11 supplies actual cached condition/budget feedback and disclosed bounded
+pauses; it preserves raw model choices, the original attempt budget and official terminal authority.
 
 软件进程停止与本地执行结果是独立证据（[ADR-0110](docs/decisions/0110-execution-generation-and-process-stop-evidence.md)）。
 Habitat Local EAIOS 在原 worker 真实退出后发布 safe-state v0.3，完整绑定原 Group、attempt

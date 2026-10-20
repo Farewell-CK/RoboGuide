@@ -19,6 +19,35 @@ pub(crate) struct PlanIssue {
     pub(crate) message: String,
 }
 
+impl PlanIssue {
+    /// Binds a concrete published-contract error to its exact logical draft field.
+    pub(crate) fn new(
+        code: &'static str,
+        path: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            code,
+            path: path.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl From<String> for PlanIssue {
+    /// Preserves an unclassified legacy rejection without guessing a more specific cause.
+    fn from(message: String) -> Self {
+        Self::new("deployment.contract_incompatible", "/tasks", message)
+    }
+}
+
+impl From<&str> for PlanIssue {
+    /// Keeps existing static contract failures distinct from placement authority.
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+
 /// Reuses submission's source and deployment validators without mutating application state.
 pub(crate) fn issues(
     controller: &ControllerState,
@@ -43,13 +72,7 @@ pub(crate) fn issues(
     if let Some(deployment) = deployment {
         let group = domain::ExecutionGroupId::new(format!("group-{}", plan.goal().mission_id()))
             .expect("decoded Mission identity creates a valid Group identity");
-        if let Err(message) = deployment.restrictions_for_plan(plan, &group) {
-            issues.push(PlanIssue {
-                code: "deployment.contract_incompatible",
-                path: "/tasks".into(),
-                message,
-            });
-        }
+        issues.extend(deployment.plan_issues(plan, &group));
     }
     issues
 }
@@ -67,7 +90,7 @@ pub(crate) fn assess(
     let truncated = issues.len() > MAX_PLAN_ISSUES;
     issues.truncate(MAX_PLAN_ISSUES);
     serde_json::json!({
-        "schema_version": "roboguide.plan-validation/v0.1",
+        "schema_version": "roboguide.plan-validation/v0.2",
         "scope": "published-contracts",
         "mission_id": plan.goal().mission_id().as_str(),
         "plan_body_sha256": format!("sha256:{:x}", Sha256::digest(body)),
@@ -76,6 +99,7 @@ pub(crate) fn assess(
         "deployment_digest": deployment.map(DeploymentFeasibility::digest),
         "world_identity": deployment.and_then(DeploymentFeasibility::planning_identity),
         "execution_lifetime": deployment.and_then(DeploymentFeasibility::published_lifetime),
+        "execution_topology": deployment.and_then(DeploymentFeasibility::published_topology),
         "issues": issues,
         "issues_truncated": truncated,
     })

@@ -1,0 +1,524 @@
+{
+  "fixture_version": "execution-composition-conformance/v0.1",
+  "purpose": "synthetic_conformance_not_benchmark",
+  "predicate": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+  "goal_expression": {
+    "kind": "logical",
+    "operator": "and",
+    "operands": [
+      {
+        "kind": "predicate",
+        "name": "any_at",
+        "arguments": [
+          "landmark-a"
+        ]
+      },
+      {
+        "kind": "predicate",
+        "name": "any_at",
+        "arguments": [
+          "landmark-b"
+        ]
+      },
+      {
+        "kind": "predicate",
+        "name": "is_detected",
+        "arguments": [
+          "landmark-a"
+        ]
+      },
+      {
+        "kind": "predicate",
+        "name": "is_detected",
+        "arguments": [
+          "landmark-b"
+        ]
+      }
+    ],
+    "quantifier": null,
+    "variables": []
+  },
+  "execution_topology": {
+    "supported_coupling_modes": [
+      "independent"
+    ],
+    "supports_task_dependencies": true,
+    "supports_context_relations": false,
+    "actor_binding": "session-stable"
+  },
+  "plan": {
+    "schema_version": "roboguide.mission-plan/v0.8",
+    "mission": {
+      "id": "mission-composition-conformance",
+      "objective": "Reach and detect both declared landmarks in one terminal state.",
+      "actors": [
+        {
+          "id": "participant-a"
+        },
+        {
+          "id": "participant-b"
+        }
+      ]
+    },
+    "contexts": [
+      {
+        "id": "joint",
+        "roles": [
+          {
+            "id": "participant-a",
+            "actor": "participant-a"
+          },
+          {
+            "id": "participant-b",
+            "actor": "participant-b"
+          }
+        ],
+        "relations": [],
+        "executor_constraints": [],
+        "coupling_mode": "independent"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "approach-a",
+        "description": "Navigate to landmark-a.",
+        "depends_on": [],
+        "context_id": "joint",
+        "roles": [
+          {
+            "id": "approach-a",
+            "context_role": "participant-a",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "navigate",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "navigate",
+                "version": "v1"
+              },
+              "objective": "Navigate to landmark-a.",
+              "parameters": {
+                "destination": "landmark-a"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "Navigate to landmark-a.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      },
+      {
+        "id": "observe-a",
+        "description": "Acquire actual visual detection of landmark-a, retaining the required joint terminal goal.",
+        "depends_on": [
+          "approach-a"
+        ],
+        "context_id": "joint",
+        "roles": [
+          {
+            "id": "observe-a",
+            "context_role": "participant-a",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "observation",
+                    "name": "acquire",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "observation",
+                "name": "acquire",
+                "version": "v1"
+              },
+              "objective": "Acquire actual visual detection of landmark-a, retaining the required joint terminal goal.",
+              "parameters": {
+                "expected": "detected(landmark-a)"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+          "basis": "verifier-evidence",
+          "verifier": {
+            "contract": {
+              "namespace": "observation",
+              "name": "verify",
+              "version": "v1"
+            },
+            "predicate": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+            "max_evidence_age_ms": 30000
+          }
+        }
+      },
+      {
+        "id": "approach-b",
+        "description": "Navigate to landmark-b.",
+        "depends_on": [],
+        "context_id": "joint",
+        "roles": [
+          {
+            "id": "approach-b",
+            "context_role": "participant-b",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "mobility",
+                    "name": "navigate",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "mobility",
+                "name": "navigate",
+                "version": "v1"
+              },
+              "objective": "Navigate to landmark-b.",
+              "parameters": {
+                "destination": "landmark-b"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "Navigate to landmark-b.",
+          "basis": "execution-report",
+          "verifier": null
+        }
+      },
+      {
+        "id": "observe-b",
+        "description": "Acquire actual visual detection of landmark-b, retaining the required joint terminal goal.",
+        "depends_on": [
+          "approach-b"
+        ],
+        "context_id": "joint",
+        "roles": [
+          {
+            "id": "observe-b",
+            "context_role": "participant-b",
+            "requirements": {
+              "capabilities": [
+                {
+                  "contract": {
+                    "namespace": "observation",
+                    "name": "acquire",
+                    "version": "v1"
+                  },
+                  "constraints": []
+                }
+              ],
+              "resources": [
+                {
+                  "kind": "space",
+                  "units": 1
+                }
+              ]
+            },
+            "execution_intent": {
+              "operation": {
+                "namespace": "observation",
+                "name": "acquire",
+                "version": "v1"
+              },
+              "objective": "Acquire actual visual detection of landmark-b, retaining the required joint terminal goal.",
+              "parameters": {
+                "expected": "detected(landmark-b)"
+              }
+            },
+            "resource_scope": "task"
+          }
+        ],
+        "timing": {
+          "earliest_start_offset_ms": 0,
+          "latest_start_offset_ms": null,
+          "completion_deadline_offset_ms": null
+        },
+        "satisfaction": {
+          "expected_effect": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+          "basis": "verifier-evidence",
+          "verifier": {
+            "contract": {
+              "namespace": "observation",
+              "name": "verify",
+              "version": "v1"
+            },
+            "predicate": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+            "max_evidence_age_ms": 30000
+          }
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "staged_independent",
+      "changes": [],
+      "expected_codes": []
+    },
+    {
+      "id": "context_handoff",
+      "changes": [
+        {
+          "path": "/contexts/0/coupling_mode",
+          "value": "sequential-handoff"
+        }
+      ],
+      "expected_codes": [
+        "deployment.coupling_mode_unsupported"
+      ],
+      "expected_paths": [
+        "/contexts/0/coupling_mode"
+      ]
+    },
+    {
+      "id": "task_override_handoff",
+      "changes": [
+        {
+          "path": "/tasks/1/coupling_mode",
+          "value": "sequential-handoff"
+        }
+      ],
+      "expected_codes": [
+        "deployment.coupling_mode_unsupported"
+      ],
+      "expected_paths": [
+        "/tasks/1/coupling_mode"
+      ]
+    },
+    {
+      "id": "four_terminal_owners",
+      "changes": [
+        {
+          "path": "/mission/actors",
+          "value": [
+            {
+              "id": "participant-a"
+            },
+            {
+              "id": "participant-b"
+            },
+            {
+              "id": "participant-c"
+            },
+            {
+              "id": "participant-d"
+            }
+          ]
+        },
+        {
+          "path": "/contexts/0/roles",
+          "value": [
+            {
+              "id": "participant-a",
+              "actor": "participant-a"
+            },
+            {
+              "id": "participant-b",
+              "actor": "participant-b"
+            },
+            {
+              "id": "participant-c",
+              "actor": "participant-c"
+            },
+            {
+              "id": "participant-d",
+              "actor": "participant-d"
+            }
+          ]
+        },
+        {
+          "path": "/tasks/0/roles/0/context_role",
+          "value": "participant-a"
+        },
+        {
+          "path": "/tasks/0/depends_on",
+          "value": []
+        },
+        {
+          "path": "/tasks/0/satisfaction",
+          "value": {
+            "expected_effect": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+            "basis": "verifier-evidence",
+            "verifier": {
+              "contract": {
+                "namespace": "observation",
+                "name": "verify",
+                "version": "v1"
+              },
+              "predicate": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+              "max_evidence_age_ms": 30000
+            }
+          }
+        },
+        {
+          "path": "/tasks/1/roles/0/context_role",
+          "value": "participant-c"
+        },
+        {
+          "path": "/tasks/1/depends_on",
+          "value": []
+        },
+        {
+          "path": "/tasks/1/satisfaction",
+          "value": {
+            "expected_effect": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+            "basis": "verifier-evidence",
+            "verifier": {
+              "contract": {
+                "namespace": "observation",
+                "name": "verify",
+                "version": "v1"
+              },
+              "predicate": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+              "max_evidence_age_ms": 30000
+            }
+          }
+        },
+        {
+          "path": "/tasks/2/roles/0/context_role",
+          "value": "participant-b"
+        },
+        {
+          "path": "/tasks/2/depends_on",
+          "value": []
+        },
+        {
+          "path": "/tasks/2/satisfaction",
+          "value": {
+            "expected_effect": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+            "basis": "verifier-evidence",
+            "verifier": {
+              "contract": {
+                "namespace": "observation",
+                "name": "verify",
+                "version": "v1"
+              },
+              "predicate": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+              "max_evidence_age_ms": 30000
+            }
+          }
+        },
+        {
+          "path": "/tasks/3/roles/0/context_role",
+          "value": "participant-d"
+        },
+        {
+          "path": "/tasks/3/depends_on",
+          "value": []
+        },
+        {
+          "path": "/tasks/3/satisfaction",
+          "value": {
+            "expected_effect": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+            "basis": "verifier-evidence",
+            "verifier": {
+              "contract": {
+                "namespace": "observation",
+                "name": "verify",
+                "version": "v1"
+              },
+              "predicate": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+              "max_evidence_age_ms": 30000
+            }
+          }
+        }
+      ],
+      "expected_codes": [
+        "verifier.retained_capacity_exceeded"
+      ],
+      "expected_paths": [
+        "/tasks"
+      ]
+    },
+    {
+      "id": "terminal_verdict_predecessor",
+      "changes": [
+        {
+          "path": "/tasks/0/satisfaction",
+          "value": {
+            "expected_effect": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+            "basis": "verifier-evidence",
+            "verifier": {
+              "contract": {
+                "namespace": "observation",
+                "name": "verify",
+                "version": "v1"
+              },
+              "predicate": "any_at(landmark-a) AND any_at(landmark-b) AND is_detected(landmark-a) AND is_detected(landmark-b)",
+              "max_evidence_age_ms": 30000
+            }
+          }
+        }
+      ],
+      "expected_codes": [
+        "verifier.retained_capacity_exceeded",
+        "verifier.blocks_dependent_work",
+        "verifier.blocks_actor_reuse"
+      ],
+      "expected_paths": [
+        "/tasks",
+        "/tasks/0/satisfaction"
+      ]
+    }
+  ]
+}
