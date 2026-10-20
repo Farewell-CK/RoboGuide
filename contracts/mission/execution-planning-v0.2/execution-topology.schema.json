@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RoboGuide published execution topology v0.2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "supported_coupling_modes",
+    "supports_task_dependencies",
+    "supports_context_relations",
+    "actor_binding"
+  ],
+  "properties": {
+    "supported_coupling_modes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "independent",
+          "sequential-handoff",
+          "concurrent-cooperation",
+          "tightly-coupled-cooperation"
+        ]
+      },
+      "description": "Canonical consumers additionally require lexical sorting."
+    },
+    "supports_task_dependencies": {"type": "boolean"},
+    "supports_context_relations": {"type": "boolean"},
+    "actor_binding": {"const": "session-stable"}
+  }
+}

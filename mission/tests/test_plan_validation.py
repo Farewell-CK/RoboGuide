@@ -13,7 +13,7 @@ from mission.controller import MissionControllerError
 from mission.deployment_assessment import plan_body_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
-from mission.plan_assessment import SCHEMA, validate_assessment
+from mission.plan_assessment import LEGACY_SCHEMA, SCHEMA, validate_assessment
 from mission.plan_validation import MAX_PLAN_ISSUES, PlanValidationError, reference_issues
 from mission.provider_errors import MissionProviderError
 from mission.rejected_draft import (
@@ -59,6 +59,7 @@ def _report(plan: MissionPlan, issues: list[JSONObject] | None = None) -> JSONOb
         "verifier_source_digest": source["digest"],
         "deployment_digest": "sha256:" + "c" * 64,
         "execution_lifetime": document["execution_lifetime"],
+        "execution_topology": document["execution_topology"],
         "world_identity": document["identity"],
         "issues": cast(JSONValue, issues or []),
         "issues_truncated": False,
@@ -93,6 +94,7 @@ def test_readonly_feedback_requires_exact_plan_and_frozen_sources() -> None:
         ("execution_lifetime", None),
         ("deployment_digest", None),
         ("world_identity", None),
+        ("execution_topology", None),
         ("scope", "initial_static_world"),
         ("issues_truncated", True),
         ("unknown", "inventory"),
@@ -101,6 +103,27 @@ def test_readonly_feedback_requires_exact_plan_and_frozen_sources() -> None:
         raw[field] = value
         with pytest.raises(ValueError):
             validate_assessment(raw, plan, evidence)
+
+
+def test_legacy_assessment_cannot_erase_new_topology_requirements() -> None:
+    """A historical reply is readable but cannot stand in for a configured v0.2 contract."""
+    plan = MissionPlan.from_json(_raw())
+    report = _report(plan)
+    report["schema_version"] = LEGACY_SCHEMA
+    report.pop("execution_topology")
+    validate_assessment(report, plan)
+    with pytest.raises(ValueError, match="differs from frozen"):
+        validate_assessment(report, plan, _evidence()[0])
+
+
+def test_same_lifetime_cannot_hide_topology_drift() -> None:
+    """Matching counts do not legitimize a changed support set or Actor lifetime."""
+    plan = MissionPlan.from_json(_raw())
+    report = _report(plan)
+    topology = cast(JSONObject, report["execution_topology"])
+    topology["supports_task_dependencies"] = False
+    with pytest.raises(ValueError, match="differs from frozen"):
+        validate_assessment(report, plan, _evidence()[0])
 
 
 def test_multiple_controller_findings_retain_exact_plan_and_source_binding() -> None:

@@ -63,6 +63,14 @@ def test_artifact_binds_verifier_and_registry_sources(tmp_path: Path) -> None:
 
     assert artifact["identity"]["semantic_evidence_digest"] == semantic["digest"]
     assert artifact["execution_lifetime"]["configured_endpoint_count"] == 1
+    assert artifact["schema_version"] == "roboguide.execution-planning-evidence/v0.2"
+    assert artifact["execution_topology"] == {
+        "supported_coupling_modes": ["independent"],
+        "supports_task_dependencies": True,
+        "supports_context_relations": False,
+        "actor_binding": "session-stable",
+    }
+    assert "node_id" not in json.dumps(artifact)
     assert artifact["digest"] == _digest(
         {key: value for key, value in artifact.items() if key != "digest"}
     )
