@@ -117,7 +117,16 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             execution_options["enable_observation_acquisition"]
             or execution_options["contract_recovery_attempts"] > 0
         )
-        observation_control = actual_schema == "roboguide.habitat-local-how-profile/v0.11"
+        navigation_dispatch = actual_schema == "roboguide.habitat-local-how-profile/v0.12"
+        observation_control = actual_schema in {
+            "roboguide.habitat-local-how-profile/v0.11",
+            "roboguide.habitat-local-how-profile/v0.12",
+        }
+        if navigation_dispatch:
+            from .navigation_dispatch import navigation_dispatch_declaration
+
+            if actual.get("navigation_dispatch") != navigation_dispatch_declaration():
+                raise IntegrationError("actual acquisition navigation dispatch contract is invalid")
         if observation_control:
             from .observation_control import observation_control_declaration
 
@@ -134,13 +143,28 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             not in {"roboguide.e1.b1-deployment-used/v0.3", "roboguide.e1.b1-deployment-used/v0.4"}
             or actual_schema
             != (
-                "roboguide.habitat-local-how-profile/v0.11"
+                "roboguide.habitat-local-how-profile/v0.12"
+                if navigation_dispatch
+                else "roboguide.habitat-local-how-profile/v0.11"
                 if observation_control
                 else "roboguide.habitat-local-how-profile/v0.10"
                 if extended
                 else "roboguide.habitat-local-how-profile/v0.9"
             )
             or (extended and actual.get("execution_options") != execution_options)
+            or set(actual)
+            != {
+                "schema_version",
+                "base_profile",
+                "execution_profile",
+                "endpoint_registry_digest",
+                "observation_enabled",
+                "unassigned_policy",
+                "official_success_authority",
+                *({"execution_options"} if extended else set()),
+                *({"observation_control"} if observation_control else set()),
+                *({"navigation_dispatch"} if navigation_dispatch else set()),
+            }
             or actual.get("execution_profile") != LIVE_PROFILE
             or actual.get("endpoint_registry_digest") != registry["digest"]
             or actual.get("observation_enabled") is not declaration.get("enable_observation")

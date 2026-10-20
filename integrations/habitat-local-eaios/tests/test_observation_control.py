@@ -232,12 +232,22 @@ def test_feedback_cannot_bind_a_different_operation_or_attempt() -> None:
         )
 
 
-@pytest.mark.parametrize("mutation", [None, "pause", "persistence", "extra", "schema"])
+@pytest.mark.parametrize(
+    "version,mutation",
+    [
+        (version, mutation)
+        for version in (11, 12)
+        for mutation in (None, "pause", "persistence", "extra", "schema")
+    ]
+    + [(12, mutation) for mutation in ("dispatch", "dispatch-missing", "dispatch-downgrade")],
+)
 def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
     tmp_path: Path,
+    version: int,
     mutation: str | None,
 ) -> None:
     """Actual run-local source validation accepts only the exact disclosed feedback profile."""
+    from habitat_local_eaios.navigation_dispatch import navigation_dispatch_declaration
     from habitat_local_eaios.observation_control import observation_control_declaration
     from roboguide_eval.b1_deployment_feasibility import (  # type: ignore[import-untyped]
         preflight_deployment_feasibility,
@@ -248,9 +258,11 @@ def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
     how_path = run / "evidence/local-how-profile.json"
     how = json.loads(how_path.read_bytes())
     how.update(
-        schema_version="roboguide.habitat-local-how-profile/v0.11",
+        schema_version=f"roboguide.habitat-local-how-profile/v0.{version}",
         observation_control=observation_control_declaration(),
     )
+    if version == 12:
+        how["navigation_dispatch"] = navigation_dispatch_declaration()
     how["execution_options"]["enable_observation_acquisition"] = True
     deployment_path = run / "b1-deployment-used.json"
     declaration = json.loads(deployment_path.read_bytes())
@@ -268,9 +280,15 @@ def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
         how["observation_control"]["hidden_motion"] = True
     elif mutation == "schema":
         how["schema_version"] = "roboguide.habitat-local-how-profile/v0.10"
+    elif mutation == "dispatch":
+        how["navigation_dispatch"]["target_cache_policy"] = "resample-every-step"
+    elif mutation == "dispatch-missing":
+        del how["navigation_dispatch"]
+    elif mutation == "dispatch-downgrade":
+        how["schema_version"] = "roboguide.habitat-local-how-profile/v0.11"
     how_path.write_text(json.dumps(how))
     if mutation is None:
         preflight_deployment_feasibility(run)
     else:
-        with pytest.raises(ValueError, match="observation feedback|Local How"):
+        with pytest.raises(ValueError, match="observation feedback|Local How|navigation dispatch"):
             preflight_deployment_feasibility(run)

@@ -257,7 +257,21 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     }
     if bound_relocation:
         expected_base["relocation_completion_profile"] = "exact-object-released-place/v0.1"
-    observation_control = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.11"
+    navigation_dispatch = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.12"
+    observation_control = how.get("schema_version") in {
+        "roboguide.habitat-local-how-profile/v0.11",
+        "roboguide.habitat-local-how-profile/v0.12",
+    }
+    if navigation_dispatch and how.get("navigation_dispatch") != {
+        "profile": "fresh-acquisition-navigation-command/v0.1",
+        "operation": "observation.acquire@v1",
+        "boundary": "after-guarded-original-tool-mapping-before-skill-entry",
+        "reset_fields": ["prev_nav_done", "skill_done"],
+        "target_cache_policy": "preserve-original-targets-and-pathfinder",
+        "arrival_authority": "original-oracle-action-recomputation",
+        "official_success_authority": "habitat-pddl",
+    }:
+        raise ValueError("loaded acquisition navigation dispatch contract is invalid")
     if observation_control and (
         execution_options["enable_observation_acquisition"] is not True
         or how.get("observation_control")
@@ -290,10 +304,13 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             "official_success_authority",
             *({"execution_options"} if extended else set()),
             *({"observation_control"} if observation_control else set()),
+            *({"navigation_dispatch"} if navigation_dispatch else set()),
         }
         or how["schema_version"]
         != (
-            "roboguide.habitat-local-how-profile/v0.11"
+            "roboguide.habitat-local-how-profile/v0.12"
+            if navigation_dispatch
+            else "roboguide.habitat-local-how-profile/v0.11"
             if observation_control
             else "roboguide.habitat-local-how-profile/v0.10"
             if extended

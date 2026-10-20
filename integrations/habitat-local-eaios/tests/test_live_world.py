@@ -14,7 +14,7 @@ from typing import Any, cast
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from habitat_local_eaios import live_bindings  # noqa: E402
+from habitat_local_eaios import live_bindings, navigation_dispatch  # noqa: E402
 from habitat_local_eaios.backend import LocalExecutionOutcome  # noqa: E402
 from habitat_local_eaios.endpoint_registry import build_endpoint_registry  # noqa: E402
 from habitat_local_eaios.idle_endpoint import PassiveIdleAgent  # noqa: E402
@@ -32,6 +32,7 @@ from habitat_local_eaios.shared_world import NodeEndpoint  # noqa: E402
 from habitat_local_eaios.stage2_feedback import Stage2ExecutionFeedback  # noqa: E402
 from habitat_local_eaios.store import ExecutionStore  # noqa: E402
 from test_endpoint_registry import node_sources  # noqa: E402
+from test_navigation_dispatch import OracleCommand  # noqa: E402
 from test_shared_world import (  # noqa: E402
     ContractAgent,
     ContractModel,
@@ -194,6 +195,15 @@ class Agent(ContractAgent):
             {"name": "wait", "parameters": {"type": "object", "properties": {}}}
         )
 
+    def chat(self, observation: str) -> Any:
+        """Preserve CrabAgent's actual post-model mapping, including exact robot injection."""
+        name, parameters = super().chat(observation)
+        return (
+            {"name": "wait", "arguments": ["500"]}
+            if name in {"wait", "send_request"}
+            else {"name": name, "arguments": dict(parameters, robot=self.name)}
+        )
+
 
 class Actor:
     """Drive the same joint actor boundary with per-endpoint original model counters."""
@@ -288,7 +298,15 @@ class Runtime(LiveEmosStage2Runtime):
             current_episode=SimpleNamespace(scene_id="scene", episode_id="episode"),
             episode_over=False,
             get_metrics=lambda: {"pddl_success": False},
-            task=SimpleNamespace(actions={}, get_task_text_context=lambda: {}),
+            task=SimpleNamespace(
+                actions={
+                    f"agent_{agent}_oracle_nav_action": OracleCommand(
+                        tuple(f"target-{i}" for i in range(32)) + ("object-a", "object-b")
+                    )
+                    for agent in range(count)
+                },
+                get_task_text_context=lambda: {},
+            ),
         )
         self._agent_access = SimpleNamespace(masks_shape=(1,))
         self._prepared_observations = {}
@@ -388,6 +406,7 @@ class Runtime(LiveEmosStage2Runtime):
 def vendor_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resolve only required original type boundaries without a vendor process."""
     monkeypatch.setattr(live_bindings, "_original_wait_skill_type", lambda: WaitSkillPolicy)
+    monkeypatch.setattr(navigation_dispatch, "_original_action_type", lambda: OracleCommand)
     module = ModuleType("habitat_mas.utils")
     module.AgentArguments = Arguments  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "habitat_mas.utils", module)
@@ -502,7 +521,7 @@ def test_live_guard_accepts_only_current_model_bearing_peers(
         with pytest.raises(IntegrationError, match="another active agent"):
             actor.originals[0].chat("before peer activation")
         bind_task(bindings, 1, 1, relocation=relocation)
-        assert actor.originals[0].chat("after peer activation")[0] == "send_request"
+        assert actor.originals[0].chat("after peer activation")["name"] == "wait"
         observe_wait_exit(bindings, 0)
         assert actor.originals[0].dispatches == 1
         assert first_model.offered_actions is not None
@@ -513,7 +532,7 @@ def test_live_guard_accepts_only_current_model_bearing_peers(
         assert bindings.feedbacks[0].request_peer_names("agent_0") == frozenset({"agent_1"})
         assert bindings.feedbacks[1].request_peer_names("agent_1") == frozenset({"agent_0"})
         cast(Any, actor.originals[1]).llm_model = request_model("agent_0", relocation=relocation)
-        assert actor.originals[1].chat("reciprocal peer request")[0] == "send_request"
+        assert actor.originals[1].chat("reciprocal peer request")["name"] == "wait"
         observe_wait_exit(bindings, 1)
         assert (
             bindings.feedbacks[0].peer_execution_scope("agent_0")["operation_delegation_supported"]
@@ -526,7 +545,7 @@ def test_live_guard_accepts_only_current_model_bearing_peers(
         later = bind_task(bindings, 1, 2, relocation=relocation)
         scope = bindings.feedbacks[0].peer_execution_scope("agent_0")
         assert scope["peers"][0]["canonical_contract"]["invocation_digest"] == later.request_key()
-        assert actor.originals[0].chat("new peer attempt")[0] == "send_request"
+        assert actor.originals[0].chat("new peer attempt")["name"] == "wait"
         observe_wait_exit(bindings, 0)
         assert actor.originals[0].initializations == 1
         assert bindings.feedbacks[0]._contracts["agent_0"].invocation_digest == own.request_key()
@@ -556,7 +575,10 @@ def test_failed_live_binding_does_not_advertise_a_peer(
             bind_task(bindings, 1, 1)
         assert bindings.feedbacks[0].request_peer_names("agent_0") == frozenset()
         assert actor.originals[0].initializations == 1
-        assert actor.originals[0].chat("untouched own navigation")[1] == {"target_obj": "target-0"}
+        assert actor.originals[0].chat("untouched own navigation")["arguments"] == {
+            "target_obj": "target-0",
+            "robot": "agent_0",
+        }
     finally:
         bindings.close()
 
@@ -785,7 +807,7 @@ def test_loaded_perception_initialization_archives_actual_readiness(
     assert runtime.test_diagnostics.terminals == []
     how = json.loads((run / "local-how-profile.json").read_bytes())
     assert how["schema_version"] == (
-        "roboguide.habitat-local-how-profile/v0.11"
+        "roboguide.habitat-local-how-profile/v0.12"
         if acquisition
         else "roboguide.habitat-local-how-profile/v0.10"
     )
@@ -793,6 +815,7 @@ def test_loaded_perception_initialization_archives_actual_readiness(
         from habitat_local_eaios.observation_control import observation_control_declaration
 
         assert how["observation_control"] == observation_control_declaration()
+        assert how["navigation_dispatch"] == navigation_dispatch.navigation_dispatch_declaration()
     else:
         assert "observation_control" not in how
 

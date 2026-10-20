@@ -13,6 +13,16 @@ Oracle navigation action used below the EMOS/CrabAgent high-level policy boundar
 resolution, agent selection, path planning, action arguments, simulator stepping, and local safety
 remain Local How.
 
+For active observation, Local How v0.12 discloses the bounded condition feedback/pause
+profile and `fresh-acquisition-navigation-command/v0.1`. After an exact guarded
+`nav_to_obj` call passes the original CrabAgent mapping, only that endpoint's
+`prev_nav_done`/`skill_done` command latches are cleared. The next original Oracle
+action recomputes arrival; no success sensor is forced, target point resampled,
+world reset, peer changed, or budget extended. This prevents a completed-target
+cache from suppressing a new acquisition command indefinitely. Other operation
+profiles retain their original lifecycle. The raw action and flag transition are
+archived separately; this does not guarantee detection or official success.
+
 ## Opt-in object relocation
 
 `--enable-relocation` enables the existing canonical `object.relocate@v1` for the

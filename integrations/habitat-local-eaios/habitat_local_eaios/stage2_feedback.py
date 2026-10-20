@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from .model import IntegrationError
 
 if TYPE_CHECKING:
+    from .navigation_dispatch import NavigationDispatchLifecycle
     from .observation_control import ObservationAcquisitionControl
     from .relocation_completion import RelocationCompletionBinding
     from .stage2_contract import Stage2ExecutionContract
@@ -150,6 +151,7 @@ class Stage2ExecutionFeedback:
         completion_binding: RelocationCompletionBinding | None = None,
         peer_contracts: Callable[[], Mapping[str, Stage2ExecutionContract]] | None = None,
         observation_control: ObservationAcquisitionControl | None = None,
+        navigation_dispatch: NavigationDispatchLifecycle | None = None,
     ) -> None:
         """Freeze own contracts, optionally reading a deployment-owned active-peer projection."""
         self._contracts = dict(contracts)
@@ -158,6 +160,9 @@ class Stage2ExecutionFeedback:
         self._completion = completion
         self._completion_binding = completion_binding
         self._observation_control = observation_control
+        self._navigation_dispatch = navigation_dispatch
+        if navigation_dispatch is not None and observation_control is None:
+            raise IntegrationError("fresh navigation dispatch requires acquisition feedback")
         if observation_control is not None and (
             len(contracts) != 1
             or any(
@@ -309,6 +314,13 @@ class Stage2ExecutionFeedback:
         pending = self._pending.get(agent_name)
         if pending is None:
             raise IntegrationError("observation dispatch has no admitted model action")
+        if pending.action["name"] == "nav_to_obj" and self._navigation_dispatch is not None:
+            self._navigation_dispatch.dispatch(
+                action,
+                pending.action,
+                pending.document["tool_call_id"],
+                pending.document["action_sequence"],
+            )
         if pending.action["name"] not in {"wait", "send_request"}:
             return action
         if action != {"name": "wait", "arguments": ["500"]}:

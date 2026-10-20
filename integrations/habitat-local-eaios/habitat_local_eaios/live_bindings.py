@@ -9,6 +9,7 @@ from typing import Any
 
 from .idle_endpoint import PassiveIdleAgent, _original_wait_skill_type
 from .model import CanonicalInvocation, IntegrationError
+from .navigation_dispatch import NavigationDispatchLifecycle
 from .observation_control import ObservationAcquisitionControl
 from .relocation_completion import RelocationCompletionBinding
 from .stage2_contract import (
@@ -134,6 +135,13 @@ class LivePolicyBindings:
             completion_binding=completion,
             peer_contracts=self.peer_contracts,
             observation_control=observation_control,
+            navigation_dispatch=(
+                NavigationDispatchLifecycle(
+                    self.runtime._habitat_env, agent, contract, self.record_feedback
+                )
+                if observation_control is not None
+                else None
+            ),
         )
         feedback.install([policy])
         try:

@@ -29,6 +29,7 @@ from .model import (
     CanonicalRelocationInvocation,
     IntegrationError,
 )
+from .navigation_dispatch import inspect_navigation_dispatch, navigation_dispatch_declaration
 from .observation_control import (
     ObservationAcquisitionControl,
     observation_control_declaration,
@@ -116,6 +117,9 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             if agent in observer_ids
         ):
             raise IntegrationError("active observation requires original navigation skills")
+        if acquisition:
+            for agent in observer_ids:
+                inspect_navigation_dispatch(environment, agent)
         self._write_json("endpoint-registry-used.json", self.registry)
         self._write_json(
             "perception-readiness.json",
@@ -159,7 +163,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         self._write_json(
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.11"
+                "schema_version": "roboguide.habitat-local-how-profile/v0.12"
                 if acquisition
                 else "roboguide.habitat-local-how-profile/v0.10"
                 if recoveries
@@ -171,7 +175,10 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 "unassigned_policy": "original-wait-model-free",
                 "official_success_authority": "habitat-pddl",
                 **(
-                    {"observation_control": observation_control_declaration()}
+                    {
+                        "observation_control": observation_control_declaration(),
+                        "navigation_dispatch": navigation_dispatch_declaration(),
+                    }
                     if acquisition
                     else {}
                 ),

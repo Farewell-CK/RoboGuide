@@ -52,6 +52,12 @@
    raw tool call 保留，模型在调用前看到实际持续时间，证据同时记录原始500步映射和实际
    本地派发。没有选择替代工具、改目标或修改 vendor 源码；未启用 acquisition 的导航、
    搬运和 idle 保持原映射。v0.9/v0.10 历史声明继续按其原合同读取，不能冒充 v0.11。
+10. Local How v0.12 增加 `fresh-acquisition-navigation-command/v0.1`。原始 Oracle 动作
+    会抑制同一已完成目标，且把完成信号重置为 false；新 acquisition 的实际工具调用不得
+    继承此命令 latch。Guard 与原始工具映射通过后，仅清除自身动作的两个完成标记，由
+    下一次原始动作重新计算到达。保留目标缓存、PathFinder、原始技能与总预算；不写传感器
+    true、不更改物理状态或官方判定，也不触碰 peer。运行前检查实际动作接口，未知实现
+    fail closed。原始 EMOS 文件不变；这是明确披露的 Local How 生命周期差异。
 
 ## 软件与物理验证边界
 

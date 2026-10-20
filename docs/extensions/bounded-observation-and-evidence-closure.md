@@ -29,7 +29,7 @@ deployment v0.4 增加 `enable_observation_acquisition`、
 语义相机和导航技能可用。默认 Python adapter 开关关闭。新的感知/重排 deployment
 模板显式选择本轮开发配置，旧冻结运行继续使用自己的旧模板。
 
-开启 acquisition 的当前代码输出 Local How v0.11，增加闭合
+开启 acquisition 的当前代码输出 Local How v0.12，保留 v0.11 的闭合
 `observation_control=bounded-visual-feedback/v0.1` 声明。每次真实模型动作请求包含最新的
 缓存 true/false/unavailable、原 Task/attempt/world/entity、sample step 和原始剩余预算；
 读取不到保持 unavailable，同 step 冲突、跨 attempt/world 或时间回退拒绝。初始已有真实
@@ -42,6 +42,15 @@ positive sample 时直接完成 acquisition，零额外模型/运动，仍不声
 与原生 EMOS 对照中声称动作调度完全等价。普通导航、搬运、idle 与历史 v0.9/v0.10
 运行保留自己的等待合同。持续可见、驻留或多目标保持仍需实际能力和官方终态证据，不能
 由这个反馈 profile 推导。
+
+v0.12 还显式声明 `fresh-acquisition-navigation-command/v0.1`：仅在 Guard 接受实际模型
+选择、原始 CrabAgent 完成同目标/同 agent 的 `nav_to_obj` 映射后，清除该端点 Oracle
+动作的 `prev_nav_done` 与 `skill_done` 命令标记。原始动作此前对相同已完成目标直接跳过
+计算并清除完成信号；新 acquisition 会因此没有运动、也没有完成反馈。现在每次真实新调用
+重新进入原始到达计算，不复用历史成功、不写入 true、不调用额外 action/Gym/sensor，不清除
+已采样目标点或路径规划器。来源 action 或目标不匹配时在修改前拒绝。其他端点、非 acquisition
+与历史声明不变。`fresh-navigation-command` 证据绑定 attempt、raw call、映射和前后标记。
+该修复不保证视野可见；导航完成后真实检测仍可能是 false，原始 acquisition 预算仍会耗尽。
 
 planning world v0.4 的 `entity_geometry` 是最多 64 条 reset position，字段为
 `entity_id`、`frame_id`、三项 integer `position_mm` 和 `up_axis=y`；未知位置进入 `gaps`。
