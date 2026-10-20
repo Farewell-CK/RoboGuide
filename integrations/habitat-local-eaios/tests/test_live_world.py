@@ -42,7 +42,7 @@ from test_shared_world import (  # noqa: E402
     WaitSkillPolicy,
 )
 from test_stage2_contract import FakeModel  # noqa: E402
-from test_view_scan import BASE_TYPES, controls  # noqa: E402
+from test_view_scan import BASE_TYPES, controls, vector_width  # noqa: E402
 
 
 def invocation(
@@ -419,6 +419,7 @@ def vendor_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(live_bindings, "_original_wait_skill_type", lambda: WaitSkillPolicy)
     monkeypatch.setattr(navigation_dispatch, "_original_action_type", lambda: OracleCommand)
     monkeypatch.setattr(view_scan, "_original_base_types", lambda: BASE_TYPES)
+    monkeypatch.setattr(view_scan, "_original_vector_width", vector_width)
     monkeypatch.setattr(view_scan, "_skill_factory", lambda *args: object())
     module = ModuleType("habitat_mas.utils")
     module.AgentArguments = Arguments  # type: ignore[attr-defined]

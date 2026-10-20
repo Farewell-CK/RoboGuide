@@ -59,6 +59,16 @@ def _width(space: Any) -> int:
     return math.prod(shape)
 
 
+def _original_vector_width(space: Any) -> int:
+    """Use the deployed HRL codec for complete vectors, including original EmptySpace slots."""
+    from habitat_baselines.utils.common import get_num_actions  # type: ignore[import-not-found]
+
+    width = get_num_actions(space)
+    if type(width) is not int or not 0 < width <= 16384:
+        raise IntegrationError("original action vector has no bounded explicit width")
+    return width
+
+
 def _original_base_types() -> tuple[type[Any], ...]:
     """Resolve exact loaded vendor controls; a same-named substitute does not establish support."""
     from habitat.tasks.rearrange.actions.actions import (  # type: ignore[import-not-found]
@@ -131,12 +141,12 @@ def inspect_view_scan(environment: Any, policy: Any, agent: int) -> ViewScanSpec
         for key, child in spaces.items():
             if key == "base_velocity":
                 break
-            offset += _width(child)
+            offset += _original_vector_width(child)
         for key, child in children.items():
             if key == yaw_key:
                 break
             offset += _width(child)
-        width, yaw_index = _width(space), offset + yaw_local
+        width, yaw_index = _original_vector_width(space), offset + yaw_local
         raw_scale, raw_hz = action._ang_speed, environment.sim.ctrl_freq
         if any(
             isinstance(value, bool) or not isinstance(value, Real) for value in (raw_scale, raw_hz)

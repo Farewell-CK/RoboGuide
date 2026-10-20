@@ -34,6 +34,14 @@ BASE_TYPES = tuple(
 )
 
 
+def vector_width(space: Any) -> int:
+    """Model the original scalar stop slot separately from the continuous base leaves."""
+    if getattr(space, "original_empty_stop", False):
+        return 1
+    children = getattr(space, "spaces", None)
+    return sum(vector_width(child) for child in children.values()) if children else space.shape[0]
+
+
 def leaf(width: int) -> Any:
     """Represent one actual continuous action leaf without a Habitat or Gym dependency."""
     return SimpleNamespace(shape=(width,))
@@ -57,7 +65,7 @@ def controls(
                 else {f"agent_{agent}_base_vel": leaf(3 if lateral else 2)}
             ),
             "wait": leaf(1),
-            "rearrange_stop": leaf(1),
+            "rearrange_stop": SimpleNamespace(original_empty_stop=True, shape=None),
         }
     )
     names = {"wait": 0}
@@ -78,6 +86,7 @@ def controls(
 def original_interfaces(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace vendor class resolution and allocation only; exercise production binding rules."""
     monkeypatch.setattr(view_scan, "_original_base_types", lambda: BASE_TYPES)
+    monkeypatch.setattr(view_scan, "_original_vector_width", vector_width)
     monkeypatch.setattr(view_scan, "_skill_factory", lambda *args: VendorSkill())
 
 
@@ -100,6 +109,18 @@ def test_actual_control_layout_and_motion_bounds(
     assert spec.normalized_yaw * spec.angular_scale <= 1.5
     assert MAX_SCAN_STEPS * spec.normalized_yaw * spec.angular_scale / spec.ctrl_freq <= math.pi / 2
     assert world.task.actions[f"agent_{agent}_base_velocity"] is spec.action
+
+
+def test_original_empty_stop_before_base_uses_the_original_vector_offset() -> None:
+    """A parameterless original stop consumes its own vector slot, never a base command."""
+    world, policy = controls()
+    full = policy._high_level_policy._action_space
+    full.spaces = {
+        "rearrange_stop": full.spaces["rearrange_stop"],
+        **{key: value for key, value in full.spaces.items() if key != "rearrange_stop"},
+    }
+    spec = inspect_view_scan(world, policy, 0)
+    assert spec.width == 7 and spec.yaw_index == 5
 
 
 def test_one_agent_uses_the_original_unprefixed_interface() -> None:
