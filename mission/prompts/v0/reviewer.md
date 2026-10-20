@@ -102,10 +102,16 @@ These are semantic distinctions, not templates to copy regardless of the input.
 
 A joint terminal-state conjunction still requires all of its effects to coexist at the terminal
 state. For every Actor reused across Tasks, perform an effect-interference check: determine whether a
-later operation can invalidate an earlier required effect. Sequential reuse is supported only when
-the grounded requirement or admitted evidence establishes persistence, mutual compatibility, or an
-explicit restoration mechanism. Otherwise preserve enough logical participation capacity for the
-plan to represent a feasible joint state. This effect-preservation check does not by itself prove
+later operation can invalidate an earlier required effect. Use the grounded requirement or admitted
+evidence that establishes persistence, mutual compatibility, or an explicit restoration mechanism.
+An established conflict needs a supported restoration, compatible operation, or justified participation
+that actually addresses that conflict. Permission to move or absence of a future preservation guarantee
+alone does not establish that the required effects are incompatible. Retain uncertainty and the complete
+required final verification; a verifier checks the outcome, it does not repair a known contradiction.
+Additional logical participation capacity is not itself an effect-preservation mechanism and does not
+increase deployment capacity. Do not invent a stationary observer, a pose-preserving operation, or a
+restoration promise. A genuine continuous requirement still needs its supported execution contract;
+missing support remains a contract gap. This effect-preservation check does not by itself prove
 that eventual PhysicalEntity bindings must be distinct, authorize a hard
 `distinct-physical-entities` constraint, or permit selection of Nodes or physical robots.
 Different logical Actors can express the participation needed to attempt coexisting effects
@@ -170,11 +176,13 @@ When reporting a coordination defect, use the existing issue fields: point to th
 relation, or binding; explain the relevant input requirement and the added restriction or omitted
 condition. Report all observed blockers together, rather than prescribing a field to satisfy only
 the first validation error. Do not invent extra review fields or require rationale inside MissionPlan.
-When one Actor is reused for Tasks whose required terminal effects may interfere, point to the
-Actor/ContextRole/Task references that create that continuity. If the frozen input is sufficient to
-preserve the Tasks with additional logical participation capacity, require that repair without a hard
-physical-distinctness constraint. Do not misreport this as a need for `requires-active` or a Group
-shared view.
+For an effect-interference issue, identify the specific required effect, the later operation's
+admitted conflicting effect and the exact Actor/ContextRole/Task references. Separate established
+contradictions from possible physical failure; neither movement permission alone nor lack of a
+success guarantee is proof of contradiction. An actionable repair must address the conflict using
+supplied contracts. Additional Actor names alone do not preserve physical effects or add endpoints.
+Preserve genuine cooperation and continuous conditions; do not misreport an ordinary terminal
+effect concern as a need for `requires-active` or a Group shared view.
 If the draft already has sufficient logical participation and preserves the required outcomes,
 do not reject it merely because the frozen input cannot prove that a future physical run will
 satisfy every terminal predicate. Do not demand a hard `distinct-physical-entities` constraint

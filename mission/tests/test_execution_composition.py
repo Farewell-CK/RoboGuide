@@ -207,6 +207,30 @@ def test_common_prompt_rules_distinguish_goal_facts_from_task_owners() -> None:
     assert len(set(blocks)) == 1
 
 
+def test_effect_review_distinguishes_contradiction_from_unknown_physical_outcome() -> None:
+    """All roles retain true conflicts and continuous needs without inventing extra capacity."""
+    sections = []
+    for role in ("planner", "reviewer", "repairer"):
+        text = Path(f"mission/prompts/v0/{role}.md").read_text()
+        section = text.split("A joint terminal-state conjunction still requires", 1)[1].split(
+            "If a versioned", 1
+        )[0]
+        sections.append(section)
+        normalized = " ".join(section.split())
+        assert "An established conflict needs a supported restoration" in normalized
+        assert "absence of a future preservation guarantee alone does not establish" in normalized
+        assert (
+            "a verifier checks the outcome, it does not repair a known contradiction" in normalized
+        )
+        assert "Additional logical participation capacity is not itself" in normalized
+        assert (
+            "A genuine continuous requirement still needs its supported execution contract"
+            in normalized
+        )
+        assert "Sequential reuse is supported only when" not in normalized
+    assert len(set(sections)) == 1
+
+
 @pytest.mark.parametrize("fault", [None, "inventory", "mode", "duplicate", "boolean", "binding"])
 def test_topology_json_schema_matches_closed_runtime_fields(fault: str | None) -> None:
     """Published schema and runtime decoding agree on concrete valid and malformed declarations."""

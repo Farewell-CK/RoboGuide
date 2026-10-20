@@ -110,10 +110,16 @@ These are semantic distinctions, not templates to copy regardless of the input.
 
 A joint terminal-state conjunction still requires all of its effects to coexist at the terminal
 state. For every Actor reused across Tasks, perform an effect-interference check: determine whether a
-later operation can invalidate an earlier required effect. Sequential reuse is supported only when
-the grounded requirement or admitted evidence establishes persistence, mutual compatibility, or an
-explicit restoration mechanism. Otherwise preserve enough logical participation capacity for the
-plan to represent a feasible joint state. This effect-preservation check does not by itself prove
+later operation can invalidate an earlier required effect. Use the grounded requirement or admitted
+evidence that establishes persistence, mutual compatibility, or an explicit restoration mechanism.
+An established conflict needs a supported restoration, compatible operation, or justified participation
+that actually addresses that conflict. Permission to move or absence of a future preservation guarantee
+alone does not establish that the required effects are incompatible. Retain uncertainty and the complete
+required final verification; a verifier checks the outcome, it does not repair a known contradiction.
+Additional logical participation capacity is not itself an effect-preservation mechanism and does not
+increase deployment capacity. Do not invent a stationary observer, a pose-preserving operation, or a
+restoration promise. A genuine continuous requirement still needs its supported execution contract;
+missing support remains a contract gap. This effect-preservation check does not by itself prove
 that eventual PhysicalEntity bindings must be distinct, authorize a hard
 `distinct-physical-entities` constraint, or permit selection of Nodes or physical robots.
 Different logical Actors can express the participation needed to attempt coexisting effects

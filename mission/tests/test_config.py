@@ -157,12 +157,13 @@ def test_prompts_preserve_joint_effects_without_inventing_physical_identity() ->
         assert "all of its effects to coexist at the terminal state" in prompt
         assert "perform an effect-interference check" in prompt
         assert "later operation can invalidate an earlier required effect" in prompt
-        assert "preserve enough logical participation capacity" in prompt
+        assert "Additional logical participation capacity is not itself" in prompt
+        assert "a verifier checks the outcome, it does not repair a known contradiction" in prompt
         assert "does not by itself prove" in prompt
         assert "`distinct-physical-entities` constraint" in prompt
-    assert "point to the Actor/ContextRole/Task references" in normalized["reviewer"]
-    assert "Do not misreport this as a need for `requires-active`" in normalized["reviewer"]
+    assert "exact Actor/ContextRole/Task references" in normalized["reviewer"]
+    assert "do not misreport an ordinary terminal effect concern" in normalized["reviewer"]
     assert "identifies effect-interfering reuse of one Actor" in normalized["repairer"]
-    assert "introduce only the logical participation capacity" in normalized["repairer"]
+    assert "Additional Actor names alone do not repair an effect conflict" in normalized["repairer"]
     benchmark_terms = ("Episode3", "Episode51", "any_targets", "Spot", "Fetch")
     assert all(term not in prompt for prompt in prompts.values() for term in benchmark_terms)
