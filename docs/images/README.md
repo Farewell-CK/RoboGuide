@@ -2,6 +2,9 @@
 
 本目录集中保存出现在 README、架构说明和后续设计文档中的图片资源。
 
+2026-10-20 当前部署 Mermaid 同步 ADR-0117 全 supervisor/Raft/child/Artifact 静止恢复，
+显式新 CAS placement 与原 SQL/ACL/预算分开；不绘制为在线跨主机或物理连续性。
+
 2026-10-20 当前部署 Mermaid 同步 ADR-0116 的 Raft 基础设施证书 authority、实际 TLS
 确认及独立应用权威；证书不绘制成 Node、资源或设备证明。
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import fcntl
 import hashlib
+import json
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -114,6 +115,158 @@ def test_any_actual_writer_refuses_before_creating_a_partial_bundle(
             backup(profile, tmp_path / "bundle", "active-writer")
         assert not (tmp_path / "bundle").exists()
         assert not (tmp_path / "bundle.partial-active-writer").exists()
+
+
+def test_replica_supervisor_lease_requires_explicit_new_profile_and_quiescence(
+    storage: tuple[dict[str, Any], sqlite3.Connection], tmp_path: Path
+) -> None:
+    """A live actual supervisor lock fences backup even when its Raft database writer is free."""
+    original, _ = storage
+    profile = copy.deepcopy(original)
+    component = profile["components"][0]
+    component["kind"] = "replica"
+    root = Path(component["root"])
+    lease = root / "supervisor.writer.lock"
+    lease.touch()
+    with pytest.raises(ValueError, match="explicit recovery profile v0.2"):
+        backup(profile, tmp_path / "old", "old-profile")
+    profile["schema"] = "roboguide.recovery-profile/v0.2"
+    profile["artifact_replica_sets"] = []
+    with lease.open("rb") as owner:
+        fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(ValueError, match="still active"):
+            backup(profile, tmp_path / "live", "live-supervisor")
+        assert not (tmp_path / "live").exists()
+        assert not (tmp_path / "live.partial-live-supervisor").exists()
+    result = backup(profile, tmp_path / "bundle", "stopped-supervisor")
+    manifest = verify(tmp_path / "bundle", result["manifest_digest"])
+    assert manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.2"
+    assert manifest["profile"]["components"][0]["kind"] == "replica"
+
+
+@pytest.fixture
+def replica_files(tmp_path: Path) -> dict[str, Any]:
+    """Create storage fixtures for scope/corruption tests; these are not live cluster proof."""
+    components: list[dict[str, Any]] = []
+    for index in range(1, 4):
+        root = tmp_path / f"replica-{index}"
+        cas = tmp_path / f"cas-{index}"
+        root.mkdir()
+        cas.mkdir()
+        for name in ("replica.sqlite3.writer.lock", "supervisor.writer.lock"):
+            (root / name).touch()
+        (cas / ".writer.lock").touch()
+        (cas / "blobs").mkdir()
+        (cas / "staging").mkdir()
+        with sqlite3.connect(root / "replica.sqlite3") as database:
+            database.execute("CREATE TABLE replica_meta (key TEXT PRIMARY KEY,value TEXT)")
+            database.executemany(
+                "INSERT INTO replica_meta VALUES (?,?)",
+                [
+                    ("identity", json.dumps(["original-cluster", "original-schema"])),
+                    (
+                        "certificate_trust",
+                        json.dumps(
+                            {
+                                "bootstrap": {
+                                    str(member): f"sha256:{member:064x}" for member in range(1, 4)
+                                }
+                            }
+                        ),
+                    ),
+                ],
+            )
+        components.extend(
+            [
+                {
+                    "component_id": f"replica-{index}",
+                    "kind": "replica",
+                    "root": str(root),
+                    "database": "replica.sqlite3",
+                    "trees": [],
+                    "depends_on": [f"cas-{index}"],
+                },
+                {
+                    "component_id": f"cas-{index}",
+                    "kind": "artifact",
+                    "root": str(cas),
+                    "database": None,
+                    "trees": [],
+                    "depends_on": [],
+                },
+            ]
+        )
+    payload = Path(__file__).read_bytes()
+    checksum = hashlib.sha256(payload).hexdigest()
+    blob = tmp_path / "cas-1/blobs/sha256" / checksum[:2] / checksum
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(payload)
+    (tmp_path / "cas-1/staging/uncommitted").write_bytes(b"not finalized")
+    return {
+        "schema": "roboguide.recovery-profile/v0.2",
+        "profile_id": "explicit-original-replica-set",
+        "revision": 1,
+        "max_bytes": 32 * 1024 * 1024,
+        "max_files": 100,
+        "budget_seconds": 30,
+        "artifact_replica_sets": [["cas-1", "cas-2", "cas-3"]],
+        "components": components,
+    }
+
+
+def test_explicit_finalized_cas_recovery_preserves_sql_and_never_repeats_missing_placements(
+    replica_files: dict[str, Any], tmp_path: Path
+) -> None:
+    """Only verified original finalized CAS bytes are copied; retries remain strictly readonly."""
+    created = backup(replica_files, tmp_path / "bundle", "original-all-stores")
+    receipt = restore(
+        tmp_path / "bundle", created["manifest_digest"], tmp_path / "restored", "original-restore"
+    )
+    assert receipt["schema"] == "roboguide.restore-receipt/v0.2"
+    assert len(receipt["artifact_replica_placements"]) == 2
+    assert not (tmp_path / "restored/stores/cas-2/staging/uncommitted").exists()
+    assert (
+        restore(
+            tmp_path / "bundle",
+            created["manifest_digest"],
+            tmp_path / "restored",
+            "original-restore",
+        )
+        == receipt
+    )
+    missing = tmp_path / "restored" / receipt["artifact_replica_placements"][0]["target"]
+    missing.unlink()
+    with pytest.raises((ValueError, FileNotFoundError)):
+        restore(
+            tmp_path / "bundle",
+            created["manifest_digest"],
+            tmp_path / "restored",
+            "original-restore",
+        )
+    assert not missing.exists()
+
+
+def test_replica_content_recovery_rejects_cross_cluster_or_incomplete_original_universe(
+    replica_files: dict[str, Any], tmp_path: Path
+) -> None:
+    """Explicit paths cannot authorize copying content between actual different SQL identities."""
+    database_path = tmp_path / "replica-2/replica.sqlite3"
+    with sqlite3.connect(database_path) as database:
+        database.execute(
+            "UPDATE replica_meta SET value=? WHERE key='identity'",
+            (json.dumps(["foreign", "original-schema"]),),
+        )
+    with pytest.raises(ValueError, match="cluster/schema/bootstrap"):
+        backup(replica_files, tmp_path / "foreign", "cross-cluster")
+    assert not (tmp_path / "foreign.partial-cross-cluster").exists()
+    with sqlite3.connect(database_path) as database:
+        database.execute(
+            "UPDATE replica_meta SET value=? WHERE key='identity'",
+            (json.dumps(["original-cluster", "original-schema"]),),
+        )
+    replica_files["artifact_replica_sets"][0].pop()
+    with pytest.raises(ValueError, match="3-9"):
+        backup(replica_files, tmp_path / "partial", "incomplete-set")
 
 
 def test_published_bundle_verification_creates_no_sqlite_sidecars_or_writes(

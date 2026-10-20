@@ -28,6 +28,10 @@ mTLS scrape、两次实际 SQL 故障的 firing/resolved、固定 histogram/queu
 
 ## 交付要求
 
+[完整副本静止恢复](acceptance/2026-10-20-replica-cold-recovery.md)验证实际全 writer 门禁、
+6 SQL/39 tables/原换证历史与显式 CAS 内容恢复；三个实际 leader endpoint 读取相同原
+内容/receipt。在线内容、版本升级与前两轮间歇 HTTP 中断仍须继续解决，不关闭完整 F5/F10。
+
 [副本证书与根迁移验收](acceptance/2026-10-20-replica-certificates.md)完成 F5 的显式
 v0.3 同一成员 Stage/Retire/Abort、实际全成员 TLS、CA overlap/removal 和原 store 重启。
 896 项 Rust 与 2623 项 Python 通过；旧 v0.2 升级、二进制滚动升级、HA 内容恢复及其余

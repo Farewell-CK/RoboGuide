@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import re
 import sqlite3
@@ -46,19 +47,21 @@ def real_directory(path: Path) -> Path:
 
 def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
     """Validate complete configured components and explicit content dependencies without Nodes."""
-    if (
-        set(profile)
-        != {
-            "schema",
-            "profile_id",
-            "revision",
-            "max_bytes",
-            "max_files",
-            "budget_seconds",
-            "components",
-        }
-        or profile["schema"] != "roboguide.recovery-profile/v0.1"
-    ):
+    expected = {
+        "schema",
+        "profile_id",
+        "revision",
+        "max_bytes",
+        "max_files",
+        "budget_seconds",
+        "components",
+    }
+    if profile.get("schema") == "roboguide.recovery-profile/v0.2":
+        expected.add("artifact_replica_sets")
+    if set(profile) != expected or profile["schema"] not in {
+        "roboguide.recovery-profile/v0.1",
+        "roboguide.recovery-profile/v0.2",
+    }:
         raise ValueError("recovery profile is not closed or versioned")
     if (
         not isinstance(profile["profile_id"], str)
@@ -98,6 +101,8 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         ):
             raise ValueError("recovery component identity/kind is invalid or repeated")
         identifiers.add(identifier)
+        if item["kind"] == "replica" and profile["schema"] != "roboguide.recovery-profile/v0.2":
+            raise ValueError("replica supervisor leases require explicit recovery profile v0.2")
         if (
             not isinstance(item["root"], str)
             or not Path(item["root"]).is_absolute()
@@ -159,6 +164,35 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         visited.update(ready)
         for identifier in ready:
             del pending[identifier]
+    replica_sets = profile.get("artifact_replica_sets", [])
+    if not isinstance(replica_sets, list) or len(replica_sets) > 64:
+        raise ValueError("Artifact replica sets must be a bounded explicit list")
+    selected_artifacts: set[str] = set()
+    by_id = {component["component_id"]: component for component in components}
+    for group in replica_sets:
+        if (
+            not isinstance(group, list)
+            or not 3 <= len(group) <= 9
+            or any(not isinstance(identity, str) for identity in group)
+        ):
+            raise ValueError("Artifact replica set must identify 3-9 explicit components")
+        for identity in group:
+            if (
+                identity in selected_artifacts
+                or identity not in by_id
+                or by_id[identity]["kind"] != "artifact"
+            ):
+                raise ValueError("Artifact replica set repeats or names a non-Artifact component")
+            selected_artifacts.add(identity)
+            owners = [
+                component
+                for component in components
+                if component["kind"] == "replica" and identity in component["depends_on"]
+            ]
+            if len(owners) != 1:
+                raise ValueError(
+                    "each Artifact replica requires one explicit original replica writer dependency"
+                )
     return sorted(components, key=lambda value: str(value["component_id"]))
 
 
@@ -181,6 +215,8 @@ def layout(component: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
     if kind == "files":
         return [], list(component["trees"]) or ["."], []
     lock = database + (".service.lock" if kind == "mission" else ".writer.lock")
+    if kind == "replica":
+        return [database], list(component["trees"]), [lock, "supervisor.writer.lock"]
     return [database], list(component["trees"]), [lock, database] if kind == "node" else [lock]
 
 
@@ -214,3 +250,50 @@ def acquire_all(components: list[dict[str, Any]]) -> Iterator[None]:
                     ).fetchone() != (13,):
                         raise ValueError("Node writer-lease storage marker is unavailable")
         yield
+
+
+def validate_replica_sets(profile: dict[str, Any], components: list[dict[str, Any]]) -> None:
+    """Check locked original cluster/schema/bootstrap before offline CAS placement."""
+    for group in profile.get("artifact_replica_sets", []):
+        cluster: tuple[Any, Any] | None = None
+        replicas: set[str] = set()
+        for artifact in group:
+            owner = next(
+                component
+                for component in components
+                if component["kind"] == "replica" and artifact in component["depends_on"]
+            )
+            if owner["component_id"] in replicas:
+                raise ValueError("Artifact set repeats the same original replica authority")
+            replicas.add(owner["component_id"])
+            path = Path(owner["root"]) / owner["database"]
+            with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as database:
+                database.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 4 * 1024 * 1024)
+                identity = database.execute(
+                    "SELECT value FROM replica_meta WHERE key='identity'"
+                ).fetchone()
+                trust = database.execute(
+                    "SELECT value FROM replica_meta WHERE key='certificate_trust'"
+                ).fetchone()
+            if identity is None or trust is None:
+                raise ValueError(
+                    "Artifact reconciliation requires original explicit v0.3 replica trust"
+                )
+            parsed_identity, parsed_trust = json.loads(identity[0]), json.loads(trust[0])
+            if (
+                not isinstance(parsed_identity, list)
+                or len(parsed_identity) != 2
+                or not isinstance(parsed_trust, dict)
+            ):
+                raise ValueError("original replica identity/trust shape differs")
+            bootstrap = parsed_trust.get("bootstrap")
+            if not isinstance(bootstrap, dict) or len(bootstrap) != len(group):
+                raise ValueError(
+                    "Artifact set does not cover the complete original member universe"
+                )
+            actual = (parsed_identity, bootstrap)
+            if cluster is not None and cluster != actual:
+                raise ValueError(
+                    "Artifact set crosses original cluster/schema/bootstrap boundaries"
+                )
+            cluster = actual

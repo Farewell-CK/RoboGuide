@@ -53,6 +53,7 @@ flowchart TB
   COLD --> NJ
   COLD --> MEM
   COLD --> SNAP[完整 SQL / 实际内容 / pinned manifest / 新目录恢复]
+  COLD --> REPLICACOLD[v0.2 全部 supervisor Raft child Artifact writer / 原日志投票 / 显式 CAS 恢复集合]
   Entry --> METRICS[专用 metrics-reader / 有界 histogram queue drop / wrapper v42]
   MI --> METRICS
   HA --> METRICS

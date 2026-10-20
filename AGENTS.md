@@ -5,6 +5,16 @@
 RoboGuide has a current V2 architecture baseline plus development and MVP documents.
 The first core bootstrap has started; the full runtime and MVP are not complete.
 
+ADR-0117 requires recovery profile v0.2 for replica components, acquiring original supervisor plus
+Raft writer leases; old v0.1 replica profiles refuse. Explicit complete same-cluster Artifact sets
+verify actual locked cluster/schema/bootstrap and copy only finalized manifest-verified CAS blobs
+to declared new roots. SQL/ACL/budgets and original placements remain; staging is not propagated.
+Restore receipt v0.2 records original source/target/hash/size and retry only inspects. Actual cold
+recovery preserves 6 SQL databases/39 tables/10 certificate receipts and independently reads real
+bytes from all three restored leaders, with zero Nodes/devices/models/simulators. See
+`tools/quality/check_replica_recovery_processes.py`. Observed intermittent HTTP interruptions remain
+F10 work; online cross-host recovery and profile/binary upgrades remain mandatory F5 requirements.
+
 ADR-0116 adds explicit replica v0.3 same-member certificate authority in Raft transactions/snapshots.
 Stage/Retire/Abort retain immutable actual callers, original revisions and irreversible retired leaves;
 retirement requires all configured members' independent actual target mTLS proofs. Lost-key Abort

@@ -18,7 +18,7 @@ PYTHONPATH=apps/recovery-tool python -m roboguide_recovery restore \
 
 The [profile schema](../../contracts/recovery/bundle-v0.1/profile.schema.json) selects arbitrary
 component IDs, real storage roots and their dependencies. It never supplies Node inventory.
-`controller`, `replica`, `node` and `mission` name their original database directly inside the root;
+`controller`, `node` and `mission` name their original database directly inside the root;
 `artifact` and `memory` derive their maintained database/content layout. `files` covers explicitly
 selected trees, or its complete root when `trees=[]`, and requires an actual writer dependency.
 Node backup requires the actual v13 journal fence. Ancestor directory symlinks, managed storage
@@ -38,6 +38,21 @@ authority paths, renew deadlines or change Unknown into success. Reacquire actua
 configuration, certificates and current State through the normal service startup/recovery gates.
 Configuration paths and external trust roots remain separate deployment inputs. A bundle of one
 declared domain is not automatic online HA replication or a proof that all other domains were saved.
+
+Replica components require explicit [profile v0.2](../../contracts/recovery/bundle-v0.2/README.md),
+which acquires both the original supervisor and Raft database writer leases. The old v0.1 replica
+profile is rejected. Child Controller, Artifact, configuration and credential paths remain separate
+explicit components. The CLI never starts or remaps services.
+
+Version 0.2 requires `artifact_replica_sets`, including an explicit empty list for no additional
+placement. A nonempty set is an operator-selected complete 3–9-member infrastructure cluster.
+Each Artifact must be a dependency of one original replica; actual locked SQL must agree on the
+original cluster, application schema and complete certificate bootstrap universe. Restore copies
+only manifest-verified finalized CAS blobs missing from another declared new root, preserving each
+original store and every tenant/content ACL. Staging bytes are never distributed. The v0.2 restore
+receipt records source, target, digest and byte size separately from original placements; retries
+only inspect existing results and fail if a completed copy is missing or corrupt. This does not
+create any Node/provider Memory replica or execution evidence.
 
 The actual process check restores a completed formal two-Node file workload, compares every table,
 rejects an archived old Node and a live new writer, starts the real Controller, reads authenticated

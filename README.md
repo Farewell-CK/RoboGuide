@@ -2,6 +2,11 @@
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
+[完整副本静止恢复](docs/development/acceptance/2026-10-20-replica-cold-recovery.md)覆盖
+实际 supervisor/Raft/child/Artifact writer、原日志投票和完整 SQL。显式 v0.2 同集群 CAS
+集合恢复已核验内容，三个真实 endpoint 接续原 receipt；旧工具拒绝新 profile。
+在线跨主机复制、受控升级和已观察到的间歇 HTTP 中断仍继续处理。
+
 [副本证书生命周期](docs/development/replica-certificate-rotation-v0.1.md)以显式 v0.3 profile
 持久化同一成员的 Stage/Retire/Abort，实际 TLS 证明后撤销旧 leaf，并支持部署 CA 根迁移。
 换证不重置应用预算或 epoch；排队请求取得 writer 后复核实际证书，丢失新 key 不锁死

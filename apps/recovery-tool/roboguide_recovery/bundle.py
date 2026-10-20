@@ -22,6 +22,7 @@ from .profile import (
     real_directory,
     relative,
     validate,
+    validate_replica_sets,
 )
 
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -269,6 +270,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         }
     with acquire_all(components):
         budget.check()
+        validate_replica_sets(profile, components)
         partial = _target(destination, command_id)
         records = []
         for component in components:
@@ -447,6 +449,43 @@ def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
     return dict(manifest)
 
 
+def _replica_placements(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Derive only explicit same-cluster finalized CAS copies from immutable original bytes."""
+    placements = []
+    declared = {row["path"]: row for row in manifest["files"]}
+    for group in manifest["profile"].get("artifact_replica_sets", []):
+        originals: dict[str, dict[str, Any]] = {}
+        for row in sorted(manifest["files"], key=lambda value: str(value["path"])):
+            parts = Path(row["path"]).parts
+            if (
+                len(parts) == 6
+                and parts[1] in group
+                and parts[2] == "blobs"
+                and row["kind"] == "content"
+            ):
+                selected = Path(*parts[2:]).as_posix()
+                originals.setdefault(selected, row)
+        for component in sorted(group):
+            for selected, row in sorted(originals.items()):
+                target = "stores/" + component + "/" + selected
+                if target in declared:
+                    if (
+                        declared[target]["content_digest"] != row["content_digest"]
+                        or declared[target]["byte_size"] != row["byte_size"]
+                    ):
+                        raise ValueError("same-cluster original CAS identity conflicts")
+                    continue
+                placements.append(
+                    {
+                        "source": row["path"],
+                        "target": target,
+                        "content_digest": row["content_digest"],
+                        "byte_size": row["byte_size"],
+                    }
+                )
+    return placements
+
+
 def restore(
     bundle: Path, expected_digest: str, destination: Path, command_id: str
 ) -> dict[str, Any]:
@@ -461,6 +500,12 @@ def restore(
     budget = Budget(manifest["profile"])
     budget.deadline_ns = started_ns + manifest["profile"]["budget_seconds"] * 1_000_000_000
     budget.check()
+    replica_placements = _replica_placements(manifest)
+    receipt_schema = (
+        "roboguide.restore-receipt/v0.2"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.2"
+        else "roboguide.restore-receipt/v0.1"
+    )
     if destination.is_dir() and not destination.is_symlink():
         receipt_path = destination / "restore-receipt.json"
         if not receipt_path.is_file() or receipt_path.is_symlink():
@@ -472,10 +517,11 @@ def restore(
         previous = json.loads(raw_receipt)
         if (
             not isinstance(previous, dict)
-            or previous.get("schema") != "roboguide.restore-receipt/v0.1"
+            or previous.get("schema") != receipt_schema
             or previous.get("command_id") != command_id
             or previous.get("manifest_digest") != expected_digest
             or previous.get("profile_digest") != manifest["profile_digest"]
+            or previous.get("artifact_replica_placements", []) != replica_placements
         ):
             raise ValueError("original restore command/source identity conflicts")
         for row in manifest["files"]:
@@ -485,6 +531,14 @@ def restore(
             ):
                 raise ValueError(
                     "restored original bytes changed after receipt; retry is read-only"
+                )
+        for row in replica_placements:
+            if _hash(destination / row["target"], budget) != (
+                row["content_digest"],
+                row["byte_size"],
+            ):
+                raise ValueError(
+                    "original restored CAS placement is missing or changed; retry never recopies"
                 )
         return dict(previous)
     partial = _target(destination, command_id)
@@ -500,8 +554,14 @@ def restore(
             raise ValueError("recovery source changed after original verification")
         if row["kind"] == "sqlite" and _identity(target, budget) != row["sqlite"]:
             raise ValueError("restored SQLite differs from its original full authority")
+    for row in replica_placements:
+        if _copy(bundle / row["source"], partial / row["target"], budget) != (
+            row["content_digest"],
+            row["byte_size"],
+        ):
+            raise ValueError("original CAS content changed before declared replica restoration")
     receipt = {
-        "schema": "roboguide.restore-receipt/v0.1",
+        "schema": receipt_schema,
         "command_id": command_id,
         "manifest_digest": expected_digest,
         "profile_digest": manifest["profile_digest"],
@@ -515,6 +575,8 @@ def restore(
             for value in validate(manifest["profile"])
         ],
     }
+    if receipt_schema == "roboguide.restore-receipt/v0.2":
+        receipt["artifact_replica_placements"] = replica_placements
     with (partial / "restore-receipt.json").open("xb") as handle:
         handle.write(canonical(receipt))
         handle.flush()
