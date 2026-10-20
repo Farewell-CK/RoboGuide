@@ -9,6 +9,12 @@ main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头�
 `d15543f4ec2dc99ebe565e319e141c0bf17b433b`（执行故障闭环）。后两者是祖先关系。
 代码集成和完整整改完成是不同状态；本次不宣称 SoftwareComplete。
 
+再次固定核对 `codex/e1-perception-contract-composition` 的新增头
+`983c8810b91ccbd5634dd9b3b7a9901c510d38cc`：四条维护提交保留原历史合入，
+有界扫描、原多 agent 参数/完整动作编码和缓存证据在零模型兼容门禁下检查。
+见[有界观测集成验收](acceptance/2026-10-20-bounded-observation-integration.md)。
+未把实验结果或设备事实纳入该合并。
+
 [原文件进程与接收身份](acceptance/2026-10-20-file-process-memory-ownership.md)补齐实际
 Local EAIOS 子进程 wait/崩溃 fence、原预算读取许可和后续 Task 的独立 import。双 Node
 停止/交接/两次复算、SQL 显式恢复和负向生命周期已检查；跨 session mixed-fault 停止恢复、

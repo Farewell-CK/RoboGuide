@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from .observation_control import ObservationAcquisitionControl
     from .relocation_completion import RelocationCompletionBinding
     from .stage2_contract import Stage2ExecutionContract
+    from .view_scan import ViewScanBinding
 
 _LOG = logging.getLogger(__name__)
 _MISSING = object()
@@ -152,6 +153,7 @@ class Stage2ExecutionFeedback:
         peer_contracts: Callable[[], Mapping[str, Stage2ExecutionContract]] | None = None,
         observation_control: ObservationAcquisitionControl | None = None,
         navigation_dispatch: NavigationDispatchLifecycle | None = None,
+        view_scan: ViewScanBinding | None = None,
     ) -> None:
         """Freeze own contracts, optionally reading a deployment-owned active-peer projection."""
         self._contracts = dict(contracts)
@@ -161,6 +163,13 @@ class Stage2ExecutionFeedback:
         self._completion_binding = completion_binding
         self._observation_control = observation_control
         self._navigation_dispatch = navigation_dispatch
+        self._view_scan = view_scan
+        if view_scan is not None and (
+            observation_control is None
+            or view_scan.control is not observation_control
+            or any(not contract.allow_view_scan for contract in contracts.values())
+        ):
+            raise IntegrationError("view scan must bind the exact admitted acquisition control")
         if navigation_dispatch is not None and observation_control is None:
             raise IntegrationError("fresh navigation dispatch requires acquisition feedback")
         if observation_control is not None and (
@@ -302,6 +311,10 @@ class Stage2ExecutionFeedback:
             else None
         )
 
+    def observation_scan_tool(self) -> dict[str, Any] | None:
+        """Offer the explicit tool only when its original control/skill binding exists."""
+        return self._view_scan.tool() if self._view_scan is not None else None
+
     def bind_observation_dispatch(self, agent_name: str, action: Any) -> Any:
         """Translate an admitted pause to its advertised Local EAIOS duration.
 
@@ -314,6 +327,16 @@ class Stage2ExecutionFeedback:
         pending = self._pending.get(agent_name)
         if pending is None:
             raise IntegrationError("observation dispatch has no admitted model action")
+        if pending.action["name"] == "scan_for_object":
+            if self._view_scan is None:
+                raise IntegrationError("observation scan has no loaded local implementation")
+            self._view_scan.admit(
+                pending.action,
+                action,
+                pending.document["tool_call_id"],
+                pending.document["action_sequence"],
+            )
+            return action
         if pending.action["name"] == "nav_to_obj" and self._navigation_dispatch is not None:
             self._navigation_dispatch.dispatch(
                 action,
@@ -663,6 +686,7 @@ class Stage2ExecutionFeedback:
             "reset_arm": "reset_arm",
             "wait": "wait",
             "send_request": "wait",
+            "scan_for_object": "scan_for_object",
         }.get(str(pending.document["tool_name"]))
         if expected_skill is None or names[0] != expected_skill:
             return
@@ -700,6 +724,8 @@ class Stage2ExecutionFeedback:
             status = (
                 "completion-evidence-unavailable"
                 if pending.physical_steps == 0
+                else "view-scan-finished"
+                if expected_skill == "scan_for_object"
                 else "local-skill-completed"
                 if expected_skill != "wait"
                 else "wait-finished"
@@ -715,7 +741,7 @@ class Stage2ExecutionFeedback:
             status=status,
             local_skill_completed=(
                 True
-                if status in {"local-skill-completed", "wait-finished"}
+                if status in {"local-skill-completed", "wait-finished", "view-scan-finished"}
                 else False
                 if base_done is False
                 else None
@@ -834,6 +860,8 @@ class Stage2ExecutionFeedback:
         for restore in reversed(self._restores):
             restore()
         self._restores.clear()
+        if self._view_scan is not None:
+            self._view_scan.close()
         if self._completion_binding is not None:
             self._completion_binding.close()
         for pending in self._pending.values():

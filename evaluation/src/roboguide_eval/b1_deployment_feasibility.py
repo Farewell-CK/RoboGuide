@@ -257,11 +257,43 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     }
     if bound_relocation:
         expected_base["relocation_completion_profile"] = "exact-object-released-place/v0.1"
-    navigation_dispatch = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.12"
+    view_search = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.13"
+    navigation_dispatch = how.get("schema_version") in {
+        "roboguide.habitat-local-how-profile/v0.12",
+        "roboguide.habitat-local-how-profile/v0.13",
+    }
     observation_control = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.11",
         "roboguide.habitat-local-how-profile/v0.12",
+        "roboguide.habitat-local-how-profile/v0.13",
     }
+    if view_search:
+        import math
+
+        expected_view_search = {
+            "profile": "bounded-base-yaw-view-search/v0.1",
+            "tool": "scan_for_object",
+            "operation": "observation.acquire@v1",
+            "max_simulator_steps_per_call": 32,
+            "max_commanded_yaw_radians_per_call": math.pi / 2,
+            "max_angular_speed_radians_per_second": 1.5,
+            "translation_command": "zero",
+            "control_source": "loaded-original-base-velocity-action",
+            "camera_teleportation": False,
+            "view_search_completion_is_detection": False,
+            "original_acquisition_budget_renewed": False,
+            "official_success_authority": "habitat-pddl",
+        }
+        actual_view_search = how.get("observation_view_search")
+        if (
+            actual_view_search != expected_view_search
+            or not isinstance(actual_view_search, dict)
+            or any(
+                type(actual_view_search[key]) is not type(value)
+                for key, value in expected_view_search.items()
+            )
+        ):
+            raise ValueError("loaded observation view search contract is invalid")
     if navigation_dispatch and how.get("navigation_dispatch") != {
         "profile": "fresh-acquisition-navigation-command/v0.1",
         "operation": "observation.acquire@v1",
@@ -305,10 +337,13 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             *({"execution_options"} if extended else set()),
             *({"observation_control"} if observation_control else set()),
             *({"navigation_dispatch"} if navigation_dispatch else set()),
+            *({"observation_view_search"} if view_search else set()),
         }
         or how["schema_version"]
         != (
-            "roboguide.habitat-local-how-profile/v0.12"
+            "roboguide.habitat-local-how-profile/v0.13"
+            if view_search
+            else "roboguide.habitat-local-how-profile/v0.12"
             if navigation_dispatch
             else "roboguide.habitat-local-how-profile/v0.11"
             if observation_control

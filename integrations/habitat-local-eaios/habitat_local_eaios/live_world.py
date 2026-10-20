@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .backend import LocalExecutionOutcome, _observation_true
+from .diagnostics import diagnostics_enabled
 from .endpoint_registry import FINALITY_PROFILE, LIVE_PROFILE, load_endpoint_registry
 from .evidence_io import json_observation
 from .live_bindings import LivePolicyBindings as LivePolicyBindings
@@ -36,8 +37,10 @@ from .observation_control import (
 )
 from .operation_admission import OPERATION_FEASIBILITY_SCHEMA
 from .perception import cached_detection_observations, inspect_perception, observe_detection
+from .perception_diagnostics import PerceptionDiagnostics
 from .preassignment_feasibility import preassignment_digest
 from .shared_world import SharedEmosStage2Runtime
+from .view_scan import inspect_view_scan, view_scan_declaration
 
 _LOG = logging.getLogger(__name__)
 LIVE_FEASIBILITY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.6"
@@ -120,15 +123,40 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         if acquisition:
             for agent in observer_ids:
                 inspect_navigation_dispatch(environment, agent)
+                inspect_view_scan(environment, actor._active_policies[agent], agent)
         self._write_json("endpoint-registry-used.json", self.registry)
         self._write_json(
             "perception-readiness.json",
             {
+                "schema_version": "roboguide.perception-readiness/v0.2",
                 "enabled": self._config.enable_observation,
                 "sensors": {
                     str(agent): sensor for agent, sensor in self._detection_sensors.items()
                 },
                 "source": "loaded-original-sensors-and-cameras",
+                "detector_sources": {
+                    str(agent): {
+                        "sensor_uuid": key,
+                        "agent_id": environment.task.sensor_suite.sensors[key].agent_id,
+                        "pixel_threshold": environment.task.sensor_suite.sensors[
+                            key
+                        ].pixel_threshold,
+                        "scope": "world" if key == "detected_objects" else "agent",
+                    }
+                    for agent, key in self._detection_sensors.items()
+                },
+                **(
+                    {
+                        "view_search": {
+                            str(agent): inspect_view_scan(
+                                environment, actor._active_policies[agent], agent
+                            ).evidence()
+                            for agent in observer_ids
+                        }
+                    }
+                    if acquisition
+                    else {}
+                ),
             },
         )
         path = self._evidence_dir() / "preassignment-feasibility.json"
@@ -163,7 +191,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         self._write_json(
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.12"
+                "schema_version": "roboguide.habitat-local-how-profile/v0.13"
                 if acquisition
                 else "roboguide.habitat-local-how-profile/v0.10"
                 if recoveries
@@ -178,6 +206,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                     {
                         "observation_control": observation_control_declaration(),
                         "navigation_dispatch": navigation_dispatch_declaration(),
+                        "observation_view_search": view_scan_declaration(),
                     }
                     if acquisition
                     else {}
@@ -320,6 +349,9 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         acquisition_starts: dict[int, int] = {}
         acquisition_digests: dict[int, str] = {}
         observation_controls: dict[int, ObservationAcquisitionControl] = {}
+        perception_diagnostics = PerceptionDiagnostics(
+            self._evidence_dir(), enabled=diagnostics_enabled()
+        )
         sequence: list[str] = []
         steps, done = 0, False
         info: dict[str, Any] = {}
@@ -424,6 +456,17 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                             acquisition_digests[agent],
                         )
                         control.update(observed)
+                        perception_diagnostics.record(
+                            invocation,
+                            environment,
+                            cached_detection_observations(
+                                gym, observations, self._detection_sensors[agent]
+                            ),
+                            self._detection_sensors,
+                            steps,
+                            acquisition_digests[agent],
+                            force=True,
+                        )
                         if observed["condition_holds"] is True:
                             observed.update(
                                 acquisition_profile="bounded-visual-acquisition/v0.1",
@@ -618,6 +661,18 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                             acquisition_max_steps=budget,
                         )
                         observation_controls[agent].update(acquisition_receipt)
+                        perception_diagnostics.record(
+                            invocation,
+                            environment,
+                            cached_detection_observations(
+                                gym, observations, self._detection_sensors[agent]
+                            ),
+                            self._detection_sensors,
+                            steps,
+                            acquisition_digests[agent],
+                            force=acquisition_expired
+                            or acquisition_receipt["condition_holds"] is True,
+                        )
                     local_finished = (
                         acquisition_receipt["condition_holds"] is True
                         if acquisition_receipt is not None
@@ -699,6 +754,32 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             reason = f"execution_exception:{type(error).__name__}"
             raise
         finally:
+            try:
+                if perception_diagnostics.enabled:
+                    for agent, invocation in ledger.active.items():
+                        if isinstance(invocation, CanonicalObservationAcquisitionInvocation):
+                            perception_diagnostics.record(
+                                invocation,
+                                environment,
+                                cached_detection_observations(
+                                    gym, observations, self._detection_sensors[agent]
+                                ),
+                                self._detection_sensors,
+                                steps,
+                                acquisition_digests[agent],
+                                force=True,
+                            )
+            except Exception:
+                _LOG.exception("cached perception terminal sample unavailable")
+            try:
+                if perception_diagnostics.enabled:
+                    self._best_effort_write_json(
+                        "perception-diagnostics-audit.json",
+                        perception_diagnostics.close(),
+                        "cached perception diagnostic closure",
+                    )
+            except Exception:
+                _LOG.exception("cached perception terminal diagnostic unavailable")
             try:
                 if bindings is not None:
                     bindings.close()

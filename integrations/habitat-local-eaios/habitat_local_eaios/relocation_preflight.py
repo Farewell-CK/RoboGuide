@@ -117,11 +117,30 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             execution_options["enable_observation_acquisition"]
             or execution_options["contract_recovery_attempts"] > 0
         )
-        navigation_dispatch = actual_schema == "roboguide.habitat-local-how-profile/v0.12"
+        view_search = actual_schema == "roboguide.habitat-local-how-profile/v0.13"
+        navigation_dispatch = actual_schema in {
+            "roboguide.habitat-local-how-profile/v0.12",
+            "roboguide.habitat-local-how-profile/v0.13",
+        }
         observation_control = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.11",
             "roboguide.habitat-local-how-profile/v0.12",
+            "roboguide.habitat-local-how-profile/v0.13",
         }
+        if view_search:
+            from .view_scan import view_scan_declaration
+
+            expected_scan = view_scan_declaration()
+            actual_scan = actual.get("observation_view_search")
+            if (
+                actual_scan != expected_scan
+                or not isinstance(actual_scan, dict)
+                or any(
+                    type(actual_scan[key]) is not type(value)
+                    for key, value in expected_scan.items()
+                )
+            ):
+                raise IntegrationError("actual observation view search contract is invalid")
         if navigation_dispatch:
             from .navigation_dispatch import navigation_dispatch_declaration
 
@@ -143,7 +162,9 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             not in {"roboguide.e1.b1-deployment-used/v0.3", "roboguide.e1.b1-deployment-used/v0.4"}
             or actual_schema
             != (
-                "roboguide.habitat-local-how-profile/v0.12"
+                "roboguide.habitat-local-how-profile/v0.13"
+                if view_search
+                else "roboguide.habitat-local-how-profile/v0.12"
                 if navigation_dispatch
                 else "roboguide.habitat-local-how-profile/v0.11"
                 if observation_control
@@ -164,6 +185,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
                 *({"execution_options"} if extended else set()),
                 *({"observation_control"} if observation_control else set()),
                 *({"navigation_dispatch"} if navigation_dispatch else set()),
+                *({"observation_view_search"} if view_search else set()),
             }
             or actual.get("execution_profile") != LIVE_PROFILE
             or actual.get("endpoint_registry_digest") != registry["digest"]

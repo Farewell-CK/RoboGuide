@@ -236,10 +236,25 @@ def test_feedback_cannot_bind_a_different_operation_or_attempt() -> None:
     "version,mutation",
     [
         (version, mutation)
-        for version in (11, 12)
+        for version in (11, 12, 13)
         for mutation in (None, "pause", "persistence", "extra", "schema")
     ]
-    + [(12, mutation) for mutation in ("dispatch", "dispatch-missing", "dispatch-downgrade")],
+    + [
+        (version, mutation)
+        for version in (12, 13)
+        for mutation in ("dispatch", "dispatch-missing", "dispatch-downgrade")
+    ]
+    + [
+        (13, mutation)
+        for mutation in (
+            "scan-missing",
+            "scan-downgrade",
+            "scan-steps",
+            "scan-yaw",
+            "scan-false",
+            "scan-extra",
+        )
+    ],
 )
 def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
     tmp_path: Path,
@@ -249,6 +264,7 @@ def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
     """Actual run-local source validation accepts only the exact disclosed feedback profile."""
     from habitat_local_eaios.navigation_dispatch import navigation_dispatch_declaration
     from habitat_local_eaios.observation_control import observation_control_declaration
+    from habitat_local_eaios.view_scan import view_scan_declaration
     from roboguide_eval.b1_deployment_feasibility import (  # type: ignore[import-untyped]
         preflight_deployment_feasibility,
     )
@@ -261,8 +277,10 @@ def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
         schema_version=f"roboguide.habitat-local-how-profile/v0.{version}",
         observation_control=observation_control_declaration(),
     )
-    if version == 12:
+    if version >= 12:
         how["navigation_dispatch"] = navigation_dispatch_declaration()
+    if version == 13:
+        how["observation_view_search"] = view_scan_declaration()
     how["execution_options"]["enable_observation_acquisition"] = True
     deployment_path = run / "b1-deployment-used.json"
     declaration = json.loads(deployment_path.read_bytes())
@@ -286,9 +304,23 @@ def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
         del how["navigation_dispatch"]
     elif mutation == "dispatch-downgrade":
         how["schema_version"] = "roboguide.habitat-local-how-profile/v0.11"
+    elif mutation == "scan-missing":
+        del how["observation_view_search"]
+    elif mutation == "scan-downgrade":
+        how["schema_version"] = "roboguide.habitat-local-how-profile/v0.12"
+    elif mutation == "scan-steps":
+        how["observation_view_search"]["max_simulator_steps_per_call"] = 4096
+    elif mutation == "scan-yaw":
+        how["observation_view_search"]["max_commanded_yaw_radians_per_call"] = 100.0
+    elif mutation == "scan-false":
+        how["observation_view_search"]["camera_teleportation"] = 0
+    elif mutation == "scan-extra":
+        how["observation_view_search"]["physical_success_override"] = True
     how_path.write_text(json.dumps(how))
     if mutation is None:
         preflight_deployment_feasibility(run)
     else:
-        with pytest.raises(ValueError, match="observation feedback|Local How|navigation dispatch"):
+        with pytest.raises(
+            ValueError, match="observation feedback|Local How|navigation dispatch|view search"
+        ):
             preflight_deployment_feasibility(run)

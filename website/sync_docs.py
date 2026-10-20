@@ -134,6 +134,10 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
                 "docs/development/acceptance/2026-10-20-file-process-memory-ownership.md",
             ),
             (
+                "有界观测集成验收",
+                "docs/development/acceptance/2026-10-20-bounded-observation-integration.md",
+            ),
+            (
                 "运行期 MI 自动发现",
                 "docs/development/acceptance/2026-10-20-runtime-mi-discovery.md",
             ),

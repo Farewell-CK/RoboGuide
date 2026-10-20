@@ -59,6 +59,11 @@ def inspect_perception(environment: Any, agent_ids: tuple[int, ...]) -> dict[int
             or sensor.pixel_threshold < 0
         ):
             raise IntegrationError("original visual detection sensor is unavailable")
+        owner = getattr(sensor, "agent_id", "unavailable")
+        if (key == "detected_objects" and owner is not None) or (
+            key != "detected_objects" and (type(owner) is not int or owner != agent_id)
+        ):
+            raise IntegrationError("visual detector scope differs from the registered endpoint")
         simulator_sensors = environment.sim._sensors
         if not any(
             name.startswith(f"agent_{agent_id}_") and "semantic" in name
