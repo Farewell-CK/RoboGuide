@@ -31,6 +31,11 @@ mTLS scrape、两次实际 SQL 故障的 firing/resolved、固定 histogram/queu
 
 ## 交付要求
 
+[部署 profile 软件门禁](acceptance/2026-10-21-deployment-profile.md)提供配置驱动的拓扑、
+共址/故障域、原文件/store owner、TLS/协议与故障/退出矩阵。实际零 Node 检查通过；CI
+补齐维护模块、同一实际 native gate 和独立 Python 3.9 runtime compatibility。它不代替
+其余阶段实测、硬件或生产批准，也不把原证据文件的完整性当作全阶段完成。
+
 [Memory writer 与完整恢复](acceptance/2026-10-21-memory-provider-writer-recovery.md)补齐实际
 四 SQL inode 和主 Store 关闭后的共享 writer 生命周期，旧连接排空后保留原数据升级。
 显式 recovery v0.4 冻结相同原租约并完整恢复；全局引用和在线 HA 仍须各自验收。
@@ -86,7 +91,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 | 阶段 | 对应项 | 必需交付 | 当前状态 |
 | --- | --- | --- | --- |
-| F0 基线与合同 | R03、R19 的非发布部分 | 备份、独立分支、软件 profile、权威/支持/验收矩阵 | 进行中 |
+| F0 基线与合同 | R03、R19 的非发布部分 | 备份、独立分支、软件 profile、权威/支持/验收矩阵 | 闭合可执行 profile/原文件/TLS/退出矩阵与实际零 Node 门禁通过；后续阶段实测与真实部署输入继续分别保留 |
 | F1 停止与当前 HA | R01、R02 | 类型化 stop、Mission hold、证据/receipt/deadline、全生命周期 gate、schema 接线 | 当前切片软件验收通过；后续 stop reconciliation/recovery 升级仍由 F7 验收 |
 | F2 身份与入口 | R04、R05、R14 | pending reconciliation、tenant、证书轮换/撤销、Node 生命周期、硬件证明验证 | 当前身份/入口切片软件验收通过；State/Memory 跨服务授权与副本证书在 F3/F4/F5 接续完成 |
 | F3 State 与 MI | R06、R07、R08 | policy registry、authority consumer、Belief、provenance、verifier/持续验证 | 当前软件阶段验收通过；设备证据独立待验证，后续阶段仍必需 |

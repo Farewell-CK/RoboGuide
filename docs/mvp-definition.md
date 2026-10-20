@@ -11,6 +11,15 @@
 
 ## 2. 当前决策状态
 
+### 已冻结的软件部署合同 v0.1
+
+用户授权的全部非发布整改使用 [deployment profile v0.1](../contracts/deployment/profile-v0.1/README.md)
+固定实际组件、进程共址、主机/控制域、原 binary/配置、唯一 store owner、TLS/协议支持、
+故障目标和退出证据。它接受零 Node，未配置的设备/能力不能用预置清单填补。具体部署由
+调用者提交实际 profile 并保留原 digest；[实际服务门禁](development/acceptance/2026-10-21-deployment-profile.md)
+已验证该路径。软件输入冻结不授予 Execute，不把文件完整性当成语义验收，也不改变完整
+物理 MVP 的 Draft 或下面真机候选的评审状态。其余非发布整改和真实物理证据仍分别必需。
+
 ### 已达成的方向
 
 - MVP 验证通用的多机异构任务，而不是导盲本身；

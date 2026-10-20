@@ -1,0 +1,519 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/deployment/profile-v0.1/schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "profile_id",
+    "revision",
+    "inspection_budget_ms",
+    "mode",
+    "local_host",
+    "hosts",
+    "components",
+    "stores",
+    "links",
+    "contracts",
+    "faults",
+    "criteria"
+  ],
+  "properties": {
+    "schema": {
+      "const": "roboguide.deployment-profile/v0.1"
+    },
+    "profile_id": {
+      "$ref": "#/$defs/id"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775807
+    },
+    "inspection_budget_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 300000
+    },
+    "mode": {
+      "enum": [
+        "single-controller",
+        "replicated-controller"
+      ]
+    },
+    "local_host": {
+      "$ref": "#/$defs/id"
+    },
+    "hosts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/host"
+      }
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/component"
+      }
+    },
+    "stores": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/store"
+      }
+    },
+    "links": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/link"
+      }
+    },
+    "contracts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/contract"
+      }
+    },
+    "faults": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/fault"
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/criterion"
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "fault_domain",
+        "trust_domain"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "fault_domain": {
+          "$ref": "#/$defs/id"
+        },
+        "trust_domain": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "process_id",
+        "host",
+        "domain",
+        "tenants",
+        "binary",
+        "inputs",
+        "application_schema"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "controller",
+            "replica",
+            "mission",
+            "artifact",
+            "memory",
+            "node",
+            "runtime-mi",
+            "operator-client"
+          ]
+        },
+        "process_id": {
+          "$ref": "#/$defs/id"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "domain": {
+          "$ref": "#/$defs/id"
+        },
+        "tenants": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "binary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/pin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inputs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/pin"
+          }
+        },
+        "application_schema": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner",
+        "path",
+        "kind",
+        "writer_contract",
+        "recovery_contract"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "owner": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "kind": {
+          "enum": [
+            "sqlite",
+            "directory"
+          ]
+        },
+        "writer_contract": {
+          "$ref": "#/$defs/id"
+        },
+        "recovery_contract": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ca",
+        "certificate",
+        "key_file",
+        "server_name",
+        "server_leaf"
+      ],
+      "properties": {
+        "ca": {
+          "$ref": "#/$defs/pin"
+        },
+        "certificate": {
+          "$ref": "#/$defs/pin"
+        },
+        "key_file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "server_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "server_leaf": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source",
+        "target",
+        "protocol",
+        "contract",
+        "endpoint",
+        "tls",
+        "probe"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "source": {
+          "$ref": "#/$defs/id"
+        },
+        "target": {
+          "$ref": "#/$defs/id"
+        },
+        "protocol": {
+          "enum": [
+            "mission-http",
+            "operator-http",
+            "artifact-http",
+            "node-grpc",
+            "replica",
+            "local-unix",
+            "metrics"
+          ]
+        },
+        "contract": {
+          "$ref": "#/$defs/id"
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/tls"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "probe": {
+          "enum": [
+            "none",
+            "tls",
+            "health",
+            "memory-instance",
+            "inventory"
+          ]
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "file"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "file": {
+          "$ref": "#/$defs/pin"
+        }
+      }
+    },
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "stage",
+        "assurance",
+        "required",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "stage": {
+          "enum": [
+            "F0",
+            "F1",
+            "F2",
+            "F3",
+            "F4",
+            "F5",
+            "F6",
+            "F7",
+            "F8",
+            "F9",
+            "F10"
+          ]
+        },
+        "assurance": {
+          "enum": [
+            "software",
+            "hardware"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/pin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "fault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "affected",
+        "owner",
+        "trigger",
+        "rto_ms",
+        "rpo",
+        "expected_fence",
+        "criteria"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "affected": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "owner": {
+          "$ref": "#/$defs/id"
+        },
+        "trigger": {
+          "enum": [
+            "process-exit",
+            "host-loss",
+            "partition",
+            "sql-failure",
+            "certificate-expiry",
+            "storage-loss"
+          ]
+        },
+        "rto_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "rpo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "amount",
+            "unit"
+          ],
+          "properties": {
+            "amount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "unit": {
+              "enum": [
+                "committed-commands",
+                "finalized-bytes",
+                "accepted-batches",
+                "journal-rows"
+              ]
+            }
+          }
+        },
+        "expected_fence": {
+          "enum": [
+            "unknown-hold",
+            "write-disabled",
+            "local-safety"
+          ]
+        },
+        "criteria": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    }
+  }
+}

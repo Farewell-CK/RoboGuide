@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+ADR-0129 adds the closed deployment-profile v0.1 and readonly inspector under tools/deployment.
+It accepts arbitrary declared components/process groups/hosts/domains, pinned inputs and contract
+support, unique store owners, actual TLS leaf pins, fault targets and explicit criteria. Zero Node
+is valid; no device or capability inventory is built in. Actual TLS/GET probes do not Register or
+Execute, and raw loopback HTTP stays in the same declared host/domain. Receipt file integrity,
+declarations, local observations and pending hardware remain separate; neither a JSON passed flag
+nor an RTO/RPO target grants authority or announces SoftwareComplete. The actual zero-Node gate is
+check_deployment_profile_processes.py. CI now includes it, maintained Python scopes and real Python
+3.9 standard-library bridge compatibility, without starting Habitat or a model.
+
 ADR-0128 explicitly supports canonical MissionPlan v0.9 in the provider DTO while preserving the
 default v0.8 and its v0.7 output compatibility. A v0.9 output requires the exact selected v0.9
 schema; Memory prerequisites cannot disappear through compatibility normalization. Canonical,

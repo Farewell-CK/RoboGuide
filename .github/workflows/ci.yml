@@ -36,6 +36,22 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --locked
 
+      - name: Check private Rust documentation
+        run: cargo doc --locked --workspace --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Set up uv for native deployment inspection
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Build the actual Controller composition
+        run: cargo build --locked -p integration-server
+
+      - name: Inspect the real deployment with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_deployment_profile_processes.py
+          --output "${RUNNER_TEMP}/roboguide-deployment-inspection"
+
   python:
     name: Python
     runs-on: ubuntu-24.04
@@ -44,6 +60,12 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Set up deployment compatibility Python
+        uses: actions/setup-python@v7
+        id: deployment-python
+        with:
+          python-version: "3.9"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -59,19 +81,45 @@ jobs:
         run: uv sync --dev --frozen
 
       - name: Check formatting
-        run: uv run ruff format --check mission apps/mission-service tools/quality integrations/robonix-map-service website
+        run: >
+          uv run ruff format --check mission apps/mission-service apps/recovery-tool
+          tools/quality tools/deployment tools/observability integrations/robonix-map-service
+          integrations/memory-provider integrations/spatial-provider integrations/habitat-local-eaios
+          evaluation website
 
       - name: Run Ruff
-        run: uv run ruff check mission apps/mission-service tools/quality integrations/robonix-map-service website
+        run: >
+          uv run ruff check mission apps/mission-service apps/recovery-tool
+          tools/quality tools/deployment tools/observability integrations/robonix-map-service
+          integrations/memory-provider integrations/spatial-provider integrations/habitat-local-eaios
+          evaluation website
 
       - name: Run mypy
         run: >
           uv run mypy --strict mission/src mission/tests apps/mission-service tools/quality
+          tools/deployment tools/observability/observability_profile.py
+          apps/recovery-tool/roboguide_recovery apps/recovery-tool/tests
+          integrations/memory-provider/roboguide_memory_provider
+          integrations/spatial-provider/roboguide_spatial_provider
           integrations/robonix-map-service/robonix-map-service.py integrations/robonix-map-service/tests
+          integrations/habitat-local-eaios/habitat_local_eaios integrations/habitat-local-eaios/tests
           website/sync_docs.py
 
+      - name: Check provider and evaluation types
+        run: |
+          uv run mypy --strict integrations/memory-provider/roboguide_memory_provider integrations/memory-provider/tests
+          uv run mypy --strict integrations/spatial-provider/roboguide_spatial_provider integrations/spatial-provider/tests
+          uv run mypy --strict evaluation/src evaluation/tests
+          uv run mypy --strict tools/observability
+
       - name: Check Python function documentation
-        run: uv run python tools/quality/check_python_function_docs.py mission apps/mission-service integrations/robonix-map-service website
+        run: >
+          uv run python tools/quality/check_python_function_docs.py
+          mission apps/mission-service apps/recovery-tool tools/quality tools/deployment tools/observability
+          integrations/robonix-map-service integrations/memory-provider integrations/spatial-provider
+          integrations/habitat-local-eaios evaluation website
 
       - name: Run tests
         run: uv run pytest -q
+        env:
+          ROBOGUIDE_HABITAT_PYTHON: ${{ steps.deployment-python.outputs.python-path }}

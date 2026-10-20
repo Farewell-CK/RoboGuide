@@ -1,5 +1,10 @@
 # RoboGuide V2 架构基线
 
+[ADR-0129](../../decisions/0129-executable-deployment-profile.md)以闭合部署输入和只读
+inspector 固定拓扑、原文件、store owner、信任连接与故障/退出证据；允许零 Node。
+[实际零 Node 验收](../../development/acceptance/2026-10-21-deployment-profile.md)不产生
+设备、执行或全阶段完成权威；原 schema/contract、当前观察和待验项分开保存。
+
 [ADR-0128](../../decisions/0128-explicit-memory-plan-provider-dto.md)要求 MI 的 provider DTO
 显式保留所选 v0.9 Memory prerequisites，旧 v0.8 默认与 v0.7 输出兼容保持；跨合同输出
 拒绝，模型仍不拥有执行或 Memory 可用性权威。

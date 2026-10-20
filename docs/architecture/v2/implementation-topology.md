@@ -31,6 +31,8 @@ flowchart TB
   MIWORK --> MIREC[recovery profile v0.3 / 原 worker + inode lease / 完整原 SQL]
   MIREC --> SQL
   Entry --> REV[原 policy / candidate / exact Review / wrapper v45]
+  DEPLOY[闭合部署 profile / 共址 故障域 目录 TLS 协议 退出证据] --> INSPECT[原 binary schema / 文件 inode / 实际只读 TLS GET / 零 Node 可用]
+  INSPECT -. 无执行或停止权 .-> Entry
   MI --> MEMDTO[显式 MissionPlan v0.9 DTO / 非空 child 许可 / 原 v0.8 默认]
   MEMDTO --> REV
   Entry --> REVMEM[v0.3 原属组 child 声明 / 原 membership 与策略 / 无预绑定]

@@ -9,6 +9,10 @@ main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头�
 `d15543f4ec2dc99ebe565e319e141c0bf17b433b`（执行故障闭环）。后两者是祖先关系。
 代码集成和完整整改完成是不同状态；本次不宣称 SoftwareComplete。
 
+2026-10-21 [可执行部署 profile](acceptance/2026-10-21-deployment-profile.md)接通 F0 软件
+输入、原 binary/schema/file/inode、TLS 与故障/退出矩阵的只读冻结；实际一进程/三监听/
+四探测/零 Node 通过。硬件、独立主机和目标 RTO/RPO 不由此升级为已达事实，其他阶段继续。
+
 2026-10-21 [Memory writer 与完整恢复](acceptance/2026-10-21-memory-provider-writer-recovery.md)
 补齐四类 SQL 的实际 inode/共享连接生命周期、原数据升级和显式 recovery v0.4。
 这修复实际旧 writer 反例；全局引用、在线 HA 及其余必需阶段继续按下表执行。
@@ -147,7 +151,7 @@ v41 证据迁移均检查。长期 SLO、跨主机/值守路由和写锁 I/O 收
 
 | 阶段 | 剩余必需交付 | 下一项可验收结果 |
 | --- | --- | --- |
-| F0 | 将部署 profile 的拓扑、目录、故障域、身份/协议支持矩阵与退出条件做成可验证输入 | 配置驱动的零 Node 启动和软件部署门禁；真实地址/设备证据缺失保持显式 |
+| F0 | 闭合配置、原 binary/文件/store inode、TLS/支持矩阵、故障/退出输入和实际零 Node 门禁已接通 | 后续总矩阵沿用实际 profile 与固定证据；真实主机独立性、RTO/RPO 实测和硬件仍按各阶段验收 |
 | F4 | Controller 与 backend 的完整 active-map/引用生命周期、tombstone/GC、撤销与 snapshot/archive/CAS 一致恢复；跨主机证据 | 先打通原授权、所有引用与恢复门禁下的可审计删除；局部八类引用 GC 不视为全局完成 |
 | F5 | 副本证书轮换、兼容升级协议、archive + snapshot + catalog + CAS 数据面恢复 | HA 接管后原内容可读或明确缺失；升级与回退不丢历史/预算/权限 |
 | F6 | divisible quota 的精确单位与 Local EAIOS 强制、完整时空承诺、真实成本源 | 缺 GPU/定位/交通 evidence 为 unavailable；逻辑账本不冒充 OS/物理强制 |

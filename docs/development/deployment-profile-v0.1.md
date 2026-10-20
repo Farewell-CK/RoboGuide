@@ -2,6 +2,11 @@
 
 状态：整改基线；需要部署负责人在进入真实生产前冻结具体地址、证书、目录和阈值。
 
+软件输入现有 [闭合可执行合同](../../contracts/deployment/profile-v0.1/README.md)与
+[inspector](../../tools/deployment/README.md)，由调用者提供实际值并按 digest 保存原声明/
+只读观察。实际零 Node 组合见[软件验收](acceptance/2026-10-21-deployment-profile.md)。
+下表仍是人类可读的候选部署约束；RTO/RPO 目标不因配置冻结而成为已达 SLO。
+
 这个 profile 把组件拓扑、信任边界、持久化位置、故障域和恢复目标写成可审阅的部署输入。它不把
 checkpoint、replica history 或 metrics 当成物理连续性证明。
 

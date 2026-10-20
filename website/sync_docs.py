@@ -55,6 +55,7 @@ COPY_PLAN: tuple[tuple[str, str], ...] = (
     ("mission/README.md", "mission/index.md"),
     ("evaluation/README.md", "evaluation/index.md"),
     ("evaluation/docs", "evaluation/docs"),
+    ("tools/deployment/README.md", "tools/deployment/index.md"),
     ("integrations/habitat-local-eaios/README.md", "integrations/habitat-local-eaios/index.md"),
     ("integrations/robonix-map-service/README.md", "integrations/robonix-map-service/index.md"),
 )
@@ -113,6 +114,8 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
                 "docs/development/roboguide-software-completion-plan-2026-10-15.md",
             ),
             ("分支同步与剩余整改", "docs/development/roboguide-integration-status-2026-10-20.md"),
+            ("可执行部署 profile", "tools/deployment/index.md"),
+            ("实际部署配置验收", "docs/development/acceptance/2026-10-21-deployment-profile.md"),
             (
                 "内容回收与恢复验收",
                 "docs/development/acceptance/2026-10-20-content-reclamation-and-recovery.md",

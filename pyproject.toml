@@ -41,9 +41,10 @@ convention = "google"
 
 [tool.pytest.ini_options]
 addopts = "-q"
-pythonpath = ["integrations/spatial-provider", "apps/recovery-tool"]
+pythonpath = ["integrations/spatial-provider", "apps/recovery-tool", "tools/deployment"]
 testpaths = [
     "tools/observability/tests",
+    "tools/deployment/tests",
     "apps/recovery-tool/tests",
     "mission/tests",
     "integrations/robonix-map-service/tests",
@@ -58,6 +59,7 @@ python_version = "3.13"
 strict = true
 files = [
     "tools/observability",
+    "tools/deployment",
     "apps/recovery-tool/roboguide_recovery",
     "apps/recovery-tool/tests",
     "integrations/memory-provider/roboguide_memory_provider",

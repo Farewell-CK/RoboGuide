@@ -1,5 +1,9 @@
 # RoboGuide
 
+[可执行部署 profile](tools/deployment/README.md)将进程共址、主机/控制域、原 binary/配置、
+持久化 owner、TLS/协议声明与故障/退出矩阵作为显式输入；实际零 Node 服务门禁检查摘要、
+inode 和四次只读探测。声明、观察、待验硬件及 RTO/RPO 目标分别保留，不自动宣告部署或整改完成。
+
 [运行期 MI 与 scoped Memory 整链](docs/development/acceptance/2026-10-21-runtime-mi-scoped-memory.md)
 补齐显式 v0.9 provider DTO，并将真实原 Request、自动故障、原退出/撤权、非空 child
 许可、持久 MI 调用、独立 Review 和正常新组 import/use/原目标验证连通。默认仍为 v0.8，
