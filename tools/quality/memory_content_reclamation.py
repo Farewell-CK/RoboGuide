@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import uuid
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ from memory_use_profile import request
 def run(directory: Path, backend: str, restart: Callable[[], None]) -> dict[str, Any]:
     """Exercise real Unix HTTP, bytes, failed final SQL, original restart and readonly history."""
     database = directory / "consumer/backend/memory.sqlite3"
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
         rows = connection.execute("SELECT original_json FROM imports ORDER BY import_id").fetchall()
     assert len(rows) == 1
     original = json.loads(rows[0][0])
@@ -55,7 +56,7 @@ def run(directory: Path, backend: str, restart: Callable[[], None]) -> dict[str,
     assert status == 200 and availability["availability"]["available"] is False, availability
     save(directory / "reclamation-tombstone.json", tombstone)
     save(directory / "reclamation-availability.json", availability)
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection, connection:
         connection.execute(
             "CREATE TRIGGER actual_reclamation_receipt_fault "
             "BEFORE UPDATE ON reclamation_commands WHEN NEW.state='deleted' "
@@ -72,7 +73,7 @@ def run(directory: Path, backend: str, restart: Callable[[], None]) -> dict[str,
         backend, "/v1/content/reclamation", {"command_id": command["command_id"]}, method="GET"
     )
     assert status == 200 and observed == tombstone, observed
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection, connection:
         connection.execute("DROP TRIGGER actual_reclamation_receipt_fault")
     restart()
     status, observed = request(

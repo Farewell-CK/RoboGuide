@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 import stat
 import time
 import zipfile
@@ -239,10 +238,20 @@ class ActiveMapLedger:
         """Open a private WAL ledger and fence every active selection after a process restart."""
         self.root = root
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if root.resolve() != store.root / "active-map":
+            raise ActiveMapError("active-map SQL must use its original provider managed directory")
         self.store = store
         self.leases = leases
         self._lock = store._mutex
-        self._db = sqlite3.connect(root / "active-map.sqlite3", check_same_thread=False)
+        self._db = store._storage.connect("active-map/active-map.sqlite3")
+        try:
+            self._initialize_database()
+        except BaseException:
+            self._db.close()
+            raise
+
+    def _initialize_database(self) -> None:
+        """Open only this connection's original schema; failed construction retains no writer."""
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
         version = self._db.execute("PRAGMA user_version").fetchone()[0]

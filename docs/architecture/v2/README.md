@@ -1,5 +1,11 @@
 # RoboGuide V2 架构基线
 
+[ADR-0127](../../decisions/0127-memory-provider-complete-writer-leases.md)定义参考 Memory
+backend 全部 SQL inode 与 connection 的共同 writer 生命周期、v3 存储 fence 和显式
+recovery-profile v0.4。实际别名/提前解锁反例和
+[完整进程恢复验收](../../development/acceptance/2026-10-21-memory-provider-writer-recovery.md)
+均保留；全局引用和在线 HA 继续必需。
+
 [ADR-0126](../../decisions/0126-scoped-memory-for-runtime-plan-revision.md)定义显式 v0.3
 修订 Memory 许可：候选/Review 前冻结原属组清单与完整 child，不预绑定新组。原停止与
 撤权证明后才能发布，目标正常 Control 绑定、独立 import/use 和每 chunk 权限仍必需。

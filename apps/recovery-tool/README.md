@@ -1,5 +1,13 @@
 # RoboGuide recovery tool
 
+[Profile v0.4](../../contracts/recovery/bundle-v0.4/README.md) adds the reference Memory provider's
+complete writer: root/use locks plus the actual inodes of all four managed SQL databases. Its
+original Memory SQL v3 marker is mandatory; old profiles refuse this storage. Closing the main
+Store does not permit a backup while an actual use/job/map connection survives. Restore preserves
+every schema/row and content byte, creates private empty lease files, and starts no services. A
+never-started restored tree can therefore be backed up under the same explicit contract. See
+[ADR-0127](../../docs/decisions/0127-memory-provider-complete-writer-leases.md).
+
 [Profile v0.3](../../contracts/recovery/bundle-v0.3/README.md) adds the actual `runtime-mi` SQL
 writer: both `database.worker.lock` and the database inode lease are mandatory, together with the
 original work instance/nonce format. Active or hardlink-alias workers refuse backup. It preserves

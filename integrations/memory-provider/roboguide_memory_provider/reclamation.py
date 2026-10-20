@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import stat
+from contextlib import closing
 from typing import Any
 
 from .active_map import ActiveMapLedger
@@ -32,8 +34,15 @@ class ContentReclamation:
             raise ValueError("content reclamation requires the exact original backend owners")
         if active_maps is not None and active_maps.store is not store:
             raise ValueError("active-map reclamation uses a different backend")
-        if active_maps is None and (store.root / "active-map/active-map.sqlite3").exists():
-            raise ValueError("existing active-map reference authority must be opened")
+        if active_maps is None:
+            path = store.root / "active-map/active-map.sqlite3"
+            if path.exists():
+                with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+                    authority = connection.execute(
+                        "SELECT 1 FROM sqlite_schema WHERE type='table' LIMIT 1"
+                    ).fetchone()
+                if authority is not None:
+                    raise ValueError("existing active-map reference authority must be opened")
         self.store, self.leases, self.jobs, self.active_maps = store, leases, jobs, active_maps
 
     def _request(self, request: dict[str, Any]) -> bytes:

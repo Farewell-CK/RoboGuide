@@ -59,12 +59,14 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
     if profile.get("schema") in {
         "roboguide.recovery-profile/v0.2",
         "roboguide.recovery-profile/v0.3",
+        "roboguide.recovery-profile/v0.4",
     }:
         expected.add("artifact_replica_sets")
     if set(profile) != expected or profile["schema"] not in {
         "roboguide.recovery-profile/v0.1",
         "roboguide.recovery-profile/v0.2",
         "roboguide.recovery-profile/v0.3",
+        "roboguide.recovery-profile/v0.4",
     }:
         raise ValueError("recovery profile is not closed or versioned")
     if (
@@ -108,9 +110,13 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         if item["kind"] == "replica" and profile["schema"] not in {
             "roboguide.recovery-profile/v0.2",
             "roboguide.recovery-profile/v0.3",
+            "roboguide.recovery-profile/v0.4",
         }:
             raise ValueError("replica supervisor leases require explicit recovery profile v0.2")
-        if item["kind"] == "runtime-mi" and profile["schema"] != "roboguide.recovery-profile/v0.3":
+        if item["kind"] == "runtime-mi" and profile["schema"] not in {
+            "roboguide.recovery-profile/v0.3",
+            "roboguide.recovery-profile/v0.4",
+        }:
             raise ValueError("runtime MI leases require explicit recovery profile v0.3")
         if (
             not isinstance(item["root"], str)
@@ -232,15 +238,23 @@ def layout(component: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
 
 
 @contextmanager
-def acquire_all(components: list[dict[str, Any]]) -> Iterator[None]:
+def acquire_all(
+    components: list[dict[str, Any]], *, profile_schema: str = "roboguide.recovery-profile/v0.1"
+) -> Iterator[None]:
     """Hold every real process lease before scanning any data; active or unknown owners refuse."""
     with ExitStack() as stack:
         paths: list[Path] = []
         for component in components:
             root = real_directory(Path(component["root"]))
-            _, _, locks = layout(component)
+            databases, _, locks = layout(component)
             paths.extend(root / name for name in locks)
+            if (
+                component["kind"] == "memory"
+                and profile_schema == "roboguide.recovery-profile/v0.4"
+            ):
+                paths.extend(root / name for name in [".memory-use.lock", *databases])
         for path in sorted(paths):
+            real_directory(path.parent)
             descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
             stack.callback(os.close, descriptor)
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
@@ -251,6 +265,33 @@ def acquire_all(components: list[dict[str, Any]]) -> Iterator[None]:
                 raise ValueError("original service writer is still active: " + str(path)) from error
             stack.callback(fcntl.flock, descriptor, fcntl.LOCK_UN)
         for component in components:
+            if component["kind"] == "memory":
+                path = Path(component["root"]) / "memory.sqlite3"
+                with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+                    version = connection.execute("PRAGMA user_version").fetchone()[0]
+                    if profile_schema == "roboguide.recovery-profile/v0.4":
+                        marker = connection.execute(
+                            "SELECT schema,databases_json FROM provider_writer_format"
+                        ).fetchall()
+                        expected = [
+                            "memory.sqlite3",
+                            "memory-use.sqlite3",
+                            "file-jobs.sqlite3",
+                            "active-map/active-map.sqlite3",
+                        ]
+                        if (
+                            version != 3
+                            or len(marker) != 1
+                            or marker[0][0] != "roboguide.memory-provider-writer/v0.1"
+                            or json.loads(marker[0][1]) != expected
+                        ):
+                            raise ValueError(
+                                "Memory recovery requires its actual v3 composite writer marker"
+                            )
+                    elif version >= 3:
+                        raise ValueError(
+                            "Memory composite writers require explicit recovery profile v0.4"
+                        )
             if component["kind"] == "runtime-mi":
                 path = Path(component["root"]) / component["database"]
                 try:

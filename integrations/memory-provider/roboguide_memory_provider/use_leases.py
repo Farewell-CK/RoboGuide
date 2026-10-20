@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
-import os
 import re
-import sqlite3
 import threading
 import uuid
 from pathlib import Path
@@ -68,12 +65,9 @@ class UseLeases:
         """Reopen original command receipts and generation fences without renewing any budget."""
         self.store = store
         self._mutex = threading.RLock()
-        self._writer: int | None = os.open(
-            store.root / ".memory-use.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
-        )
+        self._closed = False
         try:
-            fcntl.flock(self._writer, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self._db = sqlite3.connect(store.root / "memory-use.sqlite3", check_same_thread=False)
+            self._db = store._storage.connect("memory-use.sqlite3")
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=FULL")
             version = self._db.execute("PRAGMA user_version").fetchone()[0]
@@ -98,19 +92,16 @@ class UseLeases:
         except BaseException:
             if hasattr(self, "_db"):
                 self._db.close()
-            os.close(self._writer)
-            self._writer = None
+            self._closed = True
             raise
 
     def close(self) -> None:
         """Close the local lease database after the owner joins all content users."""
         with self._mutex:
-            if self._writer is None:
+            if self._closed:
                 return
             self._db.close()
-            if self._writer is not None:
-                os.close(self._writer)
-                self._writer = None
+            self._closed = True
 
     def _control(self, request: dict[str, Any]) -> dict[str, Any]:
         """Reject open commands, caller paths and replacement source identities."""

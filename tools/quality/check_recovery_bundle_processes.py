@@ -63,8 +63,14 @@ def run(
         if not key.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
     }
     environment["PYTHONPATH"] = str(ROOT / "apps/recovery-tool")
+    with closing(sqlite3.connect(source / "source/backend/memory.sqlite3")) as connection:
+        provider_version = connection.execute("PRAGMA user_version").fetchone()[0]
     profile: dict[str, Any] = {
-        "schema": "roboguide.recovery-profile/v0.1",
+        "schema": (
+            "roboguide.recovery-profile/v0.4"
+            if provider_version == 3
+            else "roboguide.recovery-profile/v0.1"
+        ),
         "profile_id": "original-file-process-stores",
         "revision": 1,
         "max_bytes": 1024 * 1024 * 1024,
@@ -89,6 +95,8 @@ def run(
             },
         ],
     }
+    if provider_version == 3:
+        profile["artifact_replica_sets"] = []
     for name in ("source", "consumer"):
         node_root = source / name / "node-state"
         profile["components"].extend(
@@ -115,7 +123,7 @@ def run(
     databases = [source / "controller.sqlite3"]
     for name in ("source", "consumer"):
         databases.append(source / name / "node-state/execution-journal.sqlite3")
-        databases.extend(sorted((source / name / "backend").glob("*.sqlite3")))
+        databases.extend(sorted((source / name / "backend").rglob("*.sqlite3")))
     before = {str(path.relative_to(source)): logical_rows(path) for path in databases}
     save(output / "original-sql-evidence.json", before)
     code_paths = sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py"))

@@ -75,6 +75,8 @@ flowchart TB
   PROBE --> DEGRADED
   NODE <--> ART[Artifact CAS / 内容授权]
   NODE --> MEM[配置固定的 Local Memory provider]
+  MEM --> MEMWRITER[参考 backend SQL v3 / root use 与四 SQL inode / 最后连接才释放]
+  MEMWRITER --> MEMCOLD[显式 recovery v0.4 / 原 schema rows UUID 内容 / 无服务启动]
   MEM --> FILEPROC[显式 owned CPU child / 原预算与 PID / 有期限 read permit]
   FILEPROC --> EXITPROOF[真实 OS wait / 原 instance PID generation / 非设备证明]
   EXITPROOF --> OBS

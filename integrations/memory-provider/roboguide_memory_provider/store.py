@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
 import re
-import sqlite3
 import stat
 import tempfile
 import threading
 import uuid
 from pathlib import Path
 from typing import Any, BinaryIO
+
+from .storage import DATABASES, WRITER_SCHEMA, ProviderStorage
 
 MAX_METADATA_BYTES = 600 * 1024
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -121,21 +121,70 @@ class MemoryStore:
                 ):
                     raise ValueError("export handoff requires a bounded relative path")
                 self._exports.append(binding)
-        self._lock_file: BinaryIO = (self.root / "writer.lock").open("a+b")
-        try:
-            fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BaseException:
-            self._lock_file.close()
-            raise
         self._mutex = threading.RLock()
-        self._db = sqlite3.connect(self.root / "memory.sqlite3", check_same_thread=False)
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA synchronous=FULL")
+        self._storage = ProviderStorage(self.root)
+        try:
+            self._db = self._storage.connect("memory.sqlite3")
+            self._initialize_storage()
+            instance, saved_provider = self._db.execute(
+                "SELECT instance,provider FROM identity WHERE singleton=1"
+            ).fetchone()
+            if saved_provider != provider_id:
+                raise ValueError("stored provider ownership differs from configuration")
+            self.instance_id = str(instance)
+            self._content = self.root / "content"
+            self._content.mkdir(mode=0o700, exist_ok=True)
+            if self._content.is_symlink():
+                raise ValueError("content root cannot be a symlink")
+            sync_directory(self.root)
+        except BaseException:
+            if hasattr(self, "_db"):
+                self._db.close()
+            self._storage.close_unopened()
+            raise
+
+    def _initialize_storage(self) -> None:
+        """Migrate only quiescent original SQL and durably fence older provider writers."""
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1, 2):
-            self.close()
+        if version not in (0, 1, 2, 3):
             raise ValueError("unsupported Memory backend schema")
-        with self._db:
+        if version == 3:
+            marker = self._db.execute(
+                "SELECT schema,databases_json FROM provider_writer_format"
+            ).fetchall()
+            if marker != [(WRITER_SCHEMA, canonical(list(DATABASES)).decode())]:
+                raise ValueError("original provider writer marker is unavailable")
+            required = {
+                "identity",
+                "imports",
+                "content_tombstones",
+                "reclamation_commands",
+                "retired_imports",
+                "content_references",
+                "provider_writer_format",
+            }
+            actual = {
+                row[0]
+                for row in self._db.execute("SELECT name FROM sqlite_schema WHERE type='table'")
+            }
+            if not required <= actual:
+                raise ValueError("original provider authority table is unavailable")
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA synchronous=FULL")
+            return
+        if version == 2:
+            original = self._db.execute(
+                "SELECT provider FROM identity WHERE singleton=1"
+            ).fetchone()
+            if original != (self.provider_id,):
+                raise ValueError("stored provider ownership differs from configuration")
+        # SQLite itself requires every legacy connection to relinquish its DB locks. This also
+        # fences old aliases that did not implement the new inode lease before any format write.
+        if self._db.execute("PRAGMA journal_mode=DELETE").fetchone() != ("delete",):
+            raise ValueError("legacy provider connections did not become quiescent")
+        self._db.execute("PRAGMA synchronous=FULL")
+        self._db.execute("BEGIN EXCLUSIVE")
+        try:
             self._db.execute(
                 "CREATE TABLE IF NOT EXISTS identity (singleton INTEGER PRIMARY KEY "
                 "CHECK(singleton=1), instance TEXT NOT NULL, provider TEXT NOT NULL)"
@@ -147,7 +196,8 @@ class MemoryStore:
                 "state TEXT NOT NULL CHECK(state IN ('pending','completed')))"
             )
             self._db.execute(
-                "INSERT OR IGNORE INTO identity VALUES (1,?,?)", (str(uuid.uuid4()), provider_id)
+                "INSERT OR IGNORE INTO identity VALUES (1,?,?)",
+                (str(uuid.uuid4()), self.provider_id),
             )
             self._db.execute(
                 "CREATE TABLE IF NOT EXISTS content_tombstones (content_digest TEXT PRIMARY KEY, "
@@ -168,28 +218,27 @@ class MemoryStore:
                 "content_digest TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, "
                 "generation INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)))"
             )
-            self._db.execute("PRAGMA user_version=2")
-        instance, saved_provider = self._db.execute(
-            "SELECT instance,provider FROM identity WHERE singleton=1"
-        ).fetchone()
-        if saved_provider != provider_id:
-            self.close()
-            raise ValueError("stored provider ownership differs from configuration")
-        self.instance_id = str(instance)
-        self._content = self.root / "content"
-        self._content.mkdir(mode=0o700, exist_ok=True)
-        if self._content.is_symlink():
-            self.close()
-            raise ValueError("content root cannot be a symlink")
-        sync_directory(self.root)
+            self._db.execute(
+                "CREATE TABLE provider_writer_format "
+                "(schema TEXT PRIMARY KEY, databases_json TEXT NOT NULL)"
+            )
+            self._db.execute(
+                "INSERT INTO provider_writer_format VALUES (?,?)",
+                (WRITER_SCHEMA, canonical(list(DATABASES)).decode()),
+            )
+            self._db.execute("PRAGMA user_version=3")
+            self._db.commit()
+        except BaseException:
+            self._db.rollback()
+            raise
+        # DELETE-mode Commit places the format/old-writer fence in the actual main file, so an
+        # older alias cannot miss it by choosing a different WAL filename.
+        self._db.execute("PRAGMA journal_mode=WAL")
 
     def close(self) -> None:
-        """Release the actual SQLite connection and the exact owned single-writer lock."""
+        """Close this connection; sibling writers retain every original root/inode lease."""
         with self._mutex:
             self._db.close()
-            if not self._lock_file.closed:
-                fcntl.flock(self._lock_file, fcntl.LOCK_UN)
-                self._lock_file.close()
 
     def identity(self) -> dict[str, str]:
         """Return the persistent identity actually read from this backend."""

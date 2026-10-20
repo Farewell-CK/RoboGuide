@@ -19,6 +19,7 @@ import sys
 import tarfile
 import time
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -353,7 +354,12 @@ def run(
         if query_setup is not None:
             query_setup.start_extra(start)
         if not group_lifecycle and not use_query_recovery and handoff_case is None:
-            with sqlite3.connect(directory / "consumer/backend/memory.sqlite3") as connection:
+            with (
+                closing(
+                    sqlite3.connect(directory / "consumer/backend/memory.sqlite3")
+                ) as connection,
+                connection,
+            ):
                 connection.execute(
                     "CREATE TRIGGER fail_final_import BEFORE UPDATE OF state ON imports "
                     "BEGIN SELECT RAISE(ABORT,'original import completion crash window'); END"
@@ -565,8 +571,10 @@ def run(
             )
             result["process_workers"] = process_workers
             if process_workers and handoff_case == "complete":
-                with sqlite3.connect(
-                    f"file:{directory / 'consumer/backend/memory.sqlite3'}?mode=ro", uri=True
+                with closing(
+                    sqlite3.connect(
+                        f"file:{directory / 'consumer/backend/memory.sqlite3'}?mode=ro", uri=True
+                    )
                 ) as connection:
                     rows = connection.execute(
                         "SELECT import_id,original_json FROM imports ORDER BY import_id"
@@ -671,8 +679,8 @@ def run(
                     ),
                     "Memory requirement waits for an explicit Group content grant",
                 )
-                with sqlite3.connect(
-                    directory / "consumer/backend/file-jobs.sqlite3"
+                with closing(
+                    sqlite3.connect(directory / "consumer/backend/file-jobs.sqlite3")
                 ) as connection:
                     assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
                 save(directory / "before-group-grant.json", waiting)
@@ -842,12 +850,20 @@ def run(
         original = exchange("/v1/memory/imports/" + import_id)[1]
         save(directory / "imports.json", {import_id: original})
         assert original["phase"] == "completed" and original["reconciliation"]["resolved_by"] == 1
-        with sqlite3.connect(directory / "consumer/backend/memory.sqlite3") as connection:
+        with (
+            closing(sqlite3.connect(directory / "consumer/backend/memory.sqlite3")) as connection,
+            connection,
+        ):
             assert connection.execute("SELECT COUNT(*),state FROM imports").fetchone() == (
                 1,
                 "pending",
             )
-        with sqlite3.connect(directory / "consumer/backend/file-jobs.sqlite3") as connection:
+        with (
+            closing(
+                sqlite3.connect(directory / "consumer/backend/file-jobs.sqlite3")
+            ) as connection,
+            connection,
+        ):
             original_jobs = connection.execute("SELECT * FROM jobs").fetchall()
             original_job_budgets = connection.execute("SELECT * FROM job_budgets").fetchall()
             assert len(original_jobs) == 1 and original_jobs[0][2] == "COMPLETED"
@@ -864,7 +880,7 @@ def run(
             "actual Node revocation ACK after Controller restore",
         )
         node_database = directory / "consumer/node-state/execution-journal.sqlite3"
-        with sqlite3.connect(node_database) as connection:
+        with closing(sqlite3.connect(node_database)) as connection, connection:
             original_receiver = connection.execute(
                 "SELECT preparation_json,budget_json,configuration_digest FROM memory_preparations"
             ).fetchall()
@@ -918,7 +934,7 @@ def run(
             ),
             "new actual registration receipts from both restarted Nodes",
         )
-        with sqlite3.connect(node_database) as connection:
+        with closing(sqlite3.connect(node_database)) as connection, connection:
             assert (
                 connection.execute(
                     "SELECT preparation_json,budget_json,configuration_digest "
@@ -926,7 +942,12 @@ def run(
                 ).fetchall()
                 == original_receiver
             )
-        with sqlite3.connect(directory / "consumer/backend/file-jobs.sqlite3") as connection:
+        with (
+            closing(
+                sqlite3.connect(directory / "consumer/backend/file-jobs.sqlite3")
+            ) as connection,
+            connection,
+        ):
             assert connection.execute("SELECT * FROM jobs").fetchall() == original_jobs
             assert (
                 connection.execute("SELECT * FROM job_budgets").fetchall() == original_job_budgets

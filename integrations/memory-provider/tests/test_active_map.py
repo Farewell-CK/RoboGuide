@@ -94,7 +94,7 @@ def ledger(tmp_path: Path) -> Iterator[tuple[ActiveMapLedger, MemoryStore, dict[
     payload, _ = bundle()
     digest = "sha256:" + hashlib.sha256(payload).hexdigest()
     (store._content / digest[7:]).write_bytes(payload)
-    active = ActiveMapLedger(tmp_path / "active-map", store, NoopLease())
+    active = ActiveMapLedger(store.root / "active-map", store, NoopLease())
     try:
         yield active, store, request(digest, len(payload)), digest
     finally:

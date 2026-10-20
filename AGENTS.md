@@ -1,5 +1,13 @@
 # Repository Guidelines
 
+ADR-0127 gives the reference Memory provider one root/use/four-database-inode writer lease,
+retained until every actual managed SQLite connection closes. Native journal transitions drain
+legacy connections before upgrade. Memory SQL v3 preserves original instance/history/budgets;
+old writers refuse it. Explicit recovery-profile v0.4 validates its marker and freezes all these
+leases, preserving all four SQL stores and declared content. Missing v3 managed files refuse
+without implicit repair. No service starts during restore; software storage facts confer no Node,
+current-use, device-stop or global HA authority. See the 2026-10-21 writer/recovery acceptance.
+
 ADR-0126 adds explicit runtime-plan-revision v0.3 original-owner Memory declarations before
 candidate output/provider claim/Review. The complete child and source membership/policy/principal
 are immutable; Review includes their digest. Original complete stop/revoke and actual CAS verification

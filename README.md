@@ -1,5 +1,10 @@
 # RoboGuide
 
+[Memory writer 与完整恢复](docs/development/acceptance/2026-10-21-memory-provider-writer-recovery.md)
+补齐参考 provider 的四类实际 SQL inode 租约：关闭主 Store 后，最后一个子连接关闭才释放
+writer；旧数据先排空原 SQLite 连接再升级，原 instance 与预算不变。显式 recovery v0.4
+冻结相同租约，恢复完整 SQL 和内容；这些存储事实不证明设备停止或整体整改完成。
+
 [原属组 Memory 计划修订](docs/development/runtime-plan-revision-v0.1.md)
 在候选和 Review 前冻结完整 child；原停止、撤权和 CAS 核验通过后，由 Control 创建新组，
 每个 Task 重新导入并取得当前使用许可。共享 wrapper v45 保留原历史，软件证明不升级为设备事实。

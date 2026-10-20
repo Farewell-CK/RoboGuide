@@ -31,6 +31,10 @@ mTLS scrape、两次实际 SQL 故障的 firing/resolved、固定 histogram/queu
 
 ## 交付要求
 
+[Memory writer 与完整恢复](acceptance/2026-10-21-memory-provider-writer-recovery.md)补齐实际
+四 SQL inode 和主 Store 关闭后的共享 writer 生命周期，旧连接排空后保留原数据升级。
+显式 recovery v0.4 冻结相同原租约并完整恢复；全局引用和在线 HA 仍须各自验收。
+
 [原属组 Memory 计划修订](acceptance/2026-10-20-scoped-memory-plan-revision.md)接通显式
 v0.3 许可、原 child/Review digest、完整停止/撤权和 Control 新组的正常 import/use。
 实际正常/SQL/已确认停止后重启/策略/到期五条链路通过，旧 writer 拒绝且原 MI/迁移回归

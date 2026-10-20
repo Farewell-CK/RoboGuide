@@ -268,7 +268,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             "files": len(saved["files"]),
             "bytes": sum(row["byte_size"] for row in saved["files"]),
         }
-    with acquire_all(components):
+    with acquire_all(components, profile_schema=profile["schema"]):
         budget.check()
         validate_replica_sets(profile, components)
         partial = _target(destination, command_id)
@@ -437,7 +437,12 @@ def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
             raise ValueError("complete recovery SQLite identity differs: " + name)
     for component in components:
         databases, _, _ = layout(component)
-        required = databases[:1] if component["kind"] == "memory" else databases
+        required = (
+            databases[:1]
+            if component["kind"] == "memory"
+            and manifest["profile"]["schema"] != "roboguide.recovery-profile/v0.4"
+            else databases
+        )
         if any(f"stores/{component['component_id']}/{name}" not in paths for name in required):
             raise ValueError("recovery manifest lost a required original authority database")
     actual = {
@@ -502,7 +507,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.3"
+        "roboguide.restore-receipt/v0.4"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.4"
+        else "roboguide.restore-receipt/v0.3"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.3"
         else "roboguide.restore-receipt/v0.2"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.2"
@@ -556,6 +563,21 @@ def restore(
             raise ValueError("recovery source changed after original verification")
         if row["kind"] == "sqlite" and _identity(target, budget) != row["sqlite"]:
             raise ValueError("restored SQLite differs from its original full authority")
+    for component in validate(manifest["profile"]):
+        root = partial / "stores" / component["component_id"]
+        _, _, locks = layout(component)
+        if (
+            component["kind"] == "memory"
+            and manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.4"
+        ):
+            locks = [*locks, ".memory-use.lock"]
+        for name in locks:
+            lock = root / name
+            lock.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if not lock.exists():
+                with lock.open("xb") as handle:
+                    handle.flush()
+                    os.fsync(handle.fileno())
     for row in replica_placements:
         if _copy(bundle / row["source"], partial / row["target"], budget) != (
             row["content_digest"],
@@ -577,7 +599,11 @@ def restore(
             for value in validate(manifest["profile"])
         ],
     }
-    if receipt_schema in {"roboguide.restore-receipt/v0.2", "roboguide.restore-receipt/v0.3"}:
+    if receipt_schema in {
+        "roboguide.restore-receipt/v0.2",
+        "roboguide.restore-receipt/v0.3",
+        "roboguide.restore-receipt/v0.4",
+    }:
         receipt["artifact_replica_placements"] = replica_placements
     with (partial / "restore-receipt.json").open("xb") as handle:
         handle.write(canonical(receipt))

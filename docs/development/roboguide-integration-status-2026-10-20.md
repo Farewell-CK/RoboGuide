@@ -9,6 +9,10 @@ main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头�
 `d15543f4ec2dc99ebe565e319e141c0bf17b433b`（执行故障闭环）。后两者是祖先关系。
 代码集成和完整整改完成是不同状态；本次不宣称 SoftwareComplete。
 
+2026-10-21 [Memory writer 与完整恢复](acceptance/2026-10-21-memory-provider-writer-recovery.md)
+补齐四类 SQL 的实际 inode/共享连接生命周期、原数据升级和显式 recovery v0.4。
+这修复实际旧 writer 反例；全局引用、在线 HA 及其余必需阶段继续按下表执行。
+
 [原属组 Memory 修订](acceptance/2026-10-20-scoped-memory-plan-revision.md)已接通显式
 v0.3 声明、完整原停止/撤权、immutable child、Control 新组与各 Task 独立 import/use。
 五种真实软件配置和原 MI/迁移回归通过，共享 wrapper v45 保留原历史与预算。

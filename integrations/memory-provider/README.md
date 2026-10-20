@@ -1,5 +1,16 @@
 # Local immutable-file Memory provider
 
+The reference implementation owns one shared writer across `memory.sqlite3`, `memory-use.sqlite3`,
+`file-jobs.sqlite3` and `active-map/active-map.sqlite3`. Root/use locks and each actual database
+inode remain locked until the last managed connection closes, even after `MemoryStore.close()`.
+Hardlink aliases cannot open a concurrent writer. Startup drains every legacy SQLite connection
+through SQLite's native exclusive journal transition before the Memory v3 marker is committed;
+close independent readonly inspection connections before starting the provider. Normal service
+still permits readonly inspection. Original UUID, rows, budgets and uncertainty remain unchanged.
+Missing managed files in existing v3 storage refuse without repair. The fixed empty databases do
+not enable jobs/use/map routes. Active-map storage stays under this managed root. Use explicit
+[recovery v0.4](../../contracts/recovery/bundle-v0.4/README.md) for a complete quiescent copy.
+
 This deployment adapter stores actual immutable files in a private CAS with a SQLite WAL original
 operation ledger. It has no Mission, Control, Runtime, robot or localization authority. The provider
 ID, roots, size bounds and publish-eligible exports are deployment inputs.

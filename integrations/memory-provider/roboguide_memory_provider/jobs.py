@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sqlite3
 import stat
 import threading
 import time
@@ -43,7 +42,15 @@ class FileJobs:
         self._active: dict[str, threading.Event] = {}
         self._workers: dict[str, threading.Thread] = {}
         self._closing = False
-        self._db = sqlite3.connect(store.root / "file-jobs.sqlite3", check_same_thread=False)
+        self._db = store._storage.connect("file-jobs.sqlite3")
+        try:
+            self._initialize_database()
+        except BaseException:
+            self._db.close()
+            raise
+
+    def _initialize_database(self) -> None:
+        """Open only this connection's original schema; failed construction retains no writer."""
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
