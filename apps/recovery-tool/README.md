@@ -1,5 +1,11 @@
 # RoboGuide recovery tool
 
+[Profile v0.5](../../contracts/recovery/bundle-v0.5/README.md) adds the Replica database v1
+storage fence and actual database-inode writer lease while retaining the complete v0.4 Memory
+contract. Old Replica table names become read-only views; old binaries and profiles refuse the
+new format. Restore starts no services and establishes no physical continuity. See
+[ADR-0130](../../docs/decisions/0130-replica-database-writer-and-legacy-fence.md).
+
 [Profile v0.4](../../contracts/recovery/bundle-v0.4/README.md) adds the reference Memory provider's
 complete writer: root/use locks plus the actual inodes of all four managed SQL databases. Its
 original Memory SQL v3 marker is mandatory; old profiles refuse this storage. Closing the main

@@ -445,3 +445,70 @@ def test_deep_configured_dependency_graph_does_not_use_python_recursion(
         )
         previous = identifier
     assert len(validate(configured)) == 1002
+
+
+def test_replica_v1_requires_explicit_profile_and_fences_legacy_writes(tmp_path: Path) -> None:
+    """Replica storage v1 preserves complete rows while old names remain readonly views."""
+    root = tmp_path / "replica"
+    root.mkdir()
+    (root / "replica.sqlite3.writer.lock").touch()
+    (root / "supervisor.writer.lock").touch()
+    database = root / "replica.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            PRAGMA user_version=1;
+            CREATE TABLE replica_storage_format(
+                version INTEGER PRIMARY KEY CHECK(version=1), schema TEXT NOT NULL
+            );
+            INSERT INTO replica_storage_format VALUES (1,'roboguide.replica-storage/v0.1');
+            CREATE TABLE replica_v1_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            CREATE TABLE replica_v1_commands(
+                revision INTEGER PRIMARY KEY, command_id TEXT UNIQUE NOT NULL, data TEXT NOT NULL
+            );
+            CREATE TABLE replica_v1_log(log_index INTEGER PRIMARY KEY,data TEXT NOT NULL);
+            CREATE TABLE replica_v1_events(
+                sequence INTEGER PRIMARY KEY, event_id TEXT UNIQUE NOT NULL,
+                data TEXT NOT NULL, digest TEXT NOT NULL
+            );
+            CREATE TABLE replica_v1_snapshot(
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                meta TEXT NOT NULL, data BLOB NOT NULL
+            );
+            CREATE VIEW replica_meta AS SELECT * FROM replica_v1_meta;
+            CREATE VIEW replica_commands AS SELECT * FROM replica_v1_commands;
+            CREATE VIEW replica_log AS SELECT * FROM replica_v1_log;
+            CREATE VIEW replica_events AS SELECT * FROM replica_v1_events;
+            CREATE VIEW replica_snapshot AS SELECT * FROM replica_v1_snapshot;
+            INSERT INTO replica_v1_meta VALUES ('identity','["cluster","schema"]');
+            """
+        )
+        with pytest.raises(sqlite3.OperationalError):
+            connection.execute("INSERT INTO replica_meta VALUES ('old','writer')")
+    profile: dict[str, Any] = {
+        "schema": "roboguide.recovery-profile/v0.5",
+        "profile_id": "replica-v1",
+        "revision": 1,
+        "max_bytes": 8 * 1024 * 1024,
+        "max_files": 32,
+        "budget_seconds": 30,
+        "artifact_replica_sets": [],
+        "components": [
+            {
+                "component_id": "replica",
+                "kind": "replica",
+                "root": str(root),
+                "database": "replica.sqlite3",
+                "trees": [],
+                "depends_on": [],
+            }
+        ],
+    }
+    result = backup(profile, tmp_path / "bundle", "replica-v1")
+    assert verify(tmp_path / "bundle", result["manifest_digest"])["profile"]["schema"] == (
+        "roboguide.recovery-profile/v0.5"
+    )
+    legacy = copy.deepcopy(profile)
+    legacy["schema"] = "roboguide.recovery-profile/v0.4"
+    with pytest.raises(ValueError, match="explicit recovery profile v0.5"):
+        backup(legacy, tmp_path / "legacy-bundle", "legacy")

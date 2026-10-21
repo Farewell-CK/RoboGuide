@@ -20,6 +20,26 @@ use std::sync::Mutex;
 const MAX_HISTORY_BYTES: u64 = 64 * 1024 * 1024;
 /// Bound on one complete replica snapshot including escaped checkpoint/history metadata.
 const MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
+/// Storage format version whose table views fence pre-format writers.
+const REPLICA_STORAGE_VERSION: i64 = 1;
+/// Closed storage marker persisted beside the complete consensus tables.
+const REPLICA_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.1";
+/// Legacy names retained only as read-only views after the atomic format migration.
+const LEGACY_TABLES: [&str; 5] = [
+    "replica_meta",
+    "replica_commands",
+    "replica_log",
+    "replica_events",
+    "replica_snapshot",
+];
+/// Current table names used by every writer in this binary.
+const STORAGE_TABLES: [&str; 5] = [
+    "replica_v1_meta",
+    "replica_v1_commands",
+    "replica_v1_log",
+    "replica_v1_events",
+    "replica_v1_snapshot",
+];
 
 /// Complete quorum-applied evidence for inactive materialization, not a second live Control map.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -204,13 +224,109 @@ pub struct SqliteRaftStore {
 struct ReplicaWriterLease {
     /// Shared open-file description locked while at least one application Store owns it.
     file: File,
+    /// Open description for the actual SQLite inode, closing the hard-link alias gap.
+    database: File,
 }
 
 impl Drop for ReplicaWriterLease {
     /// Releases the lock at the final application owner, even if a child inherited a descriptor.
     fn drop(&mut self) {
+        let _ = self.database.unlock();
         let _ = self.file.unlock();
     }
+}
+
+/// Returns the SQLite schema object kind without interpreting missing authority as an empty store.
+fn schema_object_type(connection: &Connection, name: &str) -> Result<Option<String>, String> {
+    connection
+        .query_row(
+            "SELECT type FROM sqlite_master WHERE name=?1",
+            [name],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+/// Creates or atomically migrates the complete Replica table set and its old-writer read-only fence.
+fn prepare_storage_format(connection: &mut Connection) -> Result<(), String> {
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    let marker = schema_object_type(connection, "replica_storage_format")?;
+    let current = STORAGE_TABLES
+        .iter()
+        .map(|name| schema_object_type(connection, name))
+        .collect::<Result<Vec<_>, _>>()?;
+    let legacy = LEGACY_TABLES
+        .iter()
+        .map(|name| schema_object_type(connection, name))
+        .collect::<Result<Vec<_>, _>>()?;
+    if version == REPLICA_STORAGE_VERSION && marker.as_deref() == Some("table") {
+        if current.iter().any(|kind| kind.as_deref() != Some("table"))
+            || legacy.iter().any(|kind| kind.as_deref() != Some("view"))
+        {
+            return Err("Replica storage v1 tables/views are incomplete".into());
+        }
+        let stored: (i64, String) = connection
+            .query_row(
+                "SELECT version,schema FROM replica_storage_format",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|error| error.to_string())?;
+        if stored != (REPLICA_STORAGE_VERSION, REPLICA_STORAGE_SCHEMA.to_string()) {
+            return Err("Replica storage marker differs".into());
+        }
+        return Ok(());
+    }
+    if version != 0 || marker.is_some() {
+        return Err("unknown or incomplete Replica storage format".into());
+    }
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let has_legacy = legacy.iter().any(Option::is_some);
+    if has_legacy {
+        if legacy.iter().any(|kind| kind.as_deref() != Some("table"))
+            || current.iter().any(Option::is_some)
+        {
+            return Err("legacy Replica storage tables are incomplete".into());
+        }
+        for (legacy_name, storage_name) in LEGACY_TABLES.iter().zip(STORAGE_TABLES) {
+            transaction
+                .execute(
+                    &format!("ALTER TABLE {legacy_name} RENAME TO {storage_name}"),
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    } else if current.iter().any(Option::is_some) {
+        return Err("Replica storage has unmarked current tables".into());
+    } else {
+        transaction
+            .execute_batch(
+                "CREATE TABLE replica_v1_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                 CREATE TABLE replica_v1_commands(revision INTEGER PRIMARY KEY,command_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL);
+                 CREATE TABLE replica_v1_log(log_index INTEGER PRIMARY KEY,data TEXT NOT NULL);
+                 CREATE TABLE replica_v1_events(sequence INTEGER PRIMARY KEY,event_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL,digest TEXT NOT NULL);
+                 CREATE TABLE replica_v1_snapshot(singleton INTEGER PRIMARY KEY CHECK(singleton=1),meta TEXT NOT NULL,data BLOB NOT NULL);",
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction
+        .execute_batch(
+            "CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=1),schema TEXT NOT NULL);
+             INSERT INTO replica_storage_format(version,schema) VALUES (1,'roboguide.replica-storage/v0.1');
+             CREATE VIEW replica_meta AS SELECT * FROM replica_v1_meta;
+             CREATE VIEW replica_commands AS SELECT * FROM replica_v1_commands;
+             CREATE VIEW replica_log AS SELECT * FROM replica_v1_log;
+             CREATE VIEW replica_events AS SELECT * FROM replica_v1_events;
+             CREATE VIEW replica_snapshot AS SELECT * FROM replica_v1_snapshot;
+             PRAGMA user_version=1;",
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 /// Binds exact snapshot bytes and applied pointers, detecting corruption before any installation.
@@ -234,7 +350,7 @@ fn read_meta<T: DeserializeOwned>(
 ) -> Result<Option<T>, StorageError<u64>> {
     let encoded: Option<String> = connection
         .query_row(
-            "SELECT value FROM replica_meta WHERE key=?1",
+            "SELECT value FROM replica_v1_meta WHERE key=?1",
             [key],
             |row| row.get(0),
         )
@@ -252,7 +368,7 @@ fn write_meta<T: Serialize>(
     value: &T,
 ) -> Result<(), StorageError<u64>> {
     let encoded = serde_json::to_string(value).map_err(io_error)?;
-    connection.execute("INSERT INTO replica_meta(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    connection.execute("INSERT INTO replica_v1_meta(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         params![key, encoded]).map_err(io_error)?;
     Ok(())
 }
@@ -260,7 +376,7 @@ fn write_meta<T: Serialize>(
 /// Reads exact accepted checkpoint/history while one connection guard provides a consistent view.
 fn read_view(connection: &Connection) -> Result<ReplicaView, StorageError<u64>> {
     let mut statement = connection
-        .prepare("SELECT sequence,event_id,data,digest FROM replica_events ORDER BY sequence")
+        .prepare("SELECT sequence,event_id,data,digest FROM replica_v1_events ORDER BY sequence")
         .map_err(io_error)?;
     let rows = statement
         .query_map([], |row| {
@@ -305,7 +421,7 @@ fn read_commands(
     connection: &Connection,
 ) -> Result<Vec<state::ControlCommandJournalEntry>, StorageError<u64>> {
     let mut statement = connection
-        .prepare("SELECT data FROM replica_commands ORDER BY revision")
+        .prepare("SELECT data FROM replica_v1_commands ORDER BY revision")
         .map_err(io_error)?;
     statement
         .query_map([], |row| row.get::<_, String>(0))
@@ -333,11 +449,11 @@ impl SqliteRaftStore {
             }
         } else {
             let logs: u64 = transaction
-                .query_row("SELECT COUNT(*) FROM replica_log", [], |row| row.get(0))
+                .query_row("SELECT COUNT(*) FROM replica_v1_log", [], |row| row.get(0))
                 .map_err(|error| error.to_string())?;
             let authority: u64 = transaction
                 .query_row(
-                    "SELECT COUNT(*) FROM replica_meta WHERE key != 'identity'",
+                    "SELECT COUNT(*) FROM replica_v1_meta WHERE key != 'identity'",
                     [],
                     |row| row.get(0),
                 )
@@ -392,7 +508,7 @@ impl SqliteRaftStore {
         }
         let value: String = connection
             .query_row(
-                "SELECT value FROM replica_meta WHERE key='certificate_trust'",
+                "SELECT value FROM replica_v1_meta WHERE key='certificate_trust'",
                 [],
                 |row| row.get(0),
             )
@@ -437,19 +553,35 @@ impl SqliteRaftStore {
         writer
             .try_lock()
             .map_err(|error| format!("replica database already owned: {error}"))?;
-        let writer = ReplicaWriterLease { file: writer };
-        let connection = Connection::open(canonical).map_err(|error| error.to_string())?;
+        let database = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&canonical)
+            .map_err(|error| error.to_string())?;
+        if !database
+            .metadata()
+            .map_err(|error| error.to_string())?
+            .is_file()
+        {
+            return Err("replica database must be a regular file".into());
+        }
+        database
+            .try_lock()
+            .map_err(|error| format!("replica database inode already owned: {error}"))?;
+        let writer = ReplicaWriterLease {
+            file: writer,
+            database,
+        };
+        let mut connection = Connection::open(&canonical).map_err(|error| error.to_string())?;
+        prepare_storage_format(&mut connection)?;
         connection
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(|error| error.to_string())?;
         connection
             .pragma_update(None, "synchronous", "FULL")
             .map_err(|error| error.to_string())?;
-        connection.execute_batch("CREATE TABLE IF NOT EXISTS replica_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS replica_commands(revision INTEGER PRIMARY KEY,command_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS replica_log(log_index INTEGER PRIMARY KEY,data TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS replica_events(sequence INTEGER PRIMARY KEY,event_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL,digest TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS replica_snapshot(singleton INTEGER PRIMARY KEY CHECK(singleton=1),meta TEXT NOT NULL,data BLOB NOT NULL);").map_err(|error| error.to_string())?;
         let identity: Option<(String, String)> =
             read_meta(&connection, "identity").map_err(|error| error.to_string())?;
         if identity.as_ref().is_some_and(|identity| {
@@ -526,7 +658,7 @@ impl SqliteRaftStore {
         let current_digest = previous.as_ref().map(state::checkpoint_identity);
         let command_revision: u64 = connection
             .query_row(
-                "SELECT COALESCE(MAX(revision),0) FROM replica_commands",
+                "SELECT COALESCE(MAX(revision),0) FROM replica_v1_commands",
                 [],
                 |row| row.get(0),
             )
@@ -567,7 +699,7 @@ impl SqliteRaftStore {
         let additional: u64 = encoded.iter().map(|event| event.len() as u64).sum();
         let bytes: u64 = connection
             .query_row(
-                "SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM replica_events",
+                "SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM replica_v1_events",
                 [],
                 |row| row.get(0),
             )
@@ -587,7 +719,7 @@ impl SqliteRaftStore {
         for (event, encoded) in batch.events.iter().zip(encoded) {
             connection
                 .execute(
-                    "INSERT INTO replica_events(sequence,event_id,data,digest) VALUES (?1,?2,?3,?4)",
+                    "INSERT INTO replica_v1_events(sequence,event_id,data,digest) VALUES (?1,?2,?3,?4)",
                     params![event.sequence, event.event_id, encoded, format!("{:x}",Sha256::digest(encoded.as_bytes()))],
                 )
                 .map_err(io_error)?;
@@ -595,7 +727,7 @@ impl SqliteRaftStore {
         for command in &batch.commands {
             connection
                 .execute(
-                    "INSERT INTO replica_commands VALUES (?1,?2,?3)",
+                    "INSERT INTO replica_v1_commands VALUES (?1,?2,?3)",
                     params![
                         command.authority_revision,
                         command.command_id,
@@ -641,7 +773,7 @@ impl SqliteRaftStore {
             .ok_or_else(|| "cannot compact an empty replica checkpoint".to_string())?;
         let bytes: u64 = transaction
             .query_row(
-                "SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM replica_events",
+                "SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM replica_v1_events",
                 [],
                 |row| row.get(0),
             )
@@ -671,7 +803,7 @@ fn compact_prefix(
 ) -> Result<HistoryAnchor, StorageError<u64>> {
     let current_anchor: Option<HistoryAnchor> = read_meta(connection, "history_anchor")?;
     let mut statement = connection
-        .prepare("SELECT sequence,event_id,data,digest FROM replica_events ORDER BY sequence")
+        .prepare("SELECT sequence,event_id,data,digest FROM replica_v1_events ORDER BY sequence")
         .map_err(io_error)?;
     let rows = statement
         .query_map([], |row| {
@@ -687,7 +819,7 @@ fn compact_prefix(
     let mut remaining = current_bytes;
     let target = if let Some(retain_events) = retain_events {
         let count = connection
-            .query_row("SELECT COUNT(*) FROM replica_events", [], |row| {
+            .query_row("SELECT COUNT(*) FROM replica_v1_events", [], |row| {
                 row.get::<_, u64>(0)
             })
             .map_err(io_error)?;
@@ -732,7 +864,10 @@ fn compact_prefix(
     };
     for (sequence, _, _, _) in &remove {
         connection
-            .execute("DELETE FROM replica_events WHERE sequence=?1", [sequence])
+            .execute(
+                "DELETE FROM replica_v1_events WHERE sequence=?1",
+                [sequence],
+            )
             .map_err(io_error)?;
     }
     write_meta(connection, "history_anchor", &anchor)?;
@@ -771,7 +906,7 @@ impl RaftLogReader<ControllerRaftConfig> for SqliteRaftStore {
             return Ok(Vec::new());
         }
         let connection = self.connection.lock().map_err(io_error)?;
-        let mut statement = connection.prepare("SELECT data FROM replica_log WHERE log_index>=?1 AND log_index<=?2 ORDER BY log_index").map_err(io_error)?;
+        let mut statement = connection.prepare("SELECT data FROM replica_v1_log WHERE log_index>=?1 AND log_index<=?2 ORDER BY log_index").map_err(io_error)?;
         let rows = statement
             .query_map(params![start, end.min(i64::MAX as u64)], |row| {
                 row.get::<_, String>(0)
@@ -791,7 +926,7 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
         let purged: Option<LogId<u64>> = read_meta(&connection, "purged")?;
         let last: Option<String> = connection
             .query_row(
-                "SELECT data FROM replica_log ORDER BY log_index DESC LIMIT 1",
+                "SELECT data FROM replica_v1_log ORDER BY log_index DESC LIMIT 1",
                 [],
                 |row| row.get(0),
             )
@@ -835,7 +970,7 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
             Some(committed) => write_meta(&connection, "committed", &committed),
             None => {
                 connection
-                    .execute("DELETE FROM replica_meta WHERE key='committed'", [])
+                    .execute("DELETE FROM replica_v1_meta WHERE key='committed'", [])
                     .map_err(io_error)?;
                 Ok(())
             }
@@ -864,7 +999,7 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
             let transaction = connection.transaction().map_err(io_error)?;
             for entry in entries {
                 let encoded = serde_json::to_string(&entry).map_err(io_error)?;
-                transaction.execute("INSERT INTO replica_log(log_index,data) VALUES (?1,?2) ON CONFLICT(log_index) DO UPDATE SET data=excluded.data",
+                transaction.execute("INSERT INTO replica_v1_log(log_index,data) VALUES (?1,?2) ON CONFLICT(log_index) DO UPDATE SET data=excluded.data",
                     params![entry.log_id.index,encoded]).map_err(io_error)?;
             }
             transaction.commit().map_err(io_error)?;
@@ -885,7 +1020,7 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
             .lock()
             .map_err(io_error)?
             .execute(
-                "DELETE FROM replica_log WHERE log_index>=?1",
+                "DELETE FROM replica_v1_log WHERE log_index>=?1",
                 [log_id.index],
             )
             .map_err(io_error)?;
@@ -898,7 +1033,7 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
         let transaction = connection.transaction().map_err(io_error)?;
         transaction
             .execute(
-                "DELETE FROM replica_log WHERE log_index<=?1",
+                "DELETE FROM replica_v1_log WHERE log_index<=?1",
                 [log_id.index],
             )
             .map_err(io_error)?;
@@ -1026,15 +1161,15 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
             }
         }
         transaction
-            .execute("DELETE FROM replica_events", [])
+            .execute("DELETE FROM replica_v1_events", [])
             .map_err(io_error)?;
         transaction
-            .execute("DELETE FROM replica_commands", [])
+            .execute("DELETE FROM replica_v1_commands", [])
             .map_err(io_error)?;
         for command in &restored.view.commands {
             transaction
                 .execute(
-                    "INSERT INTO replica_commands VALUES (?1,?2,?3)",
+                    "INSERT INTO replica_v1_commands VALUES (?1,?2,?3)",
                     params![
                         command.authority_revision,
                         command.command_id,
@@ -1059,7 +1194,7 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
             }
             transaction
                 .execute(
-                    "INSERT INTO replica_events(sequence,event_id,data,digest) VALUES (?1,?2,?3,?4)",
+                    "INSERT INTO replica_v1_events(sequence,event_id,data,digest) VALUES (?1,?2,?3,?4)",
                     params![
                         event.sequence,
                         event.event_id,
@@ -1081,7 +1216,7 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
         } else {
             transaction
                 .execute(
-                    "DELETE FROM replica_meta WHERE key IN ('checkpoint','checkpoint_digest')",
+                    "DELETE FROM replica_v1_meta WHERE key IN ('checkpoint','checkpoint_digest')",
                     [],
                 )
                 .map_err(io_error)?;
@@ -1090,17 +1225,17 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
             write_meta(&transaction, "history_anchor", &anchor)?;
         } else {
             transaction
-                .execute("DELETE FROM replica_meta WHERE key='history_anchor'", [])
+                .execute("DELETE FROM replica_v1_meta WHERE key='history_anchor'", [])
                 .map_err(io_error)?;
         }
         if let Some(applied) = restored.last_applied {
             write_meta(&transaction, "applied", &applied)?;
         } else {
             transaction
-                .execute("DELETE FROM replica_meta WHERE key='applied'", [])
+                .execute("DELETE FROM replica_v1_meta WHERE key='applied'", [])
                 .map_err(io_error)?;
         }
-        transaction.execute("INSERT INTO replica_snapshot(singleton,meta,data) VALUES (1,?1,?2) ON CONFLICT(singleton) DO UPDATE SET meta=excluded.meta,data=excluded.data",
+        transaction.execute("INSERT INTO replica_v1_snapshot(singleton,meta,data) VALUES (1,?1,?2) ON CONFLICT(singleton) DO UPDATE SET meta=excluded.meta,data=excluded.data",
             params![serde_json::to_string(meta).map_err(io_error)?,data]).map_err(io_error)?;
         transaction.commit().map_err(io_error)?;
         Ok(())
@@ -1113,7 +1248,7 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
         let connection = self.connection.lock().map_err(io_error)?;
         let saved: Option<(String, Vec<u8>)> = connection
             .query_row(
-                "SELECT meta,data FROM replica_snapshot WHERE singleton=1",
+                "SELECT meta,data FROM replica_v1_snapshot WHERE singleton=1",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -1152,7 +1287,7 @@ impl RaftSnapshotBuilder<ControllerRaftConfig> for SqliteRaftStore {
         if data.len() > MAX_SNAPSHOT_BYTES {
             return Err(io_error("replica snapshot exceeds bounds"));
         }
-        connection.execute("INSERT INTO replica_snapshot(singleton,meta,data) VALUES (1,?1,?2) ON CONFLICT(singleton) DO UPDATE SET meta=excluded.meta,data=excluded.data",
+        connection.execute("INSERT INTO replica_v1_snapshot(singleton,meta,data) VALUES (1,?1,?2) ON CONFLICT(singleton) DO UPDATE SET meta=excluded.meta,data=excluded.data",
             params![serde_json::to_string(&meta).map_err(io_error)?,data]).map_err(io_error)?;
         Ok(Snapshot {
             meta,

@@ -231,6 +231,79 @@ fn replica_database_alias_cannot_acquire_a_second_writer() {
     assert!(SqliteRaftStore::open(&alias, "identity", "test/checkpoint-v1").is_ok());
 }
 
+/// Database hard links cannot bypass the actual SQLite inode writer lease.
+#[cfg(unix)]
+#[test]
+fn replica_database_hard_link_cannot_acquire_a_second_writer() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("writer.sqlite3");
+    let alias = directory.path().join("hardlink.sqlite3");
+    let store = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap();
+    std::fs::hard_link(&path, &alias).unwrap();
+    assert!(
+        SqliteRaftStore::open(&alias, "identity", "test/checkpoint-v1").is_err(),
+        "an alias of the same database inode must not create another authority"
+    );
+    drop(store);
+    assert!(SqliteRaftStore::open(&alias, "identity", "test/checkpoint-v1").is_ok());
+}
+
+/// The first new writer migrates every complete legacy table and fences old table-name writers.
+#[test]
+fn legacy_replica_storage_migrates_atomically_and_old_writes_are_refused() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy.sqlite3");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE replica_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+             CREATE TABLE replica_commands(revision INTEGER PRIMARY KEY,command_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL);
+             CREATE TABLE replica_log(log_index INTEGER PRIMARY KEY,data TEXT NOT NULL);
+             CREATE TABLE replica_events(sequence INTEGER PRIMARY KEY,event_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL,digest TEXT NOT NULL);
+             CREATE TABLE replica_snapshot(singleton INTEGER PRIMARY KEY CHECK(singleton=1),meta TEXT NOT NULL,data BLOB NOT NULL);
+             INSERT INTO replica_meta(key,value) VALUES ('identity','[\"identity\",\"test/checkpoint-v1\"]');",
+        )
+        .unwrap();
+    drop(connection);
+    let store = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap();
+    assert_eq!(store.accepted_view().unwrap().revision, 0);
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    for name in [
+        "replica_meta",
+        "replica_commands",
+        "replica_log",
+        "replica_events",
+        "replica_snapshot",
+    ] {
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT type FROM sqlite_master WHERE name=?1",
+                    [name],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "view"
+        );
+    }
+    assert!(
+        connection
+            .execute(
+                "INSERT INTO replica_meta(key,value) VALUES ('legacy-write','must-refuse')",
+                [],
+            )
+            .is_err()
+    );
+    drop(connection);
+    drop(store);
+}
+
 /// Acquires three simultaneous ephemeral listeners so their released loopback ports are distinct.
 fn members() -> BTreeMap<u64, SocketAddr> {
     members_with_count(3)
@@ -662,7 +735,7 @@ async fn sql_failure_and_corrupt_accepted_evidence_fail_closed() {
     let mut store = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
     sql.execute_batch(
-        "CREATE TRIGGER fail_checkpoint BEFORE INSERT ON replica_meta
+        "CREATE TRIGGER fail_checkpoint BEFORE INSERT ON replica_v1_meta
         WHEN NEW.key='checkpoint' BEGIN SELECT RAISE(ABORT,'injected checkpoint failure'); END;",
     )
     .unwrap();
@@ -696,7 +769,7 @@ async fn sql_failure_and_corrupt_accepted_evidence_fail_closed() {
     );
     assert_eq!(target.accepted_view().unwrap().revision, 0);
     sql.execute(
-        "UPDATE replica_events SET data=replace(data,'timestamp_ms\":3','timestamp_ms\":4')",
+        "UPDATE replica_v1_events SET data=replace(data,'timestamp_ms\":3','timestamp_ms\":4')",
         [],
     )
     .unwrap();

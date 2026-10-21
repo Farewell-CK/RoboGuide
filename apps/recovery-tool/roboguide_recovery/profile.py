@@ -60,6 +60,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.2",
         "roboguide.recovery-profile/v0.3",
         "roboguide.recovery-profile/v0.4",
+        "roboguide.recovery-profile/v0.5",
     }:
         expected.add("artifact_replica_sets")
     if set(profile) != expected or profile["schema"] not in {
@@ -67,6 +68,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.2",
         "roboguide.recovery-profile/v0.3",
         "roboguide.recovery-profile/v0.4",
+        "roboguide.recovery-profile/v0.5",
     }:
         raise ValueError("recovery profile is not closed or versioned")
     if (
@@ -111,11 +113,13 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.2",
             "roboguide.recovery-profile/v0.3",
             "roboguide.recovery-profile/v0.4",
+            "roboguide.recovery-profile/v0.5",
         }:
             raise ValueError("replica supervisor leases require explicit recovery profile v0.2")
         if item["kind"] == "runtime-mi" and profile["schema"] not in {
             "roboguide.recovery-profile/v0.3",
             "roboguide.recovery-profile/v0.4",
+            "roboguide.recovery-profile/v0.5",
         }:
             raise ValueError("runtime MI leases require explicit recovery profile v0.3")
         if (
@@ -248,11 +252,16 @@ def acquire_all(
             root = real_directory(Path(component["root"]))
             databases, _, locks = layout(component)
             paths.extend(root / name for name in locks)
-            if (
-                component["kind"] == "memory"
-                and profile_schema == "roboguide.recovery-profile/v0.4"
-            ):
+            if component["kind"] == "memory" and profile_schema in {
+                "roboguide.recovery-profile/v0.4",
+                "roboguide.recovery-profile/v0.5",
+            }:
                 paths.extend(root / name for name in [".memory-use.lock", *databases])
+            if (
+                component["kind"] == "replica"
+                and profile_schema == "roboguide.recovery-profile/v0.5"
+            ):
+                paths.append(root / component["database"])
         for path in sorted(paths):
             real_directory(path.parent)
             descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
@@ -269,7 +278,10 @@ def acquire_all(
                 path = Path(component["root"]) / "memory.sqlite3"
                 with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
                     version = connection.execute("PRAGMA user_version").fetchone()[0]
-                    if profile_schema == "roboguide.recovery-profile/v0.4":
+                    if profile_schema in {
+                        "roboguide.recovery-profile/v0.4",
+                        "roboguide.recovery-profile/v0.5",
+                    }:
                         marker = connection.execute(
                             "SELECT schema,databases_json FROM provider_writer_format"
                         ).fetchall()
@@ -292,6 +304,10 @@ def acquire_all(
                         raise ValueError(
                             "Memory composite writers require explicit recovery profile v0.4"
                         )
+            if component["kind"] == "replica":
+                path = Path(component["root"]) / component["database"]
+                with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+                    validate_replica_storage(connection, profile_schema)
             if component["kind"] == "runtime-mi":
                 path = Path(component["root"]) / component["database"]
                 try:
@@ -324,6 +340,39 @@ def acquire_all(
                     ).fetchone() != (13,):
                         raise ValueError("Node writer-lease storage marker is unavailable")
         yield
+
+
+def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str) -> None:
+    """Fence new Replica storage unless the declared recovery protocol owns its actual inode."""
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    if profile_schema != "roboguide.recovery-profile/v0.5":
+        if version != 0:
+            raise ValueError("Replica storage v1 requires explicit recovery profile v0.5")
+        return
+    expected_tables = {
+        "replica_storage_format",
+        *("replica_v1_" + name for name in ("meta", "commands", "log", "events", "snapshot")),
+    }
+    actual_tables = {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+    if version != 1 or actual_tables != expected_tables:
+        raise ValueError("Replica storage v1 tables/version are unavailable")
+    if connection.execute("SELECT version,schema FROM replica_storage_format").fetchall() != [
+        (1, "roboguide.replica-storage/v0.1")
+    ]:
+        raise ValueError("Replica original storage marker differs")
+    for name in ("meta", "commands", "log", "events", "snapshot"):
+        expected_sql = f"CREATE VIEW replica_{name} AS SELECT * FROM replica_v1_{name}"
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='view' AND name=?", ("replica_" + name,)
+        ).fetchone()
+        actual_sql = " ".join(str(row[0]).lower().split()) if row is not None else ""
+        if actual_sql != expected_sql.lower():
+            raise ValueError("Replica old-writer readonly fence is unavailable")
 
 
 def validate_replica_sets(profile: dict[str, Any], components: list[dict[str, Any]]) -> None:

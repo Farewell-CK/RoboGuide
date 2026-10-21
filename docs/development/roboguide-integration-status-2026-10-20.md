@@ -3,6 +3,11 @@
 本次先同步远程并核对所有远程分支；在隔离工作树组合整改、MI 部署校验和执行故障闭环，
 保留其他工作树和未跟踪实验文件。没有启动实验、E6、模型、模拟器或设备。
 
+2026-10-21 [Replica storage v1 与数据库本体 writer](acceptance/2026-10-21-replica-storage-v1.md)
+修复了已确认的 hardlink inode writer 绕过：完整旧表事务迁移到 v1、旧表只读 view fence、
+实际新/旧进程和 alias writer 门禁通过。Recovery profile v0.5 已冻结；durable leader drain、
+在线 CAS/archive、跨故障域恢复和正式旧 binary bundle 恢复仍不关闭 F5。
+
 main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头分别是：
 `25380295a267fb4c5f2f948558460fd1b141f95f`（完整非发布整改分支）、
 `b4f1b1275a546f310f61f9b79ac0bc4bb353209a`（MI 校验）、
