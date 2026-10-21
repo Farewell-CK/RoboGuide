@@ -138,10 +138,27 @@ def test_actual_child_receives_explicit_os_quota_before_read_permission(
             line for line in limits.splitlines() if line.startswith("Max address space")
         )
         assert "268435456" in address_line
+        until(lambda: jobs.quota_evidence(invocation["execution_id"])["kernel_proof"] is not None)
+        evidence = jobs.quota_evidence(invocation["execution_id"])
+        assert evidence["pid"] == process.pid
+        assert evidence["declaration"] == {
+            "schema": "roboguide.file-worker-os-quota/v0.1",
+            "cpu_seconds": 30,
+            "address_space_bytes": 256 * 1024 * 1024,
+        }
+        assert evidence["kernel_proof"] == {
+            "kind": "os-quota",
+            "schema": "roboguide.file-worker-os-quota/v0.1",
+            "pid": process.pid,
+            "cpu_seconds": [30, 30],
+            "address_space_bytes": [256 * 1024 * 1024, 256 * 1024 * 1024],
+        }
         jobs.cancel(invocation["execution_id"])
         until(lambda: jobs.status(invocation["execution_id"])["state"] == "CANCELLED")
         assert jobs.health()["os_quota"] == {
-            "enforcement": "posix-setrlimit",
+            "schema": "roboguide.file-worker-os-quota/v0.1",
+            "configured_enforcement": "posix-setrlimit",
+            "scope": "new-admissions",
             "cpu_seconds": 30,
             "address_space_bytes": 256 * 1024 * 1024,
         }
@@ -196,6 +213,39 @@ def test_old_outcomes_migrate_without_acquiring_process_evidence(tmp_path: Path)
         with pytest.raises(sqlite3.OperationalError):
             jobs._db.execute("UPDATE jobs SET state='COMPLETED'")
         assert json.loads(before[0][1]) == invocation
+    finally:
+        jobs.close()
+        store.close()
+
+
+def test_v1_process_rows_migrate_with_quota_evidence_unavailable(tmp_path: Path) -> None:
+    """Legacy actual process history receives v2 columns but never current quota defaults."""
+    store, _, _ = declared_file(tmp_path)
+    execution = "attempt-legacy:group:hash:worker-1"
+    with sqlite3.connect(store.root / "file-jobs.sqlite3") as connection:
+        connection.executescript(
+            "CREATE TABLE process_jobs (execution_id TEXT PRIMARY KEY, invocation_json BLOB, "
+            "state TEXT NOT NULL, result_json BLOB, reason TEXT NOT NULL);"
+            "CREATE TABLE file_job_format (schema TEXT PRIMARY KEY);"
+            "INSERT INTO file_job_format VALUES ('roboguide.file-process-jobs/v0.1');"
+            "CREATE TABLE original_processes (execution_id TEXT PRIMARY KEY, "
+            "instance_id TEXT NOT NULL UNIQUE, backend_instance_id TEXT NOT NULL, "
+            "invocation_digest TEXT NOT NULL, budget_json BLOB NOT NULL, pid INTEGER, "
+            "exit_json BLOB);"
+            "INSERT INTO original_processes VALUES "
+            "('attempt-legacy:group:hash:worker-1','legacy-instance','legacy-backend',"
+            "'sha256:legacy','{}',NULL,NULL);"
+            "PRAGMA user_version=1;"
+        )
+    jobs = ProcessFileJobs(store)
+    try:
+        assert jobs._db.execute("PRAGMA user_version").fetchone() == (2,)
+        assert jobs.quota_evidence(execution) == {
+            "execution_id": execution,
+            "pid": None,
+            "declaration": None,
+            "kernel_proof": None,
+        }
     finally:
         jobs.close()
         store.close()
@@ -269,6 +319,12 @@ def test_suspended_child_cannot_read_with_a_queued_expired_permit(tmp_path: Path
         stderr=subprocess.DEVNULL,
         pass_fds=(descriptor,),
         close_fds=True,
+        env={
+            "PATH": os.defpath,
+            "LANG": "C.UTF-8",
+            "ROBOGUIDE_FILE_WORKER_CPU_SECONDS": "30",
+            "ROBOGUIDE_FILE_WORKER_AS_BYTES": str(256 * 1024 * 1024),
+        },
     )
     assert process.stdin is not None and process.stdout is not None
     reader = process.stdout
@@ -309,6 +365,13 @@ def test_suspended_child_cannot_read_with_a_queued_expired_permit(tmp_path: Path
         }
         process.stdin.write(canonical(start) + b"\n")
         process.stdin.flush()
+        assert reply() == {
+            "kind": "os-quota",
+            "schema": "roboguide.file-worker-os-quota/v0.1",
+            "pid": process.pid,
+            "cpu_seconds": [30, 30],
+            "address_space_bytes": [256 * 1024 * 1024, 256 * 1024 * 1024],
+        }
         assert reply() == {"kind": "permit"}
         process.stdin.write(fresh_permit())
         process.stdin.flush()
@@ -338,6 +401,44 @@ def test_suspended_child_cannot_read_with_a_queued_expired_permit(tmp_path: Path
             process.wait(timeout=3)
         if not process.stdin.closed:
             process.stdin.close()
+        process.stdout.close()
+        os.close(descriptor)
+
+
+def test_actual_worker_without_original_os_quota_fails_before_read_permit(
+    tmp_path: Path,
+) -> None:
+    """Missing quota is unavailable; an actual child cannot begin input work from defaults."""
+    source = tmp_path / "input.bin"
+    source.write_bytes(Path(__file__).read_bytes())
+    descriptor = os.open(source, os.O_RDONLY)
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "roboguide_memory_provider/file_worker.py"),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        pass_fds=(descriptor,),
+        close_fds=True,
+        env={"PATH": os.defpath, "LANG": "C.UTF-8"},
+    )
+    assert process.stdin is not None and process.stdout is not None
+    try:
+        assert select.select([process.stdout], [], [], 3)[0]
+        message = json.loads(process.stdout.readline(16385))
+        assert message == {
+            "kind": "error",
+            "reason": "original file worker OS quota declaration is unavailable",
+        }
+        assert process.wait(timeout=3) == 1
+        assert os.lseek(descriptor, 0, os.SEEK_CUR) == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+        process.stdin.close()
         process.stdout.close()
         os.close(descriptor)
 

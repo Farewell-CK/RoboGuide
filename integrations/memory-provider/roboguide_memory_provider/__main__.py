@@ -17,7 +17,7 @@ from typing import Any
 
 from .active_map import ActiveMapLedger
 from .jobs import FileJobs
-from .process_jobs import ProcessFileJobs
+from .process_jobs import DEFAULT_ADDRESS_SPACE_BYTES, ProcessFileJobs
 from .reclamation import ContentReclamation
 from .store import MAX_METADATA_BYTES, MemoryStore, canonical
 from .use_leases import UseLeases
@@ -102,6 +102,8 @@ def handler_type(
                     self._respond(200, jobs.health())
                 elif jobs is not None and self.path == "/v1/file-jobs/status":
                     self._respond(200, jobs.status(self._body()["execution_id"]))
+                elif isinstance(jobs, ProcessFileJobs) and self.path == "/v1/file-jobs/quota":
+                    self._respond(200, jobs.quota_evidence(self._body()["execution_id"]))
                 elif jobs is not None and self.path == "/v1/file-jobs/safe-state":
                     self._respond(200, jobs.safe_state())
                 elif self.path == "/v1/instance":
@@ -209,6 +211,8 @@ def main() -> None:
     parser.add_argument("--worker-processes", action="store_true")
     parser.add_argument("--max-job-seconds", type=int, default=5)
     parser.add_argument("--max-job-rounds", type=int, default=256)
+    parser.add_argument("--worker-cpu-seconds", type=int)
+    parser.add_argument("--worker-address-space-bytes", type=int)
     parser.add_argument("--enable-use-leases", action="store_true")
     parser.add_argument("--listen-unix", action="store_true")
     parser.add_argument("--export-directory", type=Path)
@@ -221,6 +225,10 @@ def main() -> None:
         parser.error("Memory-use leases require the explicit cohosted private Unix profile")
     if args.worker_processes and not args.enable_file_jobs:
         parser.error("owned process workers require explicit file jobs")
+    if args.worker_cpu_seconds is not None and not args.worker_processes:
+        parser.error("worker CPU quota requires the explicit owned-process profile")
+    if args.worker_address_space_bytes is not None and not args.worker_processes:
+        parser.error("worker address-space quota requires the explicit owned-process profile")
     if args.enable_active_map and (not args.enable_use_leases or not args.listen_unix):
         parser.error(
             "active-map requires current-use leases on the explicit cohosted private Unix profile"
@@ -255,13 +263,21 @@ def main() -> None:
     signal.signal(signal.SIGTERM, terminate)
     try:
         leases = UseLeases(store) if args.enable_use_leases else None
-        jobs = (
-            (ProcessFileJobs if args.worker_processes else FileJobs)(
-                store, leases, args.max_job_seconds, args.max_job_rounds
+        if args.enable_file_jobs:
+            jobs = (
+                ProcessFileJobs(
+                    store,
+                    leases,
+                    args.max_job_seconds,
+                    args.max_job_rounds,
+                    DEFAULT_ADDRESS_SPACE_BYTES
+                    if args.worker_address_space_bytes is None
+                    else args.worker_address_space_bytes,
+                    args.worker_cpu_seconds,
+                )
+                if args.worker_processes
+                else FileJobs(store, leases, args.max_job_seconds, args.max_job_rounds)
             )
-            if args.enable_file_jobs
-            else None
-        )
         active_maps = (
             ActiveMapLedger(store.root / "active-map", store, leases)
             if args.enable_active_map

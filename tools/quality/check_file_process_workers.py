@@ -22,10 +22,11 @@ from check_state_verifier_processes import ROOT, address, request, save, stop, w
 
 
 def original_process(database: Path, execution: str) -> dict[str, Any]:
-    """Read the actual original instance, PID and budgets independently from SQLite."""
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    """Read the actual original instance, PID, budgets and kernel quota proof from SQLite."""
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
         row = connection.execute(
-            "SELECT instance_id,backend_instance_id,invocation_digest,budget_json,pid,exit_json "
+            "SELECT instance_id,backend_instance_id,invocation_digest,budget_json,pid,exit_json,"
+            "quota_json,quota_proof_json "
             "FROM original_processes WHERE execution_id=?",
             (execution,),
         ).fetchone()
@@ -38,6 +39,8 @@ def original_process(database: Path, execution: str) -> dict[str, Any]:
         "budget": json.loads(row[3]),
         "pid": row[4],
         "exit": None if row[5] is None else json.loads(row[5]),
+        "declaration": None if row[6] is None else json.loads(row[6]),
+        "kernel_proof": None if row[7] is None else json.loads(row[7]),
     }
 
 
@@ -128,6 +131,10 @@ def run(directory: Path, archive: Path) -> dict[str, Any]:
                     "30",
                     "--max-job-rounds",
                     "16777216",
+                    "--worker-cpu-seconds",
+                    "30",
+                    "--worker-address-space-bytes",
+                    str(256 * 1024 * 1024),
                 ],
                 env=environment,
                 cwd=ROOT,
@@ -179,18 +186,47 @@ def run(directory: Path, archive: Path) -> dict[str, Any]:
         assert first["result"]["input_digests"] == [expected]
         completed_process = original_process(database, completed["execution_id"])
         assert completed_process["exit"]["exit_code"] == 0
+        expected_quota = {
+            "schema": "roboguide.file-worker-os-quota/v0.1",
+            "cpu_seconds": 30,
+            "address_space_bytes": 256 * 1024 * 1024,
+        }
+        assert completed_process["declaration"] == expected_quota
+        assert completed_process["kernel_proof"] == {
+            "kind": "os-quota",
+            **expected_quota,
+            "pid": completed_process["pid"],
+            "cpu_seconds": [30, 30],
+            "address_space_bytes": [256 * 1024 * 1024, 256 * 1024 * 1024],
+        }
+        quota_receipt = request(
+            endpoint,
+            "/v1/file-jobs/quota",
+            {"execution_id": completed["execution_id"]},
+            method="GET",
+        )[1]
+        assert quota_receipt == {
+            "execution_id": completed["execution_id"],
+            "pid": completed_process["pid"],
+            "declaration": expected_quota,
+            "kernel_proof": completed_process["kernel_proof"],
+        }
         assert request(endpoint, "/v1/file-jobs/compute", completed)[1] == first
         interrupted = invocation(2, 16_777_216)
         assert request(endpoint, "/v1/file-jobs/compute", interrupted)[0] == 200
         original = wait_for(
             lambda: (
                 row
-                if (row := original_process(database, interrupted["execution_id"])).get("pid")
+                if (row := original_process(database, interrupted["execution_id"])).get(
+                    "kernel_proof"
+                )
                 else None
             ),
             "actual original PID committed before work",
         )
         child = int(original["pid"])
+        assert original["kernel_proof"]["pid"] == child
+        assert original["declaration"] == expected_quota
         os.kill(child, signal.SIGSTOP)
         wait_for(
             lambda: (
@@ -248,6 +284,7 @@ def run(directory: Path, archive: Path) -> dict[str, Any]:
         )
         cancelled_process = original_process(database, cancelled["execution_id"])
         assert cancelled_process["exit"]["exit_code"] < 0
+        assert cancelled_process["kernel_proof"]["pid"] == cancelled_process["pid"]
         stop(restored)
         sys.path.insert(0, str(ROOT / "integrations/memory-provider"))
         from roboguide_memory_provider.process_jobs import ProcessFileJobs

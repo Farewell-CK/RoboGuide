@@ -18,6 +18,7 @@ import pytest
 from roboguide_memory_provider import use_leases
 from roboguide_memory_provider.__main__ import UnixServer, handler_type
 from roboguide_memory_provider.jobs import FileJobs
+from roboguide_memory_provider.process_jobs import ProcessFileJobs
 from roboguide_memory_provider.reclamation import ContentReclamation
 from roboguide_memory_provider.store import MemoryStore, canonical, original_content_digest
 from roboguide_memory_provider.use_leases import UseLeases, kernel_clock
@@ -694,7 +695,7 @@ def test_private_unix_endpoint_consumes_actual_file_and_queries_original_receipt
 ) -> None:
     """Check actual local sockets without inventing Controller or Node facts."""
     store, leases, request, invocation = prepared
-    jobs = FileJobs(store, leases)
+    jobs = ProcessFileJobs(store, leases)
     try:
         with tempfile.TemporaryDirectory(prefix="rg-memory-use-") as directory:
             path = Path(directory) / "local.sock"
@@ -718,6 +719,16 @@ def test_private_unix_endpoint_consumes_actual_file_and_queries_original_receipt
                     "GET",
                 )
                 assert actual["state"] == "COMPLETED"
+                quota = unix_request(
+                    path,
+                    "/v1/file-jobs/quota",
+                    {"execution_id": invocation["execution_id"]},
+                    "GET",
+                )
+                assert quota["pid"] > 0
+                assert quota["declaration"]["schema"] == "roboguide.file-worker-os-quota/v0.1"
+                assert quota["kernel_proof"]["pid"] == quota["pid"]
+                assert quota["kernel_proof"]["cpu_seconds"] == [5, 5]
                 fenced = unix_request(path, "/v1/memory-use/control", revoke(request), "POST")
                 assert fenced["status"] == "revoked"
                 assert (

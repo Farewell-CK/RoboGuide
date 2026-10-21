@@ -38,8 +38,10 @@ ContentReclamation.collect 执行；旧 caller boolean v0.1 保留为 blocked。
 archive/catalog/CAS 一致性仍未关闭 F4/F5。
 
 2026-10-21 [Local EAIOS 软件 worker OS quota](acceptance/2026-10-21-local-process-os-quota.md)
-实际文件 worker 在第一次读取前应用 POSIX CPU/address-space limits，并由父端保存原 permit、
-deadline、取消和 wait 证据；Control 逻辑 quota、GPU/交通、硬实时和设备安全仍未关闭 F6/F7。
+原 CPU/address-space quota 入 admission SQL，子进程 exact `getrlimit`/PID proof 在第一次
+read permit 前独立提交，并有只读查询与旧 v1 unavailable 迁移；实际 parent-death/restart
+gate 直接比较 SQL 与 API 回执，通过且没有 Node/设备。Control divisible quota、GPU/交通、
+硬实时和设备安全仍未关闭 F6/F7。
 
 2026-10-21 [Relation target 与 whole-Group stop](acceptance/2026-10-21-relation-whole-group-stop.md)
 复核确认原 `admit` 已覆盖全组 peers，原入口选择误述已更正。ADR-0137 恢复 exact target

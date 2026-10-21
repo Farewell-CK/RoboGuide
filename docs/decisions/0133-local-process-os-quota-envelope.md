@@ -10,6 +10,7 @@
 permit、deadline、取消、PID 和 wait 证据。没有 quota envelope 的直接协议 fixture 只测试线协议，
 不代表 Local EAIOS production admission。
 
-health 公开实际 quota contract 与 `posix-setrlimit` assurance；worker 被杀、超时或父权限结束
-仍保留 Unknown/实际退出状态，不能由 quota receipt 变成 Task/Mission success。该 envelope
-只覆盖软件进程资源，不证明 GPU memory、交通、物理执行时间、硬实时或设备 safe-state。
+health 仅公开 deployment quota 配置和适用新 admission 的范围；每个原进程的声明与实际
+内核 `getrlimit` proof 由独立只读 receipt 查询提供。worker 被杀、超时或父权限结束仍保留
+Unknown/实际退出状态，不能由 quota receipt 变成 Task/Mission success。该 envelope 只覆盖
+软件进程资源，不证明 GPU memory、交通、物理执行时间、硬实时或设备 safe-state。

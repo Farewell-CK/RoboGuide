@@ -17,7 +17,7 @@ from .jobs import FileJobs
 from .store import MemoryStore, canonical, content_digest
 from .use_leases import UseLeases, kernel_clock
 
-SCHEMA = "roboguide.file-process-jobs/v0.1"
+SCHEMA = "roboguide.file-process-jobs/v0.2"
 DEFAULT_ADDRESS_SPACE_BYTES = 256 * 1024 * 1024
 
 
@@ -33,6 +33,7 @@ class ProcessFileJobs(FileJobs):
         max_job_seconds: int = 5,
         max_job_rounds: int = 256,
         max_address_space_bytes: int = DEFAULT_ADDRESS_SPACE_BYTES,
+        max_cpu_seconds: int | None = None,
     ) -> None:
         """Fence old writers and retain missing historical process evidence as unavailable."""
         if (
@@ -41,7 +42,9 @@ class ProcessFileJobs(FileJobs):
         ):
             raise ValueError("OS address-space quota is outside its deployment bound")
         self._processes: dict[str, subprocess.Popen[bytes]] = {}
-        self._worker_cpu_seconds = max_job_seconds
+        self._worker_cpu_seconds = max_job_seconds if max_cpu_seconds is None else max_cpu_seconds
+        if type(self._worker_cpu_seconds) is not int or not 1 <= self._worker_cpu_seconds <= 300:
+            raise ValueError("OS CPU quota is outside its deployment bound")
         self._worker_address_space_bytes = max_address_space_bytes
         self._admitting_clock: tuple[str, str, int, int] | None = None
         self._proof_cursor = 0
@@ -65,9 +68,14 @@ class ProcessFileJobs(FileJobs):
                     "CREATE TABLE original_processes (execution_id TEXT PRIMARY KEY, "
                     "instance_id TEXT NOT NULL UNIQUE, backend_instance_id TEXT NOT NULL, "
                     "invocation_digest TEXT NOT NULL, budget_json BLOB NOT NULL, "
-                    "pid INTEGER, exit_json BLOB)"
+                    "pid INTEGER, exit_json BLOB, quota_json BLOB, quota_proof_json BLOB)"
                 )
-                self._db.execute("PRAGMA user_version=1")
+                self._db.execute("PRAGMA user_version=2")
+            elif version == 1:
+                self._db.execute("ALTER TABLE original_processes ADD COLUMN quota_json BLOB")
+                self._db.execute("ALTER TABLE original_processes ADD COLUMN quota_proof_json BLOB")
+                self._db.execute("UPDATE file_job_format SET schema=?", (SCHEMA,))
+                self._db.execute("PRAGMA user_version=2")
             else:
                 self._db.execute("SELECT exit_json FROM original_processes LIMIT 1")
             self._db.execute(
@@ -115,7 +123,9 @@ class ProcessFileJobs(FileJobs):
             if unresolved >= 4:
                 result["readiness"] = "UNAVAILABLE"
             result["os_quota"] = {
-                "enforcement": "posix-setrlimit",
+                "schema": "roboguide.file-worker-os-quota/v0.1",
+                "configured_enforcement": "posix-setrlimit",
+                "scope": "new-admissions",
                 "cpu_seconds": self._worker_cpu_seconds,
                 "address_space_bytes": self._worker_address_space_bytes,
             }
@@ -147,15 +157,58 @@ class ProcessFileJobs(FileJobs):
             "deadline_lower_ms": lower + budget_ms,
         }
         self._db.execute(
-            "INSERT INTO original_processes VALUES (?,?,?,?,?,NULL,NULL)",
+            "INSERT INTO original_processes (execution_id,instance_id,backend_instance_id,"
+            "invocation_digest,budget_json,pid,exit_json,quota_json,quota_proof_json) "
+            "VALUES (?,?,?,?,?,NULL,NULL,?,NULL)",
             (
                 invocation["execution_id"],
                 uuid.uuid4().hex,
                 self.store.instance_id,
                 content_digest(invocation),
                 canonical(budget),
+                canonical(
+                    {
+                        "schema": "roboguide.file-worker-os-quota/v0.1",
+                        "cpu_seconds": self._worker_cpu_seconds,
+                        "address_space_bytes": self._worker_address_space_bytes,
+                    }
+                ),
             ),
         )
+
+    def quota_evidence(self, execution: str) -> dict[str, object]:
+        """Observe exact original declaration/proof; old absence never receives current defaults."""
+        with self._mutex:
+            row = self._db.execute(
+                "SELECT pid,quota_json,quota_proof_json FROM original_processes "
+                "WHERE execution_id=?",
+                (execution,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("original file process identity is unavailable")
+            return {
+                "execution_id": execution,
+                "pid": row[0],
+                "declaration": json.loads(row[1]) if row[1] is not None else None,
+                "kernel_proof": json.loads(row[2]) if row[2] is not None else None,
+            }
+
+    def _record_quota_proof(
+        self, execution: str, process: subprocess.Popen[bytes], proof: dict[str, Any]
+    ) -> None:
+        """Persist exact original child evidence before the first read permit is issued."""
+        with self._mutex, self._db:
+            row = self._db.execute(
+                "SELECT pid,quota_proof_json FROM original_processes WHERE execution_id=?",
+                (execution,),
+            ).fetchone()
+            encoded = canonical(proof)
+            if row is None or row[0] != process.pid or (row[1] is not None and row[1] != encoded):
+                raise ValueError("original file worker quota proof identity differs")
+            self._db.execute(
+                "UPDATE original_processes SET quota_proof_json=? WHERE execution_id=? AND pid=?",
+                (encoded, execution, process.pid),
+            )
 
     def _retire(self, execution: str) -> None:
         """Keep local content references if an original process could not actually be reaped."""
@@ -195,12 +248,24 @@ class ProcessFileJobs(FileJobs):
         execution = invocation["execution_id"]
         with self._mutex:
             row = self._db.execute(
-                "SELECT budget_json,invocation_digest FROM original_processes WHERE execution_id=?",
+                "SELECT budget_json,invocation_digest,quota_json FROM original_processes "
+                "WHERE execution_id=?",
                 (execution,),
             ).fetchone()
         if row is None or row[1] != content_digest(invocation):
             raise ValueError("original file process invocation unavailable")
         budget = json.loads(row[0])
+        quota = json.loads(row[2]) if row[2] is not None else None
+        if (
+            not isinstance(quota, dict)
+            or set(quota) != {"schema", "cpu_seconds", "address_space_bytes"}
+            or quota["schema"] != "roboguide.file-worker-os-quota/v0.1"
+            or type(quota["cpu_seconds"]) is not int
+            or not 1 <= quota["cpu_seconds"] <= 300
+            or type(quota["address_space_bytes"]) is not int
+            or not 64 * 1024 * 1024 <= quota["address_space_bytes"] <= 8 * 1024**3
+        ):
+            raise ValueError("original immutable file worker OS quota is unavailable")
 
         def guard() -> dict[str, Any]:
             """Recheck after use-lease/SQL waiting, immediately before each child permission."""
@@ -241,14 +306,15 @@ class ProcessFileJobs(FileJobs):
             env={
                 "PATH": os.defpath,
                 "LANG": "C.UTF-8",
-                "ROBOGUIDE_FILE_WORKER_CPU_SECONDS": str(self._worker_cpu_seconds),
-                "ROBOGUIDE_FILE_WORKER_AS_BYTES": str(self._worker_address_space_bytes),
+                "ROBOGUIDE_FILE_WORKER_CPU_SECONDS": str(quota["cpu_seconds"]),
+                "ROBOGUIDE_FILE_WORKER_AS_BYTES": str(quota["address_space_bytes"]),
             },
         )
         self._processes[execution] = process
         assert process.stdin is not None and process.stdout is not None
         digests = None
         failure = None
+        quota_observed = False
         try:
             with self._mutex, self._db:
                 changed = self._db.execute(
@@ -291,7 +357,26 @@ class ProcessFileJobs(FileJobs):
                     while b"\n" in pending:
                         line, pending = pending.split(b"\n", 1)
                         message = json.loads(line)
-                        if message == {"kind": "permit"} and digests is None:
+                        if (
+                            isinstance(message, dict)
+                            and message.get("kind") == "os-quota"
+                            and not quota_observed
+                        ):
+                            expected = {
+                                "kind": "os-quota",
+                                "schema": quota["schema"],
+                                "pid": process.pid,
+                                "cpu_seconds": [quota["cpu_seconds"], quota["cpu_seconds"]],
+                                "address_space_bytes": [
+                                    quota["address_space_bytes"],
+                                    quota["address_space_bytes"],
+                                ],
+                            }
+                            if message != expected:
+                                raise ValueError("actual original worker kernel quota differs")
+                            self._record_quota_proof(execution, process, message)
+                            quota_observed = True
+                        elif message == {"kind": "permit"} and digests is None and quota_observed:
                             process.stdin.write(canonical(guard()) + b"\n")
                             process.stdin.flush()
                         elif (
@@ -301,6 +386,7 @@ class ProcessFileJobs(FileJobs):
                             and message["digests"]
                             == [manifest["artifact"]["content_digest"] for manifest, _ in inputs]
                             and digests is None
+                            and quota_observed
                         ):
                             digests = list(message["digests"])
                         elif (

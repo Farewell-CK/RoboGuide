@@ -9,6 +9,13 @@ Unreaped/spawning history survives restart and blocks replacement; old v2 operat
 legacy evidence and do not invent drain authority. No application checkpoint/Node contract changes
 are implied. This proves infrastructure process exit only, never device or Local EAIOS stopping.
 
+ADR-0139 binds deployment CPU/address-space declarations to each original Local EAIOS worker row.
+The actual child must report exact `getrlimit` values and PID; the parent persists that receipt
+before the first read permit. Health reports configuration scope; `/v1/file-jobs/quota` is the
+read-only per-execution declaration/proof view. File process SQL v2 migrates prior v1 rows with
+quota evidence unavailable and rejects old thread writers. The maintained actual-process checker
+independently reads SQLite; no device, Node, hard-realtime, GPU or Control quota facts are created.
+
 ADR-0137 preserves the exact relation target when admitting safety stop. Existing admit already
 covers all current live Group peers plus that target, including locally Completed without relation
 proof. Ordinary Group stop selects one live entry and delegates once. Synthetic contract tests

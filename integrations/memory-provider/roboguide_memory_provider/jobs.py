@@ -54,15 +54,15 @@ class FileJobs:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1) or version == 1 and self._table == "jobs":
+        if version not in (0, 1, 2) or version > 0 and self._table == "jobs":
             self._db.close()
             raise ValueError(
                 "file process authority requires the explicitly configured worker mode"
             )
-        if version == 1:
+        if version > 0:
             try:
                 marker = self._db.execute("SELECT schema FROM file_job_format").fetchall()
-                if marker != [("roboguide.file-process-jobs/v0.1",)]:
+                if marker != [(f"roboguide.file-process-jobs/v0.{version}",)]:
                     raise ValueError("unknown original file process format")
             except BaseException:
                 self._db.close()

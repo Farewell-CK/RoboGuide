@@ -61,6 +61,11 @@ stop certificate、硬实时 hazard、运行中抢占和异构 regrasp 仍保持
 原回执/预算保留，自动恢复和独立有界 GET 各有实际进程证据；无法确认仍保留 ownership，
 内容确认不绕过 stop gate。跨 Group handoff、跨主机、HA 数据面及其余阶段继续为必需项。
 
+2026-10-21 [ADR-0139](decisions/0139-original-file-worker-quota-and-kernel-proof.md)补齐 Local
+EAIOS 文件 worker 的原 quota SQL、子进程实际 `getrlimit` proof 与只读查询，并由真实进程
+检查独立核对原 PID/SQL receipt。它关闭本地 software CPU/address-space envelope 的证据缺口；
+Control 的 divisible quota、真实 GPU/交通成本、设备调度、物理时间/安全与 F6/F7 总验收仍开放。
+
 ## V2 开放架构问题
 
 2026-10-19 双 Group Memory 交接与后续成员生命周期由

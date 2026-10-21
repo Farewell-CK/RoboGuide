@@ -24,21 +24,28 @@ def emit(document: dict[str, Any]) -> None:
     sys.stdout.buffer.flush()
 
 
-def apply_os_limits() -> None:
+def apply_os_limits() -> dict[str, object]:
     """Apply the parent-declared CPU and address-space limits before reading any input."""
     try:
         cpu_seconds = int(os.environ["ROBOGUIDE_FILE_WORKER_CPU_SECONDS"])
         address_space = int(os.environ["ROBOGUIDE_FILE_WORKER_AS_BYTES"])
-    except KeyError:
-        # Direct protocol fixtures predate the quota envelope; the configured ProcessFileJobs
-        # parent always supplies both values before admitting a production child.
-        return
-    except ValueError as error:
+    except (KeyError, ValueError) as error:
         raise ValueError("original file worker OS quota declaration is unavailable") from error
     if not 1 <= cpu_seconds <= 300 or not 64 * 1024 * 1024 <= address_space <= 8 * 1024**3:
         raise ValueError("original file worker OS quota is outside its bound")
     resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
     resource.setrlimit(resource.RLIMIT_AS, (address_space, address_space))
+    cpu = resource.getrlimit(resource.RLIMIT_CPU)
+    address = resource.getrlimit(resource.RLIMIT_AS)
+    if cpu != (cpu_seconds, cpu_seconds) or address != (address_space, address_space):
+        raise ValueError("actual original kernel quota differs from its declaration")
+    return {
+        "kind": "os-quota",
+        "schema": "roboguide.file-worker-os-quota/v0.1",
+        "pid": os.getpid(),
+        "cpu_seconds": list(cpu),
+        "address_space_bytes": list(address),
+    }
 
 
 def permit() -> None:
@@ -82,7 +89,7 @@ def permit() -> None:
 
 def run() -> None:
     """Perform real CPU hashing after the parent has durably recorded the original PID."""
-    apply_os_limits()
+    quota = apply_os_limits()
     raw = sys.stdin.buffer.readline(16385)
     if len(raw) > 16384 or not raw.endswith(b"\n"):
         raise ValueError("file worker requires a bounded original start command")
@@ -97,6 +104,7 @@ def run() -> None:
         or not 1 <= len(command["inputs"]) <= 8
     ):
         raise ValueError("file worker contract or computation bounds are invalid")
+    emit(quota)
     with ExitStack() as stack:
         streams = []
         descriptors: set[int] = set()

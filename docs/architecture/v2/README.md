@@ -1,5 +1,10 @@
 # RoboGuide V2 架构基线
 
+[ADR-0139](../../decisions/0139-original-file-worker-quota-and-kernel-proof.md)将文件 worker
+原 CPU/address-space 配额写入 admission SQL，缺声明拒绝；父端核对实际 kernel limit 并
+持久化 proof 后才给 read permit。配置声明和原进程实测分开，旧数据不补默认配额；实际
+parent-death/restart checker 也核验了原 SQL/API receipt 与 old-writer fence。
+
 [ADR-0138](../../decisions/0138-original-controller-child-drain-before-transfer.md)要求原
 supervisor 持久化 spawn/PID/实际 wait，transfer 先 fence 应用、再排空原 child、最后才
 发送有原接收预算的 V3 target command；storage v3/recovery v0.7 fence 保护新证明。
