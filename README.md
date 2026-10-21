@@ -65,6 +65,12 @@ Operator HTTP 现有 TLS 前连接预算、完整请求 worker handoff 与 respo
 [`bounded-observation-and-evidence-closure`](docs/extensions/bounded-observation-and-evidence-closure.md)：
 显式、有界的视角扫描复用真实底盘接口；检测缓存、语义像素及官方结果独立留证，不以本地
 技能完成替代 Mission satisfaction 或 benchmark success。
+Local How v0.14 还将自身真实旋转与扫描计时结束分开反馈，未转动和不可观测保持不同结果，
+不修改原始碰撞、足迹或 NavMesh 约束。
+Local How v0.15 在真实静止扫描后，允许下一次模型自主选择的同目标导航进行有界观测点搜索；
+沿用原始路线、足迹和采集预算，候选不可用时明确失败，不把几何预测当成检测或官方成功。
+Local How v0.16 还核对部署声明与实际固定相机光学参数，在有界局部网格中同时检查
+取景必要条件、原路线与足迹；未声明能力保持未知，联合终态仍由官方 verifier 独立判断。
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
@@ -337,6 +343,9 @@ MI 在同一不可变 Grounding Context 中保留已知事实和未知缺口；�
 起点不可推测。能力类别不代表当前可用 Node，只有任务与世界证据支持时才声明 Role 的
 typed constraint，最终匹配和资源承诺仍由 Control 决定。见
 [`ADR-0044`](docs/decisions/0044-deployment-planning-evidence.md)。
+Planning Profile v0.2 还可发布 canonical operation 对中性状态域的读取/可能更改声明；
+MI 将同一逻辑 Actor 的重叠状态访问作为 advisory 交给 Reviewer/Repairer，不据此拒绝计划、
+推断官方谓词必然失效或选择物理实体。v0.1 仍按原义兼容读取。
 
 Mission Review 不再隐藏在 Planner 调用内部。Reviewer 对 exact draft 返回结构化 issue，Mission
 Request Engine 保存 revision/digest-bound review evidence；`RepairPlan` 最多自动修复两次，

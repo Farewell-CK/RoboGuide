@@ -35,11 +35,15 @@ from .observation_control import (
     ObservationAcquisitionControl,
     observation_control_declaration,
 )
+from .observation_optics import check_loaded_optics, read_optics_declaration
 from .operation_admission import OPERATION_FEASIBILITY_SCHEMA
 from .perception import cached_detection_observations, inspect_perception, observe_detection
 from .perception_diagnostics import PerceptionDiagnostics
 from .preassignment_feasibility import preassignment_digest
 from .shared_world import SharedEmosStage2Runtime
+from .view_motion import motion_feedback_declaration
+from .view_recovery import view_recovery_declaration
+from .view_recovery_binding import supports_viewpoint_recovery
 from .view_scan import inspect_view_scan, view_scan_declaration
 
 _LOG = logging.getLogger(__name__)
@@ -124,11 +128,22 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             for agent in observer_ids:
                 inspect_navigation_dispatch(environment, agent)
                 inspect_view_scan(environment, actor._active_policies[agent], agent)
+        optics: dict[str, Any] = {}
+        if acquisition:
+            declared_optics = read_optics_declaration(
+                path.parent / "observation-optics-declaration.json", self.registry
+            )
+            optics = {
+                str(agent): check_loaded_optics(environment, agent, declared_optics[agent])
+                for agent in observer_ids
+            }
         self._write_json("endpoint-registry-used.json", self.registry)
         self._write_json(
             "perception-readiness.json",
             {
-                "schema_version": "roboguide.perception-readiness/v0.2",
+                "schema_version": "roboguide.perception-readiness/v0.3"
+                if acquisition
+                else "roboguide.perception-readiness/v0.2",
                 "enabled": self._config.enable_observation,
                 "sensors": {
                     str(agent): sensor for agent, sensor in self._detection_sensors.items()
@@ -152,7 +167,19 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                                 environment, actor._active_policies[agent], agent
                             ).evidence()
                             for agent in observer_ids
-                        }
+                        },
+                        "viewpoint_recovery": {
+                            str(agent): {
+                                "loaded_geometry_supported": supports_viewpoint_recovery(
+                                    inspect_view_scan(
+                                        environment, actor._active_policies[agent], agent
+                                    )
+                                ),
+                                "physical_feasibility_proven": False,
+                            }
+                            for agent in observer_ids
+                        },
+                        "fixed_camera_optics": optics,
                     }
                     if acquisition
                     else {}
@@ -191,7 +218,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         self._write_json(
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.13"
+                "schema_version": "roboguide.habitat-local-how-profile/v0.16"
                 if acquisition
                 else "roboguide.habitat-local-how-profile/v0.10"
                 if recoveries
@@ -207,6 +234,8 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                         "observation_control": observation_control_declaration(),
                         "navigation_dispatch": navigation_dispatch_declaration(),
                         "observation_view_search": view_scan_declaration(),
+                        "observation_motion_feedback": motion_feedback_declaration(),
+                        "observation_viewpoint_recovery": view_recovery_declaration(),
                     }
                     if acquisition
                     else {}

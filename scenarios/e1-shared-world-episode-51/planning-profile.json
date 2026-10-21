@@ -1,9 +1,9 @@
 {
-  "schema_version": "roboguide.deployment-planning-profile/v0.1",
+  "schema_version": "roboguide.deployment-planning-profile/v0.2",
   "authority": "deployment-owned",
   "identity": {
     "profile_id": "e1-shared-world-mobility",
-    "revision": "e1-shared-world-capability-2026-09-24",
+    "revision": "e1-shared-world-capability-2026-10-21",
     "source": "deployment://e1-shared-world"
   },
   "capability_classes": [
@@ -60,5 +60,47 @@
       ]
     }
   ],
-  "digest": "sha256:a5c2535d32eba30a4dcb82b7574d02d3ebcf3580ba486eb419428f63fd2a0df8"
+  "operation_effects": [
+    {
+      "operation": {
+        "namespace": "mobility",
+        "name": "move",
+        "version": "v1"
+      },
+      "coverage": "partial",
+      "effects": [
+        {
+          "domain": "participant.position",
+          "subject_scope": "actor",
+          "subject_parameter": null,
+          "result_parameter": "destination",
+          "access": "may_change"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "mobility",
+        "name": "navigate",
+        "version": "v1"
+      },
+      "coverage": "partial",
+      "effects": [
+        {
+          "domain": "participant.position",
+          "subject_scope": "actor",
+          "subject_parameter": null,
+          "result_parameter": "destination",
+          "access": "may_change"
+        }
+      ]
+    }
+  ],
+  "digest": "sha256:5272d88a685c6cc1f16d1696058472452769dc17ee84cc09a571a5561628c1fb",
+  "state_domains": [
+    {
+      "id": "participant.position",
+      "description": "Current position of the logical participant executing a canonical operation; it does not identify or select a physical entity."
+    }
+  ]
 }

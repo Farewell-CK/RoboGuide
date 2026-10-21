@@ -95,6 +95,16 @@ def test_perception_planning_preserves_registered_platform_and_observation_modes
         assert acquired["viewpoint-positioning"] == (
             "flight" if mobility["base-type"] == "flying" else "ground"
         )
+    effects = {
+        item["operation"]["namespace"] + "." + item["operation"]["name"]: item
+        for item in profile["operation_effects"]
+    }
+    assert effects["mobility.navigate"]["effects"][0]["domain"] == "participant.position"
+    assert {effect["domain"] for effect in effects["observation.acquire"]["effects"]} == {
+        "participant.position",
+        "observation.condition",
+    }
+    assert all(effect["access"] == "read" for effect in effects["observation.verify"]["effects"])
 
 
 @pytest.mark.parametrize("expected", ["is_detected(entity)", "any_at(entity) AND detected(entity)"])

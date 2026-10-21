@@ -31,11 +31,14 @@ Planner/Repairer 输出在进入草稿、审批和提交链之前，由 MI 确�
 配置不包含 Node、ResourceId 或 PhysicalEntityId，也不读取 live inventory。
 
 服务也可用 `service.planning_profile_path` 选择启动时冻结的
-`roboguide.deployment-planning-profile/v0.1` 部署能力摘要。它只包含抽象 capability class
-及 Catalog 已定义的 typed facts，供 Planner、Reviewer 和 Repairer 了解部署能够提供的能力类别；
+`roboguide.deployment-planning-profile/v0.2` 部署能力摘要。它只包含抽象 capability class、
+Catalog 已定义的 typed facts，以及可选的中性 operation state-effect 声明，供 Planner、Reviewer
+和 Repairer 了解部署能力和同一 Actor 任务组合的潜在状态交互；
 class id 不是 Actor、Node、Resource 或 PhysicalEntity，profile 也不包含 health、lease、
 reservation 或当前可用性。缺少任务/世界证据时，MI 不得仅凭 profile 选择 capability constraint；
-profile 不能替代 environment-authoritative 的 episode floor 或 start-state evidence。
+effect 声明只用于 Review 发现潜在交互，不证明终态谓词会失效，也不选择物理实体。缺少或
+partial 声明是未知，不是无副作用。v0.1 仍按原义兼容读取，不会被补造 effect 信息。profile
+不能替代 environment-authoritative 的 episode floor 或 start-state evidence。
 
 Habitat 部署还可以通过 `service.grounding_planning_world_evidence_path` 提供
 `roboguide.authoritative-planning-world-evidence/v0.1` 静态场景证据。共享世界在执行已有的

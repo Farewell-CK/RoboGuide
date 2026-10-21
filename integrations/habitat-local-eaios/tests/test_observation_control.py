@@ -236,16 +236,17 @@ def test_feedback_cannot_bind_a_different_operation_or_attempt() -> None:
     "version,mutation",
     [
         (version, mutation)
-        for version in (11, 12, 13)
+        for version in (11, 12, 13, 14, 15, 16)
         for mutation in (None, "pause", "persistence", "extra", "schema")
     ]
     + [
         (version, mutation)
-        for version in (12, 13)
+        for version in (12, 13, 14, 15, 16)
         for mutation in ("dispatch", "dispatch-missing", "dispatch-downgrade")
     ]
     + [
-        (13, mutation)
+        (version, mutation)
+        for version in (13, 14, 15, 16)
         for mutation in (
             "scan-missing",
             "scan-downgrade",
@@ -253,6 +254,29 @@ def test_feedback_cannot_bind_a_different_operation_or_attempt() -> None:
             "scan-yaw",
             "scan-false",
             "scan-extra",
+        )
+    ]
+    + [
+        (version, mutation)
+        for version in (14, 15, 16)
+        for mutation in (
+            "motion-missing",
+            "motion-downgrade",
+            "motion-source",
+            "motion-timer",
+            "motion-type",
+        )
+    ]
+    + [
+        (version, mutation)
+        for version in (15, 16)
+        for mutation in (
+            "recovery-missing",
+            "recovery-downgrade",
+            "recovery-budget",
+            "recovery-target",
+            "recovery-type",
+            "recovery-extra",
         )
     ],
 )
@@ -264,6 +288,9 @@ def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
     """Actual run-local source validation accepts only the exact disclosed feedback profile."""
     from habitat_local_eaios.navigation_dispatch import navigation_dispatch_declaration
     from habitat_local_eaios.observation_control import observation_control_declaration
+    from habitat_local_eaios.relocation_preflight import _check_execution_profile
+    from habitat_local_eaios.view_motion import motion_feedback_declaration
+    from habitat_local_eaios.view_recovery import view_recovery_declaration
     from habitat_local_eaios.view_scan import view_scan_declaration
     from roboguide_eval.b1_deployment_feasibility import (  # type: ignore[import-untyped]
         preflight_deployment_feasibility,
@@ -279,8 +306,12 @@ def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
     )
     if version >= 12:
         how["navigation_dispatch"] = navigation_dispatch_declaration()
-    if version == 13:
+    if version >= 13:
         how["observation_view_search"] = view_scan_declaration()
+    if version >= 14:
+        how["observation_motion_feedback"] = motion_feedback_declaration()
+    if version >= 15:
+        how["observation_viewpoint_recovery"] = view_recovery_declaration(optics=version >= 16)
     how["execution_options"]["enable_observation_acquisition"] = True
     deployment_path = run / "b1-deployment-used.json"
     declaration = json.loads(deployment_path.read_bytes())
@@ -316,11 +347,48 @@ def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
         how["observation_view_search"]["camera_teleportation"] = 0
     elif mutation == "scan-extra":
         how["observation_view_search"]["physical_success_override"] = True
+    elif mutation == "motion-missing":
+        del how["observation_motion_feedback"]
+    elif mutation == "motion-downgrade":
+        how["schema_version"] = "roboguide.habitat-local-how-profile/v0.13"
+    elif mutation == "motion-source":
+        how["observation_motion_feedback"]["source"] = "commanded-yaw"
+    elif mutation == "motion-timer":
+        how["observation_motion_feedback"]["skill_timer_completion_is_rotation"] = True
+    elif mutation == "motion-type":
+        how["observation_motion_feedback"]["skill_timer_completion_is_rotation"] = 0
+    if mutation == "recovery-missing":
+        del how["observation_viewpoint_recovery"]
+    elif mutation == "recovery-downgrade":
+        how["schema_version"] = "roboguide.habitat-local-how-profile/v0.14"
+    elif mutation == "recovery-budget":
+        how["observation_viewpoint_recovery"]["max_recoveries_per_attempt"] = 3
+    elif mutation == "recovery-target":
+        how["observation_viewpoint_recovery"]["target_policy"] = "model-invented-position"
+    elif mutation == "recovery-type":
+        how["observation_viewpoint_recovery"]["original_acquisition_budget_renewed"] = 0
+    elif mutation == "recovery-extra":
+        how["observation_viewpoint_recovery"]["guaranteed_success"] = True
     how_path.write_text(json.dumps(how))
+    if version >= 16 and (run / "evidence/perception-readiness.json").exists():
+        readiness_path = run / "evidence/perception-readiness.json"
+        readiness = json.loads(readiness_path.read_bytes())
+        readiness.update(
+            schema_version="roboguide.perception-readiness/v0.3",
+            fixed_camera_optics={
+                key: {"status": "unavailable", "reason": "no fixed-camera capability declared"}
+                for key in readiness["sensors"]
+            },
+        )
+        readiness_path.write_text(json.dumps(readiness))
     if mutation is None:
         preflight_deployment_feasibility(run)
+        _check_execution_profile(run, requirement["frozen_input_sha256"])
     else:
         with pytest.raises(
-            ValueError, match="observation feedback|Local How|navigation dispatch|view search"
+            ValueError,
+            match="observation feedback|Local How|navigation dispatch|view search|motion|viewpoint",
         ):
             preflight_deployment_feasibility(run)
+        with pytest.raises(IntegrationError):
+            _check_execution_profile(run, requirement["frozen_input_sha256"])

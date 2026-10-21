@@ -1,9 +1,9 @@
 {
-  "schema_version": "roboguide.deployment-planning-profile/v0.1",
+  "schema_version": "roboguide.deployment-planning-profile/v0.2",
   "authority": "deployment-owned",
   "identity": {
     "profile_id": "e1-shared-world-rearrangement",
-    "revision": "v2",
+    "revision": "v4",
     "source": "deployment://e1-shared-world-rearrangement"
   },
   "capability_classes": [
@@ -108,5 +108,68 @@
       ]
     }
   ],
-  "digest": "sha256:0735edb69ed0de401e324c872625335229880ad6475dd6ce8f6c59e0780a803d"
+  "operation_effects": [
+    {
+      "operation": {
+        "namespace": "mobility",
+        "name": "move",
+        "version": "v1"
+      },
+      "coverage": "partial",
+      "effects": [
+        {
+          "domain": "participant.position",
+          "subject_scope": "actor",
+          "subject_parameter": null,
+          "result_parameter": "destination",
+          "access": "may_change"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "mobility",
+        "name": "navigate",
+        "version": "v1"
+      },
+      "coverage": "partial",
+      "effects": [
+        {
+          "domain": "participant.position",
+          "subject_scope": "actor",
+          "subject_parameter": null,
+          "result_parameter": "destination",
+          "access": "may_change"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "object",
+        "name": "relocate",
+        "version": "v1"
+      },
+      "coverage": "partial",
+      "effects": [
+        {
+          "domain": "entity.location",
+          "subject_scope": "world",
+          "subject_parameter": "object",
+          "result_parameter": "destination",
+          "access": "may_change"
+        }
+      ]
+    }
+  ],
+  "digest": "sha256:015f8c1e51a35b9361f2a6db08c69f7e4a63f1441867bcb5d372bf859edabe3b",
+  "state_domains": [
+    {
+      "id": "entity.location",
+      "description": "Current location state of a named semantic object; it does not establish containment, ownership, or future placement."
+    },
+    {
+      "id": "participant.position",
+      "description": "Current position of the logical participant executing a canonical operation; it does not identify or select a physical entity."
+    }
+  ]
 }

@@ -5,6 +5,10 @@ artifact together. The context is the exact immutable evidence used by Interpret
 When `deployment_planning_profile` is supplied, treat it as a startup-frozen summary of abstract
 deployment capability classes. It contains no Node, Resource, Physical Entity, health, lease,
 reservation, or current availability authority. A class id cannot select an Actor or executor.
+If its versioned `operation_effects` are present, they declare reads and possible changes to the
+documented neutral state domains for the named canonical operations. An omitted operation or a
+partial declaration is unknown, not a claim that the operation has no effect. These declarations
+describe possible local effects; they do not prove a terminal predicate or select an executor.
 Approve a capability constraint only when the grounded requirement and supplied world evidence
 justify it; a missing world fact is an evidence gap, not permission to infer a provider choice.
 Use the shared rules below as review criteria, not as authority to rewrite the plan.
@@ -104,6 +108,14 @@ A joint terminal-state conjunction still requires all of its effects to coexist 
 state. For every Actor reused across Tasks, perform an effect-interference check: determine whether a
 later operation can invalidate an earlier required effect. Use the grounded requirement or admitted
 evidence that establishes persistence, mutual compatibility, or an explicit restoration mechanism.
+When `operation_effect_composition_review` is supplied, use its exact Task/Role pair and state-domain
+findings as a checklist against the plan's expected effects. If that review is absent but a
+`deployment_planning_profile` is supplied, compare the declared `operation_effects` for the
+candidate plan yourself. In either case, a shared state domain identifies a possible interaction,
+not a proven conflict or a physical binding. An unordered pair has no DAG order. Missing or partial
+operation-effect declarations remain unknown; do not infer effects that the profile does not declare.
+If neither source is available, retain the effect-interference question as unknown rather than
+assuming persistence or conflict.
 An established conflict needs a supported restoration, compatible operation, or justified participation
 that actually addresses that conflict. Permission to move or absence of a future preservation guarantee
 alone does not establish that the required effects are incompatible. Retain uncertainty and the complete

@@ -857,6 +857,11 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   shared-world reset, planning-world evidence v0.2 may add an exact official geometric
   single-location witness for a joint terminal goal. It is a snapshot planning option, not a
   route, physical assignment, task completion, or benchmark outcome. See ADR-0044.
+- Deployment Planning Profile v0.2 may additionally declare canonical-operation reads and possible
+  changes to documented neutral state domains. Mission emits an exact-plan/profile-digest-bound
+  advisory composition review to Reviewer and Repairer; possible overlap is not a proven goal
+  conflict, admission rule, physical binding, or official verifier result. Legacy v0.1 remains
+  readable without inferred effects. These declarations never select Nodes or Physical Entities.
 - `apps/mission-service/` is the Python Mission Request composition root. It owns text instruction
   ingress and durable deliberation state, then submits accepted complete plans to the existing
   Controller API; its Interpreter does not consume live Node/Resource inventory, and current
@@ -1051,7 +1056,7 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   provider-level feasibility baselines and never an expansion of integrated Local EAIOS steps.
 
 ADR-0094 adds deployment-owned bounded `observation.acquire@v1`, separate from
-snapshot verification. Its opt-in Local How v0.13 retains v0.11 exact-attempt cached condition/budget
+snapshot verification. Its opt-in Local How v0.16 retains v0.11 exact-attempt cached condition/budget
 feedback and a disclosed at-most-16-step original-wait mapping; it neither edits raw model
 choices nor guarantees persistent effects. Already-observed acquisition needs no extra model
 or motion. A guarded fresh acquisition navigation call rearms only its endpoint's original
@@ -1073,6 +1078,36 @@ Navigation/relocation/idle retain their tools. `perception_diagnostics.py` is de
 the existing physical-diagnostics flag; bounded same-cache pixel/threshold/camera comparisons
 separate own-agent evidence, derived current-world union and unavailable official truth, with
 no sensor/render/predicate calls. Failed final capture cannot skip buffered evidence flush.
+`view_motion.py` adds exact-call post-step quaternion observations to scan receipts and subsequent
+model inputs. A completed skill timer never proves rotation; fully observed stationarity and
+unavailable evidence remain separate. No actuator, collision threshold, NavMesh or benchmark
+predicate is changed. The v0.14 declaration is checked independently of legacy v0.13 evidence.
+`view_recovery.py` and `view_recovery_binding.py` add a bounded same-entity local arrival-point
+search only after an observed stationary scan and a fresh model-selected navigation. Original
+route and nonempty noncylindrical scan-footprint checks must support a candidate; unknown geometry
+or a bounded miss is a typed local recovery failure before movement, never a straight-line
+fallback. Two searches, 24 candidates each, up to 32 original scan checks per candidate and at most
+16 footprint points remain inside the original acquisition budget. A one-second Python search
+deadline does not preempt blocking native calls. No target cache, external EMOS source, collision
+threshold or official predicate is changed. Exact own-endpoint hooks are removed at the next
+navigation or attempt close. Local How v0.15 discloses this controlled-arm capability; v0.14 and
+earlier frozen artifacts retain their original contracts. Map-supported candidates do not prove
+physical safety, arrival, detection or persistent satisfaction of another Task.
+Activation is per endpoint's actual supported nonempty footprint; other controller interfaces
+keep ordinary navigation. Readiness records support separately from unknown physical feasibility.
+`observation_optics.py` owns the source-bound fixed primary pinhole camera declaration and
+read-only loaded-camera checks. Optional Catalog attributes describe height above the kinematic
+base, forward offset/elevation, horizontal/vertical FOV and absence of workflow pan/tilt; they
+never claim visibility. The same typed facts enter Node registration and MI capability classes.
+Local How v0.16 requires the run-local optics declaration, rejects mismatches before READY, and
+uses fixed-camera sphere/frustum necessary conditions with at most 512 local grid requests,
+64 route queries and 32 full scan candidates per original one-second search. The grid is
+0.15m-spaced within 1.2m half-width; accepted displacement stays at most 1m and path length 1.5m.
+Legacy v0.15 retains its radial declaration. No articulated camera is treated as fixed and no
+unknown camera is assigned invented optics. Camera/target drift fences selected-point hooks.
+Local acquisition is not persistent satisfaction; final joint goals require original independent
+verification and proximity/detection need not belong to the same Physical Entity.
+
 
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add

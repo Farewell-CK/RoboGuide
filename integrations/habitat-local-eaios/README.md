@@ -32,6 +32,24 @@ occlusion and vertical camera framing can still prevent detection. A `view-scan-
 receipt describes the local scan, not acquisition or official success. Native EMOS files
 and its baseline tool set remain unchanged, so this controlled-arm difference is explicit.
 
+Local How v0.14 adds exact-call post-step orientation feedback. The next model input and
+tool receipt distinguish actual rotation, fully observed no rotation and unavailable evidence.
+Original timer completion stays a timer fact; it never proves motion or detection. Reads use
+the existing own-agent quaternion, without extra actions, steps, sensor queries or RNG access.
+Footprint checks, collision thresholds and NavMesh constraints remain unchanged. A stationary
+scan does not identify its blocking cause or authorize weakening those constraints.
+
+Local How v0.15 adds bounded observation-point recovery. After an observed stationary
+scan, only a fresh model-selected `nav_to_obj` for the committed entity can select an
+alternative local arrival point. It uses existing native routes and unchanged scan
+footprint checks, up to two searches per attempt, 24 candidates per search within one
+metre, and the original acquisition budget. Missing noncylindrical footprint geometry,
+an unavailable route or a bounded miss reports a local recovery failure before dispatch.
+The target entity, native caches, velocities, collision thresholds and official goals
+remain unchanged. This is a disclosed RoboGuide Local How capability; it does not claim
+equivalence to the native EMOS baseline or guarantee physical arrival or visibility.
+The one-second search deadline bounds Python decisions, not an individual native call.
+
 With physical diagnostics enabled, `perception-diagnostics.jsonl` records bounded same-cache
 detector results, exact target pixel counts, original thresholds and camera projection geometry
 every16steps and at acquisition boundaries. Own-agent detection, derived current cross-agent
@@ -602,3 +620,10 @@ INCOMPLETE admission evidence. A Node route must advertise this session schema
 in registration metadata; the Controller rejects a non-advertising route before
 dispatch rather than silently losing the topology. Deploy Controller and Node
 updates together.
+
+The opt-in observation Local How v0.16 uses source-bound fixed primary pinhole optics
+(`observation_optics.py`) and bounded camera/route/footprint viewpoint selection. Node attributes
+and MI capability classes carry the same neutral camera facts; loaded original camera mismatch
+refuses READY. Geometry is a necessary condition only: cached pixels decide acquisition and
+Habitat retains official joint terminal authority. See the
+[observation extension](../../docs/extensions/bounded-observation-and-evidence-closure.md).

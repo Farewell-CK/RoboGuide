@@ -182,6 +182,7 @@ class Stage2ExecutionFeedback:
         ):
             raise IntegrationError("observation feedback must bind exactly its own acquisition")
         self._pending: dict[str, _PendingAction] = {}
+        self._stationary_scan: tuple[str, int] | None = None
         self._sequences: dict[str, int] = {}
         self._operation_completed: dict[str, bool] = {}
         self._restores: list[Callable[[], None]] = []
@@ -208,6 +209,14 @@ class Stage2ExecutionFeedback:
         """Replace an optimistic receipt only after the independent guard admits the call."""
         receipt = _receipt(model, action)
         previous = self._pending.get(agent_name)
+        if previous is not None and previous.document["tool_name"] == "scan_for_object":
+            self._update_scan_motion(previous)
+            motion = previous.document.get("view_search_motion", {})
+            self._stationary_scan = (
+                (previous.document["tool_call_id"], previous.document["action_sequence"])
+                if motion.get("rotation_observed") is False
+                else None
+            )
         sequence = self._sequences.get(agent_name, 0) + 1
         self._sequences[agent_name] = sequence
         document = {
@@ -263,6 +272,7 @@ class Stage2ExecutionFeedback:
         """Deliver observed feedback without preserving the vendor's false completion claim."""
         pending = self._pending.get(agent_name)
         if pending is not None and pending.model is model:
+            self._update_scan_motion(pending)
             if pending.document["status"] == "accepted-awaiting-observation":
                 pending.document = dict(
                     pending.document,
@@ -315,6 +325,23 @@ class Stage2ExecutionFeedback:
         """Offer the explicit tool only when its original control/skill binding exists."""
         return self._view_scan.tool() if self._view_scan is not None else None
 
+    @property
+    def supports_viewpoint_recovery(self) -> bool:
+        """Expose the declared same-target selection implementation without a map query."""
+        return (
+            self._navigation_dispatch is not None
+            and self._navigation_dispatch.supports_viewpoint_recovery
+        )
+
+    def _update_scan_motion(self, pending: _PendingAction) -> None:
+        """Attach actual orientation evidence separately from the requested effect."""
+        if self._view_scan is not None and pending.document["tool_name"] == "scan_for_object":
+            observation = self._view_scan.motion_feedback(
+                pending.document["tool_call_id"], pending.document["action_sequence"]
+            )
+            if observation is not None:
+                pending.document["view_search_motion"] = observation
+
     def bind_observation_dispatch(self, agent_name: str, action: Any) -> Any:
         """Translate an admitted pause to its advertised Local EAIOS duration.
 
@@ -343,7 +370,9 @@ class Stage2ExecutionFeedback:
                 pending.action,
                 pending.document["tool_call_id"],
                 pending.document["action_sequence"],
+                stationary_scan=self._stationary_scan,
             )
+            self._stationary_scan = None
         if pending.action["name"] not in {"wait", "send_request"}:
             return action
         if action != {"name": "wait", "arguments": ["500"]}:
@@ -431,12 +460,15 @@ class Stage2ExecutionFeedback:
     def physical_step(self) -> None:
         """Count existing Gym steps and confirm only an exact retry's deferred terminal fact.
 
-        This runs after the existing Gym call succeeds. Ordinary steps only
-        increment counters; an attributed retry boundary emits one receipt.
+        This runs after the existing Gym call succeeds. Ordinary steps increment
+        counters and active scans read their existing orientation; an attributed
+        retry boundary emits one receipt.
         No skill, sensor, action, model, or Gym method is called here.
         """
         for agent_name, pending in self._pending.items():
             pending.physical_steps += 1
+            if self._view_scan is not None and pending.document["tool_name"] == "scan_for_object":
+                self._view_scan.observe_physical_step()
             if self._completion_binding is not None and pending.document["tool_name"] == "place":
                 self._post_step_place(agent_name, pending)
                 continue
@@ -774,6 +806,7 @@ class Stage2ExecutionFeedback:
                 pending.document.update(
                     status="completion-evidence-unavailable", local_skill_completed=None
                 )
+        self._update_scan_motion(pending)
         self._write_observed_receipt(pending)
         self._emit("skill-terminated", pending.document)
         self._notify_completion(agent_name, pending)
@@ -862,9 +895,12 @@ class Stage2ExecutionFeedback:
         self._restores.clear()
         if self._view_scan is not None:
             self._view_scan.close()
+        if self._navigation_dispatch is not None:
+            self._navigation_dispatch.close()
         if self._completion_binding is not None:
             self._completion_binding.close()
         for pending in self._pending.values():
+            self._update_scan_motion(pending)
             if pending.document["status"] == "accepted-awaiting-observation":
                 pending.document = dict(
                     pending.document,

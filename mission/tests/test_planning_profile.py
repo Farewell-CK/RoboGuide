@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from mission.intent import GroundedIntent
-from mission.models import JSONObject
+from mission.models import JSONObject, MissionPlan
+from mission.operation_effect_review import operation_effect_composition_review
 from mission.planning_profile import (
     DeploymentPlanningProfile,
     PlanningProfileError,
@@ -25,6 +27,7 @@ from mission.responses import (
     ResponsesMissionReviewer,
 )
 from mission.review import MissionPlanReview
+from mission.submission_evidence import canonical_plan_digest
 from test_planners import (
     FakeTransport,
     _current_catalog,
@@ -44,11 +47,27 @@ def test_checked_in_profile_is_versioned_typed_and_catalog_bound() -> None:
     profile = DeploymentPlanningProfile.load(_PROFILE)
     profile.validate_catalog(_current_catalog())
     payload = profile.to_json()
-    assert payload["schema_version"] == "roboguide.deployment-planning-profile/v0.1"
+    Draft202012Validator.check_schema(
+        json.loads(
+            Path(
+                "contracts/mission/deployment-planning-profile-v0.2/profile.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+    )
+    Draft202012Validator(
+        json.loads(
+            Path(
+                "contracts/mission/deployment-planning-profile-v0.2/profile.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+    ).validate(payload)
+    assert payload["schema_version"] == "roboguide.deployment-planning-profile/v0.2"
     assert payload["authority"] == "deployment-owned"
     assert "node_id" not in json.dumps(payload)
     assert "resource_id" not in json.dumps(payload)
     assert "physical_entity" not in json.dumps(payload)
+    assert payload["operation_effects"]
+    assert payload["state_domains"]
     assert {item.class_id for item in profile.capability_classes} == {
         "legged-floor-capable",
         "wheeled-single-floor",
@@ -80,6 +99,56 @@ def test_profile_digest_and_catalog_validation_fail_closed(tmp_path: Path) -> No
     with pytest.raises(PlanningProfileError, match="unknown capability"):
         profile = DeploymentPlanningProfile.load(path)
         profile.validate_catalog(_current_catalog())
+
+
+def test_operation_effect_profile_is_bound_to_catalog_operation_parameters() -> None:
+    """Operation effects name only published operations and their exact parameters."""
+    raw = json.loads(_PROFILE.read_text(encoding="utf-8"))
+    invalid_parameter = deepcopy(raw)
+    invalid_parameter["operation_effects"][0]["effects"][0]["result_parameter"] = "room"
+    invalid_parameter["digest"] = _digest_without_digest(invalid_parameter)
+    with pytest.raises(PlanningProfileError, match="unknown parameter"):
+        DeploymentPlanningProfile.from_json(invalid_parameter).validate_catalog(_current_catalog())
+
+    invalid_operation = deepcopy(raw)
+    invalid_operation["operation_effects"][0]["operation"]["name"] = "not-published"
+    invalid_operation["digest"] = _digest_without_digest(invalid_operation)
+    with pytest.raises(PlanningProfileError, match="unknown operation"):
+        DeploymentPlanningProfile.from_json(invalid_operation).validate_catalog(_current_catalog())
+
+    unknown_domain = deepcopy(raw)
+    unknown_domain["operation_effects"][0]["effects"][0]["domain"] = "undeclared.domain"
+    unknown_domain["digest"] = _digest_without_digest(unknown_domain)
+    with pytest.raises(PlanningProfileError, match="undocumented state domain"):
+        DeploymentPlanningProfile.from_json(unknown_domain).validate_catalog(_current_catalog())
+
+    invalid_scope = deepcopy(raw)
+    invalid_scope["operation_effects"][0]["effects"][0]["subject_scope"] = "physical-entity"
+    invalid_scope["digest"] = _digest_without_digest(invalid_scope)
+    with pytest.raises(PlanningProfileError, match="subject_scope must be actor or world"):
+        DeploymentPlanningProfile.from_json(invalid_scope)
+
+    missing_world_subject = deepcopy(raw)
+    world_effect = missing_world_subject["operation_effects"][0]["effects"][0]
+    world_effect["subject_scope"] = "world"
+    world_effect["subject_parameter"] = None
+    missing_world_subject["digest"] = _digest_without_digest(missing_world_subject)
+    with pytest.raises(PlanningProfileError, match="world scope requires a subject_parameter"):
+        DeploymentPlanningProfile.from_json(missing_world_subject)
+
+
+def test_v0_1_profile_remains_readable_without_invented_effect_declarations() -> None:
+    """Legacy profile bytes retain their old meaning and do not acquire inferred effects."""
+    raw = json.loads(_PROFILE.read_text(encoding="utf-8"))
+    legacy = deepcopy(raw)
+    legacy["schema_version"] = "roboguide.deployment-planning-profile/v0.1"
+    legacy.pop("operation_effects")
+    legacy.pop("state_domains")
+    legacy["digest"] = _digest_without_digest(legacy)
+    profile = DeploymentPlanningProfile.from_json(legacy)
+    assert profile.schema_version == "roboguide.deployment-planning-profile/v0.1"
+    assert profile.operation_effects == ()
+    assert profile.to_json() == legacy
 
 
 def test_planner_reviewer_and_repairer_share_frozen_profile_input() -> None:
@@ -172,6 +241,79 @@ def test_planner_reviewer_and_repairer_share_frozen_profile_input() -> None:
                 "unknown_world_facts_must_not_be_guessed": True,
             },
         }
+    planner_input = json.loads(cast(str, transport.requests[0][2]["input"]))
+    reviewer_input = json.loads(cast(str, transport.requests[1][2]["input"]))
+    repairer_input = json.loads(cast(str, transport.requests[2][2]["input"]))
+    expected_effect_review = operation_effect_composition_review(plan, profile)
+    assert "operation_effect_composition_review" not in planner_input
+    assert reviewer_input["operation_effect_composition_review"] == expected_effect_review
+    assert repairer_input["operation_effect_composition_review"] == expected_effect_review
+
+
+def test_planner_prompt_matches_its_candidate_effect_evidence_boundary() -> None:
+    """Planner uses profile effects itself; derived plan analysis is Reviewer/Repairer input."""
+    prompt = Path("mission/prompts/v0/planner.md").read_text(encoding="utf-8")
+    assert "If that review is absent but a" in prompt
+    assert "`deployment_planning_profile` is supplied" in prompt
+    assert "compare the declared `operation_effects`" in prompt
+    assert "If neither source is available" in prompt
+    assert "do not infer effects that the profile does not declare" in prompt
+
+
+@pytest.mark.parametrize("with_profile", [False, True])
+def test_runtime_replanning_keeps_context_and_exact_plan_effect_evidence(
+    with_profile: bool,
+) -> None:
+    """Runtime generation and review preserve context and analyze their own exact plans."""
+    original = MissionPlan.from_json(_v0_8_plan())
+    candidate_json = deepcopy(original.to_json())
+    tasks = cast(list[JSONObject], candidate_json["tasks"])
+    tasks[0]["description"] = "Continue the unfinished objective using original fault evidence."
+    candidate = MissionPlan.from_json(candidate_json)
+    assert canonical_plan_digest(candidate.to_json()) != canonical_plan_digest(original.to_json())
+    profile = DeploymentPlanningProfile.load(_PROFILE) if with_profile else None
+    transport = FakeTransport(
+        [_response(_provider_plan(candidate_json)), _response(_review_output())]
+    )
+    environment = {"OPENAI_API_KEY": "test-only-key"}
+    settings = _local_settings()
+    repairer = ResponsesMissionRepairer(settings, environment, transport, planning_profile=profile)
+    reviewer = ResponsesMissionReviewer(settings, environment, transport, planning_profile=profile)
+    context: JSONObject = {
+        "schema_version": "roboguide.runtime-replanning-context/v0.1",
+        "ticket_id": "runtime-ticket-fixture",
+        "source_revision": 1,
+        "source_plan_digest": canonical_plan_digest(original.to_json()),
+        "completed_tasks": [],
+        "fault": {"kind": "local-execution-failed"},
+    }
+    intent = GroundedIntent(original.mission.objective, (), ())
+    catalog = _current_catalog()
+    grounding = _grounding()
+
+    generated = repairer.replan(
+        original.mission.mission_id, intent, original, catalog, grounding, context
+    )
+    reviewer.review_runtime(intent, generated, catalog, grounding, context)
+
+    assert generated == candidate
+    assert len(transport.requests) == 2
+    generation_input = json.loads(cast(str, transport.requests[0][2]["input"]))
+    review_input = json.loads(cast(str, transport.requests[1][2]["input"]))
+    assert generation_input["review"] is None
+    assert generation_input["rejected_plan"] == original.to_json()
+    assert review_input["mission_plan"] == candidate.to_json()
+    for payload, analyzed_plan in ((generation_input, original), (review_input, candidate)):
+        assert payload["runtime_replanning_context"] == context
+        assert payload["grounding_context"] == grounding.to_json()
+        if profile is None:
+            assert "deployment_planning_profile" not in payload
+            assert "operation_effect_composition_review" not in payload
+        else:
+            assert payload["deployment_planning_profile"] == profile.to_json()
+            assert payload["operation_effect_composition_review"] == (
+                operation_effect_composition_review(analyzed_plan, profile)
+            )
 
 
 def _digest_without_digest(value: JSONObject) -> str:

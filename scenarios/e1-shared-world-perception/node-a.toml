@@ -117,7 +117,7 @@ base = {}
 contract = "observation.acquire@v1"
 kind = "observation"
 owner = "habitat-local-eaios"
-attributes = { acquisition-mode = "bounded-active", condition-format = "detected(entity-ref)", sensing-modality = "visual", moves-observer = true, max-observation-cycles = 256, viewpoint-positioning = "ground" }
+attributes = { acquisition-mode = "bounded-active", condition-format = "detected(entity-ref)", sensing-modality = "visual", moves-observer = true, max-observation-cycles = 256, viewpoint-positioning = "ground", camera-model = "fixed-primary-pinhole/v0.1", camera-height-above-base-m = 0.48, camera-forward-offset-m = 0.4164822634134684, camera-forward-elevation-degrees = 0.0, camera-horizontal-fov-degrees = 90.0, camera-vertical-fov-degrees = 90.0, camera-pan-tilt-supported = false }
 
 [capability_profiles.readiness]
 state_pointer = "/state"

@@ -9,7 +9,7 @@ from typing import Any
 
 from .idle_endpoint import PassiveIdleAgent, _original_wait_skill_type
 from .model import CanonicalInvocation, IntegrationError
-from .navigation_dispatch import NavigationDispatchLifecycle
+from .navigation_dispatch import NavigationDispatchLifecycle, inspect_navigation_dispatch
 from .observation_control import ObservationAcquisitionControl
 from .relocation_completion import RelocationCompletionBinding
 from .stage2_contract import (
@@ -19,6 +19,7 @@ from .stage2_contract import (
     install_stage2_contract_guard,
 )
 from .stage2_feedback import Stage2ExecutionFeedback
+from .view_recovery_binding import ObservationViewpointRecovery, supports_viewpoint_recovery
 from .view_scan import ViewScanBinding
 
 _LOG = logging.getLogger(__name__)
@@ -148,7 +149,22 @@ class LivePolicyBindings:
                 observation_control=observation_control,
                 navigation_dispatch=(
                     NavigationDispatchLifecycle(
-                        self.runtime._habitat_env, agent, contract, self.record_feedback
+                        self.runtime._habitat_env,
+                        agent,
+                        contract,
+                        self.record_feedback,
+                        view_recovery=(
+                            ObservationViewpointRecovery(
+                                inspect_navigation_dispatch(self.runtime._habitat_env, agent),
+                                scan.spec,
+                                observation_control,
+                                self.record_feedback,
+                            )
+                            if scan is not None
+                            and observation_control is not None
+                            and supports_viewpoint_recovery(scan.spec)
+                            else None
+                        ),
                     )
                     if observation_control is not None
                     else None

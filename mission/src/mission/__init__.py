@@ -28,7 +28,10 @@ from mission.planning_profile import (
     DeploymentPlanningProfile,
     PlanningCapabilityClass,
     PlanningCapabilityFact,
+    PlanningOperationEffects,
     PlanningProfileError,
+    PlanningStateDomain,
+    PlanningStateEffect,
     load_optional_planning_profile,
 )
 from mission.planning_world_evidence import (
@@ -89,7 +92,10 @@ __all__ = [
     "MissionPlanError",
     "PlanningCapabilityClass",
     "PlanningCapabilityFact",
+    "PlanningOperationEffects",
     "PlanningProfileError",
+    "PlanningStateDomain",
+    "PlanningStateEffect",
     "AuthoritativePlanningWorldEvidence",
     "PlanningSpatialFact",
     "PlanningWorldRelation",
