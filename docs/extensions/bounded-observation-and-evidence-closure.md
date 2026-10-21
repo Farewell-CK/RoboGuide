@@ -29,7 +29,7 @@ deployment v0.4 增加 `enable_observation_acquisition`、
 语义相机和导航技能可用。默认 Python adapter 开关关闭。新的感知/重排 deployment
 模板显式选择本轮开发配置，旧冻结运行继续使用自己的旧模板。
 
-开启 acquisition 的当前代码输出 Local How v0.14，保留 v0.11 的闭合
+开启 acquisition 的当前代码输出 Local How v0.15，保留 v0.11 的闭合
 `observation_control=bounded-visual-feedback/v0.1` 声明。每次真实模型动作请求包含最新的
 缓存 true/false/unavailable、原 Task/attempt/world/entity、sample step 和原始剩余预算；
 读取不到保持 unavailable，同 step 冲突、跨 attempt/world 或时间回退拒绝。初始已有真实
@@ -78,6 +78,44 @@ no-rotation-observed或unavailable。完全缺失基线或部分读取失败不�
 读取失败不影响原动作或异常；运动阻塞的原因保持unavailable，不能由零转角猜测碰撞。
 没有自动重试、改写动作、替换目标、改变footprint/碰撞容差/NavMesh或增加物理控制权限。
 不同Local How控制器的几何可行性不一致需要独立的部署合同审查，不能靠放宽检查掩盖。
+
+v0.15 增加 `observation_viewpoint_recovery=bounded-observation-viewpoint/v0.1`。
+只有上一扫描真实观测为未转动、当前检测为false且模型重新选择同一entity的`nav_to_obj`，
+才执行有界观测点搜索。模型没有选导航时不自主移动；错误目标仍由Guard在原始映射前拒绝。
+既有raw tool、canonical operation与entity不变，变化的是本地导航到该实体所选的arrival point。
+
+候选位于当前点周围0.4/0.7/1.0米的固定8方向；投影偏移超过0.2米、位移不足0.25米、
+重复旧点、路线缺失或超过1.5米均不能使用。最多24个候选，每个候选用原始非圆柱底盘
+footprint/容差/mesh回放完整32步scan；footprint最多16点。已有goal-region导航的距离
+envelope保留。路径查询失败不使用原生的直线兜底。整个attempt最多两次搜索，不续期
+原始acquisition预算。Python每个候选前后检查1秒期限，不能中断单次native查询或约束其
+内部内存分配；不宣称硬实时执行上限。
+
+当前实现需要实际加载的BaseVelNonCylinderAction及非空足迹、同一机器人与原始mesh；
+其他接口缺少这项几何契约时保持原始导航，不启用或宣称这项恢复能力。
+perception-readiness逐端点记录loaded_geometry_supported，物理可行性仍未证明；已启用
+接口若在派发时丢失必要几何，则明确local recovery unavailable，不臆测平台运动安全。
+局部位置只覆盖当前导航调用，实体位置、episode或mesh改变后拒绝旧选择；任务退出与
+下一次导航清除自身hooks，原始缓存、peer与其他operation保持各自执行路径。
+记录`observation-viewpoint-selection`、原scan call、当前nav call/sequence、候选位置、
+route、预算与失败原因。搜索失败属于local-observation-recovery，未派发、不重试Provider。
+
+本功能是RoboGuide受控臂的Local How扩展，不能称作原生EMOS等价执行。静态候选检查不
+证明动态碰撞安全、到达误差下的可旋转性、目标持续可见性或官方成功；真实轨迹与detector
+继续决定实际结果。旧v0.14/v0.13归档保持原始字段和行为版本，不能补字段重写历史。
+
+```mermaid
+flowchart LR
+  M[原始 Stage2 模型选择同目标导航] --> G[Guard 校验 committed entity]
+  G --> F{此前自身扫描观测为静止?}
+  F -- 否 --> N[原始导航]
+  F -- 是 --> S[原始地图路线与足迹有界搜索]
+  S -- 候选可用 --> P[同实体的本地观测点]
+  S -- 无证据或有界未找到 --> U[明确的 local recovery unavailable]
+  P --> N
+  N --> O[实际运动与检测反馈]
+  O --> H[独立官方 Habitat 判定]
+```
 
 物理诊断开关还启用 `perception-diagnostics.jsonl`，以16步采样周期读取同一次既有 Gym
 缓存。每条记录保留精确 entity/attempt/world、各 detector 的自身结果、原始整数语义图像

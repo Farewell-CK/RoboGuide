@@ -257,22 +257,53 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     }
     if bound_relocation:
         expected_base["relocation_completion_profile"] = "exact-object-released-place/v0.1"
-    motion_feedback = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.14"
+    viewpoint_recovery = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.15"
+    motion_feedback = how.get("schema_version") in {
+        "roboguide.habitat-local-how-profile/v0.14",
+        "roboguide.habitat-local-how-profile/v0.15",
+    }
     view_search = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.13",
         "roboguide.habitat-local-how-profile/v0.14",
+        "roboguide.habitat-local-how-profile/v0.15",
     }
     navigation_dispatch = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.12",
         "roboguide.habitat-local-how-profile/v0.13",
         "roboguide.habitat-local-how-profile/v0.14",
+        "roboguide.habitat-local-how-profile/v0.15",
     }
     observation_control = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.11",
         "roboguide.habitat-local-how-profile/v0.12",
         "roboguide.habitat-local-how-profile/v0.13",
         "roboguide.habitat-local-how-profile/v0.14",
+        "roboguide.habitat-local-how-profile/v0.15",
     }
+    if viewpoint_recovery:
+        expected_recovery = {
+            "profile": "bounded-observation-viewpoint/v0.1",
+            "operation": "observation.acquire@v1",
+            "activation": "per-endpoint-loaded-noncylindrical-footprint",
+            "trigger": "fresh-selected-navigation-after-observed-stationary-scan",
+            "tool": "nav_to_obj",
+            "target_policy": "same-committed-entity",
+            "max_recoveries_per_attempt": 2,
+            "candidate_radii_m": [0.4, 0.7, 1.0],
+            "directions_per_radius": 8,
+            "max_search_seconds": 1.0,
+            "max_route_points": 4096,
+            "max_footprint_points": 16,
+            "candidate_check": "unchanged-original-scan-footprint-and-native-route",
+            "missing_evidence": "local-recovery-unavailable",
+            "original_acquisition_budget_renewed": False,
+            "physical_safety_or_visibility_guaranteed": False,
+            "official_success_authority": "habitat-pddl",
+        }
+        if json.dumps(how.get("observation_viewpoint_recovery"), sort_keys=True) != json.dumps(
+            expected_recovery, sort_keys=True
+        ):
+            raise ValueError("loaded observation viewpoint recovery contract is invalid")
     if motion_feedback:
         expected_motion = {
             "profile": "observed-own-scan-rotation/v0.1",
@@ -365,10 +396,13 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             *({"navigation_dispatch"} if navigation_dispatch else set()),
             *({"observation_view_search"} if view_search else set()),
             *({"observation_motion_feedback"} if motion_feedback else set()),
+            *({"observation_viewpoint_recovery"} if viewpoint_recovery else set()),
         }
         or how["schema_version"]
         != (
-            "roboguide.habitat-local-how-profile/v0.14"
+            "roboguide.habitat-local-how-profile/v0.15"
+            if viewpoint_recovery
+            else "roboguide.habitat-local-how-profile/v0.14"
             if motion_feedback
             else "roboguide.habitat-local-how-profile/v0.13"
             if view_search

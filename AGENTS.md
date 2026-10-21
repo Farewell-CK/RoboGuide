@@ -831,7 +831,7 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   provider-level feasibility baselines and never an expansion of integrated Local EAIOS steps.
 
 ADR-0094 adds deployment-owned bounded `observation.acquire@v1`, separate from
-snapshot verification. Its opt-in Local How v0.14 retains v0.11 exact-attempt cached condition/budget
+snapshot verification. Its opt-in Local How v0.15 retains v0.11 exact-attempt cached condition/budget
 feedback and a disclosed at-most-16-step original-wait mapping; it neither edits raw model
 choices nor guarantees persistent effects. Already-observed acquisition needs no extra model
 or motion. A guarded fresh acquisition navigation call rearms only its endpoint's original
@@ -857,6 +857,19 @@ no sensor/render/predicate calls. Failed final capture cannot skip buffered evid
 model inputs. A completed skill timer never proves rotation; fully observed stationarity and
 unavailable evidence remain separate. No actuator, collision threshold, NavMesh or benchmark
 predicate is changed. The v0.14 declaration is checked independently of legacy v0.13 evidence.
+`view_recovery.py` and `view_recovery_binding.py` add a bounded same-entity local arrival-point
+search only after an observed stationary scan and a fresh model-selected navigation. Original
+route and nonempty noncylindrical scan-footprint checks must support a candidate; unknown geometry
+or a bounded miss is a typed local recovery failure before movement, never a straight-line
+fallback. Two searches, 24 candidates each, up to 32 original scan checks per candidate and at most
+16 footprint points remain inside the original acquisition budget. A one-second Python search
+deadline does not preempt blocking native calls. No target cache, external EMOS source, collision
+threshold or official predicate is changed. Exact own-endpoint hooks are removed at the next
+navigation or attempt close. Local How v0.15 discloses this controlled-arm capability; v0.14 and
+earlier frozen artifacts retain their original contracts. Map-supported candidates do not prove
+physical safety, arrival, detection or persistent satisfaction of another Task.
+Activation is per endpoint's actual supported nonempty footprint; other controller interfaces
+keep ordinary navigation. Readiness records support separately from unknown physical feasibility.
 
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add

@@ -182,6 +182,7 @@ class Stage2ExecutionFeedback:
         ):
             raise IntegrationError("observation feedback must bind exactly its own acquisition")
         self._pending: dict[str, _PendingAction] = {}
+        self._stationary_scan: tuple[str, int] | None = None
         self._sequences: dict[str, int] = {}
         self._operation_completed: dict[str, bool] = {}
         self._restores: list[Callable[[], None]] = []
@@ -208,6 +209,14 @@ class Stage2ExecutionFeedback:
         """Replace an optimistic receipt only after the independent guard admits the call."""
         receipt = _receipt(model, action)
         previous = self._pending.get(agent_name)
+        if previous is not None and previous.document["tool_name"] == "scan_for_object":
+            self._update_scan_motion(previous)
+            motion = previous.document.get("view_search_motion", {})
+            self._stationary_scan = (
+                (previous.document["tool_call_id"], previous.document["action_sequence"])
+                if motion.get("rotation_observed") is False
+                else None
+            )
         sequence = self._sequences.get(agent_name, 0) + 1
         self._sequences[agent_name] = sequence
         document = {
@@ -316,6 +325,14 @@ class Stage2ExecutionFeedback:
         """Offer the explicit tool only when its original control/skill binding exists."""
         return self._view_scan.tool() if self._view_scan is not None else None
 
+    @property
+    def supports_viewpoint_recovery(self) -> bool:
+        """Expose the declared same-target selection implementation without a map query."""
+        return (
+            self._navigation_dispatch is not None
+            and self._navigation_dispatch.supports_viewpoint_recovery
+        )
+
     def _update_scan_motion(self, pending: _PendingAction) -> None:
         """Attach actual orientation evidence separately from the requested effect."""
         if self._view_scan is not None and pending.document["tool_name"] == "scan_for_object":
@@ -353,7 +370,9 @@ class Stage2ExecutionFeedback:
                 pending.action,
                 pending.document["tool_call_id"],
                 pending.document["action_sequence"],
+                stationary_scan=self._stationary_scan,
             )
+            self._stationary_scan = None
         if pending.action["name"] not in {"wait", "send_request"}:
             return action
         if action != {"name": "wait", "arguments": ["500"]}:
@@ -876,6 +895,8 @@ class Stage2ExecutionFeedback:
         self._restores.clear()
         if self._view_scan is not None:
             self._view_scan.close()
+        if self._navigation_dispatch is not None:
+            self._navigation_dispatch.close()
         if self._completion_binding is not None:
             self._completion_binding.close()
         for pending in self._pending.values():

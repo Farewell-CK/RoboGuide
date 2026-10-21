@@ -485,7 +485,7 @@ def _bound_navigation_tools(actions: object, destination: str) -> list[dict[str,
 
 
 def _bound_observation_tools(
-    actions: list[dict[str, Any]], pause_steps: int
+    actions: list[dict[str, Any]], pause_steps: int, *, viewpoint_recovery: bool = False
 ) -> list[dict[str, Any]]:
     """Expose only authorized observation tools and their actual bounded pause semantics."""
     offered = [
@@ -494,6 +494,16 @@ def _bound_observation_tools(
     if sum(tool.get("name") == "wait" for tool in offered) != 1:
         raise IntegrationError("observation control requires an exact original wait tool")
     for tool in offered:
+        if tool.get("name") == "nav_to_obj" and viewpoint_recovery:
+            tool["description"] = (
+                str(tool.get("description", ""))
+                + " After an observed stationary scan, a fresh navigation to this same entity "
+                "searches for an alternative local observation point using the loaded map and "
+                "original scan-footprint checks. The search is bounded to two selections and "
+                "one metre from the current position, within the original acquisition budget. "
+                "Missing geometry or a bounded search miss reports local recovery unavailable; "
+                "a selected point does not guarantee physical arrival or detection."
+            ).strip()
         if tool.get("name") in {"wait", "send_request"}:
             tool["description"] = (
                 str(tool.get("description", ""))
@@ -661,7 +671,11 @@ def _guard_agent(
                             raise IntegrationError(
                                 "local observation scan tool conflicts with vendor tools"
                             )
-                        offered_actions = _bound_observation_tools(offered_actions, pause)
+                        offered_actions = _bound_observation_tools(
+                            offered_actions,
+                            pause,
+                            viewpoint_recovery=feedback.supports_viewpoint_recovery,
+                        )
                         if scan_tool is not None:
                             offered_actions.append(scan_tool)
                 if feedback is not None and (

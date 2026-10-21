@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .model import IntegrationError
 from .stage2_contract import Stage2ExecutionContract
+
+if TYPE_CHECKING:
+    from .view_recovery_binding import ObservationViewpointRecovery
 
 _LOG = logging.getLogger(__name__)
 
@@ -63,6 +66,8 @@ class NavigationDispatchLifecycle:
         agent: int,
         contract: Stage2ExecutionContract,
         record: Callable[[dict[str, Any]], None],
+        *,
+        view_recovery: ObservationViewpointRecovery | None = None,
     ) -> None:
         """Retain one exact acquisition binding without resetting an action or world."""
         if contract.operation != "observation.acquire@v1" or not contract.invocation_digest:
@@ -73,6 +78,7 @@ class NavigationDispatchLifecycle:
         self._action = inspect_navigation_dispatch(environment, agent)
         self._record = record
         self._sequence = 0
+        self._view_recovery = view_recovery
 
     def dispatch(
         self,
@@ -80,6 +86,8 @@ class NavigationDispatchLifecycle:
         raw: Mapping[str, Any],
         tool_call_id: str,
         sequence: int,
+        *,
+        stationary_scan: tuple[str, int] | None = None,
     ) -> None:
         """Clear only completion latches after an exact raw-to-local navigation mapping.
 
@@ -102,6 +110,8 @@ class NavigationDispatchLifecycle:
             or sum(entity.name == target for entity in self._action._poss_entities) != 1
         ):
             raise IntegrationError("acquisition navigation dispatch is malformed or detached")
+        if self._view_recovery is not None:
+            self._view_recovery.dispatch(tool_call_id, sequence, stationary_scan)
         prior = {key: vars(self._action)[key] for key in ("prev_nav_done", "skill_done")}
         self._action.prev_nav_done = False
         self._action.skill_done = False
@@ -125,3 +135,13 @@ class NavigationDispatchLifecycle:
             )
         except Exception:  # noqa: BLE001 - archival loss cannot fabricate an execution result
             _LOG.exception("fresh navigation command evidence unavailable")
+
+    def close(self) -> None:
+        """Remove only this attempt's optional viewpoint hooks on every segment exit."""
+        if self._view_recovery is not None:
+            self._view_recovery.close()
+
+    @property
+    def supports_viewpoint_recovery(self) -> bool:
+        """Expose loaded optional implementation, never actual geometric feasibility."""
+        return self._view_recovery is not None

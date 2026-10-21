@@ -70,6 +70,12 @@
     只读现有quaternion、call/sequence与skill归属；缺少基线或读数不能证明无运动。
     不增加step、sensor、RNG或控制调用，不自动重试，也不放宽碰撞/足迹/NavMesh约束。
     no-rotation仅表示已有观测未见转动，不能当成碰撞原因、Task满意或设备安全证明。
+14. Local How v0.15 只在真实静止扫描之后、模型新选择同目标nav_to_obj时，进行有界本地
+    观测点搜索。每个attempt最多两次，每次固定24个候选；现有原始mesh路线、完整32步
+    原始scan足迹检查都必须支持候选点。没有几何或搜索失败以local recovery unavailable
+    拒绝派发，不换目标、不使用直线路径兜底、不延长原始acquisition预算。
+    临时覆盖只属于当前endpoint/attempt，退出与下一次导航均恢复，不改原始target cache。
+    候选预测不是实际到达、设备安全、检测或既有目标持续满足的保证；真实结果仍须另验。
 
 ## 软件与物理验证边界
 
