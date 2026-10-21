@@ -8,6 +8,9 @@
 source drain、target accepted、new epoch、reconcile 和 uncertain restart hold 写入完整
 Replica snapshot；旧 source snapshot 不得覆盖已完成 target hold。仍不建立设备连续性。
 
+[ADR-0132](../../decisions/0132-active-map-gc-reference-gate.md)以实际 Provider/Active Map
+引用取代 caller all-clear boolean，`ContentReclamation.collect` 保留最终 unlink authority。
+
 [ADR-0129](../../decisions/0129-executable-deployment-profile.md)以闭合部署输入和只读
 inspector 固定拓扑、原文件、store owner、信任连接与故障/退出证据；允许零 Node。
 [实际零 Node 验收](../../development/acceptance/2026-10-21-deployment-profile.md)不产生

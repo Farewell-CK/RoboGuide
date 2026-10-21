@@ -169,6 +169,34 @@ def test_legacy_gc_booleans_cannot_authorize_deletion(
     assert store._content.joinpath(digest[7:]).is_file()
 
 
+def test_gc_v2_reads_actual_active_map_and_provider_references(
+    ledger: tuple[ActiveMapLedger, MemoryStore, dict[str, Any], str],
+) -> None:
+    """The versioned GC gate derives blockers from local SQL authorities, then delegates unlink."""
+    active, store, selection, digest = ledger
+    active.select(selection)
+    blocked = active.gc(
+        {
+            "schema": "roboguide.active-map-gc/v0.2",
+            "content_digest": digest,
+            "selector": "map:r1",
+        }
+    )
+    assert blocked["state"] == "blocked"
+    assert "active_map:map:r1" in blocked["reasons"]
+    active.release(selection)
+    eligible = active.gc(
+        {
+            "schema": "roboguide.active-map-gc/v0.2",
+            "content_digest": digest,
+            "selector": "map:r1",
+        }
+    )
+    assert eligible["state"] == "eligible"
+    assert eligible["delete_authority"] == "ContentReclamation.collect"
+    assert store._content.joinpath(digest[7:]).is_file()
+
+
 def test_non_stored_bundle_is_rejected(
     ledger: tuple[ActiveMapLedger, MemoryStore, dict[str, Any], str],
 ) -> None:

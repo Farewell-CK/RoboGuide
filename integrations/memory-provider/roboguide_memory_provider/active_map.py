@@ -732,7 +732,43 @@ class ActiveMapLedger:
         }
 
     def gc(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Retain the legacy route without granting deletion authority to caller booleans."""
+        """Evaluate actual local references before ContentReclamation may unlink local bytes."""
+        if request.get("schema") == "roboguide.active-map-gc/v0.2":
+            required = {"schema", "content_digest", "selector"}
+            if set(request) != required:
+                raise ActiveMapError("active-map GC v0.2 request is not closed")
+            digest = _digest(request["content_digest"], "content_digest")
+            selector = _text(request["selector"], "selector")
+            blockers = self.reclamation_blockers(digest)
+            with self._lock:
+                refs = [
+                    f"{kind}:{owner}:{reference}"
+                    for reference, kind, owner in self.store._db.execute(
+                        "SELECT reference_id,kind,owner FROM content_references "
+                        "WHERE content_digest=? AND active=1 ORDER BY reference_id",
+                        (digest,),
+                    )
+                ]
+                blockers.extend(refs)
+                if self._db.execute(
+                    "SELECT 1 FROM heads WHERE selector=? AND state='active' "
+                    "AND json_extract(context_json,'$.content_digest')=?",
+                    (selector, digest),
+                ).fetchone():
+                    blockers.append("active_map:" + selector)
+                tombstone = self.store._db.execute(
+                    "SELECT state FROM content_tombstones WHERE content_digest=?", (digest,)
+                ).fetchone()
+            blockers = sorted(set(blockers))
+            return {
+                "schema": "roboguide.active-map-gc/v0.2",
+                "state": "blocked" if blockers else "eligible",
+                "digest": digest,
+                "selector": selector,
+                "reasons": blockers,
+                "delete_authority": "ContentReclamation.collect" if not blockers else None,
+                "tombstone_state": tombstone[0] if tombstone is not None else "absent",
+            }
         required = {"schema", "content_digest", "selector", "refs"}
         if set(request) != required or request["schema"] != "roboguide.active-map-gc/v0.1":
             raise ActiveMapError("active-map GC request is not closed")

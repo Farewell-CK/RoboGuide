@@ -13,6 +13,11 @@
 并让 supervisor 在 uncertain handoff 后保持 child hold。三副本 round-trip 与 restart-safe
 monotonic record 回归继续保留；跨故障域在线 HA 和物理连续性仍待验。
 
+2026-10-21 [Active Map 实际引用 GC 门禁](acceptance/2026-10-21-active-map-gc-reference-gate.md)
+新增 v0.2 实际 content_references/head/ref/pending-handoff 检查，删除仍只能由
+ContentReclamation.collect 执行；旧 caller boolean v0.1 保留为 blocked。全局跨节点 GC、
+archive/catalog/CAS 一致性仍未关闭 F4/F5。
+
 main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头分别是：
 `25380295a267fb4c5f2f948558460fd1b141f95f`（完整非发布整改分支）、
 `b4f1b1275a546f310f61f9b79ac0bc4bb353209a`（MI 校验）、
