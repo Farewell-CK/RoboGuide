@@ -330,9 +330,17 @@ def test_committed_use_grant_reconciles_reference_insert_after_sql_failure(
 
 def test_failed_renewal_keeps_old_projection_until_exact_retry(
     prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failed replacement cannot delete the old GC fence before installing its successor."""
     store, leases, request, _ = prepared
+    budget = request["receiver_budget"]
+    fixed_lower = budget["received_lower_ms"] + 2
+    monkeypatch.setattr(
+        use_leases,
+        "kernel_clock",
+        lambda: (budget["boot_id"], budget["time_namespace"], fixed_lower, 1),
+    )
     leases.apply(request)
     next_request = advance(request, 2, request["receiver_budget"]["received_lower_ms"] + 1)
     store._db.execute(
