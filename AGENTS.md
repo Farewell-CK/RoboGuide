@@ -1,5 +1,12 @@
 # Repository Guidelines
 
+ADR-0145 verifies stored active Memory references, Active Map refs/heads and pending handoff
+source/target against exact CAS bytes in the same quiescent recovery bundle. Missing content,
+tombstone conflicts and absent mandatory reference tables refuse backup/verify before publication;
+released history needs no deleted content. Scans retain original operation bounds. The actual
+provider/CLI/restart gate creates zero Nodes/devices and does not establish global reference
+coverage, cross-host content replication or physical continuity.
+
 ADR-0140 connects Control's durable tenant/category quota ledger to normal resource Commit, Mission
 Group Commit, recovery Commit and exact Task/Context/Group/recovery release. Claims use original
 Role requirement units and immutable Mission tenant. Recovery-admin configures the revisioned policy

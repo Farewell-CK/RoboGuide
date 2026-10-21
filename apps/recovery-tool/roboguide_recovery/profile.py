@@ -288,35 +288,7 @@ def acquire_all(
             if component["kind"] == "memory":
                 path = Path(component["root"]) / "memory.sqlite3"
                 with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
-                    version = connection.execute("PRAGMA user_version").fetchone()[0]
-                    if profile_schema in {
-                        "roboguide.recovery-profile/v0.4",
-                        "roboguide.recovery-profile/v0.5",
-                        "roboguide.recovery-profile/v0.6",
-                        "roboguide.recovery-profile/v0.7",
-                    }:
-                        marker = connection.execute(
-                            "SELECT schema,databases_json FROM provider_writer_format"
-                        ).fetchall()
-                        expected = [
-                            "memory.sqlite3",
-                            "memory-use.sqlite3",
-                            "file-jobs.sqlite3",
-                            "active-map/active-map.sqlite3",
-                        ]
-                        if (
-                            version != 3
-                            or len(marker) != 1
-                            or marker[0][0] != "roboguide.memory-provider-writer/v0.1"
-                            or json.loads(marker[0][1]) != expected
-                        ):
-                            raise ValueError(
-                                "Memory recovery requires its actual v3 composite writer marker"
-                            )
-                    elif version >= 3:
-                        raise ValueError(
-                            "Memory composite writers require explicit recovery profile v0.4"
-                        )
+                    validate_memory_storage(connection, profile_schema)
             if component["kind"] == "replica":
                 path = Path(component["root"]) / component["database"]
                 with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
@@ -353,6 +325,41 @@ def acquire_all(
                     ).fetchone() != (13,):
                         raise ValueError("Node writer-lease storage marker is unavailable")
         yield
+
+
+def validate_memory_storage(connection: sqlite3.Connection, profile_schema: str) -> None:
+    """Require the original composite writer marker during backup and immutable bundle reads."""
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    if profile_schema in {
+        "roboguide.recovery-profile/v0.4",
+        "roboguide.recovery-profile/v0.5",
+        "roboguide.recovery-profile/v0.6",
+        "roboguide.recovery-profile/v0.7",
+    }:
+        message = "Memory recovery requires its actual v3 composite writer marker"
+        if version != 3:
+            raise ValueError(message)
+        try:
+            marker = connection.execute(
+                "SELECT schema,databases_json FROM provider_writer_format"
+            ).fetchall()
+            databases = json.loads(marker[0][1]) if len(marker) == 1 else None
+        except (sqlite3.DatabaseError, TypeError, json.JSONDecodeError) as error:
+            raise ValueError(message) from error
+        expected = [
+            "memory.sqlite3",
+            "memory-use.sqlite3",
+            "file-jobs.sqlite3",
+            "active-map/active-map.sqlite3",
+        ]
+        if (
+            len(marker) != 1
+            or marker[0][0] != "roboguide.memory-provider-writer/v0.1"
+            or databases != expected
+        ):
+            raise ValueError(message)
+    elif version >= 3:
+        raise ValueError("Memory composite writers require explicit recovery profile v0.4")
 
 
 def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str) -> None:

@@ -3,6 +3,11 @@
 本次先同步远程并核对所有远程分支；在隔离工作树组合整改、MI 部署校验和执行故障闭环，
 保留其他工作树和未跟踪实验文件。没有启动实验、E6、模型、模拟器或设备。
 
+2026-10-21 [恢复包活动内容引用](acceptance/2026-10-21-recovery-active-content-reference.md)
+在逐文件/SQL 校验后，把已存活动 Memory、Active Map 和 pending-handoff 引用与同 provider
+CAS 对账；缺字节、tombstone 冲突或必要表缺失即拒绝备份/恢复，released 历史不强求已删除内容。
+原预算、原有效包和独立损坏证据分别保留；这不补造尚未接线的引用生产者，也不关闭 F4/F5。
+
 2026-10-21 [本地 Memory 内容引用生命周期](acceptance/2026-10-21-memory-content-reference-lifecycle.md)
 为现有 v3 `content_references` 增加 same-UID Unix acquire/query/exact-generation release，并把
 实际 use-lease grant/revoke/restart 接入引用行；跨 SQLite 失败靠原命令重放修复，lease 与引用

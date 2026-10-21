@@ -8,6 +8,7 @@ import http.client
 import json
 import os
 import select
+import shutil
 import signal
 import socket
 import sqlite3
@@ -192,6 +193,155 @@ def _import_fixture(source: Path, provider_id: str, instance_id: str) -> dict[st
     }
 
 
+def check_recovery(
+    output: Path,
+    root: Path,
+    inputs: Path,
+    query: dict[str, Any],
+    acquired: dict[str, Any],
+) -> dict[str, Any]:
+    """Restore real active reference bytes via the independent CLI and reject lost-CAS bundles."""
+    selected: dict[str, Any] = {
+        "schema": "roboguide.recovery-profile/v0.4",
+        "profile_id": "local-content-reference-recovery",
+        "revision": 1,
+        "max_bytes": 16 * 1024 * 1024,
+        "max_files": 128,
+        "budget_seconds": 30,
+        "artifact_replica_sets": [],
+        "components": [
+            {
+                "component_id": "provider",
+                "kind": "memory",
+                "root": str(root),
+                "database": None,
+                "trees": [],
+                "depends_on": [],
+            }
+        ],
+    }
+    profile = output / "reference-recovery-profile.json"
+    save(profile, selected)
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
+    }
+    environment["PYTHONPATH"] = str(ROOT / "apps/recovery-tool")
+    commands: list[dict[str, Any]] = []
+
+    def invoke(*arguments: str, passed: bool = True) -> dict[str, Any]:
+        """Run the shipped recovery CLI in a new process and retain each exact exit and output."""
+        completed = subprocess.run(
+            [sys.executable, "-m", "roboguide_recovery", *arguments],
+            cwd=ROOT,
+            env=environment,
+            capture_output=True,
+            timeout=40,
+        )
+        label = f"reference-recovery-{len(commands) + 1}"
+        (output / (label + ".stdout")).write_bytes(completed.stdout)
+        (output / (label + ".stderr")).write_bytes(completed.stderr)
+        commands.append({"arguments": list(arguments), "exit_code": completed.returncode})
+        if not passed:
+            assert completed.returncode != 0
+            assert b"lacks its bundled CAS content" in completed.stderr, completed.stderr
+            return {}
+        assert completed.returncode == 0, completed.stderr
+        value = json.loads(completed.stdout)
+        assert isinstance(value, dict)
+        return value
+
+    bundle, restored = output / "reference-bundle", output / "reference-restored"
+    created = invoke(
+        "backup",
+        "--profile",
+        str(profile),
+        "--destination",
+        str(bundle),
+        "--command-id",
+        "original-reference-backup",
+    )
+    invoke("verify", "--bundle", str(bundle), "--manifest-digest", created["manifest_digest"])
+    receipt = invoke(
+        "restore",
+        "--bundle",
+        str(bundle),
+        "--manifest-digest",
+        created["manifest_digest"],
+        "--destination",
+        str(restored),
+        "--command-id",
+        "original-reference-restore",
+    )
+    recovered = restored / "stores/provider"
+    log = (output / "provider-restored.stderr").open("wb")
+    try:
+        process = start(recovered, inputs, log)
+        try:
+            assert request(recovered / "local.sock", "/v1/content/references", query, "GET") == (
+                200,
+                acquired,
+            )
+        finally:
+            assert stop(process, recovered / "local.sock") == 0
+    finally:
+        log.close()
+    checksum = acquired["content_digest"]
+    content = recovered / "content" / checksum[7:]
+    assert "sha256:" + hashlib.sha256(content.read_bytes()).hexdigest() == checksum
+    # Corrupt only the owned restored copy: the original provider keeps all its bytes and history.
+    content.unlink()
+    selected["components"][0]["root"] = str(recovered)
+    missing_profile = output / "missing-reference-profile.json"
+    save(missing_profile, selected)
+    invoke(
+        "backup",
+        "--profile",
+        str(missing_profile),
+        "--destination",
+        str(output / "missing-backup"),
+        "--command-id",
+        "missing-content",
+        passed=False,
+    )
+    assert not (output / "missing-backup").exists()
+    # A manifest cannot bless a missing referenced object merely by omitting its file row.
+    tampered = output / "missing-reference-bundle"
+    shutil.copytree(bundle, tampered)
+    manifest = json.loads((tampered / "manifest.json").read_bytes())
+    relative = "stores/provider/content/" + checksum[7:]
+    (tampered / relative).unlink()
+    manifest["files"] = [row for row in manifest["files"] if row["path"] != relative]
+    raw = canonical(manifest)
+    (tampered / "manifest.json").write_bytes(raw)
+    repinned = "sha256:" + hashlib.sha256(raw).hexdigest()
+    invoke("verify", "--bundle", str(tampered), "--manifest-digest", repinned, passed=False)
+    invoke(
+        "restore",
+        "--bundle",
+        str(tampered),
+        "--manifest-digest",
+        repinned,
+        "--destination",
+        str(output / "missing-restore"),
+        "--command-id",
+        "missing-restore",
+        passed=False,
+    )
+    assert not (output / "missing-restore").exists()
+    result = {
+        "active_reference_restored_via_actual_provider": True,
+        "actual_restored_content_digest": checksum,
+        "missing_active_content_backup_rejected": True,
+        "repinned_missing_content_verify_and_restore_rejected": True,
+        "restore_receipt": receipt,
+        "commands": commands,
+    }
+    save(output / "reference-recovery-result.json", result)
+    return result
+
+
 def run(output: Path) -> dict[str, Any]:
     """Exercise acquire, observe, release and replay across two actual provider restarts."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -204,7 +354,11 @@ def run(output: Path) -> dict[str, Any]:
     logs: list[BinaryIO] = []
     processes: list[subprocess.Popen[bytes]] = []
     socket_path = root / "local.sock"
-    paths = [Path(__file__), *sorted((PROVIDER / "roboguide_memory_provider").glob("*.py"))]
+    paths = [
+        Path(__file__),
+        *sorted((PROVIDER / "roboguide_memory_provider").glob("*.py")),
+        *sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py")),
+    ]
     save(
         output / "source-identity.json",
         {str(path): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() for path in paths},
@@ -278,6 +432,7 @@ def run(output: Path) -> dict[str, Any]:
         )
         first_exit = stop(first, socket_path)
         assert first_exit == 0
+        recovery = check_recovery(output, root, inputs, query, acquired)
 
         second = launch("provider-second")
         status, identity_after_restart = request(socket_path, "/v1/instance", {}, "GET")
@@ -324,6 +479,7 @@ def run(output: Path) -> dict[str, Any]:
             "stale_acquire_did_not_reactivate": stale_acquire["state"] == "released",
             "content_reclamation_blocked_by_original_reference": True,
             "sqlite_projection_active": row[4],
+            "reference_recovery": recovery,
             "first_process_exit": first_exit,
             "second_process_exit": second_exit,
             "registered_nodes": 0,

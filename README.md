@@ -106,6 +106,10 @@ process/generation/checkpoint/revision 探针 Commit 成功后才能继续。复
 任何 recovery 前取得锁；Node Contract 保持 v0.12，共享 wrapper 后续升级见上文。全局 Memory/HA
 数据面及后续完整整改仍按原计划验收。
 
+[恢复包活动引用门禁](docs/development/acceptance/2026-10-21-recovery-active-content-reference.md)
+进一步核对已存活动 Memory/Active Map/pending-handoff 引用与同包 CAS；缺字节、tombstone
+冲突或必要引用表丢失时拒绝发布或恢复。released 历史保留且不要求已删除字节，原预算不续期。
+
 2026-10-20 的[分支同步与剩余整改核对](docs/development/roboguide-integration-status-2026-10-20.md)
 记录所有远程分支与尚未关闭的非发布工作。整改、MI 校验和执行故障闭环按
 [ADR-0111](docs/decisions/0111-branch-integration-and-authority-version-fences.md)组合：

@@ -22,6 +22,7 @@ from .profile import (
     real_directory,
     relative,
     validate,
+    validate_memory_storage,
     validate_replica_sets,
     validate_replica_storage,
 )
@@ -159,6 +160,139 @@ def _identity(path: Path, budget: Budget) -> dict[str, Any]:
             "schema_digest": digest(canonical(schema)),
             "tables": tables,
         }
+
+
+def _validate_memory_content_references(
+    root: Path, component_id: str, records: dict[str, dict[str, Any]], budget: Budget
+) -> None:
+    """Require every active local Memory reference and map head to a bundled CAS object."""
+    database_path = f"stores/{component_id}/memory.sqlite3"
+    if database_path not in records or records[database_path]["kind"] != "sqlite":
+        raise ValueError("Memory content reference authority is absent from its bundle")
+    database = root / database_path
+
+    def progress() -> int:
+        """Bound SQLite scans and sorting by the original recovery operation deadline."""
+        budget.check()
+        return 0
+
+    def require_content(value: object, source: str) -> None:
+        """Resolve one exact digest to the immutable provider content in this bundle."""
+        budget.check()
+        if not isinstance(value, str) or SHA256.fullmatch(value) is None:
+            raise ValueError(f"{source} has an invalid content digest")
+        path = f"stores/{component_id}/content/{value[7:]}"
+        row = records.get(path)
+        if row is None or row["kind"] != "content" or row.get("content_digest") != value:
+            raise ValueError(
+                f"active Memory reference {source} lacks its bundled CAS content: {value}"
+            )
+        if (
+            "content_tombstones" in tables
+            and connection.execute(
+                "SELECT 1 FROM content_tombstones WHERE content_digest=?", (value,)
+            ).fetchone()
+        ):
+            raise ValueError("active Memory content reference points at a durable tombstone")
+
+    try:
+        with closing(
+            sqlite3.connect(database.as_uri() + "?mode=ro&immutable=1", uri=True)
+        ) as connection:
+            connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_MANIFEST_BYTES)
+            connection.set_progress_handler(progress, 1000)
+            tables = {
+                row[0]
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            if (
+                connection.execute("PRAGMA user_version").fetchone()[0] == 3
+                and not {"content_references", "content_tombstones"} <= tables
+            ):
+                raise ValueError("Memory v3 content reference authority table is missing")
+            if "content_references" in tables:
+                columns = {
+                    row[1] for row in connection.execute("PRAGMA table_info(content_references)")
+                }
+                if not {"reference_id", "content_digest", "active"} <= columns:
+                    raise ValueError(
+                        "Memory content reference table is missing its authority columns"
+                    )
+                for index, (value,) in enumerate(
+                    connection.execute(
+                        "SELECT content_digest FROM content_references "
+                        "WHERE active=1 ORDER BY reference_id"
+                    )
+                ):
+                    require_content(value, f"content_references[{index}]")
+            map_path = f"stores/{component_id}/active-map/active-map.sqlite3"
+            if map_path in records:
+                map_database = root / map_path
+                with closing(
+                    sqlite3.connect(map_database.as_uri() + "?mode=ro&immutable=1", uri=True)
+                ) as map_connection:
+                    map_connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_MANIFEST_BYTES)
+                    map_connection.set_progress_handler(progress, 1000)
+                    map_tables = {
+                        row[0]
+                        for row in map_connection.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                        )
+                    }
+                    if (
+                        map_connection.execute("PRAGMA user_version").fetchone()[0] in (1, 2)
+                        and not {"refs", "heads", "handoffs"} <= map_tables
+                    ):
+                        raise ValueError("Active Map content reference authority table is missing")
+                    if "refs" in map_tables:
+                        for index, (value,) in enumerate(
+                            map_connection.execute(
+                                "SELECT digest FROM refs WHERE active=1 ORDER BY ref_id"
+                            )
+                        ):
+                            require_content(value, f"active-map.refs[{index}]")
+                    if "heads" in map_tables:
+                        for index, (context_json,) in enumerate(
+                            map_connection.execute(
+                                "SELECT context_json FROM heads WHERE state='active' "
+                                "ORDER BY selector"
+                            )
+                        ):
+                            try:
+                                context = json.loads(context_json)
+                            except (TypeError, json.JSONDecodeError) as error:
+                                raise ValueError(
+                                    f"active-map head {index} has invalid context JSON"
+                                ) from error
+                            if not isinstance(context, dict):
+                                raise ValueError(
+                                    f"active-map head {index} context is not an object"
+                                )
+                            require_content(
+                                context.get("content_digest"), f"active-map.heads[{index}]"
+                            )
+                    if "handoffs" in map_tables:
+                        for index, (encoded,) in enumerate(
+                            map_connection.execute(
+                                "SELECT request_json FROM handoffs WHERE state='prepared' "
+                                "ORDER BY barrier_id"
+                            )
+                        ):
+                            budget.check()
+                            try:
+                                handoff = json.loads(encoded)
+                            except (TypeError, json.JSONDecodeError) as error:
+                                raise ValueError("pending map handoff has invalid JSON") from error
+                            for side in ("source", "target"):
+                                context = handoff.get(side) if isinstance(handoff, dict) else None
+                                if not isinstance(context, dict):
+                                    raise ValueError("pending map handoff content is unavailable")
+                                require_content(
+                                    context.get("content_digest"),
+                                    f"active-map.handoffs[{index}].{side}",
+                                )
+    except sqlite3.DatabaseError as error:
+        raise ValueError("Memory content reference authority cannot be read") from error
 
 
 def _copy(source: Path, target: Path, budget: Budget) -> tuple[str, int]:
@@ -333,6 +467,12 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                             "byte_size": size,
                         }
                     )
+        record_map = {str(row["path"]): row for row in records}
+        for component in components:
+            if component["kind"] == "memory":
+                _validate_memory_content_references(
+                    partial, component["component_id"], record_map, budget
+                )
         manifest = {
             "schema": "roboguide.recovery-bundle/v0.1",
             "command_id": command_id,
@@ -437,11 +577,22 @@ def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
         if row["kind"] == "sqlite":
             if _identity(bundle / name, budget) != row["sqlite"]:
                 raise ValueError("complete recovery SQLite identity differs: " + name)
+            if component["kind"] == "memory" and selected == "memory.sqlite3":
+                with closing(
+                    sqlite3.connect((bundle / name).as_uri() + "?mode=ro&immutable=1", uri=True)
+                ) as connection:
+                    validate_memory_storage(connection, manifest["profile"]["schema"])
             if component["kind"] == "replica":
                 with closing(
                     sqlite3.connect((bundle / name).as_uri() + "?mode=ro&immutable=1", uri=True)
                 ) as connection:
                     validate_replica_storage(connection, manifest["profile"]["schema"])
+    record_map = {str(row["path"]): row for row in files}
+    for component in components:
+        if component["kind"] == "memory":
+            _validate_memory_content_references(
+                bundle, component["component_id"], record_map, budget
+            )
     for component in components:
         databases, _, _ = layout(component)
         required = (

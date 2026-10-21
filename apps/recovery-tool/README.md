@@ -51,6 +51,15 @@ service rejects backup. Failures retain an unpublished `.partial-<command-id>` d
 inspection; reruns do not overwrite it. Completed backup retry verifies its original immutable
 bundle and command/profile identity, without taking a new snapshot.
 
+[ADR-0145](../../docs/decisions/0145-recovery-active-content-reference-binding.md) additionally
+checks stored active Memory references, Active Map selections and pending handoff source/target
+against the same provider's declared CAS bytes during backup and verification. Missing bytes,
+durable tombstones or missing mandatory reference tables reject the bundle, even when its new
+manifest digest is explicitly pinned. Released references remain history and need no deleted bytes.
+The check retains the original operation budget and never invents unregistered remote references.
+The zero-Node `tools/quality/check_memory_reference_processes.py` gate exercises real provider/CLI
+backup, restore and restart, plus independently damaged copies.
+
 Keep the returned manifest digest outside the bundle. Restore checks every original file and full
 SQL identity, creates a new private `stores/<component-id>` tree, fsyncs it and publishes an exact
 receipt. Existing destinations are never overwritten. It does not start services, remap frozen

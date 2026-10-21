@@ -149,6 +149,10 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
                 "docs/development/acceptance/2026-10-21-memory-content-reference-lifecycle.md",
             ),
             (
+                "恢复包活动内容引用",
+                "docs/development/acceptance/2026-10-21-recovery-active-content-reference.md",
+            ),
+            (
                 "运行期 MI 与 Memory 整链",
                 "docs/development/acceptance/2026-10-21-runtime-mi-scoped-memory.md",
             ),
