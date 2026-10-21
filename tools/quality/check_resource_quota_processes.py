@@ -109,6 +109,7 @@ def make_certificates(directory: Path) -> tuple[dict[str, str], ssl.SSLContext, 
         digests[name] = hashlib.sha256(der).hexdigest()
 
     def context(name: str) -> ssl.SSLContext:
+        """Build one TLS client context with the selected local operator leaf."""
         result = ssl.create_default_context(cafile=str(directory / "ca.crt"))
         result.load_cert_chain(directory / f"{name}.crt", directory / f"{name}.key")
         return result
