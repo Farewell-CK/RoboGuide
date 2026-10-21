@@ -127,6 +127,31 @@ pub(crate) fn submit_memory(
     )
 }
 
+/// Commits complete expected-revision tenant resource limits through the operator authority journal.
+pub(crate) fn submit_resource_quotas(
+    controller: &Arc<Mutex<ControllerState>>,
+    log: &state::SqliteEventLog,
+    gate: &dyn crate::application::ApplicationWriteGate,
+    body: &[u8],
+    subject: &str,
+    now: domain::TimestampMs,
+) -> Result<serde_json::Value, String> {
+    let input: RegistryUpdate<domain::ResourceQuotaRegistry> =
+        serde_json::from_slice(body).map_err(|error| error.to_string())?;
+    commit_registry(
+        controller,
+        log,
+        gate,
+        &input,
+        subject,
+        now,
+        domain::RegistryCommandKind::ResourceQuota,
+        |control| {
+            control.accept_resource_quota_registry(input.registry.clone(), input.expected_revision)
+        },
+    )
+}
+
 /// Parses and commits State policy authority without treating payloads as policy declarations.
 pub(crate) fn submit(
     controller: &Arc<Mutex<ControllerState>>,

@@ -70,6 +70,7 @@ mod physical_entity;
 mod physical_safety;
 mod registry_command;
 mod resource;
+mod resource_quota;
 mod role_assignment;
 mod spatial_memory;
 mod spatial_replica;
@@ -171,6 +172,7 @@ pub use physical_safety::{
     SafetyStopPhase, SafetyStopRecord,
 };
 pub use resource::{Resource, ResourceKind, ResourceRequirement};
+pub use resource_quota::{ResourceQuotaLimit, ResourceQuotaRegistry};
 pub use role_assignment::RoleAssignment;
 pub use spatial_memory::{
     ContentDigest, MAP_MANIFEST_SCHEMA_V0_1, MapArtifactManifest, MapArtifactRef, MapId,

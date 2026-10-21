@@ -1,5 +1,12 @@
 # RoboGuide V2 架构基线
 
+[ADR-0140](../../decisions/0140-control-resource-quota-commitment.md)把已配置的
+revisioned tenant/category quota policy 经 recovery-admin `/v1/resource-quotas` 和 authority journal
+接入正常 Commit、Group Commit、Recovery 与 exact release；Control wrapper v47 checkpoint 同时保存
+policy history、资源 claim 与老 reservation 的不可用迁移 fence。超额拒绝先于
+reservation/event 变化，旧 demand 未知不靠当前默认值补造。该 claim 仅是 Control 逻辑 quota，
+不拆分资源、不证明 GPU/OS/物理/硬实时强制。
+
 [ADR-0139](../../decisions/0139-original-file-worker-quota-and-kernel-proof.md)将文件 worker
 原 CPU/address-space 配额写入 admission SQL，缺声明拒绝；父端核对实际 kernel limit 并
 持久化 proof 后才给 read permit。配置声明和原进程实测分开，旧数据不补默认配额；实际

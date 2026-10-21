@@ -1,6 +1,6 @@
 # 当前软件实现与部署拓扑
 
-更新：2026-10-20。对应全部非发布软件整改计划；后续目标不视为当前能力。
+更新：2026-10-21。对应全部非发布软件整改计划；后续目标不视为当前能力。
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
 
@@ -23,6 +23,8 @@ flowchart TB
   ID --> PROTO
   ID --> ART
   MI --> Entry[Controller 用户与高权限入口]
+  Entry -->|recovery-admin / expected revision| QUOTA[Control tenant quota / 原 Role demand / wrapper v47]
+  QUOTA --> CTRL
   Entry --> HTTPBOUND[有界 TLS 前连接 / 同步 poll handoff / response I/O 期限]
   HTTPBOUND --> WIT
   MI --> PREFLIGHT[只读发布合同前检 / exact plan + source digests]
@@ -166,7 +168,7 @@ Controller 中 Orchestration、Control、Runtime、State 和 Integration 当前�
 Rust 模块及 transport-neutral ports 保持。Mission Service 是独立进程，Local EAIOS 位于
 部署侧。默认监听 loopback；非 loopback 入口必须启用对应 mTLS 和证书权限 profile。
 默认单 Controller，显式静态三成员 HA profile 使用独立副本 SQL 和 Controller 子进程。
-动态成员、Federation、运行期重规划、完整时空/quota 和分布式 Spatial 消费属于本轮必需目标，
+动态成员、Federation、运行期重规划、完整时空与 divisible allocation、分布式 Spatial 消费属于本轮必需目标，
 目前仍需按阶段实现和验收。
 
 实际 Spatial 文件计算已接入 Node Service 的正式 Local How、prepared-artifact 和 CAS

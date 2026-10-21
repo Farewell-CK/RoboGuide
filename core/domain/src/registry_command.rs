@@ -16,6 +16,8 @@ pub enum RegistryCommandKind {
     MemoryAuthorization,
     /// Revisioned stable-principal Artifact certificate grants.
     ArtifactAuthorization,
+    /// Complete revisioned tenant/category resource quota limits.
+    ResourceQuota,
 }
 
 /// Original authenticated result of one idempotent registry change.

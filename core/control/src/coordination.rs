@@ -160,6 +160,10 @@ impl ControlPlane {
             ));
         }
         self.validate_current_assignment_support(state, proposal, timestamp)?;
+        self.validate_resource_quotas(
+            proposal.task_ref().mission_id(),
+            &Self::proposal_quota_demands(proposal)?,
+        )?;
         self.audit_committed_decision(state, proposal, timestamp, correlation_id, events);
         self.commit_validated(proposal, timestamp, correlation_id, events)
     }
@@ -197,6 +201,11 @@ impl ControlPlane {
                 }
             }
         }
+
+        self.commit_resource_quotas(
+            proposal.task_ref().mission_id(),
+            Self::proposal_quota_demands(proposal)?,
+        )?;
 
         for assignment in proposal.assignments() {
             for resource_id in assignment.resource_ids() {
@@ -273,6 +282,10 @@ impl ControlPlane {
         events: &mut E,
     ) -> Result<CommittedPlan, ControlError> {
         self.validate_current_assignment_support(state, proposal, timestamp)?;
+        self.validate_resource_quotas(
+            proposal.task_ref().mission_id(),
+            &Self::proposal_quota_demands(proposal)?,
+        )?;
         self.audit_committed_decision(state, proposal, timestamp, correlation_id, events);
         self.commit_for_group_validated(group_id, proposal, timestamp, correlation_id, events)
     }
@@ -365,6 +378,10 @@ impl ControlPlane {
                 }
             }
         }
+        self.commit_resource_quotas(
+            proposal.task_ref().mission_id(),
+            Self::proposal_quota_demands(proposal)?,
+        )?;
         for (assignment, scope, owner) in owners {
             for resource_id in assignment.resource_ids() {
                 self.reservations

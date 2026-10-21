@@ -242,6 +242,7 @@ impl ControlPlane {
         }
         for resource_id in &resource_ids {
             self.reservations.remove(resource_id);
+            self.release_resource_quota(resource_id);
         }
         let group = self
             .groups
@@ -327,6 +328,7 @@ impl ControlPlane {
                 .is_some_and(|reservation| reservation.scope == ResourceBindingScope::Task)
             {
                 self.reservations.remove(resource_id);
+                self.release_resource_quota(resource_id);
             }
         }
         let group = self
@@ -900,6 +902,7 @@ impl ControlPlane {
 
         for resource_id in &resource_ids {
             self.reservations.remove(resource_id);
+            self.release_resource_quota(resource_id);
         }
         for key in pending_keys {
             self.pending_recovery_commitments.remove(&key);

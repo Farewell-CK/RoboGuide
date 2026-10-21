@@ -233,7 +233,7 @@ def main() -> None:
     parser.add_argument("--storage-version", type=int, choices=(2, 3), default=2)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile", default="a" * 64)
-    parser.add_argument("--application-schema", default="roboguide.controller-checkpoint/v45")
+    parser.add_argument("--application-schema", default="roboguide.controller-checkpoint/v47")
     arguments = parser.parse_args()
     result = run(
         arguments.new_probe.resolve(),

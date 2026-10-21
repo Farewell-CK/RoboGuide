@@ -55,6 +55,11 @@ jobs:
           uv run --frozen python tools/quality/check_deployment_profile_processes.py
           --output "${RUNNER_TEMP}/roboguide-deployment-inspection"
 
+      - name: Verify Control quota policy with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_resource_quota_processes.py
+          --output "${RUNNER_TEMP}/roboguide-resource-quota"
+
   python:
     name: Python
     runs-on: ubuntu-24.04

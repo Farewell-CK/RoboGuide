@@ -3,6 +3,13 @@
 本次先同步远程并核对所有远程分支；在隔离工作树组合整改、MI 部署校验和执行故障闭环，
 保留其他工作树和未跟踪实验文件。没有启动实验、E6、模型、模拟器或设备。
 
+2026-10-21 [Control tenant quota commitment](../decisions/0140-control-resource-quota-commitment.md)
+接入 recovery-admin `/v1/resource-quotas` revisioned policy/authority journal、正常/Group/recovery
+Commit 与 Task/Context/Group/recovery release，wrapper v47 保存 policy/history/精确 claims；缺少
+历史 demand 的 v45/v46 reservation 不臆测用量。166 项 Control 测试及实际双向 TLS/SQLite/重启
+进程验收通过，Node inventory 为零；divisible allocation、GPU/traffic、Local EAIOS 其他
+资源强制、完整时空预约和 F6/F7 总验收继续开放。
+
 2026-10-21 [原 Controller child 排空](../decisions/0138-original-controller-child-drain-before-transfer.md)
 将 pre-spawn intent、实际 PID/boot/start tick、原 supervisor wait 持久化；源应用先 fence，
 只有原退出证明、原 quorum 与八秒预算齐备才发 V3 election。target 的原 receive budget
@@ -40,8 +47,8 @@ archive/catalog/CAS 一致性仍未关闭 F4/F5。
 2026-10-21 [Local EAIOS 软件 worker OS quota](acceptance/2026-10-21-local-process-os-quota.md)
 原 CPU/address-space quota 入 admission SQL，子进程 exact `getrlimit`/PID proof 在第一次
 read permit 前独立提交，并有只读查询与旧 v1 unavailable 迁移；实际 parent-death/restart
-gate 直接比较 SQL 与 API 回执，通过且没有 Node/设备。Control divisible quota、GPU/交通、
-硬实时和设备安全仍未关闭 F6/F7。
+gate 直接比较 SQL 与 API 回执，通过且没有 Node/设备。Control 的 revisioned tenant/category
+逻辑配额现已接入；divisible allocation、GPU/交通、硬实时和设备安全仍未关闭 F6/F7。
 
 2026-10-21 [Relation target 与 whole-Group stop](acceptance/2026-10-21-relation-whole-group-stop.md)
 复核确认原 `admit` 已覆盖全组 peers，原入口选择误述已更正。ADR-0137 恢复 exact target
@@ -199,7 +206,7 @@ v41 证据迁移均检查。长期 SLO、跨主机/值守路由和写锁 I/O 收
 | F0 | 闭合配置、原 binary/文件/store inode、TLS/支持矩阵、故障/退出输入和实际零 Node 门禁已接通 | 后续总矩阵沿用实际 profile 与固定证据；真实主机独立性、RTO/RPO 实测和硬件仍按各阶段验收 |
 | F4 | Controller 与 backend 的完整 active-map/引用生命周期、tombstone/GC、撤销与 snapshot/archive/CAS 一致恢复；跨主机证据 | 先打通原授权、所有引用与恢复门禁下的可审计删除；局部八类引用 GC 不视为全局完成 |
 | F5 | 副本证书轮换、兼容升级协议、archive + snapshot + catalog + CAS 数据面恢复 | HA 接管后原内容可读或明确缺失；升级与回退不丢历史/预算/权限 |
-| F6 | divisible quota 的精确单位与 Local EAIOS 强制、完整时空承诺、真实成本源 | 缺 GPU/定位/交通 evidence 为 unavailable；逻辑账本不冒充 OS/物理强制 |
+| F6 | divisible allocation 与 Local EAIOS 全资源强制、完整时空承诺、真实成本源 | tenant/category 逻辑 quota 已接入 Control Commit；缺 GPU/定位/交通 evidence 为 unavailable，逻辑账本不冒充 OS/物理强制 |
 | F7 | 策略授权的运行中抢占、耦合多 Role 恢复、异构 handoff/regrasp 与 hazard 合同 | 原完整 stop 集合、上下文验证、新 Commit/Rebind 和不确定性保留；设备证明独立 |
 | F8 | 原目标/版本、MI claim/nonce/发现/原回包对账、显式 v0.9 非空 scoped Memory 和安全新 Group 已通过实际通用文件组合；其余类型/复杂拓扑仍须随 F4/F7 总矩阵完成 | 保留既成事实与原目标，经 Review/Control/stop gate 切换，不重做已完成副作用或未知模型调用；普通 resume/recovery 不绕过待完成修订 |
 | F9 | 真正跨控制域 transport、证书/tenant/domain 路由与多域恢复 | prepare/commit session 经真实服务边界消费，不把单进程记录当跨域完成 |

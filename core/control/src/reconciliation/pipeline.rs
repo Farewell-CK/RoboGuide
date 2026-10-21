@@ -1063,6 +1063,10 @@ impl ControlPlane {
             }
         }
 
+        let quota_demands = recovery_quota_demands(&role, proposal.replacement_resource_ids())?;
+        self.validate_resource_quotas(requirement.mission_id(), &quota_demands)?;
+        self.commit_resource_quotas(requirement.mission_id(), quota_demands)?;
+
         let mut committed = CommittedRecoveryAssignment::new_with_operation(
             proposal.group_id().clone(),
             proposal.task_ref().clone(),
@@ -1131,6 +1135,7 @@ impl ControlPlane {
 
         for resource_id in committed.committed_resource_ids() {
             self.reservations.remove(resource_id);
+            self.release_resource_quota(resource_id);
         }
         self.pending_recovery_commitments
             .remove(&recovery_commitment_key(
@@ -1152,4 +1157,22 @@ impl ControlPlane {
         );
         Ok(())
     }
+}
+
+/// Preserves exact original per-resource demand when a blocked Role commits replacement resources.
+fn recovery_quota_demands(
+    role: &domain::RoleRequirement,
+    resource_ids: &[ResourceId],
+) -> Result<Vec<(ResourceId, domain::ResourceKind, u32)>, ControlError> {
+    if role.resource_requirements().len() != resource_ids.len() {
+        return Err(ControlError::InvalidProposal(
+            "recovery quota demand differs from the exact Role requirement".into(),
+        ));
+    }
+    Ok(resource_ids
+        .iter()
+        .cloned()
+        .zip(role.resource_requirements().iter())
+        .map(|(resource, demand)| (resource, demand.kind(), demand.units()))
+        .collect())
 }

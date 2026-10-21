@@ -1,5 +1,13 @@
 # Repository Guidelines
 
+ADR-0140 connects Control's durable tenant/category quota ledger to normal resource Commit, Mission
+Group Commit, recovery Commit and exact Task/Context/Group/recovery release. Claims use original
+Role requirement units and immutable Mission tenant. Recovery-admin configures the revisioned policy
+through `/v1/resource-quotas`; wrapper v47 checkpoints it with a fail-closed legacy-unaccounted
+reservation fence. Over-limit Commit changes neither reservation nor event evidence. This remains
+logical accounting over exclusive Control reservations; it does not divide Node resources or assert
+GPU, OS, physical, realtime or device enforcement.
+
 ADR-0138 adds the member-local original Controller process journal under Replica storage v3 and
 explicit recovery v0.7. Real supervisor spawn intent precedes the actual Child PID/boot/start-tick
 registration; only that incarnation's actual wait result becomes exit proof. Transfer fences source
@@ -72,8 +80,9 @@ candidate output/provider claim/Review. The complete child and source membership
 are immutable; Review includes their digest. Original complete stop/revoke and actual CAS verification
 precede publication and normal Control creation of the new Group. Staging grants no resource or
 availability fact. Per-chunk parent-reference exceptions require the actual child import; each later
-Task retains its own preparation/import. Shared wrapper v45 fences older writers and v0.3 receipts,
-including zero-event declarations; v44 generation history migrates unchanged. Node Contract v0.12,
+Task retains its own preparation/import. At ADR-0138, shared wrapper v45 fenced the prior writer
+generation and v0.3 receipts, including zero-event declarations; v44 generation history migrated
+unchanged. Node Contract v0.12,
 config v0.13/catalog v0.15, Node journal v13, Bridge v23 and event codec v28 retain their meaning.
 `tools/quality/memory_revision_processes.py` extends the real file checker with revision, SQL rollback,
 confirmed-stop restart, policy and expiry cases. `check_revision_memory_schemas.py` validates their

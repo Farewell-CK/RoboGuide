@@ -9,6 +9,8 @@ fn legacy_batch_cannot_hide_v43_v44_or_current_authority_head() {
     for schema in [
         "roboguide.controller-checkpoint/v43",
         "roboguide.controller-checkpoint/v44",
+        "roboguide.controller-checkpoint/v45",
+        "roboguide.controller-checkpoint/v46",
         crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA,
     ] {
         let batch = ApplicationCommitBatch {

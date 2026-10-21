@@ -1,18 +1,12 @@
 //! Durable tenant/resource quota accounting kept separate from physical reservations.
 
-use domain::ResourceKind;
+use domain::{ResourceId, ResourceKind, ResourceQuotaLimit};
 
-/// One bounded tenant quota for a resource category.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct QuotaLimit {
-    /// Immutable tenant namespace selected by the authenticated Mission authority.
-    pub tenant_id: String,
-    /// Resource category counted by this limit.
-    pub kind: ResourceKind,
-    /// Maximum concurrently claimed logical units.
-    pub max_units: u64,
-}
+/// One resource demand is bounded by the domain's u32 capacity declaration.
+const MAX_RESOURCE_DEMAND_UNITS: u64 = u32::MAX as u64;
+
+/// Compatibility name for the domain's canonical tenant quota limit.
+pub type QuotaLimit = ResourceQuotaLimit;
 
 /// One idempotent logical quota claim; it grants no physical resource ownership.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -26,6 +20,9 @@ pub struct QuotaClaim {
     pub kind: ResourceKind,
     /// Logical units consumed by this claim.
     pub units: u64,
+    /// Exact Control reservation, absent on legacy/operator-only logical claims.
+    #[serde(default)]
+    pub resource_id: Option<ResourceId>,
 }
 
 /// Errors from the durable logical quota ledger.
@@ -100,24 +97,24 @@ impl QuotaLedger {
         if max_units == 0 || max_units > 1_000_000_000 {
             return Err(QuotaError::Invalid("limit is outside its bound".into()));
         }
-        let limit = QuotaLimit {
+        let used = self.used(&tenant_id, kind);
+        if used > max_units {
+            return Err(QuotaError::Exceeded {
+                limit: max_units,
+                used,
+                requested: 0,
+            });
+        }
+        let limit = ResourceQuotaLimit {
             tenant_id,
             kind,
             max_units,
         };
-        let used = self.used(&limit.tenant_id, limit.kind);
         if let Some(existing) = self
             .limits
             .iter_mut()
             .find(|existing| existing.tenant_id == limit.tenant_id && existing.kind == limit.kind)
         {
-            if used > max_units {
-                return Err(QuotaError::Exceeded {
-                    limit: max_units,
-                    used,
-                    requested: 0,
-                });
-            }
             *existing = limit;
         } else {
             self.limits.push(limit);
@@ -128,15 +125,46 @@ impl QuotaLedger {
         Ok(())
     }
 
+    /// Replaces all policy limits only when retained claims remain within every new ceiling.
+    pub(crate) fn replace_limits(
+        &mut self,
+        limits: &[ResourceQuotaLimit],
+    ) -> Result<(), QuotaError> {
+        let mut candidate = Self {
+            limits: Vec::new(),
+            claims: self.claims.clone(),
+        };
+        for limit in limits {
+            candidate.set_limit(limit.tenant_id.clone(), limit.kind, limit.max_units)?;
+        }
+        self.limits = candidate.limits;
+        Ok(())
+    }
+
     /// Adds one idempotent claim only when the configured logical quota remains available.
     pub fn reserve(&mut self, claim: QuotaClaim) -> Result<(), QuotaError> {
-        validate_text(&claim.claim_id, "claim_id")?;
-        validate_text(&claim.tenant_id, "tenant_id")?;
-        if claim.units == 0 || claim.units > 1_000_000_000 {
-            return Err(QuotaError::Invalid(
-                "claim units are outside their bound".into(),
-            ));
+        validate_claim(&claim)?;
+        if self
+            .claims
+            .iter()
+            .any(|item| item.claim_id == claim.claim_id)
+        {
+            return self.track(claim);
         }
+        if self
+            .limits
+            .iter()
+            .find(|item| item.tenant_id == claim.tenant_id && item.kind == claim.kind)
+            .is_none()
+        {
+            return Err(QuotaError::LimitMissing);
+        }
+        self.track(claim)
+    }
+
+    /// Tracks one actual resource reservation and enforces a configured tenant limit if present.
+    pub(crate) fn track(&mut self, claim: QuotaClaim) -> Result<(), QuotaError> {
+        validate_claim(&claim)?;
         if let Some(existing) = self
             .claims
             .iter()
@@ -148,28 +176,107 @@ impl QuotaLedger {
                 Err(QuotaError::ClaimConflict)
             };
         }
-        let Some(limit) = self
+        if let Some(limit) = self
             .limits
             .iter()
             .find(|item| item.tenant_id == claim.tenant_id && item.kind == claim.kind)
-        else {
-            return Err(QuotaError::LimitMissing);
-        };
-        let used = self.used(&claim.tenant_id, claim.kind);
-        if used
-            .checked_add(claim.units)
-            .is_none_or(|total| total > limit.max_units)
         {
-            return Err(QuotaError::Exceeded {
-                limit: limit.max_units,
-                used,
-                requested: claim.units,
-            });
+            let used = self.used(&claim.tenant_id, claim.kind);
+            if used
+                .checked_add(claim.units)
+                .is_none_or(|total| total > limit.max_units)
+            {
+                return Err(QuotaError::Exceeded {
+                    limit: limit.max_units,
+                    used,
+                    requested: claim.units,
+                });
+            }
         }
         self.claims.push(claim);
         self.claims
             .sort_by(|left, right| left.claim_id.cmp(&right.claim_id));
         Ok(())
+    }
+
+    /// Tracks one resource-backed reservation, retaining the largest demand while it stays held.
+    pub(crate) fn track_resource(&mut self, claim: QuotaClaim) -> Result<(), QuotaError> {
+        if claim.resource_id.is_none() {
+            return Err(QuotaError::Invalid(
+                "resource claim lacks its exact reservation identity".into(),
+            ));
+        }
+        validate_claim(&claim)?;
+        if let Some(index) = self
+            .claims
+            .iter()
+            .position(|item| item.claim_id == claim.claim_id)
+        {
+            let existing = &self.claims[index];
+            if existing.tenant_id != claim.tenant_id
+                || existing.kind != claim.kind
+                || existing.resource_id != claim.resource_id
+            {
+                return Err(QuotaError::ClaimConflict);
+            }
+            if claim.units <= existing.units {
+                return Ok(());
+            }
+            let previous = existing.units;
+            let limit = self
+                .limits
+                .iter()
+                .find(|item| item.tenant_id == claim.tenant_id && item.kind == claim.kind);
+            if let Some(limit) = limit {
+                let used_without_claim = self
+                    .used(&claim.tenant_id, claim.kind)
+                    .saturating_sub(previous);
+                if used_without_claim
+                    .checked_add(claim.units)
+                    .is_none_or(|total| total > limit.max_units)
+                {
+                    return Err(QuotaError::Exceeded {
+                        limit: limit.max_units,
+                        used: used_without_claim,
+                        requested: claim.units,
+                    });
+                }
+            }
+            self.claims[index].units = claim.units;
+            return Ok(());
+        }
+        self.track(claim)
+    }
+
+    /// Removes one exact resource-backed claim when Control releases its reservation.
+    pub(crate) fn release_resource(&mut self, resource_id: &str) {
+        self.claims.retain(|claim| {
+            claim.resource_id.as_ref().map(ResourceId::as_str) != Some(resource_id)
+        });
+    }
+
+    /// Returns whether one resource identity has retained logical quota evidence.
+    pub(crate) fn has_resource_claim(&self, resource_id: &str) -> bool {
+        self.claims
+            .iter()
+            .any(|claim| claim.resource_id.as_ref().map(ResourceId::as_str) == Some(resource_id))
+    }
+
+    /// Returns all claims for exact checkpoint-to-reservation validation.
+    pub(crate) fn claims(&self) -> &[QuotaClaim] {
+        &self.claims
+    }
+
+    /// Returns whether a tenant/category limit is explicitly configured.
+    pub(crate) fn has_limit(&self, tenant_id: &str, kind: ResourceKind) -> bool {
+        self.limits
+            .iter()
+            .any(|limit| limit.tenant_id == tenant_id && limit.kind == kind)
+    }
+
+    /// Returns all configured limits in deterministic order.
+    pub fn limits(&self) -> &[ResourceQuotaLimit] {
+        &self.limits
     }
 
     /// Releases one exact claim; unknown claims are idempotently treated as already released.
@@ -185,8 +292,7 @@ impl QuotaLedger {
         self.claims
             .iter()
             .filter(|claim| claim.tenant_id == tenant_id && claim.kind == kind)
-            .map(|claim| claim.units)
-            .sum()
+            .fold(0, |total, claim| total.saturating_add(claim.units))
     }
 
     /// Returns the configured remaining logical units, or `None` when no limit exists.
@@ -199,15 +305,62 @@ impl QuotaLedger {
 
     /// Validates restored limits, claims, duplicate identities and all usage bounds.
     pub fn validate(&self) -> Result<(), QuotaError> {
+        if self
+            .limits
+            .windows(2)
+            .any(|pair| (&pair[0].tenant_id, pair[0].kind) >= (&pair[1].tenant_id, pair[1].kind))
+            || self
+                .claims
+                .windows(2)
+                .any(|pair| pair[0].claim_id >= pair[1].claim_id)
+        {
+            return Err(QuotaError::Invalid(
+                "checkpointed quota entries are duplicated or not canonical".into(),
+            ));
+        }
         let mut checked = Self::new();
+        let mut resource_ids = std::collections::BTreeSet::new();
         for limit in &self.limits {
             checked.set_limit(limit.tenant_id.clone(), limit.kind, limit.max_units)?;
         }
         for claim in &self.claims {
-            checked.reserve(claim.clone())?;
+            if let Some(resource_id) = &claim.resource_id
+                && !resource_ids.insert(resource_id.as_str())
+            {
+                return Err(QuotaError::Invalid(
+                    "duplicate resource-backed quota claim".into(),
+                ));
+            }
+            checked.track(claim.clone())?;
         }
         Ok(())
     }
+}
+
+/// Gives a Control resource one stable ledger identity independent of its Task or Role owner.
+pub(crate) fn resource_claim_id(resource_id: &str) -> String {
+    format!("control-resource:{resource_id}")
+}
+
+/// Validates typed provenance while keeping legacy claims independent of reservation authority.
+fn validate_claim(claim: &QuotaClaim) -> Result<(), QuotaError> {
+    validate_text(&claim.claim_id, "claim_id")?;
+    validate_text(&claim.tenant_id, "tenant_id")?;
+    if claim.units == 0 || claim.units > MAX_RESOURCE_DEMAND_UNITS {
+        return Err(QuotaError::Invalid(
+            "claim units are outside their bound".into(),
+        ));
+    }
+    if claim
+        .resource_id
+        .as_ref()
+        .is_some_and(|resource_id| claim.claim_id != resource_claim_id(resource_id.as_str()))
+    {
+        return Err(QuotaError::Invalid(
+            "resource quota claim identity does not match its reservation".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Checks one bounded logical quota identity.
@@ -233,6 +386,7 @@ mod tests {
             tenant_id: "tenant".into(),
             kind: ResourceKind::Compute,
             units: 2,
+            resource_id: None,
         };
         ledger.reserve(claim.clone()).unwrap();
         ledger.reserve(claim.clone()).unwrap();
@@ -249,5 +403,59 @@ mod tests {
         assert!(ledger.release("claim-1").unwrap());
         assert_eq!(ledger.used("tenant", ResourceKind::Compute), 0);
         ledger.validate().unwrap();
+    }
+
+    #[test]
+    fn tracked_reservations_are_counted_before_a_limit_is_installed() {
+        let mut ledger = QuotaLedger::new();
+        let claim = QuotaClaim {
+            claim_id: resource_claim_id("resource-1"),
+            tenant_id: "tenant".into(),
+            kind: ResourceKind::Compute,
+            units: 2,
+            resource_id: Some(ResourceId::new("resource-1").unwrap()),
+        };
+        ledger.track(claim.clone()).unwrap();
+        ledger
+            .set_limit("tenant", ResourceKind::Compute, 3)
+            .unwrap();
+        assert!(matches!(
+            ledger.track(QuotaClaim {
+                claim_id: resource_claim_id("resource-2"),
+                units: 2,
+                resource_id: Some(ResourceId::new("resource-2").unwrap()),
+                ..claim
+            }),
+            Err(QuotaError::Exceeded {
+                limit: 3,
+                used: 2,
+                requested: 2
+            })
+        ));
+        ledger.release_resource("resource-1");
+        assert_eq!(ledger.remaining("tenant", ResourceKind::Compute), Some(3));
+    }
+
+    #[test]
+    fn restored_ledger_rejects_duplicate_claim_and_limit_identities() {
+        let claim = QuotaClaim {
+            claim_id: "claim-1".into(),
+            tenant_id: "tenant".into(),
+            kind: ResourceKind::Compute,
+            units: 1,
+            resource_id: None,
+        };
+        let mut duplicate_claims = QuotaLedger::new();
+        duplicate_claims.claims = vec![claim.clone(), claim];
+        assert!(duplicate_claims.validate().is_err());
+
+        let limit = ResourceQuotaLimit {
+            tenant_id: "tenant".into(),
+            kind: ResourceKind::Compute,
+            max_units: 2,
+        };
+        let mut duplicate_limits = QuotaLedger::new();
+        duplicate_limits.limits = vec![limit.clone(), limit];
+        assert!(duplicate_limits.validate().is_err());
     }
 }

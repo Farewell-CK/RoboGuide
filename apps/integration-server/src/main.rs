@@ -35,7 +35,11 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
-/// Previous wrapper before original-owner scoped Memory permissions for plan revisions.
+/// Interim wrapper with Control resource claims but no revisioned quota policy history.
+const PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v46";
+/// Previous main wrapper before Control resource commitment accounting was wired.
+const PRE_RESOURCE_COMMIT_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v45";
+/// Last wrapper before original-owner scoped Memory permissions for plan revisions.
 const PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v44";
 /// Previous wrapper before explicit fault-triggered Mission Intelligence generation permission.
 const PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v43";
@@ -1047,6 +1051,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA
+                    | PRE_RESOURCE_COMMIT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -1094,6 +1100,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA
+                    | PRE_RESOURCE_COMMIT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA

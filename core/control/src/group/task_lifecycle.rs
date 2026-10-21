@@ -40,6 +40,7 @@ impl ControlPlane {
         }
         for resource_id in &resources {
             self.reservations.remove(resource_id);
+            self.release_resource_quota(resource_id);
         }
         let group_mut = self
             .groups
@@ -421,9 +422,6 @@ impl ControlPlane {
                 )));
             }
         }
-        for resource_id in &expected_sorted {
-            self.reservations.remove(resource_id);
-        }
         // Keep Context-scoped assignments visible on the TaskExecution. Their reservation
         // belongs to the Context and must survive the Task terminal transition.
         let remaining = execution
@@ -434,6 +432,10 @@ impl ControlPlane {
             })
             .cloned()
             .collect::<Vec<_>>();
+        for resource_id in &expected_sorted {
+            self.reservations.remove(resource_id);
+            self.release_resource_quota(resource_id);
+        }
         let group = self
             .groups
             .get_mut(group_id)

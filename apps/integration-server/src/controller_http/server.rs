@@ -197,6 +197,7 @@ fn authorize_tenant_path(
             | "/v1/belief-policies"
             | "/v1/memory-authorizations"
             | "/v1/artifact-authorizations"
+            | "/v1/resource-quotas"
     ) {
         return Err(
             "global administration/diagnostics require an explicitly delegated global principal"
@@ -230,7 +231,8 @@ fn authorize_operator_request(
             | "/v1/verifier-sources"
             | "/v1/belief-policies"
             | "/v1/memory-authorizations"
-            | "/v1/artifact-authorizations",
+            | "/v1/artifact-authorizations"
+            | "/v1/resource-quotas",
         ) => 2,
         ("GET", _)
         | ("POST", "/v1/missions/assess-initial-support" | "/v1/missions/validate-plan") => 0,
@@ -253,7 +255,7 @@ fn authorize_operator_request(
             | "/v1/belief-policies"
             | "/v1/memory-authorizations",
         ) => 2,
-        ("POST", "/v1/artifact-authorizations") => 2,
+        ("POST", "/v1/artifact-authorizations" | "/v1/resource-quotas") => 2,
         ("POST", "/v1/verifier-evidence" | "/v1/mission-goal-evidence") => 1,
         ("POST", "/v1/attestation/challenges" | "/v1/attestation/evidence") => 2,
         ("POST", path)
@@ -1257,6 +1259,25 @@ where
             }
         };
     }
+    if method == "POST" && path == "/v1/resource-quotas" {
+        return match application::state_policy::submit_resource_quotas(
+            controller,
+            event_log,
+            event_write_gate,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin"),
+            clock.now(),
+        ) {
+            Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error": error}))
+                    .await
+            }
+        };
+    }
     if method == "POST" && path == "/v1/state-policies" {
         return match application::state_policy::submit(
             controller,
@@ -1578,6 +1599,38 @@ where
             (
                 "200 OK",
                 serde_json::json!({"schema_version":"roboguide.decision-policy-view/v0.1","registry":live.bridge.control().decision_policy_registry()}),
+            )
+        }
+        ("GET", "/v1/resource-quotas") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            let control = live.bridge.control();
+            let usage = control
+                .quota_ledger()
+                .limits()
+                .iter()
+                .map(|limit| {
+                    let (used_units, remaining_units) =
+                        control.quota_usage(&limit.tenant_id, limit.kind);
+                    serde_json::json!({
+                        "tenant_id": limit.tenant_id,
+                        "kind": limit.kind,
+                        "max_units": limit.max_units,
+                        "used_units": used_units,
+                        "remaining_units": remaining_units,
+                    })
+                })
+                .collect::<Vec<_>>();
+            (
+                "200 OK",
+                serde_json::json!({
+                    "schema_version":"roboguide.resource-quota-view/v0.1",
+                    "registry": control.resource_quota_registry(),
+                    "usage": usage,
+                    "legacy_policy_requires_adoption": control.resource_quota_registry().is_none()
+                        && !control.quota_ledger().limits().is_empty(),
+                }),
             )
         }
         ("GET", path) if path.starts_with("/v1/executions/") && path.ends_with("/safety-stop") => {

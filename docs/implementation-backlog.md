@@ -1,5 +1,11 @@
 # 架构与实现待决事项
 
+2026-10-21 [ADR-0140](decisions/0140-control-resource-quota-commitment.md)把 revisioned quota policy
+接入 recovery-admin `/v1/resource-quotas`、原 operator authority journal 与幂等 receipt；wrapper v47
+对账 ResourceId claim、tenant、policy history 和 reservation，并将旧需求不可用显式 fence。真实
+双向 TLS/SQLite/重启进程验收通过且 Node inventory 为零，见[验收](development/acceptance/2026-10-21-control-resource-quotas.md)。逻辑账本
+约束 Control 承诺，不等于 divisible allocation、GPU/traffic cost 或 OS/物理强制，完整 F6 仍开放。
+
 2026-10-20 [运行期修订验收](development/acceptance/2026-10-20-runtime-plan-revision.md)
 补齐原目标 gate、版本历史、原预算、精确 Review 与完整 stop/revoke 后的新 Group；普通
 resume/recovery 不能越过待完成修订。ADR-0121 的 wrapper v44 / inner v23 / codec v28
@@ -38,7 +44,8 @@ Node journal 写入拒绝。实际文件、SQL 提交失败、正式查询、重
 
 2026-10-16 Scheduler/运维软件切片已完成：`SchedulingCostEvidence` 的来源/TTL/边界校验与
 确定性排序、checkpointed logical `QuotaLedger`、以及 Mission/Artifact Prometheus 文本入口
-均已接入。它们不提供真实 GPU/交通成本、OS quota、物理执行时限或告警平台 SLO 达标证据。
+均已接入；ADR-0140 又将 revisioned tenant quota 与原 ResourceId Commit/release 接通。它们不提供
+divisible allocation、真实 GPU/交通成本、OS quota enforcement、物理执行时限或告警平台 SLO 达标证据。
 
 2026-10-16 Control 已增加持久 Federation prepare/commit session：epoch、plan/ownership digest、
 deadline 与 abort/dispatch-ready gate 均有 checkpoint 和回归，见
@@ -237,7 +244,7 @@ Transport、序列化格式、数据库、调度算法或部署拓扑。
 - Observation 融合采用投票、滤波、因子图或其他方法；
 - Scheduler v0.2 已采用 deterministic bounded joint search，ADR-0082 已实现 Orchestration
   logical priority/fairness 和有界准入，ADR-0084 已实现显式 future planning preemption；
-  运行中物理抢占、真实 cost model、travel/traffic prediction、divisible quota、auction
+  运行中物理抢占、真实 cost model、travel/traffic prediction、divisible allocation、auction
   或 RL policy 仍待独立设计/证据 gate；
 - Shared Resource Coordination 的时空图、Reservation 和冲突求解；
 - Messaging / Invocation 使用 DDS、Zenoh、gRPC、MQTT、WebRTC 或其他协议；

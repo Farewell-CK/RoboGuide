@@ -53,7 +53,7 @@ pub use tenant::{MissionTenantMigration, MissionTenantMigrationReceipt};
 use coordination::Reservation;
 use domain::{
     ActorBinding, ActorId, CoordinationContextId, ExecutionGroupId, LeaseId, MissionId, NodeId,
-    NodeLease, PhysicalEntityId, ResourceId, RoleId, TaskRef, TimestampMs,
+    NodeLease, PhysicalEntityId, ResourceId, ResourceKind, RoleId, TaskRef, TimestampMs,
 };
 use ports::SharedStateError;
 use registry_provenance::RegistryProvenance;
@@ -78,6 +78,12 @@ pub struct ControlCheckpoint {
     /// Immutable original Artifact certificate policy revisions.
     #[serde(default)]
     artifact_authorization_history: BTreeMap<u64, domain::ArtifactAuthorizationRegistry>,
+    /// Current complete tenant/category logical quota policy.
+    #[serde(default)]
+    resource_quota_registry: Option<domain::ResourceQuotaRegistry>,
+    /// Immutable quota policy revisions used by original operator receipts.
+    #[serde(default)]
+    resource_quota_history: BTreeMap<u64, domain::ResourceQuotaRegistry>,
     /// Explicit content authority, retained independently of catalog discovery and placement.
     #[serde(default)]
     memory_authorization_registry: Option<domain::MemoryAuthorizationRegistry>,
@@ -163,6 +169,9 @@ pub struct ControlCheckpoint {
     /// Explicit logical quota limits/claims; this never replaces physical reservation authority.
     #[serde(default)]
     quota_ledger: QuotaLedger,
+    /// Exact legacy reservations without quota claims, retained until their original release.
+    #[serde(default)]
+    quota_unaccounted_resources: Option<Vec<ResourceId>>,
     /// Cross-domain prepare/commit sessions; only committed sessions can be dispatch-ready.
     #[serde(default)]
     federation_sessions: BTreeMap<String, FederationSession>,
@@ -459,6 +468,10 @@ pub struct ControlPlane {
     artifact_authorization_registry: Option<domain::ArtifactAuthorizationRegistry>,
     /// Retained original certificate grants, including irrevocable retirement.
     artifact_authorization_history: BTreeMap<u64, domain::ArtifactAuthorizationRegistry>,
+    /// Current complete tenant/category logical quota policy.
+    resource_quota_registry: Option<domain::ResourceQuotaRegistry>,
+    /// Retained original quota policy revisions for administration receipts.
+    resource_quota_history: BTreeMap<u64, domain::ResourceQuotaRegistry>,
     /// Current tenant, content and participant policy; catalog metadata never grants this authority.
     memory_authorization_registry: Option<domain::MemoryAuthorizationRegistry>,
     /// Immutable original policy interpretations retained through revocation and restore.
@@ -530,6 +543,8 @@ pub struct ControlPlane {
     pub(crate) max_status_age_ms: u64,
     /// Durable logical quota ledger kept separate from physical resource reservations.
     pub(crate) quota_ledger: QuotaLedger,
+    /// Legacy resource reservations whose original demand cannot be inferred after upgrade.
+    pub(crate) quota_unaccounted_resources: BTreeSet<ResourceId>,
     /// Durable cross-domain session authority.
     pub(crate) federation_sessions: BTreeMap<String, FederationSession>,
 }
@@ -552,9 +567,217 @@ impl ControlPlane {
         &self.quota_ledger
     }
 
-    /// Returns the quota mutation surface used by an authenticated application authority.
-    pub fn quota_ledger_mut(&mut self) -> &mut QuotaLedger {
-        &mut self.quota_ledger
+    /// Returns current logical quota usage and remaining tenant/category capacity.
+    pub fn quota_usage(&self, tenant_id: &str, kind: ResourceKind) -> (u64, Option<u64>) {
+        (
+            self.quota_ledger.used(tenant_id, kind),
+            self.quota_ledger.remaining(tenant_id, kind),
+        )
+    }
+
+    /// Returns the current revisioned resource quota policy, if explicitly configured.
+    pub fn resource_quota_registry(&self) -> Option<&domain::ResourceQuotaRegistry> {
+        self.resource_quota_registry.as_ref()
+    }
+
+    /// Installs a complete expected-revision quota policy after checking legacy usage and claims.
+    pub fn accept_resource_quota_registry(
+        &mut self,
+        registry: domain::ResourceQuotaRegistry,
+        expected_revision: u64,
+    ) -> Result<(), ControlError> {
+        registry.validate().map_err(ControlError::InvalidProposal)?;
+        match &self.resource_quota_registry {
+            Some(previous) => {
+                if previous == &registry && previous.revision == expected_revision {
+                    return Ok(());
+                }
+                if previous.revision != expected_revision {
+                    return Err(ControlError::InvalidProposal(
+                        "resource quota expected revision conflicts".into(),
+                    ));
+                }
+                previous
+                    .validates_successor(&registry)
+                    .map_err(ControlError::InvalidProposal)?;
+            }
+            None if expected_revision == 0 && registry.revision == 1 => {
+                if !self.quota_ledger.limits().is_empty()
+                    && self.quota_ledger.limits() != registry.limits.as_slice()
+                {
+                    return Err(ControlError::InvalidProposal(
+                        "initial quota policy must exactly adopt legacy configured limits".into(),
+                    ));
+                }
+            }
+            None => {
+                return Err(ControlError::InvalidProposal(
+                    "initial resource quota policy requires revision one".into(),
+                ));
+            }
+        }
+        if self.resource_quota_history.len() >= 1024 {
+            return Err(ControlError::InvalidProposal(
+                "resource quota policy history is full".into(),
+            ));
+        }
+        for resource_id in &self.quota_unaccounted_resources {
+            let Some(reservation) = self.reservations.get(resource_id) else {
+                continue;
+            };
+            let tenant = self.reservation_quota_tenant(reservation);
+            if (tenant.is_none() && !registry.limits.is_empty())
+                || (tenant.is_some_and(|tenant| {
+                    registry
+                        .limits
+                        .iter()
+                        .any(|limit| limit.tenant_id == tenant)
+                }))
+            {
+                return Err(ControlError::InvalidProposal(
+                    "legacy resource demand or tenant is unavailable under the proposed quota policy"
+                        .into(),
+                ));
+            }
+        }
+        let mut candidate = self.quota_ledger.clone();
+        candidate
+            .replace_limits(&registry.limits)
+            .map_err(|error| ControlError::InvalidProposal(error.to_string()))?;
+        self.resource_quota_history
+            .insert(registry.revision, registry.clone());
+        self.resource_quota_registry = Some(registry);
+        self.quota_ledger = candidate;
+        Ok(())
+    }
+
+    /// Atomically retains quota usage for exact resource commitments under the Mission tenant.
+    pub(crate) fn commit_resource_quotas(
+        &mut self,
+        mission_id: &MissionId,
+        demands: Vec<(ResourceId, ResourceKind, u32)>,
+    ) -> Result<(), ControlError> {
+        if demands.is_empty() {
+            return Ok(());
+        }
+        self.validate_resource_quotas(mission_id, &demands)?;
+        let tenant_id = self.resource_quota_tenant(mission_id)?;
+        let mut candidate = self.quota_ledger.clone();
+        for (resource_id, kind, units) in &demands {
+            candidate
+                .track_resource(QuotaClaim {
+                    claim_id: crate::quota::resource_claim_id(resource_id.as_str()),
+                    tenant_id: tenant_id.clone(),
+                    kind: *kind,
+                    units: u64::from(*units),
+                    resource_id: Some(resource_id.clone()),
+                })
+                .map_err(|error| ControlError::InvalidProposal(error.to_string()))?;
+        }
+        self.quota_ledger = candidate;
+        for (resource_id, _, _) in &demands {
+            self.quota_unaccounted_resources.remove(resource_id);
+        }
+        Ok(())
+    }
+
+    /// Checks exact resource claims without changing checkpointed quota state.
+    pub(crate) fn validate_resource_quotas(
+        &self,
+        mission_id: &MissionId,
+        demands: &[(ResourceId, ResourceKind, u32)],
+    ) -> Result<(), ControlError> {
+        if demands.is_empty() {
+            return Ok(());
+        }
+        let tenant_id = self.resource_quota_tenant(mission_id)?;
+        if self.quota_unaccounted_resources.iter().any(|resource_id| {
+            self.reservations
+                .get(resource_id)
+                .is_some_and(|reservation| {
+                    let owner_tenant = self.reservation_quota_tenant(reservation);
+                    (owner_tenant.is_none() || owner_tenant == Some(tenant_id.as_str()))
+                        && demands
+                            .iter()
+                            .any(|(_, kind, _)| self.quota_ledger.has_limit(&tenant_id, *kind))
+                })
+        }) {
+            return Err(ControlError::InvalidProposal(
+                "legacy resource demand is unavailable for a tenant/category with a quota limit"
+                    .into(),
+            ));
+        }
+        let mut candidate = self.quota_ledger.clone();
+        for (resource_id, kind, units) in demands {
+            candidate
+                .track_resource(QuotaClaim {
+                    claim_id: crate::quota::resource_claim_id(resource_id.as_str()),
+                    tenant_id: tenant_id.clone(),
+                    kind: *kind,
+                    units: u64::from(*units),
+                    resource_id: Some(resource_id.clone()),
+                })
+                .map_err(|error| ControlError::InvalidProposal(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Resolves the original authenticated Mission tenant or the explicit legacy local profile.
+    fn resource_quota_tenant(&self, mission_id: &MissionId) -> Result<String, ControlError> {
+        if let Some(tenant) = self.mission_tenant(mission_id) {
+            return Ok(tenant.to_owned());
+        }
+        if self.node_identity_registry().is_some() {
+            return Err(ControlError::InvalidProposal(
+                "resource quota requires immutable Mission tenant registration".into(),
+            ));
+        }
+        Ok("local".into())
+    }
+
+    /// Returns a reservation tenant only from immutable Mission authority or the legacy local profile.
+    fn reservation_quota_tenant<'a>(&'a self, reservation: &'a Reservation) -> Option<&'a str> {
+        self.mission_tenant(reservation.task_ref.mission_id())
+            .or_else(|| self.node_identity_registry().is_none().then_some("local"))
+    }
+
+    /// Releases the quota record paired with an exact Control reservation.
+    pub(crate) fn release_resource_quota(&mut self, resource_id: &ResourceId) {
+        self.quota_ledger.release_resource(resource_id.as_str());
+        self.quota_unaccounted_resources.remove(resource_id);
+    }
+
+    /// Builds the exact quota claims retained by one validated proposal.
+    pub(crate) fn proposal_quota_demands(
+        proposal: &AssignmentProposal,
+    ) -> Result<Vec<(ResourceId, ResourceKind, u32)>, ControlError> {
+        let mut demands = Vec::new();
+        for assignment in proposal.assignments() {
+            if assignment.resource_ids().is_empty() {
+                continue;
+            }
+            let requirement = proposal
+                .requirement_for_role(assignment.role_id())
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(
+                        "resource quota requires the original Role requirement".into(),
+                    )
+                })?;
+            if assignment.resource_ids().len() != requirement.resource_requirements().len() {
+                return Err(ControlError::InvalidProposal(
+                    "resource quota demand differs from exact Role resource requirements".into(),
+                ));
+            }
+            demands.extend(
+                assignment
+                    .resource_ids()
+                    .iter()
+                    .cloned()
+                    .zip(requirement.resource_requirements().iter())
+                    .map(|(resource, demand)| (resource, demand.kind(), demand.units())),
+            );
+        }
+        Ok(demands)
     }
 
     /// Persists one exact cross-domain prepare; retries with the same identity are idempotent.
@@ -653,6 +876,8 @@ impl ControlPlane {
         Self {
             artifact_authorization_registry: None,
             artifact_authorization_history: BTreeMap::new(),
+            resource_quota_registry: None,
+            resource_quota_history: BTreeMap::new(),
             memory_authorization_registry: None,
             memory_authorization_history: BTreeMap::new(),
             semantic_verifier_registry: None,
@@ -687,6 +912,7 @@ impl ControlPlane {
             pending_recovery_commitments: BTreeMap::new(),
             max_status_age_ms,
             quota_ledger: QuotaLedger::new(),
+            quota_unaccounted_resources: BTreeSet::new(),
             federation_sessions: BTreeMap::new(),
         }
     }
@@ -696,6 +922,8 @@ impl ControlPlane {
         ControlCheckpoint {
             artifact_authorization_registry: self.artifact_authorization_registry.clone(),
             artifact_authorization_history: self.artifact_authorization_history.clone(),
+            resource_quota_registry: self.resource_quota_registry.clone(),
+            resource_quota_history: self.resource_quota_history.clone(),
             memory_authorization_registry: self.memory_authorization_registry.clone(),
             memory_authorization_history: self.memory_authorization_history.clone(),
             semantic_verifier_registry: self.semantic_verifier_registry.clone(),
@@ -738,6 +966,16 @@ impl ControlPlane {
                 .collect(),
             max_status_age_ms: self.max_status_age_ms,
             quota_ledger: self.quota_ledger.clone(),
+            quota_unaccounted_resources: Some(
+                self.reservations
+                    .keys()
+                    .filter(|resource_id| {
+                        self.quota_unaccounted_resources.contains(*resource_id)
+                            || !self.quota_ledger.has_resource_claim(resource_id.as_str())
+                    })
+                    .cloned()
+                    .collect(),
+            ),
             federation_sessions: self.federation_sessions.clone(),
         }
     }
@@ -765,6 +1003,41 @@ impl ControlPlane {
                 .validate()
                 .map_err(|error| ControlError::InvalidLease(error.to_string()))?;
         }
+        let reservation_ids = checkpoint
+            .reservations
+            .keys()
+            .map(|resource_id| resource_id.as_str().to_owned())
+            .collect::<BTreeSet<_>>();
+        let mut resource_claim_ids = BTreeSet::new();
+        for claim in checkpoint.quota_ledger.claims() {
+            if let Some(resource_id) = &claim.resource_id
+                && (!reservation_ids.contains(resource_id.as_str())
+                    || !resource_claim_ids.insert(resource_id.as_str().to_owned()))
+            {
+                return Err(ControlError::InvalidProposal(
+                    "quota checkpoint resource claim has no unique reservation".into(),
+                ));
+            }
+        }
+        let derived_unaccounted = checkpoint
+            .reservations
+            .keys()
+            .filter(|resource_id| !resource_claim_ids.contains(resource_id.as_str()))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let quota_unaccounted_resources = match &checkpoint.quota_unaccounted_resources {
+            Some(resources) => {
+                let stored = resources.iter().cloned().collect::<BTreeSet<_>>();
+                if stored.len() != resources.len() || stored != derived_unaccounted {
+                    return Err(ControlError::InvalidProposal(
+                        "quota checkpoint unavailable-resource fence differs from reservations"
+                            .into(),
+                    ));
+                }
+                stored
+            }
+            None => derived_unaccounted,
+        };
         if checkpoint.registry_provenance.is_none()
             && checkpoint
                 .actor_bindings
@@ -943,6 +1216,8 @@ impl ControlPlane {
         let restored = Self {
             artifact_authorization_registry: checkpoint.artifact_authorization_registry,
             artifact_authorization_history: checkpoint.artifact_authorization_history,
+            resource_quota_registry: checkpoint.resource_quota_registry,
+            resource_quota_history: checkpoint.resource_quota_history,
             memory_authorization_registry: checkpoint.memory_authorization_registry,
             memory_authorization_history: checkpoint.memory_authorization_history,
             semantic_verifier_registry: checkpoint.semantic_verifier_registry,
@@ -977,12 +1252,45 @@ impl ControlPlane {
             pending_recovery_commitments,
             max_status_age_ms: checkpoint.max_status_age_ms,
             quota_ledger: checkpoint.quota_ledger,
+            quota_unaccounted_resources,
             federation_sessions: checkpoint.federation_sessions,
         };
         restored
             .quota_ledger
             .validate()
             .map_err(|error| ControlError::InvalidProposal(error.to_string()))?;
+        for claim in restored.quota_ledger.claims() {
+            if let Some(resource_id) = &claim.resource_id {
+                let reservation = restored.reservations.get(resource_id).ok_or_else(|| {
+                    ControlError::InvalidProposal(
+                        "quota checkpoint resource claim lost its reservation".into(),
+                    )
+                })?;
+                let reservation_tenant = restored
+                    .reservation_quota_tenant(reservation)
+                    .ok_or_else(|| {
+                        ControlError::InvalidProposal(
+                            "quota checkpoint reservation tenant is unavailable".into(),
+                        )
+                    })?;
+                if claim.tenant_id != reservation_tenant {
+                    return Err(ControlError::InvalidProposal(
+                        "quota checkpoint resource claim changed Mission tenant".into(),
+                    ));
+                }
+            }
+        }
+        restored.validate_resource_quota_checkpoint()?;
+        if restored.reservations.keys().any(|resource_id| {
+            !restored
+                .quota_ledger
+                .has_resource_claim(resource_id.as_str())
+                && !restored.quota_unaccounted_resources.contains(resource_id)
+        }) {
+            return Err(ControlError::InvalidProposal(
+                "quota checkpoint reservation lacks claim or explicit legacy fence".into(),
+            ));
+        }
         for session in restored.federation_sessions.values() {
             session
                 .validate_at(TimestampMs::new(0))
@@ -998,6 +1306,73 @@ impl ControlPlane {
         restored.validate_scheduling_checkpoint_authority()?;
         restored.allocation_snapshot(TimestampMs::new(0))?;
         Ok(restored)
+    }
+
+    /// Validates the complete quota policy history against its checkpointed ledger and old owners.
+    fn validate_resource_quota_checkpoint(&self) -> Result<(), ControlError> {
+        if self.resource_quota_history.len() > 1024 {
+            return Err(ControlError::InvalidProposal(
+                "resource quota policy history is invalid".into(),
+            ));
+        }
+        let mut previous: Option<&domain::ResourceQuotaRegistry> = None;
+        for (revision, registry) in &self.resource_quota_history {
+            registry.validate().map_err(ControlError::InvalidProposal)?;
+            if revision != &registry.revision {
+                return Err(ControlError::InvalidProposal(
+                    "resource quota history revision conflicts".into(),
+                ));
+            }
+            if let Some(old) = previous {
+                old.validates_successor(registry)
+                    .map_err(ControlError::InvalidProposal)?;
+            } else if *revision != 1 {
+                return Err(ControlError::InvalidProposal(
+                    "resource quota history does not start at one".into(),
+                ));
+            }
+            previous = Some(registry);
+        }
+        match (&self.resource_quota_registry, previous) {
+            (Some(current), Some(last)) if current == last => {}
+            (None, None) => {}
+            _ => {
+                return Err(ControlError::InvalidProposal(
+                    "current resource quota policy lacks exact original history".into(),
+                ));
+            }
+        }
+        let configured_limits = self
+            .resource_quota_registry
+            .as_ref()
+            .map_or(&[][..], |registry| registry.limits.as_slice());
+        if self.resource_quota_registry.is_some() && self.quota_ledger.limits() != configured_limits
+        {
+            return Err(ControlError::InvalidProposal(
+                "resource quota ledger limits differ from current policy".into(),
+            ));
+        }
+        for resource_id in &self.quota_unaccounted_resources {
+            let Some(reservation) = self.reservations.get(resource_id) else {
+                return Err(ControlError::InvalidProposal(
+                    "legacy quota fence lost its original reservation".into(),
+                ));
+            };
+            let tenant = self.reservation_quota_tenant(reservation);
+            if (tenant.is_none() && !configured_limits.is_empty())
+                || (tenant.is_some_and(|tenant| {
+                    configured_limits
+                        .iter()
+                        .any(|limit| limit.tenant_id == tenant)
+                }))
+            {
+                return Err(ControlError::InvalidProposal(
+                    "legacy resource demand or tenant is unavailable under current quota policy"
+                        .into(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Records an actor binding after a successful committed task and Group binding.

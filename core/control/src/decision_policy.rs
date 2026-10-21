@@ -158,6 +158,10 @@ impl ControlPlane {
                 .artifact_authorization_history
                 .get(&receipt.revision)
                 .map(serde_json::to_value),
+            domain::RegistryCommandKind::ResourceQuota => self
+                .resource_quota_history
+                .get(&receipt.revision)
+                .map(serde_json::to_value),
         }
         .transpose()
         .map_err(|error| ControlError::InvalidProposal(error.to_string()))?

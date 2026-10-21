@@ -355,6 +355,7 @@ async fn tenant_administrator_cannot_read_or_replace_global_source_and_content_a
         "/v1/verifier-sources",
         "/v1/memory-authorizations",
         "/v1/artifact-authorizations",
+        "/v1/resource-quotas",
     ] {
         for method in ["GET", "POST"] {
             let response = route(
@@ -374,6 +375,125 @@ async fn tenant_administrator_cannot_read_or_replace_global_source_and_content_a
         server_checkpoint_json(&controller.lock().unwrap()).unwrap(),
         before
     );
+}
+
+/// Resource quotas use a recovery-admin revisioned command, durable receipt and read-only view.
+#[tokio::test]
+async fn resource_quota_policy_requires_admin_and_commits_idempotently() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let controller = controller(&log);
+    let admin = OperatorPrincipal {
+        tenants: Some(BTreeSet::from(["*".into()])),
+        subject: Some("quota-admin".into()),
+        role: Some("recovery-admin".into()),
+        ..Default::default()
+    };
+    let operator = OperatorPrincipal {
+        role: Some("operator".into()),
+        ..admin.clone()
+    };
+    let body = serde_json::to_vec(&serde_json::json!({
+        "command_id":"quota-policy-1",
+        "expected_revision":0,
+        "registry":{
+            "registry_id":"deployment-quota-policy",
+            "revision":1,
+            "limits":[{"tenant_id":"tenant-a","kind":"Compute","max_units":12}]
+        }
+    }))
+    .unwrap();
+    let denied = route(
+        &controller,
+        &log,
+        &operator,
+        &request("POST", "/v1/resource-quotas", &body, None),
+    )
+    .await;
+    assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
+    assert!(
+        controller
+            .lock()
+            .unwrap()
+            .bridge
+            .control()
+            .resource_quota_registry()
+            .is_none()
+    );
+
+    let accepted = route(
+        &controller,
+        &log,
+        &admin,
+        &request("POST", "/v1/resource-quotas", &body, None),
+    )
+    .await;
+    assert!(accepted.starts_with("HTTP/1.1 200"), "{accepted}");
+    let retried = route(
+        &controller,
+        &log,
+        &admin,
+        &request("POST", "/v1/resource-quotas", &body, None),
+    )
+    .await;
+    assert!(retried.starts_with("HTTP/1.1 200"), "{retried}");
+    assert_eq!(log.control_command_count().unwrap(), 1);
+    let mut conflicting: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    conflicting["registry"]["limits"][0]["max_units"] = serde_json::json!(13);
+    let conflict = route(
+        &controller,
+        &log,
+        &admin,
+        &request(
+            "POST",
+            "/v1/resource-quotas",
+            &serde_json::to_vec(&conflicting).unwrap(),
+            None,
+        ),
+    )
+    .await;
+    assert!(conflict.starts_with("HTTP/1.1 409"), "{conflict}");
+    let mut update = conflicting;
+    update["command_id"] = serde_json::json!("quota-policy-2");
+    update["expected_revision"] = serde_json::json!(1);
+    update["registry"]["revision"] = serde_json::json!(2);
+    let updated = route(
+        &controller,
+        &log,
+        &admin,
+        &request(
+            "POST",
+            "/v1/resource-quotas",
+            &serde_json::to_vec(&update).unwrap(),
+            None,
+        ),
+    )
+    .await;
+    assert!(updated.starts_with("HTTP/1.1 200"), "{updated}");
+    assert_eq!(log.control_command_count().unwrap(), 2);
+    let original_after_update = route(
+        &controller,
+        &log,
+        &admin,
+        &request("POST", "/v1/resource-quotas", &body, None),
+    )
+    .await;
+    assert!(original_after_update.starts_with("HTTP/1.1 200"));
+    assert_eq!(log.control_command_count().unwrap(), 2);
+    let view = route(
+        &controller,
+        &log,
+        &admin,
+        &request("GET", "/v1/resource-quotas", b"", None),
+    )
+    .await;
+    assert!(view.starts_with("HTTP/1.1 200"), "{view}");
+    assert!(view.contains("deployment-quota-policy"));
+    assert!(view.contains("\"used_units\":0"));
+    let restored =
+        control::ControlPlane::restore(controller.lock().unwrap().bridge.control().checkpoint())
+            .unwrap();
+    assert_eq!(restored.resource_quota_registry().unwrap().revision, 2);
 }
 
 /// Review distinguishes a SQL outage from contract rejection, rolls back clearing, and can be retried once.

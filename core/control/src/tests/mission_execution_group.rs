@@ -163,6 +163,16 @@ fn mission_task_bind_uses_commit_authority_and_releases_task_scope() {
     let group = domain::ExecutionGroupId::new("group-authority").expect("group valid");
     let resource = ResourceId::new("compute-worker").expect("resource valid");
     control
+        .register_mission_tenant(task.mission_id().clone(), "tenant-a")
+        .expect("test Mission tenant registers");
+    install_quota_limit(&mut control, "tenant-a", ResourceKind::Compute, 1);
+    control
+        .commit_resource_quotas(
+            task.mission_id(),
+            vec![(resource.clone(), ResourceKind::Compute, 1)],
+        )
+        .expect("exact original Task demand is retained");
+    control
         .create_mission_group(group.clone(), &plan, TimestampMs::new(1), &trace(), &mut events)
         .expect("Group creates");
     control.reservations.insert(
@@ -227,6 +237,10 @@ fn mission_task_bind_uses_commit_authority_and_releases_task_scope() {
         )
         .expect("Task resources release");
     assert!(!control.reservations.contains_key(&resource));
+    assert_eq!(
+        control.quota_usage("tenant-a", ResourceKind::Compute),
+        (0, Some(1))
+    );
 }
 
 /// Task release preserves a Context-scoped assignment until explicit Context release.
