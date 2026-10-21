@@ -38,7 +38,7 @@ pub use matching::RoleCandidateDiagnostics;
 pub use matching::{CandidateSet, RoleCandidates};
 pub use node::CandidateExclusionReason;
 pub use proposal::AssignmentProposal;
-pub use quota::{QuotaClaim, QuotaError, QuotaLedger, QuotaLimit};
+pub use quota::{QuotaClaim, QuotaError, QuotaLedger, QuotaLimit, QuotaUsage};
 pub use reconciliation::{
     ActorTakeoverAuthorization, CommittedRecoveryAssignment, ReconciliationAssessment,
     RecoveryAssignmentProposal, RecoveryCandidateSet, RecoveryOutcome, RoleRecoveryNeed,

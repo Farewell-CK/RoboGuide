@@ -1,5 +1,9 @@
 # 架构与实现待决事项
 
+2026-10-21 [ADR-0141](decisions/0141-unconfigured-resource-quota-usage-view.md)修复 quota 运维视图
+只枚举已配置限额而隐藏既有 commitment 的问题；v0.2 汇总 configured limits 与原 claims 并集，
+无上限/剩余量明确返回 `null`。零 Node 的实际 API/SQLite 重启门禁持续验收。
+
 2026-10-21 [ADR-0140](decisions/0140-control-resource-quota-commitment.md)把 revisioned quota policy
 接入 recovery-admin `/v1/resource-quotas`、原 operator authority journal 与幂等 receipt；wrapper v47
 对账 ResourceId claim、tenant、policy history 和 reservation，并将旧需求不可用显式 fence。真实

@@ -293,6 +293,7 @@ def run(output: Path, skip_build: bool, binary_path: Path | None) -> dict[str, A
         assert request(origin, admin_next, "/v1/resource-quotas", update)[0] == 200
         current = request(origin, admin_next, "/v1/resource-quotas")
         assert current[0] == 200 and current[1]["registry"]["revision"] == 2
+        assert current[1]["schema_version"] == "roboguide.resource-quota-view/v0.2"
         assert current[1]["usage"] == [
             {
                 "tenant_id": "tenant-a",

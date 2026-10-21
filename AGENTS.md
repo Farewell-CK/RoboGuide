@@ -8,6 +8,9 @@ reservation fence. Over-limit Commit changes neither reservation nor event evide
 logical accounting over exclusive Control reservations; it does not divide Node resources or assert
 GPU, OS, physical, realtime or device enforcement.
 
+ADR-0141 advances the quota read-only view to v0.2: it reports both configured limits and every
+existing tenant/category claim, with absent limits and remaining capacity represented as `null`.
+
 ADR-0138 adds the member-local original Controller process journal under Replica storage v3 and
 explicit recovery v0.7. Real supervisor spawn intent precedes the actual Child PID/boot/start-tick
 registration; only that incarnation's actual wait result becomes exit proof. Transfer fences source

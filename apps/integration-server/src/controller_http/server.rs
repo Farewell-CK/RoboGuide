@@ -1606,26 +1606,11 @@ where
                 .lock()
                 .map_err(|_| "controller lock is poisoned")?;
             let control = live.bridge.control();
-            let usage = control
-                .quota_ledger()
-                .limits()
-                .iter()
-                .map(|limit| {
-                    let (used_units, remaining_units) =
-                        control.quota_usage(&limit.tenant_id, limit.kind);
-                    serde_json::json!({
-                        "tenant_id": limit.tenant_id,
-                        "kind": limit.kind,
-                        "max_units": limit.max_units,
-                        "used_units": used_units,
-                        "remaining_units": remaining_units,
-                    })
-                })
-                .collect::<Vec<_>>();
+            let usage = control.quota_ledger().usage();
             (
                 "200 OK",
                 serde_json::json!({
-                    "schema_version":"roboguide.resource-quota-view/v0.1",
+                    "schema_version":"roboguide.resource-quota-view/v0.2",
                     "registry": control.resource_quota_registry(),
                     "usage": usage,
                     "legacy_policy_requires_adoption": control.resource_quota_registry().is_none()

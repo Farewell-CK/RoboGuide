@@ -488,6 +488,7 @@ async fn resource_quota_policy_requires_admin_and_commits_idempotently() {
     )
     .await;
     assert!(view.starts_with("HTTP/1.1 200"), "{view}");
+    assert!(view.contains("roboguide.resource-quota-view/v0.2"));
     assert!(view.contains("deployment-quota-policy"));
     assert!(view.contains("\"used_units\":0"));
     let restored =

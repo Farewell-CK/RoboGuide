@@ -31,7 +31,8 @@ fence。每个新 resource claim 另有 typed `resource_id` 关联；不能从�
 reservation identity。v46 及更早 checkpoint 的既有 reservations 没有原始 demand 证据，restore 后记为 unavailable；
 不套当前 requirement/default 推测单位。Recovery-admin 通过 `/v1/resource-quotas` 提交完整
 expected-revision policy，使用原 operator authority gate、stable principal、幂等 receipt 与 Control
-command journal；read-only view 为 `/v1/resource-quotas`。任何有 quota 的 tenant 仍持有 legacy
+command journal；read-only `/v1/resource-quotas` view v0.2 列出全部已配置或已有 claim 的
+tenant/category，用量、可选上限和可选剩余量，避免无 policy 的真实承诺从视图消失。任何有 quota 的 tenant 仍持有 legacy
 unknown demand 时，不得安装该 tenant 的额度；无 quota tenant 可继续独立运行。恢复核对每个
 typed resource claim 恰有一个原 reservation、tenant 与 Mission 相符，且 policy history、current policy
 和 ledger limits 完全一致，不允许 claim 单独授权 reservation。

@@ -1,5 +1,9 @@
 # RoboGuide V2 架构基线
 
+[ADR-0141](../../decisions/0141-unconfigured-resource-quota-usage-view.md)使 read-only quota view
+同时暴露现有 claims 与配置限额；尚未设限的 tenant/category 保留真实用量，并将上限/剩余量标为
+`null`。实际 API 查询不创建 Node 或资源 inventory。
+
 [ADR-0140](../../decisions/0140-control-resource-quota-commitment.md)把已配置的
 revisioned tenant/category quota policy 经 recovery-admin `/v1/resource-quotas` 和 authority journal
 接入正常 Commit、Group Commit、Recovery 与 exact release；Control wrapper v47 checkpoint 同时保存

@@ -8,6 +8,22 @@ const MAX_RESOURCE_DEMAND_UNITS: u64 = u32::MAX as u64;
 /// Compatibility name for the domain's canonical tenant quota limit.
 pub type QuotaLimit = ResourceQuotaLimit;
 
+/// Read-only usage for one tenant/category, including commitments with no configured limit.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuotaUsage {
+    /// Tenant charged for the usage.
+    pub tenant_id: String,
+    /// Resource category charged.
+    pub kind: ResourceKind,
+    /// Current committed logical units.
+    pub used_units: u64,
+    /// Explicit maximum, absent until a policy configures one.
+    pub max_units: Option<u64>,
+    /// Remaining configured units, absent when no policy exists.
+    pub remaining_units: Option<u64>,
+}
+
 /// One idempotent logical quota claim; it grants no physical resource ownership.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -279,6 +295,38 @@ impl QuotaLedger {
         &self.limits
     }
 
+    /// Lists every configured or currently used tenant/category pair deterministically.
+    pub fn usage(&self) -> Vec<QuotaUsage> {
+        let mut keys = std::collections::BTreeSet::new();
+        keys.extend(
+            self.limits
+                .iter()
+                .map(|limit| (limit.tenant_id.clone(), limit.kind)),
+        );
+        keys.extend(
+            self.claims
+                .iter()
+                .map(|claim| (claim.tenant_id.clone(), claim.kind)),
+        );
+        keys.into_iter()
+            .map(|(tenant_id, kind)| {
+                let used_units = self.used(&tenant_id, kind);
+                let max_units = self
+                    .limits
+                    .iter()
+                    .find(|limit| limit.tenant_id == tenant_id && limit.kind == kind)
+                    .map(|limit| limit.max_units);
+                QuotaUsage {
+                    tenant_id,
+                    kind,
+                    used_units,
+                    max_units,
+                    remaining_units: max_units.map(|limit| limit.saturating_sub(used_units)),
+                }
+            })
+            .collect()
+    }
+
     /// Releases one exact claim; unknown claims are idempotently treated as already released.
     pub fn release(&mut self, claim_id: &str) -> Result<bool, QuotaError> {
         validate_text(claim_id, "claim_id")?;
@@ -434,6 +482,30 @@ mod tests {
         ));
         ledger.release_resource("resource-1");
         assert_eq!(ledger.remaining("tenant", ResourceKind::Compute), Some(3));
+    }
+
+    #[test]
+    fn usage_view_includes_existing_commitments_before_a_limit_is_configured() {
+        let mut ledger = QuotaLedger::new();
+        ledger
+            .track(QuotaClaim {
+                claim_id: resource_claim_id("resource-without-policy"),
+                tenant_id: "tenant-a".into(),
+                kind: ResourceKind::Compute,
+                units: 3,
+                resource_id: Some(ResourceId::new("resource-without-policy").unwrap()),
+            })
+            .unwrap();
+        assert_eq!(
+            ledger.usage(),
+            vec![QuotaUsage {
+                tenant_id: "tenant-a".into(),
+                kind: ResourceKind::Compute,
+                used_units: 3,
+                max_units: None,
+                remaining_units: None,
+            }]
+        );
     }
 
     #[test]
