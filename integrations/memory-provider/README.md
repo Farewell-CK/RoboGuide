@@ -36,6 +36,22 @@ Artifact service and Controller authorization. The local facade exposes fixed ro
 | GET `/v1/discover` | Return only explicit configured publish-eligible exports with verified bytes |
 | GET `/v1/export` | Resolve only an exact configured immutable manifest to its controlled handoff path |
 
+With `--listen-unix --enable-use-leases --enable-file-jobs --enable-content-reclamation`, the
+same-user private Unix socket also exposes `POST /v1/content/references` for acquire/exact-generation
+release and `GET /v1/content/references` for a bounded read-only observation. The closed v0.1
+request binds the provider ID and persistent provider instance. Acquire rehashes the actual local CAS
+file and refuses tombstoned content; release must match the original digest, kind, owner and
+generation. Reference IDs are single-generation and never reused: acquire/release retries are
+idempotent and a delayed acquire after release cannot reactivate the row. Use a new reference ID for
+each owner lifecycle. Active rows are consulted by Active Map GC and ContentReclamation; only the
+original ContentReclamation command can unlink bytes. This proves only the provider's local same-UID
+reference state, not remote replicas, global archive/catalog retirement, or device safety. See
+[ADR-0142](../../docs/decisions/0142-local-memory-content-reference-authority.md).
+
+`tools/quality/check_memory_reference_processes.py` starts the shipped provider twice around a real
+service restart, imports actual file bytes, and verifies reference persistence/release using the
+private Unix protocol and independently read SQLite. It creates no Node, device, model or simulator.
+
 The GET query/import routes receive bounded JSON through configuration-owned Node workflow
 bindings. Import requires `memory_import`, `memory_manifest`, and `staged_artifact`; query requires
 the original `memory_import` evidence. Configure v0.8 continuity with instance `/instance_id`, query

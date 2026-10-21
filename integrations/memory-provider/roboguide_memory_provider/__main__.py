@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .active_map import ActiveMapLedger
+from .content_references import ContentReferences
 from .jobs import FileJobs
 from .process_jobs import DEFAULT_ADDRESS_SPACE_BYTES, ProcessFileJobs
 from .reclamation import ContentReclamation
@@ -52,6 +53,7 @@ def handler_type(
     reclamation: ContentReclamation | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     """Bind an already configured actual backend to fixed readonly and import routes."""
+    references = ContentReferences(store) if reclamation is not None else None
 
     class Handler(BaseHTTPRequestHandler):
         """Accept bounded local JSON; clients never select arbitrary methods or backend paths."""
@@ -98,6 +100,12 @@ def handler_type(
                             "content reclamation requires the actual private Unix transport"
                         )
                     self._respond(200, reclamation.observe(self._body()["command_id"]))
+                elif references is not None and self.path == "/v1/content/references":
+                    if not isinstance(self.server, UnixServer):
+                        raise ValueError(
+                            "content references require the actual private Unix transport"
+                        )
+                    self._respond(200, references.observe(self._body()))
                 elif jobs is not None and self.path == "/v1/file-jobs/health":
                     self._respond(200, jobs.health())
                 elif jobs is not None and self.path == "/v1/file-jobs/status":
@@ -130,6 +138,13 @@ def handler_type(
         def do_POST(self) -> None:  # noqa: N802 - stdlib HTTP dispatch contract.
             """Import an exact actual staged file once under its complete original identity."""
             try:
+                if references is not None and self.path == "/v1/content/references":
+                    if not isinstance(self.server, UnixServer):
+                        raise ValueError(
+                            "content references require the actual private Unix transport"
+                        )
+                    self._respond(200, references.apply(self._body()))
+                    return
                 if reclamation is not None and self.path in {
                     "/v1/content/tombstone",
                     "/v1/content/collect",
@@ -313,6 +328,8 @@ def main() -> None:
         print(json.dumps({"endpoint": endpoint}), flush=True)
         try:
             server.serve_forever(poll_interval=0.2)
+        except KeyboardInterrupt:
+            pass
         finally:
             server.server_close()
     finally:

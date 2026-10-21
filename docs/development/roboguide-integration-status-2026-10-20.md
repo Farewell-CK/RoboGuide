@@ -3,6 +3,11 @@
 本次先同步远程并核对所有远程分支；在隔离工作树组合整改、MI 部署校验和执行故障闭环，
 保留其他工作树和未跟踪实验文件。没有启动实验、E6、模型、模拟器或设备。
 
+2026-10-21 [本地 Memory 内容引用生命周期](acceptance/2026-10-21-memory-content-reference-lifecycle.md)
+为现有 v3 `content_references` 增加 same-UID Unix acquire/query/exact-generation release；真实
+provider restart gate 证明活动行持久、release 重放和旧 acquire 不复活，零 Node/设备。它补齐
+provider-local 引用写入端，不闭合全局/跨主机 GC、replica/archive/Catalog 对账或 F4/F5。
+
 2026-10-21 [Control tenant quota commitment](../decisions/0140-control-resource-quota-commitment.md)
 接入 recovery-admin `/v1/resource-quotas` revisioned policy/authority journal、正常/Group/recovery
 Commit 与 Task/Context/Group/recovery release，wrapper v47 保存 policy/history/精确 claims；缺少

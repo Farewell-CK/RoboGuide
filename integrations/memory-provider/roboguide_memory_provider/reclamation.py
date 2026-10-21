@@ -11,6 +11,7 @@ from contextlib import closing
 from typing import Any
 
 from .active_map import ActiveMapLedger
+from .content_references import MAX_REFERENCES
 from .jobs import FileJobs
 from .store import DIGEST, MAX_METADATA_BYTES, MemoryStore, canonical, content_digest
 from .use_leases import UseLeases
@@ -108,12 +109,15 @@ class ContentReclamation:
         for binding in self.store._exports:
             if self.store._artifact(binding["manifest"])[0] == digest:
                 blockers.append("configured_source_export")
-        for reference, kind, owner in self.store._db.execute(
+        references = self.store._db.execute(
             "SELECT reference_id,kind,owner FROM content_references "
-            "WHERE content_digest=? AND active=1 ORDER BY reference_id",
-            (digest,),
-        ):
-            blockers.append(f"{kind}:{owner}:{reference}")
+            "WHERE content_digest=? AND active=1 ORDER BY reference_id LIMIT ?",
+            (digest, MAX_REFERENCES + 1),
+        ).fetchall()
+        if len(references) > MAX_REFERENCES:
+            blockers.append("provider_reference_set_exceeds_bound")
+        else:
+            blockers.extend(f"{kind}:{owner}:{reference}" for reference, kind, owner in references)
         blockers.extend(self.jobs.reclamation_blockers())
         blockers.extend(self.leases.content_retention_blockers(digest))
         for original in originals:

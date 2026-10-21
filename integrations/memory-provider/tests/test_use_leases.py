@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import http.client
 import json
 import socket
 import sqlite3
@@ -11,12 +12,14 @@ import tempfile
 import threading
 import uuid
 from collections.abc import Iterator
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 import pytest
 from roboguide_memory_provider import use_leases
 from roboguide_memory_provider.__main__ import UnixServer, handler_type
+from roboguide_memory_provider.content_references import ContentReferences
 from roboguide_memory_provider.jobs import FileJobs
 from roboguide_memory_provider.process_jobs import ProcessFileJobs
 from roboguide_memory_provider.reclamation import ContentReclamation
@@ -386,6 +389,23 @@ def reclamation_request(store: MemoryStore, grant: dict[str, Any]) -> dict[str, 
     }
 
 
+def content_reference_request(store: MemoryStore, grant: dict[str, Any]) -> dict[str, Any]:
+    """Bind one exact imported CAS object to an immutable local owner generation."""
+    artifact = json.loads(grant["preparation_json"])["inputs"][0]["manifest"]["artifact"]
+    return {
+        "schema": "roboguide.content-reference-command/v0.1",
+        "operation": "acquire",
+        "provider_id": store.provider_id,
+        "provider_instance_id": store.instance_id,
+        "reference_id": "lineage-" + uuid.uuid4().hex,
+        "content_digest": artifact["content_digest"],
+        "kind": "lineage",
+        "owner": grant["imports"][0]["import_id"],
+        "generation": 1,
+        "byte_size": artifact["byte_size"],
+    }
+
+
 def test_reclamation_requires_actual_original_revoke_and_preserves_history(
     prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
 ) -> None:
@@ -393,7 +413,9 @@ def test_reclamation_requires_actual_original_revoke_and_preserves_history(
     store, leases, grant, invocation = prepared
     jobs = FileJobs(store, leases)
     owner = ContentReclamation(store, leases, jobs, None)
+    references = ContentReferences(store)
     command = reclamation_request(store, grant)
+    reference = content_reference_request(store, grant)
     original = grant["imports"][0]
     try:
         assert owner.tombstone(command)["state"] == "blocked"
@@ -402,6 +424,38 @@ def test_reclamation_requires_actual_original_revoke_and_preserves_history(
         assert owner.tombstone(command)["state"] == "blocked"
         completion = store.query(original)
         leases.apply(revoke(grant))
+        active = references.apply(reference)
+        assert active["state"] == "active"
+        assert references.apply(reference) == active
+        blocked = owner.tombstone(command)
+        assert blocked["state"] == "blocked"
+        assert (
+            "lineage:" + reference["owner"] + ":" + reference["reference_id"]
+            in (blocked["reasons"])
+        )
+        changed_generation = {
+            **reference,
+            "operation": "release",
+            "generation": reference["generation"] + 1,
+        }
+        changed_generation.pop("byte_size")
+        with pytest.raises(ValueError, match="exact original"):
+            references.apply(changed_generation)
+        released = {**reference, "operation": "release"}
+        released.pop("byte_size")
+        release_receipt = references.apply(released)
+        assert release_receipt["state"] == "released"
+        assert references.apply(released) == release_receipt
+        observed = references.observe(
+            {
+                "schema": "roboguide.content-reference-query/v0.1",
+                "provider_id": store.provider_id,
+                "provider_instance_id": store.instance_id,
+                "reference_id": reference["reference_id"],
+            }
+        )
+        assert observed == release_receipt
+        assert references.apply(reference)["state"] == "released"
         tombstone = owner.tombstone(command)
         assert tombstone["state"] == "tombstoned"
         assert store._content.joinpath(command["content_digest"][7:]).is_file()
@@ -414,6 +468,7 @@ def test_reclamation_requires_actual_original_revoke_and_preserves_history(
                 str(store.input_roots[0] / "source"),
             )
         assert owner.tombstone(command) == tombstone
+        assert references.apply(reference) == release_receipt
         receipt = owner.collect(command)
         assert receipt["state"] == "deleted" and receipt["local_copy_only"] is True
         assert not store._content.joinpath(command["content_digest"][7:]).exists()
@@ -425,6 +480,55 @@ def test_reclamation_requires_actual_original_revoke_and_preserves_history(
         changed = {**command, "byte_size": command["byte_size"] - 1}
         with pytest.raises(ValueError, match="conflicts"):
             owner.tombstone(changed)
+    finally:
+        jobs.close()
+
+
+def test_reference_acquire_races_with_tombstone_without_leaving_unfenced_bytes(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """Serialize actual acquire and tombstone so one sees the other's committed authority."""
+    store, leases, grant, _ = prepared
+    jobs = FileJobs(store, leases)
+    references = ContentReferences(store)
+    owner = ContentReclamation(store, leases, jobs, None)
+    reference = content_reference_request(store, grant)
+    reclaim = reclamation_request(store, grant)
+    leases.apply(revoke(grant))
+    barrier = threading.Barrier(2)
+    outcomes: dict[str, Any] = {}
+
+    def acquire() -> None:
+        """Race the provider's actual reference writer against its removal gate."""
+        barrier.wait(timeout=5)
+        try:
+            outcomes["reference"] = references.apply(reference)
+        except ValueError as error:
+            outcomes["reference_error"] = str(error)
+
+    def tombstone() -> None:
+        """Race the original durable reclamation transaction against acquisition."""
+        barrier.wait(timeout=5)
+        outcomes["reclamation"] = owner.tombstone(reclaim)
+
+    workers = [threading.Thread(target=acquire), threading.Thread(target=tombstone)]
+    try:
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=10)
+            assert not worker.is_alive()
+        state = outcomes["reclamation"]["state"]
+        if "reference" in outcomes:
+            assert outcomes["reference"]["state"] == "active"
+            assert state == "blocked"
+            assert (
+                "lineage:" + reference["owner"] + ":" + reference["reference_id"]
+                in (outcomes["reclamation"]["reasons"])
+            )
+        else:
+            assert "tombstoned" in outcomes["reference_error"]
+            assert state == "tombstoned"
     finally:
         jobs.close()
 
@@ -604,6 +708,7 @@ def test_private_unix_reclamation_consumes_real_original_revocation(
     jobs = FileJobs(store, leases)
     owner = ContentReclamation(store, leases, jobs, None)
     command = reclamation_request(store, grant)
+    reference = content_reference_request(store, grant)
     try:
         with tempfile.TemporaryDirectory(prefix="rg-content-") as directory:
             path = Path(directory) / "local.sock"
@@ -615,8 +720,34 @@ def test_private_unix_reclamation_consumes_real_original_revocation(
                     unix_request(path, "/v1/content/tombstone", command, "POST")["state"]
                     == "blocked"
                 )
+                active = unix_request(path, "/v1/content/references", reference, "POST")
+                assert active["state"] == "active"
+                assert (
+                    unix_request(
+                        path,
+                        "/v1/content/references",
+                        {
+                            "schema": "roboguide.content-reference-query/v0.1",
+                            "provider_id": store.provider_id,
+                            "provider_instance_id": store.instance_id,
+                            "reference_id": reference["reference_id"],
+                        },
+                        "GET",
+                    )
+                    == active
+                )
                 unix_request(path, "/v1/memory-use/control", grant, "POST")
                 unix_request(path, "/v1/memory-use/control", revoke(grant), "POST")
+                assert (
+                    unix_request(path, "/v1/content/tombstone", command, "POST")["state"]
+                    == "blocked"
+                )
+                release = {**reference, "operation": "release"}
+                release.pop("byte_size")
+                assert (
+                    unix_request(path, "/v1/content/references", release, "POST")["state"]
+                    == "released"
+                )
                 tombstone = unix_request(path, "/v1/content/tombstone", command, "POST")
                 assert tombstone["state"] == "tombstoned"
                 assert (
@@ -637,6 +768,41 @@ def test_private_unix_reclamation_consumes_real_original_revocation(
                 thread.join(timeout=5)
                 assert not thread.is_alive()
     finally:
+        jobs.close()
+
+
+def test_content_references_reject_tcp_even_when_handler_has_reclamation_authority(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """A configured reference owner still refuses every non-Unix transport."""
+    store, leases, grant, _ = prepared
+    jobs = FileJobs(store, leases)
+    owner = ContentReclamation(store, leases, jobs, None)
+    reference = content_reference_request(store, grant)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_type(store, jobs, leases, None, owner))
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        try:
+            connection.request(
+                "POST",
+                "/v1/content/references",
+                body=canonical(reference),
+                headers={"Content-Length": str(len(canonical(reference)))},
+            )
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+        finally:
+            connection.close()
+        assert response.status == 409
+        assert "private Unix transport" in payload["error"]
+        assert store._db.execute("SELECT COUNT(*) FROM content_references").fetchone() == (0,)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        assert not thread.is_alive()
         jobs.close()
 
 

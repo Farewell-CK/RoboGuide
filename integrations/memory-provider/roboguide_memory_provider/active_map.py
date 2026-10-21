@@ -13,6 +13,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from .content_references import MAX_REFERENCES
 from .store import MemoryStore, canonical
 
 MAX_BUNDLE_BYTES = 512 * 1024 * 1024
@@ -741,15 +742,17 @@ class ActiveMapLedger:
             selector = _text(request["selector"], "selector")
             blockers = self.reclamation_blockers(digest)
             with self._lock:
-                refs = [
-                    f"{kind}:{owner}:{reference}"
-                    for reference, kind, owner in self.store._db.execute(
-                        "SELECT reference_id,kind,owner FROM content_references "
-                        "WHERE content_digest=? AND active=1 ORDER BY reference_id",
-                        (digest,),
+                refs = self.store._db.execute(
+                    "SELECT reference_id,kind,owner FROM content_references "
+                    "WHERE content_digest=? AND active=1 ORDER BY reference_id LIMIT ?",
+                    (digest, MAX_REFERENCES + 1),
+                ).fetchall()
+                if len(refs) > MAX_REFERENCES:
+                    blockers.append("provider_reference_set_exceeds_bound")
+                else:
+                    blockers.extend(
+                        f"{kind}:{owner}:{reference}" for reference, kind, owner in refs
                     )
-                ]
-                blockers.extend(refs)
                 if self._db.execute(
                     "SELECT 1 FROM heads WHERE selector=? AND state='active' "
                     "AND json_extract(context_json,'$.content_digest')=?",
