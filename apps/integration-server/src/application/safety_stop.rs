@@ -415,11 +415,11 @@ pub(crate) fn admit_group_stop(
     now: TimestampMs,
     timeout_ms: u64,
 ) -> Result<(), String> {
-    let commands: Vec<_> = controller
+    let command = controller
         .bridge
         .attempt_history()
         .into_iter()
-        .filter(|attempt| {
+        .find(|attempt| {
             let command = attempt.command();
             command.group_id() == group_id
                 && !attempt.status().is_terminal()
@@ -429,9 +429,8 @@ pub(crate) fn admit_group_stop(
                     command.role_id(),
                 ) == Some(attempt.execution_id())
         })
-        .map(|attempt| attempt.command().clone())
-        .collect();
-    for command in commands {
+        .map(|attempt| attempt.command().clone());
+    if let Some(command) = command {
         admit(
             controller,
             group_id,

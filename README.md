@@ -1,5 +1,9 @@
 # RoboGuide
 
+[关系异常目标覆盖](docs/decisions/0137-terminal-relation-target-stop-coverage.md)保留原
+Task/Role：本地 Completed 而缺少 relation proof 的目标，仍需独立 stop/hold 门禁。
+全组 peers 复用既有停止 authority；不会从本地终态推导设备安全。
+
 [成员本地 leader transfer](docs/decisions/0136-member-local-leader-transfer-evidence.md)
 按原 ID 保留历史；丢失回包保持 Unknown，不重复选举。完成要求目标独立 quorum 与源的
 认证只读观察，Raft snapshot 不携带本地 hold。Replica storage v2 / recovery v0.6 保护

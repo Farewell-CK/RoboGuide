@@ -15,6 +15,11 @@ fn parallel_plan() -> domain::MissionPlan {
 
 /// Builds the same physical topology with an optional independent final verifier.
 fn parallel_plan_with_verifier(verifier_first_task: bool) -> domain::MissionPlan {
+    parallel_plan_with_options(verifier_first_task, false)
+}
+
+/// Varies accepted semantic verification and relation declarations without inventing deployment facts.
+fn parallel_plan_with_options(verifier_first_task: bool, relation: bool) -> domain::MissionPlan {
     let operation = serde_json::json!({"namespace": "compute", "name": "work", "version": "v1"});
     let mut tasks = ["a", "b"].map(|id| serde_json::json!({
         "id": id, "description": "independent work", "depends_on": [],
@@ -43,7 +48,11 @@ fn parallel_plan_with_verifier(verifier_first_task: bool) -> domain::MissionPlan
         "schema_version": "roboguide.mission-plan/v0.7",
         "mission": {"id": "parallel-mission", "objective": "parallel work", "actors": [{"id": "a"}, {"id": "b"}]},
         "contexts": [{"id": "parallel-context", "roles": [{"id": "a", "actor": "a"}, {"id": "b", "actor": "b"}],
-            "relations": [], "coupling_mode": "independent"}],
+            "relations": if relation { serde_json::json!([{
+                "id": "source-must-remain-active", "kind": "requires-active",
+                "source": {"task_id": "a", "role_id": "worker"},
+                "target": {"task_id": "b", "role_id": "worker"}
+            }]) } else { serde_json::json!([]) }, "coupling_mode": "independent"}],
         "tasks": tasks
     }).to_string()).expect("canonical MissionPlan decodes")
 }
@@ -72,16 +81,21 @@ impl ParallelMission {
 
     /// Runs the same real application path with one Task awaiting external evidence.
     fn new_with_verifier(verifier_first_task: bool) -> Self {
-        let directory = tempfile::tempdir().expect("isolated controller directory");
-        let events = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
-            .expect("event log opens");
-        let correlation = CorrelationId::new("parallel-replay").expect("correlation");
-        let group_id = ExecutionGroupId::new("parallel-group").expect("Group");
         let plan = if verifier_first_task {
             parallel_plan_with_verifier(true)
         } else {
             parallel_plan()
         };
+        Self::new_with_plan(plan)
+    }
+
+    /// Dispatches an accepted plan through the maintained Control and Runtime composition.
+    fn new_with_plan(plan: domain::MissionPlan) -> Self {
+        let directory = tempfile::tempdir().expect("isolated controller directory");
+        let events = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
+            .expect("event log opens");
+        let correlation = CorrelationId::new("parallel-replay").expect("correlation");
+        let group_id = ExecutionGroupId::new("parallel-group").expect("Group");
         let mut control = control::ControlPlane::new();
         let mut state = state::InMemorySharedNodeState::new();
         for (node, resource) in [("node-a", "cpu-a"), ("node-b", "cpu-b")] {
@@ -97,6 +111,7 @@ impl ParallelMission {
                 .expect("register Node");
         }
         let mut orchestrator = MissionOrchestrator::new();
+        let relation_plan = plan.clone();
         orchestrator
             .submit(
                 plan,
@@ -126,6 +141,15 @@ impl ParallelMission {
             verifier_artifact_store: None,
             verifier_source_digest: None,
         };
+        controller
+            .bridge
+            .register_execution_relations(
+                &relation_plan,
+                &group_id,
+                TimestampMs::new(2),
+                &correlation,
+            )
+            .expect("accepted relation declarations register before dispatch");
         events.begin_batch().unwrap();
         drive_ready_tasks(
             &mut controller,
@@ -870,5 +894,128 @@ fn blocked_parallel_group_defers_sibling_failure() {
             .expect("Mission")
             .lifecycle(),
         orchestration::MissionExecutionLifecycle::Running
+    );
+}
+
+/// A local Completed target without relation proof retains its own stop gate and all live peers.
+#[test]
+fn terminal_relation_target_retains_stop_gate_with_or_without_live_peer() {
+    use crate::application::safety_stop;
+    for source_terminal in [false, true] {
+        let mut fixture = ParallelMission::new_with_plan(parallel_plan_with_options(false, true));
+        fixture.fact(
+            0,
+            1,
+            if source_terminal {
+                ExecutionPhase::Completed
+            } else {
+                ExecutionPhase::Started
+            },
+        );
+        let before = fixture
+            .controller
+            .bridge
+            .control()
+            .allocation_snapshot(TimestampMs::new(10));
+        fixture.fact(1, 1, ExecutionPhase::Completed);
+        let target = &fixture.attempts[1];
+        assert!(
+            fixture
+                .controller
+                .safety_stops
+                .contains_key(target.execution_id()),
+            "terminal relation target was omitted with source_terminal={source_terminal}"
+        );
+        assert_eq!(
+            fixture.controller.safety_stops.len(),
+            if source_terminal { 1 } else { 2 }
+        );
+        assert!(safety_stop::blocks_release(
+            &fixture.controller,
+            target.command().mission_id()
+        ));
+        assert!(
+            fixture
+                .controller
+                .orchestrator
+                .execution(target.command().mission_id())
+                .unwrap()
+                .isolation()
+                .is_some()
+        );
+        assert_eq!(
+            fixture
+                .controller
+                .bridge
+                .control()
+                .allocation_snapshot(TimestampMs::new(10)),
+            before
+        );
+        assert_eq!(
+            fixture
+                .controller
+                .bridge
+                .attempt_history()
+                .into_iter()
+                .find(|a| a.execution_id() == target.execution_id())
+                .unwrap()
+                .status(),
+            runtime::ExecutionStatus::Completed
+        );
+        let saved = server_checkpoint_json(&fixture.controller)
+            .expect("frozen original stop evidence remains serializable");
+        assert!(saved.contains(target.execution_id()));
+    }
+}
+
+/// One Group-stop admission covers both current peers and preserves original deadlines on replay.
+#[test]
+fn group_stop_covers_all_current_peers_without_replacing_original_purposes() {
+    use crate::application::safety_stop;
+    let mut fixture = ParallelMission::new();
+    fixture.fact(0, 1, ExecutionPhase::Started);
+    fixture.fact(1, 1, ExecutionPhase::Started);
+    let before = fixture
+        .controller
+        .bridge
+        .control()
+        .allocation_snapshot(TimestampMs::new(10))
+        .unwrap();
+    safety_stop::admit_group_stop(
+        &mut fixture.controller,
+        &fixture.group_id,
+        TimestampMs::new(11),
+        100,
+    )
+    .unwrap();
+    let frozen = serde_json::to_value(&fixture.controller.safety_stops).unwrap();
+    assert_eq!(fixture.controller.safety_stops.len(), 2);
+    for attempt in &fixture.attempts {
+        assert!(
+            fixture
+                .controller
+                .safety_stops
+                .contains_key(attempt.execution_id())
+        );
+    }
+    safety_stop::admit_group_stop(
+        &mut fixture.controller,
+        &fixture.group_id,
+        TimestampMs::new(12),
+        200,
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(&fixture.controller.safety_stops).unwrap(),
+        frozen
+    );
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .control()
+            .allocation_snapshot(TimestampMs::new(10))
+            .unwrap(),
+        before
     );
 }

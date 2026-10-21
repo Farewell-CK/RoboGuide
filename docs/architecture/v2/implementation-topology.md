@@ -4,6 +4,9 @@
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
 
+Relation stop 保留 exact Task/Role target；缺少 relation proof 的 Completed target 与
+当前 live peers 一起进入现有独立 stop/hold 门禁。单元合同的合成 Node 观察不进入部署。
+
 2026-10-21 Replica storage v2 同时拥有实际 SQL inode 与 sibling writer lease。升级须先
 核对原 identity、由 SQLite 排空旧连接，再原子提交只读旧表 fence；缺失 identity 不自动
 修复。Recovery v0.6 冻结相同 writer，并在 bundle verify/restore 重查完整格式与原 transfer

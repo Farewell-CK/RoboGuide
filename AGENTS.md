@@ -1,5 +1,11 @@
 # Repository Guidelines
 
+ADR-0137 preserves the exact relation target when admitting safety stop. Existing admit already
+covers all current live Group peers plus that target, including locally Completed without relation
+proof. Ordinary Group stop selects one live entry and delegates once. Synthetic contract tests
+cover live/all-terminal source cases, original ownership/result and nonrenewing replay; these never
+create deployment facts or prove device stopping. No checkpoint/Node contract changes are implied.
+
 ADR-0136 retains bounded member-local transfer history under Replica storage v2 and explicit
 recovery v0.6, preserving original IDs and fencing v1 binaries. Raft snapshots never import or erase
 this operational authority. TransferLeadershipV2 rejects old target commands; loss/cancellation

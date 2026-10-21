@@ -1,5 +1,9 @@
 # RoboGuide V2 架构基线
 
+[ADR-0137](../../decisions/0137-terminal-relation-target-stop-coverage.md)保留 relation 的
+exact target：Completed 但缺少 relation proof 的目标，仍与当前活跃 peers 一起经过原
+stop/hold 门禁。普通 Group stop 复用既有全组覆盖，不从本地终态推导设备停止。
+
 [ADR-0136](../../decisions/0136-member-local-leader-transfer-evidence.md)纠正 transfer 与
 Raft snapshot 的边界：成员本地不可覆盖历史、Unknown 不重发、目标实际 quorum 证明及
 源独立只读观察；显式 target command/storage v2/recovery v0.6 fence 保护新语义。
