@@ -84,6 +84,7 @@ class ProcessFileJobs(FileJobs):
                 "WHERE state='RUNNING'"
             )
             self._db.commit()
+            self._reconcile_execution_references()
         except BaseException:
             self._db.rollback()
             self._db.close()
@@ -131,16 +132,9 @@ class ProcessFileJobs(FileJobs):
             }
             return result
 
-    def reclamation_blockers(self) -> list[str]:
-        """Retain unknown original readers even when today's parent owns no live Popen handle."""
-        with self._mutex:
-            return super().reclamation_blockers() + [
-                "unverified_original_process:" + row[0]
-                for row in self._db.execute(
-                    "SELECT execution_id FROM original_processes WHERE exit_json IS NULL "
-                    "ORDER BY execution_id"
-                )
-            ]
+    def reclamation_blockers(self, digest: str | None = None) -> list[str]:
+        """Use exact durable execution references for active and unreaped original readers."""
+        return super().reclamation_blockers(digest)
 
     def _save_budget(self, invocation: dict[str, Any], admitted_ns: int, budget_ms: int) -> None:
         """Persist the original instance and kernel budget before process or file effects."""
@@ -211,10 +205,15 @@ class ProcessFileJobs(FileJobs):
             )
 
     def _retire(self, execution: str) -> None:
-        """Keep local content references if an original process could not actually be reaped."""
+        """Release only after the exact original OS wait has been durably recorded."""
         original = self._processes.get(execution)
+        proof = self._db.execute(
+            "SELECT exit_json FROM original_processes WHERE execution_id=?", (execution,)
+        ).fetchone()
         if original is None or original.returncode is not None:
-            super()._retire(execution)
+            self._active.pop(execution, None)
+            if proof is not None and proof[0]:
+                self._content_references.synchronize_execution(execution, 0, [], False)
 
     def _record_exit(self, execution: str, process: subprocess.Popen[bytes], code: int) -> None:
         """Persist only an actual original wait result, retaining the immutable instance and PID."""

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
-from .store import DIGEST, MemoryStore
+from .store import DIGEST, MemoryStore, canonical
 
 MAX_REFERENCES = 16_384
 KINDS = frozenset({"execution", "lineage", "replica", "snapshot", "archive", "use_lease"})
@@ -70,12 +71,108 @@ class ContentReferences:
             or not 0 < generation <= 2**63 - 1
         ):
             raise ValueError("content reference digest, kind, or generation is invalid")
+        if kind == "execution" and owner.startswith("file-job:"):
+            raise ValueError("file-job execution references are owned by the job journal")
         if operation == "acquire" and (
             type(request["byte_size"]) is not int
             or not 0 <= request["byte_size"] <= self.store.max_bytes
         ):
             raise ValueError("content reference byte size is invalid")
         return reference, digest, kind, owner, generation
+
+    @staticmethod
+    def execution_owner(execution_id: str) -> str:
+        """Map an immutable execution ID to the reserved bounded local job-reference owner."""
+        execution_id = _text(execution_id, "execution_id", 1024)
+        return "file-job:" + hashlib.sha256(execution_id.encode()).hexdigest()
+
+    def synchronize_execution(
+        self,
+        execution_id: str,
+        generation: int,
+        manifests: list[dict[str, Any]],
+        active: bool,
+    ) -> None:
+        """Tie exact file-job input CAS rows to the durable execution lifecycle."""
+        owner = self.execution_owner(execution_id)
+        if not active:
+            with self.store._mutex, self.store._db:
+                self.store._db.execute(
+                    "DELETE FROM content_references WHERE kind='execution' AND owner=?", (owner,)
+                )
+            return
+        if type(generation) is not int or not 0 <= generation <= 2**63 - 1 or len(manifests) > 8:
+            raise ValueError("file-job execution reference coverage is unavailable")
+        if not manifests:
+            with self.store._mutex:
+                existing = self.store._db.execute(
+                    "SELECT 1 FROM content_references WHERE kind='execution' AND owner=? LIMIT 1",
+                    (owner,),
+                ).fetchone()
+                if existing is not None:
+                    raise ValueError("original file-job execution acquired different input content")
+            return
+        if generation == 0:
+            raise ValueError("active file-job execution requires its exact positive generation")
+        pending: list[tuple[str, str, int, str, int]] = []
+        for manifest in manifests:
+            digest, size = self.store._artifact(manifest)
+            selector_digest = hashlib.sha256(canonical(manifest["selector"])).hexdigest()
+            reference_id = f"file-job:{owner[9:]}:{generation}:{selector_digest}"
+            pending.append((reference_id, digest, size, owner, generation))
+        unique = {row[0]: row for row in pending}
+        if any(unique[row[0]] != row for row in pending):
+            raise ValueError("file-job execution reference identity conflicts")
+        pending = list(unique.values())
+        with self.store._mutex:
+            for _, digest, _, _, _ in pending:
+                self.store.require_content_live(digest)
+            rows = self.store._db.execute(
+                "SELECT reference_id,content_digest,generation,active FROM content_references "
+                "WHERE kind='execution' AND owner=? ORDER BY reference_id",
+                (owner,),
+            ).fetchall()
+            expected = sorted((ref, digest, current, 1) for ref, digest, _, _, current in pending)
+            if rows:
+                if rows != expected:
+                    raise ValueError("original file-job execution reference identity conflicts")
+                return
+            for _, digest, size, _, _ in pending:
+                if not self.store._verify_content(digest, size):
+                    raise ValueError("file-job execution requires matching live provider bytes")
+            with self.store._db:
+                count = self.store._db.execute(
+                    "SELECT COUNT(*) FROM content_references"
+                ).fetchone()[0]
+                if count + len(pending) > MAX_REFERENCES:
+                    raise ValueError("provider content reference history is full")
+                self.store._db.executemany(
+                    "INSERT INTO content_references "
+                    "(reference_id,content_digest,kind,owner,generation,active) "
+                    "VALUES (?,?, 'execution', ?, ?, 1)",
+                    [
+                        (reference, digest, owner, current)
+                        for reference, digest, _, owner, current in pending
+                    ],
+                )
+
+    def prune_execution_projections(self, retained_owners: set[str]) -> None:
+        """Remove only orphaned projections in the reserved file-job namespace."""
+        with self.store._mutex:
+            owners = {
+                row[0]
+                for row in self.store._db.execute(
+                    "SELECT DISTINCT owner FROM content_references "
+                    "WHERE kind='execution' AND owner GLOB 'file-job:*'"
+                )
+            }
+            stale = owners - retained_owners
+            if stale:
+                with self.store._db:
+                    self.store._db.executemany(
+                        "DELETE FROM content_references WHERE kind='execution' AND owner=?",
+                        [(owner,) for owner in sorted(stale)],
+                    )
 
     def _receipt(
         self,

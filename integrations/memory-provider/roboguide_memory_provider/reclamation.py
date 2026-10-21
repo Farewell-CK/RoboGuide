@@ -118,7 +118,7 @@ class ContentReclamation:
             blockers.append("provider_reference_set_exceeds_bound")
         else:
             blockers.extend(f"{kind}:{owner}:{reference}" for reference, kind, owner in references)
-        blockers.extend(self.jobs.reclamation_blockers())
+        blockers.extend(self.jobs.reclamation_blockers(digest))
         blockers.extend(self.leases.content_retention_blockers(digest))
         for original in originals:
             try:

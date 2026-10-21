@@ -57,6 +57,15 @@ failure leaves an active row or independent lease blocker until replay repairs i
 Restart fencing is local software evidence only and does not count as the original Controller revoke
 receipt required by ContentReclamation. See [ADR-0143](../../docs/decisions/0143-use-lease-reference-projection.md).
 
+Actual local `FileJobs` admissions also create reserved `execution` references for their imported
+CAS inputs. Thread work releases after its terminal result and reader close; process work releases
+only after the original PID has been reaped and its wait receipt committed. On restart, unresolved
+jobs rebuild references from their frozen invocation without retrying the work, so `UNKNOWN` jobs
+continue to block collection of the specific input bytes. Declared export files outside the provider
+CAS are not covered by ContentReclamation. External reference commands cannot claim the reserved
+`file-job:` owner namespace. This local projection is described in
+[ADR-0144](../../docs/decisions/0144-file-job-content-references.md).
+
 `tools/quality/check_memory_reference_processes.py` starts the shipped provider twice around a real
 service restart, imports actual file bytes, and verifies reference persistence/release using the
 private Unix protocol and independently read SQLite. It creates no Node, device, model or simulator.

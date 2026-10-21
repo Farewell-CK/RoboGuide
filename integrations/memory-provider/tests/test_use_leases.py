@@ -8,8 +8,10 @@ import http.client
 import json
 import socket
 import sqlite3
+import subprocess
 import tempfile
 import threading
+import time
 import uuid
 from collections.abc import Iterator
 from http.server import ThreadingHTTPServer
@@ -596,6 +598,246 @@ def test_reclamation_requires_actual_original_revoke_and_preserves_history(
             owner.tombstone(changed)
     finally:
         jobs.close()
+
+
+def test_actual_file_job_reference_fences_only_its_input_until_worker_exits(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An actual paused file reader fences its CAS after revoke and releases after thread exit."""
+    store, leases, grant, invocation = prepared
+    leases.apply(grant)
+    jobs = FileJobs(store, leases, max_job_seconds=30, max_job_rounds=256)
+    owner = ContentReclamation(store, leases, jobs, None)
+    entered = threading.Event()
+    resume = threading.Event()
+    original_hash = jobs._hash_inputs
+
+    def pause_before_hash(*args: Any, **kwargs: Any) -> list[str]:
+        """Hold the actual opened-input worker at a bounded read boundary for the GC race."""
+        entered.set()
+        if not resume.wait(timeout=5):
+            raise TimeoutError("actual file-job test worker was not released")
+        return original_hash(*args, **kwargs)
+
+    monkeypatch.setattr(jobs, "_hash_inputs", pause_before_hash)
+    command = reclamation_request(store, grant)
+    execution = invocation["execution_id"]
+    worker: threading.Thread | None = None
+    try:
+        assert jobs.submit(invocation)["state"] == "RUNNING"
+        assert entered.wait(timeout=5)
+        worker = jobs._workers[execution]
+        references = store._db.execute(
+            "SELECT content_digest,kind,owner,generation,active FROM content_references "
+            "WHERE kind='execution' AND active=1"
+        ).fetchall()
+        assert len(references) == 1
+        assert references[0][0] == command["content_digest"]
+        assert references[0][1:] == (
+            "execution",
+            ContentReferences.execution_owner(execution),
+            1,
+            1,
+        )
+        leases.apply(revoke(grant))
+        blocked = owner.tombstone(command)
+        assert blocked["state"] == "blocked"
+        assert any(reason.startswith("execution:file-job:") for reason in blocked["reasons"])
+        resume.set()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert jobs.status(execution)["state"] == "CANCELLED"
+        assert store._db.execute(
+            "SELECT COUNT(*) FROM content_references WHERE kind='execution' AND active=1"
+        ).fetchone() == (0,)
+        assert owner.tombstone(command)["state"] == "tombstoned"
+        assert owner.collect(command)["state"] == "deleted"
+    finally:
+        resume.set()
+        if worker is not None:
+            worker.join(timeout=5)
+        jobs.close()
+
+
+@pytest.mark.parametrize("failed_table", ["content-reference", "job-intent"])
+def test_file_job_admission_failure_never_leaves_a_dangling_or_unfenced_intent(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+    failed_table: str,
+) -> None:
+    """Injected SQLite failures leave neither a phantom job nor an orphan live execution ref."""
+    store, leases, grant, invocation = prepared
+    leases.apply(grant)
+    jobs = FileJobs(store, leases)
+    try:
+        if failed_table == "content-reference":
+            store._db.execute(
+                "CREATE TRIGGER reject_execution_reference BEFORE INSERT ON content_references "
+                "WHEN NEW.kind='execution' "
+                "BEGIN SELECT RAISE(ABORT,'execution reference fault'); END"
+            )
+            store._db.commit()
+            error = "execution reference fault"
+        else:
+            jobs._db.execute(
+                "CREATE TRIGGER reject_job_intent BEFORE INSERT ON jobs "
+                "BEGIN SELECT RAISE(ABORT,'job intent fault'); END"
+            )
+            jobs._db.commit()
+            error = "job intent fault"
+        with pytest.raises(sqlite3.IntegrityError, match=error):
+            jobs.compute(invocation)
+        assert jobs.status(invocation["execution_id"])["state"] == "UNKNOWN"
+        assert store._db.execute(
+            "SELECT COUNT(*) FROM content_references WHERE kind='execution' AND active=1"
+        ).fetchone() == (0,)
+        assert jobs._db.execute("SELECT COUNT(*) FROM jobs WHERE state='RUNNING'").fetchone() == (
+            0,
+        )
+    finally:
+        jobs.close()
+
+
+def test_original_child_wait_receipt_sql_failure_retains_input_gc_reference(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """A real reaped PID without committed wait evidence leaves its exact CAS fenced."""
+    store, leases, grant, invocation = prepared
+    leases.apply(grant)
+    invocation["execution_generation"] = 1
+    jobs = ProcessFileJobs(store, leases)
+    owner = ContentReclamation(store, leases, jobs, None)
+    command = reclamation_request(store, grant)
+    try:
+        jobs._db.execute(
+            "CREATE TRIGGER reject_original_wait BEFORE UPDATE OF exit_json ON original_processes "
+            "BEGIN SELECT RAISE(ABORT,'original wait receipt fault'); END"
+        )
+        jobs._db.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="original wait receipt fault"):
+            jobs.compute(invocation)
+        process = jobs._processes[invocation["execution_id"]]
+        assert process.returncode is not None
+        assert jobs._db.execute(
+            "SELECT exit_json FROM original_processes WHERE execution_id=?",
+            (invocation["execution_id"],),
+        ).fetchone() == (None,)
+        assert store._db.execute(
+            "SELECT generation,active FROM content_references WHERE kind='execution'"
+        ).fetchall() == [(1, 1)]
+        leases.apply(revoke(grant))
+        assert owner.tombstone(command)["state"] == "blocked"
+    finally:
+        jobs.close()
+
+
+def test_actual_child_exit_releases_only_after_original_wait_and_blocks_gc(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real imported-CAS child keeps its reference through revoke until original wait."""
+    store, leases, grant, invocation = prepared
+    leases.apply(grant)
+    invocation["execution_generation"] = 1
+    jobs = ProcessFileJobs(store, leases, max_job_seconds=30, max_job_rounds=256)
+    owner = ContentReclamation(store, leases, jobs, None)
+    command = reclamation_request(store, grant)
+    execution = invocation["execution_id"]
+    proof_recorded = threading.Event()
+    release_worker = threading.Event()
+    original_record = jobs._record_quota_proof
+
+    def pause_before_child_read(
+        current_execution: str,
+        process: subprocess.Popen[bytes],
+        proof: dict[str, Any],
+    ) -> None:
+        """Hold the actual child after kernel proof and before granting its first read."""
+        original_record(current_execution, process, proof)
+        proof_recorded.set()
+        if not release_worker.wait(timeout=5):
+            raise TimeoutError("actual process test did not release its child")
+
+    monkeypatch.setattr(jobs, "_record_quota_proof", pause_before_child_read)
+    try:
+        assert jobs.submit(invocation)["state"] == "RUNNING"
+        deadline = time.monotonic() + 5
+        while not proof_recorded.is_set() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert proof_recorded.is_set()
+        process = jobs._processes[execution]
+        assert process.poll() is None
+        leases.apply(revoke(grant))
+        assert owner.tombstone(command)["state"] == "blocked"
+        assert store._db.execute(
+            "SELECT generation,active FROM content_references WHERE kind='execution'"
+        ).fetchall() == [(1, 1)]
+        assert jobs.cancel(execution)["accepted"] is True
+        release_worker.set()
+        deadline = time.monotonic() + 10
+        while jobs.status(execution)["state"] not in {"CANCELLED", "FAILED"}:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("original local child did not reach a terminal result")
+            time.sleep(0.01)
+        assert process.returncode is not None
+        assert (
+            jobs._db.execute(
+                "SELECT pid,exit_json FROM original_processes WHERE execution_id=?", (execution,)
+            ).fetchone()[1]
+            is not None
+        )
+        assert store._db.execute(
+            "SELECT COUNT(*) FROM content_references WHERE kind='execution' AND active=1"
+        ).fetchone() == (0,)
+        assert owner.tombstone(command)["state"] == "tombstoned"
+        assert owner.collect(command)["state"] == "deleted"
+    finally:
+        release_worker.set()
+        jobs.close()
+
+
+def test_restart_rebuilds_unknown_job_reference_without_reexecuting(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """Reopen an admitted job after simulated owner death; retain GC fence without replay."""
+    store, leases, grant, invocation = prepared
+    leases.apply(grant)
+    original_jobs = FileJobs(store, leases)
+    command = reclamation_request(store, grant)
+    execution = invocation["execution_id"]
+    jobs_closed = False
+    try:
+        admission = original_jobs._admit(invocation)
+        assert admission is not None
+        leases.apply(revoke(grant))
+        leases.close()
+        assert store._db.execute(
+            "SELECT COUNT(*) FROM content_references WHERE kind='execution' AND active=1"
+        ).fetchone() == (1,)
+        original_jobs._active.clear()  # Simulate abrupt loss after durable admission.
+        original_jobs.close()
+        jobs_closed = True
+        reopened_leases = UseLeases(store)
+        reopened_jobs = FileJobs(store, reopened_leases)
+        reopened_owner = ContentReclamation(store, reopened_leases, reopened_jobs, None)
+        try:
+            assert reopened_jobs.status(execution)["state"] == "UNKNOWN"
+            assert reopened_jobs.compute(invocation)["state"] == "UNKNOWN"
+            assert store._db.execute(
+                "SELECT generation,active FROM content_references "
+                "WHERE kind='execution' AND owner=?",
+                (ContentReferences.execution_owner(execution),),
+            ).fetchall() == [(1, 1)]
+            blocked = reopened_owner.tombstone(command)
+            assert blocked["state"] == "blocked"
+            assert any(reason.startswith("execution:file-job:") for reason in blocked["reasons"])
+        finally:
+            reopened_jobs.close()
+            reopened_leases.close()
+    finally:
+        if not jobs_closed:
+            original_jobs._active.clear()
+            original_jobs.close()
 
 
 def test_reference_acquire_races_with_tombstone_without_leaving_unfenced_bytes(

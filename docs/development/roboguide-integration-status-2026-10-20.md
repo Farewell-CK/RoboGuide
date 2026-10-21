@@ -15,6 +15,13 @@ use-lease 行改为 GC 当前状态投影；命令历史继续由原 UseLeases j
 命令重放对账。公共引用 API 不能声明内部 use_lease 类型。20 代续期回归通过；显式 owner 引用、
 跨主机副本/Archive/Catalog 对账和 F4/F5 总闭环仍待完成。
 
+2026-10-21 [本地 FileJobs CAS 执行引用](acceptance/2026-10-21-file-job-content-references.md)
+FileJobs admission 将原 execution 与每个导入 CAS digest 关联；GC 按 digest 检查活动引用，线程
+任务终态后释放，进程任务须先持久化原 PID wait。restart 从原 invocation 恢复 Unknown 引用且不
+重执行。真实 CAS import、线程、POSIX child/revoke/cancel/wait 与 tombstone 回归通过；声明的外部
+export 不属于该 CAS GC 范围。Replica/Archive/Controller Catalog 生产接线、跨主机撤权和全局 GC
+仍开放，见 ADR-0144。
+
 2026-10-21 [Control tenant quota commitment](../decisions/0140-control-resource-quota-commitment.md)
 接入 recovery-admin `/v1/resource-quotas` revisioned policy/authority journal、正常/Group/recovery
 Commit 与 Task/Context/Group/recovery release，wrapper v47 保存 policy/history/精确 claims；缺少

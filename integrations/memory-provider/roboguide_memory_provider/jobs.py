@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from .content_references import ContentReferences
 from .store import MemoryStore, canonical, content_digest
 from .use_leases import UseLeases, UsePermissionEnded
 
@@ -43,8 +44,11 @@ class FileJobs:
         self._workers: dict[str, threading.Thread] = {}
         self._closing = False
         self._db = store._storage.connect("file-jobs.sqlite3")
+        self._content_references = ContentReferences(store)
         try:
             self._initialize_database()
+            if type(self) is FileJobs:
+                self._reconcile_execution_references()
         except BaseException:
             self._db.close()
             raise
@@ -87,6 +91,68 @@ class FileJobs:
         )
         self._db.commit()
 
+    def _reconcile_execution_references(self) -> None:
+        """Rebuild exact references for unresolved original jobs and prune abandoned intents."""
+        with self._mutex:
+            has_process_authority = (
+                self._db.execute(
+                    "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='original_processes'"
+                ).fetchone()
+                is not None
+            )
+            rows = self._db.execute(
+                f"SELECT execution_id,invocation_json,state FROM {self._table} "
+                "ORDER BY execution_id"
+            ).fetchall()
+            retained: set[str] = set()
+            for execution, encoded, state in rows:
+                unresolved = state in {"RUNNING", "UNKNOWN"}
+                if has_process_authority:
+                    process = self._db.execute(
+                        "SELECT exit_json FROM original_processes WHERE execution_id=?",
+                        (execution,),
+                    ).fetchone()
+                    if process is not None:
+                        unresolved = process[0] is None
+                if not unresolved:
+                    self._content_references.synchronize_execution(execution, 0, [], False)
+                    continue
+                if encoded is None:
+                    raise ValueError(
+                        "unresolved file job has no original invocation for GC fencing"
+                    )
+                invocation = json.loads(encoded)
+                generation = self._execution_generation(invocation)
+                self._content_references.synchronize_execution(
+                    execution, generation, self._reference_manifests(invocation), True
+                )
+                retained.add(self._content_references.execution_owner(execution))
+            self._content_references.prune_execution_projections(retained)
+
+    @staticmethod
+    def _execution_generation(invocation: dict[str, Any]) -> int:
+        """Resolve the frozen attempt generation or use the local legacy generation one."""
+        value = invocation.get("execution_generation")
+        if value is None:
+            value = FileJobs._original_generation(invocation) or 1
+        if type(value) is not int or not 0 < value <= 2**63 - 1:
+            raise ValueError("original file-job execution generation is unavailable")
+        return value
+
+    @staticmethod
+    def _reference_manifests(invocation: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return only prepared imported CAS manifests; declared external exports are not CAS."""
+        preparation = invocation.get("memory_preparation", {})
+        inputs = preparation.get("inputs", []) if isinstance(preparation, dict) else []
+        if not isinstance(inputs, list) or len(inputs) > 8:
+            raise ValueError("file-job reference inputs exceed their original bound")
+        manifests = []
+        for item in inputs:
+            if not isinstance(item, dict) or not isinstance(item.get("manifest"), dict):
+                raise ValueError("file-job reference input lacks exact imported manifest")
+            manifests.append(item["manifest"])
+        return manifests
+
     def close(self) -> None:
         """Fence admission and join owned workers before closing original outcome storage."""
         with self._mutex:
@@ -123,14 +189,22 @@ class FileJobs:
                 "assurance": "software-computation",
             }
 
-    def reclamation_blockers(self) -> list[str]:
-        """Retain content during admission, actual thread work and open-input processing."""
+    def reclamation_blockers(self, digest: str | None = None) -> list[str]:
+        """Return exact input-content execution references instead of blocking the full provider."""
         with self._mutex:
+            query = (
+                "SELECT reference_id,owner FROM content_references "
+                "WHERE kind='execution' AND owner GLOB 'file-job:*' AND active=1"
+            )
+            parameters: tuple[str, ...] = ()
+            if digest is not None:
+                query += " AND content_digest=?"
+                parameters = (digest,)
+            query += " ORDER BY owner,reference_id"
             return [
-                "live_worker:" + execution
-                for execution, worker in self._workers.items()
-                if worker.is_alive()
-            ] + ["active_execution:" + execution for execution in sorted(self._active)]
+                "execution:" + owner + ":" + reference
+                for reference, owner in self.store._db.execute(query, parameters)
+            ]
 
     def status(self, execution_id: str) -> dict[str, object]:
         """Read the exact original outcome, with unavailable evidence left UNKNOWN."""
@@ -294,14 +368,24 @@ class FileJobs:
             if len(self._active) >= 4:
                 raise ValueError("bounded actual computation workers are busy")
             use_lease = self.leases.require(invocation) if self.leases is not None else None
+            self._content_references.synchronize_execution(
+                execution,
+                self._execution_generation(invocation),
+                self._reference_manifests(invocation),
+                True,
+            )
             event = threading.Event()
             admitted_ns = time.monotonic_ns()
-            with self._db:
-                self._db.execute(
-                    f"INSERT INTO {self._table} VALUES (?,?,'RUNNING',NULL,'')",
-                    (execution, encoded),
-                )
-                self._save_budget(invocation, admitted_ns, self.max_job_ms)
+            try:
+                with self._db:
+                    self._db.execute(
+                        f"INSERT INTO {self._table} VALUES (?,?,'RUNNING',NULL,'')",
+                        (execution, encoded),
+                    )
+                    self._save_budget(invocation, admitted_ns, self.max_job_ms)
+            except BaseException:
+                self._content_references.synchronize_execution(execution, 0, [], False)
+                raise
             self._active[execution] = event
             return event, use_lease, admitted_ns, self.max_job_ms
 
@@ -314,6 +398,7 @@ class FileJobs:
 
     def _retire(self, execution: str) -> None:
         """Retire a completed thread computation after its own input processing has ended."""
+        self._content_references.synchronize_execution(execution, 0, [], False)
         self._active.pop(execution, None)
 
     def submit(self, invocation: dict[str, Any]) -> dict[str, object]:
@@ -414,12 +499,12 @@ class FileJobs:
                         "cancellation preceded outcome commit",
                         None,
                     )
-                self._retire(execution)
                 self._db.execute(
                     f"UPDATE {self._table} SET state=?,result_json=?,reason=? WHERE execution_id=?",
                     (state, canonical(result) if result is not None else None, reason, execution),
                 )
                 self._db.commit()
+                self._retire(execution)
         return self.status(execution)
 
     def _hash_inputs(

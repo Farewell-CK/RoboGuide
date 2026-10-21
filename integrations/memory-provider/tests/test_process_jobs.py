@@ -273,7 +273,9 @@ def test_pid_commit_failure_never_grants_child_computation_or_exit_authority(
         process = jobs._processes[invocation["execution_id"]]
         assert process.returncode is not None
         assert jobs.health()["safe"] is False
-        assert jobs.reclamation_blockers()
+        assert (
+            jobs.reclamation_blockers() == []
+        )  # This fixture reads an external export, not local CAS.
     finally:
         jobs.close()
         store.close()
