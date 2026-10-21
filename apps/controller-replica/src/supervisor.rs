@@ -264,6 +264,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     eprintln!("Stopping owned Controller: exit_status={child_exit:?}, current_epoch={current:?}");
                     stop_controller(&mut owned).await?;
                 }
+                let _transfer_reconciled = node.reconcile_leader_transfer()?;
                 if !leader_transfer_attempted
                     && let (Some(transfer), Some(epoch)) =
                         (configuration.leader_transfer.as_ref(), current)
@@ -287,7 +288,10 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     }
                     continue;
                 }
-                if owned.is_none() && let Some(epoch) = current {
+                if owned.is_none()
+                    && !node.leader_transfer_blocks_controller()?
+                    && let Some(epoch) = current
+                {
                     configuration.validate()?;
                     materialize(&configuration.storage_directory, &node.accepted_view()?)?;
                     if node.check_epoch(epoch).await.is_ok() {

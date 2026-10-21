@@ -40,6 +40,8 @@ const STORAGE_TABLES: [&str; 5] = [
     "replica_v1_events",
     "replica_v1_snapshot",
 ];
+/// Metadata key for the one handoff that may require operator reconciliation.
+const LEADER_TRANSFER_META_KEY: &str = "leader_transfer";
 
 /// Complete quorum-applied evidence for inactive materialization, not a second live Control map.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -205,6 +207,9 @@ struct StoreSnapshot {
     /// Optional v0.3 infrastructure trust; absent in unchanged legacy snapshot bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     certificate_trust: Option<CertificateTrust>,
+    /// Pending software leader handoff, retained independently of the application view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    leader_transfer: Option<LeaderTransferRecord>,
 }
 
 /// One serialized durable connection implements distinct Raft storage responsibility traits.
@@ -327,6 +332,31 @@ fn prepare_storage_format(connection: &mut Connection) -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())
+}
+
+/// Returns a monotonic rank for durable handoff state transitions.
+fn leader_transfer_state_rank(state: &str) -> Option<u8> {
+    match state {
+        "prepared" => Some(0),
+        "accepted" => Some(1),
+        "target-elected" => Some(2),
+        "completed" | "rejected" | "unknown" => Some(3),
+        _ => None,
+    }
+}
+
+/// Validates bounded handoff identity and state before it can become persistent authority.
+fn validate_leader_transfer(record: &LeaderTransferRecord) -> Result<(), String> {
+    if record.transfer_id.trim().is_empty() || record.transfer_id.len() > 128 {
+        return Err("leader transfer identity is empty or unbounded".into());
+    }
+    if record.target == record.source_epoch.replica_id {
+        return Err("leader transfer target is the source replica".into());
+    }
+    if leader_transfer_state_rank(&record.state).is_none() {
+        return Err("leader transfer state is unknown".into());
+    }
+    Ok(())
 }
 
 /// Binds exact snapshot bytes and applied pointers, detecting corruption before any installation.
@@ -601,6 +631,48 @@ impl SqliteRaftStore {
         view.validate(application_schema)
             .map_err(|error| error.to_string())?;
         Ok(store)
+    }
+
+    /// Reads the one durable handoff record without turning it into a current leadership fact.
+    pub fn leader_transfer_record(&self) -> Result<Option<LeaderTransferRecord>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let record: Option<LeaderTransferRecord> =
+            read_meta(&connection, LEADER_TRANSFER_META_KEY).map_err(|error| error.to_string())?;
+        if let Some(record) = &record {
+            validate_leader_transfer(record)?;
+        }
+        Ok(record)
+    }
+
+    /// Persists an idempotent monotonic handoff state before any election/ticker mutation.
+    pub fn persist_leader_transfer(&self, record: &LeaderTransferRecord) -> Result<(), String> {
+        validate_leader_transfer(record)?;
+        let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let current: Option<LeaderTransferRecord> =
+            read_meta(&transaction, LEADER_TRANSFER_META_KEY).map_err(|error| error.to_string())?;
+        if let Some(current) = &current {
+            validate_leader_transfer(current)?;
+            if current.transfer_id != record.transfer_id
+                && matches!(current.state.as_str(), "prepared" | "accepted" | "unknown")
+            {
+                return Err("another leader transfer requires reconciliation".into());
+            }
+            if current.transfer_id == record.transfer_id
+                && (current.source_epoch != record.source_epoch
+                    || current.target != record.target
+                    || current.required_last_log_index != record.required_last_log_index
+                    || leader_transfer_state_rank(&record.state)
+                        < leader_transfer_state_rank(&current.state))
+            {
+                return Err("leader transfer identity or state regressed".into());
+            }
+        }
+        write_meta(&transaction, LEADER_TRANSFER_META_KEY, record)
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())
     }
 
     /// Duplicates the actual lease descriptor for a bounded inherited-descriptor regression test.
@@ -1142,6 +1214,9 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
         if let Some(trust) = &restored.certificate_trust {
             trust.validate().map_err(io_error)?;
         }
+        if let Some(record) = &restored.leader_transfer {
+            validate_leader_transfer(record).map_err(io_error)?;
+        }
         let mut connection = self.connection.lock().map_err(io_error)?;
         let transaction = connection.transaction().map_err(io_error)?;
         let original: Option<CertificateTrust> = read_meta(&transaction, "certificate_trust")?;
@@ -1158,6 +1233,35 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
                 return Err(io_error(
                     "snapshot certificate authority is absent, stale or forked",
                 ));
+            }
+        }
+        let original_transfer: Option<LeaderTransferRecord> =
+            read_meta(&transaction, LEADER_TRANSFER_META_KEY)?;
+        match (&original_transfer, &restored.leader_transfer) {
+            (None, incoming) => {
+                if let Some(incoming) = incoming {
+                    write_meta(&transaction, LEADER_TRANSFER_META_KEY, incoming)?;
+                }
+            }
+            (Some(original), Some(incoming))
+                if original.transfer_id == incoming.transfer_id
+                    && original.source_epoch == incoming.source_epoch
+                    && original.target == incoming.target
+                    && original.required_last_log_index == incoming.required_last_log_index =>
+            {
+                if leader_transfer_state_rank(&incoming.state)
+                    >= leader_transfer_state_rank(&original.state)
+                {
+                    write_meta(&transaction, LEADER_TRANSFER_META_KEY, incoming)?;
+                }
+            }
+            (Some(_), None) => {
+                return Err(io_error(
+                    "snapshot would discard a durable leader transfer hold",
+                ));
+            }
+            _ => {
+                return Err(io_error("snapshot leader transfer identity is forked"));
             }
         }
         transaction
@@ -1277,6 +1381,7 @@ impl RaftSnapshotBuilder<ControllerRaftConfig> for SqliteRaftStore {
             membership: read_meta(&connection, "membership")?.unwrap_or_default(),
             view: read_view(&connection)?,
             certificate_trust: read_meta(&connection, "certificate_trust")?,
+            leader_transfer: read_meta(&connection, LEADER_TRANSFER_META_KEY)?,
         };
         let data = serde_json::to_vec(&snapshot).map_err(io_error)?;
         let meta = SnapshotMeta {

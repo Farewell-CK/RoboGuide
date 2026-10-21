@@ -248,6 +248,56 @@ fn replica_database_hard_link_cannot_acquire_a_second_writer() {
     assert!(SqliteRaftStore::open(&alias, "identity", "test/checkpoint-v1").is_ok());
 }
 
+/// A handoff intent survives a Store restart and cannot regress or overlap an uncertain request.
+#[test]
+fn durable_leader_transfer_record_is_monotonic_and_restart_safe() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("transfer.sqlite3");
+    let store = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap();
+    let record = LeaderTransferRecord {
+        transfer_id: "durable-transfer".into(),
+        source_epoch: ControllerEpoch {
+            term: 3,
+            replica_id: 1,
+        },
+        target: 2,
+        required_last_log_index: Some(9),
+        state: "prepared".into(),
+    };
+    store.persist_leader_transfer(&record).unwrap();
+    assert_eq!(
+        store.leader_transfer_record().unwrap(),
+        Some(record.clone())
+    );
+    drop(store);
+    let reopened = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap();
+    assert_eq!(
+        reopened.leader_transfer_record().unwrap(),
+        Some(record.clone())
+    );
+    assert!(
+        reopened
+            .persist_leader_transfer(&LeaderTransferRecord {
+                state: "prepared".into(),
+                source_epoch: ControllerEpoch {
+                    term: 2,
+                    replica_id: 1,
+                },
+                ..record.clone()
+            })
+            .is_err()
+    );
+    assert!(
+        reopened
+            .persist_leader_transfer(&LeaderTransferRecord {
+                transfer_id: "other-transfer".into(),
+                state: "prepared".into(),
+                ..record
+            })
+            .is_err()
+    );
+}
+
 /// The first new writer migrates every complete legacy table and fences old table-name writers.
 #[test]
 fn legacy_replica_storage_migrates_atomically_and_old_writes_are_refused() {

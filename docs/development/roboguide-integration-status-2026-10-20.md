@@ -8,6 +8,11 @@
 实际新/旧进程和 alias writer 门禁通过。Recovery profile v0.5 已冻结；durable leader drain、
 在线 CAS/archive、跨故障域恢复和正式旧 binary bundle 恢复仍不关闭 F5。
 
+2026-10-21 [持久化 leader transfer drain](../decisions/0131-durable-leader-transfer-drain.md)
+把 transfer intent/target acknowledgement/new epoch/reconcile 写入 Replica SQL 与 snapshot，
+并让 supervisor 在 uncertain handoff 后保持 child hold。三副本 round-trip 与 restart-safe
+monotonic record 回归继续保留；跨故障域在线 HA 和物理连续性仍待验。
+
 main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头分别是：
 `25380295a267fb4c5f2f948558460fd1b141f95f`（完整非发布整改分支）、
 `b4f1b1275a546f310f61f9b79ac0bc4bb353209a`（MI 校验）、

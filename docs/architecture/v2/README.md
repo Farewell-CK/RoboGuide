@@ -4,6 +4,10 @@
 数据库本体 writer、保留完整原数据的 storage v1 和只读旧表 fence，以及显式恢复 v0.5。
 当前代码已加入实现与单元回归；实际旧 binary、恢复和独立进程门禁通过前不宣称 F5 完成。
 
+[ADR-0131](../../decisions/0131-durable-leader-transfer-drain.md)把 leader transfer 的
+source drain、target accepted、new epoch、reconcile 和 uncertain restart hold 写入完整
+Replica snapshot；旧 source snapshot 不得覆盖已完成 target hold。仍不建立设备连续性。
+
 [ADR-0129](../../decisions/0129-executable-deployment-profile.md)以闭合部署输入和只读
 inspector 固定拓扑、原文件、store owner、信任连接与故障/退出证据；允许零 Node。
 [实际零 Node 验收](../../development/acceptance/2026-10-21-deployment-profile.md)不产生
