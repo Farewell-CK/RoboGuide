@@ -21,7 +21,7 @@ uv run --frozen python tools/quality/check_resource_quota_processes.py --output 
 
 结果：PASS。binary SHA-256 `0ad90f773893b1166f0a491b57a40b7f14b08b7c979ee168b882c6c9fdcee9ca`；Controller wrapper `roboguide.controller-checkpoint/v47`；quota view `roboguide.resource-quota-view/v0.2`；policy revision `2`；原 SQLite journal 有 `2` 条 quota commands；稳定 admin principal 为 `quota-admin`；restart 前后 registered Nodes 为 `0`；Node identity registry 为 `null`。本次输出和过程日志：`/tmp/rg-control-quota-process-20261021-view-v02/result.json`、`/tmp/rg-control-quota-process-20261021-view-v02/controller.log`。
 
-同一源码版本的 workspace 回归中，Control 为 166 项（164 pass、2 个显式 ignored）；quota-specific Control 回归、无 policy 用量可见性和空 Node identity/旧 reservation 拒绝回归均通过。Rust workspace 测试、Clippy、Rustdoc、Python ruff/mypy 和 strict MkDocs 也通过。
+同一源码版本的 workspace 回归中，Control 为 167 项（165 pass、2 个显式 ignored）；quota-specific Control 回归、无 policy 用量可见性和空 Node identity/旧 reservation 拒绝回归均通过。Rust workspace 测试、Clippy、Rustdoc、Python ruff/mypy 和 strict MkDocs 也通过。
 
 ## 解释边界
 

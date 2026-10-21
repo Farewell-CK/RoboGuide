@@ -6,8 +6,9 @@
 2026-10-21 [Control tenant quota commitment](../decisions/0140-control-resource-quota-commitment.md)
 接入 recovery-admin `/v1/resource-quotas` revisioned policy/authority journal、正常/Group/recovery
 Commit 与 Task/Context/Group/recovery release，wrapper v47 保存 policy/history/精确 claims；缺少
-历史 demand 的 v45/v46 reservation 不臆测用量。166 项 Control 测试及实际双向 TLS/SQLite/重启
-进程验收通过，Node inventory 为零；divisible allocation、GPU/traffic、Local EAIOS 其他
+历史 demand 的 v45/v46 reservation 不臆测用量；ADR-0141 的 v0.2 view 也列出尚未设限的现有用量。
+167 项 Control 测试及实际双向 TLS/SQLite/重启进程验收通过，Node inventory 为零；divisible
+allocation、GPU/traffic、Local EAIOS 其他
 资源强制、完整时空预约和 F6/F7 总验收继续开放。
 
 2026-10-21 [原 Controller child 排空](../decisions/0138-original-controller-child-drain-before-transfer.md)
