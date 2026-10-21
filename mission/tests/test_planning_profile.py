@@ -240,11 +240,23 @@ def test_planner_reviewer_and_repairer_share_frozen_profile_input() -> None:
                 "unknown_world_facts_must_not_be_guessed": True,
             },
         }
+    planner_input = json.loads(cast(str, transport.requests[0][2]["input"]))
     reviewer_input = json.loads(cast(str, transport.requests[1][2]["input"]))
     repairer_input = json.loads(cast(str, transport.requests[2][2]["input"]))
     expected_effect_review = operation_effect_composition_review(plan, profile)
+    assert "operation_effect_composition_review" not in planner_input
     assert reviewer_input["operation_effect_composition_review"] == expected_effect_review
     assert repairer_input["operation_effect_composition_review"] == expected_effect_review
+
+
+def test_planner_prompt_matches_its_candidate_effect_evidence_boundary() -> None:
+    """Planner uses profile effects itself; derived plan analysis is Reviewer/Repairer input."""
+    prompt = Path("mission/prompts/v0/planner.md").read_text(encoding="utf-8")
+    assert "If that review is absent but a" in prompt
+    assert "`deployment_planning_profile` is supplied" in prompt
+    assert "compare the declared `operation_effects`" in prompt
+    assert "If neither source is available" in prompt
+    assert "do not infer effects that the profile does not declare" in prompt
 
 
 def _digest_without_digest(value: JSONObject) -> str:
