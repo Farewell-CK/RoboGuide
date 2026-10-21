@@ -7,6 +7,11 @@
 2026-10-20 后续连续实施使用 `codex/software-completion-2026-10-20` 隔离工作树，
 各验收工作包完成后合入并同步 main。后续记录按实际合并提交与证据 identity 保留。
 
+2026-10-22 [全分支与整改存量复核](roboguide-branch-audit-2026-10-22.md)确认冻结
+`main@fc5d2ba` 已含所有 18 个本地分支的已提交历史，并逐条核对远端独有补丁、工作树、
+stash 与 reflog。下表阶段仍开放不表示整项尚未实现：当前能力、缺失接线/软件组合验收
+与设备/跨主机证据分别记录，不重复开发已经进入 main 的算法或服务入口。
+
 2026-10-20 集成工作在 `codex/main-integration-2026-10-20` 隔离工作树执行，目标合并 main；
 包含 MI 部署校验和执行故障闭环分支。全部远程分支与当前必需剩余项见
 [分支同步与剩余整改核对](roboguide-integration-status-2026-10-20.md)。
@@ -95,13 +100,13 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F1 停止与当前 HA | R01、R02 | 类型化 stop、Mission hold、证据/receipt/deadline、全生命周期 gate、schema 接线 | 当前切片软件验收通过；后续 stop reconciliation/recovery 升级仍由 F7 验收 |
 | F2 身份与入口 | R04、R05、R14 | pending reconciliation、tenant、证书轮换/撤销、Node 生命周期、硬件证明验证 | 当前身份/入口切片软件验收通过；State/Memory 跨服务授权与副本证书在 F3/F4/F5 接续完成 |
 | F3 State 与 MI | R06、R07、R08 | policy registry、authority consumer、Belief、provenance、verifier/持续验证 | 当前软件阶段验收通过；设备证据独立待验证，后续阶段仍必需 |
-| F4 Memory/Spatial | R10、R11、R12、R20 | reconciliation、Group 授权/handoff、active-map/GC/revocation、自动配准/融合/增量 | Active Map GC v0.2 与 ADR-0142–0145 已接本地显式引用、紧凑 use-lease 投影、FileJobs execution CAS 引用和 generation-bound 写入；静止恢复将已存活动引用/Active Map/handoff 与同包 CAS 和 tombstone 对账，并保留 ContentReclamation 最终删除权。Replica/Archive/Catalog 生产者、Group/跨节点授权、map fusion/增量与全局恢复仍实施中，见 ADR-0105/0132/0142–0145 |
-| F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | Replica storage v3 / recovery v0.7 保留实际 inode writer、旧连接排空、原 transfer 与 Controller spawn/PID/wait。V3 target election 前须 source 独立 durable wait、原 quorum/预算，排队不续期；Unknown 原 ID 不重发，snapshot 不覆盖本地 hold。旧应用缺少进程日志的显式排空迁移、在线 archive/CAS、跨故障域仍待完成 |
+| F4 Memory/Spatial | R10、R11、R12、R20 | reconciliation、Group 授权/handoff、active-map/GC/revocation、自动配准/融合/增量 | import/Unknown 查询、Group use/revoke/handoff、Active Map、本地 tombstone/GC 已接线；实际文件配准/融合/增量算法也已有。ADR-0142–0145 接通显式引用、紧凑 use-lease、FileJobs execution 引用及静止恢复的原 CAS 对账。实际 Replica/Archive/Snapshot/Catalog 引用生产与释放、跨服务对账和 typed-map 完整生命周期/融合结果消费/恢复组合仍待完成；算法和局部证据不重复列为零实现 |
+| F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | 动态 learner/joint-consensus 成员、transfer、证书轮换/Abort 和静止 SQL/CAS 恢复已有。Replica storage v3 / recovery v0.7 保留 inode writer、旧连接排空、原 transfer 与 Controller spawn/PID/wait；V3 election 须原 durable wait/quorum/预算，排队不续期，Unknown 原 ID 不重发。缺原进程日志的旧部署显式排空迁移、在线 archive/snapshot/catalog/CAS、滚动版本升级/回退组合和跨故障域仍待完成 |
 | F6 资源/调度 | R16、R20 | tenant/category quota、divisible allocation、完整时间/空间承诺、真实成本 evidence 与确定性策略 | ADR-0140 / wrapper v47 已由 recovery-admin revisioned policy API 把原 Role demand 接到正常、Group、recovery Commit 与精确 release；ADR-0141 让 v0.2 运维 view 暴露未设限的已有用量。真实双向 TLS/SQLite/重启进程 gate 通过且 0 Node。local worker POSIX CPU/address-space proof 独立通过。divisible allocation、GPU/交通成本、完整时空、Local EAIOS 其他资源强制和运行中抢占仍待完成 |
 | F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | relation violation/Unknown 已接入 whole-Group stop barrier，并保留每个 current attempt 的独立 stop gate；运行中抢占、耦合迁移、异构 regrasp/hazard 协议和真实物理证据仍待完成 |
 | F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 原目标/版本、MI generation/claim/nonce、主体/tenant 发现、原回包对账与非空 scoped Memory 通用文件组合已验收；其他类型/复杂拓扑仍须随 F4/F7 总矩阵完成 |
 | F9 层级/Federation | R20 | 控制域、跨域 prepare/commit、路由/授权与恢复 | 持久 epoch/digest/deadline prepare/commit session 已通过；跨域 transport/授权/恢复部署仍待完成 |
-| F10 运维与总验收 | R18、R19 的非发布部分 | 指标/告警、write-disabled 只读恢复、部署/迁移/回退、全功能验收 | 待完成 |
+| F10 运维与总验收 | R18、R19 的非发布部分 | 指标/告警、write-disabled 只读恢复、部署/迁移/回退、全功能验收 | write-disabled、最后提交查询、显式恢复探针、Prometheus/Alertmanager 实际短窗口 firing/resolved、部分 worker/连接隔离已有。其余 listener/阻塞 I/O、完整 SLO/runbook/告警覆盖、升级/回退组合和非发布总矩阵仍待完成；长期/跨主机/人工响应证据独立验收 |
 
 每阶段通过对应验收后才进入依赖阶段。类型、文档、占位返回值、内部直调和通用测试通过
 不能独立关闭功能。阶段记录必须包含当前源码/配置 identity、复现命令、调用链、结果和剩余项。

@@ -1,5 +1,10 @@
 # RoboGuide 分支同步与剩余整改核对（2026-10-20）
 
+2026-10-22 [全分支与整改存量复核](roboguide-branch-audit-2026-10-22.md)以
+`main@fc5d2ba` 重新检查 18 个本地分支、60 个远端分支、10 个工作树、stash 和 reflog。
+整改开发线均已进入 main；本页原分支表保留 2026-10-20 的历史计数，当前分支结论以上述
+新记录为准。已实现能力不再因阶段未关闭而重复列成“未做”。
+
 本次先同步远程并核对所有远程分支；在隔离工作树组合整改、MI 部署校验和执行故障闭环，
 保留其他工作树和未跟踪实验文件。没有启动实验、E6、模型、模拟器或设备。
 
@@ -229,13 +234,13 @@ v41 证据迁移均检查。长期 SLO、跨主机/值守路由和写锁 I/O 收
 | 阶段 | 剩余必需交付 | 下一项可验收结果 |
 | --- | --- | --- |
 | F0 | 闭合配置、原 binary/文件/store inode、TLS/支持矩阵、故障/退出输入和实际零 Node 门禁已接通 | 后续总矩阵沿用实际 profile 与固定证据；真实主机独立性、RTO/RPO 实测和硬件仍按各阶段验收 |
-| F4 | Controller 与 backend 的完整 active-map/引用生命周期、tombstone/GC、撤销与 snapshot/archive/CAS 一致恢复；跨主机证据 | 先打通原授权、所有引用与恢复门禁下的可审计删除；局部八类引用 GC 不视为全局完成 |
-| F5 | 副本证书轮换、兼容升级协议、archive + snapshot + catalog + CAS 数据面恢复 | HA 接管后原内容可读或明确缺失；升级与回退不丢历史/预算/权限 |
+| F4 | 实际 Replica/Archive/Snapshot/Catalog 引用生产与释放、跨服务对账；typed-map 完整生命周期、融合/增量结果消费与恢复组合 | import/use/revoke/Group handoff、Active Map、本地 GC 与引用恢复对账已有；真实文件配准/融合/增量算法也已有。补齐全部生产者和组合验收，再验收全局恢复 |
+| F5 | 在线 archive + snapshot + catalog + CAS 数据面恢复、旧部署缺原进程记录的显式排空迁移、滚动版本升级/回退组合 | 动态成员、transfer、证书轮换/Abort、原 child wait 与静止恢复已有；继续证明接管后的原内容可读或明确缺失，升级/回退不丢历史/预算/权限 |
 | F6 | divisible allocation 与 Local EAIOS 全资源强制、完整时空承诺、真实成本源 | tenant/category 逻辑 quota 已接入 Control Commit；缺 GPU/定位/交通 evidence 为 unavailable，逻辑账本不冒充 OS/物理强制 |
 | F7 | 策略授权的运行中抢占、耦合多 Role 恢复、异构 handoff/regrasp 与 hazard 合同 | 原完整 stop 集合、上下文验证、新 Commit/Rebind 和不确定性保留；设备证明独立 |
 | F8 | 原目标/版本、MI claim/nonce/发现/原回包对账、显式 v0.9 非空 scoped Memory 和安全新 Group 已通过实际通用文件组合；其余类型/复杂拓扑仍须随 F4/F7 总矩阵完成 | 保留既成事实与原目标，经 Review/Control/stop gate 切换，不重做已完成副作用或未知模型调用；普通 resume/recovery 不绕过待完成修订 |
 | F9 | 真正跨控制域 transport、证书/tenant/domain 路由与多域恢复 | prepare/commit session 经真实服务边界消费，不把单进程记录当跨域完成 |
-| F10 | write-disabled 只读恢复、写锁内阻塞 I/O 收敛、完整指标/告警/SLO/runbook 和总验收 | 已提交快照仍可查询，恢复入口可审计；实际采集和告警演练后再关闭 |
+| F10 | 其余 listener/阻塞 I/O 收敛、完整 SLO/runbook/告警覆盖、版本升级/回退与非发布总矩阵 | write-disabled、最后提交查询、恢复探针、Prometheus/Alertmanager 短窗口 firing/resolved 已有；长期/跨主机/人工响应证据独立验收 |
 
 F1–F3 当前软件切片已验收，但跨阶段消费仍必须通过组合验收；不能由文档、类型、测试替身
 或本机进程得出物理安全、硬件身份或跨主机连续性。发布、许可证和生产上线不在用户本轮范围。

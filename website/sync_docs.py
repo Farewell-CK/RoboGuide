@@ -114,6 +114,7 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
                 "docs/development/roboguide-software-completion-plan-2026-10-15.md",
             ),
             ("分支同步与剩余整改", "docs/development/roboguide-integration-status-2026-10-20.md"),
+            ("全分支与整改存量复核", "docs/development/roboguide-branch-audit-2026-10-22.md"),
             ("可执行部署 profile", "tools/deployment/index.md"),
             ("实际部署配置验收", "docs/development/acceptance/2026-10-21-deployment-profile.md"),
             (
