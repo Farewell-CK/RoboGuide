@@ -26,6 +26,7 @@ def coordinator(directory: Path) -> LiveWorldCoordinator:
     result._ledger = LiveSlotLedger((0,))
     result._ledger.admit(0, invocation(0, ("actor",)))
     result._history = []
+    result._entries = {}
     result._finished = True
     result._retain_stopped_session = False
     result._closure_phase = "closed"
@@ -85,6 +86,25 @@ def test_failed_terminal_write_never_sets_publication_flags(
     assert producer.closure()["verifier_published"] is False
     assert producer.closure()["evidence_flushed"] is False
     assert producer.closure()["execution_error"] == "execution:Stage2ContractViolation"
+
+
+def test_closed_failed_world_without_official_metric_remains_unavailable(tmp_path: Path) -> None:
+    """Complete archival cannot turn missing official truth into a negative benchmark verdict."""
+    producer = coordinator(tmp_path)
+    producer._publish_terminal(
+        {},
+        {"identity": {"simulator_steps": 2}, "official_metrics": {}},
+        [invocation(0, ("actor",))],
+    )
+    producer._write_state("failed")
+    producer._archive_closure()
+    assert producer.closure()["evidence_flushed"] is True
+    assert producer.closure()["verifier_published"] is False
+    assert producer.closure()["verifier_required"] is False
+    summary = json.loads((tmp_path / "shared-world-summary.json").read_bytes())
+    assert "official_pddl_success" not in summary
+    assert summary["official_pddl_success_unavailable_reason"]
+    assert not (tmp_path / "task-verifier-verdict.json").exists()
 
 
 def test_exit_export_binds_complete_original_group_generations(tmp_path: Path) -> None:

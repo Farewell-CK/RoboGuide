@@ -19,7 +19,7 @@ digest，verify/restore 仍拒绝且不发布目标。有效原包及其输入�
 
 本次实现提交为 `eab4fb485c05a45ce7ba63a6a556199389208227`；已接入当时最新 main 的
 `cb48cbc` 并通过[完整 CI](https://github.com/Farewell-CK/RoboGuide/actions/runs/39624012158)。
-本地全量 Python 为 3002 passed、1 skipped（本机缺少 Python 3.9；CI 配置并运行该解释器），
+本地全量 Python 为 3002 passed、1 skipped（当时未指定部署 Python 路径；CI 配置并运行 Python 3.9），
 474 个 Python 文件格式/Ruff、304 个源文件严格 mypy、函数文档和 MkDocs strict 通过。
 最终实际进程证据位于 `/tmp/rg-ref-recovery-20261021-b/result.json`，`registered_nodes`、
 `device_facts`、`models`、`simulators` 均为 0；有效 backup/verify/restore 退出码为 0，

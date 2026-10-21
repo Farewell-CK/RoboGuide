@@ -98,7 +98,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | --- | --- | --- | --- |
 | F0 基线与合同 | R03、R19 的非发布部分 | 备份、独立分支、软件 profile、权威/支持/验收矩阵 | 闭合可执行 profile/原文件/TLS/退出矩阵与实际零 Node 门禁通过；后续阶段实测与真实部署输入继续分别保留 |
 | F1 停止与当前 HA | R01、R02 | 类型化 stop、Mission hold、证据/receipt/deadline、全生命周期 gate、schema 接线 | 当前切片软件验收通过；后续 stop reconciliation/recovery 升级仍由 F7 验收 |
-| F2 身份与入口 | R04、R05、R14 | pending reconciliation、tenant、证书轮换/撤销、Node 生命周期、硬件证明验证 | 当前身份/入口切片软件验收通过；State/Memory 跨服务授权与副本证书在 F3/F4/F5 接续完成 |
+| F2 身份与入口 | R04、R05、R14 | pending reconciliation、tenant、证书轮换/撤销、Node 生命周期、硬件证明验证 | 当前身份/入口切片软件验收通过，副本换证另有软件证据；State/Memory 完整跨服务授权组合随 F3/F4/F5 接续验收，硬件身份来源证据独立保留 |
 | F3 State 与 MI | R06、R07、R08 | policy registry、authority consumer、Belief、provenance、verifier/持续验证 | 当前软件阶段验收通过；设备证据独立待验证，后续阶段仍必需 |
 | F4 Memory/Spatial | R10、R11、R12、R20 | reconciliation、Group 授权/handoff、active-map/GC/revocation、自动配准/融合/增量 | import/Unknown 查询、Group use/revoke/handoff、Active Map、本地 tombstone/GC 已接线；实际文件配准/融合/增量算法也已有。ADR-0142–0145 接通显式引用、紧凑 use-lease、FileJobs execution 引用及静止恢复的原 CAS 对账。实际 Replica/Archive/Snapshot/Catalog 引用生产与释放、跨服务对账和 typed-map 完整生命周期/融合结果消费/恢复组合仍待完成；算法和局部证据不重复列为零实现 |
 | F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | 动态 learner/joint-consensus 成员、transfer、证书轮换/Abort 和静止 SQL/CAS 恢复已有。Replica storage v3 / recovery v0.7 保留 inode writer、旧连接排空、原 transfer 与 Controller spawn/PID/wait；V3 election 须原 durable wait/quorum/预算，排队不续期，Unknown 原 ID 不重发。缺原进程日志的旧部署显式排空迁移、在线 archive/snapshot/catalog/CAS、滚动版本升级/回退组合和跨故障域仍待完成 |
@@ -110,6 +110,52 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 每阶段通过对应验收后才进入依赖阶段。类型、文档、占位返回值、内部直调和通用测试通过
 不能独立关闭功能。阶段记录必须包含当前源码/配置 identity、复现命令、调用链、结果和剩余项。
+
+## 当前执行队列（2026-10-22）
+
+进度复核基线为 `main@efd3c83`，其
+[完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
+上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main
+组合检查并合入，不改写前一次 `fc5d2ba` 冻结审计的分支统计。整合在隔离工作树检查，
+原实验目录保留。
+
+本次组合全量 Python 为 **3021 passed，0 skipped，451.35 秒**；格式/Ruff、304 个源文件
+strict mypy、函数文档和 MkDocs strict 通过。实际
+`/home/duchaoke/miniconda3/envs/habitat/bin/python`（3.9.23）另完成 15 个正向和 35 个
+generation 拒绝案例，Provider calls 为 0，physical episode 为 false。
+测试结果保存在 `/tmp/rg-progress-20261022-pytest.xml` 与
+`/tmp/rg-progress-20261022-runtime-check.json`。先前未设置部署 Python 环境变量时的
+skip 不表示机器没有该解释器；本次已指定实际路径，没有通过跳过检查获得通过。
+
+F0–F3 当前软件切片已有验收；F4–F8 和 F10 已有可执行实现与专项证据，剩余项包括具体
+功能接线和跨模块故障组合。F9 目前主要是 Control 内部持久 session，跨域服务入口仍须
+实现。阶段数、文档数、提交数和测试数都不折算为完成百分比。
+
+下表落实原全部非发布范围，未增加一个新的 MVP。N0 本次收拢完成，当前重点是 N1；不
+重复展开已验收的算法、证书轮换、quota、MI 修订或写入恢复。
+
+| 顺序 | 工作包 | 交付与完成条件 |
+| --- | --- | --- |
+| N0（已完成） | 新提交集成 | `227fb62` 与 main 的组合通过定向/3021 项全量 Python、实际 Python 3.9 协议兼容和文档门禁；软件回归覆盖失败后的活动 peer 排空、未下发 slot 保留、迟到派发和 verifier coverage，不将替身结果升级为物理事实 |
+| N1 | Memory 实际引用生命周期 | 在现有本地引用、use-lease、FileJobs 与 GC 上接真实 Replica/lineage/Catalog/Snapshot/Archive 生产与释放；先区分 provider-local CAS 与 Controller Artifact CAS 的 owner，不把不同存储的相同 digest 当同一副本。每个生产者须有副作用前持久 intent、原 owner/provider/generation 绑定、ACK 或只读原命令对账；Unknown/失联/重启不释放引用，过期不冒充退休证明。首个实现包接通一个实际生产者的完整链路，其余生产者继续为 N1 必需项 |
+| N2 | typed-map 与修订组合 | 复用既有实际文件配准/融合/增量算法，验证结果从发布、原 CAS/import、active-map、当前 use、撤权、交接到重启/回收的完整链路；将原地图来源、frame、revision 和完整 lineage 带入 F8 的 scoped Memory 修订。SQL 中断、晚到 ACK、来源/配置变化不得重复导入、重启 worker 或续预算 |
+| N3 | 在线 HA 内容与升级恢复 | 以 N1/N2 的内容与引用身份接通 online Archive/Snapshot/Catalog/CAS 一致性，再验证 leader 接管后的原授权内容、原 receipt 与缺失状态；补缺原 child journal 的旧部署显式排空迁移、滚动版本升级/回退。元数据换主不计为内容就绪或设备连续执行 |
+| N4 | 资源成本与可分配资源 | 连接实际 load/GPU memory/queue/交通等可用成本源，保留来源、接收时间、TTL 和 unavailable；增加显式版本化 divisible allocation 及本地强制，不重解释现有 `units` 最小容量语义；验证正常/Group/recovery Commit、释放和完整时间/空间冲突 |
+| N5 | 运行中抢占、耦合恢复与 MI | 在现有 whole-Group stop/hold、Memory revoke 和 Control ownership 上接策略授权的运行中抢占、多 Role 迁移、hazard/handoff/regrasp 合同；验证 stop/退出/撤权证据齐备后才进入新 Commit/Rebind。与 F8 原目标/Review/新计划/复杂拓扑组合，不重做已有副作用；设备证明缺失保留明确待验证状态 |
+| N6 | Federation 服务边界 | 复用持久 session，增加真实两个 Control 域间的 transport、证书/tenant/domain 路由、prepare/commit/abort 与恢复；通过实际服务/SQL/TLS、超时/响应丢失/分区/epoch 变化验证，保留两域各自的资源权威；单进程 session 测试不能关闭本项 |
+| N7 | 运维与全量验收 | 在每个前述工作包持续执行 listener 容量、阻塞 I/O、write-disabled、metrics/alert、升级/回退门禁；最终以固定 deployment profile 运行全部非发布矩阵并核对 SLO/runbook。长期、跨主机、人工响应与设备结果按各自证据填写，不能由短窗口或合成事实代替 |
+
+N1 的第一份交付必须同时包含真实生产者代码与进程证据，不能仅增加一种引用类型、
+一个接口或一份矩阵。首个生产者只是内部里程碑；完整 N1 须覆盖表中全部引用生产者，
+才可转入依赖其完整性的验收。矩阵列出每类引用的权威 owner、产生时点、可观察的终止证明、
+持久 intent/回执和恢复入口；新公开权限/跨服务合同按 V2 与 ADR 版本化，保留现有
+same-UID Unix 入口的本地边界，引用保留权不授予内容读权。验收至少覆盖实际 acquire、
+GC 拒绝、进程重启/SQL 与响应丢失、原 generation 只读对账、精确 release 及实际内容回收，
+并独立读取 SQL 与 CAS 核对结果。
+
+下一包使用部署配置、真实文件、SQLite、协议和 OS 进程，不要求设备、模拟器或模型。
+全部非发布软件闭合后记录 `SoftwareComplete`；实际停止、物理交接、硬实时、硬件身份和物理连续性
+继续按原要求记录 `HardwareEvidencePending`，不因此省略通用软件实现。
 
 当前阶段记录：[F1 停止权威与当前 HA 软件验收](acceptance/2026-10-15-f1.md)。
 后续记录：[F2 身份与入口软件验收](acceptance/2026-10-15-f2.md)、

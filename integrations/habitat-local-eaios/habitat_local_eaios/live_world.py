@@ -394,6 +394,9 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 if cancellation_requested():
                     reason = "cancellation"
                     break
+                if ledger.failure_drained() and not ledger.complete():
+                    reason = "local_failure_drained"
+                    break
                 incoming = dict(arrivals())
                 if cancellation_requested():
                     reason = "cancellation"
@@ -447,7 +450,9 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                             if observed["status"] == "observed"
                             else "condition-observation-unavailable",
                         )
-                        completed(agent, ledger.finish(agent), outcome)
+                        completed(
+                            agent, ledger.finish(agent, failed=outcome.state == "FAILED"), outcome
+                        )
                         latest[agent] = outcome
                         history.append(
                             {
@@ -560,6 +565,9 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 if ledger.complete():
                     reason = "all_local_slots_finished"
                     break
+                if ledger.failure_drained():
+                    reason = "local_failure_drained"
+                    break
                 if not ledger.active:
                     if waited_from is None:
                         waited_from = time.monotonic()
@@ -653,7 +661,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                             episode_terminated=bool(done or environment.episode_over),
                             terminal_basis="original-skill-bad-terminate",
                         )
-                        completed(agent, ledger.finish(agent), outcome)
+                        completed(agent, ledger.finish(agent, failed=True), outcome)
                         latest[agent] = outcome
                         history.append(
                             {
@@ -756,7 +764,9 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                         if successful
                         else "episode-terminated-before-success",
                     )
-                    completed(agent, ledger.finish(agent), outcome)
+                    completed(
+                        agent, ledger.finish(agent, failed=outcome.state == "FAILED"), outcome
+                    )
                     latest[agent] = outcome
                     history.append(
                         {
@@ -834,7 +844,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 episode_terminated=bool(done or environment.episode_over),
                 terminal_basis=reason,
             )
-            completed(agent, ledger.finish(agent), outcome)
+            completed(agent, ledger.finish(agent, failed=outcome.state == "FAILED"), outcome)
             latest[agent] = outcome
             history.append({"invocation": invocation.as_dict(), "outcome": outcome.as_dict()})
         return latest, {
@@ -851,6 +861,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             "final_info": json_observation(info),
             "action_trace_collection": self._action_trace_stats(),
             "task_outcomes": history,
+            "session_progress": ledger.progress(),
             "execution_profile": LIVE_PROFILE,
             "termination_reason": reason,
         }

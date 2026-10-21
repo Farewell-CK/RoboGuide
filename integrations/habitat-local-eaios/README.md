@@ -627,3 +627,10 @@ and MI capability classes carry the same neutral camera facts; loaded original c
 refuses READY. Geometry is a necessary condition only: cached pixels decide acquisition and
 Habitat retains official joint terminal authority. See the
 [observation extension](../../docs/extensions/bounded-observation-and-evidence-closure.md).
+
+Live sessions close after a real local failure once their active executions have ended, even if
+Control never dispatches a failed prerequisite's successor. Active peers keep their original path;
+the adapter does not schedule work or release Control resources. Versioned session progress separates
+terminal failures from undispatched slots. Dispatches accepted during closure without a child terminal
+remain explicit `unreported_dispatches`, with no invented physical outcome or verifier coverage.
+Official metrics and evidence publication still determine outcome availability and archival closure.

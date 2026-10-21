@@ -17,6 +17,7 @@ class LiveSlotLedger:
         self.session: Any = None
         self.seen: dict[tuple[str, str], tuple[int, CanonicalInvocation]] = {}
         self.completed: set[tuple[str, str]] = set()
+        self.failed: set[tuple[str, str]] = set()
         self.active: dict[int, CanonicalInvocation] = {}
         self.actor_owners: dict[str, int] = {}
 
@@ -75,12 +76,37 @@ class LiveSlotLedger:
         self.seen[slot] = (agent, invocation)
         self.active[agent] = invocation
 
-    def finish(self, agent: int) -> CanonicalInvocation:
+    def finish(self, agent: int, *, failed: bool = False) -> CanonicalInvocation:
         """Release only the adapter's active local handle, never Control-owned resources."""
         invocation = self.active.pop(agent)
-        self.completed.add((invocation.task_id, invocation.role_id))
+        slot = (invocation.task_id, invocation.role_id)
+        self.completed.add(slot)
+        if failed:
+            self.failed.add(slot)
         return invocation
 
     def complete(self) -> bool:
         """Detect all local session slots finished without claiming semantic satisfaction."""
         return self.session is not None and len(self.completed) == len(self.session.slots)
+
+    def failure_drained(self) -> bool:
+        """Close unsupported failure continuation only after every admitted execution ends."""
+        return bool(self.failed) and not self.active
+
+    def progress(self) -> dict[str, Any]:
+        """Separate actual local terminal facts from slots never delivered by Control."""
+        declared = (
+            {(str(slot["task_id"]), str(slot["role_id"])) for slot in self.session.slots}
+            if self.session is not None
+            else set()
+        )
+        return {
+            "schema_version": "roboguide.live-session-progress/v0.1",
+            "execution_session_digest": self.session.digest if self.session is not None else None,
+            "declared_slot_count": len(declared),
+            "dispatched_slot_count": len(self.seen),
+            "terminal_slot_count": len(self.completed),
+            "failed_slots": [list(slot) for slot in sorted(self.failed)],
+            "active_slots": [list(slot) for slot in sorted(set(self.seen) - self.completed)],
+            "undispatched_slots": [list(slot) for slot in sorted(declared - set(self.seen))],
+        }

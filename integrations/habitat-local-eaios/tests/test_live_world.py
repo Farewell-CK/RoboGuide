@@ -711,6 +711,136 @@ def test_live_loop_closes_bad_terminate_endpoint_and_keeps_peer_running(
     assert failure["local_failure"]["termination"]["bad_terminate"] is True
 
 
+def dependent_invocation(task: int) -> CanonicalInvocation:
+    """Declare two independent Actor chains without inventing a dispatch for either successor."""
+    body = invocation(task, ("left", "right", "left", "right")).as_dict()
+    session = cast(dict[str, Any], body["execution_session"])
+    for slot in session["slots"]:
+        if slot["task_id"] in {"task-2", "task-3"}:
+            slot["dependencies"] = ["task-0" if slot["task_id"] == "task-2" else "task-1"]
+    session["digest"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                {key: value for key, value in session.items() if key != "digest"},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+    )
+    return parse_canonical_invocation({"invocation": body})
+
+
+@pytest.mark.parametrize("peer_finish", [1, 4])
+def test_failed_predecessor_closes_after_real_peers_without_waiting_for_missing_successor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, peer_finish: int
+) -> None:
+    """A failed prerequisite cannot create its successor or stop an already executing peer."""
+    actor, gym = Actor(2), Gym({0: 99, 1: peer_finish})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    observed: list[tuple[str, str, int]] = []
+    sent = False
+
+    def terminal_failure(
+        feedback: Stage2ExecutionFeedback, agent_name: str
+    ) -> dict[str, Any] | None:
+        """Represent one actual local failure after two original steps."""
+        del feedback
+        if agent_name == "agent_0" and gym.steps >= 2:
+            return {"failure_basis": "original-skill-bad-terminate"}
+        return None
+
+    def arrivals() -> Mapping[int, CanonicalInvocation]:
+        """Control can release the successful peer's successor only before Group failure."""
+        nonlocal sent
+        if not sent and observed == [("task-1", "COMPLETED", 1)]:
+            sent = True
+            return {1: dependent_invocation(3)}
+        return {}
+
+    def completed(agent: int, request: CanonicalInvocation, outcome: LocalExecutionOutcome) -> None:
+        """Retain original terminal state and physical step for each real dispatch."""
+        del agent
+        observed.append((request.task_id, outcome.state, outcome.simulator_steps))
+
+    monkeypatch.setattr(Stage2ExecutionFeedback, "terminal_failure", terminal_failure)
+    _, summary = runtime.execute_live(
+        {0: dependent_invocation(0), 1: dependent_invocation(1)},
+        arrivals,
+        lambda: False,
+        lambda *args: None,
+        completed,
+        0.01,
+    )
+    assert summary["termination_reason"] == "local_failure_drained"
+    progress = summary["session_progress"]
+    assert progress["failed_slots"] == [["task-0", "role"]]
+    assert progress["active_slots"] == []
+    assert progress["undispatched_slots"] == (
+        [["task-2", "role"]] if peer_finish == 1 else [["task-2", "role"], ["task-3", "role"]]
+    )
+    assert progress["declared_slot_count"] == 4
+    assert progress["terminal_slot_count"] == len(observed) == (3 if peer_finish == 1 else 2)
+    assert ("task-0", "FAILED", 2) in observed
+    assert ("task-1", "COMPLETED", peer_finish) in observed
+    assert all(task != "task-2" for task, _, _ in observed)
+    assert gym.steps == actor.calls == max(2, peer_finish)
+    assert runtime.test_diagnostics.terminals == [(gym.steps, "local_failure_drained")]
+
+
+@pytest.mark.parametrize("with_failure", [False, True])
+def test_completed_slot_is_not_a_failed_session(with_failure: bool) -> None:
+    """An unsent successor remains pending after success; only actual failure closes a session."""
+    ledger = LiveSlotLedger((0, 1))
+    ledger.admit(0, dependent_invocation(0))
+    ledger.finish(0, failed=with_failure)
+    assert not ledger.complete()
+    assert ledger.failure_drained() is with_failure
+    assert ledger.progress()["terminal_slot_count"] == 1
+    assert ledger.progress()["dispatched_slot_count"] == 1
+    assert ledger.progress()["undispatched_slots"] == [
+        ["task-1", "role"],
+        ["task-2", "role"],
+        ["task-3", "role"],
+    ]
+
+
+def test_group_cancel_preserves_failed_predecessor_and_cancels_only_active_peer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Existing explicit cancellation ends a live peer without rewriting prior failure facts."""
+    actor, gym = Actor(2), Gym({0: 99, 1: 99})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+
+    def terminal_failure(
+        feedback: Stage2ExecutionFeedback, agent_name: str
+    ) -> dict[str, Any] | None:
+        """Expose failure of only the first active endpoint."""
+        del feedback
+        return (
+            {"failure_basis": "original-skill-bad-terminate"} if agent_name == "agent_0" else None
+        )
+
+    monkeypatch.setattr(Stage2ExecutionFeedback, "terminal_failure", terminal_failure)
+    terminal: list[tuple[str, str]] = []
+    _, summary = runtime.execute_live(
+        {0: dependent_invocation(0), 1: dependent_invocation(1)},
+        lambda: {},
+        lambda: gym.steps == 1,
+        lambda *args: None,
+        lambda agent, request, outcome: terminal.append((request.task_id, outcome.state)),
+        0.01,
+    )
+    assert terminal == [("task-0", "FAILED"), ("task-1", "CANCELLED")]
+    assert gym.steps == actor.calls == 1
+    assert summary["termination_reason"] == "cancellation"
+    assert summary["session_progress"]["failed_slots"] == [["task-0", "role"]]
+    assert summary["session_progress"]["undispatched_slots"] == [
+        ["task-2", "role"],
+        ["task-3", "role"],
+    ]
+
+
 @pytest.mark.parametrize("archive_failed", [False, True])
 def test_post_reset_profile_failure_flushes_diagnostics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, archive_failed: bool
@@ -849,8 +979,9 @@ def test_loaded_perception_initialization_archives_actual_readiness(
 
 
 @pytest.mark.parametrize("count", [1, 2, 3, 4])
+@pytest.mark.parametrize("failed_predecessor", [False, True])
 def test_live_pipe_relays_later_assignments_and_early_terminal_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int, failed_predecessor: bool
 ) -> None:
     """Exercise real parent/child IPC with one reset and two sequential Control dispatches."""
     import multiprocessing
@@ -887,17 +1018,26 @@ def test_live_pipe_relays_later_assignments_and_early_terminal_once(
     observed: list[str] = []
     sent = False
 
+    def terminal_failure(
+        feedback: Stage2ExecutionFeedback, agent_name: str
+    ) -> dict[str, Any] | None:
+        """Expose a local failure only in the failure case, preserving the original pipe path."""
+        del feedback, agent_name
+        return {"failure_basis": "original-skill-bad-terminate"} if failed_predecessor else None
+
+    monkeypatch.setattr(Stage2ExecutionFeedback, "terminal_failure", terminal_failure)
+
     def arrivals() -> Mapping[int, CanonicalInvocation]:
         """Send the second committed Task only after reading the first early terminal."""
         nonlocal sent
-        if observed and not sent:
+        if observed and not sent and not failed_predecessor:
             sent = True
             return {0: second}
         return {}
 
     def completed(agent: int, request: CanonicalInvocation, outcome: LocalExecutionOutcome) -> None:
         """Consume each exact child terminal once, before the shared world ends."""
-        assert agent == 0 and outcome.state == "COMPLETED"
+        assert agent == 0 and outcome.state == ("FAILED" if failed_predecessor else "COMPLETED")
         observed.append(request.task_id)
 
     try:
@@ -905,9 +1045,14 @@ def test_live_pipe_relays_later_assignments_and_early_terminal_once(
             {0: first}, arrivals, lambda: False, lambda *args: None, completed, 1.0
         )
         assert starts == [True]
-        assert observed == ["task-0", "task-1"]
-        assert gym.steps == actor.calls == 2
-        assert [agent.initializations for agent in actor.originals] == [2] + [0] * (count - 1)
+        assert observed == (["task-0"] if failed_predecessor else ["task-0", "task-1"])
+        steps = 1 if failed_predecessor else 2
+        assert gym.steps == actor.calls == steps
+        assert [agent.initializations for agent in actor.originals] == [steps] + [0] * (count - 1)
+        if failed_predecessor:
+            assert summary["termination_reason"] == "local_failure_drained"
+            assert summary["session_progress"]["undispatched_slots"] == [["task-1", "role"]]
+            assert not sent
         assert summary["official_metrics"]["pddl_success"] is False
     finally:
         parent.send(("CLOSE", None))
@@ -1116,11 +1261,16 @@ def test_perception_negative_read_completes_only_observation(tmp_path: Path) -> 
     assert "pddl_success" not in observation
 
 
+@pytest.mark.parametrize("undispatched_successor", [False, True])
 @pytest.mark.parametrize(
     "detected_at,expected_state,expected_steps", [(3, "COMPLETED", 3), (None, "FAILED", 4)]
 )
 def test_active_acquisition_requires_actual_detection_not_navigation_completion(
-    tmp_path: Path, detected_at: int | None, expected_state: str, expected_steps: int
+    tmp_path: Path,
+    detected_at: int | None,
+    expected_state: str,
+    expected_steps: int,
+    undispatched_successor: bool,
 ) -> None:
     """Use original steps/cache; finished-navigation alone is insufficient."""
 
@@ -1149,7 +1299,8 @@ def test_active_acquisition_requires_actual_detection_not_navigation_completion(
         sim_info=SimpleNamespace(search_for_entity=lambda entity: 7, sim=simulator),
     )
     runtime._habitat_env.sim = simulator
-    request_body = invocation(0, ("observer",), observation=True).as_dict()
+    actors = ("observer", "observer") if undispatched_successor else ("observer",)
+    request_body = invocation(0, actors, observation=True).as_dict()
     request_body.update(operation="observation.acquire@v1", objective="Navigate to object-a")
     request = parse_canonical_invocation({"invocation": request_body})
     terminal: list[LocalExecutionOutcome] = []
@@ -1164,6 +1315,9 @@ def test_active_acquisition_requires_actual_detection_not_navigation_completion(
     assert actor.calls == gym.steps == expected_steps
     assert terminal[0].state == expected_state
     assert terminal[0].local_skill_completed is False
+    if undispatched_successor and expected_state == "FAILED":
+        assert summary["termination_reason"] == "local_failure_drained"
+        assert summary["session_progress"]["undispatched_slots"] == [["task-1", "role"]]
     assert summary["identity"]["episode_reset_count"] == 1
     receipt = json.loads(next(tmp_path.glob("observation-*.json")).read_bytes())
     assert receipt["condition_holds"] is (detected_at is not None)
@@ -1438,6 +1592,123 @@ def test_missing_followup_dispatch_times_out_without_fabricating_completion(tmp_
     assert len(summary["task_outcomes"]) == 1
     assert gym.steps == actor.calls == 1
     assert actor.originals[0].initializations == 1
+
+
+@pytest.mark.parametrize(
+    "failed_write", [None, "shared-world-summary.json", "task-verifier-verdict.json"]
+)
+@pytest.mark.parametrize("late_dispatch", [False, True])
+def test_failed_predecessor_publishes_actual_terminal_world_and_closure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_write: str | None, late_dispatch: bool
+) -> None:
+    """Exercise loop, store and verifier closure without model or physics calls."""
+    from habitat_local_eaios.shared_world import _archive_official_metrics
+    from habitat_local_eaios.task_verifier import build_task_verifier_source
+    from test_task_verifier import _semantic
+
+    actor, gym = Actor(2), Gym({0: 99})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    monkeypatch.setattr(runtime, "final_metrics", lambda: {"pddl_success": False})
+    semantic = _semantic()
+    (tmp_path / "authoritative-semantic-evidence.json").write_text(json.dumps(semantic))
+    (tmp_path / "task-verifier-source.json").write_text(
+        json.dumps(build_task_verifier_source(semantic))
+    )
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(build_endpoint_registry(node_sources(tmp_path, 2), tmp_path))
+    )
+    actors = ("one", "other")
+
+    def terminal_failure(feedback: Stage2ExecutionFeedback, agent_name: str) -> dict[str, Any]:
+        """Observe an original local failure after the single physical step."""
+        del feedback, agent_name
+        if late_dispatch:
+            peer.submit({"invocation": invocation(1, actors).as_dict()})
+        return {"failure_basis": "original-skill-bad-terminate"}
+
+    monkeypatch.setattr(Stage2ExecutionFeedback, "terminal_failure", terminal_failure)
+
+    class World:
+        """Keep original runtime and publication boundaries with only vendor APIs substituted."""
+
+        def start(self) -> None:
+            """The deterministic runtime already represents the one reset world."""
+
+        def is_ready(self) -> bool:
+            """Expose only the fixture's initialized runtime."""
+            return True
+
+        def readiness_detail(self) -> str:
+            """Disclose that this proves software lifecycle rather than physical readiness."""
+            return "deterministic world"
+
+        def supported_operations(self) -> tuple[str, ...]:
+            """Expose only the operation used in the real invocation parser."""
+            return ("mobility.move@v1",)
+
+        def run_live(self, *args: Any) -> Any:
+            """Use the production loop and the child's real official-metric archival path."""
+            outcomes, summary = runtime.execute_live(*args)
+            _archive_official_metrics(runtime, summary)
+            return outcomes, summary
+
+        def shutdown(self) -> None:
+            """No external process or simulator exists in this deterministic fixture."""
+
+    producer = LiveWorldCoordinator(World(), registry_path, 0.01, tmp_path)
+    write = producer._write_json
+
+    def selected_failure(name: str, value: object) -> None:
+        """Fail only the selected evidence writer and retain all other real publications."""
+        if name == failed_write:
+            raise OSError("deterministic archival fault")
+        write(name, value)
+
+    monkeypatch.setattr(producer, "_write_json", selected_failure)
+    endpoint = NodeEndpoint("node-a", 0, ExecutionStore(tmp_path / "store.sqlite3"), producer)
+    peer = NodeEndpoint("node-b", 1, ExecutionStore(tmp_path / "peer.sqlite3"), producer)
+    try:
+        response = endpoint.submit({"invocation": invocation(0, actors).as_dict()})
+        producer._worker.join(timeout=2)
+        assert not producer._worker.is_alive()
+        status = producer.closure()
+        assert status["phase"] == "closed" and status["finished"] is True
+        assert status["evidence_flushed"] is (failed_write is None)
+        assert status["execution_error"] is None
+        progress = status["session_progress"]
+        assert isinstance(progress, dict)
+        assert progress["failed_slots"] == (
+            [["task-0", "role"], ["task-1", "role"]] if late_dispatch else [["task-0", "role"]]
+        )
+        assert progress["active_slots"] == []
+        assert progress["undispatched_slots"] == ([] if late_dispatch else [["task-1", "role"]])
+        records = endpoint.store().all_executions()
+        assert len(records) == 1
+        assert endpoint.status({"execution_id": response["execution_id"]})["state"] == "FAILED"
+        with pytest.raises(IntegrationError, match="consumed"):
+            endpoint.accept({"invocation": invocation(1, actors).as_dict()})
+        assert gym.steps == actor.calls == 1
+        assert actor.originals[1].initializations == 0
+        state = json.loads((tmp_path / "live-session-state.json").read_bytes())
+        assert len(state["unreported_dispatches"]) == int(late_dispatch)
+        if late_dispatch:
+            dispatch = state["unreported_dispatches"][0]["execution"]
+            assert dispatch["state"] == "FAILED"
+            assert dispatch["local_outcome"] is None
+            assert peer.accept({"invocation": invocation(1, actors).as_dict()})["state"] == "FAILED"
+        if failed_write != "shared-world-summary.json":
+            summary = json.loads((tmp_path / "shared-world-summary.json").read_bytes())
+            assert summary["official_pddl_success"] is False
+            assert summary["termination_reason"] == "local_failure_drained"
+            assert summary["identity"]["episode_terminated"] is False
+            assert len(summary["serial_task_outcomes"]) == 1
+        if failed_write != "task-verifier-verdict.json":
+            verdict = json.loads((tmp_path / "task-verifier-verdict.json").read_bytes())
+            assert verdict["satisfied"] is False
+            assert [task["task_id"] for task in verdict["tasks"]] == ["task-0"]
+    finally:
+        producer.shutdown()
 
 
 def test_action_trace_cleanup_fault_does_not_mask_actor_exception(

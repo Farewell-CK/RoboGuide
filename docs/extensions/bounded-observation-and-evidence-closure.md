@@ -172,10 +172,35 @@ Runner 最多观察 30 秒 / 64 页小状态响应，将每次读取保存在
 `evidence-closure-archive.json`；失败归属 `HARNESS_ARCHIVAL`，不覆盖 `run-failure.json`。
 legacy adapter 的 closure 为 unavailable；只有 live 的已接受 Request 启用该附加 barrier。
 
+### 失败后 session 的自然封口
+
+`independent-live/v0.1` 不提供失败后的 session continuation。某个真实本地执行返回
+`FAILED` 后，已经活动的 peer 继续原执行路径，或响应既有显式取消；adapter 不替 Control
+取消、重新调度或释放资源。当这些活动执行全部结束，而 session 仍有从未下发的 slot 时，
+runtime 使用 `termination_reason=local_failure_drained` 结束本次世界执行，不再等待不可能由
+本地补发的后继。正常成功后的 Control 顺序派发、全 slot 完成及 assignment wait budget
+保持原有路径。此规则依据实际失败事实和活动执行集合，不读取或推导 DAG 调度决策。
+
+slot ledger 的 `completed` 仅表示本地已终止，不等于成功或 Task satisfaction；新的
+`roboguide.live-session-progress/v0.1` 分别记录 declared/dispatched/terminal 数量、真实
+failed slots、active slots 和 undispatched slots。它随 live summary、session state 和
+closure 发布。summary 来自子进程已收到的派发；closure/session state 来自父进程已接收的
+派发。因此在终态与派发并发到达的情况下，两边的 dispatched 数量可以不同，不能据数量
+相等推断完整性。父进程已接收但未得到子进程终态的派发，在 store 中保留真实失败及错误，
+另列于 `unreported_dispatches`，不会伪造位置、物理执行结果或 verifier 的 attempt coverage。
+这些记录在最终 state 发布前结束本地 handle，不能继续标为 active。
+
+封口仍读取同一真实世界的原始官方 metric；不会由局部失败推导 `pddl_success=false`，
+也不会把 `episode_terminated` 改成 true。官方 metric 缺失仍为 unavailable，summary 或
+verifier 写入失败仍使 `evidence_flushed=false`。物理失败、归档失败和正式 admission
+保持独立；历史失败归档不回写。
+
 feasibility v0.6 的 `finality_profile` 固定三个中立字段：
 `verifier_publication=after-all-session-slots`、`endpoint_capacity=1`、
 `resource_release=after-task-satisfaction`。Controller 在资源保留的 final slots 上进行
 有界候选匹配，并在创建 Group 前拒绝无法闭合的容量冲突；这不授予任何预留或释放权限。
+这里的全 slot barrier 约束正常完成路径；失败封口结束的是已失败、不可继续的 session，
+不把未下发 slot 标成完成，也不授予正常 Task satisfaction 或额外资源复用。
 
 感知与重排的 live deployment 还在每次 reset 后、Mission Service 启动前发布
 `roboguide.execution-planning-evidence/v0.2`。该 artifact 将同一份 semantic evidence 的
