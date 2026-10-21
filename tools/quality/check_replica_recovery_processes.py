@@ -9,10 +9,12 @@ import json
 import os
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 from typing import Any, BinaryIO, cast
 
@@ -45,9 +47,14 @@ def storage_profile(
 ) -> dict[str, Any]:
     """Declare every actual original supervisor, child, CAS and credential/config dependency."""
     components: list[dict[str, Any]] = []
+    storage_versions = set()
     replica_ids = [f"replica-{member}" for member in configs]
     for member, config in configs.items():
         storage = Path(config["storage_directory"])
+        with closing(
+            sqlite3.connect((storage / "replica.sqlite3").as_uri() + "?mode=ro", uri=True)
+        ) as connection:
+            storage_versions.add(connection.execute("PRAGMA user_version").fetchone()[0])
         dependencies: list[str] = []
         cas = storage / "artifacts"
         if cas.exists():
@@ -104,8 +111,12 @@ def storage_profile(
             },
         ]
     )
+    if storage_versions not in ({0}, {1}):
+        raise ValueError("actual Replica stores require one complete supported storage profile")
     return {
-        "schema": "roboguide.recovery-profile/v0.2",
+        "schema": "roboguide.recovery-profile/v0.5"
+        if storage_versions == {1}
+        else "roboguide.recovery-profile/v0.2",
         "profile_id": "actual-rotated-cluster-stores",
         "revision": 1,
         "max_bytes": 1024 * 1024 * 1024,

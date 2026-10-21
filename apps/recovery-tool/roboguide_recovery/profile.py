@@ -365,6 +365,14 @@ def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str
         (1, "roboguide.replica-storage/v0.1")
     ]:
         raise ValueError("Replica original storage marker differs")
+    if connection.execute("SELECT 1 FROM sqlite_master WHERE type='trigger'").fetchone():
+        raise ValueError("Replica storage contains unrecognized writer triggers")
+    views = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='view'")
+    }
+    if views != {"replica_" + name for name in ("meta", "commands", "log", "events", "snapshot")}:
+        raise ValueError("Replica old-writer readonly views are incomplete")
     for name in ("meta", "commands", "log", "events", "snapshot"):
         expected_sql = f"CREATE VIEW replica_{name} AS SELECT * FROM replica_v1_{name}"
         row = connection.execute(

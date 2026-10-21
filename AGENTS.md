@@ -1,5 +1,14 @@
 # Repository Guidelines
 
+ADR-0130/0135 bind Replica storage v1 to the actual database inode plus sibling writer lease.
+Migration first validates original cluster/schema and drains legacy SQLite connections using native
+DELETE-journal/exclusive locking. Complete tables, exact readonly legacy views, marker and absence
+of writer triggers are checked; missing identity never bootstraps replacement authority. Explicit
+recovery v0.5 retains the full v0.4 Memory contract and revalidates Replica fences during immutable
+bundle verification/restore. The maintained storage_lease_probe and process checker create zero
+Nodes/devices. ADR-0131 transfer intent tests do not prove source-child drain, response-loss recovery
+or full HA; these remain required alongside online content and cross-domain recovery.
+
 ADR-0129 adds the closed deployment-profile v0.1 and readonly inspector under tools/deployment.
 It accepts arbitrary declared components/process groups/hosts/domains, pinned inputs and contract
 support, unique store owners, actual TLS leaf pins, fault targets and explicit criteria. Zero Node

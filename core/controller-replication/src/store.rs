@@ -254,7 +254,11 @@ fn schema_object_type(connection: &Connection, name: &str) -> Result<Option<Stri
 }
 
 /// Creates or atomically migrates the complete Replica table set and its old-writer read-only fence.
-fn prepare_storage_format(connection: &mut Connection) -> Result<(), String> {
+fn prepare_storage_format(
+    connection: &mut Connection,
+    profile: &str,
+    application_schema: &str,
+) -> Result<(), String> {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
@@ -267,6 +271,16 @@ fn prepare_storage_format(connection: &mut Connection) -> Result<(), String> {
         .iter()
         .map(|name| schema_object_type(connection, name))
         .collect::<Result<Vec<_>, _>>()?;
+    let triggers: u64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if triggers != 0 {
+        return Err("Replica storage contains unrecognized writer triggers".into());
+    }
     if version == REPLICA_STORAGE_VERSION && marker.as_deref() == Some("table") {
         if current.iter().any(|kind| kind.as_deref() != Some("table"))
             || legacy.iter().any(|kind| kind.as_deref() != Some("view"))
@@ -283,15 +297,91 @@ fn prepare_storage_format(connection: &mut Connection) -> Result<(), String> {
         if stored != (REPLICA_STORAGE_VERSION, REPLICA_STORAGE_SCHEMA.to_string()) {
             return Err("Replica storage marker differs".into());
         }
+        let identity: Option<(String, String)> =
+            read_meta(connection, "identity").map_err(|error| error.to_string())?;
+        if identity != Some((profile.to_string(), application_schema.to_string())) {
+            return Err("stored replica cluster/application identity is absent or differs".into());
+        }
+        let object_count: u64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if object_count != 11 {
+            return Err("Replica storage contains unknown tables/views".into());
+        }
+        for (legacy_name, storage_name) in LEGACY_TABLES.iter().zip(STORAGE_TABLES) {
+            let sql: String = connection
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE name=?1 AND type='view'",
+                    [legacy_name],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            let expected = format!("CREATE VIEW {legacy_name} AS SELECT * FROM {storage_name}");
+            if sql.split_whitespace().collect::<Vec<_>>()
+                != expected.split_whitespace().collect::<Vec<_>>()
+            {
+                return Err("Replica storage readonly view differs".into());
+            }
+        }
         return Ok(());
     }
     if version != 0 || marker.is_some() {
         return Err("unknown or incomplete Replica storage format".into());
     }
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|error| error.to_string())?;
     let has_legacy = legacy.iter().any(Option::is_some);
+    let mut objects = connection
+        .prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'")
+        .map_err(|error| error.to_string())?
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    objects.sort();
+    let mut expected = if has_legacy {
+        LEGACY_TABLES
+            .iter()
+            .map(|name| name.to_string())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    expected.sort();
+    if objects != expected {
+        return Err("legacy Replica database contains incomplete or unknown tables/views".into());
+    }
+    if has_legacy {
+        let identity: (String, String) = connection
+            .query_row(
+                "SELECT value FROM replica_meta WHERE key='identity'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| error.to_string())
+            .and_then(|encoded| {
+                serde_json::from_str(&encoded).map_err(|error| error.to_string())
+            })?;
+        if identity != (profile.to_string(), application_schema.to_string()) {
+            return Err("stored replica cluster/application identity differs".into());
+        }
+    }
+    // A pre-inode-lock process can still hold the original database through another basename.
+    // SQLite itself must drain all old connections before any format fence reaches the main file.
+    let journal: String = connection
+        .query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
+        .map_err(|error| format!("legacy Replica connections are not quiescent: {error}"))?;
+    if journal != "delete" {
+        return Err("legacy Replica connections are not quiescent".into());
+    }
+    connection
+        .pragma_update(None, "synchronous", "FULL")
+        .map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Exclusive)
+        .map_err(|error| error.to_string())?;
     if has_legacy {
         if legacy.iter().any(|kind| kind.as_deref() != Some("table"))
             || current.iter().any(Option::is_some)
@@ -331,6 +421,10 @@ fn prepare_storage_format(connection: &mut Connection) -> Result<(), String> {
              PRAGMA user_version=1;",
         )
         .map_err(|error| error.to_string())?;
+    if !has_legacy {
+        write_meta(&transaction, "identity", &(profile, application_schema))
+            .map_err(|error| error.to_string())?;
+    }
     transaction.commit().map_err(|error| error.to_string())
 }
 
@@ -573,21 +667,27 @@ impl SqliteRaftStore {
         };
         let mut lease = canonical.as_os_str().to_os_string();
         lease.push(".writer.lock");
-        let writer = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let writer = options
             .open(Path::new(&lease))
             .map_err(|error| error.to_string())?;
+        if !writer
+            .metadata()
+            .map_err(|error| error.to_string())?
+            .is_file()
+        {
+            return Err("replica lease must be a regular file".into());
+        }
         writer
             .try_lock()
             .map_err(|error| format!("replica database already owned: {error}"))?;
-        let database = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
+        let database = options
             .open(&canonical)
             .map_err(|error| error.to_string())?;
         if !database
@@ -605,21 +705,15 @@ impl SqliteRaftStore {
             database,
         };
         let mut connection = Connection::open(&canonical).map_err(|error| error.to_string())?;
-        prepare_storage_format(&mut connection)?;
+        connection
+            .busy_timeout(Duration::from_millis(100))
+            .map_err(|error| error.to_string())?;
+        prepare_storage_format(&mut connection, profile, application_schema)?;
         connection
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(|error| error.to_string())?;
         connection
             .pragma_update(None, "synchronous", "FULL")
-            .map_err(|error| error.to_string())?;
-        let identity: Option<(String, String)> =
-            read_meta(&connection, "identity").map_err(|error| error.to_string())?;
-        if identity.as_ref().is_some_and(|identity| {
-            identity != &(profile.to_string(), application_schema.to_string())
-        }) {
-            return Err("stored replica cluster/application identity differs".into());
-        }
-        write_meta(&connection, "identity", &(profile, application_schema))
             .map_err(|error| error.to_string())?;
         let store = Self {
             connection: Arc::new(Mutex::new(connection)),

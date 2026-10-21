@@ -1,5 +1,10 @@
 # RoboGuide
 
+[Replica 原数据升级与恢复校验](docs/development/acceptance/2026-10-21-replica-upgrade-quiescence.md)
+在旧 SQLite 连接仍活跃时拒绝迁移，排空后保留原 identity；实际 inode lease 与只读旧表
+屏障阻止双 writer。显式 recovery v0.5 在备份、验证、恢复时检查格式，摘要正确也不能
+恢复损坏的 writer 合同。完整 leader transfer 排空、在线内容与跨故障域恢复继续实施。
+
 [可执行部署 profile](tools/deployment/README.md)将进程共址、主机/控制域、原 binary/配置、
 持久化 owner、TLS/协议声明与故障/退出矩阵作为显式输入；实际零 Node 服务门禁检查摘要、
 inode 和四次只读探测。声明、观察、待验硬件及 RTO/RPO 目标分别保留，不自动宣告部署或整改完成。

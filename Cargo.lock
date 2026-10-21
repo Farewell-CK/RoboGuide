@@ -416,6 +416,7 @@ dependencies = [
 name = "controller-replication"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "openraft",
  "ports",
  "rusqlite",

@@ -1,5 +1,9 @@
 # RoboGuide V2 架构基线
 
+[ADR-0135](../../decisions/0135-replica-upgrade-quiescence-and-recovery-validation.md)要求实际
+旧 SQLite 连接排空、迁移前原 identity、完整旧表 fence 与恢复 profile 校验；响应丢失和
+source child drain 仍须独立通过后续 HA 门禁。
+
 [ADR-0130](../../decisions/0130-replica-database-writer-and-legacy-fence.md)冻结 Replica
 数据库本体 writer、保留完整原数据的 storage v1 和只读旧表 fence，以及显式恢复 v0.5。
 当前代码已加入实现与单元回归；实际旧 binary、恢复和独立进程门禁通过前不宣称 F5 完成。

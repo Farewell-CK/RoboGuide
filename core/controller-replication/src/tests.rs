@@ -354,6 +354,77 @@ fn legacy_replica_storage_migrates_atomically_and_old_writes_are_refused() {
     drop(store);
 }
 
+/// The main-file migration fence requires every legacy WAL connection to relinquish SQLite locks.
+#[test]
+fn live_legacy_sqlite_connection_blocks_replica_format_migration() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy-live.sqlite3");
+    let legacy = rusqlite::Connection::open(&path).unwrap();
+    legacy
+        .execute_batch(
+            "PRAGMA journal_mode=WAL;
+             CREATE TABLE replica_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+             CREATE TABLE replica_commands(revision INTEGER PRIMARY KEY,command_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL);
+             CREATE TABLE replica_log(log_index INTEGER PRIMARY KEY,data TEXT NOT NULL);
+             CREATE TABLE replica_events(sequence INTEGER PRIMARY KEY,event_id TEXT UNIQUE NOT NULL,data TEXT NOT NULL,digest TEXT NOT NULL);
+             CREATE TABLE replica_snapshot(singleton INTEGER PRIMARY KEY CHECK(singleton=1),meta TEXT NOT NULL,data BLOB NOT NULL);
+             INSERT INTO replica_meta VALUES ('identity','[\"identity\",\"test/checkpoint-v1\"]');",
+        )
+        .unwrap();
+    let refused = SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1");
+    assert!(refused.err().unwrap().contains("not quiescent"));
+    assert_eq!(
+        legacy
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    drop(legacy);
+    assert!(SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").is_ok());
+}
+
+/// Wrong original identity and altered view fences refuse before modifying retained authority rows.
+#[test]
+fn replica_format_reopen_rejects_altered_readonly_view() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("altered.sqlite3");
+    drop(SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap());
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch(
+        "DROP VIEW replica_meta;
+         CREATE VIEW replica_meta AS SELECT * FROM replica_v1_log;",
+    )
+    .unwrap();
+    drop(sql);
+    assert!(
+        SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1")
+            .err()
+            .unwrap()
+            .contains("readonly view differs")
+    );
+}
+
+/// Missing identity remains unknown; reopening cannot silently invent a new cluster authority.
+#[test]
+fn replica_format_requires_original_identity_before_any_repair() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("missing-identity.sqlite3");
+    drop(SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").unwrap());
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute("DELETE FROM replica_v1_meta WHERE key='identity'", [])
+        .unwrap();
+    drop(connection);
+    let before = std::fs::read(&path).unwrap();
+    assert!(
+        SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1")
+            .err()
+            .unwrap()
+            .contains("identity is absent or differs")
+    );
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
 /// Acquires three simultaneous ephemeral listeners so their released loopback ports are distinct.
 fn members() -> BTreeMap<u64, SocketAddr> {
     members_with_count(3)
@@ -678,16 +749,24 @@ async fn dynamic_membership_uses_learner_catchup_and_joint_consensus() {
         .change_membership([1_u64, 2, 3, 4].into_iter().collect(), true)
         .await
         .unwrap();
-    assert!(
-        nodes[3]
-            .0
-            .raft
-            .metrics()
-            .borrow()
-            .membership_config
-            .voter_ids()
-            .any(|id| id == 4)
-    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let applied = nodes[3]
+                .0
+                .raft
+                .metrics()
+                .borrow()
+                .membership_config
+                .voter_ids()
+                .collect::<BTreeSet<_>>();
+            if applied == [1_u64, 2, 3, 4].into_iter().collect() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    })
+    .await
+    .expect("new voter independently applies the committed complete membership");
     let current_leader = leader(&nodes).await;
     nodes[current_leader]
         .0

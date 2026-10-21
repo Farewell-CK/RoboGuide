@@ -8,10 +8,15 @@
 实际新/旧进程和 alias writer 门禁通过。Recovery profile v0.5 已冻结；durable leader drain、
 在线 CAS/archive、跨故障域恢复和正式旧 binary bundle 恢复仍不关闭 F5。
 
-2026-10-21 [持久化 leader transfer drain](../decisions/0131-durable-leader-transfer-drain.md)
-把 transfer intent/target acknowledgement/new epoch/reconcile 写入 Replica SQL 与 snapshot，
-并让 supervisor 在 uncertain handoff 后保持 child hold。三副本 round-trip 与 restart-safe
-monotonic record 回归继续保留；跨故障域在线 HA 和物理连续性仍待验。
+2026-10-21 [Replica 升级排空与 v0.5 恢复脚本对齐](../decisions/0135-replica-upgrade-quiescence-and-recovery-validation.md)
+补充迁移前 identity、SQLite 实际排空、完整 view/trigger 校验；Replica 冷恢复脚本按实际
+SQL version 选择原 v0.2 或显式 v0.5，混合/未知格式拒绝。Memory provider 原 v0.4 语义保持不变。响应丢失、source child drain、在线内容和
+跨故障域恢复仍未关闭完整 F5。
+
+2026-10-21 [持久化 leader transfer intent](../decisions/0131-durable-leader-transfer-drain.md)
+已保存 intent/target acknowledgement/new epoch/reconcile。复查发现 source-child drain、
+响应丢失与成员本地记录/snapshot 分离仍须修正；三副本 round-trip 和 record restart
+回归不能单独证明这些边界，完整 HA 保持待完成。
 
 2026-10-21 [Active Map 实际引用 GC 门禁](acceptance/2026-10-21-active-map-gc-reference-gate.md)
 新增 v0.2 实际 content_references/head/ref/pending-handoff 检查，删除仍只能由

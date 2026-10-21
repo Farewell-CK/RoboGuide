@@ -23,6 +23,7 @@ from .profile import (
     relative,
     validate,
     validate_replica_sets,
+    validate_replica_storage,
 )
 
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
@@ -433,8 +434,14 @@ def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
             raise ValueError("recovery content digest or size differs: " + name)
         if row["kind"] == "content":
             _check_cas_path(component, selected, row["content_digest"])
-        if row["kind"] == "sqlite" and _identity(bundle / name, budget) != row["sqlite"]:
-            raise ValueError("complete recovery SQLite identity differs: " + name)
+        if row["kind"] == "sqlite":
+            if _identity(bundle / name, budget) != row["sqlite"]:
+                raise ValueError("complete recovery SQLite identity differs: " + name)
+            if component["kind"] == "replica":
+                with closing(
+                    sqlite3.connect((bundle / name).as_uri() + "?mode=ro&immutable=1", uri=True)
+                ) as connection:
+                    validate_replica_storage(connection, manifest["profile"]["schema"])
     for component in components:
         databases, _, _ = layout(component)
         required = (

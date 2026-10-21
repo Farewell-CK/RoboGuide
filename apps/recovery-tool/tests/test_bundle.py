@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 from roboguide_recovery import backup, restore, verify
-from roboguide_recovery.bundle import canonical, digest
+from roboguide_recovery.bundle import Budget, _identity, canonical, digest
 from roboguide_recovery.profile import validate
 
 
@@ -447,8 +447,8 @@ def test_deep_configured_dependency_graph_does_not_use_python_recursion(
     assert len(validate(configured)) == 1002
 
 
-def test_replica_v1_requires_explicit_profile_and_fences_legacy_writes(tmp_path: Path) -> None:
-    """Replica storage v1 preserves complete rows while old names remain readonly views."""
+def replica_v1_profile(tmp_path: Path) -> dict[str, Any]:
+    """Create a complete SQL storage boundary for recovery corruption tests without Nodes."""
     root = tmp_path / "replica"
     root.mkdir()
     (root / "replica.sqlite3.writer.lock").touch()
@@ -485,7 +485,7 @@ def test_replica_v1_requires_explicit_profile_and_fences_legacy_writes(tmp_path:
         )
         with pytest.raises(sqlite3.OperationalError):
             connection.execute("INSERT INTO replica_meta VALUES ('old','writer')")
-    profile: dict[str, Any] = {
+    return {
         "schema": "roboguide.recovery-profile/v0.5",
         "profile_id": "replica-v1",
         "revision": 1,
@@ -504,6 +504,11 @@ def test_replica_v1_requires_explicit_profile_and_fences_legacy_writes(tmp_path:
             }
         ],
     }
+
+
+def test_replica_v1_requires_explicit_profile_and_fences_legacy_writes(tmp_path: Path) -> None:
+    """Replica storage v1 preserves complete rows while old names remain readonly views."""
+    profile = replica_v1_profile(tmp_path)
     result = backup(profile, tmp_path / "bundle", "replica-v1")
     assert verify(tmp_path / "bundle", result["manifest_digest"])["profile"]["schema"] == (
         "roboguide.recovery-profile/v0.5"
@@ -512,3 +517,40 @@ def test_replica_v1_requires_explicit_profile_and_fences_legacy_writes(tmp_path:
     legacy["schema"] = "roboguide.recovery-profile/v0.4"
     with pytest.raises(ValueError, match="explicit recovery profile v0.5"):
         backup(legacy, tmp_path / "legacy-bundle", "legacy")
+
+
+@pytest.mark.parametrize(
+    "corruption", ["missing-view", "redirected-view", "writer-trigger", "marker"]
+)
+def test_replica_recovery_revalidates_pinned_sql_fences(tmp_path: Path, corruption: str) -> None:
+    """Even exact byte/row pins cannot authorize a damaged storage writer contract."""
+    profile = replica_v1_profile(tmp_path)
+    outcome = backup(profile, tmp_path / "bundle", "original")
+    manifest = verify(tmp_path / "bundle", outcome["manifest_digest"])
+    database = tmp_path / "bundle/stores/replica/replica.sqlite3"
+    with sqlite3.connect(database) as connection:
+        if corruption == "missing-view":
+            connection.execute("DROP VIEW replica_meta")
+        elif corruption == "redirected-view":
+            connection.executescript(
+                "DROP VIEW replica_meta; CREATE VIEW replica_meta AS SELECT * FROM replica_v1_log;"
+            )
+        elif corruption == "writer-trigger":
+            connection.executescript(
+                "CREATE TRIGGER old_writer INSTEAD OF INSERT ON replica_meta BEGIN "
+                "INSERT INTO replica_v1_meta VALUES (NEW.key,NEW.value); END;"
+            )
+        else:
+            connection.execute("UPDATE replica_storage_format SET schema='unrecognized'")
+    row = manifest["files"][0]
+    raw_database = database.read_bytes()
+    row["byte_size"] = len(raw_database)
+    row["content_digest"] = digest(raw_database)
+    row["sqlite"] = _identity(database, Budget(profile))
+    raw = canonical(manifest)
+    (tmp_path / "bundle/manifest.json").write_bytes(raw)
+    with pytest.raises(ValueError, match="Replica"):
+        verify(tmp_path / "bundle", digest(raw))
+    with pytest.raises(ValueError, match="Replica"):
+        restore(tmp_path / "bundle", digest(raw), tmp_path / "restored", "refuse")
+    assert not (tmp_path / "restored").exists()
