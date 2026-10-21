@@ -4,9 +4,10 @@
 保留其他工作树和未跟踪实验文件。没有启动实验、E6、模型、模拟器或设备。
 
 2026-10-21 [本地 Memory 内容引用生命周期](acceptance/2026-10-21-memory-content-reference-lifecycle.md)
-为现有 v3 `content_references` 增加 same-UID Unix acquire/query/exact-generation release；真实
-provider restart gate 证明活动行持久、release 重放和旧 acquire 不复活，零 Node/设备。它补齐
-provider-local 引用写入端，不闭合全局/跨主机 GC、replica/archive/Catalog 对账或 F4/F5。
+为现有 v3 `content_references` 增加 same-UID Unix acquire/query/exact-generation release，并把
+实际 use-lease grant/revoke/restart 接入引用行；跨 SQLite 失败靠原命令重放修复，lease 与引用
+任一活动时均挡 GC。真实 provider restart gate 证明引用持久，零 Node/设备。它补齐本地引用写入
+端，不闭合全局/跨主机 GC、replica/archive/Catalog 对账或 F4/F5。
 
 2026-10-21 [Control tenant quota commitment](../decisions/0140-control-resource-quota-commitment.md)
 接入 recovery-admin `/v1/resource-quotas` revisioned policy/authority journal、正常/Group/recovery

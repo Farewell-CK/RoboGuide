@@ -7,7 +7,7 @@ from typing import Any
 from .store import DIGEST, MemoryStore
 
 MAX_REFERENCES = 16_384
-KINDS = frozenset({"execution", "lineage", "replica", "snapshot", "archive"})
+KINDS = frozenset({"execution", "lineage", "replica", "snapshot", "archive", "use_lease"})
 
 
 def _text(value: object, name: str, maximum: int = 256) -> str:
@@ -174,3 +174,69 @@ class ContentReferences:
         if row is None:
             raise ValueError("original provider content reference is unavailable")
         return self._receipt(reference, row[0], row[1], row[2], row[3], bool(row[4]))
+
+    def synchronize_use_lease(
+        self,
+        lease_id: str,
+        generation: int,
+        originals: list[dict[str, Any]],
+        active: bool,
+        content_verified: bool = False,
+    ) -> None:
+        """Mirror a durable provider use-lease into exact per-import content references."""
+        lease_id = _text(lease_id, "use lease owner")
+        if type(generation) is not int or not 0 <= generation <= 2**63 - 1:
+            raise ValueError("content reference use-lease generation is invalid")
+        with self.store._mutex:
+            if not active:
+                with self.store._db:
+                    self.store._db.execute(
+                        "UPDATE content_references SET active=0 "
+                        "WHERE kind='use_lease' AND owner=? AND active=1",
+                        (lease_id,),
+                    )
+                return
+            if not 0 < generation <= 2**63 - 1 or not 1 <= len(originals) <= 8:
+                raise ValueError("active Memory-use reference coverage is unavailable")
+            pending: list[tuple[str, str, str, str, int]] = []
+            for original in originals:
+                manifest = self.store._validate_original(original)
+                digest, size = self.store._artifact(manifest)
+                self.store.require_content_live(digest)
+                if not content_verified and not self.store._verify_content(digest, size):
+                    raise ValueError("active Memory-use reference bytes are unavailable")
+                import_id = _text(original["import_id"], "import_id")
+                reference_id = f"use:{lease_id}:{generation}:{import_id}"
+                if len(reference_id.encode()) > 256:
+                    raise ValueError("Memory-use reference identity exceeds its bound")
+                pending.append((reference_id, digest, "use_lease", lease_id, generation))
+            if len({item[0] for item in pending}) != len(pending):
+                raise ValueError("Memory-use repeats an original import reference")
+            with self.store._db:
+                for reference, digest, kind, owner, current_generation in pending:
+                    existing = self.store._db.execute(
+                        "SELECT content_digest,kind,owner,generation,active "
+                        "FROM content_references WHERE reference_id=?",
+                        (reference,),
+                    ).fetchone()
+                    identity = (digest, kind, owner, current_generation)
+                    if existing is not None:
+                        if tuple(existing[:4]) != identity or not existing[4]:
+                            raise ValueError("original Memory-use reference generation conflicts")
+                        continue
+                    count = self.store._db.execute(
+                        "SELECT COUNT(*) FROM content_references"
+                    ).fetchone()[0]
+                    if count >= MAX_REFERENCES:
+                        raise ValueError("provider content reference history is full")
+                    self.store._db.execute(
+                        "INSERT INTO content_references "
+                        "(reference_id,content_digest,kind,owner,generation,active) "
+                        "VALUES (?,?,?,?,?,1)",
+                        (reference, digest, kind, owner, current_generation),
+                    )
+                self.store._db.execute(
+                    "UPDATE content_references SET active=0 "
+                    "WHERE kind='use_lease' AND owner=? AND generation<>? AND active=1",
+                    (lease_id, generation),
+                )

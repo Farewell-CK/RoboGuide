@@ -48,6 +48,12 @@ original ContentReclamation command can unlink bytes. This proves only the provi
 reference state, not remote replicas, global archive/catalog retirement, or device safety. See
 [ADR-0142](../../docs/decisions/0142-local-memory-content-reference-authority.md).
 
+The provider's `/v1/memory-use/control` grant/revoke also synchronizes exact `use_lease` references
+to this table under the same writer mutex. A renewal records its new generation and retires the
+previous one; a durable revoke or provider restart retires all rows for that lease. Restart fencing
+is local software evidence only and does not count as the original Controller revoke receipt required
+by ContentReclamation.
+
 `tools/quality/check_memory_reference_processes.py` starts the shipped provider twice around a real
 service restart, imports actual file bytes, and verifies reference persistence/release using the
 private Unix protocol and independently read SQLite. It creates no Node, device, model or simulator.

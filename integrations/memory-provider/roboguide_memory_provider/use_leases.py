@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
+from .content_references import ContentReferences
 from .store import DIGEST, MAX_METADATA_BYTES, MemoryStore, canonical, content_digest
 
 MAX_LEASE_MS = 30_000
@@ -66,6 +67,7 @@ class UseLeases:
         self.store = store
         self._mutex = threading.RLock()
         self._closed = False
+        self._content_references = ContentReferences(store)
         try:
             self._db = store._storage.connect("memory-use.sqlite3")
             self._db.execute("PRAGMA journal_mode=WAL")
@@ -89,6 +91,11 @@ class UseLeases:
                 )
                 self._db.execute("PRAGMA user_version=1")
                 self._db.execute("UPDATE leases SET revoked=1 WHERE revoked=0")
+            with self.store._mutex:
+                for (lease_id,) in self._db.execute(
+                    "SELECT lease_id FROM leases WHERE revoked=1 ORDER BY lease_id"
+                ):
+                    self._content_references.synchronize_use_lease(lease_id, 0, [], False)
         except BaseException:
             if hasattr(self, "_db"):
                 self._db.close()
@@ -283,7 +290,25 @@ class UseLeases:
             if original is not None:
                 if original[0] != request_digest:
                     raise ValueError("original Memory-use command changed its budget or contents")
-                return cast(dict[str, Any], json.loads(original[1]))
+                receipt = cast(dict[str, Any], json.loads(original[1]))
+                current = self._db.execute(
+                    "SELECT generation,revoked FROM leases WHERE lease_id=?",
+                    (control["lease_id"],),
+                ).fetchone()
+                if control["operation"] == "revoke":
+                    self._content_references.synchronize_use_lease(
+                        control["lease_id"], 0, [], False
+                    )
+                elif current is not None and current[0] == control["generation"] and not current[1]:
+                    self._inputs(request, control)
+                    self._content_references.synchronize_use_lease(
+                        control["lease_id"],
+                        control["generation"],
+                        request["imports"],
+                        True,
+                        content_verified=True,
+                    )
+                return receipt
             current = self._db.execute(
                 "SELECT purpose_json,generation,registry_revision,membership_json,"
                 "budget_json,revoked "
@@ -408,6 +433,13 @@ class UseLeases:
                     "DELETE FROM commands WHERE lease_id=? AND generation>0 AND generation<?",
                     (control["lease_id"], max(0, control["generation"] - 3)),
                 )
+            self._content_references.synchronize_use_lease(
+                control["lease_id"],
+                control["generation"] if control["operation"] == "grant" else 0,
+                request["imports"] if control["operation"] == "grant" else [],
+                control["operation"] == "grant",
+                content_verified=control["operation"] == "grant",
+            )
             return receipt
 
     def query(self, request: dict[str, Any]) -> dict[str, Any]:
