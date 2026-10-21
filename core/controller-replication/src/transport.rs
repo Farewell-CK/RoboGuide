@@ -85,12 +85,18 @@ enum Command {
         /// Complete candidate with immutable event/source evidence.
         batch: state::ApplicationCommitBatch,
     },
+    /// Read one original member-local handoff without election or application authority.
+    ObserveLeaderTransfer {
+        /// Original bounded operation ID, never a permission to repeat an effect.
+        transfer_id: String,
+    },
     /// Read the accepted application identity after an ambiguous Commit response.
     AcceptedIdentity {
         /// Original issuing epoch whose quorum must still be current.
         epoch: ControllerEpoch,
     },
     /// Target-side controlled election used by the explicit leader transfer profile.
+    #[serde(rename = "TransferLeadershipV2")]
     TransferLeadership {
         /// Epoch of the current leader that must still be the target's observed leader.
         epoch: ControllerEpoch,
@@ -172,6 +178,8 @@ enum Reply {
     AcceptedIdentity(Result<AcceptedApplicationIdentity, String>),
     /// Target-side transfer admission; it does not mean the target has won an election.
     Transfer(Result<LeaderTransferReceipt, String>),
+    /// Readonly exact member-local operation evidence.
+    LeaderTransferRecord(Result<Option<LeaderTransferRecord>, String>),
     /// Current leader epoch observed by an administration client.
     Epoch(Option<ControllerEpoch>),
     /// Current committed voter identities.
@@ -398,10 +406,19 @@ where
                 target,
                 transfer_id,
                 required_last_log_index,
-            } => Reply::Transfer(
+            } => Reply::Transfer(if request.sender != epoch.replica_id {
+                Err("leader transfer source differs from actual authenticated member".into())
+            } else {
                 node.accept_leader_transfer(epoch, target, transfer_id, required_last_log_index)
-                    .await,
-            ),
+                    .await
+            }),
+            Command::ObserveLeaderTransfer { transfer_id } => {
+                Reply::LeaderTransferRecord(if transfer_id.is_empty() || transfer_id.len() > 128 {
+                    Err("original transfer observation ID is unbounded".into())
+                } else {
+                    node.store.leader_transfer_by_id(&transfer_id)
+                })
+            }
             Command::AdminEpoch => Reply::Epoch(node.current_epoch()),
             Command::AdminMembership => Reply::Membership(
                 node.raft
@@ -446,6 +463,21 @@ where
             }),
         }
     };
+    #[cfg(test)]
+    if matches!(reply, Reply::Transfer(Ok(_))) && node.discard_transfer_reply.load(Ordering::SeqCst)
+    {
+        tokio::time::timeout(Duration::from_secs(4), async {
+            loop {
+                if node.reconcile_leader_transfer().await? {
+                    return Ok::<(), String>(());
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .map_err(|_| "test target quorum did not precede response loss".to_string())??;
+        return Err("test discarded original transfer reply after actual target quorum".into());
+    }
     let encoded = serde_json::to_vec(&reply).map_err(|error| error.to_string())?;
     if encoded.len() > MAX_FRAME_BYTES {
         return Err("replica response exceeds bounds".into());
@@ -686,6 +718,40 @@ pub(crate) async fn member_epoch(
     {
         Reply::Epoch(epoch) => Ok(epoch),
         _ => Err("member epoch response was invalid".into()),
+    }
+}
+
+/// Observes only an original target's local handoff proof through actual member authentication.
+pub(crate) async fn observe_leader_transfer(
+    node: &ReplicaNode,
+    member: u64,
+    transfer_id: &str,
+) -> Result<Option<LeaderTransferRecord>, String> {
+    admin_observe_leader_transfer(&node.config, member, node.tls.clone(), transfer_id).await
+}
+
+/// Reads an original infrastructure operation using an explicitly configured actual member peer.
+pub(crate) async fn admin_observe_leader_transfer(
+    config: &ReplicaConfig,
+    member: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
+    transfer_id: &str,
+) -> Result<Option<LeaderTransferRecord>, String> {
+    if transfer_id.trim().is_empty() || transfer_id.len() > 128 {
+        return Err("original transfer observation identity is invalid".into());
+    }
+    match admin_network(config, member, tls)?
+        .exchange(
+            Command::ObserveLeaderTransfer {
+                transfer_id: transfer_id.into(),
+            },
+            RPCOption::new(Duration::from_secs(2)),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::LeaderTransferRecord(record) => record,
+        _ => Err("original target handoff observation response differs".into()),
     }
 }
 

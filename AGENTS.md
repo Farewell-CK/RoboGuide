@@ -1,5 +1,14 @@
 # Repository Guidelines
 
+ADR-0136 retains bounded member-local transfer history under Replica storage v2 and explicit
+recovery v0.6, preserving original IDs and fencing v1 binaries. Raft snapshots never import or erase
+this operational authority. TransferLeadershipV2 rejects old target commands; loss/cancellation
+remains Unknown and duplicate original IDs never send another election. Completed retains the
+target's actual newer linearizable epoch; the source obtains the exact proof over authenticated
+readonly observation. Current source application fence/commit is refused while pending. Legacy
+weak completion migrates to Unknown with raw evidence preserved. This still requires independent
+source-child stop/wait, online content and cross-domain recovery evidence before full HA completion.
+
 ADR-0130/0135 bind Replica storage v1 to the actual database inode plus sibling writer lease.
 Migration first validates original cluster/schema and drains legacy SQLite connections using native
 DELETE-journal/exclusive locking. Complete tables, exact readonly legacy views, marker and absence

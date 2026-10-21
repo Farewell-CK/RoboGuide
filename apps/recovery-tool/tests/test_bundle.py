@@ -554,3 +554,59 @@ def test_replica_recovery_revalidates_pinned_sql_fences(tmp_path: Path, corrupti
     with pytest.raises(ValueError, match="Replica"):
         restore(tmp_path / "bundle", digest(raw), tmp_path / "restored", "refuse")
     assert not (tmp_path / "restored").exists()
+
+
+def test_replica_v2_recovery_preserves_original_transfer_hold(tmp_path: Path) -> None:
+    """Preserve the original uncertain ID and reject a forged completed proof."""
+    profile = replica_v1_profile(tmp_path)
+    profile["schema"] = "roboguide.recovery-profile/v0.6"
+    database = tmp_path / "replica/replica.sqlite3"
+    original = {
+        "transfer_id": "original-uncertain",
+        "source_epoch": {"term": 1, "replica_id": 1},
+        "target": 2,
+        "required_last_log_index": 5,
+        "state": "unknown",
+    }
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            "DROP TABLE replica_storage_format;"
+            "CREATE TABLE replica_storage_format("
+            "version INTEGER PRIMARY KEY CHECK(version=2),schema TEXT NOT NULL);"
+            "INSERT INTO replica_storage_format VALUES (2,'roboguide.replica-storage/v0.2');"
+            "PRAGMA user_version=2;"
+        )
+        connection.execute(
+            "INSERT INTO replica_v1_meta VALUES ('leader_transfers_v2',?)",
+            (json.dumps([original]),),
+        )
+    result = backup(profile, tmp_path / "bundle", "original")
+    manifest = verify(tmp_path / "bundle", result["manifest_digest"])
+    restore(tmp_path / "bundle", result["manifest_digest"], tmp_path / "restored", "restore")
+    with sqlite3.connect(tmp_path / "restored/stores/replica/replica.sqlite3") as connection:
+        assert json.loads(
+            connection.execute(
+                "SELECT value FROM replica_v1_meta WHERE key='leader_transfers_v2'"
+            ).fetchone()[0]
+        ) == [original]
+    with pytest.raises(ValueError, match="original recovery profile"):
+        backup(
+            {**profile, "schema": "roboguide.recovery-profile/v0.5"}, tmp_path / "wrong", "wrong"
+        )
+    bundled = tmp_path / "bundle/stores/replica/replica.sqlite3"
+    with sqlite3.connect(bundled) as connection:
+        connection.execute(
+            "UPDATE replica_v1_meta SET value=? WHERE key='leader_transfers_v2'",
+            (json.dumps([{**original, "state": "completed"}]),),
+        )
+    row = manifest["files"][0]
+    content = bundled.read_bytes()
+    row.update(
+        byte_size=len(content),
+        content_digest=digest(content),
+        sqlite=_identity(bundled, Budget(profile)),
+    )
+    raw = canonical(manifest)
+    (tmp_path / "bundle/manifest.json").write_bytes(raw)
+    with pytest.raises(ValueError, match="completed quorum proof"):
+        verify(tmp_path / "bundle", digest(raw))

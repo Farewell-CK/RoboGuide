@@ -1,5 +1,9 @@
 # RoboGuide V2 架构基线
 
+[ADR-0136](../../decisions/0136-member-local-leader-transfer-evidence.md)纠正 transfer 与
+Raft snapshot 的边界：成员本地不可覆盖历史、Unknown 不重发、目标实际 quorum 证明及
+源独立只读观察；显式 target command/storage v2/recovery v0.6 fence 保护新语义。
+
 [ADR-0135](../../decisions/0135-replica-upgrade-quiescence-and-recovery-validation.md)要求实际
 旧 SQLite 连接排空、迁移前原 identity、完整旧表 fence 与恢复 profile 校验；响应丢失和
 source child drain 仍须独立通过后续 HA 门禁。
@@ -8,9 +12,8 @@ source child drain 仍须独立通过后续 HA 门禁。
 数据库本体 writer、保留完整原数据的 storage v1 和只读旧表 fence，以及显式恢复 v0.5。
 当前代码已加入实现与单元回归；实际旧 binary、恢复和独立进程门禁通过前不宣称 F5 完成。
 
-[ADR-0131](../../decisions/0131-durable-leader-transfer-drain.md)把 leader transfer 的
-source drain、target accepted、new epoch、reconcile 和 uncertain restart hold 写入完整
-Replica snapshot；旧 source snapshot 不得覆盖已完成 target hold。仍不建立设备连续性。
+[ADR-0131](../../decisions/0131-durable-leader-transfer-drain.md)的早期 intent/hold 记录
+由 ADR-0136 修正；本地运维记录不进入 Raft snapshot，source-child drain 须独立证明。
 
 [ADR-0132](../../decisions/0132-active-map-gc-reference-gate.md)以实际 Provider/Active Map
 引用取代 caller all-clear boolean，`ContentReclamation.collect` 保留最终 unlink authority。

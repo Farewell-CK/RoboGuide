@@ -41,6 +41,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ReplicaAdminClient::new(configuration.replica, leader)?
         };
         match operation.as_str() {
+            "--observe-leader-transfer" => {
+                let transfer_id = arguments.next().ok_or("missing original transfer id")?;
+                if arguments.next().is_some() {
+                    return Err("unexpected transfer observation arguments".into());
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(&client.leader_transfer_record(&transfer_id).await?)?
+                );
+            }
             "--certificate-observation" => {
                 if arguments.next().is_some() {
                     return Err("unexpected certificate observation arguments".into());

@@ -61,6 +61,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.3",
         "roboguide.recovery-profile/v0.4",
         "roboguide.recovery-profile/v0.5",
+        "roboguide.recovery-profile/v0.6",
     }:
         expected.add("artifact_replica_sets")
     if set(profile) != expected or profile["schema"] not in {
@@ -69,6 +70,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.3",
         "roboguide.recovery-profile/v0.4",
         "roboguide.recovery-profile/v0.5",
+        "roboguide.recovery-profile/v0.6",
     }:
         raise ValueError("recovery profile is not closed or versioned")
     if (
@@ -114,12 +116,14 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.3",
             "roboguide.recovery-profile/v0.4",
             "roboguide.recovery-profile/v0.5",
+            "roboguide.recovery-profile/v0.6",
         }:
             raise ValueError("replica supervisor leases require explicit recovery profile v0.2")
         if item["kind"] == "runtime-mi" and profile["schema"] not in {
             "roboguide.recovery-profile/v0.3",
             "roboguide.recovery-profile/v0.4",
             "roboguide.recovery-profile/v0.5",
+            "roboguide.recovery-profile/v0.6",
         }:
             raise ValueError("runtime MI leases require explicit recovery profile v0.3")
         if (
@@ -255,12 +259,13 @@ def acquire_all(
             if component["kind"] == "memory" and profile_schema in {
                 "roboguide.recovery-profile/v0.4",
                 "roboguide.recovery-profile/v0.5",
+                "roboguide.recovery-profile/v0.6",
             }:
                 paths.extend(root / name for name in [".memory-use.lock", *databases])
-            if (
-                component["kind"] == "replica"
-                and profile_schema == "roboguide.recovery-profile/v0.5"
-            ):
+            if component["kind"] == "replica" and profile_schema in {
+                "roboguide.recovery-profile/v0.5",
+                "roboguide.recovery-profile/v0.6",
+            }:
                 paths.append(root / component["database"])
         for path in sorted(paths):
             real_directory(path.parent)
@@ -281,6 +286,7 @@ def acquire_all(
                     if profile_schema in {
                         "roboguide.recovery-profile/v0.4",
                         "roboguide.recovery-profile/v0.5",
+                        "roboguide.recovery-profile/v0.6",
                     }:
                         marker = connection.execute(
                             "SELECT schema,databases_json FROM provider_writer_format"
@@ -345,7 +351,11 @@ def acquire_all(
 def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str) -> None:
     """Fence new Replica storage unless the declared recovery protocol owns its actual inode."""
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if profile_schema != "roboguide.recovery-profile/v0.5":
+    expected_version = {
+        "roboguide.recovery-profile/v0.5": 1,
+        "roboguide.recovery-profile/v0.6": 2,
+    }.get(profile_schema)
+    if expected_version is None:
         if version != 0:
             raise ValueError("Replica storage v1 requires explicit recovery profile v0.5")
         return
@@ -359,10 +369,10 @@ def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         )
     }
-    if version != 1 or actual_tables != expected_tables:
-        raise ValueError("Replica storage v1 tables/version are unavailable")
+    if version != expected_version or actual_tables != expected_tables:
+        raise ValueError("Replica tables/version differ from the original recovery profile")
     if connection.execute("SELECT version,schema FROM replica_storage_format").fetchall() != [
-        (1, "roboguide.replica-storage/v0.1")
+        (expected_version, f"roboguide.replica-storage/v0.{expected_version}")
     ]:
         raise ValueError("Replica original storage marker differs")
     if connection.execute("SELECT 1 FROM sqlite_master WHERE type='trigger'").fetchone():
@@ -373,6 +383,12 @@ def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str
     }
     if views != {"replica_" + name for name in ("meta", "commands", "log", "events", "snapshot")}:
         raise ValueError("Replica old-writer readonly views are incomplete")
+    if expected_version == 2:
+        row = connection.execute(
+            "SELECT value FROM replica_v1_meta WHERE key='leader_transfers_v2'"
+        ).fetchone()
+        history = json.loads(row[0]) if row is not None else None
+        validate_transfer_history(history)
     for name in ("meta", "commands", "log", "events", "snapshot"):
         expected_sql = f"CREATE VIEW replica_{name} AS SELECT * FROM replica_v1_{name}"
         row = connection.execute(
@@ -381,6 +397,71 @@ def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str
         actual_sql = " ".join(str(row[0]).lower().split()) if row is not None else ""
         if actual_sql != expected_sql.lower():
             raise ValueError("Replica old-writer readonly fence is unavailable")
+
+
+def validate_transfer_history(history: Any) -> None:
+    """Revalidate every original operation without inventing quorum or renewing effect authority."""
+    if not isinstance(history, list) or len(history) > 512:
+        raise ValueError("Replica original bounded transfer history is unavailable")
+    identifiers: set[str] = set()
+    pending = 0
+    for record in history:
+        required = {"transfer_id", "source_epoch", "target", "required_last_log_index", "state"}
+        if not isinstance(record, dict) or set(record) not in (
+            required,
+            required | {"confirmed_epoch"},
+        ):
+            raise ValueError("Replica transfer operation is not closed")
+        identifier, source, target = record["transfer_id"], record["source_epoch"], record["target"]
+        if (
+            not isinstance(identifier, str)
+            or not identifier.strip()
+            or len(identifier.encode()) > 128
+            or identifier in identifiers
+            or not valid_transfer_epoch(source)
+            or type(target) is not int
+            or not 0 < target < 2**64
+            or target == source["replica_id"]
+        ):
+            raise ValueError("Replica transfer original identity is invalid or repeated")
+        identifiers.add(identifier)
+        log = record["required_last_log_index"]
+        if log is not None and (type(log) is not int or not 0 <= log < 2**64):
+            raise ValueError("Replica transfer original log is invalid")
+        state = record["state"]
+        if state not in (
+            "prepared",
+            "accepted",
+            "target-elected",
+            "unknown",
+            "completed",
+            "rejected",
+        ):
+            raise ValueError("Replica transfer original state is invalid")
+        confirmed = record.get("confirmed_epoch")
+        if state == "completed":
+            if (
+                not isinstance(confirmed, dict)
+                or not valid_transfer_epoch(confirmed)
+                or confirmed["replica_id"] != target
+                or confirmed["term"] <= source["term"]
+            ):
+                raise ValueError("Replica transfer completed quorum proof is unavailable")
+        elif confirmed is not None:
+            raise ValueError("Replica pending transfer cannot claim completed quorum")
+        if state not in ("completed", "rejected"):
+            pending += 1
+    if pending > 1:
+        raise ValueError("Replica original transfer history contains overlapping holds")
+
+
+def valid_transfer_epoch(value: Any) -> bool:
+    """Recognize one exact positive member/term without inferring that quorum accepted it."""
+    return (
+        isinstance(value, dict)
+        and set(value) == {"term", "replica_id"}
+        and all(type(item) is int and 0 < item < 2**64 for item in value.values())
+    )
 
 
 def validate_replica_sets(profile: dict[str, Any], components: list[dict[str, Any]]) -> None:

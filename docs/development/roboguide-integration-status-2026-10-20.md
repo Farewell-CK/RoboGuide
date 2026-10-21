@@ -3,6 +3,13 @@
 本次先同步远程并核对所有远程分支；在隔离工作树组合整改、MI 部署校验和执行故障闭环，
 保留其他工作树和未跟踪实验文件。没有启动实验、E6、模型、模拟器或设备。
 
+2026-10-21 [成员本地 transfer 历史](../decisions/0136-member-local-leader-transfer-evidence.md)
+修正本地 hold 与 Raft snapshot 混用；丢失原回包保持 Unknown，同 ID 不重发，完成须目标
+实际新 quorum epoch 和源的认证只读观察。storage v2 / recovery v0.6 fence 保留旧原值与
+完整操作历史；source-child stop/wait、在线内容和跨故障域恢复仍继续。
+[实际进程验收](acceptance/2026-10-21-member-local-transfer-recovery.md)覆盖旧 v0/v1 writer、
+三副本换证与恢复、6 SQL/42 tables 和三个恢复 leader 的原 CAS/receipt；源排空仍须独立证明。
+
 2026-10-21 [Replica storage v1 与数据库本体 writer](acceptance/2026-10-21-replica-storage-v1.md)
 修复了已确认的 hardlink inode writer 绕过：完整旧表事务迁移到 v1、旧表只读 view fence、
 实际新/旧进程和 alias writer 门禁通过。Recovery profile v0.5 已冻结；durable leader drain、

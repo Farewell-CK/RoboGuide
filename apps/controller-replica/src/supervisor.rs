@@ -264,7 +264,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     eprintln!("Stopping owned Controller: exit_status={child_exit:?}, current_epoch={current:?}");
                     stop_controller(&mut owned).await?;
                 }
-                let _transfer_reconciled = node.reconcile_leader_transfer()?;
+                let _transfer_reconciled = node.reconcile_leader_transfer().await?;
                 if !leader_transfer_attempted
                     && let (Some(transfer), Some(epoch)) =
                         (configuration.leader_transfer.as_ref(), current)

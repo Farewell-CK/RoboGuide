@@ -1,5 +1,10 @@
 # RoboGuide
 
+[成员本地 leader transfer](docs/decisions/0136-member-local-leader-transfer-evidence.md)
+按原 ID 保留历史；丢失回包保持 Unknown，不重复选举。完成要求目标独立 quorum 与源的
+认证只读观察，Raft snapshot 不携带本地 hold。Replica storage v2 / recovery v0.6 保护
+新语义；原 v0.5 仍只接收 v1。完整 source-child 排空和在线 HA 继续验证。
+
 [Replica 原数据升级与恢复校验](docs/development/acceptance/2026-10-21-replica-upgrade-quiescence.md)
 在旧 SQLite 连接仍活跃时拒绝迁移，排空后保留原 identity；实际 inode lease 与只读旧表
 屏障阻止双 writer。显式 recovery v0.5 在备份、验证、恢复时检查格式，摘要正确也不能

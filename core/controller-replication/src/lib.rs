@@ -96,7 +96,7 @@ pub struct LeaderTransferReceipt {
     pub state: String,
 }
 
-/// Durable handoff intent retained across process restart and snapshot installation.
+/// Member-local handoff evidence retained across process restart, never Raft snapshot authority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LeaderTransferRecord {
@@ -110,6 +110,9 @@ pub struct LeaderTransferRecord {
     pub required_last_log_index: Option<u64>,
     /// Monotonic durable state: prepared, accepted, target-elected, completed, rejected or unknown.
     pub state: String,
+    /// Exact target epoch independently confirmed by quorum; absence never proves completion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed_epoch: Option<ControllerEpoch>,
 }
 
 /// Authenticated member-side administration client; it opens no consensus storage or child.
@@ -123,6 +126,20 @@ pub struct ReplicaAdminClient {
 }
 
 impl ReplicaAdminClient {
+    /// Observes one exact member-local original operation without requiring or creating leadership.
+    pub async fn leader_transfer_record(
+        &self,
+        transfer_id: &str,
+    ) -> Result<Option<LeaderTransferRecord>, String> {
+        transport::admin_observe_leader_transfer(
+            &self.config,
+            self.leader,
+            self.tls.clone(),
+            transfer_id,
+        )
+        .await
+    }
+
     /// Validates a pre-enrolled member profile before constructing a private admin client.
     pub fn new(config: ReplicaConfig, leader: u64) -> Result<Self, String> {
         config.validate()?;
@@ -392,6 +409,9 @@ impl ReplicaConfig {
 /// Live consensus service and durable accepted history, independent of any executing Controller child.
 #[derive(Clone)]
 pub struct ReplicaNode {
+    /// Test-only response loss after actual target-side acceptance/election; never a product mode.
+    #[cfg(test)]
+    discard_transfer_reply: Arc<std::sync::atomic::AtomicBool>,
     /// Prevents overlapping temporary heartbeat/election suspension for one original source.
     leader_transfer_writer: Arc<tokio::sync::Mutex<()>>,
     /// Test-only actual framed-ingress ordinal, never an authority or success receipt.
@@ -470,6 +490,8 @@ impl ReplicaNode {
         .await
         .map_err(|error| error.to_string())?;
         let node = Self {
+            #[cfg(test)]
+            discard_transfer_reply: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             leader_transfer_writer: Arc::new(tokio::sync::Mutex::new(())),
             #[cfg(test)]
             framed_member_mutations: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -508,8 +530,29 @@ impl ReplicaNode {
         Ok((node, server))
     }
 
-    /// Requires current leadership and majority confirmation under the exact original epoch.
+    /// Fences application work while retaining infrastructure quorum observations for reconciliation.
     pub async fn check_epoch(&self, epoch: ControllerEpoch) -> Result<(), String> {
+        self.check_source_transfer_fence()?;
+        self.check_consensus_epoch(epoch).await?;
+        self.check_source_transfer_fence()
+    }
+
+    /// Refuses source application authority as soon as its durable original handoff is pending.
+    fn check_source_transfer_fence(&self) -> Result<(), String> {
+        if self.store.leader_transfer_record()?.is_some_and(|record| {
+            record.source_epoch.replica_id == self.config.replica_id
+                && !matches!(record.state.as_str(), "completed" | "rejected")
+        }) {
+            return Err(
+                "original source Controller is fenced pending leader transfer reconciliation"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Confirms actual infrastructure quorum without granting application or source-child authority.
+    async fn check_consensus_epoch(&self, epoch: ControllerEpoch) -> Result<(), String> {
         if let Some(tls) = &self.tls {
             tls.refreshed()?
                 .authenticate_local(self.config.replica_id)?;
@@ -636,14 +679,27 @@ impl ReplicaNode {
         transfer_id: impl Into<String>,
     ) -> Result<LeaderTransferReceipt, String> {
         let _transfer_writer = self.leader_transfer_writer.lock().await;
-        self.reconcile_leader_transfer()?;
         let transfer_id = transfer_id.into();
         if transfer_id.trim().is_empty() || transfer_id.len() > 128 {
             return Err("leader transfer identity is empty or unbounded".into());
         }
+        if let Some(original) = self.store.leader_transfer_by_id(&transfer_id)? {
+            if original.target != member_id
+                || original.source_epoch.replica_id != self.config.replica_id
+            {
+                return Err("original leader transfer owner/target differs".into());
+            }
+            return Ok(LeaderTransferReceipt {
+                transfer_id: original.transfer_id,
+                source_epoch: original.source_epoch,
+                target: original.target,
+                state: original.state,
+            });
+        }
+        self.reconcile_leader_transfer().await?;
         let epoch = self
             .current_epoch()
-            .ok_or_else(|| "leader transfer requires the current leader".to_string())?;
+            .ok_or("leader transfer requires the current leader")?;
         self.check_epoch(epoch).await?;
         if member_id == self.config.replica_id
             || !self.config.members.contains_key(&member_id)
@@ -669,50 +725,71 @@ impl ReplicaNode {
         {
             return Err("leader transfer target has not caught up to the current log".into());
         }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
         let prepared = LeaderTransferRecord {
             transfer_id: transfer_id.clone(),
             source_epoch: epoch,
             target: member_id,
             required_last_log_index,
             state: "prepared".into(),
+            confirmed_epoch: None,
         };
         self.store.persist_leader_transfer(&prepared)?;
         self.raft.runtime_config().heartbeat(false);
         self.raft.runtime_config().elect(false);
         let _resume_ticker = LeaderTransferTickerGuard { raft: &self.raft };
-        let receipt = transport::request_leader_transfer(
-            self,
-            member_id,
-            transfer_id,
-            epoch,
-            required_last_log_index,
+        let result = tokio::time::timeout_at(
+            deadline,
+            transport::request_leader_transfer(
+                self,
+                member_id,
+                transfer_id,
+                epoch,
+                required_last_log_index,
+            ),
         )
         .await;
-        let receipt = match receipt {
-            Ok(receipt) => {
+        let receipt = match result {
+            Ok(Ok(receipt)) => {
+                if receipt.transfer_id != prepared.transfer_id
+                    || receipt.source_epoch != epoch
+                    || receipt.target != member_id
+                    || receipt.state != "requested"
+                {
+                    self.store.persist_leader_transfer(&LeaderTransferRecord {
+                        state: "unknown".into(),
+                        ..prepared
+                    })?;
+                    return Err("leader transfer original target receipt differs".into());
+                }
                 self.store.persist_leader_transfer(&LeaderTransferRecord {
                     state: "accepted".into(),
                     ..prepared.clone()
                 })?;
                 receipt
             }
-            Err(error) => {
+            result => {
                 self.store.persist_leader_transfer(&LeaderTransferRecord {
-                    state: "rejected".into(),
+                    state: "unknown".into(),
                     ..prepared
                 })?;
-                return Err(error);
+                return Err(match result {
+                    Ok(Err(error)) => error,
+                    _ => {
+                        "leader transfer original effect deadline expired; outcome remains unknown"
+                            .into()
+                    }
+                });
             }
         };
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
         loop {
-            if let Ok(Some(target_epoch)) = transport::member_epoch(self, member_id).await
+            if let Ok(Ok(Some(target_epoch))) =
+                tokio::time::timeout_at(deadline, transport::member_epoch(self, member_id)).await
                 && target_epoch.replica_id == member_id
                 && target_epoch.term > epoch.term
             {
                 self.store.persist_leader_transfer(&LeaderTransferRecord {
                     state: "target-elected".into(),
-                    transfer_id: receipt.transfer_id.clone(),
                     ..prepared.clone()
                 })?;
                 return Ok(receipt);
@@ -723,7 +800,7 @@ impl ReplicaNode {
                     ..prepared
                 })?;
                 return Err(
-                    "leader transfer target did not become leader before its deadline".into(),
+                    "leader transfer target was not confirmed before original deadline".into(),
                 );
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -735,38 +812,65 @@ impl ReplicaNode {
         self.store.leader_transfer_record()
     }
 
-    /// Completes a target-owned handoff only after a newer local leader epoch is observable.
-    pub fn reconcile_leader_transfer(&self) -> Result<bool, String> {
+    /// Observes an original completion without triggering election or renewing effect permission.
+    pub async fn reconcile_leader_transfer(&self) -> Result<bool, String> {
         let Some(record) = self.store.leader_transfer_record()? else {
             return Ok(true);
         };
-        if record.state == "completed" {
+        if matches!(record.state.as_str(), "completed" | "rejected") {
             return Ok(true);
         }
-        if !matches!(record.state.as_str(), "accepted" | "target-elected") {
+        if record.target == self.config.replica_id {
+            let Some(epoch) = self.current_epoch() else {
+                return Ok(false);
+            };
+            if epoch.term <= record.source_epoch.term {
+                return Ok(false);
+            }
+            if self.check_consensus_epoch(epoch).await.is_err() {
+                return Ok(false);
+            }
+            self.store.persist_leader_transfer(&LeaderTransferRecord {
+                state: "completed".into(),
+                confirmed_epoch: Some(epoch),
+                ..record
+            })?;
+            return Ok(true);
+        }
+        if record.source_epoch.replica_id != self.config.replica_id {
             return Ok(false);
         }
-        let Some(epoch) = self.current_epoch() else {
-            return Ok(false);
+        let incoming = match transport::observe_leader_transfer(
+            self,
+            record.target,
+            &record.transfer_id,
+        )
+        .await
+        {
+            Ok(Some(incoming)) => incoming,
+            _ => return Ok(false),
         };
-        if record.target != self.config.replica_id || epoch.term <= record.source_epoch.term {
+        if incoming.transfer_id != record.transfer_id
+            || incoming.source_epoch != record.source_epoch
+            || incoming.target != record.target
+            || incoming.required_last_log_index != record.required_last_log_index
+            || incoming.state != "completed"
+            || !incoming.confirmed_epoch.is_some_and(|epoch| {
+                epoch.replica_id == record.target && epoch.term > record.source_epoch.term
+            })
+        {
             return Ok(false);
         }
-        self.store.persist_leader_transfer(&LeaderTransferRecord {
-            state: "completed".into(),
-            ..record
-        })?;
+        self.store.persist_leader_transfer(&incoming)?;
         Ok(true)
     }
 
-    /// Reports whether a pending or uncertain handoff must hold the owned Controller child.
+    /// Holds owned application processes until an original operation has independent completion.
     pub fn leader_transfer_blocks_controller(&self) -> Result<bool, String> {
-        Ok(self.store.leader_transfer_record()?.is_some_and(|record| {
-            matches!(
-                record.state.as_str(),
-                "prepared" | "accepted" | "unknown" | "target-elected"
-            )
-        }))
+        Ok(self
+            .store
+            .leader_transfer_record()?
+            .is_some_and(|record| !matches!(record.state.as_str(), "completed" | "rejected")))
     }
 
     /// Returns whether an envelope sender is a current member or a configured bootstrap voter.
@@ -800,6 +904,28 @@ impl ReplicaNode {
         transfer_id: String,
         required_last_log_index: Option<u64>,
     ) -> Result<LeaderTransferReceipt, String> {
+        if let Some(original) = self.store.leader_transfer_by_id(&transfer_id)? {
+            if original.source_epoch != source_epoch
+                || original.target != target
+                || original.required_last_log_index != required_last_log_index
+            {
+                return Err("original target transfer identity differs".into());
+            }
+            return if matches!(
+                original.state.as_str(),
+                "accepted" | "completed" | "target-elected"
+            ) {
+                Ok(LeaderTransferReceipt {
+                    transfer_id,
+                    source_epoch,
+                    target,
+                    state: "requested".into(),
+                })
+            } else {
+                Err("original target transfer remains uncertain; election cannot repeat".into())
+            };
+        }
+        self.reconcile_leader_transfer().await?;
         let metrics = self.raft.metrics().borrow().clone();
         if target != self.config.replica_id
             || source_epoch.replica_id == self.config.replica_id
@@ -819,6 +945,7 @@ impl ReplicaNode {
             target,
             required_last_log_index,
             state: "accepted".into(),
+            confirmed_epoch: None,
         })?;
         self.raft
             .trigger()

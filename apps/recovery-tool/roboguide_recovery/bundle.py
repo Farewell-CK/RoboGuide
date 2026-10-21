@@ -448,7 +448,11 @@ def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
             databases[:1]
             if component["kind"] == "memory"
             and manifest["profile"]["schema"]
-            not in {"roboguide.recovery-profile/v0.4", "roboguide.recovery-profile/v0.5"}
+            not in {
+                "roboguide.recovery-profile/v0.4",
+                "roboguide.recovery-profile/v0.5",
+                "roboguide.recovery-profile/v0.6",
+            }
             else databases
         )
         if any(f"stores/{component['component_id']}/{name}" not in paths for name in required):
@@ -515,7 +519,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.5"
+        "roboguide.restore-receipt/v0.6"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.6"
+        else "roboguide.restore-receipt/v0.5"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.5"
         else "roboguide.restore-receipt/v0.4"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.4"
@@ -579,6 +585,7 @@ def restore(
         if component["kind"] == "memory" and manifest["profile"]["schema"] in {
             "roboguide.recovery-profile/v0.4",
             "roboguide.recovery-profile/v0.5",
+            "roboguide.recovery-profile/v0.6",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:
@@ -614,6 +621,7 @@ def restore(
         "roboguide.restore-receipt/v0.3",
         "roboguide.restore-receipt/v0.4",
         "roboguide.restore-receipt/v0.5",
+        "roboguide.restore-receipt/v0.6",
     }:
         receipt["artifact_replica_placements"] = replica_placements
     with (partial / "restore-receipt.json").open("xb") as handle:

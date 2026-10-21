@@ -21,9 +21,9 @@ const MAX_HISTORY_BYTES: u64 = 64 * 1024 * 1024;
 /// Bound on one complete replica snapshot including escaped checkpoint/history metadata.
 const MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
 /// Storage format version whose table views fence pre-format writers.
-const REPLICA_STORAGE_VERSION: i64 = 1;
+const REPLICA_STORAGE_VERSION: i64 = 2;
 /// Closed storage marker persisted beside the complete consensus tables.
-const REPLICA_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.1";
+const REPLICA_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.2";
 /// Legacy names retained only as read-only views after the atomic format migration.
 const LEGACY_TABLES: [&str; 5] = [
     "replica_meta",
@@ -40,8 +40,12 @@ const STORAGE_TABLES: [&str; 5] = [
     "replica_v1_events",
     "replica_v1_snapshot",
 ];
-/// Metadata key for the one handoff that may require operator reconciliation.
-const LEADER_TRANSFER_META_KEY: &str = "leader_transfer";
+/// Immutable legacy operation value retained only for historical inspection.
+const LEGACY_LEADER_TRANSFER_META_KEY: &str = "leader_transfer";
+/// Version-fenced member-local operation history, never distributed by a Raft snapshot.
+const LEADER_TRANSFER_HISTORY_META_KEY: &str = "leader_transfers_v2";
+/// Maximum number of original operations; capacity never discards old IDs.
+const MAX_LEADER_TRANSFERS: usize = 512;
 
 /// Complete quorum-applied evidence for inactive materialization, not a second live Control map.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -207,7 +211,7 @@ struct StoreSnapshot {
     /// Optional v0.3 infrastructure trust; absent in unchanged legacy snapshot bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     certificate_trust: Option<CertificateTrust>,
-    /// Pending software leader handoff, retained independently of the application view.
+    /// Legacy snapshot compatibility only; never imported into member-local authority.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     leader_transfer: Option<LeaderTransferRecord>,
 }
@@ -281,7 +285,7 @@ fn prepare_storage_format(
     if triggers != 0 {
         return Err("Replica storage contains unrecognized writer triggers".into());
     }
-    if version == REPLICA_STORAGE_VERSION && marker.as_deref() == Some("table") {
+    if matches!(version, 1 | REPLICA_STORAGE_VERSION) && marker.as_deref() == Some("table") {
         if current.iter().any(|kind| kind.as_deref() != Some("table"))
             || legacy.iter().any(|kind| kind.as_deref() != Some("view"))
         {
@@ -294,7 +298,12 @@ fn prepare_storage_format(
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|error| error.to_string())?;
-        if stored != (REPLICA_STORAGE_VERSION, REPLICA_STORAGE_SCHEMA.to_string()) {
+        let expected_schema = if version == 1 {
+            "roboguide.replica-storage/v0.1"
+        } else {
+            REPLICA_STORAGE_SCHEMA
+        };
+        if stored != (version, expected_schema.to_string()) {
             return Err("Replica storage marker differs".into());
         }
         let identity: Option<(String, String)> =
@@ -327,6 +336,44 @@ fn prepare_storage_format(
                 return Err("Replica storage readonly view differs".into());
             }
         }
+        if version == 1 {
+            let legacy: Option<LeaderTransferRecord> =
+                read_meta(connection, LEGACY_LEADER_TRANSFER_META_KEY)
+                    .map_err(|error| error.to_string())?;
+            let history = legacy
+                .into_iter()
+                .map(|mut record| {
+                    record.state = "unknown".into();
+                    record.confirmed_epoch = None;
+                    record
+                })
+                .collect::<Vec<_>>();
+            for record in &history {
+                validate_leader_transfer(record)?;
+            }
+            let journal: String = connection
+                .query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
+                .map_err(|error| format!("Replica v1 connections are not quiescent: {error}"))?;
+            if journal != "delete" {
+                return Err("Replica v1 connections are not quiescent".into());
+            }
+            connection
+                .pragma_update(None, "synchronous", "FULL")
+                .map_err(|error| error.to_string())?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Exclusive)
+                .map_err(|error| error.to_string())?;
+            transaction.execute_batch(
+                "DROP TABLE replica_storage_format;
+                 CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=2),schema TEXT NOT NULL);
+                 INSERT INTO replica_storage_format VALUES (2,'roboguide.replica-storage/v0.2');
+                 PRAGMA user_version=2;"
+            ).map_err(|error| error.to_string())?;
+            write_meta(&transaction, LEADER_TRANSFER_HISTORY_META_KEY, &history)
+                .map_err(|error| error.to_string())?;
+            transaction.commit().map_err(|error| error.to_string())?;
+        }
+        read_leader_transfer_history(connection)?;
         return Ok(());
     }
     if version != 0 || marker.is_some() {
@@ -411,16 +458,22 @@ fn prepare_storage_format(
     }
     transaction
         .execute_batch(
-            "CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=1),schema TEXT NOT NULL);
-             INSERT INTO replica_storage_format(version,schema) VALUES (1,'roboguide.replica-storage/v0.1');
+            "CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=2),schema TEXT NOT NULL);
+             INSERT INTO replica_storage_format(version,schema) VALUES (2,'roboguide.replica-storage/v0.2');
              CREATE VIEW replica_meta AS SELECT * FROM replica_v1_meta;
              CREATE VIEW replica_commands AS SELECT * FROM replica_v1_commands;
              CREATE VIEW replica_log AS SELECT * FROM replica_v1_log;
              CREATE VIEW replica_events AS SELECT * FROM replica_v1_events;
              CREATE VIEW replica_snapshot AS SELECT * FROM replica_v1_snapshot;
-             PRAGMA user_version=1;",
+             PRAGMA user_version=2;",
         )
         .map_err(|error| error.to_string())?;
+    write_meta(
+        &transaction,
+        LEADER_TRANSFER_HISTORY_META_KEY,
+        &Vec::<LeaderTransferRecord>::new(),
+    )
+    .map_err(|error| error.to_string())?;
     if !has_legacy {
         write_meta(&transaction, "identity", &(profile, application_schema))
             .map_err(|error| error.to_string())?;
@@ -428,15 +481,42 @@ fn prepare_storage_format(
     transaction.commit().map_err(|error| error.to_string())
 }
 
-/// Returns a monotonic rank for durable handoff state transitions.
-fn leader_transfer_state_rank(state: &str) -> Option<u8> {
-    match state {
-        "prepared" => Some(0),
-        "accepted" => Some(1),
-        "target-elected" => Some(2),
-        "completed" | "rejected" | "unknown" => Some(3),
-        _ => None,
+/// Allows only explicit operation transitions; terminal outcomes and original identity are immutable.
+fn leader_transfer_transition_allowed(original: &str, next: &str) -> bool {
+    original == next
+        || matches!(
+            (original, next),
+            ("prepared", "accepted" | "unknown" | "completed")
+                | ("accepted", "target-elected" | "unknown" | "completed")
+                | ("target-elected", "unknown" | "completed")
+                | ("unknown", "completed")
+        )
+}
+
+/// Reads the complete bounded local history without silently replacing missing authority.
+fn read_leader_transfer_history(
+    connection: &Connection,
+) -> Result<Vec<LeaderTransferRecord>, String> {
+    let history: Vec<LeaderTransferRecord> =
+        read_meta(connection, LEADER_TRANSFER_HISTORY_META_KEY)
+            .map_err(|error| error.to_string())?
+            .ok_or("Replica transfer history is absent")?;
+    if history.len() > MAX_LEADER_TRANSFERS {
+        return Err("Replica transfer history exceeds its original bound".into());
     }
+    let mut ids = BTreeSet::new();
+    let mut pending = 0;
+    for record in &history {
+        validate_leader_transfer(record)?;
+        if !ids.insert(&record.transfer_id) {
+            return Err("Replica transfer history repeats an original operation".into());
+        }
+        pending += usize::from(!matches!(record.state.as_str(), "completed" | "rejected"));
+    }
+    if pending > 1 {
+        return Err("Replica transfer history contains overlapping uncertain operations".into());
+    }
+    Ok(history)
 }
 
 /// Validates bounded handoff identity and state before it can become persistent authority.
@@ -444,11 +524,28 @@ fn validate_leader_transfer(record: &LeaderTransferRecord) -> Result<(), String>
     if record.transfer_id.trim().is_empty() || record.transfer_id.len() > 128 {
         return Err("leader transfer identity is empty or unbounded".into());
     }
+    if record.target == 0 || record.source_epoch.replica_id == 0 || record.source_epoch.term == 0 {
+        return Err("leader transfer original epoch/member is unavailable".into());
+    }
     if record.target == record.source_epoch.replica_id {
         return Err("leader transfer target is the source replica".into());
     }
-    if leader_transfer_state_rank(&record.state).is_none() {
+    if !matches!(
+        record.state.as_str(),
+        "prepared" | "accepted" | "target-elected" | "completed" | "rejected" | "unknown"
+    ) {
         return Err("leader transfer state is unknown".into());
+    }
+    if record.state == "completed" {
+        if !record.confirmed_epoch.is_some_and(|epoch| {
+            epoch.replica_id == record.target && epoch.term > record.source_epoch.term
+        }) {
+            return Err(
+                "leader transfer completion requires an exact newer target quorum epoch".into(),
+            );
+        }
+    } else if record.confirmed_epoch.is_some() {
+        return Err("pending leader transfer cannot claim a completed quorum proof".into());
     }
     Ok(())
 }
@@ -577,12 +674,15 @@ impl SqliteRaftStore {
                 .map_err(|error| error.to_string())?;
             let authority: u64 = transaction
                 .query_row(
-                    "SELECT COUNT(*) FROM replica_v1_meta WHERE key != 'identity'",
+                    "SELECT COUNT(*) FROM replica_v1_meta WHERE key NOT IN ('identity','leader_transfers_v2')",
                     [],
                     |row| row.get(0),
                 )
                 .map_err(|error| error.to_string())?;
-            if logs != 0 || authority != 0 {
+            if logs != 0
+                || authority != 0
+                || !read_leader_transfer_history(&transaction)?.is_empty()
+            {
                 return Err(
                     "existing replica history lacks required original certificate authority".into(),
                 );
@@ -727,44 +827,60 @@ impl SqliteRaftStore {
         Ok(store)
     }
 
-    /// Reads the one durable handoff record without turning it into a current leadership fact.
+    /// Reads the most recent local operation, retaining all original IDs in the same store.
     pub fn leader_transfer_record(&self) -> Result<Option<LeaderTransferRecord>, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
-        let record: Option<LeaderTransferRecord> =
-            read_meta(&connection, LEADER_TRANSFER_META_KEY).map_err(|error| error.to_string())?;
-        if let Some(record) = &record {
-            validate_leader_transfer(record)?;
-        }
-        Ok(record)
+        Ok(read_leader_transfer_history(&connection)?.last().cloned())
     }
 
-    /// Persists an idempotent monotonic handoff state before any election/ticker mutation.
+    /// Reads one original operation without creating another effect or changing the latest hold.
+    pub fn leader_transfer_by_id(
+        &self,
+        transfer_id: &str,
+    ) -> Result<Option<LeaderTransferRecord>, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        Ok(read_leader_transfer_history(&connection)?
+            .into_iter()
+            .find(|record| record.transfer_id == transfer_id))
+    }
+
+    /// Commits a permitted original operation transition without discarding prior operations.
     pub fn persist_leader_transfer(&self, record: &LeaderTransferRecord) -> Result<(), String> {
         validate_leader_transfer(record)?;
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
-        let current: Option<LeaderTransferRecord> =
-            read_meta(&transaction, LEADER_TRANSFER_META_KEY).map_err(|error| error.to_string())?;
-        if let Some(current) = &current {
-            validate_leader_transfer(current)?;
-            if current.transfer_id != record.transfer_id
-                && matches!(current.state.as_str(), "prepared" | "accepted" | "unknown")
-            {
-                return Err("another leader transfer requires reconciliation".into());
-            }
-            if current.transfer_id == record.transfer_id
-                && (current.source_epoch != record.source_epoch
-                    || current.target != record.target
-                    || current.required_last_log_index != record.required_last_log_index
-                    || leader_transfer_state_rank(&record.state)
-                        < leader_transfer_state_rank(&current.state))
+        let mut history = read_leader_transfer_history(&transaction)?;
+        if let Some(current) = history
+            .iter_mut()
+            .find(|current| current.transfer_id == record.transfer_id)
+        {
+            if current.source_epoch != record.source_epoch
+                || current.target != record.target
+                || current.required_last_log_index != record.required_last_log_index
+                || !leader_transfer_transition_allowed(&current.state, &record.state)
+                || (current.confirmed_epoch.is_some()
+                    && current.confirmed_epoch != record.confirmed_epoch)
             {
                 return Err("leader transfer identity or state regressed".into());
             }
+            *current = record.clone();
+        } else {
+            if history
+                .iter()
+                .any(|current| !matches!(current.state.as_str(), "completed" | "rejected"))
+            {
+                return Err("another leader transfer requires reconciliation".into());
+            }
+            if history.len() >= MAX_LEADER_TRANSFERS {
+                return Err(
+                    "leader transfer history is full; original IDs cannot be discarded".into(),
+                );
+            }
+            history.push(record.clone());
         }
-        write_meta(&transaction, LEADER_TRANSFER_META_KEY, record)
+        write_meta(&transaction, LEADER_TRANSFER_HISTORY_META_KEY, &history)
             .map_err(|error| error.to_string())?;
         transaction.commit().map_err(|error| error.to_string())
     }
@@ -1309,7 +1425,10 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
             trust.validate().map_err(io_error)?;
         }
         if let Some(record) = &restored.leader_transfer {
-            validate_leader_transfer(record).map_err(io_error)?;
+            let mut legacy = record.clone();
+            legacy.state = "unknown".into();
+            legacy.confirmed_epoch = None;
+            validate_leader_transfer(&legacy).map_err(io_error)?;
         }
         let mut connection = self.connection.lock().map_err(io_error)?;
         let transaction = connection.transaction().map_err(io_error)?;
@@ -1327,35 +1446,6 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
                 return Err(io_error(
                     "snapshot certificate authority is absent, stale or forked",
                 ));
-            }
-        }
-        let original_transfer: Option<LeaderTransferRecord> =
-            read_meta(&transaction, LEADER_TRANSFER_META_KEY)?;
-        match (&original_transfer, &restored.leader_transfer) {
-            (None, incoming) => {
-                if let Some(incoming) = incoming {
-                    write_meta(&transaction, LEADER_TRANSFER_META_KEY, incoming)?;
-                }
-            }
-            (Some(original), Some(incoming))
-                if original.transfer_id == incoming.transfer_id
-                    && original.source_epoch == incoming.source_epoch
-                    && original.target == incoming.target
-                    && original.required_last_log_index == incoming.required_last_log_index =>
-            {
-                if leader_transfer_state_rank(&incoming.state)
-                    >= leader_transfer_state_rank(&original.state)
-                {
-                    write_meta(&transaction, LEADER_TRANSFER_META_KEY, incoming)?;
-                }
-            }
-            (Some(_), None) => {
-                return Err(io_error(
-                    "snapshot would discard a durable leader transfer hold",
-                ));
-            }
-            _ => {
-                return Err(io_error("snapshot leader transfer identity is forked"));
             }
         }
         transaction
@@ -1475,7 +1565,7 @@ impl RaftSnapshotBuilder<ControllerRaftConfig> for SqliteRaftStore {
             membership: read_meta(&connection, "membership")?.unwrap_or_default(),
             view: read_view(&connection)?,
             certificate_trust: read_meta(&connection, "certificate_trust")?,
-            leader_transfer: read_meta(&connection, LEADER_TRANSFER_META_KEY)?,
+            leader_transfer: None,
         };
         let data = serde_json::to_vec(&snapshot).map_err(io_error)?;
         let meta = SnapshotMeta {

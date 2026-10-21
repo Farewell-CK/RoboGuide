@@ -111,10 +111,12 @@ def storage_profile(
             },
         ]
     )
-    if storage_versions not in ({0}, {1}):
+    if storage_versions not in ({0}, {1}, {2}):
         raise ValueError("actual Replica stores require one complete supported storage profile")
     return {
-        "schema": "roboguide.recovery-profile/v0.5"
+        "schema": "roboguide.recovery-profile/v0.6"
+        if storage_versions == {2}
+        else "roboguide.recovery-profile/v0.5"
         if storage_versions == {1}
         else "roboguide.recovery-profile/v0.2",
         "profile_id": "actual-rotated-cluster-stores",

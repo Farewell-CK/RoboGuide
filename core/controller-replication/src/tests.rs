@@ -263,6 +263,7 @@ fn durable_leader_transfer_record_is_monotonic_and_restart_safe() {
         target: 2,
         required_last_log_index: Some(9),
         state: "prepared".into(),
+        confirmed_epoch: None,
     };
     store.persist_leader_transfer(&record).unwrap();
     assert_eq!(
@@ -322,7 +323,7 @@ fn legacy_replica_storage_migrates_atomically_and_old_writes_are_refused() {
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        1
+        2
     );
     for name in [
         "replica_meta",
@@ -905,4 +906,263 @@ async fn sql_failure_and_corrupt_accepted_evidence_fail_closed() {
     assert!(store.accepted_view().is_err());
     drop(store);
     assert!(SqliteRaftStore::open(&path, "identity", "test/checkpoint-v1").is_err());
+}
+
+/// Raft snapshots neither transplant a sender's hold nor erase a receiver's independent operation.
+#[tokio::test]
+async fn raft_snapshot_preserves_member_local_transfer_history() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut source = SqliteRaftStore::open(
+        &directory.path().join("source.sqlite3"),
+        "same",
+        "test/checkpoint-v1",
+    )
+    .unwrap();
+    let mut target = SqliteRaftStore::open(
+        &directory.path().join("target.sqlite3"),
+        "same",
+        "test/checkpoint-v1",
+    )
+    .unwrap();
+    let mut unrelated = SqliteRaftStore::open(
+        &directory.path().join("unrelated.sqlite3"),
+        "same",
+        "test/checkpoint-v1",
+    )
+    .unwrap();
+    let record = LeaderTransferRecord {
+        transfer_id: "source-only".into(),
+        source_epoch: ControllerEpoch {
+            term: 1,
+            replica_id: 1,
+        },
+        target: 2,
+        required_last_log_index: None,
+        state: "prepared".into(),
+        confirmed_epoch: None,
+    };
+    source.persist_leader_transfer(&record).unwrap();
+    let own = LeaderTransferRecord {
+        transfer_id: "target-only".into(),
+        target: 3,
+        ..record.clone()
+    };
+    target.persist_leader_transfer(&own).unwrap();
+    let snapshot = source.build_snapshot().await.unwrap();
+    let bytes = snapshot.snapshot.into_inner();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(body.get("leader_transfer").is_none());
+    target
+        .install_snapshot(&snapshot.meta, Box::new(Cursor::new(bytes.clone())))
+        .await
+        .unwrap();
+    unrelated
+        .install_snapshot(&snapshot.meta, Box::new(Cursor::new(bytes)))
+        .await
+        .unwrap();
+    assert_eq!(target.leader_transfer_record().unwrap(), Some(own));
+    assert_eq!(unrelated.leader_transfer_record().unwrap(), None);
+}
+
+/// Exact original identities remain retrievable and an uncertain or completed result cannot flip.
+#[test]
+fn transfer_history_retains_original_operations_and_immutable_completion() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("history.sqlite3");
+    let store = SqliteRaftStore::open(&path, "same", "test/checkpoint-v1").unwrap();
+    let unknown = LeaderTransferRecord {
+        transfer_id: "first".into(),
+        source_epoch: ControllerEpoch {
+            term: 1,
+            replica_id: 1,
+        },
+        target: 2,
+        required_last_log_index: Some(5),
+        state: "unknown".into(),
+        confirmed_epoch: None,
+    };
+    store.persist_leader_transfer(&unknown).unwrap();
+    assert!(
+        store
+            .persist_leader_transfer(&LeaderTransferRecord {
+                state: "rejected".into(),
+                ..unknown.clone()
+            })
+            .is_err()
+    );
+    assert!(
+        store
+            .persist_leader_transfer(&LeaderTransferRecord {
+                state: "completed".into(),
+                ..unknown.clone()
+            })
+            .is_err()
+    );
+    let completed = LeaderTransferRecord {
+        state: "completed".into(),
+        confirmed_epoch: Some(ControllerEpoch {
+            term: 2,
+            replica_id: 2,
+        }),
+        ..unknown
+    };
+    store.persist_leader_transfer(&completed).unwrap();
+    assert!(
+        store
+            .persist_leader_transfer(&LeaderTransferRecord {
+                state: "unknown".into(),
+                confirmed_epoch: None,
+                ..completed.clone()
+            })
+            .is_err()
+    );
+    let next = LeaderTransferRecord {
+        transfer_id: "second".into(),
+        state: "prepared".into(),
+        confirmed_epoch: None,
+        ..completed.clone()
+    };
+    store.persist_leader_transfer(&next).unwrap();
+    drop(store);
+    let reopened = SqliteRaftStore::open(&path, "same", "test/checkpoint-v1").unwrap();
+    assert_eq!(
+        reopened.leader_transfer_by_id("first").unwrap(),
+        Some(completed)
+    );
+    assert_eq!(reopened.leader_transfer_record().unwrap(), Some(next));
+}
+
+/// A real dropped TCP response after target election stays Unknown and reconciles without resend.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lost_target_transfer_reply_reconciles_original_operation_without_repeat() {
+    let directory = tempfile::tempdir().unwrap();
+    let endpoints = members();
+    let mut nodes = Vec::new();
+    for id in 1..=3 {
+        nodes.push(
+            ReplicaNode::start(
+                configuration(id, &endpoints),
+                &directory.path().join(format!("replica-{id}.sqlite3")),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    let source = leader(&nodes).await;
+    let source_epoch = nodes[source].0.current_epoch().unwrap();
+    let target = (source + 1) % nodes.len();
+    let target_id = nodes[target].0.config.replica_id;
+    nodes[target]
+        .0
+        .discard_transfer_reply
+        .store(true, Ordering::SeqCst);
+    assert!(
+        nodes[source]
+            .0
+            .request_leader_transfer(target_id, "lost-original-reply")
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        nodes[source]
+            .0
+            .leader_transfer_record()
+            .unwrap()
+            .unwrap()
+            .state,
+        "unknown"
+    );
+    assert!(nodes[source].0.check_epoch(source_epoch).await.is_err());
+    let before = nodes[target]
+        .0
+        .framed_member_mutations
+        .load(Ordering::SeqCst);
+    let receipt = nodes[source]
+        .0
+        .request_leader_transfer(target_id, "lost-original-reply")
+        .await
+        .unwrap();
+    assert_eq!(receipt.state, "unknown");
+    assert_eq!(
+        nodes[target]
+            .0
+            .framed_member_mutations
+            .load(Ordering::SeqCst),
+        before
+    );
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if nodes[target].0.reconcile_leader_transfer().await.unwrap()
+                && nodes[source].0.reconcile_leader_transfer().await.unwrap()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    })
+    .await
+    .expect("original target quorum proof reconciles dropped reply");
+    assert_eq!(
+        nodes[source]
+            .0
+            .leader_transfer_record()
+            .unwrap()
+            .unwrap()
+            .state,
+        "completed"
+    );
+    for (node, _) in &nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
+/// Legacy weak completion remains original history and cannot silently clear a v2 source hold.
+#[test]
+fn v1_transfer_upgrade_preserves_raw_evidence_and_fences_old_completion() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy-v1.sqlite3");
+    drop(SqliteRaftStore::open(&path, "same", "test/checkpoint-v1").unwrap());
+    let original = serde_json::json!({
+        "transfer_id": "legacy", "source_epoch": {"term": 1, "replica_id": 1},
+        "target": 2, "required_last_log_index": 5, "state": "completed"
+    })
+    .to_string();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch(
+        "DROP TABLE replica_storage_format;
+         CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=1),schema TEXT NOT NULL);
+         INSERT INTO replica_storage_format VALUES (1,'roboguide.replica-storage/v0.1');
+         DELETE FROM replica_v1_meta WHERE key='leader_transfers_v2';
+         PRAGMA user_version=1;"
+    ).unwrap();
+    connection
+        .execute(
+            "INSERT INTO replica_v1_meta VALUES ('leader_transfer',?1)",
+            [&original],
+        )
+        .unwrap();
+    drop(connection);
+    let store = SqliteRaftStore::open(&path, "same", "test/checkpoint-v1").unwrap();
+    let upgraded = store.leader_transfer_record().unwrap().unwrap();
+    assert_eq!(upgraded.transfer_id, "legacy");
+    assert_eq!(upgraded.state, "unknown");
+    assert_eq!(upgraded.confirmed_epoch, None);
+    drop(store);
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT value FROM replica_v1_meta WHERE key='leader_transfer'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        original
+    );
+    assert_eq!(
+        connection
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, u64>(0))
+            .unwrap(),
+        2
+    );
 }

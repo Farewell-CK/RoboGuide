@@ -4,10 +4,11 @@
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
 
-2026-10-21 Replica storage v1 同时拥有实际 SQL inode 与 sibling writer lease。升级须先
+2026-10-21 Replica storage v2 同时拥有实际 SQL inode 与 sibling writer lease。升级须先
 核对原 identity、由 SQLite 排空旧连接，再原子提交只读旧表 fence；缺失 identity 不自动
-修复。Recovery v0.5 冻结相同 writer，并在 bundle verify/restore 重查完整格式。当前
-transfer intent/hold 仍须补 source-child 排空、响应丢失与本地记录/snapshot 分离验收。
+修复。Recovery v0.6 冻结相同 writer，并在 bundle verify/restore 重查完整格式与原 transfer
+历史。成员本地 hold 不进入 Raft snapshot；Unknown 原 ID 不重发，目标 quorum 与源独立
+只读观察先于完成。当前仍须独立证明 source-child 排空与跨域/在线内容恢复。
 
 ```mermaid
 flowchart TB
