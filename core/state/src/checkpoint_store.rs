@@ -502,7 +502,9 @@ fn encode_delta(previous: &[u8], target: &[u8]) -> Result<String, SqliteEventLog
     let middle = &target[prefix..target.len() - suffix];
     let mut index: BTreeMap<u64, Vec<usize>> = BTreeMap::new();
     for (number, bytes) in previous[prefix..previous.len() - suffix]
-        .chunks_exact(BLOCK)
+        .as_chunks::<BLOCK>()
+        .0
+        .iter()
         .enumerate()
     {
         let bucket = index.entry(fingerprint(bytes)).or_default();

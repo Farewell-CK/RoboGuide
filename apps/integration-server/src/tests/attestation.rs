@@ -311,7 +311,9 @@ async fn public_attestation_challenge_and_evidence_survive_replay_and_restore() 
     let nonce: Vec<_> = challenge
         .nonce_hex
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect();
     quote[10..42].copy_from_slice(&nonce);

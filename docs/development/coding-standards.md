@@ -35,6 +35,10 @@ docstring，包括私有函数、方法、测试辅助函数、Fixture 和构造
 
 Rust 必须通过以下检查：
 
+本机与 CI 共同固定 `rust-toolchain.toml` 和 workflow 中的 Rust 1.99.1，禁止使用浮动
+`stable` 作为已验收工具链 identity。workspace 的 MSRV 声明保持独立；编译器升级须重新
+执行完整质量门禁，并保留实际 binary digest，不因数据 schema 相同就复用旧 HA policy pin。
+
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings

@@ -1,5 +1,5 @@
 [toolchain]
-# The 2026-07-16 stable manifest resolves to Rust 1.97.1 on the development host.
-channel = "stable"
+# Keep the reviewed compiler and Clippy identical locally and in CI.
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
