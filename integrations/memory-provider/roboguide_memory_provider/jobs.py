@@ -100,13 +100,19 @@ class FileJobs:
                 ).fetchone()
                 is not None
             )
-            rows = self._db.execute(
+            unresolved_query = (
                 f"SELECT execution_id,invocation_json,state FROM {self._table} "
-                "ORDER BY execution_id"
-            ).fetchall()
+                "WHERE state IN ('RUNNING','UNKNOWN')"
+            )
+            if has_process_authority:
+                unresolved_query += (
+                    " OR execution_id IN "
+                    "(SELECT execution_id FROM original_processes WHERE exit_json IS NULL)"
+                )
+            rows = self._db.execute(unresolved_query + " ORDER BY execution_id").fetchall()
             retained: set[str] = set()
-            for execution, encoded, state in rows:
-                unresolved = state in {"RUNNING", "UNKNOWN"}
+            for execution, encoded, _state in rows:
+                unresolved = True
                 if has_process_authority:
                     process = self._db.execute(
                         "SELECT exit_json FROM original_processes WHERE execution_id=?",
