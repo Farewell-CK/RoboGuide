@@ -98,7 +98,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F4 Memory/Spatial | R10、R11、R12、R20 | reconciliation、Group 授权/handoff、active-map/GC/revocation、自动配准/融合/增量 | Active Map GC v0.2 已改为实际 provider/selection/reference gate，并保留 ContentReclamation 最终删除权；Group/跨节点授权、map fusion/增量与全局恢复仍实施中，见 ADR-0105/0132 |
 | F5 动态 HA/恢复 | R09、R13、R15 | join/remove、leader transfer、升级协议、archive/catalog/CAS 恢复 | Replica storage v1 已加入实际数据库 inode writer、完整 legacy 表迁移和只读旧表 fence；持久化 transfer drain/target reconcile 与三副本 round-trip 回归已通过。旧 binary 正式恢复 profile v0.5、在线 archive/CAS 和跨故障域仍待完成 |
 | F6 资源/调度 | R16、R20 | divisible quota、完整时间/空间承诺、真实成本 evidence 与确定性策略 | cost evidence、逻辑 quota ledger、Local EAIOS 文件 worker 的实际 POSIX CPU/address-space envelope 与 Prometheus 入口已通过；divisible quota、GPU/交通成本、完整时空和运行中抢占仍待完成 |
-| F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | 当前 stop/recovery/hold/rebind gate 回归通过；运行中抢占、耦合迁移和 hazard/交接协议软件仍须完成，真实物理证据独立待验 |
+| F7 执行协调 | R17、R20 | 运行中抢占、耦合恢复、异构交接/regrasp、hazard/stop certificate 接入 | relation violation/Unknown 已接入 whole-Group stop barrier，并保留每个 current attempt 的独立 stop gate；运行中抢占、耦合迁移、异构 regrasp/hazard 协议和真实物理证据仍待完成 |
 | F8 运行期计划 | R20 | 版本化候选/替代计划、预授权、持久预算、去重及安全切换 | 原目标/版本、MI generation/claim/nonce、主体/tenant 发现、原回包对账与非空 scoped Memory 通用文件组合已验收；其他类型/复杂拓扑仍须随 F4/F7 总矩阵完成 |
 | F9 层级/Federation | R20 | 控制域、跨域 prepare/commit、路由/授权与恢复 | 持久 epoch/digest/deadline prepare/commit session 已通过；跨域 transport/授权/恢复部署仍待完成 |
 | F10 运维与总验收 | R18、R19 的非发布部分 | 指标/告警、write-disabled 只读恢复、部署/迁移/回退、全功能验收 | 待完成 |

@@ -158,15 +158,8 @@ pub(crate) fn apply_runtime_events(
             | runtime::ExecutionEvent::RelationRegistered { .. }
             | runtime::ExecutionEvent::RelationStateChanged { .. } => {}
             runtime::ExecutionEvent::RelationReconciliationRequired { relation, .. } => {
-                safety_stop::admit(
-                    controller,
-                    relation.group_id(),
-                    relation.target_task_ref(),
-                    relation.target_role_id(),
-                    timestamp,
-                    10_000,
-                )
-                .map_err(|error| format!("relation stop admission failed: {error}"))?;
+                safety_stop::admit_group_stop(controller, relation.group_id(), timestamp, 10_000)
+                    .map_err(|error| format!("relation stop admission failed: {error}"))?;
             }
         }
     }

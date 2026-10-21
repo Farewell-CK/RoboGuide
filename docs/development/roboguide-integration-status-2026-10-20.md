@@ -22,6 +22,10 @@ archive/catalog/CAS 一致性仍未关闭 F4/F5。
 实际文件 worker 在第一次读取前应用 POSIX CPU/address-space limits，并由父端保存原 permit、
 deadline、取消和 wait 证据；Control 逻辑 quota、GPU/交通、硬实时和设备安全仍未关闭 F6/F7。
 
+2026-10-21 [Relation violation whole-Group stop](acceptance/2026-10-21-relation-whole-group-stop.md)
+Runtime relation violation/Unknown 现在为 Group 全部当前 attempts 建立安全停止目的，保留
+独立 generation/receipt/safe-state gate；物理 stop、hard-realtime 与 regrasp 仍待部署证据。
+
 main 合并前为 `5285a92a6af8bf4a99bb0852b5cdb80728c9144c`；三个集成头分别是：
 `25380295a267fb4c5f2f948558460fd1b141f95f`（完整非发布整改分支）、
 `b4f1b1275a546f310f61f9b79ac0bc4bb353209a`（MI 校验）、
