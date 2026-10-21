@@ -7,11 +7,12 @@
 Relation stop 保留 exact Task/Role target；缺少 relation proof 的 Completed target 与
 当前 live peers 一起进入现有独立 stop/hold 门禁。单元合同的合成 Node 观察不进入部署。
 
-2026-10-21 Replica storage v2 同时拥有实际 SQL inode 与 sibling writer lease。升级须先
+2026-10-21 Replica storage v3 同时拥有实际 SQL inode 与 sibling writer lease。升级须先
 核对原 identity、由 SQLite 排空旧连接，再原子提交只读旧表 fence；缺失 identity 不自动
-修复。Recovery v0.6 冻结相同 writer，并在 bundle verify/restore 重查完整格式与原 transfer
-历史。成员本地 hold 不进入 Raft snapshot；Unknown 原 ID 不重发，目标 quorum 与源独立
-只读观察先于完成。当前仍须独立证明 source-child 排空与跨域/在线内容恢复。
+修复。Recovery v0.7 冻结相同 writer，并在 bundle verify/restore 重查完整格式、原 transfer
+与原 Controller spawn/PID/wait。成员本地 hold 不进入 Raft snapshot；Unknown 原 ID 不重发。
+V3 election 前须原 source child 独立 durable wait、原 quorum 与预算；完成须目标 quorum
+与源独立只读观察。跨域/在线内容恢复继续验收。
 
 ```mermaid
 flowchart TB

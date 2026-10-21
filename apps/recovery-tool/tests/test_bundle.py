@@ -610,3 +610,56 @@ def test_replica_v2_recovery_preserves_original_transfer_hold(tmp_path: Path) ->
     (tmp_path / "bundle/manifest.json").write_bytes(raw)
     with pytest.raises(ValueError, match="completed quorum proof"):
         verify(tmp_path / "bundle", digest(raw))
+
+
+def test_replica_v3_recovery_requires_original_process_journal(tmp_path: Path) -> None:
+    """A pinned v3 bundle cannot discard an original uncertain spawn or its capacity fence."""
+    profile = replica_v1_profile(tmp_path)
+    profile["schema"] = "roboguide.recovery-profile/v0.7"
+    database = tmp_path / "replica/replica.sqlite3"
+    original = {
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "supervisor_instance": "00000000-0000-0000-0000-000000000002",
+        "epoch": {"term": 1, "replica_id": 1},
+        "process": None,
+        "outcome": None,
+    }
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            "DROP TABLE replica_storage_format;"
+            "CREATE TABLE replica_storage_format("
+            "version INTEGER PRIMARY KEY CHECK(version=3),schema TEXT NOT NULL);"
+            "INSERT INTO replica_storage_format VALUES (3,'roboguide.replica-storage/v0.3');"
+            "PRAGMA user_version=3;"
+        )
+        connection.executemany(
+            "INSERT INTO replica_v1_meta VALUES (?,?)",
+            [
+                ("leader_transfers_v2", "[]"),
+                ("controller_supervision_v1", "true"),
+                ("legacy_controller_continuity_unknown", "false"),
+                ("controller_processes_v1", json.dumps([original])),
+            ],
+        )
+    outcome = backup(profile, tmp_path / "bundle", "original-process")
+    manifest = verify(tmp_path / "bundle", outcome["manifest_digest"])
+    restore(tmp_path / "bundle", outcome["manifest_digest"], tmp_path / "restored", "restore")
+    with sqlite3.connect(tmp_path / "restored/stores/replica/replica.sqlite3") as connection:
+        assert json.loads(
+            connection.execute(
+                "SELECT value FROM replica_v1_meta WHERE key='controller_processes_v1'"
+            ).fetchone()[0]
+        ) == [original]
+    bundled = tmp_path / "bundle/stores/replica/replica.sqlite3"
+    with sqlite3.connect(bundled) as connection:
+        connection.execute("DELETE FROM replica_v1_meta WHERE key='controller_processes_v1'")
+    content = bundled.read_bytes()
+    manifest["files"][0].update(
+        byte_size=len(content),
+        content_digest=digest(content),
+        sqlite=_identity(bundled, Budget(profile)),
+    )
+    raw = canonical(manifest)
+    (tmp_path / "bundle/manifest.json").write_bytes(raw)
+    with pytest.raises(ValueError, match="supervision/history"):
+        verify(tmp_path / "bundle", digest(raw))

@@ -6,6 +6,7 @@
 
 mod certificates;
 mod store;
+mod supervision;
 #[cfg(test)]
 mod tests;
 mod tls;
@@ -25,6 +26,7 @@ pub use certificates::{
     CertificateReceipt, CertificateRequest, CertificateTrust, MemberCertificates, ReplicaCommand,
 };
 pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};
+pub use supervision::{ControllerDrainProof, ControllerProcessExit, ControllerProcessIdentity};
 pub use transport::{ReplicaFenceClient, ReplicaServer};
 
 openraft::declare_raft_types!(
@@ -113,6 +115,12 @@ pub struct LeaderTransferRecord {
     /// Exact target epoch independently confirmed by quorum; absence never proves completion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirmed_epoch: Option<ControllerEpoch>,
+    /// Exact original source child frozen before fencing; absent only with a verified empty set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_process: Option<ControllerProcessIdentity>,
+    /// Original supervisor wait or scoped actual empty-process proof, mandatory before election.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_drain: Option<ControllerDrainProof>,
 }
 
 /// Authenticated member-side administration client; it opens no consensus storage or child.
@@ -409,6 +417,8 @@ impl ReplicaConfig {
 /// Live consensus service and durable accepted history, independent of any executing Controller child.
 #[derive(Clone)]
 pub struct ReplicaNode {
+    /// Actual kernel-generated identity of this infrastructure process incarnation.
+    process_instance: String,
     /// Test-only response loss after actual target-side acceptance/election; never a product mode.
     #[cfg(test)]
     discard_transfer_reply: Arc<std::sync::atomic::AtomicBool>,
@@ -490,6 +500,7 @@ impl ReplicaNode {
         .await
         .map_err(|error| error.to_string())?;
         let node = Self {
+            process_instance: supervision::new_process_instance()?,
             #[cfg(test)]
             discard_transfer_reply: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             leader_transfer_writer: Arc::new(tokio::sync::Mutex::new(())),
@@ -539,6 +550,12 @@ impl ReplicaNode {
 
     /// Refuses source application authority as soon as its durable original handoff is pending.
     fn check_source_transfer_fence(&self) -> Result<(), String> {
+        if !self.store.controller_continuity_known()? {
+            return Err(
+                "legacy Controller process continuity requires independent migration evidence"
+                    .into(),
+            );
+        }
         if self.store.leader_transfer_record()?.is_some_and(|record| {
             record.source_epoch.replica_id == self.config.replica_id
                 && !matches!(record.state.as_str(), "completed" | "rejected")
@@ -726,15 +743,59 @@ impl ReplicaNode {
             return Err("leader transfer target has not caught up to the current log".into());
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
-        let prepared = LeaderTransferRecord {
+        let mut prepared = LeaderTransferRecord {
             transfer_id: transfer_id.clone(),
             source_epoch: epoch,
             target: member_id,
             required_last_log_index,
             state: "prepared".into(),
             confirmed_epoch: None,
+            source_process: self.store.transfer_source_process(epoch)?,
+            source_drain: None,
         };
         self.store.persist_leader_transfer(&prepared)?;
+        loop {
+            if let Some(proof) = self.store.controller_drain_proof(
+                epoch,
+                prepared.source_process.as_ref(),
+                &self.process_instance,
+            )? {
+                proof.validate(epoch)?;
+                prepared.source_drain = Some(proof);
+                self.store.persist_leader_transfer(&prepared)?;
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                self.store.persist_leader_transfer(&LeaderTransferRecord {
+                    state: "unknown".into(),
+                    ..prepared
+                })?;
+                return Err(
+                    "original Controller child was not reaped before transfer deadline".into(),
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        if let Err(error) = self.check_consensus_epoch(epoch).await {
+            self.store.persist_leader_transfer(&LeaderTransferRecord {
+                state: "unknown".into(),
+                ..prepared
+            })?;
+            return Err(error);
+        }
+        let remaining_ms = u64::try_from(
+            deadline
+                .saturating_duration_since(tokio::time::Instant::now())
+                .as_millis(),
+        )
+        .unwrap_or(0);
+        if remaining_ms == 0 {
+            self.store.persist_leader_transfer(&LeaderTransferRecord {
+                state: "unknown".into(),
+                ..prepared
+            })?;
+            return Err("original source drain consumed the transfer effect budget".into());
+        }
         self.raft.runtime_config().heartbeat(false);
         self.raft.runtime_config().elect(false);
         let _resume_ticker = LeaderTransferTickerGuard { raft: &self.raft };
@@ -746,6 +807,11 @@ impl ReplicaNode {
                 transfer_id,
                 epoch,
                 required_last_log_index,
+                prepared
+                    .source_drain
+                    .clone()
+                    .ok_or("original source drain proof is absent")?,
+                remaining_ms,
             ),
         )
         .await;
@@ -819,6 +885,9 @@ impl ReplicaNode {
         };
         if matches!(record.state.as_str(), "completed" | "rejected") {
             return Ok(true);
+        }
+        if record.source_drain.is_none() {
+            return Ok(false);
         }
         if record.target == self.config.replica_id {
             let Some(epoch) = self.current_epoch() else {
@@ -903,11 +972,18 @@ impl ReplicaNode {
         target: u64,
         transfer_id: String,
         required_last_log_index: Option<u64>,
+        source_drain: ControllerDrainProof,
+        received_deadline: tokio::time::Instant,
     ) -> Result<LeaderTransferReceipt, String> {
+        source_drain.validate(source_epoch)?;
+        if tokio::time::Instant::now() >= received_deadline {
+            return Err("original target receive budget expired before admission".into());
+        }
         if let Some(original) = self.store.leader_transfer_by_id(&transfer_id)? {
             if original.source_epoch != source_epoch
                 || original.target != target
                 || original.required_last_log_index != required_last_log_index
+                || original.source_drain.as_ref() != Some(&source_drain)
             {
                 return Err("original target transfer identity differs".into());
             }
@@ -946,7 +1022,15 @@ impl ReplicaNode {
             required_last_log_index,
             state: "accepted".into(),
             confirmed_epoch: None,
+            source_process: match &source_drain {
+                ControllerDrainProof::ProcessExit { outcome } => Some(outcome.process.clone()),
+                _ => None,
+            },
+            source_drain: Some(source_drain),
         })?;
+        if tokio::time::Instant::now() >= received_deadline {
+            return Err("original target receive budget expired before election".into());
+        }
         self.raft
             .trigger()
             .elect()

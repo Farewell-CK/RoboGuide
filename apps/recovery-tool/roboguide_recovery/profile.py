@@ -62,6 +62,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.4",
         "roboguide.recovery-profile/v0.5",
         "roboguide.recovery-profile/v0.6",
+        "roboguide.recovery-profile/v0.7",
     }:
         expected.add("artifact_replica_sets")
     if set(profile) != expected or profile["schema"] not in {
@@ -71,6 +72,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.4",
         "roboguide.recovery-profile/v0.5",
         "roboguide.recovery-profile/v0.6",
+        "roboguide.recovery-profile/v0.7",
     }:
         raise ValueError("recovery profile is not closed or versioned")
     if (
@@ -117,6 +119,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.4",
             "roboguide.recovery-profile/v0.5",
             "roboguide.recovery-profile/v0.6",
+            "roboguide.recovery-profile/v0.7",
         }:
             raise ValueError("replica supervisor leases require explicit recovery profile v0.2")
         if item["kind"] == "runtime-mi" and profile["schema"] not in {
@@ -124,6 +127,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.4",
             "roboguide.recovery-profile/v0.5",
             "roboguide.recovery-profile/v0.6",
+            "roboguide.recovery-profile/v0.7",
         }:
             raise ValueError("runtime MI leases require explicit recovery profile v0.3")
         if (
@@ -260,11 +264,13 @@ def acquire_all(
                 "roboguide.recovery-profile/v0.4",
                 "roboguide.recovery-profile/v0.5",
                 "roboguide.recovery-profile/v0.6",
+                "roboguide.recovery-profile/v0.7",
             }:
                 paths.extend(root / name for name in [".memory-use.lock", *databases])
             if component["kind"] == "replica" and profile_schema in {
                 "roboguide.recovery-profile/v0.5",
                 "roboguide.recovery-profile/v0.6",
+                "roboguide.recovery-profile/v0.7",
             }:
                 paths.append(root / component["database"])
         for path in sorted(paths):
@@ -287,6 +293,7 @@ def acquire_all(
                         "roboguide.recovery-profile/v0.4",
                         "roboguide.recovery-profile/v0.5",
                         "roboguide.recovery-profile/v0.6",
+                        "roboguide.recovery-profile/v0.7",
                     }:
                         marker = connection.execute(
                             "SELECT schema,databases_json FROM provider_writer_format"
@@ -354,6 +361,7 @@ def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str
     expected_version = {
         "roboguide.recovery-profile/v0.5": 1,
         "roboguide.recovery-profile/v0.6": 2,
+        "roboguide.recovery-profile/v0.7": 3,
     }.get(profile_schema)
     if expected_version is None:
         if version != 0:
@@ -383,12 +391,14 @@ def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str
     }
     if views != {"replica_" + name for name in ("meta", "commands", "log", "events", "snapshot")}:
         raise ValueError("Replica old-writer readonly views are incomplete")
-    if expected_version == 2:
+    if expected_version >= 2:
         row = connection.execute(
             "SELECT value FROM replica_v1_meta WHERE key='leader_transfers_v2'"
         ).fetchone()
         history = json.loads(row[0]) if row is not None else None
-        validate_transfer_history(history)
+        validate_transfer_history(history, expected_version)
+        if expected_version == 3:
+            validate_controller_process_history(connection)
     for name in ("meta", "commands", "log", "events", "snapshot"):
         expected_sql = f"CREATE VIEW replica_{name} AS SELECT * FROM replica_v1_{name}"
         row = connection.execute(
@@ -399,7 +409,7 @@ def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str
             raise ValueError("Replica old-writer readonly fence is unavailable")
 
 
-def validate_transfer_history(history: Any) -> None:
+def validate_transfer_history(history: Any, storage_version: int = 2) -> None:
     """Revalidate every original operation without inventing quorum or renewing effect authority."""
     if not isinstance(history, list) or len(history) > 512:
         raise ValueError("Replica original bounded transfer history is unavailable")
@@ -407,10 +417,10 @@ def validate_transfer_history(history: Any) -> None:
     pending = 0
     for record in history:
         required = {"transfer_id", "source_epoch", "target", "required_last_log_index", "state"}
-        if not isinstance(record, dict) or set(record) not in (
-            required,
-            required | {"confirmed_epoch"},
-        ):
+        allowed = required | {"confirmed_epoch"}
+        if storage_version == 3:
+            allowed |= {"source_process", "source_drain"}
+        if not isinstance(record, dict) or not required <= set(record) <= allowed:
             raise ValueError("Replica transfer operation is not closed")
         identifier, source, target = record["transfer_id"], record["source_epoch"], record["target"]
         if (
@@ -428,6 +438,8 @@ def validate_transfer_history(history: Any) -> None:
         log = record["required_last_log_index"]
         if log is not None and (type(log) is not int or not 0 <= log < 2**64):
             raise ValueError("Replica transfer original log is invalid")
+        if storage_version == 3 and record.get("source_drain") is not None:
+            validate_controller_drain(record["source_drain"], source, record.get("source_process"))
         state = record["state"]
         if state not in (
             "prepared",
@@ -440,6 +452,8 @@ def validate_transfer_history(history: Any) -> None:
             raise ValueError("Replica transfer original state is invalid")
         confirmed = record.get("confirmed_epoch")
         if state == "completed":
+            if storage_version == 3 and record.get("source_drain") is None:
+                raise ValueError("Replica completed transfer lacks original source drain")
             if (
                 not isinstance(confirmed, dict)
                 or not valid_transfer_epoch(confirmed)
@@ -509,3 +523,110 @@ def validate_replica_sets(profile: dict[str, Any], components: list[dict[str, An
                     "Artifact set crosses original cluster/schema/bootstrap boundaries"
                 )
             cluster = actual
+
+
+def valid_process_instance(value: Any) -> bool:
+    """Recognize a bounded original process UUID without asserting hardware identity."""
+    return (
+        isinstance(value, str)
+        and re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value) is not None
+    )
+
+
+def validate_controller_process(value: Any) -> None:
+    """Require the complete original Linux child identity; missing values never become zero."""
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {"instance_id", "supervisor_instance", "epoch", "pid", "boot_id", "start_ticks"}
+        or not all(
+            valid_process_instance(value[key])
+            for key in ("instance_id", "supervisor_instance", "boot_id")
+        )
+        or not valid_transfer_epoch(value["epoch"])
+        or type(value["pid"]) is not int
+        or not 0 < value["pid"] < 2**32
+        or type(value["start_ticks"]) is not int
+        or not 0 < value["start_ticks"] < 2**64
+    ):
+        raise ValueError("Replica original Controller process identity is unavailable")
+
+
+def validate_controller_drain(value: Any, epoch: Any, process: Any) -> None:
+    """Check exact retained wait evidence without inferring OS exit from a PID or terminal row."""
+    if not isinstance(value, dict):
+        raise ValueError("Replica source drain is not a closed proof")
+    if value.get("kind") == "no-application-process":
+        if (
+            set(value) != {"kind", "supervisor_instance", "epoch"}
+            or not valid_process_instance(value["supervisor_instance"])
+            or value["epoch"] != epoch
+            or process is not None
+        ):
+            raise ValueError("Replica original empty-process proof differs")
+        return
+    if set(value) != {"kind", "outcome"} or value["kind"] != "process-exit":
+        raise ValueError("Replica source drain kind is unavailable")
+    outcome = value["outcome"]
+    if not isinstance(outcome, dict) or set(outcome) != {"process", "exit_code", "signal"}:
+        raise ValueError("Replica original Controller wait is not closed")
+    validate_controller_process(outcome["process"])
+    code, signal = outcome["exit_code"], outcome["signal"]
+    if (
+        outcome["process"] != process
+        or process["epoch"] != epoch
+        or (code is None) == (signal is None)
+        or (code is not None and (type(code) is not int or not -(2**31) <= code < 2**31))
+        or (signal is not None and (type(signal) is not int or not 0 < signal < 2**31))
+    ):
+        raise ValueError("Replica original Controller wait identity/status differs")
+
+
+def validate_controller_process_history(connection: sqlite3.Connection) -> None:
+    """Require original supervision and every pre-spawn/PID/wait record in the complete bundle."""
+    rows = dict(
+        connection.execute(
+            "SELECT key,value FROM replica_v1_meta "
+            "WHERE key IN ('controller_supervision_v1','controller_processes_v1',"
+            "'legacy_controller_continuity_unknown')"
+        ).fetchall()
+    )
+    enabled = json.loads(rows.get("controller_supervision_v1", "null"))
+    legacy_unknown = json.loads(rows.get("legacy_controller_continuity_unknown", "null"))
+    records = json.loads(rows.get("controller_processes_v1", "null"))
+    if (
+        type(enabled) is not bool
+        or type(legacy_unknown) is not bool
+        or not isinstance(records, list)
+        or len(records) > 1024
+    ):
+        raise ValueError("Replica original Controller supervision/history is unavailable")
+    ids: set[str] = set()
+    uncertain = 0
+    for record in records:
+        if (
+            not isinstance(record, dict)
+            or set(record) != {"instance_id", "supervisor_instance", "epoch", "process", "outcome"}
+            or not valid_process_instance(record["instance_id"])
+            or not valid_process_instance(record["supervisor_instance"])
+            or not valid_transfer_epoch(record["epoch"])
+            or record["instance_id"] in ids
+        ):
+            raise ValueError("Replica original Controller spawn history differs")
+        ids.add(record["instance_id"])
+        process, outcome = record["process"], record["outcome"]
+        if process is not None:
+            validate_controller_process(process)
+            if any(
+                process[key] != record[key]
+                for key in ("instance_id", "supervisor_instance", "epoch")
+            ):
+                raise ValueError("Replica original spawn/PID identity differs")
+        if outcome is not None:
+            validate_controller_drain(
+                {"kind": "process-exit", "outcome": outcome}, record["epoch"], process
+            )
+        else:
+            uncertain += 1
+    if uncertain > 1 or (records and not enabled):
+        raise ValueError("Replica original Controller history overlaps or lost supervision")

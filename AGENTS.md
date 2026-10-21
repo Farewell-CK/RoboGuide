@@ -1,5 +1,14 @@
 # Repository Guidelines
 
+ADR-0138 adds the member-local original Controller process journal under Replica storage v3 and
+explicit recovery v0.7. Real supervisor spawn intent precedes the actual Child PID/boot/start-tick
+registration; only that incarnation's actual wait result becomes exit proof. Transfer fences source
+application authority, waits for original durable exit, rechecks original quorum/budget, then sends
+TransferLeadershipV3 with exact proof and a receive-relative target budget frozen before queuing.
+Unreaped/spawning history survives restart and blocks replacement; old v2 operation values remain
+legacy evidence and do not invent drain authority. No application checkpoint/Node contract changes
+are implied. This proves infrastructure process exit only, never device or Local EAIOS stopping.
+
 ADR-0137 preserves the exact relation target when admitting safety stop. Existing admit already
 covers all current live Group peers plus that target, including locally Completed without relation
 proof. Ordinary Group stop selects one live entry and delegates once. Synthetic contract tests

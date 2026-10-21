@@ -3,6 +3,13 @@
 本次先同步远程并核对所有远程分支；在隔离工作树组合整改、MI 部署校验和执行故障闭环，
 保留其他工作树和未跟踪实验文件。没有启动实验、E6、模型、模拟器或设备。
 
+2026-10-21 [原 Controller child 排空](../decisions/0138-original-controller-child-drain-before-transfer.md)
+将 pre-spawn intent、实际 PID/boot/start tick、原 supervisor wait 持久化；源应用先 fence，
+只有原退出证明、原 quorum 与八秒预算齐备才发 V3 election。target 的原 receive budget
+包含 member-writer 排队。storage v3 / recovery v0.7 保留完整进程日志；旧应用 checkpoint
+缺少原进程记录时保持 Unknown，不能推成空进程。独立旧部署排空迁移、在线内容与跨域
+仍须接续完成，软件进程证明不升级为 Node/设备停止。
+
 2026-10-21 [成员本地 transfer 历史](../decisions/0136-member-local-leader-transfer-evidence.md)
 修正本地 hold 与 Raft snapshot 混用；丢失原回包保持 Unknown，同 ID 不重发，完成须目标
 实际新 quorum epoch 和源的认证只读观察。storage v2 / recovery v0.6 fence 保留旧原值与

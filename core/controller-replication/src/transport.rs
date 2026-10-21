@@ -96,7 +96,7 @@ enum Command {
         epoch: ControllerEpoch,
     },
     /// Target-side controlled election used by the explicit leader transfer profile.
-    #[serde(rename = "TransferLeadershipV2")]
+    #[serde(rename = "TransferLeadershipV3")]
     TransferLeadership {
         /// Epoch of the current leader that must still be the target's observed leader.
         epoch: ControllerEpoch,
@@ -106,6 +106,10 @@ enum Command {
         transfer_id: String,
         /// Source last-log index required before triggering the election.
         required_last_log_index: Option<u64>,
+        /// Actual original source child wait or scoped empty-process proof.
+        source_drain: ControllerDrainProof,
+        /// Remaining original effect budget; receiver freezes its own ingress-relative deadline.
+        effect_budget_ms: u64,
     },
     /// Read the leader epoch for an authenticated member-side administration client.
     AdminEpoch,
@@ -277,6 +281,7 @@ where
         .await
         .map_err(|error| error.to_string())?;
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    let received_at = tokio::time::Instant::now();
     #[cfg(test)]
     if request.command.requires_member_writer() {
         node.framed_member_mutations.fetch_add(1, Ordering::SeqCst);
@@ -406,11 +411,22 @@ where
                 target,
                 transfer_id,
                 required_last_log_index,
-            } => Reply::Transfer(if request.sender != epoch.replica_id {
+                source_drain,
+                effect_budget_ms,
+            } => Reply::Transfer(if effect_budget_ms == 0 || effect_budget_ms > 8_000 {
+                Err("original target effect budget is invalid".into())
+            } else if request.sender != epoch.replica_id {
                 Err("leader transfer source differs from actual authenticated member".into())
             } else {
-                node.accept_leader_transfer(epoch, target, transfer_id, required_last_log_index)
-                    .await
+                node.accept_leader_transfer(
+                    epoch,
+                    target,
+                    transfer_id,
+                    required_last_log_index,
+                    source_drain,
+                    received_at + Duration::from_millis(effect_budget_ms),
+                )
+                .await
             }),
             Command::ObserveLeaderTransfer { transfer_id } => {
                 Reply::LeaderTransferRecord(if transfer_id.is_empty() || transfer_id.len() > 128 {
@@ -500,6 +516,8 @@ pub(crate) async fn request_leader_transfer(
     transfer_id: String,
     epoch: ControllerEpoch,
     required_last_log_index: Option<u64>,
+    source_drain: ControllerDrainProof,
+    effect_budget_ms: u64,
 ) -> Result<LeaderTransferReceipt, String> {
     let address = *node
         .config
@@ -522,6 +540,8 @@ pub(crate) async fn request_leader_transfer(
                 target,
                 transfer_id,
                 required_last_log_index,
+                source_drain,
+                effect_budget_ms,
             },
             RPCOption::new(Duration::from_secs(5)),
         )

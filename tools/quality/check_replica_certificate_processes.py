@@ -324,6 +324,11 @@ def run(
         """Retain the exact immutable command file before invoking its actual RPC once."""
         path = output / (str(operation["command_id"]) + ".json")
         save(path, operation)
+        if accepted:
+            wait_for(
+                lambda: admin(caller, current_leader, "--certificate-trust"),
+                "actual readonly current quorum before the one original mutation",
+            )
         return admin(caller, current_leader, "--rotate-certificate", str(path), accepted=accepted)
 
     def all_at(revision: int) -> bool:
@@ -451,6 +456,7 @@ def run(
         save(output / "after-first-rotation-application-checkpoint.json", current_application)
         assert current_application == original_application
         result["first_complete_application_checkpoint_unchanged"] = True
+        original_source_child = status(current_leader)["child_pid"]
         admin(
             current_leader,
             current_leader,
@@ -460,6 +466,29 @@ def run(
             "rotate-leader-handoff",
         )
         wait_for(lambda: leader() == target, "rotated member becomes actual Controller leader")
+        original_transfer = admin(
+            target, target, "--observe-leader-transfer", "rotate-leader-handoff"
+        )
+        source_drain = original_transfer["source_drain"]
+        assert source_drain["kind"] == "process-exit"
+        original_wait = source_drain["outcome"]
+        assert original_wait["process"]["pid"] == original_source_child
+        assert original_wait["process"]["epoch"] == original_transfer["source_epoch"]
+        assert original_wait["exit_code"] is not None or original_wait["signal"] is not None
+        connection = sqlite3.connect(
+            (output / f"replica-{current_leader}/replica.sqlite3").as_uri() + "?mode=ro", uri=True
+        )
+        try:
+            original_processes = json.loads(
+                connection.execute(
+                    "SELECT value FROM replica_v1_meta WHERE key='controller_processes_v1'"
+                ).fetchone()[0]
+            )
+        finally:
+            connection.close()
+        assert any(record["outcome"] == original_wait for record in original_processes)
+        assert not Path(f"/proc/{original_source_child}").exists()
+        result["original_source_child_wait_before_target_admission"] = original_wait
         before = status(target)
         replacement_again, final_leaf = issue(next_pki, f"member-{target}-issued-as-leader")
         second_stage = {

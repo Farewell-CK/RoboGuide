@@ -1,7 +1,9 @@
 //! Single-owned-child lifecycle and conservative atomic accepted-view materialization.
 
 use crate::config::ProcessConfig;
-use controller_replication::{ControllerEpoch, ReplicaNode, ReplicaView};
+use controller_replication::{
+    ControllerEpoch, ControllerProcessExit, ControllerProcessIdentity, ReplicaNode, ReplicaView,
+};
 use serde::Serialize;
 use serde_json::json;
 use std::fs::{File, OpenOptions};
@@ -31,6 +33,8 @@ struct OwnedController {
     epoch: ControllerEpoch,
     /// Owned process handle; drop requests termination.
     child: Child,
+    /// Complete original PID identity registered before the owned handle becomes live authority.
+    process: ControllerProcessIdentity,
 }
 
 /// Locks a private generated file without finding/killing any external process.
@@ -92,7 +96,7 @@ fn materialize(directory: &Path, view: &ReplicaView) -> Result<(), String> {
 }
 
 /// Starts only the validated binary with an immutable parent fence and explicit cleared policy environment.
-fn start_controller(
+async fn start_controller(
     configuration: &ProcessConfig,
     node: &ReplicaNode,
     epoch: ControllerEpoch,
@@ -159,16 +163,36 @@ fn start_controller(
             configuration.storage_directory.join("replica.sqlite3"),
         );
     }
-    let child = command.spawn().map_err(|error| error.to_string())?;
+    let original = node.begin_controller_process(epoch).await?;
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let process = match node.register_controller_process(
+        epoch,
+        original,
+        child.id().ok_or("actual owned Controller PID is absent")?,
+    ) {
+        Ok(process) => process,
+        Err(error) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            return Err(error);
+        }
+    };
     eprintln!(
         "Controller child {} started under epoch {epoch:?}",
         child.id().unwrap_or(0)
     );
-    Ok(OwnedController { epoch, child })
+    Ok(OwnedController {
+        epoch,
+        child,
+        process,
+    })
 }
 
 /// Terminates and reaps only this supervisor's child; physical work and Node journals remain untouched.
-async fn stop_controller(owned: &mut Option<OwnedController>) -> Result<(), String> {
+async fn stop_controller(
+    owned: &mut Option<OwnedController>,
+    node: &ReplicaNode,
+) -> Result<(), String> {
     if let Some(mut controller) = owned.take() {
         if controller
             .child
@@ -181,10 +205,22 @@ async fn stop_controller(owned: &mut Option<OwnedController>) -> Result<(), Stri
                 .start_kill()
                 .map_err(|error| error.to_string())?;
         }
-        tokio::time::timeout(Duration::from_secs(5), controller.child.wait())
+        let status = tokio::time::timeout(Duration::from_secs(5), controller.child.wait())
             .await
             .map_err(|_| "owned Controller exit timed out".to_string())?
             .map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        let signal = {
+            use std::os::unix::process::ExitStatusExt;
+            status.signal()
+        };
+        #[cfg(not(unix))]
+        let signal = None;
+        node.record_controller_exit(ControllerProcessExit {
+            process: controller.process,
+            exit_code: status.code(),
+            signal,
+        })?;
     }
     Ok(())
 }
@@ -229,6 +265,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
         &configuration.storage_directory.join("replica.sqlite3"),
     )
     .await?;
+    node.enable_controller_supervision()?;
     let mut owned = None;
     let metrics_task = crate::metrics::start(
         configuration.metrics_address,
@@ -262,7 +299,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                 let child_dead = child_exit.is_some();
                 if child_dead || owned.as_ref().is_some_and(|controller| Some(controller.epoch) != current) {
                     eprintln!("Stopping owned Controller: exit_status={child_exit:?}, current_epoch={current:?}");
-                    stop_controller(&mut owned).await?;
+                    stop_controller(&mut owned, &node).await?;
                 }
                 let _transfer_reconciled = node.reconcile_leader_transfer().await?;
                 if !leader_transfer_attempted
@@ -270,7 +307,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                         (configuration.leader_transfer.as_ref(), current)
                 {
                     leader_transfer_attempted = true;
-                    stop_controller(&mut owned).await?;
+                    stop_controller(&mut owned, &node).await?;
                     let result = node
                         .request_leader_transfer(transfer.target, transfer.transfer_id.clone())
                         .await;
@@ -298,7 +335,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                         if let Some(result) = ready_shutdown(shutdown_signal.as_mut()).await {
                             break result.map_err(|error| error.to_string());
                         }
-                        owned = Some(start_controller(&configuration, &node, epoch)?);
+                        owned = Some(start_controller(&configuration, &node, epoch).await?);
                     }
                 }
                 write_status(&configuration, &node, current, &owned)?;
@@ -308,7 +345,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
     if let Some(task) = metrics_task {
         task.abort();
     }
-    stop_controller(&mut owned).await?;
+    stop_controller(&mut owned, &node).await?;
     node.shutdown().await?;
     result
 }

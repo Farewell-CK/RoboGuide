@@ -1,5 +1,10 @@
 # RoboGuide
 
+[原 Controller 子进程排空](docs/decisions/0138-original-controller-child-drain-before-transfer.md)
+将原 spawn、实际 PID/内核身份和原 supervisor 的 wait 写入独立日志。Transfer 先封住源
+应用，确认原退出后才发送 V3 选举请求；排队消耗原接收预算，重启不替换未对账进程。
+Replica storage v3 / recovery v0.7 保护这些证明；它们不代表机器人已停止。
+
 [关系异常目标覆盖](docs/decisions/0137-terminal-relation-target-stop-coverage.md)保留原
 Task/Role：本地 Completed 而缺少 relation proof 的目标，仍需独立 stop/hold 门禁。
 全组 peers 复用既有停止 authority；不会从本地终态推导设备安全。

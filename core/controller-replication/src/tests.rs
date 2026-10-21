@@ -264,6 +264,8 @@ fn durable_leader_transfer_record_is_monotonic_and_restart_safe() {
         required_last_log_index: Some(9),
         state: "prepared".into(),
         confirmed_epoch: None,
+        source_process: None,
+        source_drain: None,
     };
     store.persist_leader_transfer(&record).unwrap();
     assert_eq!(
@@ -323,7 +325,7 @@ fn legacy_replica_storage_migrates_atomically_and_old_writes_are_refused() {
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        2
+        3
     );
     for name in [
         "replica_meta",
@@ -940,6 +942,8 @@ async fn raft_snapshot_preserves_member_local_transfer_history() {
         required_last_log_index: None,
         state: "prepared".into(),
         confirmed_epoch: None,
+        source_process: None,
+        source_drain: None,
     };
     source.persist_leader_transfer(&record).unwrap();
     let own = LeaderTransferRecord {
@@ -980,6 +984,8 @@ fn transfer_history_retains_original_operations_and_immutable_completion() {
         required_last_log_index: Some(5),
         state: "unknown".into(),
         confirmed_epoch: None,
+        source_process: None,
+        source_drain: None,
     };
     store.persist_leader_transfer(&unknown).unwrap();
     assert!(
@@ -1000,6 +1006,10 @@ fn transfer_history_retains_original_operations_and_immutable_completion() {
     );
     let completed = LeaderTransferRecord {
         state: "completed".into(),
+        source_drain: Some(ControllerDrainProof::NoApplicationProcess {
+            supervisor_instance: "00000000-0000-0000-0000-000000000001".into(),
+            epoch: unknown.source_epoch,
+        }),
         confirmed_epoch: Some(ControllerEpoch {
             term: 2,
             replica_id: 2,
@@ -1163,6 +1173,252 @@ fn v1_transfer_upgrade_preserves_raw_evidence_and_fences_old_completion() {
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u64>(0))
             .unwrap(),
-        2
+        3
     );
+}
+
+/// Owns one real software child so any assertion failure still kills and reaps that exact process.
+struct OriginalChild(std::process::Child);
+
+impl Drop for OriginalChild {
+    /// Reaps only the original handle, never searching for another process or device.
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Target election cannot precede the source supervisor's durable original Child.wait evidence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn original_controller_child_wait_precedes_target_transfer_acceptance() {
+    use std::os::unix::process::ExitStatusExt;
+    let directory = tempfile::tempdir().unwrap();
+    let endpoints = members();
+    let mut nodes = Vec::new();
+    for id in 1..=3 {
+        nodes.push(
+            ReplicaNode::start(
+                configuration(id, &endpoints),
+                &directory.path().join(format!("replica-{id}.sqlite3")),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    let source = leader(&nodes).await;
+    let epoch = nodes[source].0.current_epoch().unwrap();
+    nodes[source].0.enable_controller_supervision().unwrap();
+    let instance = nodes[source]
+        .0
+        .begin_controller_process(epoch)
+        .await
+        .unwrap();
+    let mut child = OriginalChild(
+        std::process::Command::new("/bin/sleep")
+            .arg("60")
+            .spawn()
+            .unwrap(),
+    );
+    let identity = nodes[source]
+        .0
+        .register_controller_process(epoch, instance, child.0.id())
+        .unwrap();
+    let target = (source + 1) % nodes.len();
+    let target_id = nodes[target].0.config.replica_id;
+    let before = nodes[target]
+        .0
+        .framed_member_mutations
+        .load(Ordering::SeqCst);
+    let owned_source = nodes[source].0.clone();
+    let transfer = tokio::spawn(async move {
+        owned_source
+            .request_leader_transfer(target_id, "original-owned-child")
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while nodes[source].0.leader_transfer_record().unwrap().is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(nodes[source].0.check_epoch(epoch).await.is_err());
+    assert_eq!(
+        nodes[target]
+            .0
+            .framed_member_mutations
+            .load(Ordering::SeqCst),
+        before
+    );
+    child.0.kill().unwrap();
+    let status = child.0.wait().unwrap();
+    // Even an actual OS wait outside the authority journal cannot authorize the target election.
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(
+        nodes[target]
+            .0
+            .framed_member_mutations
+            .load(Ordering::SeqCst),
+        before
+    );
+    nodes[source]
+        .0
+        .record_controller_exit(ControllerProcessExit {
+            process: identity.clone(),
+            exit_code: status.code(),
+            signal: status.signal(),
+        })
+        .unwrap();
+    transfer.await.unwrap().unwrap();
+    let admitted = nodes[target].0.leader_transfer_record().unwrap().unwrap();
+    assert_eq!(admitted.source_process, Some(identity.clone()));
+    assert!(
+        matches!(admitted.source_drain, Some(ControllerDrainProof::ProcessExit { outcome }) if outcome.process == identity)
+    );
+    for (node, _) in &nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
+/// A restarted supervisor cannot invent a wait result or start another process over an uncertain PID.
+#[tokio::test]
+async fn controller_process_restart_keeps_original_unreaped_capacity_fence() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("original.sqlite3");
+    let store = SqliteRaftStore::open(&path, "same", "test/checkpoint-v1").unwrap();
+    store.enable_controller_supervision().unwrap();
+    let original_supervisor = supervision::new_process_instance().unwrap();
+    let epoch = ControllerEpoch {
+        term: 1,
+        replica_id: 1,
+    };
+    let original = store
+        .begin_controller_process(epoch, &original_supervisor)
+        .unwrap();
+    drop(store);
+    let restored = SqliteRaftStore::open(&path, "same", "test/checkpoint-v1").unwrap();
+    assert!(
+        restored
+            .begin_controller_process(epoch, &supervision::new_process_instance().unwrap())
+            .is_err()
+    );
+    assert_eq!(
+        restored
+            .controller_drain_proof(epoch, None, &original_supervisor)
+            .unwrap(),
+        None
+    );
+    assert!(restored.transfer_source_process(epoch).is_err());
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let records: serde_json::Value = serde_json::from_str(
+        &sql.query_row(
+            "SELECT value FROM replica_v1_meta WHERE key='controller_processes_v1'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(records[0]["instance_id"], original);
+}
+
+/// Actual member-writer queue time consumes the original receiver budget before election admission.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn queued_target_transfer_cannot_renew_original_receive_budget() {
+    let directory = tempfile::tempdir().unwrap();
+    let endpoints = members();
+    let mut nodes = Vec::new();
+    for id in 1..=3 {
+        nodes.push(
+            ReplicaNode::start(
+                configuration(id, &endpoints),
+                &directory.path().join(format!("replica-{id}.sqlite3")),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    let source = leader(&nodes).await;
+    let epoch = nodes[source].0.current_epoch().unwrap();
+    let target = (source + 1) % nodes.len();
+    let target_id = nodes[target].0.config.replica_id;
+    let lock = nodes[target].0.member_writer.lock().await;
+    let before = nodes[target]
+        .0
+        .framed_member_mutations
+        .load(Ordering::SeqCst);
+    let source_node = nodes[source].0.clone();
+    let proof = ControllerDrainProof::NoApplicationProcess {
+        supervisor_instance: source_node.process_instance.clone(),
+        epoch,
+    };
+    let request = tokio::spawn(async move {
+        transport::request_leader_transfer(
+            &source_node,
+            target_id,
+            "expired-original-ingress".into(),
+            epoch,
+            None,
+            proof,
+            50,
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while nodes[target]
+            .0
+            .framed_member_mutations
+            .load(Ordering::SeqCst)
+            == before
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(lock);
+    assert!(
+        request
+            .await
+            .unwrap()
+            .unwrap_err()
+            .contains("receive budget expired")
+    );
+    assert_eq!(nodes[target].0.leader_transfer_record().unwrap(), None);
+    for (node, _) in &nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
+/// Legacy application bytes without an original process journal never become an empty-source proof.
+#[tokio::test]
+async fn legacy_application_checkpoint_keeps_unknown_controller_continuity() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy-application.sqlite3");
+    let store = SqliteRaftStore::open(&path, "same", "test/checkpoint-v1").unwrap();
+    let mut store = store;
+    store
+        .apply([Entry {
+            log_id: LogId::new(CommittedLeaderId::new(1, 1), 1),
+            payload: EntryPayload::Normal(batch(None, 1).into()),
+        }])
+        .await
+        .unwrap();
+    drop(store);
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch("DROP TABLE replica_storage_format; CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=2),schema TEXT NOT NULL); INSERT INTO replica_storage_format VALUES (2,'roboguide.replica-storage/v0.2'); PRAGMA user_version=2; DELETE FROM replica_v1_meta WHERE key IN ('controller_supervision_v1','controller_processes_v1','legacy_controller_continuity_unknown');").unwrap();
+    drop(sql);
+    let restored = SqliteRaftStore::open(&path, "same", "test/checkpoint-v1").unwrap();
+    assert!(!restored.controller_continuity_known().unwrap());
+    assert!(restored.enable_controller_supervision().is_err());
+    assert!(
+        restored
+            .transfer_source_process(ControllerEpoch {
+                term: 2,
+                replica_id: 1
+            })
+            .is_err()
+    );
+    assert_eq!(restored.accepted_view().unwrap().revision, 1);
 }

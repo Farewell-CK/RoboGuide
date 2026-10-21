@@ -1,5 +1,9 @@
 # RoboGuide V2 架构基线
 
+[ADR-0138](../../decisions/0138-original-controller-child-drain-before-transfer.md)要求原
+supervisor 持久化 spawn/PID/实际 wait，transfer 先 fence 应用、再排空原 child、最后才
+发送有原接收预算的 V3 target command；storage v3/recovery v0.7 fence 保护新证明。
+
 [ADR-0137](../../decisions/0137-terminal-relation-target-stop-coverage.md)保留 relation 的
 exact target：Completed 但缺少 relation proof 的目标，仍与当前活跃 peers 一起经过原
 stop/hold 门禁。普通 Group stop 复用既有全组覆盖，不从本地终态推导设备停止。

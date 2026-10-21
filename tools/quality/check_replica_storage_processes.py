@@ -75,6 +75,7 @@ def run(
     profile: str,
     schema: str,
     previous_probe: Path | None = None,
+    expected_storage_version: int = 2,
 ) -> dict[str, Any]:
     """Exercise actual old connections, hardlinks, migration and cold old-writer refusal."""
     for probe in (new_probe, legacy_probe, *([previous_probe] if previous_probe else [])):
@@ -188,7 +189,7 @@ def run(
                         "original_identity_preserved",
                     )
                 )
-                and result["migrated_storage_version"] == 2
+                and result["migrated_storage_version"] == expected_storage_version
             )
     except Exception as error:
         result["error"] = str(error)
@@ -229,6 +230,7 @@ def main() -> None:
     parser.add_argument("--new-probe", type=Path, required=True)
     parser.add_argument("--legacy-probe", type=Path, required=True)
     parser.add_argument("--previous-probe", type=Path)
+    parser.add_argument("--storage-version", type=int, choices=(2, 3), default=2)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile", default="a" * 64)
     parser.add_argument("--application-schema", default="roboguide.controller-checkpoint/v45")
@@ -240,6 +242,7 @@ def main() -> None:
         arguments.profile,
         arguments.application_schema,
         arguments.previous_probe.resolve() if arguments.previous_probe is not None else None,
+        arguments.storage_version,
     )
     print(json.dumps(result, sort_keys=True))
     if not result["passed"]:

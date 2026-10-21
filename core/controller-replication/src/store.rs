@@ -21,9 +21,9 @@ const MAX_HISTORY_BYTES: u64 = 64 * 1024 * 1024;
 /// Bound on one complete replica snapshot including escaped checkpoint/history metadata.
 const MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
 /// Storage format version whose table views fence pre-format writers.
-const REPLICA_STORAGE_VERSION: i64 = 2;
+const REPLICA_STORAGE_VERSION: i64 = 3;
 /// Closed storage marker persisted beside the complete consensus tables.
-const REPLICA_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.2";
+const REPLICA_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.3";
 /// Legacy names retained only as read-only views after the atomic format migration.
 const LEGACY_TABLES: [&str; 5] = [
     "replica_meta",
@@ -220,7 +220,7 @@ struct StoreSnapshot {
 #[derive(Clone)]
 pub struct SqliteRaftStore {
     /// Atomic SQLite storage shared by log and state-machine traits.
-    connection: Arc<Mutex<Connection>>,
+    pub(crate) connection: Arc<Mutex<Connection>>,
     /// Lifetime process writer lease; a second owner cannot fork local consensus history.
     _writer: Arc<ReplicaWriterLease>,
     /// Frozen network/application identity.
@@ -285,7 +285,7 @@ fn prepare_storage_format(
     if triggers != 0 {
         return Err("Replica storage contains unrecognized writer triggers".into());
     }
-    if matches!(version, 1 | REPLICA_STORAGE_VERSION) && marker.as_deref() == Some("table") {
+    if matches!(version, 1 | 2 | REPLICA_STORAGE_VERSION) && marker.as_deref() == Some("table") {
         if current.iter().any(|kind| kind.as_deref() != Some("table"))
             || legacy.iter().any(|kind| kind.as_deref() != Some("view"))
         {
@@ -300,6 +300,8 @@ fn prepare_storage_format(
             .map_err(|error| error.to_string())?;
         let expected_schema = if version == 1 {
             "roboguide.replica-storage/v0.1"
+        } else if version == 2 {
+            "roboguide.replica-storage/v0.2"
         } else {
             REPLICA_STORAGE_SCHEMA
         };
@@ -336,12 +338,25 @@ fn prepare_storage_format(
                 return Err("Replica storage readonly view differs".into());
             }
         }
-        if version == 1 {
+        if version < REPLICA_STORAGE_VERSION {
             let legacy: Option<LeaderTransferRecord> =
                 read_meta(connection, LEGACY_LEADER_TRANSFER_META_KEY)
                     .map_err(|error| error.to_string())?;
-            let history = legacy
+            let originals = if version == 1 {
+                legacy.into_iter().collect::<Vec<_>>()
+            } else {
+                read_meta::<Vec<LeaderTransferRecord>>(connection, LEADER_TRANSFER_HISTORY_META_KEY)
+                    .map_err(|error| error.to_string())?
+                    .ok_or("original v2 transfer history is absent")?
+            };
+            let original_history = originals.clone();
+            if originals.len() > MAX_LEADER_TRANSFERS {
+                return Err("original legacy transfer history exceeds its bound".into());
+            }
+            let history = originals
                 .into_iter()
+                .rev()
+                .take(1)
                 .map(|mut record| {
                     record.state = "unknown".into();
                     record.confirmed_epoch = None;
@@ -365,15 +380,40 @@ fn prepare_storage_format(
                 .map_err(|error| error.to_string())?;
             transaction.execute_batch(
                 "DROP TABLE replica_storage_format;
-                 CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=2),schema TEXT NOT NULL);
-                 INSERT INTO replica_storage_format VALUES (2,'roboguide.replica-storage/v0.2');
-                 PRAGMA user_version=2;"
+                 CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=3),schema TEXT NOT NULL);
+                 INSERT INTO replica_storage_format VALUES (3,'roboguide.replica-storage/v0.3');
+                 PRAGMA user_version=3;"
             ).map_err(|error| error.to_string())?;
+            write_meta(
+                &transaction,
+                "legacy_transfer_history_v2",
+                &original_history,
+            )
+            .map_err(|error| error.to_string())?;
+            let legacy_application =
+                read_meta::<state::PersistedCheckpoint>(&transaction, "checkpoint")
+                    .map_err(|error| error.to_string())?
+                    .is_some();
+            write_meta(
+                &transaction,
+                crate::supervision::LEGACY_CONTINUITY_KEY,
+                &legacy_application,
+            )
+            .map_err(|error| error.to_string())?;
+            write_meta(&transaction, crate::supervision::SUPERVISION_KEY, &false)
+                .map_err(|error| error.to_string())?;
+            write_meta(
+                &transaction,
+                crate::supervision::PROCESS_HISTORY_KEY,
+                &Vec::<crate::supervision::ControllerProcessRecord>::new(),
+            )
+            .map_err(|error| error.to_string())?;
             write_meta(&transaction, LEADER_TRANSFER_HISTORY_META_KEY, &history)
                 .map_err(|error| error.to_string())?;
             transaction.commit().map_err(|error| error.to_string())?;
         }
         read_leader_transfer_history(connection)?;
+        SqliteRaftStore::validate_controller_supervision(connection)?;
         return Ok(());
     }
     if version != 0 || marker.is_some() {
@@ -458,20 +498,38 @@ fn prepare_storage_format(
     }
     transaction
         .execute_batch(
-            "CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=2),schema TEXT NOT NULL);
-             INSERT INTO replica_storage_format(version,schema) VALUES (2,'roboguide.replica-storage/v0.2');
+            "CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=3),schema TEXT NOT NULL);
+             INSERT INTO replica_storage_format(version,schema) VALUES (3,'roboguide.replica-storage/v0.3');
              CREATE VIEW replica_meta AS SELECT * FROM replica_v1_meta;
              CREATE VIEW replica_commands AS SELECT * FROM replica_v1_commands;
              CREATE VIEW replica_log AS SELECT * FROM replica_v1_log;
              CREATE VIEW replica_events AS SELECT * FROM replica_v1_events;
              CREATE VIEW replica_snapshot AS SELECT * FROM replica_v1_snapshot;
-             PRAGMA user_version=2;",
+             PRAGMA user_version=3;",
         )
         .map_err(|error| error.to_string())?;
     write_meta(
         &transaction,
         LEADER_TRANSFER_HISTORY_META_KEY,
         &Vec::<LeaderTransferRecord>::new(),
+    )
+    .map_err(|error| error.to_string())?;
+    write_meta(&transaction, crate::supervision::SUPERVISION_KEY, &false)
+        .map_err(|error| error.to_string())?;
+    let legacy_application = has_legacy
+        && read_meta::<state::PersistedCheckpoint>(&transaction, "checkpoint")
+            .map_err(|error| error.to_string())?
+            .is_some();
+    write_meta(
+        &transaction,
+        crate::supervision::LEGACY_CONTINUITY_KEY,
+        &legacy_application,
+    )
+    .map_err(|error| error.to_string())?;
+    write_meta(
+        &transaction,
+        crate::supervision::PROCESS_HISTORY_KEY,
+        &Vec::<crate::supervision::ControllerProcessRecord>::new(),
     )
     .map_err(|error| error.to_string())?;
     if !has_legacy {
@@ -536,7 +594,19 @@ fn validate_leader_transfer(record: &LeaderTransferRecord) -> Result<(), String>
     ) {
         return Err("leader transfer state is unknown".into());
     }
+    if let Some(proof) = &record.source_drain {
+        proof.validate(record.source_epoch)?;
+        match (proof, &record.source_process) {
+            (ControllerDrainProof::ProcessExit { outcome }, Some(process))
+                if &outcome.process == process => {}
+            (ControllerDrainProof::NoApplicationProcess { .. }, None) => {}
+            _ => return Err("original transfer process differs from retained drain proof".into()),
+        }
+    }
     if record.state == "completed" {
+        if record.source_drain.is_none() {
+            return Err("completed transfer lacks original source drain".into());
+        }
         if !record.confirmed_epoch.is_some_and(|epoch| {
             epoch.replica_id == record.target && epoch.term > record.source_epoch.term
         }) {
@@ -565,7 +635,7 @@ pub(super) fn io_error(error: impl std::fmt::Display) -> StorageError<u64> {
 }
 
 /// Reads one versioned JSON metadata value without replacing malformed authority with defaults.
-fn read_meta<T: DeserializeOwned>(
+pub(crate) fn read_meta<T: DeserializeOwned>(
     connection: &Connection,
     key: &str,
 ) -> Result<Option<T>, StorageError<u64>> {
@@ -583,7 +653,7 @@ fn read_meta<T: DeserializeOwned>(
 }
 
 /// Writes one metadata value in its caller's current atomic transaction.
-fn write_meta<T: Serialize>(
+pub(crate) fn write_meta<T: Serialize>(
     connection: &Connection,
     key: &str,
     value: &T,
@@ -674,7 +744,7 @@ impl SqliteRaftStore {
                 .map_err(|error| error.to_string())?;
             let authority: u64 = transaction
                 .query_row(
-                    "SELECT COUNT(*) FROM replica_v1_meta WHERE key NOT IN ('identity','leader_transfers_v2')",
+                    "SELECT COUNT(*) FROM replica_v1_meta WHERE key NOT IN ('identity','leader_transfers_v2','controller_supervision_v1','controller_processes_v1','legacy_controller_continuity_unknown')",
                     [],
                     |row| row.get(0),
                 )
@@ -839,9 +909,27 @@ impl SqliteRaftStore {
         transfer_id: &str,
     ) -> Result<Option<LeaderTransferRecord>, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
-        Ok(read_leader_transfer_history(&connection)?
+        let current = read_leader_transfer_history(&connection)?
             .into_iter()
-            .find(|record| record.transfer_id == transfer_id))
+            .find(|record| record.transfer_id == transfer_id);
+        if current.is_some() {
+            return Ok(current);
+        }
+        let legacy: Vec<LeaderTransferRecord> =
+            read_meta(&connection, "legacy_transfer_history_v2")
+                .map_err(|error| error.to_string())?
+                .unwrap_or_default();
+        if legacy.len() > MAX_LEADER_TRANSFERS {
+            return Err("original legacy transfer history exceeds its bound".into());
+        }
+        Ok(legacy
+            .into_iter()
+            .find(|record| record.transfer_id == transfer_id)
+            .map(|mut record| {
+                record.state = "unknown".into();
+                record.confirmed_epoch = None;
+                record
+            }))
     }
 
     /// Commits a permitted original operation transition without discarding prior operations.
@@ -859,6 +947,8 @@ impl SqliteRaftStore {
             if current.source_epoch != record.source_epoch
                 || current.target != record.target
                 || current.required_last_log_index != record.required_last_log_index
+                || current.source_process != record.source_process
+                || (current.source_drain.is_some() && current.source_drain != record.source_drain)
                 || !leader_transfer_transition_allowed(&current.state, &record.state)
                 || (current.confirmed_epoch.is_some()
                     && current.confirmed_epoch != record.confirmed_epoch)
@@ -867,13 +957,23 @@ impl SqliteRaftStore {
             }
             *current = record.clone();
         } else {
+            let legacy: Vec<LeaderTransferRecord> =
+                read_meta(&transaction, "legacy_transfer_history_v2")
+                    .map_err(|error| error.to_string())?
+                    .unwrap_or_default();
+            if legacy
+                .iter()
+                .any(|original| original.transfer_id == record.transfer_id)
+            {
+                return Err("original legacy transfer ID cannot authorize another effect".into());
+            }
             if history
                 .iter()
                 .any(|current| !matches!(current.state.as_str(), "completed" | "rejected"))
             {
                 return Err("another leader transfer requires reconciliation".into());
             }
-            if history.len() >= MAX_LEADER_TRANSFERS {
+            if history.len().saturating_add(legacy.len()) >= MAX_LEADER_TRANSFERS {
                 return Err(
                     "leader transfer history is full; original IDs cannot be discarded".into(),
                 );
