@@ -208,10 +208,13 @@ def test_actual_import_grant_query_replay_and_reopen_preserve_budget(
     try:
         assert reopened.apply(request) == first
         assert reopened.query(request)["effective"] is False
-        assert store._db.execute(
-            "SELECT active FROM content_references WHERE reference_id=?",
-            (reference_rows[0][0],),
-        ).fetchone() == (0,)
+        assert (
+            store._db.execute(
+                "SELECT active FROM content_references WHERE reference_id=?",
+                (reference_rows[0][0],),
+            ).fetchone()
+            is None
+        )
         assert reopened._db.execute("SELECT * FROM commands").fetchall() == original_commands
         assert reopened._db.execute("SELECT budget_json FROM leases").fetchone() == original_budget
         with pytest.raises(ValueError, match="revoked"):
@@ -233,7 +236,7 @@ def test_continuous_renewal_keeps_four_receipts_and_fences_replayed_generations(
     )
     request = advance(request, 1, lower)
     first = leases.apply(request)
-    for generation in range(2, 11):
+    for generation in range(2, 21):
         now[0] += 1000
         leases.apply(advance(request, generation, now[0]))
     active_generations = store._db.execute(
@@ -241,9 +244,7 @@ def test_continuous_renewal_keeps_four_receipts_and_fences_replayed_generations(
         "AND owner=? ORDER BY generation",
         (request["control"]["lease_id"],),
     ).fetchall()
-    assert active_generations == [
-        (generation, int(generation == 10)) for generation in range(1, 11)
-    ]
+    assert active_generations == [(20, 1)]
     assert leases._db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 4
     assert leases.query(request) == {"receipt": None, "effective": False}
     with pytest.raises(ValueError, match="discontinuous"):
@@ -270,7 +271,7 @@ def test_revoke_is_irreversible_even_when_it_arrives_first(
     assert fence["status"] == "revoked" and fence["receiver_budget"] is None
     assert leases.apply(revoke(request)) == fence
     assert store._db.execute(
-        "SELECT COUNT(*) FROM content_references WHERE kind='use_lease' AND active=1"
+        "SELECT COUNT(*) FROM content_references WHERE kind='use_lease'"
     ).fetchone() == (0,)
     with pytest.raises(ValueError):
         leases.require(invocation)
@@ -325,6 +326,37 @@ def test_committed_use_grant_reconciles_reference_insert_after_sql_failure(
     ).fetchone() == (1,)
 
 
+def test_failed_renewal_keeps_old_projection_until_exact_retry(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """A failed replacement cannot delete the old GC fence before installing its successor."""
+    store, leases, request, _ = prepared
+    leases.apply(request)
+    next_request = advance(request, 2, request["receiver_budget"]["received_lower_ms"] + 1)
+    store._db.execute(
+        "CREATE TRIGGER reject_next_use_reference BEFORE INSERT ON content_references "
+        "WHEN NEW.kind='use_lease' AND NEW.generation=2 "
+        "BEGIN SELECT RAISE(ABORT,'replacement reference fault'); END"
+    )
+    store._db.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="replacement reference fault"):
+        leases.apply(next_request)
+    assert store._db.execute(
+        "SELECT generation,active FROM content_references WHERE kind='use_lease'"
+    ).fetchall() == [(1, 1)]
+    assert leases.content_retention_blockers(
+        json.loads(request["preparation_json"])["inputs"][0]["manifest"]["artifact"][
+            "content_digest"
+        ]
+    ) == ["current_or_unconfirmed_use_lease:" + request["control"]["lease_id"]]
+    store._db.execute("DROP TRIGGER reject_next_use_reference")
+    store._db.commit()
+    assert leases.apply(next_request)["generation"] == 2
+    assert store._db.execute(
+        "SELECT generation,active FROM content_references WHERE kind='use_lease'"
+    ).fetchall() == [(2, 1)]
+
+
 def test_committed_revoke_reconciles_reference_release_after_sql_failure(
     prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
 ) -> None:
@@ -332,8 +364,8 @@ def test_committed_revoke_reconciles_reference_release_after_sql_failure(
     store, leases, request, _ = prepared
     leases.apply(request)
     store._db.execute(
-        "CREATE TRIGGER reject_use_release BEFORE UPDATE ON content_references "
-        "WHEN OLD.kind='use_lease' AND NEW.active=0 "
+        "CREATE TRIGGER reject_use_release BEFORE DELETE ON content_references "
+        "WHEN OLD.kind='use_lease' "
         "BEGIN SELECT RAISE(ABORT,'use reference release fault'); END"
     )
     store._db.commit()
@@ -348,7 +380,7 @@ def test_committed_revoke_reconciles_reference_release_after_sql_failure(
     receipt = leases.apply(revoke(request))
     assert receipt["status"] == "revoked"
     assert store._db.execute(
-        "SELECT COUNT(*) FROM content_references WHERE kind='use_lease' AND active=1"
+        "SELECT COUNT(*) FROM content_references WHERE kind='use_lease'"
     ).fetchone() == (0,)
 
 
@@ -513,6 +545,13 @@ def test_reclamation_requires_actual_original_revoke_and_preserves_history(
         changed_generation.pop("byte_size")
         with pytest.raises(ValueError, match="exact original"):
             references.apply(changed_generation)
+        forged_use_reference = {
+            **reference,
+            "reference_id": "forged-use-" + uuid.uuid4().hex,
+            "kind": "use_lease",
+        }
+        with pytest.raises(ValueError, match="kind"):
+            references.apply(forged_use_reference)
         released = {**reference, "operation": "release"}
         released.pop("byte_size")
         release_receipt = references.apply(released)
@@ -529,7 +568,7 @@ def test_reclamation_requires_actual_original_revoke_and_preserves_history(
         assert observed == release_receipt
         assert references.apply(reference)["state"] == "released"
         assert store._db.execute(
-            "SELECT active FROM content_references WHERE kind='use_lease'"
+            "SELECT COUNT(*) FROM content_references WHERE kind='use_lease'"
         ).fetchone() == (0,)
         tombstone = owner.tombstone(command)
         assert tombstone["state"] == "tombstoned"
@@ -678,9 +717,12 @@ def test_backend_restart_fence_is_not_an_original_revoke_receipt(
     owner = ContentReclamation(store, reopened, jobs, None)
     try:
         assert reopened.query(grant)["effective"] is False
-        assert store._db.execute(
-            "SELECT active FROM content_references WHERE kind='use_lease'"
-        ).fetchone() == (0,)
+        assert (
+            store._db.execute(
+                "SELECT active FROM content_references WHERE kind='use_lease'"
+            ).fetchone()
+            is None
+        )
         assert owner.tombstone(reclamation_request(store, grant))["state"] == "blocked"
     finally:
         jobs.close()

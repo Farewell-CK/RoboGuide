@@ -8,6 +8,7 @@ from .store import DIGEST, MemoryStore
 
 MAX_REFERENCES = 16_384
 KINDS = frozenset({"execution", "lineage", "replica", "snapshot", "archive", "use_lease"})
+EXTERNAL_KINDS = KINDS - {"use_lease"}
 
 
 def _text(value: object, name: str, maximum: int = 256) -> str:
@@ -64,7 +65,7 @@ class ContentReferences:
         if (
             not isinstance(digest, str)
             or DIGEST.fullmatch(digest) is None
-            or kind not in KINDS
+            or kind not in EXTERNAL_KINDS
             or type(generation) is not int
             or not 0 < generation <= 2**63 - 1
         ):
@@ -189,10 +190,12 @@ class ContentReferences:
             raise ValueError("content reference use-lease generation is invalid")
         with self.store._mutex:
             if not active:
+                # The durable lease/command journal is the historical authority. This table is
+                # only its live GC projection, so prune it after a persistent revoke or restart
+                # fence instead of retaining one dead row for every renewal forever.
                 with self.store._db:
                     self.store._db.execute(
-                        "UPDATE content_references SET active=0 "
-                        "WHERE kind='use_lease' AND owner=? AND active=1",
+                        "DELETE FROM content_references WHERE kind='use_lease' AND owner=?",
                         (lease_id,),
                     )
                 return
@@ -213,6 +216,14 @@ class ContentReferences:
             if len({item[0] for item in pending}) != len(pending):
                 raise ValueError("Memory-use repeats an original import reference")
             with self.store._db:
+                # Historical use-lease receipts remain in the lease journal. Remove only older
+                # projection generations in the same transaction that installs this complete
+                # current generation; a failed insert rolls the pruning back and remains safe.
+                self.store._db.execute(
+                    "DELETE FROM content_references "
+                    "WHERE kind='use_lease' AND owner=? AND generation<>?",
+                    (lease_id, generation),
+                )
                 for reference, digest, kind, owner, current_generation in pending:
                     existing = self.store._db.execute(
                         "SELECT content_digest,kind,owner,generation,active "
@@ -235,8 +246,3 @@ class ContentReferences:
                         "VALUES (?,?,?,?,?,1)",
                         (reference, digest, kind, owner, current_generation),
                     )
-                self.store._db.execute(
-                    "UPDATE content_references SET active=0 "
-                    "WHERE kind='use_lease' AND owner=? AND generation<>? AND active=1",
-                    (lease_id, generation),
-                )

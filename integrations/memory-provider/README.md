@@ -49,10 +49,13 @@ reference state, not remote replicas, global archive/catalog retirement, or devi
 [ADR-0142](../../docs/decisions/0142-local-memory-content-reference-authority.md).
 
 The provider's `/v1/memory-use/control` grant/revoke also synchronizes exact `use_lease` references
-to this table under the same writer mutex. A renewal records its new generation and retires the
-previous one; a durable revoke or provider restart retires all rows for that lease. Restart fencing
-is local software evidence only and does not count as the original Controller revoke receipt required
-by ContentReclamation.
+to this table under the same writer mutex. These are a compact current-use projection; the separate
+UseLeases journal retains command history and receipts. A renewal atomically replaces prior
+generations, and durable revoke or provider restart removes that lease's projection rows. Cross-store
+failure leaves an active row or independent lease blocker until replay repairs it. The public
+`/v1/content/references` route rejects `use_lease`; only validated lease commands can create it.
+Restart fencing is local software evidence only and does not count as the original Controller revoke
+receipt required by ContentReclamation. See [ADR-0143](../../docs/decisions/0143-use-lease-reference-projection.md).
 
 `tools/quality/check_memory_reference_processes.py` starts the shipped provider twice around a real
 service restart, imports actual file bytes, and verifies reference persistence/release using the

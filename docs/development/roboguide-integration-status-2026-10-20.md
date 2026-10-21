@@ -9,6 +9,12 @@
 任一活动时均挡 GC。真实 provider restart gate 证明引用持久，零 Node/设备。它补齐本地引用写入
 端，不闭合全局/跨主机 GC、replica/archive/Catalog 对账或 F4/F5。
 
+2026-10-21 [use-lease 引用投影有界化](../decisions/0143-use-lease-reference-projection.md)
+use-lease 行改为 GC 当前状态投影；命令历史继续由原 UseLeases journal 权威保存。换代时事务性
+替换旧代，durable revoke/restart fence 清理该 lease 投影；失败保留旧引用或 lease blocker 并由原
+命令重放对账。公共引用 API 不能声明内部 use_lease 类型。20 代续期回归通过；显式 owner 引用、
+跨主机副本/Archive/Catalog 对账和 F4/F5 总闭环仍待完成。
+
 2026-10-21 [Control tenant quota commitment](../decisions/0140-control-resource-quota-commitment.md)
 接入 recovery-admin `/v1/resource-quotas` revisioned policy/authority journal、正常/Group/recovery
 Commit 与 Task/Context/Group/recovery release，wrapper v47 保存 policy/history/精确 claims；缺少

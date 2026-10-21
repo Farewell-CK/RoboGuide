@@ -19,14 +19,16 @@ reference ID 与正 generation；provider 会在数据库 writer mutex 下重新
 
 `reference_id` 对一个 generation 永不复用。相同 acquire 可幂等重放；release 可幂等重放；
 释放后的旧 acquire 重放只返回 `released`，不能让引用复活。新的生命周期必须使用新的
-reference ID。旧 generation、其他 owner 或修改过的内容身份不能释放原引用。provider 对
-活动引用历史设 16384 行上限，超限拒绝新写入，并在 GC 枚举超过界限时 fail-closed。
+reference ID。旧 generation、其他 owner 或修改过的内容身份不能释放原引用。provider 对保留的
+显式引用行设 16384 行上限，超限拒绝新写入，并在 GC 枚举超过界限时 fail-closed；内部
+use-lease 当前投影遵循 ADR-0143 的压缩生命周期。
 
 Provider 自己已验证的 current-use grant 也会登记 `use_lease` 引用，按精确原 import 与当前
-generation 建行；generation 续期只保留当前一代活动。durable revoke 后释放该 lease 的所有行；
-重复命令会对账该副作用。backend restart 会先 fence 所有本地 lease，再释放 use-lease 引用。
-restart fence 仍不是 Controller 原始 revoke receipt，因此不能单独通过 ContentReclamation 的
-original-revoke 门禁。
+generation 建行。该行是 ContentReclamation 的活动投影，当前的保留和替换规则由
+[ADR-0143](0143-use-lease-reference-projection.md)细化。Durable revoke 后该 lease 的本地活动行
+释放；重复命令会对账该副作用。backend restart 会先 fence 所有本地 lease，再清除 use-lease
+活动投影。restart fence 仍不是 Controller 原始 revoke receipt，因此不能单独通过
+ContentReclamation 的 original-revoke 门禁。
 
 SQLite v3 原有表已包含全部持久字段，因此不改变数据库/恢复 schema。GC 继续独占最终删除权，
 活动引用会阻止 tombstone 和 collect。此协议记录的是本地 provider 声明；same-UID Unix
