@@ -228,3 +228,37 @@ reflog 中额外 10 个提交逐一核对如下；它们不是当前分支头。
 下一实现包仍应接续 F4 的实际引用生产者与完整生命周期，对照现有实现补接线和组合验收，
 而不是重写已完成算法、轮换、MI 修订或恢复入口。完整约束以
 [全部非发布整改计划](roboguide-software-completion-plan-2026-10-15.md)为准；发布不在范围内。
+
+## 2026-10-22 Memory 分支追查补充
+
+为核对“Memory 引用生命周期是否已经在其他分支完成”，以当前
+`main = origin/main = 677d1625d0cb` 重新检查全部 refs 和工作树。结果如下：
+
+| 代码线 | 相关提交 | 当前状态 |
+| --- | --- | --- |
+| 本地引用表与 GC 门禁 | `9710a5c`、`1a0cdb9` | 已在 main |
+| use-lease 引用投影 | `645416a`、`39c00b8` | 已在 main；远端同名分支是 main 的祖先 |
+| FileJobs execution 引用 | `7456e24`、`30781bf` | 已在 main；远端同名分支是 main 的祖先 |
+| Unknown/restart 与引用恢复 | `b555697`、`64603ff`、`eab4fb4`、`fc5d2ba` | 已在 main |
+| Group handoff、原 provider revoke、静止恢复 | `2538029`、`ca406b9`、`5762150` | 已在 main |
+
+当前 `ContentReferences` 声明了 `execution`、`lineage`、`replica`、`snapshot`、`archive` 和
+`use_lease` 六类，但实际生产调用点仍是 `synchronize_execution`（FileJobs）和
+`synchronize_use_lease`（当前使用许可）。外部 `/v1/content/references` 可以登记闭合命令，
+测试覆盖了 `lineage` 例子，但没有发现 Replica、Controller Catalog、Snapshot 或 Archive
+生产者在运行代码中调用该协议。Spatial provider 的 `snapshot` 是输入文件快照；它不是
+provider CAS 的活动引用。Controller 的 event archive、Artifact Catalog 和 Memory provider
+分别保留自己的存储权威，当前没有跨 owner 的引用登记/释放/恢复桥。
+
+其他 refs 的结果也没有改变：所有本地分支已在 main；远端仍有独有提交的分支是实验、旧
+Habitat guard、独立 H-CoRE/Android 产品、评测工具或无共同历史的产品根，独有路径没有
+Memory/Artifact/Replica 的当前生产实现。`origin/sunweihao` 无共同历史且只包含 Robonix
+Client；不能把它当作 V2 Memory 实现合并。原工作树没有 tracked Memory 修改，只有实验和
+会议目录；旧 worker 工作树的修改是已在 main 的测试副本；stash 只有 actor-binding import
+顺序修正。
+
+因此本次不再合并其他分支。下一步应在 main 上实现 N1 的第一条真实生产链：选定一个
+Artifact/Memory owner，持久化原引用 intent、provider/instance/owner/generation 和释放
+回执，把实际 producer、重启/响应丢失对账、GC 拒绝与精确 release 接成一条进程验收链；
+随后以相同协议接入其余 Replica/lineage/Catalog/Snapshot/Archive owner。不能把声明的
+六种 kind 或已有本地测试当成外部引用生命周期已经完成。
