@@ -203,6 +203,8 @@ def test_common_prompt_rules_distinguish_goal_facts_from_task_owners() -> None:
         assert "actively making it hold" in block
         assert "not automatically a separate Task or Actor" in block
         assert "all evidence required by the frozen policy" in block
+        assert "operation_effect_composition_review" in text
+        assert "not a proven conflict or a physical binding" in text
         assert all(name not in block for name in ("Episode", "Habitat", "EMOS", "Spot", "Fetch"))
     assert len(set(blocks)) == 1
 

@@ -250,6 +250,9 @@ MI 在同一不可变 Grounding Context 中保留已知事实和未知缺口；�
 起点不可推测。能力类别不代表当前可用 Node，只有任务与世界证据支持时才声明 Role 的
 typed constraint，最终匹配和资源承诺仍由 Control 决定。见
 [`ADR-0044`](docs/decisions/0044-deployment-planning-evidence.md)。
+Planning Profile v0.2 还可发布 canonical operation 对中性状态域的读取/可能更改声明；
+MI 将同一逻辑 Actor 的重叠状态访问作为 advisory 交给 Reviewer/Repairer，不据此拒绝计划、
+推断官方谓词必然失效或选择物理实体。v0.1 仍按原义兼容读取。
 
 Mission Review 不再隐藏在 Planner 调用内部。Reviewer 对 exact draft 返回结构化 issue，Mission
 Request Engine 保存 revision/digest-bound review evidence；`RepairPlan` 最多自动修复两次，

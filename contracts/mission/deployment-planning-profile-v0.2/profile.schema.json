@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/mission/deployment-planning-profile-v0.2/profile.schema.json",
+  "title": "RoboGuide Deployment Planning Profile v0.2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "authority", "identity", "capability_classes", "state_domains", "operation_effects", "digest"],
+  "properties": {
+    "schema_version": {"const": "roboguide.deployment-planning-profile/v0.2"},
+    "authority": {"const": "deployment-owned"},
+    "identity": {"$ref": "#/$defs/identity"},
+    "capability_classes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/capability_class"}},
+    "state_domains": {"type": "array", "items": {"$ref": "#/$defs/state_domain"}},
+    "operation_effects": {"type": "array", "items": {"$ref": "#/$defs/operation_effects"}},
+    "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["profile_id", "revision", "source"],
+      "properties": {"profile_id": {"$ref": "#/$defs/text"}, "revision": {"$ref": "#/$defs/text"}, "source": {"$ref": "#/$defs/text"}}
+    },
+    "operation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["namespace", "name", "version"],
+      "properties": {"namespace": {"$ref": "#/$defs/text"}, "name": {"$ref": "#/$defs/text"}, "version": {"$ref": "#/$defs/text"}}
+    },
+    "capability_fact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract", "attributes"],
+      "properties": {
+        "contract": {"$ref": "#/$defs/operation"},
+        "attributes": {"type": "object", "additionalProperties": {"type": ["string", "integer", "number", "boolean"]}}
+      }
+    },
+    "capability_class": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "description", "capabilities"],
+      "properties": {
+        "id": {"$ref": "#/$defs/text"}, "description": {"$ref": "#/$defs/text"},
+        "capabilities": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/capability_fact"}}
+      }
+    },
+    "state_domain": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "description"],
+      "properties": {"id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,127}$"}, "description": {"$ref": "#/$defs/text"}}
+    },
+    "state_effect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["domain", "access", "subject_scope", "subject_parameter", "result_parameter"],
+      "properties": {
+        "domain": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,127}$"},
+        "access": {"enum": ["read", "may_change"]},
+        "subject_scope": {"enum": ["actor", "world"]},
+        "subject_parameter": {"type": ["string", "null"], "minLength": 1},
+        "result_parameter": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "operation_effects": {
+      "type": "object", "additionalProperties": false,
+      "required": ["operation", "coverage", "effects"],
+      "properties": {
+        "operation": {"$ref": "#/$defs/operation"},
+        "coverage": {"enum": ["complete", "partial"]},
+        "effects": {"type": "array", "items": {"$ref": "#/$defs/state_effect"}}
+      }
+    }
+  }
+}

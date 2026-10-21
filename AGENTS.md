@@ -637,6 +637,11 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   shared-world reset, planning-world evidence v0.2 may add an exact official geometric
   single-location witness for a joint terminal goal. It is a snapshot planning option, not a
   route, physical assignment, task completion, or benchmark outcome. See ADR-0044.
+- Deployment Planning Profile v0.2 may additionally declare canonical-operation reads and possible
+  changes to documented neutral state domains. Mission emits an exact-plan/profile-digest-bound
+  advisory composition review to Reviewer and Repairer; possible overlap is not a proven goal
+  conflict, admission rule, physical binding, or official verifier result. Legacy v0.1 remains
+  readable without inferred effects. These declarations never select Nodes or Physical Entities.
 - `apps/mission-service/` is the Python Mission Request composition root. It owns text instruction
   ingress and durable deliberation state, then submits accepted complete plans to the existing
   Controller API; its Interpreter does not consume live Node/Resource inventory, and current

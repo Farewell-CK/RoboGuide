@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from mission.intent import GroundedIntent
 from mission.models import JSONObject
+from mission.operation_effect_review import operation_effect_composition_review
 from mission.planning_profile import (
     DeploymentPlanningProfile,
     PlanningProfileError,
@@ -44,11 +46,27 @@ def test_checked_in_profile_is_versioned_typed_and_catalog_bound() -> None:
     profile = DeploymentPlanningProfile.load(_PROFILE)
     profile.validate_catalog(_current_catalog())
     payload = profile.to_json()
-    assert payload["schema_version"] == "roboguide.deployment-planning-profile/v0.1"
+    Draft202012Validator.check_schema(
+        json.loads(
+            Path(
+                "contracts/mission/deployment-planning-profile-v0.2/profile.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+    )
+    Draft202012Validator(
+        json.loads(
+            Path(
+                "contracts/mission/deployment-planning-profile-v0.2/profile.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+    ).validate(payload)
+    assert payload["schema_version"] == "roboguide.deployment-planning-profile/v0.2"
     assert payload["authority"] == "deployment-owned"
     assert "node_id" not in json.dumps(payload)
     assert "resource_id" not in json.dumps(payload)
     assert "physical_entity" not in json.dumps(payload)
+    assert payload["operation_effects"]
+    assert payload["state_domains"]
     assert {item.class_id for item in profile.capability_classes} == {
         "legged-floor-capable",
         "wheeled-single-floor",
@@ -80,6 +98,56 @@ def test_profile_digest_and_catalog_validation_fail_closed(tmp_path: Path) -> No
     with pytest.raises(PlanningProfileError, match="unknown capability"):
         profile = DeploymentPlanningProfile.load(path)
         profile.validate_catalog(_current_catalog())
+
+
+def test_operation_effect_profile_is_bound_to_catalog_operation_parameters() -> None:
+    """Operation effects name only published operations and their exact parameters."""
+    raw = json.loads(_PROFILE.read_text(encoding="utf-8"))
+    invalid_parameter = deepcopy(raw)
+    invalid_parameter["operation_effects"][0]["effects"][0]["result_parameter"] = "room"
+    invalid_parameter["digest"] = _digest_without_digest(invalid_parameter)
+    with pytest.raises(PlanningProfileError, match="unknown parameter"):
+        DeploymentPlanningProfile.from_json(invalid_parameter).validate_catalog(_current_catalog())
+
+    invalid_operation = deepcopy(raw)
+    invalid_operation["operation_effects"][0]["operation"]["name"] = "not-published"
+    invalid_operation["digest"] = _digest_without_digest(invalid_operation)
+    with pytest.raises(PlanningProfileError, match="unknown operation"):
+        DeploymentPlanningProfile.from_json(invalid_operation).validate_catalog(_current_catalog())
+
+    unknown_domain = deepcopy(raw)
+    unknown_domain["operation_effects"][0]["effects"][0]["domain"] = "undeclared.domain"
+    unknown_domain["digest"] = _digest_without_digest(unknown_domain)
+    with pytest.raises(PlanningProfileError, match="undocumented state domain"):
+        DeploymentPlanningProfile.from_json(unknown_domain).validate_catalog(_current_catalog())
+
+    invalid_scope = deepcopy(raw)
+    invalid_scope["operation_effects"][0]["effects"][0]["subject_scope"] = "physical-entity"
+    invalid_scope["digest"] = _digest_without_digest(invalid_scope)
+    with pytest.raises(PlanningProfileError, match="subject_scope must be actor or world"):
+        DeploymentPlanningProfile.from_json(invalid_scope)
+
+    missing_world_subject = deepcopy(raw)
+    world_effect = missing_world_subject["operation_effects"][0]["effects"][0]
+    world_effect["subject_scope"] = "world"
+    world_effect["subject_parameter"] = None
+    missing_world_subject["digest"] = _digest_without_digest(missing_world_subject)
+    with pytest.raises(PlanningProfileError, match="world scope requires a subject_parameter"):
+        DeploymentPlanningProfile.from_json(missing_world_subject)
+
+
+def test_v0_1_profile_remains_readable_without_invented_effect_declarations() -> None:
+    """Legacy profile bytes retain their old meaning and do not acquire inferred effects."""
+    raw = json.loads(_PROFILE.read_text(encoding="utf-8"))
+    legacy = deepcopy(raw)
+    legacy["schema_version"] = "roboguide.deployment-planning-profile/v0.1"
+    legacy.pop("operation_effects")
+    legacy.pop("state_domains")
+    legacy["digest"] = _digest_without_digest(legacy)
+    profile = DeploymentPlanningProfile.from_json(legacy)
+    assert profile.schema_version == "roboguide.deployment-planning-profile/v0.1"
+    assert profile.operation_effects == ()
+    assert profile.to_json() == legacy
 
 
 def test_planner_reviewer_and_repairer_share_frozen_profile_input() -> None:
@@ -172,6 +240,11 @@ def test_planner_reviewer_and_repairer_share_frozen_profile_input() -> None:
                 "unknown_world_facts_must_not_be_guessed": True,
             },
         }
+    reviewer_input = json.loads(cast(str, transport.requests[1][2]["input"]))
+    repairer_input = json.loads(cast(str, transport.requests[2][2]["input"]))
+    expected_effect_review = operation_effect_composition_review(plan, profile)
+    assert reviewer_input["operation_effect_composition_review"] == expected_effect_review
+    assert repairer_input["operation_effect_composition_review"] == expected_effect_review
 
 
 def _digest_without_digest(value: JSONObject) -> str:

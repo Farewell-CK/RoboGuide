@@ -1,9 +1,9 @@
 {
-  "schema_version": "roboguide.deployment-planning-profile/v0.1",
+  "schema_version": "roboguide.deployment-planning-profile/v0.2",
   "authority": "deployment-owned",
   "identity": {
     "profile_id": "e1-shared-world-perception",
-    "revision": "v4",
+    "revision": "v6",
     "source": "deployment://e1-shared-world-perception"
   },
   "capability_classes": [
@@ -134,5 +134,92 @@
       ]
     }
   ],
-  "digest": "sha256:c446988561ba2b4d75da9c67ee7e73f64d62fbcfa450433614e4333eef43afbf"
+  "operation_effects": [
+    {
+      "operation": {
+        "namespace": "mobility",
+        "name": "move",
+        "version": "v1"
+      },
+      "coverage": "partial",
+      "effects": [
+        {
+          "domain": "participant.position",
+          "subject_scope": "actor",
+          "subject_parameter": null,
+          "result_parameter": "destination",
+          "access": "may_change"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "mobility",
+        "name": "navigate",
+        "version": "v1"
+      },
+      "coverage": "partial",
+      "effects": [
+        {
+          "domain": "participant.position",
+          "subject_scope": "actor",
+          "subject_parameter": null,
+          "result_parameter": "destination",
+          "access": "may_change"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "observation",
+        "name": "acquire",
+        "version": "v1"
+      },
+      "coverage": "partial",
+      "effects": [
+        {
+          "domain": "observation.condition",
+          "subject_scope": "world",
+          "access": "may_change",
+          "subject_parameter": "expected",
+          "result_parameter": null
+        },
+        {
+          "domain": "participant.position",
+          "subject_scope": "actor",
+          "subject_parameter": null,
+          "result_parameter": null,
+          "access": "may_change"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "observation",
+        "name": "verify",
+        "version": "v1"
+      },
+      "coverage": "complete",
+      "effects": [
+        {
+          "domain": "observation.condition",
+          "subject_scope": "world",
+          "access": "read",
+          "subject_parameter": "expected",
+          "result_parameter": null
+        }
+      ]
+    }
+  ],
+  "digest": "sha256:ccb96eb78b5d27c8564eb8efe21f084f7726c35769c446c74a6a33579e8d567c",
+  "state_domains": [
+    {
+      "id": "observation.condition",
+      "description": "Current truth or observation status of the exact declared semantic condition; it does not guarantee future truth."
+    },
+    {
+      "id": "participant.position",
+      "description": "Current position of the logical participant executing a canonical operation; it does not identify or select a physical entity."
+    }
+  ]
 }

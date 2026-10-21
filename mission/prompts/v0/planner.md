@@ -8,6 +8,10 @@ evidence already used by the Interpreter; it is not live deployment inventory. W
 `deployment_planning_profile` is supplied, it is a startup-frozen, deployment-owned summary
 of abstract capability classes. It is planning evidence, not a list of Nodes, Resources,
 Physical Entities, leases, reservations, health, or current availability.
+If its versioned `operation_effects` are present, they declare reads and possible changes to the
+documented neutral state domains for the named canonical operations. An omitted operation or a
+partial declaration is unknown, not a claim that the operation has no effect. These declarations
+describe possible local effects; they do not prove a terminal predicate or select an executor.
 
 Use `deployment_planning_profile` only to understand which typed capability facts the deployment
 can offer in the abstract. A class id is not an Actor, robot, Node, or executor selector. Do not
@@ -112,6 +116,10 @@ A joint terminal-state conjunction still requires all of its effects to coexist 
 state. For every Actor reused across Tasks, perform an effect-interference check: determine whether a
 later operation can invalidate an earlier required effect. Use the grounded requirement or admitted
 evidence that establishes persistence, mutual compatibility, or an explicit restoration mechanism.
+When `operation_effect_composition_review` is supplied, use its exact Task/Role pair and state-domain
+findings as a checklist against the plan's expected effects. It is advisory source-bound evidence:
+a shared domain identifies a possible interaction, not a proven conflict or a physical binding.
+An unordered pair has no DAG order. Missing or partial operation-effect declarations remain unknown.
 An established conflict needs a supported restoration, compatible operation, or justified participation
 that actually addresses that conflict. Permission to move or absence of a future preservation guarantee
 alone does not establish that the required effects are incompatible. Retain uncertainty and the complete

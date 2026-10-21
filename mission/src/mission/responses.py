@@ -31,6 +31,7 @@ from mission.execution_profile import DeploymentExecutionProfile
 from mission.grounding_context import GroundingContextSnapshot, admitted_physical_entity_ids
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
+from mission.operation_effect_review import operation_effect_composition_review
 from mission.plan_validation import PlanValidationError, reference_issues
 from mission.planning_profile import DeploymentPlanningProfile
 from mission.planning_world_evidence import planning_world_review_payload
@@ -299,6 +300,22 @@ def _with_planning_world_evidence(
     if evidence is None:
         return payload
     return {**payload, "authoritative_planning_world_evidence": evidence}
+
+
+def _with_operation_effect_review(
+    payload: JSONObject,
+    plan: MissionPlan,
+    planning_profile: DeploymentPlanningProfile | None,
+) -> JSONObject:
+    """Attach an advisory effect comparison bound to this exact plan and profile."""
+    if planning_profile is None:
+        return payload
+    return {
+        **payload,
+        "operation_effect_composition_review": operation_effect_composition_review(
+            plan, planning_profile
+        ),
+    }
 
 
 class _ResponsesClient:
@@ -637,41 +654,39 @@ class ResponsesMissionReviewer:
                     f"execution planning evidence is invalid: {error}",
                     configuration_failure=True,
                 ) from error
+        review_payload = _with_semantic_goal(
+            {
+                "grounded_intent": grounded_intent.to_json(),
+                "mission_plan": plan.to_json(),
+                "satisfaction_policy": self._client._satisfaction_policy_input(),
+                "capability_catalog": capability_catalog.to_json(),
+                "grounding_context": grounding_context.to_json(),
+                **(
+                    {"deployment_execution_profile": self._execution_profile.to_json()}
+                    if self._execution_profile is not None
+                    else {}
+                ),
+                **(
+                    {"deployment_planning_profile": self._planning_profile.to_json()}
+                    if self._planning_profile is not None
+                    else {}
+                ),
+                **(
+                    {"execution_planning_evidence": (self._execution_planning_evidence.to_json())}
+                    if self._execution_planning_evidence is not None
+                    else {}
+                ),
+            },
+            grounding_context,
+            self._settings.satisfaction_policy,
+        )
+        review_payload = _with_operation_effect_review(review_payload, plan, self._planning_profile)
         response = self._client._request(
             model=self._settings.llm.review_model,
             instructions=self._client._load_prompt(self._settings.prompts.reviewer_path),
             input_text=json.dumps(
                 _with_planning_world_evidence(
-                    _with_semantic_goal(
-                        {
-                            "grounded_intent": grounded_intent.to_json(),
-                            "mission_plan": plan.to_json(),
-                            "satisfaction_policy": self._client._satisfaction_policy_input(),
-                            "capability_catalog": capability_catalog.to_json(),
-                            "grounding_context": grounding_context.to_json(),
-                            **(
-                                {"deployment_execution_profile": self._execution_profile.to_json()}
-                                if self._execution_profile is not None
-                                else {}
-                            ),
-                            **(
-                                {"deployment_planning_profile": self._planning_profile.to_json()}
-                                if self._planning_profile is not None
-                                else {}
-                            ),
-                            **(
-                                {
-                                    "execution_planning_evidence": (
-                                        self._execution_planning_evidence.to_json()
-                                    )
-                                }
-                                if self._execution_planning_evidence is not None
-                                else {}
-                            ),
-                        },
-                        grounding_context,
-                        self._settings.satisfaction_policy,
-                    ),
+                    review_payload,
                     grounding_context,
                 ),
                 ensure_ascii=False,
@@ -789,6 +804,10 @@ class ResponsesMissionRepairer:
                 else {}
             ),
         }
+        if self._planning_profile is not None:
+            payload["operation_effect_composition_review"] = operation_effect_composition_review(
+                reviewed_plan, self._planning_profile
+            )
         remaining_seconds = (session.expires_at_ms - int(time.time() * 1000)) / 1000
         if remaining_seconds <= 0:
             raise TimeoutError("deployment recovery deadline expired before Provider call")
@@ -943,16 +962,20 @@ class ResponsesMissionRepairer:
         }
         if feedback is not None:
             payload["repair_prevalidation_recovery_feedback"] = feedback
+        repair_payload = _with_semantic_goal(
+            payload,
+            grounding_context,
+            self._settings.satisfaction_policy,
+        )
+        repair_payload = _with_operation_effect_review(
+            repair_payload, rejected_plan, self._planning_profile
+        )
         response = self._client._request(
             model=self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.repairer_path),
             input_text=json.dumps(
                 _with_planning_world_evidence(
-                    _with_semantic_goal(
-                        payload,
-                        grounding_context,
-                        self._settings.satisfaction_policy,
-                    ),
+                    repair_payload,
                     grounding_context,
                 ),
                 ensure_ascii=False,
