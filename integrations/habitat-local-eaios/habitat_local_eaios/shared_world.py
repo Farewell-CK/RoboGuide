@@ -2938,6 +2938,8 @@ class SharedWorldCoordinator:
         if summary.get("execution_profile") == "independent-live/v0.1":
             summary_document["execution_profile"] = summary["execution_profile"]
             summary_document["termination_reason"] = summary.get("termination_reason", "unknown")
+            if "session_progress" in summary:
+                summary_document["session_progress"] = summary["session_progress"]
         if "navigation_preparation_failure" in summary:
             summary_document["navigation_preparation_failure"] = summary[
                 "navigation_preparation_failure"

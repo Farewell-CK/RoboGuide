@@ -1076,6 +1076,11 @@ source-bound world evidence, not inventory or a route guarantee. Feasibility v0.
 final-verifier resource lifetimes without selecting endpoints; closure observations record
 actual publication and preserve archival failures separately from SUT outcomes. See
 `docs/extensions/bounded-observation-and-evidence-closure.md`. Physical release gates remain explicit.
+Live failure continuation is unsupported: an actual local failure closes the session after active
+dispatches finish or receive an existing explicit cancellation. Missing successors remain undispatched;
+no Task success, Control release, Cancel receipt or physical result is synthesized. Session progress
+v0.1 and separate unreported dispatch records retain parent/child delivery boundaries; only actual
+child terminal coverage enters normal final verifier publication. Official truth remains unchanged.
 
 The v0.13 acquisition tool `scan_for_object` is backed by an independently scoped local HRL
 skill and verified original base-yaw interfaces. Only a real guarded model selection invokes it;

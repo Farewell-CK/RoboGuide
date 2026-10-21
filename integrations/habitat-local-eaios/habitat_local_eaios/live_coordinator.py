@@ -115,6 +115,7 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
                 "group_id": self._ledger.session.group_id
                 if self._ledger.session is not None
                 else None,
+                "session_progress": self._ledger.progress(),
                 "summary_published": self._summary_published,
                 "verifier_published": self._verifier_published,
                 "verifier_required": self._verifier_required,
@@ -136,6 +137,7 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
             if (
                 self._finished
                 or self._closing.is_set()
+                or self._ledger.failure_drained()
                 or not self.runtime_ready()
                 or invocation.operation not in self.operations_for(endpoint.agent_id)
             ):
@@ -167,7 +169,7 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
         if execution is None:
             raise IntegrationError("live dispatch has no durable accepted execution")
         with self._condition:
-            if self._finished or self._closing.is_set():
+            if self._finished or self._closing.is_set() or self._ledger.failure_drained():
                 endpoint.store().mark_failed(execution_id, "shared world has ended")
                 return
             try:
@@ -221,7 +223,7 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
                 raise IntegrationError("live outcome is not bound to the current endpoint attempt")
             if self._ledger.active.get(agent) != invocation:
                 raise IntegrationError("live outcome is duplicated or stale")
-            self._ledger.finish(agent)
+            self._ledger.finish(agent, failed=outcome.state == "FAILED")
             self._history.append(
                 {
                     "invocation": invocation.as_dict(),
@@ -247,6 +249,8 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
                     if self._ledger.session is not None
                     else None,
                     "task_outcomes": self._history,
+                    "session_progress": self._ledger.progress(),
+                    "unreported_dispatches": self._unreported_dispatches(),
                 },
             )
             self._state_archived = True
@@ -254,6 +258,25 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
             self._state_archived = False
             self._closure_error = "live-session-state-archival"
             _LOG.exception("live local evidence archival unavailable")
+
+    def _unreported_dispatches(self) -> list[dict[str, Any]]:
+        """Retain adapter failures separately when no child terminal outcome was observed."""
+        reported = {row["local_execution_id"] for row in self._history}
+        rows = []
+        for agent, (endpoint, handle) in self._entries.items():
+            if agent in self._ledger.active or handle in reported:
+                continue
+            current = endpoint.store().get(handle)
+            rows.append(
+                {
+                    "node": endpoint.name,
+                    "local_execution_id": handle,
+                    "execution": endpoint._execution_response(current)
+                    if current is not None
+                    else None,
+                }
+            )
+        return rows
 
     def process_exit_observation(self) -> dict[str, object] | None:
         """Read an already-reaped original process witness, never infer it from terminal rows."""
@@ -331,7 +354,11 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
             with self._condition:
                 self._finished = True
                 self._closure_phase = "finalizing"
-                invocations = [value for _, value in self._ledger.seen.values()]
+                invocations = [
+                    value
+                    for slot, (_, value) in self._ledger.seen.items()
+                    if slot in self._ledger.completed
+                ]
             # Reuse the same official summary/verifier projection, not a new success rule.
             self._publish_terminal(outcomes, summary, invocations)
             self._write_state("ended")
@@ -373,6 +400,10 @@ class LiveWorldCoordinator(SharedWorldCoordinator):
                         endpoint.store().mark_failed(
                             handle, "shared world ended before this dispatch activated"
                         )
+                        current = endpoint.store().get(handle)
+                    if current is not None:
+                        self._ledger.finish(agent, failed=current["state"] == "FAILED")
+                self._write_state("failed" if self._execution_error else "ended")
                 self._closure_phase = "closed"
             self._close_process_evidence()
             self._archive_closure()
