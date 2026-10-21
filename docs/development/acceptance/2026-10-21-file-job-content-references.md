@@ -9,6 +9,8 @@ digest 检查执行引用；同 provider 上无关 CAS 不因别的任务占用�
   挡住 tombstone，直到子进程退出。
 - 重启恢复根据原 invocation 重建 `RUNNING/UNKNOWN` 输入引用；重复命令返回原 Unknown，不重新
   执行。进程 exit 缺失时引用保留；原 wait proof 已保存时允许清理 stale projection。
+- ProcessFileJobs 已写入 intent、但尚未提交 PID 的重启路径也从原进程 journal 恢复为 Unknown，
+  不启动替代 child，并按 exact imported digest 返回原 execution GC blocker。
 - external export 路径不属于 provider CAS，不会登记为这里的 execution 引用；并不由该
   ContentReclamation 路由删除。
 - Public `/v1/content/references` 拒绝保留的 `file-job:` owner，不能伪造或提前释放 job 引用。

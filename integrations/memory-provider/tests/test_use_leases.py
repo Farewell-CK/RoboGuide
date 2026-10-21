@@ -840,6 +840,52 @@ def test_restart_rebuilds_unknown_job_reference_without_reexecuting(
             original_jobs.close()
 
 
+def test_process_job_restart_rebuilds_unknown_cas_reference_without_pid_replay(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """Restore a durable pre-spawn process intent as UNKNOWN and keep its imported bytes fenced."""
+    store, leases, grant, invocation = prepared
+    leases.apply(grant)
+    invocation["execution_generation"] = 1
+    original_jobs = ProcessFileJobs(store, leases)
+    execution = invocation["execution_id"]
+    jobs_closed = False
+    try:
+        admission = original_jobs._admit(invocation)
+        assert admission is not None
+        assert original_jobs._db.execute(
+            "SELECT pid,exit_json FROM original_processes WHERE execution_id=?", (execution,)
+        ).fetchone() == (None, None)
+        original_jobs._active.clear()  # Simulate loss before original Popen/PID commit.
+        original_jobs.close()
+        jobs_closed = True
+        leases.close()
+
+        reopened_leases = UseLeases(store)
+        reopened_jobs = ProcessFileJobs(store, reopened_leases)
+        try:
+            assert reopened_jobs.status(execution)["state"] == "UNKNOWN"
+            assert reopened_jobs.compute(invocation)["state"] == "UNKNOWN"
+            assert reopened_jobs._processes == {}
+            assert reopened_jobs._db.execute(
+                "SELECT pid,exit_json FROM original_processes WHERE execution_id=?", (execution,)
+            ).fetchone() == (None, None)
+            prepared_manifest = json.loads(grant["preparation_json"])["inputs"][0]["manifest"]
+            owner = ContentReferences.execution_owner(execution)
+            selector_digest = hashlib.sha256(canonical(prepared_manifest["selector"])).hexdigest()
+            expected_reference = f"file-job:{owner[9:]}:1:{selector_digest}"
+            assert reopened_jobs.reclamation_blockers(
+                prepared_manifest["artifact"]["content_digest"]
+            ) == [f"execution:{owner}:{expected_reference}"]
+        finally:
+            reopened_jobs.close()
+            reopened_leases.close()
+    finally:
+        if not jobs_closed:
+            original_jobs._active.clear()
+            original_jobs.close()
+
+
 def test_reference_acquire_races_with_tombstone_without_leaving_unfenced_bytes(
     prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
 ) -> None:
