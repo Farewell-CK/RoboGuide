@@ -108,6 +108,48 @@ def test_actual_running_child_has_no_proof_until_cancel_and_reap(tmp_path: Path)
         store.close()
 
 
+def test_actual_child_receives_explicit_os_quota_before_read_permission(
+    tmp_path: Path,
+) -> None:
+    """The admitted worker carries real POSIX CPU/address-space limits before hashing bytes."""
+    store, original, _ = declared_file(tmp_path)
+    invocation = attempt(original)
+    invocation["parameters"]["rounds"] = 16_777_216
+    jobs = ProcessFileJobs(store, max_job_seconds=30, max_job_rounds=16_777_216)
+    try:
+        jobs.submit(invocation)
+        until(lambda: invocation["execution_id"] in jobs._processes)
+        process = jobs._processes[invocation["execution_id"]]
+        until(
+            lambda: (
+                "30"
+                in next(
+                    line
+                    for line in Path(f"/proc/{process.pid}/limits").read_text().splitlines()
+                    if line.startswith("Max cpu time")
+                )
+            )
+        )
+        limits = Path(f"/proc/{process.pid}/limits").read_text()
+        assert "Max cpu time" in limits and "30" in next(
+            line for line in limits.splitlines() if line.startswith("Max cpu time")
+        )
+        address_line = next(
+            line for line in limits.splitlines() if line.startswith("Max address space")
+        )
+        assert "268435456" in address_line
+        jobs.cancel(invocation["execution_id"])
+        until(lambda: jobs.status(invocation["execution_id"])["state"] == "CANCELLED")
+        assert jobs.health()["os_quota"] == {
+            "enforcement": "posix-setrlimit",
+            "cpu_seconds": 30,
+            "address_space_bytes": 256 * 1024 * 1024,
+        }
+    finally:
+        jobs.close()
+        store.close()
+
+
 def test_natural_child_failure_reports_real_exit_without_cancel_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

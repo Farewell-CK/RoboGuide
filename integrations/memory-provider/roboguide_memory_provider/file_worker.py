@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import resource
 import stat
 import sys
 from contextlib import ExitStack
@@ -21,6 +22,23 @@ def emit(document: dict[str, Any]) -> None:
         raise ValueError("file worker response exceeds its bound")
     sys.stdout.buffer.write(encoded)
     sys.stdout.buffer.flush()
+
+
+def apply_os_limits() -> None:
+    """Apply the parent-declared CPU and address-space limits before reading any input."""
+    try:
+        cpu_seconds = int(os.environ["ROBOGUIDE_FILE_WORKER_CPU_SECONDS"])
+        address_space = int(os.environ["ROBOGUIDE_FILE_WORKER_AS_BYTES"])
+    except KeyError:
+        # Direct protocol fixtures predate the quota envelope; the configured ProcessFileJobs
+        # parent always supplies both values before admitting a production child.
+        return
+    except ValueError as error:
+        raise ValueError("original file worker OS quota declaration is unavailable") from error
+    if not 1 <= cpu_seconds <= 300 or not 64 * 1024 * 1024 <= address_space <= 8 * 1024**3:
+        raise ValueError("original file worker OS quota is outside its bound")
+    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+    resource.setrlimit(resource.RLIMIT_AS, (address_space, address_space))
 
 
 def permit() -> None:
@@ -64,6 +82,7 @@ def permit() -> None:
 
 def run() -> None:
     """Perform real CPU hashing after the parent has durably recorded the original PID."""
+    apply_os_limits()
     raw = sys.stdin.buffer.readline(16385)
     if len(raw) > 16384 or not raw.endswith(b"\n"):
         raise ValueError("file worker requires a bounded original start command")

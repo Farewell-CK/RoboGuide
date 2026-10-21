@@ -11,6 +11,10 @@ Replica snapshot；旧 source snapshot 不得覆盖已完成 target hold。仍�
 [ADR-0132](../../decisions/0132-active-map-gc-reference-gate.md)以实际 Provider/Active Map
 引用取代 caller all-clear boolean，`ContentReclamation.collect` 保留最终 unlink authority。
 
+[ADR-0133](../../decisions/0133-local-process-os-quota-envelope.md)把 Local EAIOS 文件 worker
+的 CPU/address-space envelope 实际应用到子进程 `setrlimit`，并保留原 permit/wait/Unknown
+语义；它不代表 GPU、硬实时或设备安全。
+
 [ADR-0129](../../decisions/0129-executable-deployment-profile.md)以闭合部署输入和只读
 inspector 固定拓扑、原文件、store owner、信任连接与故障/退出证据；允许零 Node。
 [实际零 Node 验收](../../development/acceptance/2026-10-21-deployment-profile.md)不产生

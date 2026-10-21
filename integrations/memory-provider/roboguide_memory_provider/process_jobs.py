@@ -18,6 +18,7 @@ from .store import MemoryStore, canonical, content_digest
 from .use_leases import UseLeases, kernel_clock
 
 SCHEMA = "roboguide.file-process-jobs/v0.1"
+DEFAULT_ADDRESS_SPACE_BYTES = 256 * 1024 * 1024
 
 
 class ProcessFileJobs(FileJobs):
@@ -31,9 +32,17 @@ class ProcessFileJobs(FileJobs):
         leases: UseLeases | None = None,
         max_job_seconds: int = 5,
         max_job_rounds: int = 256,
+        max_address_space_bytes: int = DEFAULT_ADDRESS_SPACE_BYTES,
     ) -> None:
         """Fence old writers and retain missing historical process evidence as unavailable."""
+        if (
+            type(max_address_space_bytes) is not int
+            or not 64 * 1024 * 1024 <= max_address_space_bytes <= 8 * 1024**3
+        ):
+            raise ValueError("OS address-space quota is outside its deployment bound")
         self._processes: dict[str, subprocess.Popen[bytes]] = {}
+        self._worker_cpu_seconds = max_job_seconds
+        self._worker_address_space_bytes = max_address_space_bytes
         self._admitting_clock: tuple[str, str, int, int] | None = None
         self._proof_cursor = 0
         super().__init__(store, leases, max_job_seconds, max_job_rounds)
@@ -105,6 +114,11 @@ class ProcessFileJobs(FileJobs):
             result["assurance"] = "software-process"
             if unresolved >= 4:
                 result["readiness"] = "UNAVAILABLE"
+            result["os_quota"] = {
+                "enforcement": "posix-setrlimit",
+                "cpu_seconds": self._worker_cpu_seconds,
+                "address_space_bytes": self._worker_address_space_bytes,
+            }
             return result
 
     def reclamation_blockers(self) -> list[str]:
@@ -224,7 +238,12 @@ class ProcessFileJobs(FileJobs):
             stderr=subprocess.DEVNULL,
             pass_fds=tuple(stream.fileno() for stream in opened),
             close_fds=True,
-            env={"PATH": os.defpath, "LANG": "C.UTF-8"},
+            env={
+                "PATH": os.defpath,
+                "LANG": "C.UTF-8",
+                "ROBOGUIDE_FILE_WORKER_CPU_SECONDS": str(self._worker_cpu_seconds),
+                "ROBOGUIDE_FILE_WORKER_AS_BYTES": str(self._worker_address_space_bytes),
+            },
         )
         self._processes[execution] = process
         assert process.stdin is not None and process.stdout is not None
