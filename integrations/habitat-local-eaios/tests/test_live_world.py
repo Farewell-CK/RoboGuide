@@ -769,6 +769,7 @@ def test_loaded_perception_initialization_archives_actual_readiness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int, acquisition: bool
 ) -> None:
     """Exercise real post-reset readiness writers with registered sensors and no model or step."""
+    from habitat_local_eaios.observation_optics import build_optics_declaration
     from habitat_local_eaios.shared_world import SharedEmosStage2Runtime
 
     run = tmp_path / "run"
@@ -782,6 +783,13 @@ def test_loaded_perception_initialization_archives_actual_readiness(
     registry = build_endpoint_registry(tuple(sources), run)
     registry_path = run / "endpoint-registry.json"
     registry_path.write_text(json.dumps(registry))
+    (run / "observation-optics-declaration.json").write_text(
+        json.dumps(build_optics_declaration(tuple(sources)))
+    )
+    monkeypatch.setattr(
+        "habitat_local_eaios.live_world.check_loaded_optics",
+        lambda environment, agent, declared: {"status": "observed", "attributes": declared},
+    )
     actor, gym = Actor(count), Gym({})
     runtime = Runtime(run, count, gym, actor)
     runtime._config.endpoint_registry_path = registry_path
@@ -822,7 +830,7 @@ def test_loaded_perception_initialization_archives_actual_readiness(
     assert runtime.test_diagnostics.terminals == []
     how = json.loads((run / "local-how-profile.json").read_bytes())
     assert how["schema_version"] == (
-        "roboguide.habitat-local-how-profile/v0.15"
+        "roboguide.habitat-local-how-profile/v0.16"
         if acquisition
         else "roboguide.habitat-local-how-profile/v0.10"
     )

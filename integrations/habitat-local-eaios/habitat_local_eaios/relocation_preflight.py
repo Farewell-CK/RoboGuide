@@ -117,21 +117,27 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             execution_options["enable_observation_acquisition"]
             or execution_options["contract_recovery_attempts"] > 0
         )
-        viewpoint_recovery = actual_schema == "roboguide.habitat-local-how-profile/v0.15"
+        optics_recovery = actual_schema == "roboguide.habitat-local-how-profile/v0.16"
+        viewpoint_recovery = (
+            optics_recovery or actual_schema == "roboguide.habitat-local-how-profile/v0.15"
+        )
         motion_feedback = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.14",
             "roboguide.habitat-local-how-profile/v0.15",
+            "roboguide.habitat-local-how-profile/v0.16",
         }
         view_search = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.13",
             "roboguide.habitat-local-how-profile/v0.14",
             "roboguide.habitat-local-how-profile/v0.15",
+            "roboguide.habitat-local-how-profile/v0.16",
         }
         navigation_dispatch = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.12",
             "roboguide.habitat-local-how-profile/v0.13",
             "roboguide.habitat-local-how-profile/v0.14",
             "roboguide.habitat-local-how-profile/v0.15",
+            "roboguide.habitat-local-how-profile/v0.16",
         }
         observation_control = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.11",
@@ -139,13 +145,14 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.13",
             "roboguide.habitat-local-how-profile/v0.14",
             "roboguide.habitat-local-how-profile/v0.15",
+            "roboguide.habitat-local-how-profile/v0.16",
         }
         if viewpoint_recovery:
             from .view_recovery import view_recovery_declaration
 
             if json.dumps(
                 actual.get("observation_viewpoint_recovery"), sort_keys=True
-            ) != json.dumps(view_recovery_declaration(), sort_keys=True):
+            ) != json.dumps(view_recovery_declaration(optics=optics_recovery), sort_keys=True):
                 raise IntegrationError("actual observation viewpoint recovery contract is invalid")
         if motion_feedback:
             from .view_motion import motion_feedback_declaration
@@ -196,7 +203,9 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             not in {"roboguide.e1.b1-deployment-used/v0.3", "roboguide.e1.b1-deployment-used/v0.4"}
             or actual_schema
             != (
-                "roboguide.habitat-local-how-profile/v0.15"
+                "roboguide.habitat-local-how-profile/v0.16"
+                if optics_recovery
+                else "roboguide.habitat-local-how-profile/v0.15"
                 if viewpoint_recovery
                 else "roboguide.habitat-local-how-profile/v0.14"
                 if motion_feedback
@@ -233,6 +242,13 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             or _read_object(run / "evidence/endpoint-registry-used.json") != registry
         ):
             raise IntegrationError("actual live Local How differs from frozen endpoint sources")
+        if optics_recovery and declaration.get("enable_observation") is True:
+            from .observation_optics import read_optics_declaration, validate_optics_readiness
+
+            optics = read_optics_declaration(run / "observation-optics-declaration.json", registry)
+            validate_optics_readiness(
+                _read_object(run / "evidence/perception-readiness.json"), optics
+            )
         actual = actual.get("base_profile", {})
     expected = {
         "schema_version": "roboguide.habitat-local-how-profile/v0.8"

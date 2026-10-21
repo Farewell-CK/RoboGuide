@@ -11,17 +11,23 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable
+from numbers import Integral
+from types import SimpleNamespace
 from typing import Any
 
 from .goal_region_navigation import Point3, point3
 from .model import IntegrationError
 from .observation_control import ObservationAcquisitionControl
+from .observation_optics import loaded_fixed_camera_optics
 from .view_recovery import (
     MAX_FOOTPRINT_POINTS,
     MAX_RECOVERIES,
     MAX_ROUTE_POINTS,
     ObservationRecoveryUnavailable,
+    ViewpointSearchMiss,
+    local_grid_candidates,
     select_viewpoint,
+    sphere_may_intersect_camera_frustum,
     view_recovery_declaration,
 )
 from .view_scan import MAX_SCAN_STEPS, ViewScanSpec
@@ -84,6 +90,135 @@ class NativeViewpointGeometry:
         self.episode = navigation._sim.ep_info.episode_id
         self.mesh = navigation.pathfinder
         self._hs, self._mn, self._np = habitat_sim, mn, np
+        self._camera_geometry = self._load_camera_geometry()
+
+    def _load_camera_geometry(self) -> tuple[dict[str, Any], ...]:
+        """Freeze actual own semantic-camera geometry for detached candidate checks.
+
+        Camera matrices and object bounds are read from already constructed
+        Habitat objects. No sensor observation, render, predicate evaluation,
+        simulator step or RNG access occurs. Missing or malformed optics fail
+        closed instead of allowing a blind viewpoint move.
+        """
+        robot_pose = self._mn.Matrix4(self.navigation.cur_articulated_agent.sim_obj.transformation)
+        cameras: list[dict[str, Any]] = []
+        sensors = getattr(self.navigation._sim, "_sensors", {})
+        fixed = loaded_fixed_camera_optics(
+            SimpleNamespace(sim=self.navigation._sim), self.scan.agent
+        )
+        names = [fixed["sensor_uuid"]]
+        for name, wrapper in sensors.items():
+            if name not in names:
+                continue
+            sensor = getattr(wrapper, "_sensor_object", None)
+            renderer = getattr(sensor, "render_camera", None)
+            if sensor is None or renderer is None:
+                raise IntegrationError("observation semantic camera is unavailable")
+            hfov = float(sensor.hfov)
+            viewport = renderer.viewport
+            width, height = int(viewport[0]), int(viewport[1])
+            if not math.isfinite(hfov) or not 0 < hfov < 180 or width <= 0 or height <= 0:
+                raise IntegrationError("observation semantic camera geometry is malformed")
+            view_from_body = renderer.camera_matrix @ robot_pose
+            values = self._np.asarray(view_from_body)
+            if values.shape != (4, 4) or not bool(self._np.isfinite(values).all()):
+                raise IntegrationError("observation semantic camera matrix is malformed")
+            half_horizontal = math.tan(math.radians(hfov) / 2)
+            cameras.append(
+                {
+                    "name": name,
+                    "sensor": sensor,
+                    "view_from_body": view_from_body,
+                    "hfov_degrees": hfov,
+                    "viewport": [width, height],
+                    "horizontal_tangent": half_horizontal,
+                    "vertical_tangent": half_horizontal * height / width,
+                }
+            )
+        if not cameras:
+            raise IntegrationError("observation semantic camera geometry is unavailable")
+        object_manager = self.navigation._sim.get_rigid_object_manager()
+        object_index = self.navigation._task.pddl_problem.sim_info.search_for_entity(self.entity)
+        if (
+            isinstance(object_index, bool)
+            or not isinstance(object_index, Integral)
+            or object_index < 0
+        ):
+            raise IntegrationError("observation target object index is malformed")
+        object_id = self.navigation._sim.scene_obj_ids[int(object_index)]
+        object_instance = object_manager.get_object_by_id(object_id)
+        if object_instance is None:
+            raise IntegrationError("observation target object geometry is unavailable")
+        box = object_instance.root_scene_node.cumulative_bb
+        world_transform = object_instance.root_scene_node.transformation
+        corners = [
+            world_transform.transform_point(self._mn.Vector3(x, y, z))
+            for x in (box.min[0], box.max[0])
+            for y in (box.min[1], box.max[1])
+            for z in (box.min[2], box.max[2])
+        ]
+        radius = max(math.dist(self.center, tuple(corner)) for corner in corners)
+        if not math.isfinite(radius) or radius < 0:
+            raise IntegrationError("observation target geometry is malformed")
+        for camera in cameras:
+            camera["target_bounding_sphere_radius_m"] = radius
+        return tuple(cameras)
+
+    def _candidate_pose(self, point: Point3, heading: float) -> Any:
+        """Construct a detached upright body pose without assigning it to Habitat."""
+        rotation = self._mn.Quaternion.rotation(self._mn.Rad(heading), self._mn.Vector3.y_axis())
+        offset = self.scan.action.cur_articulated_agent.params.base_offset
+        return self._mn.Matrix4.from_(
+            rotation.to_matrix(), self._mn.Vector3(point) - rotation.transform_vector(offset)
+        )
+
+    def _camera_projections(self, point: Point3, heading: float) -> dict[str, Any]:
+        """Project the target sphere through frozen camera-body matrices."""
+        pose = self._candidate_pose(point, heading)
+        projections: dict[str, Any] = {}
+        for camera in self._camera_geometry:
+            camera_point = point3(
+                (camera["view_from_body"] @ pose.inverted()).transform_point(
+                    self._mn.Vector3(self.center)
+                )
+            )
+            may_intersect = sphere_may_intersect_camera_frustum(
+                camera_point,
+                camera["horizontal_tangent"],
+                camera["vertical_tangent"],
+                camera["target_bounding_sphere_radius_m"],
+            )
+            projections[camera["name"]] = {
+                "target_camera_position": list(camera_point),
+                "bounding_sphere_may_intersect_frustum": may_intersect,
+                "hfov_degrees": camera["hfov_degrees"],
+                "viewport": camera["viewport"],
+                "occlusion": "unavailable",
+                "pixel_detection": "unavailable",
+            }
+        return projections
+
+    def permits_viewpoint(self, point: Point3, heading: float) -> bool:
+        """Require one own camera's conservative frustum intersection."""
+        return any(
+            value["bounding_sphere_may_intersect_frustum"]
+            for value in self._camera_projections(point, heading).values()
+        )
+
+    def viewpoint_evidence(self, point: Point3, heading: float) -> dict[str, Any]:
+        """Record geometric necessary conditions without claiming visual truth."""
+        projections = self._camera_projections(point, heading)
+        return {
+            "camera_check": "actual-own-semantic-camera-bounding-sphere-frustum",
+            "camera_projections": projections,
+            "source": "actual-loaded-own-cameras-and-object-bounds",
+            "camera_pose_model": "frozen-body-relative-optics-at-dispatch",
+            "independent_camera_control": False,
+            "other_task_effects_preserved": False,
+            "visibility_guaranteed": False,
+            "occlusion": "unavailable",
+            "pixel_detection": "unavailable",
+        }
 
     def project(self, point: Point3) -> Point3:
         """Project only on the already loaded original scan mesh, without random sampling."""
@@ -162,6 +297,16 @@ class NativeViewpointGeometry:
             != self.center
         ):
             raise IntegrationError("observation viewpoint geometry changed after selection")
+        pose = self.navigation.cur_articulated_agent.sim_obj.transformation
+        for camera in self._camera_geometry:
+            sensor = self.navigation._sim._sensors[camera["name"]]._sensor_object
+            if sensor is not camera["sensor"] or not self._np.allclose(
+                self._np.asarray(sensor.render_camera.camera_matrix @ pose),
+                self._np.asarray(camera["view_from_body"]),
+                atol=1e-4,
+                rtol=0,
+            ):
+                raise IntegrationError("observation fixed-camera geometry changed after selection")
         return self._np.asarray(self.center)
 
 
@@ -233,6 +378,9 @@ class ObservationViewpointRecovery:
                 geometry.route_length,
                 geometry.permits_scan,
                 self._previous,
+                candidate_points=local_grid_candidates,
+                permits_viewpoint=geometry.permits_viewpoint,
+                viewpoint_evidence=geometry.viewpoint_evidence,
             )
             point = selected.point
 
@@ -271,6 +419,9 @@ class ObservationViewpointRecovery:
                 candidates_examined=selected.candidates_examined,
                 route_length_m=selected.route_length_m,
                 heading_radians=selected.heading_radians,
+                route_queries=selected.route_queries,
+                scan_candidates=selected.scan_candidates,
+                viewpoint_evidence=selected.viewpoint_evidence,
                 recoveries_used=self._used,
                 source="original-loaded-mesh-and-scan-controller",
                 visibility_guaranteed=False,
@@ -279,6 +430,8 @@ class ObservationViewpointRecovery:
         except Exception as error:
             self.close()
             document["reason"] = str(error)[:256]
+            if isinstance(error, ViewpointSearchMiss):
+                document["search_progress"] = error.progress
             self._emit(document)
             raise ObservationRecoveryUnavailable(
                 str(error)

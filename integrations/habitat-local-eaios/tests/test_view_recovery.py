@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from habitat_local_eaios import view_recovery_binding as bindings  # noqa: E402
 from habitat_local_eaios.model import IntegrationError  # noqa: E402
-from habitat_local_eaios.view_recovery import select_viewpoint  # noqa: E402
+from habitat_local_eaios.view_recovery import local_grid_candidates, select_viewpoint  # noqa: E402
 from habitat_local_eaios.view_recovery_binding import ObservationViewpointRecovery  # noqa: E402
 from habitat_local_eaios.view_scan import ViewScanSpec  # noqa: E402
 from test_observation_control import _control, _sample  # noqa: E402
@@ -134,6 +134,14 @@ class Geometry:
         """Expose the original-control result; no adapter may turn false into true."""
         return bool(self.navigation.scan_allowed)
 
+    def permits_viewpoint(self, point: Any, yaw: float) -> bool:
+        """Retain a separate supplied optical necessary condition for the synthetic world."""
+        return bool(getattr(self.navigation, "camera_allowed", True))
+
+    def viewpoint_evidence(self, point: Any, yaw: float) -> dict[str, Any]:
+        """Report unknown pixels even for a geometrically admitted synthetic candidate."""
+        return {"visibility_guaranteed": False, "pixel_detection": "unavailable"}
+
     def target(self, index: int) -> Any:
         """Reject changed semantic entities just as the production geometry witness does."""
         if index != 0 or self.navigation.target_changed:
@@ -172,7 +180,7 @@ def test_recovery_preserves_semantic_target_and_restores_all_owned_methods(
     budget = recovery.control.snapshot()["remaining_simulator_steps"]
     recovery.dispatch("new-nav", 2, ("original-stationary-scan", 1))
     point, entity = recovery.navigation._get_target_for_idx(0)
-    assert entity == ENTITY and point == (0.4, 0.0, 0.0)
+    assert entity == ENTITY and point in local_grid_candidates(START)
     assert recovery.navigation._targets == original["_targets"]
     assert recovery.navigation._path_to_point(point) == [START, point]
     assert recovery.control.snapshot()["remaining_simulator_steps"] == budget
@@ -247,7 +255,7 @@ def test_evidence_write_failure_cannot_relax_collision_or_change_cleanup(
 
     recovery = setup_recovery(monkeypatch, bad_writer)
     recovery.navigation.scan_allowed = False
-    with pytest.raises(IntegrationError, match="no supported candidate"):
+    with pytest.raises(IntegrationError, match="scan query budget exhausted"):
         recovery.dispatch("nav", 2, ("scan", 1))
     recovery.navigation.scan_allowed = True
     recovery.dispatch("nav-next", 3, ("scan", 1))

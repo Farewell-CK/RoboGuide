@@ -3,13 +3,13 @@
   "authority": "deployment-owned",
   "identity": {
     "profile_id": "e1-shared-world-perception",
-    "revision": "v3",
+    "revision": "v4",
     "source": "deployment://e1-shared-world-perception"
   },
   "capability_classes": [
     {
       "id": "capability-class-0",
-      "description": "Deployment-declared legged mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes the read-only observation only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Camera FOV and gimbal limits are not declared and remain unknown. Base type and viewpoint positioning are typed capability attributes for Matching; flight permits aerial positioning, ground may traverse supporting surfaces. Neither mode proves a route or visibility. Both observation operations accept exactly expected=detected(entity-ref), as registered by condition-format. Active acquisition completes only on observed detection; it does not establish navigation arrival or a conjunction of conditions. Required arrival remains a separate mobility intent and satisfaction requirement.",
+      "description": "Deployment-declared legged mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes the read-only observation only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Base type and viewpoint positioning are typed capability attributes for Matching; flight permits aerial positioning, ground may traverse supporting surfaces. Neither mode proves a route or visibility. Both observation operations accept exactly expected=detected(entity-ref), as registered by condition-format. Active acquisition completes only on observed detection; it does not establish navigation arrival or a conjunction of conditions. Required arrival remains a separate mobility intent and satisfaction requirement. The fixed primary pinhole camera attributes are deployment facts checked against the loaded original sensor before readiness. They describe the optical center relative to the kinematic base, not an absolute world height. Independent camera pan/tilt is unavailable in this observation workflow; other articulated camera poses and occlusion remain unknown. Navigation arrival and current visual detection are separate effects; any required coexistence must be checked at the declared final state.",
       "capabilities": [
         {
           "contract": {
@@ -58,14 +58,21 @@
             "sensing-modality": "visual",
             "moves-observer": true,
             "max-observation-cycles": 256,
-            "viewpoint-positioning": "ground"
+            "viewpoint-positioning": "ground",
+            "camera-model": "fixed-primary-pinhole/v0.1",
+            "camera-height-above-base-m": 0.48,
+            "camera-forward-offset-m": 0.4164822634134684,
+            "camera-forward-elevation-degrees": 0.0,
+            "camera-horizontal-fov-degrees": 90.0,
+            "camera-vertical-fov-degrees": 90.0,
+            "camera-pan-tilt-supported": false
           }
         }
       ]
     },
     {
       "id": "capability-class-1",
-      "description": "Deployment-declared flying mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes the read-only observation only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Camera FOV and gimbal limits are not declared and remain unknown. Base type and viewpoint positioning are typed capability attributes for Matching; flight permits aerial positioning, ground may traverse supporting surfaces. Neither mode proves a route or visibility. Both observation operations accept exactly expected=detected(entity-ref), as registered by condition-format. Active acquisition completes only on observed detection; it does not establish navigation arrival or a conjunction of conditions. Required arrival remains a separate mobility intent and satisfaction requirement.",
+      "description": "Deployment-declared flying mobility and original visual condition observation. Loaded class and exact support are independently checked before registration. The local observation.verify@v1 profile accepts expected=detected(entity-ref) for an admitted object identity and reads the existing visual observation. A false observation completes the read-only observation only; it does not establish the condition or move the observer. Active acquisition is a separate bounded approach-and-sense capability for the exact entity; cached verify never moves. Navigation completion alone does not establish detection. Base type and viewpoint positioning are typed capability attributes for Matching; flight permits aerial positioning, ground may traverse supporting surfaces. Neither mode proves a route or visibility. Both observation operations accept exactly expected=detected(entity-ref), as registered by condition-format. Active acquisition completes only on observed detection; it does not establish navigation arrival or a conjunction of conditions. Required arrival remains a separate mobility intent and satisfaction requirement. The fixed primary pinhole camera attributes are deployment facts checked against the loaded original sensor before readiness. They describe the optical center relative to the kinematic base, not an absolute world height. Independent camera pan/tilt is unavailable in this observation workflow; other articulated camera poses and occlusion remain unknown. Navigation arrival and current visual detection are separate effects; any required coexistence must be checked at the declared final state.",
       "capabilities": [
         {
           "contract": {
@@ -114,11 +121,18 @@
             "sensing-modality": "visual",
             "moves-observer": true,
             "max-observation-cycles": 256,
-            "viewpoint-positioning": "flight"
+            "viewpoint-positioning": "flight",
+            "camera-model": "fixed-primary-pinhole/v0.1",
+            "camera-height-above-base-m": 1.5,
+            "camera-forward-offset-m": 0.0,
+            "camera-forward-elevation-degrees": -45.0,
+            "camera-horizontal-fov-degrees": 90.0,
+            "camera-vertical-fov-degrees": 90.0,
+            "camera-pan-tilt-supported": false
           }
         }
       ]
     }
   ],
-  "digest": "sha256:73fba0b484be3377996412072028818f6c96137480cc7b61988df0d0ccd4bc41"
+  "digest": "sha256:c446988561ba2b4d75da9c67ee7e73f64d62fbcfa450433614e4333eef43afbf"
 }

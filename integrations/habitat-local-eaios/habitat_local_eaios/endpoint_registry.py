@@ -227,6 +227,7 @@ def verify_endpoint_sources(path: Path) -> dict[str, Any]:
 
 def prepare_live_deployment(run: Path, count: int) -> None:
     """Freeze actual run-local Node sources without a service, simulator or Provider."""
+    from .observation_optics import build_optics_declaration
     from .relocation_deployment import build_relocation_profile
     from .spatial_feasibility import build_spatial_profile_snapshot
 
@@ -235,6 +236,7 @@ def prepare_live_deployment(run: Path, count: int) -> None:
     artifacts: dict[str, Any] = {
         "endpoint-registry.json": registry,
         "spatial-profile.json": build_spatial_profile_snapshot(sources),
+        "observation-optics-declaration.json": build_optics_declaration(sources),
     }
     relocators = tuple(
         (record["agent_id"], Path(record["node_config_path"]))

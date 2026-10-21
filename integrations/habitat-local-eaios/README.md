@@ -620,3 +620,10 @@ INCOMPLETE admission evidence. A Node route must advertise this session schema
 in registration metadata; the Controller rejects a non-advertising route before
 dispatch rather than silently losing the topology. Deploy Controller and Node
 updates together.
+
+The opt-in observation Local How v0.16 uses source-bound fixed primary pinhole optics
+(`observation_optics.py`) and bounded camera/route/footprint viewpoint selection. Node attributes
+and MI capability classes carry the same neutral camera facts; loaded original camera mismatch
+refuses READY. Geometry is a necessary condition only: cached pixels decide acquisition and
+Habitat retains official joint terminal authority. See the
+[observation extension](../../docs/extensions/bounded-observation-and-evidence-closure.md).

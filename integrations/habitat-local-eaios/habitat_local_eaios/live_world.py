@@ -35,6 +35,7 @@ from .observation_control import (
     ObservationAcquisitionControl,
     observation_control_declaration,
 )
+from .observation_optics import check_loaded_optics, read_optics_declaration
 from .operation_admission import OPERATION_FEASIBILITY_SCHEMA
 from .perception import cached_detection_observations, inspect_perception, observe_detection
 from .perception_diagnostics import PerceptionDiagnostics
@@ -127,11 +128,22 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             for agent in observer_ids:
                 inspect_navigation_dispatch(environment, agent)
                 inspect_view_scan(environment, actor._active_policies[agent], agent)
+        optics: dict[str, Any] = {}
+        if acquisition:
+            declared_optics = read_optics_declaration(
+                path.parent / "observation-optics-declaration.json", self.registry
+            )
+            optics = {
+                str(agent): check_loaded_optics(environment, agent, declared_optics[agent])
+                for agent in observer_ids
+            }
         self._write_json("endpoint-registry-used.json", self.registry)
         self._write_json(
             "perception-readiness.json",
             {
-                "schema_version": "roboguide.perception-readiness/v0.2",
+                "schema_version": "roboguide.perception-readiness/v0.3"
+                if acquisition
+                else "roboguide.perception-readiness/v0.2",
                 "enabled": self._config.enable_observation,
                 "sensors": {
                     str(agent): sensor for agent, sensor in self._detection_sensors.items()
@@ -167,6 +179,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                             }
                             for agent in observer_ids
                         },
+                        "fixed_camera_optics": optics,
                     }
                     if acquisition
                     else {}
@@ -205,7 +218,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         self._write_json(
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.15"
+                "schema_version": "roboguide.habitat-local-how-profile/v0.16"
                 if acquisition
                 else "roboguide.habitat-local-how-profile/v0.10"
                 if recoveries

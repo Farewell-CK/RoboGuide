@@ -831,7 +831,7 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   provider-level feasibility baselines and never an expansion of integrated Local EAIOS steps.
 
 ADR-0094 adds deployment-owned bounded `observation.acquire@v1`, separate from
-snapshot verification. Its opt-in Local How v0.15 retains v0.11 exact-attempt cached condition/budget
+snapshot verification. Its opt-in Local How v0.16 retains v0.11 exact-attempt cached condition/budget
 feedback and a disclosed at-most-16-step original-wait mapping; it neither edits raw model
 choices nor guarantees persistent effects. Already-observed acquisition needs no extra model
 or motion. A guarded fresh acquisition navigation call rearms only its endpoint's original
@@ -870,6 +870,19 @@ earlier frozen artifacts retain their original contracts. Map-supported candidat
 physical safety, arrival, detection or persistent satisfaction of another Task.
 Activation is per endpoint's actual supported nonempty footprint; other controller interfaces
 keep ordinary navigation. Readiness records support separately from unknown physical feasibility.
+`observation_optics.py` owns the source-bound fixed primary pinhole camera declaration and
+read-only loaded-camera checks. Optional Catalog attributes describe height above the kinematic
+base, forward offset/elevation, horizontal/vertical FOV and absence of workflow pan/tilt; they
+never claim visibility. The same typed facts enter Node registration and MI capability classes.
+Local How v0.16 requires the run-local optics declaration, rejects mismatches before READY, and
+uses fixed-camera sphere/frustum necessary conditions with at most 512 local grid requests,
+64 route queries and 32 full scan candidates per original one-second search. The grid is
+0.15m-spaced within 1.2m half-width; accepted displacement stays at most 1m and path length 1.5m.
+Legacy v0.15 retains its radial declaration. No articulated camera is treated as fixed and no
+unknown camera is assigned invented optics. Camera/target drift fences selected-point hooks.
+Local acquisition is not persistent satisfaction; final joint goals require original independent
+verification and proximity/detection need not belong to the same Physical Entity.
+
 
 Keep `AGENTS.md` at the root. The bootstrap may create only the maintained paths
 listed above. Create future paths only with their first implementation; never add

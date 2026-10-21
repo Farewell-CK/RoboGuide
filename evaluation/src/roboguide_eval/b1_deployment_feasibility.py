@@ -257,21 +257,27 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     }
     if bound_relocation:
         expected_base["relocation_completion_profile"] = "exact-object-released-place/v0.1"
-    viewpoint_recovery = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.15"
+    optics_recovery = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.16"
+    viewpoint_recovery = (
+        optics_recovery or how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.15"
+    )
     motion_feedback = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.14",
         "roboguide.habitat-local-how-profile/v0.15",
+        "roboguide.habitat-local-how-profile/v0.16",
     }
     view_search = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.13",
         "roboguide.habitat-local-how-profile/v0.14",
         "roboguide.habitat-local-how-profile/v0.15",
+        "roboguide.habitat-local-how-profile/v0.16",
     }
     navigation_dispatch = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.12",
         "roboguide.habitat-local-how-profile/v0.13",
         "roboguide.habitat-local-how-profile/v0.14",
         "roboguide.habitat-local-how-profile/v0.15",
+        "roboguide.habitat-local-how-profile/v0.16",
     }
     observation_control = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.11",
@@ -279,6 +285,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.13",
         "roboguide.habitat-local-how-profile/v0.14",
         "roboguide.habitat-local-how-profile/v0.15",
+        "roboguide.habitat-local-how-profile/v0.16",
     }
     if viewpoint_recovery:
         expected_recovery = {
@@ -300,6 +307,23 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             "physical_safety_or_visibility_guaranteed": False,
             "official_success_authority": "habitat-pddl",
         }
+        if optics_recovery:
+            expected_recovery.update(
+                profile="bounded-observation-viewpoint/v0.2",
+                candidate_generation="bounded-local-ground-grid",
+                max_candidates=512,
+                grid_half_width_m=1.2,
+                grid_spacing_m=0.15,
+                max_route_queries=64,
+                max_scan_candidates=32,
+                max_displacement_m=1.0,
+                max_route_length_m=1.5,
+                camera_check="actual-own-semantic-camera-bounding-sphere-frustum",
+                occlusion_and_pixel_detection="unknown-until-existing-observation",
+                other_task_effects_preserved=False,
+            )
+            del expected_recovery["candidate_radii_m"]
+            del expected_recovery["directions_per_radius"]
         if json.dumps(how.get("observation_viewpoint_recovery"), sort_keys=True) != json.dumps(
             expected_recovery, sort_keys=True
         ):
@@ -400,7 +424,9 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         }
         or how["schema_version"]
         != (
-            "roboguide.habitat-local-how-profile/v0.15"
+            "roboguide.habitat-local-how-profile/v0.16"
+            if optics_recovery
+            else "roboguide.habitat-local-how-profile/v0.15"
             if viewpoint_recovery
             else "roboguide.habitat-local-how-profile/v0.14"
             if motion_feedback
@@ -442,6 +468,109 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             )
         ):
             raise ValueError("loaded perception readiness is unavailable")
+        if optics_recovery:
+            _check_optics_readiness(run, records, readiness)
+
+
+def _check_optics_readiness(
+    run: Path, records: list[dict[str, Any]], readiness: dict[str, Any]
+) -> None:
+    """Independently cross-check source-bound camera facts without importing the adapter."""
+    fields = {
+        "camera-model",
+        "camera-height-above-base-m",
+        "camera-forward-offset-m",
+        "camera-forward-elevation-degrees",
+        "camera-horizontal-fov-degrees",
+        "camera-vertical-fov-degrees",
+        "camera-pan-tilt-supported",
+    }
+    declaration = load_document(run / "observation-optics-declaration.json")
+    expected = []
+    for record in records:
+        config = tomllib.loads(Path(record["node_config_path"]).read_text())
+        profiles = [
+            profile
+            for profile in config.get("capability_profiles", [])
+            if profile.get("contract") == "observation.acquire@v1"
+        ]
+        if len(profiles) > 1:
+            raise ValueError("observation optics have duplicate acquisition profiles")
+        attributes = profiles[0].get("attributes", {}) if profiles else {}
+        facts = {key: attributes[key] for key in fields if key in attributes}
+        expected.append(
+            {
+                "agent_id": record["agent_id"],
+                "node_config_digest": record["node_config_digest"],
+                "attributes": facts,
+            }
+        )
+    if (
+        declaration
+        != {
+            "schema_version": "roboguide.observation-optics-declaration/v0.1",
+            "agents": expected,
+        }
+        or readiness.get("schema_version") != "roboguide.perception-readiness/v0.3"
+    ):
+        raise ValueError("observation optics declaration differs from Node sources")
+    actual = readiness.get("fixed_camera_optics")
+    if not isinstance(actual, dict) or set(actual) != set(readiness["sensors"]):
+        raise ValueError("observation optics readiness coverage is unavailable")
+    for record in expected:
+        agent = str(record["agent_id"])
+        if agent not in actual:
+            continue
+        observed = actual[agent]
+        facts = record["attributes"]
+        if not facts:
+            if observed != {
+                "status": "unavailable",
+                "reason": "no fixed-camera capability declared",
+            }:
+                raise ValueError("undeclared observation optics cannot become known")
+            continue
+        numeric = fields - {"camera-model", "camera-pan-tilt-supported"}
+        if (
+            set(facts) != fields
+            or any(
+                isinstance(facts[key], bool)
+                or not isinstance(facts[key], (int, float))
+                or not math.isfinite(facts[key])
+                for key in numeric
+            )
+            or not 0 < facts["camera-horizontal-fov-degrees"] < 180
+            or not 0 < facts["camera-vertical-fov-degrees"] < 180
+            or not -90 <= facts["camera-forward-elevation-degrees"] <= 90
+            or not 0 <= facts["camera-height-above-base-m"] <= 100
+            or abs(facts["camera-forward-offset-m"]) > 100
+        ):
+            raise ValueError("declared observation optics values are malformed")
+        if (
+            facts["camera-model"] != "fixed-primary-pinhole/v0.1"
+            or facts["camera-pan-tilt-supported"] is not False
+            or not isinstance(observed, dict)
+            or observed.get("status") != "observed"
+            or observed.get("source") != "loaded-original-camera-matrices"
+            or not isinstance(observed.get("sensor_uuid"), str)
+            or not observed["sensor_uuid"].startswith(f"agent_{agent}_")
+            or not isinstance(observed.get("attributes"), dict)
+            or set(observed["attributes"]) != fields
+        ):
+            raise ValueError("loaded observation optics are unavailable or detached")
+        for key, value in facts.items():
+            actual_value = observed["attributes"][key]
+            if isinstance(value, (str, bool)):
+                same = type(actual_value) is type(value) and actual_value == value
+            else:
+                same = (
+                    not isinstance(actual_value, bool)
+                    and isinstance(actual_value, (int, float))
+                    and math.isfinite(actual_value)
+                    and math.isclose(actual_value, value, rel_tol=0, abs_tol=1e-4)
+                )
+            if not same:
+                raise ValueError("loaded observation optics differ from declared facts")
 
 
 def _canonical_digest_value(value: Any) -> Any:

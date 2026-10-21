@@ -499,10 +499,14 @@ def _bound_observation_tools(
                 str(tool.get("description", ""))
                 + " After an observed stationary scan, a fresh navigation to this same entity "
                 "searches for an alternative local observation point using the loaded map and "
-                "original scan-footprint checks. The search is bounded to two selections and "
+                "original scan-footprint checks and actual camera frustum geometry. "
+                "The search is bounded to two selections and "
                 "one metre from the current position, within the original acquisition budget. "
                 "Missing geometry or a bounded search miss reports local recovery unavailable; "
-                "a selected point does not guarantee physical arrival or detection."
+                "a selected point does not guarantee physical arrival, detection or "
+                "preservation of "
+                "another Task effect. Final joint conditions still require "
+                "independent verification."
             ).strip()
         if tool.get("name") in {"wait", "send_request"}:
             tool["description"] = (

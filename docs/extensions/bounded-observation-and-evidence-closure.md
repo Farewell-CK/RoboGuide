@@ -16,7 +16,8 @@ acquire 的唯一参数是 `expected=detected(entity-ref)`。当前 profile 没�
 运动方式复用 Node 已有的 `base-type`（如 legged/flying），完整投影到 MI capability class；
 主动观测的 `viewpoint-positioning` 则从同一注册事实约束为 ground/flight。Control 使用已有
 typed capability constraints 做 Matching；逻辑 Actor 名称和文字描述均不选择物理端点。
-当前部署仍未提供 FOV、gimbal 或 visibility guarantee，MI 不得猜测。
+已有固定主相机声明的部署在注册和 MI capability class 中携带真实光学标量；其他相机、
+未提供的控制能力与可见性保持未知，MI 不得猜测。
 
 当前检测能力通过注册的 `condition-format=detected(entity-ref)` 声明精确参数格式，
 该字段完整进入 MI capability class。acquire 的完成条件仅为检测成立；接近实体是
@@ -29,7 +30,7 @@ deployment v0.4 增加 `enable_observation_acquisition`、
 语义相机和导航技能可用。默认 Python adapter 开关关闭。新的感知/重排 deployment
 模板显式选择本轮开发配置，旧冻结运行继续使用自己的旧模板。
 
-开启 acquisition 的当前代码输出 Local How v0.15，保留 v0.11 的闭合
+开启 acquisition 的当前代码输出 Local How v0.16，保留 v0.11 的闭合
 `observation_control=bounded-visual-feedback/v0.1` 声明。每次真实模型动作请求包含最新的
 缓存 true/false/unavailable、原 Task/attempt/world/entity、sample step 和原始剩余预算；
 读取不到保持 unavailable，同 step 冲突、跨 attempt/world 或时间回退拒绝。初始已有真实
@@ -100,6 +101,37 @@ perception-readiness逐端点记录loaded_geometry_supported，物理可行性�
 记录`observation-viewpoint-selection`、原scan call、当前nav call/sequence、候选位置、
 route、预算与失败原因。搜索失败属于local-observation-recovery，未派发、不重试Provider。
 
+v0.16 使用 `bounded-observation-viewpoint/v0.2`。原生多agent构造会给camera mount
+和sensor UUID都加agent前缀，解析必须按原映射绑定自身端点。`observation_optics.py`
+只把唯一base-mounted pinhole主相机作为固定几何模型；jaw等机械臂相机仍可被原detector
+使用，但不会被冒称为固定或可由本操作控制。Node注册和MI capability class中的标量是：
+
+| 属性 | 意义 |
+|---|---|
+| `camera-model` | `fixed-primary-pinhole/v0.1`，不保证可见性 |
+| `camera-height-above-base-m` | 光心相对运动基点的高度，不是世界绝对高度 |
+| `camera-forward-offset-m` | 平台前向的光心偏移 |
+| `camera-forward-elevation-degrees` | 光轴相对平台前向平面的仰角；负值朝下 |
+| `camera-horizontal-fov-degrees` / `camera-vertical-fov-degrees` | 真实pinhole视场 |
+| `camera-pan-tilt-supported` | 当前观测工作流是否能独立控制相机，当前为false |
+
+运行前 `observation-optics-declaration.json` 冻结Node文件摘要和完整可选标量。v0.16
+缺失该artifact不能降级为旧schema。reset后核对实际原相机矩阵、mount和FOV，误报能力
+会使READY失败；缺失声明仍明确unavailable。相同事实随既有typed attributes注册给Control，
+并从deployment profile交给MI；MI不读取live Node Inventory。
+
+生产候选来自0.15米间隔、1.2米半宽的固定局部网格（288个请求，硬上限512）。
+原投影偏移、至少0.25米且至多1米位移、去重、至多1.5米真实路线、两次恢复和原始
+采集预算保持。原始相机矩阵对目标的实际包围球作视锥半平面必要条件检查；遮挡和
+像素数未知。每次最多64次route和32个完整scan候选，耗尽独立预算时记录真实进度并
+拒绝派发。一秒Python期限不能中断单个native调用。选择后外参、实体或mesh漂移会
+使旧hook失效，清理仍只恢复自己的覆盖，不改变原cache、其他端点或vendor源码。
+
+该几何检查不保证实际到达误差、无遮挡或严格像素阈值。若靠近和取景的可行区域不同，
+不能由检测动作暗中承诺保持其他Task效果，也不能把两个独立存在性谓词强绑同一Physical
+Entity。实际MI计划须保留所有任务条件，最终按原联合verifier检查当前状态，历史正读数
+和stage-goal锁存都不能代替终态。当前实现没有本地跨端点改派或自动改写MissionPlan。
+
 本功能是RoboGuide受控臂的Local How扩展，不能称作原生EMOS等价执行。静态候选检查不
 证明动态碰撞安全、到达误差下的可旋转性、目标持续可见性或官方成功；真实轨迹与detector
 继续决定实际结果。旧v0.14/v0.13归档保持原始字段和行为版本，不能补字段重写历史。
@@ -109,7 +141,7 @@ flowchart LR
   M[原始 Stage2 模型选择同目标导航] --> G[Guard 校验 committed entity]
   G --> F{此前自身扫描观测为静止?}
   F -- 否 --> N[原始导航]
-  F -- 是 --> S[原始地图路线与足迹有界搜索]
+  F -- 是 --> S[真实相机取景必要条件与原始路线/足迹有界搜索]
   S -- 候选可用 --> P[同实体的本地观测点]
   S -- 无证据或有界未找到 --> U[明确的 local recovery unavailable]
   P --> N

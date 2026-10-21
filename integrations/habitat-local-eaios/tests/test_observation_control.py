@@ -236,17 +236,17 @@ def test_feedback_cannot_bind_a_different_operation_or_attempt() -> None:
     "version,mutation",
     [
         (version, mutation)
-        for version in (11, 12, 13, 14, 15)
+        for version in (11, 12, 13, 14, 15, 16)
         for mutation in (None, "pause", "persistence", "extra", "schema")
     ]
     + [
         (version, mutation)
-        for version in (12, 13, 14, 15)
+        for version in (12, 13, 14, 15, 16)
         for mutation in ("dispatch", "dispatch-missing", "dispatch-downgrade")
     ]
     + [
         (version, mutation)
-        for version in (13, 14, 15)
+        for version in (13, 14, 15, 16)
         for mutation in (
             "scan-missing",
             "scan-downgrade",
@@ -258,7 +258,7 @@ def test_feedback_cannot_bind_a_different_operation_or_attempt() -> None:
     ]
     + [
         (version, mutation)
-        for version in (14, 15)
+        for version in (14, 15, 16)
         for mutation in (
             "motion-missing",
             "motion-downgrade",
@@ -268,7 +268,8 @@ def test_feedback_cannot_bind_a_different_operation_or_attempt() -> None:
         )
     ]
     + [
-        (15, mutation)
+        (version, mutation)
+        for version in (15, 16)
         for mutation in (
             "recovery-missing",
             "recovery-downgrade",
@@ -310,7 +311,7 @@ def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
     if version >= 14:
         how["observation_motion_feedback"] = motion_feedback_declaration()
     if version >= 15:
-        how["observation_viewpoint_recovery"] = view_recovery_declaration()
+        how["observation_viewpoint_recovery"] = view_recovery_declaration(optics=version >= 16)
     how["execution_options"]["enable_observation_acquisition"] = True
     deployment_path = run / "b1-deployment-used.json"
     declaration = json.loads(deployment_path.read_bytes())
@@ -369,6 +370,17 @@ def test_new_local_how_profile_is_checked_without_weakening_legacy_evidence(
     elif mutation == "recovery-extra":
         how["observation_viewpoint_recovery"]["guaranteed_success"] = True
     how_path.write_text(json.dumps(how))
+    if version >= 16 and (run / "evidence/perception-readiness.json").exists():
+        readiness_path = run / "evidence/perception-readiness.json"
+        readiness = json.loads(readiness_path.read_bytes())
+        readiness.update(
+            schema_version="roboguide.perception-readiness/v0.3",
+            fixed_camera_optics={
+                key: {"status": "unavailable", "reason": "no fixed-camera capability declared"}
+                for key in readiness["sensors"]
+            },
+        )
+        readiness_path.write_text(json.dumps(readiness))
     if mutation is None:
         preflight_deployment_feasibility(run)
         _check_execution_profile(run, requirement["frozen_input_sha256"])
