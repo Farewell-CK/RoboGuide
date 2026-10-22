@@ -199,7 +199,11 @@ def old_leaf_request(
 
 
 def run(
-    output: Path, skip_build: bool, old_binary: Path | None, async_workers: int | None = None
+    output: Path,
+    skip_build: bool,
+    old_binary: Path | None,
+    async_workers: int | None = None,
+    artifact_retained: bool = False,
 ) -> dict[str, Any]:
     """Exercise new-key proof, missing peers, irreversible revoke, leader rotation and restart."""
     if async_workers is not None and not 1 <= async_workers <= 64:
@@ -379,6 +383,10 @@ def run(
             path = output / f"member-{member}.json"
             if async_workers is not None:
                 config["controller_environment"]["TOKIO_WORKER_THREADS"] = str(async_workers)
+            if artifact_retained:
+                config["controller_environment"]["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = (
+                    "roboguide.artifact-storage/v1"
+                )
             save(path, config)
             config["replica"]["application_policy_digest"] = subprocess.check_output(
                 [str(replica_binary), "--policy-digest", str(path)],
@@ -681,12 +689,14 @@ def main() -> None:
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--old-binary", type=Path)
     parser.add_argument("--async-workers", type=int, choices=range(1, 65))
+    parser.add_argument("--artifact-retained", action="store_true")
     arguments = parser.parse_args()
     result = run(
         arguments.output.resolve(),
         arguments.skip_build,
         arguments.old_binary,
         arguments.async_workers,
+        arguments.artifact_retained,
     )
     print(
         json.dumps(

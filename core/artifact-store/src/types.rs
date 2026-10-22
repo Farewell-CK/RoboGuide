@@ -15,6 +15,10 @@ use std::sync::Arc;
 pub struct FileSystemArtifactStore {
     /// Root directory containing the staging and blob trees.
     pub(crate) root: PathBuf,
+    /// Actual finalized-blob directory selected by the explicit storage format.
+    pub(crate) blob_directory: &'static str,
+    /// Persistent software backend identity; legacy roots do not manufacture one.
+    pub(crate) owner_id: Option<String>,
     /// Exclusive lease shared by every clone and in-progress upload from this store.
     pub(crate) _writer_lock: Arc<ArtifactWriterLease>,
 }

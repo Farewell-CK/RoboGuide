@@ -96,8 +96,11 @@ name = "artifact-store"
 version = "0.1.0"
 dependencies = [
  "domain",
+ "getrandom 0.4.3",
  "libc",
  "ports",
+ "serde",
+ "serde_json",
  "sha2",
  "tempfile",
 ]

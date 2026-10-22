@@ -1,5 +1,13 @@
 # RoboGuide
 
+Controller Artifact CAS 可显式选择 storage v1：持久 backend identity、原目录 inode 迁移
+intent、`objects-v1` 内容和旧路径文件 fence。旧 binary/backup 拒绝新格式；显式
+recovery v0.9 保存原 owner/fence 和完整 bytes。`GET /v1/artifact-store` 是受限运维观察，
+不授予内容权限或设备身份。实现与边界见
+[ADR-0148](docs/decisions/0148-artifact-owner-identity-and-retained-layout.md)和
+[恢复合同](contracts/recovery/bundle-v0.9/README.md)。Catalog/lineage/Archive 的引用接线
+与在线 HA 仍继续实施，默认 legacy 部署保持原合同。
+
 Snapshot 引用已有实际恢复工具生产者：显式启用 Memory SQL v4 / recovery profile v0.8，
 在所有原 writer/inode 租约内先持久化原命令、内容集合、预算和引用，再复制真实 bytes。
 发布结果须完整验证后才退休；中断保留引用，只读对账不重新复制。冷恢复不改写原 active

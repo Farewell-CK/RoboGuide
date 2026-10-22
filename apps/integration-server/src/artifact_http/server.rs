@@ -370,6 +370,22 @@ where
             Response::Json("200 OK", serde_json::json!({"status": "ok", "ready": true}))
         }
         ("GET", "/metrics") => run_blocking(|| artifact_metrics(catalog, uploads))?,
+        ("GET", "/v1/artifact-store") => run_blocking(|| {
+            let _guard = catalog.write_gate.lock().map_err(|_| {
+                HttpError::service_unavailable("Artifact owner observation unavailable")
+            })?;
+            memory_admission
+                .revalidate_artifact_principal(&principal)
+                .map_err(HttpError::forbidden)?;
+            Ok(Response::Json(
+                "200 OK",
+                serde_json::json!({
+                    "schema": "roboguide.artifact-store-observation/v0.1",
+                    "storage_schema": if store.owner_id().is_some() { artifact_store::ARTIFACT_LAYOUT_SCHEMA } else { "legacy" },
+                    "owner_id": store.owner_id(),
+                }),
+            ))
+        })?,
         ("GET", "/metrics/prometheus") => {
             run_blocking(|| artifact_metrics_prometheus(catalog, uploads))?
         }

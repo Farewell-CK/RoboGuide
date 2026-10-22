@@ -1,5 +1,13 @@
 # RoboGuide recovery tool
 
+[Profile v0.9](../../contracts/recovery/bundle-v0.9/README.md) requires the actual Artifact retained
+layout v1, including `.retention-owner.json`, the `blobs` regular-file old-writer fence, `objects-v1`
+CAS and staging. Original metadata and all bytes are verified together; missing/conflicting identity
+refuses without replacement. It keeps the v0.8 Memory Snapshot and v3 Replica contracts. Old profiles
+remain explicit, and older tools refuse the fenced old content path. Cold recovery preserves logical
+software backend identity, never physical inode/Node/use/online continuity. See
+[ADR-0148](../../docs/decisions/0148-artifact-owner-identity-and-retained-layout.md).
+
 [Profile v0.8](../../contracts/recovery/bundle-v0.8/README.md) adds the actual Memory Snapshot
 reference producer. Explicit provider `--enable-snapshot-references` drains and upgrades original
 v3 SQL to v4; default v3 remains supported by its original profiles. v0.8 retains Replica storage

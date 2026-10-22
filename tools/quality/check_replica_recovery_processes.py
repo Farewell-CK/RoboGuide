@@ -48,6 +48,7 @@ def storage_profile(
     """Declare every actual original supervisor, child, CAS and credential/config dependency."""
     components: list[dict[str, Any]] = []
     storage_versions = set()
+    artifact_formats: set[str] = set()
     replica_ids = [f"replica-{member}" for member in configs]
     for member, config in configs.items():
         storage = Path(config["storage_directory"])
@@ -58,6 +59,9 @@ def storage_profile(
         dependencies: list[str] = []
         cas = storage / "artifacts"
         if cas.exists():
+            artifact_formats.add(
+                "retained" if (cas / ".retention-owner.json").is_file() else "legacy"
+            )
             dependencies.append(f"cas-{member}")
             components.append(
                 {
@@ -113,8 +117,12 @@ def storage_profile(
     )
     if storage_versions not in ({0}, {1}, {2}, {3}):
         raise ValueError("actual Replica stores require one complete supported storage profile")
+    if len(artifact_formats) != 1 or (artifact_formats == {"retained"} and storage_versions != {3}):
+        raise ValueError("actual Artifact roots require one explicit complete storage profile")
     return {
-        "schema": "roboguide.recovery-profile/v0.7"
+        "schema": "roboguide.recovery-profile/v0.9"
+        if artifact_formats == {"retained"}
+        else "roboguide.recovery-profile/v0.7"
         if storage_versions == {3}
         else "roboguide.recovery-profile/v0.6"
         if storage_versions == {2}

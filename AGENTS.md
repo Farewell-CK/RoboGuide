@@ -1,5 +1,17 @@
 # Repository Guidelines
 
+ADR-0148 adds explicit Artifact storage v1 via `ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA` or
+`FileSystemArtifactStore::new_with_retention`. The original root writer precedes OS-random backend
+identity/actual directory-inode intent, atomic `blobs` to `objects-v1` migration, regular-file old
+path fence and original owner publication. Missing/conflicting identity refuses replacement; default
+legacy remains explicit. Operator-bound `GET /v1/artifact-store` reports loaded software owner only;
+it grants no content/tenant/device authority. Recovery v0.9 preserves exact owner/fence/CAS and
+v0.8 Memory Snapshot/v3 Replica semantics; old binaries/tools refuse the fenced old path. Native
+`core/artifact-store/examples/layout_probe.rs` and
+`tools/quality/check_artifact_owner_processes.py` exercise actual bytes/Controller/mTLS/old binary/
+old CLI/cold restore with zero Nodes. This supplies the actual owner boundary for later Catalog/
+lineage/Archive/online references; it does not itself close those producers or P1-P7.
+
 ADR-0147 adds opt-in provider `--enable-snapshot-references` (Memory SQL v4 / writer v0.2)
 and explicit recovery v0.8. Actual all-root/inode leases precede a unique original command,
 provider-instance/content set and kernel-budget intent plus snapshot pins, before any copy.

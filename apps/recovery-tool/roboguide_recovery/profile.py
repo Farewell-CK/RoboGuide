@@ -64,6 +64,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.6",
         "roboguide.recovery-profile/v0.7",
         "roboguide.recovery-profile/v0.8",
+        "roboguide.recovery-profile/v0.9",
     }:
         expected.add("artifact_replica_sets")
     if set(profile) != expected or profile["schema"] not in {
@@ -75,6 +76,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.6",
         "roboguide.recovery-profile/v0.7",
         "roboguide.recovery-profile/v0.8",
+        "roboguide.recovery-profile/v0.9",
     }:
         raise ValueError("recovery profile is not closed or versioned")
     if (
@@ -123,6 +125,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.6",
             "roboguide.recovery-profile/v0.7",
             "roboguide.recovery-profile/v0.8",
+            "roboguide.recovery-profile/v0.9",
         }:
             raise ValueError("replica supervisor leases require explicit recovery profile v0.2")
         if item["kind"] == "runtime-mi" and profile["schema"] not in {
@@ -132,6 +135,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.6",
             "roboguide.recovery-profile/v0.7",
             "roboguide.recovery-profile/v0.8",
+            "roboguide.recovery-profile/v0.9",
         }:
             raise ValueError("runtime MI leases require explicit recovery profile v0.3")
         if (
@@ -172,8 +176,13 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             Path(item["database"]).is_relative_to(Path(tree)) for tree in selected
         ):
             raise ValueError("authority database cannot be duplicated inside a content tree")
-        databases, trees, locks = layout(item)
-        selected_paths = {root / path for path in databases + trees + locks}
+        databases, trees, locks = layout(item, profile_schema=profile["schema"])
+        from .artifact_layout import metadata_files
+
+        selected_paths = {
+            root / path
+            for path in databases + trees + locks + metadata_files(item, profile["schema"])
+        }
         managed_paths.extend(selected_paths)
     ordered_paths = sorted(path.parts for path in managed_paths)
     if any(current[: len(previous)] == previous for previous, current in pairwise(ordered_paths)):
@@ -227,7 +236,9 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(components, key=lambda value: str(value["component_id"]))
 
 
-def layout(component: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
+def layout(
+    component: dict[str, Any], *, profile_schema: str = "roboguide.recovery-profile/v0.1"
+) -> tuple[list[str], list[str], list[str]]:
     """Derive maintained databases, content roots and actual lease paths for one component kind."""
     kind, database = component["kind"], component["database"]
     if kind == "memory":
@@ -242,7 +253,8 @@ def layout(component: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
             ["writer.lock"],
         )
     if kind == "artifact":
-        return [], ["blobs", "staging"], [".writer.lock"]
+        blobs = "objects-v1" if profile_schema == "roboguide.recovery-profile/v0.9" else "blobs"
+        return [], [blobs, "staging"], [".writer.lock"]
     if kind == "files":
         return [], list(component["trees"]) or ["."], []
     if kind == "runtime-mi":
@@ -262,7 +274,7 @@ def acquire_all(
         paths: list[Path] = []
         for component in components:
             root = real_directory(Path(component["root"]))
-            databases, _, locks = layout(component)
+            databases, _, locks = layout(component, profile_schema=profile_schema)
             paths.extend(root / name for name in locks)
             if component["kind"] == "memory" and profile_schema in {
                 "roboguide.recovery-profile/v0.4",
@@ -270,6 +282,7 @@ def acquire_all(
                 "roboguide.recovery-profile/v0.6",
                 "roboguide.recovery-profile/v0.7",
                 "roboguide.recovery-profile/v0.8",
+                "roboguide.recovery-profile/v0.9",
             }:
                 paths.extend(root / name for name in [".memory-use.lock", *databases])
             if component["kind"] == "replica" and profile_schema in {
@@ -277,6 +290,7 @@ def acquire_all(
                 "roboguide.recovery-profile/v0.6",
                 "roboguide.recovery-profile/v0.7",
                 "roboguide.recovery-profile/v0.8",
+                "roboguide.recovery-profile/v0.9",
             }:
                 paths.append(root / component["database"])
         for path in sorted(paths):
@@ -291,6 +305,10 @@ def acquire_all(
                 raise ValueError("original service writer is still active: " + str(path)) from error
             stack.callback(fcntl.flock, descriptor, fcntl.LOCK_UN)
         for component in components:
+            if component["kind"] == "artifact":
+                from .artifact_layout import validate_storage
+
+                validate_storage(Path(component["root"]), profile_schema)
             if component["kind"] == "memory":
                 path = Path(component["root"]) / "memory.sqlite3"
                 with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
@@ -342,8 +360,12 @@ def validate_memory_storage(connection: sqlite3.Connection, profile_schema: str)
         "roboguide.recovery-profile/v0.6",
         "roboguide.recovery-profile/v0.7",
         "roboguide.recovery-profile/v0.8",
+        "roboguide.recovery-profile/v0.9",
     }:
-        snapshot = profile_schema == "roboguide.recovery-profile/v0.8"
+        snapshot = profile_schema in {
+            "roboguide.recovery-profile/v0.8",
+            "roboguide.recovery-profile/v0.9",
+        }
         expected_version = 4 if snapshot else 3
         message = f"Memory recovery requires its actual v{expected_version} composite writer marker"
         if version != expected_version:
@@ -398,6 +420,7 @@ def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str
         "roboguide.recovery-profile/v0.6": 2,
         "roboguide.recovery-profile/v0.7": 3,
         "roboguide.recovery-profile/v0.8": 3,
+        "roboguide.recovery-profile/v0.9": 3,
     }.get(profile_schema)
     if expected_version is None:
         if version != 0:

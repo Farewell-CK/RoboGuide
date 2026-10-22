@@ -814,6 +814,24 @@ fn configured_duration(name: &str, default: u64) -> Result<u64, Box<dyn std::err
     parsed_duration(name, value.as_deref(), default).map_err(Into::into)
 }
 
+/// Selects an explicit Artifact format before listeners can use an unrecognized storage owner.
+fn configured_artifact_store(
+    root: &Path,
+) -> Result<artifact_store::FileSystemArtifactStore, Box<dyn std::error::Error>> {
+    let profile = match std::env::var("ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA") {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => "legacy".to_string(),
+        Err(error) => return Err(error.into()),
+    };
+    match profile.as_str() {
+        "legacy" => Ok(artifact_store::FileSystemArtifactStore::new(root)?),
+        artifact_store::ARTIFACT_LAYOUT_SCHEMA => Ok(
+            artifact_store::FileSystemArtifactStore::new_with_retention(root)?,
+        ),
+        _ => Err("unsupported explicit Artifact storage schema".into()),
+    }
+}
+
 /// Binds the configured integration listener and keeps accepting connector sessions.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -983,7 +1001,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let diagnostic_writer = diagnostics::DiagnosticWriter::configured();
     let diagnostic_handle = observability::MetricsObserver::handle(diagnostic_writer.handle());
     let event_log = event_log.with_diagnostics(diagnostic_handle.clone());
-    let artifact_store = artifact_store::FileSystemArtifactStore::new(&artifact_root)?;
+    let artifact_store = configured_artifact_store(Path::new(&artifact_root))?;
     let artifact_catalog =
         artifact_http::ArtifactCatalog::replay_with_gate(&event_log, event_write_gate.clone())
             .map_err(|error| format!("spatial catalog startup replay failed: {error}"))?;

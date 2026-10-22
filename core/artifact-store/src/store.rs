@@ -31,8 +31,19 @@ impl FileSystemArtifactStore {
     /// A second initializer for the same canonical root fails without inspecting or cleaning
     /// staging files owned by the active writer.
     pub fn new(root: impl Into<PathBuf>) -> Result<Self, ArtifactStoreError> {
-        let root = std::path::absolute(root.into())
-            .map_err(|error| io_error("resolve artifact root", error))?;
+        Self::open_layout(root.into(), false)
+    }
+
+    /// Opens the explicit retained layout, preserving original bytes and fencing older writers.
+    /// A partial migration resumes its original nonce; missing or conflicting identity refuses.
+    pub fn new_with_retention(root: impl Into<PathBuf>) -> Result<Self, ArtifactStoreError> {
+        Self::open_layout(root.into(), true)
+    }
+
+    /// Acquires the actual writer before any format check, migration, or managed-directory effect.
+    fn open_layout(root: PathBuf, retained: bool) -> Result<Self, ArtifactStoreError> {
+        let root =
+            std::path::absolute(root).map_err(|error| io_error("resolve artifact root", error))?;
         create_directory(&root, "create artifact root")?;
         let root = root
             .canonicalize()
@@ -42,9 +53,11 @@ impl FileSystemArtifactStore {
             &root.join(STAGING_DIRECTORY),
             "create artifact staging directory",
         )?;
-        create_directory(&root.join(BLOB_DIRECTORY), "create artifact blob directory")?;
+        let layout = crate::layout::open(&root, retained)?;
         Ok(Self {
             root,
+            blob_directory: layout.blob_directory,
+            owner_id: layout.owner_id,
             _writer_lock: writer_lock,
         })
     }
@@ -52,6 +65,11 @@ impl FileSystemArtifactStore {
     /// Returns the configured root directory.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Returns the original software backend identity without granting content access or use.
+    pub fn owner_id(&self) -> Option<&str> {
+        self.owner_id.as_deref()
     }
 
     /// Starts an upload using a caller-provided, path-safe temporary identifier.
@@ -277,7 +295,7 @@ impl FileSystemArtifactStore {
     pub(crate) fn blob_path(&self, digest: &str) -> PathBuf {
         let hex = digest.strip_prefix(DIGEST_PREFIX).unwrap_or(digest);
         self.root
-            .join(BLOB_DIRECTORY)
+            .join(self.blob_directory)
             .join("sha256")
             .join(&hex[..2])
             .join(hex)

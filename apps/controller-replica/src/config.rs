@@ -14,6 +14,7 @@ pub(super) const APPLICATION_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOI
 const ALLOWED_ENVIRONMENT: &[&str] = &[
     "TOKIO_WORKER_THREADS",
     "ROBOGUIDE_OPERATOR_CONNECTION_LIMIT",
+    "ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA",
     "ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN",
     "ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS",
     "ROBOGUIDE_NODE_LEASE_DURATION_MS",
@@ -134,6 +135,13 @@ impl ProcessConfig {
         {
             return Err("unsupported replica process paths/schema/environment".into());
         }
+        if self
+            .controller_environment
+            .get("ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA")
+            .is_some_and(|value| value != "legacy" && value != "roboguide.artifact-storage/v1")
+        {
+            return Err("unsupported explicit Controller Artifact storage schema".into());
+        }
         if let Some(transfer) = &self.leader_transfer
             && (transfer.target == self.replica.replica_id
                 || !self.replica.members.contains_key(&transfer.target)
@@ -235,6 +243,20 @@ mod tests {
             assert!(candidate.validate().is_err(), "{value} bypassed policy");
             candidate.replica.application_policy_digest = candidate.policy_digest().unwrap();
             assert_eq!(candidate.validate().is_ok(), value == "2");
+        }
+    }
+
+    /// A retained byte-store format is explicit, closed and part of the frozen deployment policy.
+    #[test]
+    fn artifact_storage_format_is_explicit_and_policy_bound() {
+        for value in ["legacy", "roboguide.artifact-storage/v1", "unknown"] {
+            let mut candidate = profile("1");
+            candidate
+                .controller_environment
+                .insert("ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA".into(), value.into());
+            assert!(candidate.validate().is_err());
+            candidate.replica.application_policy_digest = candidate.policy_digest().unwrap();
+            assert_eq!(candidate.validate().is_ok(), value != "unknown");
         }
     }
 }

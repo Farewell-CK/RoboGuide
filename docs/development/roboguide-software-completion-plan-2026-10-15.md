@@ -133,6 +133,11 @@ v4/v0.8 Snapshot 原意图→实际复制→完整验证→精确退休/对账�
 wait、SQL 与回包中断、冷恢复和双 Node 文件组合已验证；Catalog/lineage、Controller
 Artifact/Raft Snapshot、Archive 和在线副本生命周期仍属 N1/N3 必需工作。
 
+[Artifact 实际 owner 与显式格式验收](acceptance/2026-10-22-artifact-owner-and-retained-layout.md)
+接通 ADR-0148 的原 root writer/nonce/inode intent、旧路径文件 fence、受限 owner 观察
+及显式 v0.9 的真实内容恢复。实际旧 binary 与旧 CLI 拒绝新布局；本项是 Catalog/
+lineage/Archive 引用的 owner 依赖，不把这些后续生产者标成已经完成。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

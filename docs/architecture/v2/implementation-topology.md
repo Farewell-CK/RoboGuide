@@ -312,3 +312,16 @@ source provider instance 与集合不能随 retry 改变；未确认操作不重
 SQLite 排空旧连接后才迁移，旧 writer 和旧 recovery profile 拒绝新权限。v3/default
 部署继续保持原合同。Snapshot 属于独立内容 owner，不能借它证明在线 HA、设备停止或
 Controller Artifact CAS 的全局引用覆盖。
+
+## Artifact 内容 owner 与格式迁移（ADR-0148）
+
+Controller Artifact CAS 的 backend identity 由实际持有 root writer lease 的存储层创建，
+不复用 Node provider instance，也不从 digest、设备名或进程 PID 推断。显式 retained
+layout 将原 `blobs` 目录原子迁移为 `objects-v1`；先持久化原 nonce 与目录 inode 的迁移
+intent，再建立旧路径文件 fence，最后发布相同 owner 记录。原 staging、bytes 和历史
+不被替换；中断只继续原身份，缺失 mandatory identity 不生成新 owner。
+
+旧 binary/profile 在原 `blobs` 路径看到文件 fence 后拒绝。读取原内容仍由原权限和实际
+bytes 验证；storage identity 不授予 tenant、Group 或读写权限。冷恢复保持逻辑 backend
+identity 的原证据，不证明 inode、跨主机身份或物理连续性。后续 Catalog、lineage、
+Replica、Snapshot、Archive 需分别取得这个实际 owner 下的保留意图及退休证明。

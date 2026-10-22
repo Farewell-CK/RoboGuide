@@ -85,6 +85,7 @@ def test_snapshot_intent_precedes_copy_and_restore_retains_original_active_histo
     assert len(manifest["snapshot_operations"]) == 1
     receipt = restore(destination, result["manifest_digest"], tmp_path / "restored", "restore")
     assert receipt["schema"] == "roboguide.restore-receipt/v0.8"
+    assert receipt["artifact_replica_placements"] == []
     recovered = tmp_path / "restored/stores/provider"
     assert (recovered / "content" / checksum).read_bytes() == (
         root / "content" / checksum

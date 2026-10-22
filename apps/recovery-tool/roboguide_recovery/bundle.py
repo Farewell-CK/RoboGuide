@@ -14,7 +14,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from . import snapshot_references
+from . import artifact_layout, snapshot_references
 from .profile import (
     IDENTIFIER,
     MAX_PROFILE_BYTES,
@@ -104,12 +104,21 @@ def _sync_tree(root: Path, budget: Budget) -> None:
         _sync(directory)
 
 
-def _check_cas_path(component: dict[str, Any], name: str, checksum: str) -> None:
+def _check_cas_path(
+    component: dict[str, Any],
+    name: str,
+    checksum: str,
+    profile_schema: str = "roboguide.recovery-profile/v0.1",
+) -> None:
     """Reject finalized CAS bytes whose actual hash differs from their storage identity."""
     parts = Path(name).parts
-    if component["kind"] == "artifact" and parts[0] == "blobs":
+    if name in artifact_layout.metadata_files(component, profile_schema):
+        return
+    if component["kind"] == "artifact" and parts[0] in {"blobs", "objects-v1"}:
+        expected = "objects-v1" if profile_schema == artifact_layout.SCHEMA else "blobs"
         if (
             len(parts) != 4
+            or parts[0] != expected
             or parts[1] != "sha256"
             or parts[2] != checksum[7:9]
             or parts[3] != checksum[7:]
@@ -399,7 +408,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         budget.check()
         if saved["command_id"] != command_id or saved["profile"] != profile:
             raise ValueError("original recovery command/source identity conflicts")
-        if profile["schema"] == snapshot_references.SCHEMA:
+        if snapshot_references.supports(profile["schema"]):
             with acquire_all(components, profile_schema=profile["schema"]):
                 snapshot_references.complete(components, saved, digest(previous), budget)
         return {
@@ -412,14 +421,14 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         validate_replica_sets(profile, components)
         snapshot_operations = (
             snapshot_references.prepare(profile, components, destination, command_id, budget)
-            if profile["schema"] == snapshot_references.SCHEMA
+            if snapshot_references.supports(profile["schema"])
             else []
         )
         partial = _target(destination, command_id)
         records = []
         for component in components:
             root, identifier = Path(component["root"]), component["component_id"]
-            databases, trees, _ = layout(component)
+            databases, trees, _ = layout(component, profile_schema=profile["schema"])
             for name in databases:
                 path = root / name
                 if component["kind"] == "memory" and name != "memory.sqlite3" and not path.exists():
@@ -462,12 +471,27 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                         "sqlite": _identity(target, budget),
                     }
                 )
+            for name in artifact_layout.metadata_files(component, profile["schema"]):
+                target = partial / "stores" / identifier / name
+                checksum, size = _copy(root / name, target, budget)
+                records.append(
+                    {
+                        "path": target.relative_to(partial).as_posix(),
+                        "kind": "content",
+                        "content_digest": checksum,
+                        "byte_size": size,
+                    }
+                )
             for name in trees:
+                if profile["schema"] == artifact_layout.SCHEMA:
+                    (partial / "stores" / identifier / name).mkdir(
+                        mode=0o700, parents=True, exist_ok=True
+                    )
                 for source_path in _walk(root / name, budget):
                     selected = source_path.relative_to(root)
                     target = partial / "stores" / identifier / selected
                     checksum, size = _copy(source_path, target, budget)
-                    _check_cas_path(component, selected.as_posix(), checksum)
+                    _check_cas_path(component, selected.as_posix(), checksum, profile["schema"])
                     records.append(
                         {
                             "path": target.relative_to(partial).as_posix(),
@@ -478,6 +502,8 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                     )
         record_map = {str(row["path"]): row for row in records}
         for component in components:
+            if component["kind"] == "artifact":
+                artifact_layout.validate_bundle(partial, component, record_map, profile["schema"])
             if component["kind"] == "memory":
                 _validate_memory_content_references(
                     partial, component["component_id"], record_map, budget
@@ -485,7 +511,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         manifest = {
             "schema": (
                 "roboguide.recovery-bundle/v0.2"
-                if profile["schema"] == snapshot_references.SCHEMA
+                if snapshot_references.supports(profile["schema"])
                 else "roboguide.recovery-bundle/v0.1"
             ),
             "command_id": command_id,
@@ -495,7 +521,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             "scope": "declared-stores-only",
             "physical_continuity": "not-established",
         }
-        if profile["schema"] == snapshot_references.SCHEMA:
+        if snapshot_references.supports(profile["schema"]):
             manifest["snapshot_operations"] = snapshot_operations
             snapshot_references.validate_bundle(partial, manifest, budget)
         raw = canonical(manifest)
@@ -514,7 +540,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             raise ValueError("recovery destination changed before publication")
         partial.rename(destination)
         _sync(destination.parent)
-        if profile["schema"] == snapshot_references.SCHEMA:
+        if snapshot_references.supports(profile["schema"]):
             verified = verify(destination, digest(raw), deadline_ns=budget.deadline_ns)
             budget.check()
             snapshot_references.complete(components, verified, digest(raw), budget)
@@ -592,18 +618,23 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
         ):
             raise ValueError("recovery content size or digest is invalid")
         component = identities[parts[1]]
-        databases, trees, _ = layout(component)
+        databases, trees, _ = layout(component, profile_schema=manifest["profile"]["schema"])
         selected = "/".join(parts[2:])
         if row["kind"] == "sqlite" and selected not in databases:
             raise ValueError("recovery SQLite path is not part of its original component")
-        if row["kind"] == "content" and not any(
-            tree == "." or Path(selected).is_relative_to(tree) for tree in trees
+        if (
+            row["kind"] == "content"
+            and not any(tree == "." or Path(selected).is_relative_to(tree) for tree in trees)
+            and selected
+            not in artifact_layout.metadata_files(component, manifest["profile"]["schema"])
         ):
             raise ValueError("recovery content path is outside its original managed trees")
         if _hash(bundle / name, budget) != (row["content_digest"], row["byte_size"]):
             raise ValueError("recovery content digest or size differs: " + name)
         if row["kind"] == "content":
-            _check_cas_path(component, selected, row["content_digest"])
+            _check_cas_path(
+                component, selected, row["content_digest"], manifest["profile"]["schema"]
+            )
         if row["kind"] == "sqlite":
             if _identity(bundle / name, budget) != row["sqlite"]:
                 raise ValueError("complete recovery SQLite identity differs: " + name)
@@ -618,19 +649,23 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 ) as connection:
                     validate_replica_storage(connection, manifest["profile"]["schema"])
     record_map = {str(row["path"]): row for row in files}
-    if (manifest["profile"]["schema"] == snapshot_references.SCHEMA) != (
+    if (snapshot_references.supports(manifest["profile"]["schema"])) != (
         manifest["schema"] == "roboguide.recovery-bundle/v0.2"
     ):
         raise ValueError("snapshot profile and bundle schema differ")
     if manifest["schema"] == "roboguide.recovery-bundle/v0.2":
         snapshot_references.validate_bundle(bundle, manifest, budget)
     for component in components:
+        if component["kind"] == "artifact":
+            artifact_layout.validate_bundle(
+                bundle, component, record_map, manifest["profile"]["schema"]
+            )
         if component["kind"] == "memory":
             _validate_memory_content_references(
                 bundle, component["component_id"], record_map, budget
             )
     for component in components:
-        databases, _, _ = layout(component)
+        databases, _, _ = layout(component, profile_schema=manifest["profile"]["schema"])
         required = (
             databases[:1]
             if component["kind"] == "memory"
@@ -641,6 +676,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.6",
                 "roboguide.recovery-profile/v0.7",
                 "roboguide.recovery-profile/v0.8",
+                "roboguide.recovery-profile/v0.9",
             }
             else databases
         )
@@ -660,11 +696,11 @@ def reconcile_snapshots(
 ) -> dict[str, Any]:
     """Retire original snapshot pins after verifying the complete original copy."""
     components = validate(profile)
-    if profile["schema"] != snapshot_references.SCHEMA:
+    if not snapshot_references.supports(profile["schema"]):
         raise ValueError("snapshot reconciliation requires explicit recovery profile v0.8")
     budget = Budget(profile)
     manifest = verify(bundle, expected_digest, deadline_ns=budget.deadline_ns)
-    if manifest["profile"]["schema"] != snapshot_references.SCHEMA:
+    if not snapshot_references.supports(manifest["profile"]["schema"]):
         raise ValueError("snapshot proof lacks its original explicit reference protocol")
     with acquire_all(components, profile_schema=profile["schema"]):
         receipts = snapshot_references.complete(components, manifest, expected_digest, budget)
@@ -679,7 +715,10 @@ def reconcile_snapshots(
 def abort_snapshots(profile: dict[str, Any], destination: Path, command_id: str) -> dict[str, Any]:
     """Irreversibly fence an unpublished synchronous copy; retain all original partial evidence."""
     components = validate(profile)
-    if profile["schema"] != snapshot_references.SCHEMA or IDENTIFIER.fullmatch(command_id) is None:
+    if (
+        not snapshot_references.supports(profile["schema"])
+        or IDENTIFIER.fullmatch(command_id) is None
+    ):
         raise ValueError("snapshot abort requires explicit v0.8 and its original command")
     budget = Budget(profile)
     with acquire_all(components, profile_schema=profile["schema"]):
@@ -705,7 +744,7 @@ def _replica_placements(manifest: dict[str, Any]) -> list[dict[str, Any]]:
             if (
                 len(parts) == 6
                 and parts[1] in group
-                and parts[2] == "blobs"
+                and parts[2] in {"blobs", "objects-v1"}
                 and row["kind"] == "content"
             ):
                 selected = Path(*parts[2:]).as_posix()
@@ -747,7 +786,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.8"
+        "roboguide.restore-receipt/v0.9"
+        if manifest["profile"]["schema"] == artifact_layout.SCHEMA
+        else "roboguide.restore-receipt/v0.8"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.8"
         else "roboguide.restore-receipt/v0.7"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.7"
@@ -802,7 +843,7 @@ def restore(
     for component in validate(manifest["profile"]):
         root = partial / "stores" / component["component_id"]
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        _, trees, _ = layout(component)
+        _, trees, _ = layout(component, profile_schema=manifest["profile"]["schema"])
         for name in trees:
             (root / name).mkdir(mode=0o700, parents=True, exist_ok=True)
     for row in manifest["files"]:
@@ -813,13 +854,14 @@ def restore(
             raise ValueError("restored SQLite differs from its original full authority")
     for component in validate(manifest["profile"]):
         root = partial / "stores" / component["component_id"]
-        _, _, locks = layout(component)
+        _, _, locks = layout(component, profile_schema=manifest["profile"]["schema"])
         if component["kind"] == "memory" and manifest["profile"]["schema"] in {
             "roboguide.recovery-profile/v0.4",
             "roboguide.recovery-profile/v0.5",
             "roboguide.recovery-profile/v0.6",
             "roboguide.recovery-profile/v0.7",
             "roboguide.recovery-profile/v0.8",
+            "roboguide.recovery-profile/v0.9",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:
@@ -850,14 +892,7 @@ def restore(
             for value in validate(manifest["profile"])
         ],
     }
-    if receipt_schema in {
-        "roboguide.restore-receipt/v0.2",
-        "roboguide.restore-receipt/v0.3",
-        "roboguide.restore-receipt/v0.4",
-        "roboguide.restore-receipt/v0.5",
-        "roboguide.restore-receipt/v0.6",
-        "roboguide.restore-receipt/v0.7",
-    }:
+    if "artifact_replica_sets" in manifest["profile"]:
         receipt["artifact_replica_placements"] = replica_placements
     with (partial / "restore-receipt.json").open("xb") as handle:
         handle.write(canonical(receipt))

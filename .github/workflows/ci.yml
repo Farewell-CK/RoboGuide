@@ -75,6 +75,14 @@ jobs:
           uv run --frozen python tools/quality/check_snapshot_reference_processes.py
           --output "${RUNNER_TEMP}/roboguide-snapshot-references"
 
+      - name: Build actual Artifact layout process probe
+        run: cargo build --locked -p artifact-store --example layout_probe
+
+      - name: Verify actual Artifact owner and cold restore with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_artifact_owner_processes.py
+          --skip-build --output "${RUNNER_TEMP}/roboguide-artifact-owner"
+
   python:
     name: Python
     runs-on: ubuntu-24.04
