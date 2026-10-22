@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block extrahead %}
+  {{ super() }}
+  {# Load the pinned local runtime before Material initializes diagram observers. #}
+  <script src="{{ 'javascripts/vendor/mermaid-11.12.2.min.js' | url }}"></script>
+{% endblock %}

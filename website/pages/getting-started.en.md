@@ -1,138 +1,71 @@
 # Getting started
 
-The shortest path to build, test, and run RoboGuide locally. All commands assume
-the repository root as the working directory.
+Begin with the control-plane demo requiring no network, model or device. Then verify the formal protocol and optionally connect MI.
 
 ## Prerequisites
 
-| Tool | Version | Notes |
-| --- | --- | --- |
-| Rust toolchain | pinned by `rust-toolchain.toml` | `cargo` picks it automatically |
-| Python | 3.13 | managed by `uv` (`pyproject.toml` pins `>=3.13,<3.14`) |
-| [uv](https://docs.astral.sh/uv/) | any recent version | Python environment & dependency management |
-| git | — | clone the repository |
-
-??? note "Optional: model access for Mission Intelligence"
-
-    Mission Intelligence uses the OpenAI Responses API by default. The API key is
-    read only from the `OPENAI_API_KEY` environment variable and never stored in
-    config files; remote plaintext HTTP is rejected by the security boundary —
-    use HTTPS or a localhost tunnel for production integration. Without a key,
-    the Rust demo paths below are unaffected.
-
-## Build and test
+Run commands from the repository root. `rust-toolchain.toml` pins Rust; `pyproject.toml` pins Python to the 3.13 series. Use uv for Python environments. Repository files define exact supported versions.
 
 ```bash
-# Rust core (11 crates + 5 application roots)
-cargo build --workspace
-cargo test --workspace          # all offline deterministic tests, no external services
-
-# Python (mission / evaluation / tools)
-uv sync --dev
-uv run pytest -q                # also fully offline
-```
-
-Quality gates (identical to CI):
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-uv run ruff format --check mission apps/mission-service tools/quality evaluation
-uv run ruff check mission apps/mission-service tools/quality evaluation
-uv run mypy --strict mission/src mission/tests apps/mission-service tools/quality
-uv run python tools/quality/check_python_function_docs.py mission apps/mission-service
+git clone https://github.com/Farewell-CK/RoboGuide.git
+cd RoboGuide
+cargo build --locked -p controller -p integration-server -p real-node-smoke
 ```
 
 ## Demo 1: control-plane vertical slice (no network)
 
-`apps/controller` is the minimal executable proof: registers 3 nodes, creates a
-Mission Group, runs match → schedule → propose → commit → bind, drives a FakeNode
-(including failure injection and recovery rebind), and finishes when the Group
-reaches `Completed → Released`.
-
 ```bash
-cargo run -p controller
+cargo run --locked -p controller
 ```
 
-Expected output includes `DEAIOS control slice produced N events`. Everything
-uses `VirtualClock` and in-memory state — no network or external services.
+At this content baseline, output is `DEAIOS control slice produced 21 events`. FakeNodes, VirtualClock and in-memory State exercise registration, commitment, execution and recovery. This demonstrates control flow, not devices.
 
 ## Demo 2: formal Node Protocol v0.4 handshake
 
-Start the Controller composition root (gRPC `:50051`, Control HTTP `:8080`,
-Artifact HTTP `:8090`):
+Choose free loopback ports and a new data directory. These example ports are local only; update both sides if occupied.
 
 ```bash
-cargo run -p integration-server
+mkdir -p /tmp/roboguide-quickstart
+cargo run --locked -p integration-server --   127.0.0.1:39151 /tmp/roboguide-quickstart/controller.sqlite3   127.0.0.1:39152 127.0.0.1:39153 /tmp/roboguide-quickstart/artifacts
 ```
 
-In another terminal, run the smoke probe for a real protocol handshake,
-registration, and heartbeat:
+In another terminal:
 
 ```bash
-cargo run -p real-node-smoke -- --endpoint 127.0.0.1:50051
+cargo run --locked -p real-node-smoke -- --endpoint http://127.0.0.1:39151   --node-id docs-protocol-smoke
 ```
 
-Expected output: `registered node=... session=... lease=... protocol=v0.4 ...`.
+Successful output contains `registered node=docs-protocol-smoke`, a session and `protocol=v0.4`. The isolated test Controller registers an explicitly synthetic software Node; no Local EAIOS, model or device runs. Stop the server with Ctrl+C. Keep its data for inspection rather than reusing it in production.
 
-The `--simulate-execute` mode additionally submits a synthetic single-role
-Mission through the full Controller dispatch loop (session-unique capability
-contract, never selects an existing Node, performs no hardware I/O):
-
-```bash
-cargo run -p real-node-smoke -- --endpoint 127.0.0.1:50051 \
-  --control-endpoint http://127.0.0.1:8080 --simulate-execute
-```
+**Common failures:** change occupied ports; for writer-busy databases check your existing process or choose a new directory; for admission failures inspect exact contract/TLS/config instead of deleting SQL history.
 
 ## Demo 3: Mission Intelligence service
 
-```bash
-export OPENAI_API_KEY=sk-...        # optional, see note above
-uv run mission-service              # listens on 127.0.0.1:8070 by default
-```
-
-Submit a text instruction and follow the clarification/draft/approval loop:
+This optional path needs valid model configuration and your own Controller. Documentation validation runs only the model-free examples and does not claim live-model acceptance.
 
 ```bash
-curl --fail-with-body -X POST http://127.0.0.1:8070/v1/mission-requests \
-  -H 'Content-Type: application/json' \
-  -d '{"instruction": "Move the cup from the living room to the kitchen"}'
+uv sync --dev --frozen
+uv run mission-service
 ```
 
-Use the returned request id with `GET /v1/mission-requests/{id}` to poll,
-`POST .../{id}/messages` to answer blocking clarifications, and `.../approve`
-to approve a draft. Configuration lives in `config/mission.toml` and
-`config/mission-service.toml`.
-
-## Eval Harness
-
-The evaluation framework is independent of the core code; run the environment
-self-check first:
+Inspect `config/mission.toml` and `config/mission-service.toml`, supplying credentials through the configured environment variables. In your isolated deployment:
 
 ```bash
-uv run roboguide-eval doctor --spec evaluation/specs/e1/<spec>.yaml --config evaluation/local.yaml
+curl --fail-with-body http://127.0.0.1:8070/v1/mission-requests   -H 'Content-Type: application/json'   -d '{"instruction":"Produce a file and independently verify its contents"}'
 ```
 
-Machine-specific Conda environments, working directories, and credentials stay
-in the Git-ignored `evaluation/local.yaml` (template: `local.yaml.example`) or
-`ROBOGUIDE_EVAL_*` environment variables.
+Results depend on published Catalog, grounding, model and deployment. Clarification/approval may be required; the example is not guaranteed executable. Use the Request ID to observe original progress and answer questions. Uncertain outcomes do not authorize duplicate submission.
+
+## Checks and next steps
+
+Follow repository AGENTS for maintained fmt, Clippy, pytest, Ruff, mypy and function-documentation scopes. Continue with [integration](integration-guide.md) or [Eval Harness](modules/evaluation.md).
 
 ## Local preview of this documentation site
 
 ```bash
 cd website
-uv run python sync_docs.py
-uvx --from mkdocs --with-requirements requirements.txt mkdocs serve
+python sync_docs.py
+uvx --from mkdocs --with-requirements requirements.txt mkdocs serve -a 127.0.0.1:8001
 ```
 
-Open <http://localhost:8000>. The build is strict: any broken internal link
-fails the build.
-
-## Next steps
-
-- Read the [architecture tour](architecture-tour.md) for layer responsibilities
-  and key semantic boundaries
-- Go crate by crate through the [module maps](modules/domain-ports.md) (each page
-  lists key types, main-flow APIs, and test themes)
-- When you need to know *why* a semantic is the way it is, check the
-  [ADR index](docs/decisions/index.md)
+See [website maintenance](https://github.com/Farewell-CK/RoboGuide/blob/main/website/README.md) for the complete build and verification procedure.
