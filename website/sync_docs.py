@@ -1,6 +1,6 @@
 """Synchronize curated repository documents into the MkDocs site source tree.
 
-Both the Cloudflare Pages build and the local preview run this script before
+Both the Cloudflare Workers build and the local preview run this script before
 ``mkdocs build --strict``. Responsibilities and invariants:
 
 - Mirror an explicit, curated list of repository documents into
@@ -31,6 +31,15 @@ import shutil
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
+
+from site_support import (
+    legacy_anchors,
+    pin_links,
+    source_revision,
+    tracked_paths,
+    validate_pairs,
+    write_reference,
+)
 
 WEBSITE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = WEBSITE_DIR.parent
@@ -69,152 +78,50 @@ ADR_NAV_TITLE = "架构决策记录（ADR）"
 #: children are emitted indented by four spaces because Python-Markdown (and
 #: therefore literate-nav) only nests list items at that indent width.
 NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
-    ("首页", "index.md", ()),
+    ("项目概览", "index.md", ()),
     ("快速开始", "getting-started.md", ()),
-    ("架构导览", "architecture-tour.md", ()),
     (
-        "模块地图",
-        "modules/domain-ports.md",
+        "架构与概念",
+        "architecture-tour.md",
         (
-            ("Control Plane", "modules/control.md"),
+            ("核心概念", "concepts.md"),
+            ("执行生命周期", "lifecycle.md"),
+            ("State 与 Memory", "state-memory.md"),
+            ("V2 架构手册", "docs/architecture/v2/architecture-handbook.md"),
+        ),
+    ),
+    (
+        "开发与接入",
+        "integration-guide.md",
+        (
+            ("模块地图", "modules/domain-ports.md"),
+            ("Mission Intelligence", "modules/mission.md"),
             ("Mission Orchestration", "modules/orchestration.md"),
+            ("Control Plane", "modules/control.md"),
             ("Distributed Runtime", "modules/runtime.md"),
             ("State & Memory", "modules/state.md"),
             ("Integration 与 Node Service", "modules/integration-node-service.md"),
-            ("Mission Intelligence", "modules/mission.md"),
             ("Eval Harness 与本地集成", "modules/evaluation.md"),
         ),
     ),
-    ("文档索引", "docs/index.md", ()),
+    ("部署与运维", "operations.md", ()),
     (
-        "项目范围",
-        "docs/project-goals-and-mvp.md",
+        "状态与参考",
+        "status.md",
         (
-            ("MVP 定义", "docs/mvp-definition.md"),
-            ("待定决策清单", "docs/implementation-backlog.md"),
+            ("版本与构建来源", "reference.md"),
+            ("ADR 主题索引", "decisions.md"),
+            ("原始文档档案", "archives.md"),
+            ("ADR 全索引", "docs/decisions/index.md"),
         ),
     ),
-    (
-        "架构",
-        "docs/architecture/index.md",
-        (
-            ("V2 架构基线", "docs/architecture/v2/index.md"),
-            ("V1.1 历史架构", "docs/architecture/v1.1/index.md"),
-            ("架构图索引", "docs/images/index.md"),
-        ),
-    ),
-    (ADR_NAV_TITLE, "docs/decisions/index.md", ()),
-    (
-        "开发",
-        "docs/development/index.md",
-        (
-            ("编码规范", "docs/development/coding-standards.md"),
-            (
-                "全部非发布整改计划",
-                "docs/development/roboguide-software-completion-plan-2026-10-15.md",
-            ),
-            ("分支同步与剩余整改", "docs/development/roboguide-integration-status-2026-10-20.md"),
-            ("全分支与整改存量复核", "docs/development/roboguide-branch-audit-2026-10-22.md"),
-            ("可执行部署 profile", "tools/deployment/index.md"),
-            ("实际部署配置验收", "docs/development/acceptance/2026-10-21-deployment-profile.md"),
-            (
-                "内容回收与恢复验收",
-                "docs/development/acceptance/2026-10-20-content-reclamation-and-recovery.md",
-            ),
-            ("Controller 写入恢复", "docs/development/controller-write-recovery-v0.1.md"),
-            ("写入恢复验收", "docs/development/acceptance/2026-10-20-authority-write-recovery.md"),
-            ("运行指标与告警", "docs/development/observability-v0.1.md"),
-            ("原生监控验收", "docs/development/acceptance/2026-10-20-observability.md"),
-            ("副本证书轮换", "docs/development/replica-certificate-rotation-v0.1.md"),
-            ("副本证书验收", "docs/development/acceptance/2026-10-20-replica-certificates.md"),
-            ("完整副本静止恢复", "docs/development/acceptance/2026-10-20-replica-cold-recovery.md"),
-            ("Controller worker 隔离", "docs/development/controller-worker-isolation-v0.1.md"),
-            ("Operator 网络边界", "docs/development/operator-network-bounds-v0.1.md"),
-            ("运行期计划修订与原目标", "docs/development/runtime-plan-revision-v0.1.md"),
-            ("运行期修订验收", "docs/development/acceptance/2026-10-20-runtime-plan-revision.md"),
-            ("运行期 MI 工作", "docs/development/runtime-mission-intelligence-v0.2.md"),
-            (
-                "文件进程与接收身份",
-                "docs/development/acceptance/2026-10-20-file-process-memory-ownership.md",
-            ),
-            (
-                "原属组 Memory 计划修订",
-                "docs/development/acceptance/2026-10-20-scoped-memory-plan-revision.md",
-            ),
-            (
-                "Memory writer 与恢复",
-                "docs/development/acceptance/2026-10-21-memory-provider-writer-recovery.md",
-            ),
-            (
-                "Memory 内容引用生命周期",
-                "docs/development/acceptance/2026-10-21-memory-content-reference-lifecycle.md",
-            ),
-            (
-                "恢复包活动内容引用",
-                "docs/development/acceptance/2026-10-21-recovery-active-content-reference.md",
-            ),
-            (
-                "运行期 MI 与 Memory 整链",
-                "docs/development/acceptance/2026-10-21-runtime-mi-scoped-memory.md",
-            ),
-            (
-                "有界观测集成验收",
-                "docs/development/acceptance/2026-10-20-bounded-observation-integration.md",
-            ),
-            (
-                "运行期 MI 自动发现",
-                "docs/development/acceptance/2026-10-20-runtime-mi-discovery.md",
-            ),
-            ("运行期 MI 恢复验收", "docs/development/acceptance/2026-10-20-runtime-mi-recovery.md"),
-            (
-                "运行期 MI 验收",
-                "docs/development/acceptance/2026-10-20-runtime-mission-intelligence.md",
-            ),
-            (
-                "新增执行合同集成验收",
-                "docs/development/acceptance/2026-10-20-current-execution-contract-integration.md",
-            ),
-            (
-                "Operator 网络边界验收",
-                "docs/development/acceptance/2026-10-20-operator-network-isolation.md",
-            ),
-            (
-                "Worker 与 transfer 验收",
-                "docs/development/acceptance/2026-10-20-worker-and-transfer-liveness.md",
-            ),
-            ("运行时可靠性故障矩阵", "docs/development/runtime-reliability-fault-matrix.md"),
-            ("ADR 遗留核验", "docs/development/adr-follow-up-register.md"),
-            ("Controller 事务性能", "docs/development/controller-persistence-performance.md"),
-            ("Controller 复制软件部署", "docs/development/controller-replication.md"),
-            ("C1 前生产链准入审计", "docs/development/pre-c1-readiness-audit-2026-09-15.md"),
-            ("MI 协调指导验证", "docs/development/mi-coordination-guidance-validation.md"),
-            ("设备扩展规范 v0.1", "docs/extensions/device-extension-conformance-v0.1.md"),
-            ("设备扩展规范 v0.2", "docs/extensions/device-extension-conformance-v0.2.md"),
-        ),
-    ),
-    ("Mission Intelligence", "mission/index.md", ()),
-    (
-        "Eval Harness",
-        "evaluation/index.md",
-        (
-            ("E1 公平性集成计划", "evaluation/docs/E1_FAIRNESS_INTEGRATION_PLAN.md"),
-            ("E1 测试框架就绪审计", "evaluation/docs/E1_HARNESS_READINESS_AUDIT.md"),
-            ("E1 公平性基础", "evaluation/docs/e1-fairness-foundation.md"),
-            ("E1 公平性评审挑战", "evaluation/docs/e1-fairness-reviewer-challenges.md"),
-            ("评估证据有效性规范", "evaluation/docs/evaluation-evidence-validity.md"),
-            ("F01-F07 集成回归", "evaluation/docs/f01-f07-integration-regression.md"),
-        ),
-    ),
-    ("Robonix 地图适配器", "integrations/robonix-map-service/index.md", ()),
-    ("Habitat Local EAIOS 桥", "integrations/habitat-local-eaios/index.md", ()),
-    ("仓库 README", "repository-overview.md", ()),
 )
 
 LINK_PATTERN = re.compile(r"\]\((?P<target>[^()\s]+)(?P<title>\s+\"[^\"]*\")?\)")
 SKIP_TARGET_PREFIXES = ("#", "http://", "https://", "mailto:", "data:")
 HEADING_PATTERN = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
-STATUS_PATTERN = re.compile(r"^\s*[-*]\s*(?:Status|状态)\s*[:：]\s*(.+?)\s*$", re.MULTILINE)
-DATE_PATTERN = re.compile(r"^\s*[-*]\s*(?:Date|日期)\s*[:：]\s*(.+?)\s*$", re.MULTILINE)
+STATUS_PATTERN = re.compile(r"^\s*(?:[-*]\s*)?(?:Status|状态)\s*[:：]\s*(.+?)\s*$", re.MULTILINE)
+DATE_PATTERN = re.compile(r"^\s*(?:[-*]\s*)?(?:Date|日期)\s*[:：]\s*(.+?)\s*$", re.MULTILINE)
 ADR_NUMBER_PATTERN = re.compile(r"^(\d{4})-")
 ADR_TITLE_PREFIX_PATTERN = re.compile(r"^ADR-\d+\s*[:：]?\s*")
 
@@ -241,11 +148,17 @@ def build_file_mapping() -> dict[str, str]:
         SystemExit: If a sync-plan source does not exist in the repository.
     """
     mapping: dict[str, str] = {}
+    tracked = tracked_paths()
     for source, destination in COPY_PLAN:
         source_path = REPO_ROOT / source
         if source_path.is_dir():
             for file_path in sorted(source_path.rglob("*")):
                 relative = file_path.relative_to(source_path)
+                repo_path = file_path.relative_to(REPO_ROOT).as_posix()
+                if repo_path not in tracked or repo_path.startswith(
+                    ("docs/meetings/", "docs/tmp/")
+                ):
+                    continue
                 if not file_path.is_file() or any(part.startswith(".") for part in relative.parts):
                     continue
                 if file_path.suffix.lower() not in COPY_SUFFIXES:
@@ -290,7 +203,7 @@ def github_url(repo_posix: str, is_directory: bool) -> str:
     """
     quoted = "/".join(urllib.parse.quote(part, safe="") for part in repo_posix.split("/"))
     kind = "tree" if is_directory else "blob"
-    return f"{GITHUB_BASE}/{kind}/main/{quoted}"
+    return f"{GITHUB_BASE}/{kind}/{source_revision()}/{quoted}"
 
 
 def resolve_site_relative(
@@ -342,6 +255,11 @@ def rewrite_target(
     """
     if not target or target.startswith(SKIP_TARGET_PREFIXES):
         return None
+    for prefix in ("/data/workspace/code/RoboGuide/", "/home/duchaoke/workspace/code/RoboGuide/"):
+        if target.startswith(prefix):
+            source, _, line = target.removeprefix(prefix).rpartition(":")
+            if line.isdigit() and (REPO_ROOT / source).is_file():
+                return f"{github_url(source, is_directory=False)}#L{line}"
     path_part, anchor_separator, anchor = target.partition("#")
     if not path_part:
         return None
@@ -409,6 +327,10 @@ def rewrite_markdown_file(
         return f"]({rewritten}{title})"
 
     rewritten_text = LINK_PATTERN.sub(replace, text)
+    rewritten_text = rewritten_text.replace("[English](architecture-handbook.en.md)", "")
+    rewritten_text = rewritten_text.replace("[中文](architecture-handbook.md)", "")
+    rewritten_text = pin_links(rewritten_text)
+    rewritten_text = rewritten_text.replace("#原生-workload-与观测", "#workload")
     if rewritten_text != text:
         site_file.write_text(rewritten_text, encoding="utf-8", newline="\n")
 
@@ -429,7 +351,12 @@ def copy_local_pages() -> list[str]:
         relative = file_path.relative_to(LOCAL_PAGES_DIR)
         destination = SITE_DOCS_DIR / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(file_path, destination)
+        destination.write_text(
+            legacy_anchors(relative.as_posix())
+            + "\n\n"
+            + pin_links(file_path.read_text(encoding="utf-8")),
+            encoding="utf-8",
+        )
         copied.append(relative.as_posix())
     if not copied:
         raise SystemExit(f"local pages directory contains no markdown files: {LOCAL_PAGES_DIR}")
@@ -494,6 +421,24 @@ def write_adr_overview(summaries: list[AdrSummary]) -> Path:
             f"| [ADR-{adr.number}]({filename}) | {adr.title} | {adr.status} | {adr.date} |"
         )
     lines.append("")
+    english = [
+        "# Architecture decision catalog",
+        "",
+        "Original decisions retain their source language and status. "
+        "English titles identify topics; "
+        "[bilingual decision summaries](../../decisions.md) explain the main boundaries. "
+        "This catalog is generated.",
+        "",
+        "| ADR | Topic | Original status |",
+        "| --- | --- | --- |",
+    ]
+    for adr in summaries:
+        filename = Path(adr.site_path).name
+        topic = Path(filename).stem.partition("-")[2].replace("-", " ")
+        english.append(f"| [ADR-{adr.number}]({filename}) | {topic} | {adr.status} |")
+    (SITE_DOCS_DIR / "docs" / "decisions" / "index.en.md").write_text(
+        "\n".join(english) + "\n", encoding="utf-8"
+    )
     destination = SITE_DOCS_DIR / "docs" / "decisions" / "index.md"
     destination.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     return destination
@@ -568,6 +513,7 @@ def main() -> int:
         Process exit code: 0 on success, 1 when generated link targets are
         missing after rewriting.
     """
+    validate_pairs(LOCAL_PAGES_DIR)
     mapping = build_file_mapping()
     copy_sources(mapping)
     local_pages = copy_local_pages()
@@ -582,6 +528,7 @@ def main() -> int:
         rewritten_pages += 1
     summaries = parse_adr_summaries(mapping)
     write_adr_overview(summaries)
+    write_reference(SITE_DOCS_DIR)
     write_summary(summaries)
     for site_file, targets in sorted(broken_by_file.items()):
         for target in sorted(targets):

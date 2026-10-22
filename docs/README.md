@@ -1,5 +1,7 @@
 # 文档索引
 
+面向读者的[架构手册](architecture/v2/architecture-handbook.md)先解释职责、对象与完整闭环；本页及已接受 ADR 保持原权威。
+
 ## 当前架构
 
 - [`architecture/v2/RoboGuide_Architecture_Baseline_V2.docx`](architecture/v2/RoboGuide_Architecture_Baseline_V2.docx)：当前架构权威源文档，包含 V2 总体架构图；

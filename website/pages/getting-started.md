@@ -1,125 +1,71 @@
 # 快速开始
 
-本页给出在本地构建、测试 RoboGuide 并跑通三条演示路径的最短路径。命令均以仓库根目录为工作目录。
+从不需要网络、模型或设备的控制平面演示开始。再验证正式协议，最后按需接入 MI。
 
 ## 前置条件
 
-| 工具 | 版本 | 说明 |
-| --- | --- | --- |
-| Rust toolchain | 由 `rust-toolchain.toml` 固定 | `cargo` 自动选用 |
-| Python | 3.13 | 由 `uv` 管理（`pyproject.toml` 固定 `>=3.13,<3.14`） |
-| [uv](https://docs.astral.sh/uv/) | 任意近代版本 | Python 环境与依赖管理 |
-| git | —— | 克隆仓库 |
-
-??? note "可选：Misson Intelligence 的模型访问"
-
-    Mission Intelligence 默认配置使用 OpenAI Responses API。API Key 只从环境变量
-    `OPENAI_API_KEY` 读取，绝不写入配置文件；远程明文 HTTP 会被安全边界拒绝，
-    生产联调应使用 HTTPS 或 localhost 隧道。没有模型 Key 时，下文的
-    Rust 演示路径不受影响。
-
-## 构建与测试
+仓库根目录运行命令。Rust 版本由 `rust-toolchain.toml` 固定，Python 由 `pyproject.toml` 固定为 3.13 系列；Python 环境使用 uv。具体锁定版本以仓库文件为准。
 
 ```bash
-# Rust 核心（11 个 crate + 5 个应用）
-cargo build --workspace
-cargo test --workspace          # 全部离线确定性测试，无需任何外部服务
-
-# Python（mission / evaluation / 工具）
-uv sync --dev
-uv run pytest -q                # 同样全部离线
-```
-
-质量门禁（与 CI 相同）：
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-uv run ruff format --check mission apps/mission-service tools/quality evaluation
-uv run ruff check mission apps/mission-service tools/quality evaluation
-uv run mypy --strict mission/src mission/tests apps/mission-service tools/quality
-uv run python tools/quality/check_python_function_docs.py mission apps/mission-service
+git clone https://github.com/Farewell-CK/RoboGuide.git
+cd RoboGuide
+cargo build --locked -p controller -p integration-server -p real-node-smoke
 ```
 
 ## 演示路径 1：控制平面纵向切片（无网络）
 
-`apps/controller` 是最小可执行证据：注册 3 个节点、创建 Mission Group、
-匹配 → 调度 → 提案 → 提交 → 绑定、驱动 FakeNode（含故障注入与恢复 rebind）、
-直至 Group 进入 `Completed → Released`。
-
 ```bash
-cargo run -p controller
+cargo run --locked -p controller
 ```
 
-预期输出包含 `DEAIOS control slice produced N events`。全过程使用
-`VirtualClock` 与内存 State，不需要任何网络或外部服务。
+在本页核对基线中输出 `DEAIOS control slice produced 21 events`。演示使用 FakeNode、VirtualClock 和内存 State，包含注册、承诺、执行和恢复。它证明控制链，不创建真实设备。
 
 ## 演示路径 2：正式 Node Protocol v0.4 握手
 
-启动 Controller 组合根（gRPC `:50051`、Control HTTP `:8080`、Artifact HTTP `:8090`）：
+为本次运行选择未占用的 loopback 端口和新数据目录。以下端口仅用于本地示例；若已占用，修改两端参数。
 
 ```bash
-cargo run -p integration-server
+mkdir -p /tmp/roboguide-quickstart
+cargo run --locked -p integration-server --   127.0.0.1:39151 /tmp/roboguide-quickstart/controller.sqlite3   127.0.0.1:39152 127.0.0.1:39153 /tmp/roboguide-quickstart/artifacts
 ```
 
-另开终端，用 smoke 探针执行真实的协议握手、注册与心跳：
+另开终端执行：
 
 ```bash
-cargo run -p real-node-smoke -- --endpoint 127.0.0.1:50051
+cargo run --locked -p real-node-smoke -- --endpoint http://127.0.0.1:39151   --node-id docs-protocol-smoke
 ```
 
-预期输出 `registered node=... session=... lease=... protocol=v0.4 ...`。
+成功输出包含 `registered node=docs-protocol-smoke`、session 与 `protocol=v0.4`。这会在独立测试 Controller 上注册一个明确的合成软件 Node，不运行 Local EAIOS、模型或设备。结束后在服务终端按 Ctrl+C；保留该目录作为本次日志，不复用到生产。
 
-`--simulate-execute` 模式额外提交一个单角色合成 Mission 走完整
-Controller 派发回路（使用会话唯一能力契约，不会选中已有 Node，不做任何硬件 I/O）：
-
-```bash
-cargo run -p real-node-smoke -- --endpoint 127.0.0.1:50051 \
-  --control-endpoint http://127.0.0.1:8080 --simulate-execute
-```
+**常见失败：**端口占用时换端口；数据库 writer busy 时检查是否仍有自己的旧进程持有，使用新目录；握手拒绝时检查 exact contract/TLS/config，不删除原 SQL history。
 
 ## 演示路径 3：Mission Intelligence 服务
 
-```bash
-export OPENAI_API_KEY=sk-...        # 可选，见上文说明
-uv run mission-service              # 默认监听 127.0.0.1:8070
-```
-
-提交一条文本指令并观察澄清/草案/审批闭环：
+这条路径需要有效的模型配置和自己的 Controller；本轮只验证无模型示例，不将它标为已执行的模型验收。
 
 ```bash
-curl --fail-with-body -X POST http://127.0.0.1:8070/v1/mission-requests \
-  -H 'Content-Type: application/json' \
-  -d '{"instruction": "让机器人把客厅的杯子拿到厨房"}'
+uv sync --dev --frozen
+uv run mission-service
 ```
 
-返回的 request id 可用于 `GET /v1/mission-requests/{id}` 轮询、
-`POST .../{id}/messages` 回答阻塞澄清、`.../approve` 审批草案。
-配置位于 `config/mission.toml` 与 `config/mission-service.toml`。
-
-## Eval Harness
-
-评估框架独立于核心代码，先做环境自检再跑实验：
+检查 `config/mission.toml` 与 `config/mission-service.toml`，按配置通过环境变量提供凭证。在你自己的隔离部署中提交文本请求：
 
 ```bash
-uv run roboguide-eval doctor --spec evaluation/specs/e1/<spec>.yaml --config evaluation/local.yaml
+curl --fail-with-body http://127.0.0.1:8070/v1/mission-requests   -H 'Content-Type: application/json'   -d '{"instruction":"生成一份文件并独立验证内容"}'
 ```
 
-机器相关的 Conda 环境、工作目录、凭据保存在 Git 忽略的 `evaluation/local.yaml`
-（模板见 `local.yaml.example`）或 `ROBOGUIDE_EVAL_*` 环境变量。
+结果依赖已发布 Catalog、grounding、模型和部署，可能需要澄清或审批，不保证示例语句一定可执行。Request ID 用于原进度查询和回答，不把 uncertain outcome 当成可安全重复提交。
+
+## 质量检查与下一步
+
+按仓库 AGENTS 的维护范围执行 fmt、Clippy、pytest、Ruff、mypy 和函数文档检查。首次接入另读[开发与接入](integration-guide.md)；实验编排见[Eval Harness](modules/evaluation.md)。
 
 ## 本文档站本地预览
 
 ```bash
 cd website
-uv run python sync_docs.py
-uvx --from mkdocs --with-requirements requirements.txt mkdocs serve
+python sync_docs.py
+uvx --from mkdocs --with-requirements requirements.txt mkdocs serve -a 127.0.0.1:8001
 ```
 
-浏览器打开 <http://localhost:8000>。构建是严格模式：任何内部坏链都会导致构建失败。
-
-## 下一步
-
-- 读[架构导览](architecture-tour.md)理解各层职责与关键语义边界
-- 按[模块地图](modules/domain-ports.md)逐个 crate 深入（每页列出关键类型、主流程 API 与测试主题）
-- 需要理解某条语义"为什么这样设计"时，查 [ADR 索引](docs/decisions/index.md)
+完整构建与检查见[网站维护说明](https://github.com/Farewell-CK/RoboGuide/blob/main/website/README.md)。

@@ -1,0 +1,14 @@
+{
+  "code_commit": "cd1faaf9d30e18d71fac82960e370540fe857aca",
+  "reviewed_at": "2026-10-22",
+  "versions": {
+    "MissionPlan (configured default)": "roboguide.mission-plan/v0.8",
+    "MissionPlan (explicit Memory)": "roboguide.mission-plan/v0.9",
+    "Node journal (storage fence)": "v13",
+    "Node Protocol": "roboguide.node-protocol/v0.4",
+    "Node Contract (explicit safety/Memory profile)": "roboguide.node.v0.12",
+    "Node config (latest explicit profile)": "roboguide.node-config/v0.13",
+    "Controller checkpoint": "roboguide.controller-checkpoint/v49",
+    "Capability Catalog": "roboguide.capability-catalog/v0.3"
+  }
+}

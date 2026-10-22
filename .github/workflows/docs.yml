@@ -1,0 +1,57 @@
+name: Documentation
+
+on:
+  pull_request:
+    paths: ['website/**', 'docs/**', 'README.md', 'contracts/**', 'config/mission.toml', 'core/**', '.github/workflows/docs.yml']
+  push:
+    branches: [main]
+    paths: ['website/**', 'docs/**', 'README.md', 'contracts/**', 'config/mission.toml', 'core/**', '.github/workflows/docs.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+      - name: Check maintained documentation code
+        run: |
+          uv run --frozen ruff format --check website
+          uv run --frozen ruff check website
+          uv run --frozen mypy --strict website
+          uv run --frozen python tools/quality/check_python_function_docs.py website
+          PYTHONPATH=website uv run --frozen python -m unittest discover -s website/tests
+      - name: Build and inspect both languages
+        env:
+          DISABLE_MKDOCS_2_WARNING: 'true'
+        run: |
+          python website/sync_docs.py
+          uvx --from mkdocs --with-requirements website/requirements.txt mkdocs build --strict -f website/mkdocs.yml
+          python website/check_site.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: website/browser-tests/package-lock.json
+      - name: Check diagrams, navigation and responsive reading
+        run: |
+          npm ci --ignore-scripts --prefix website/browser-tests
+          cd website/browser-tests
+          npx playwright install --with-deps chromium
+          python -m http.server 39801 --bind 127.0.0.1 --directory ../site > /tmp/docs-preview.log 2>&1 &
+          npm test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: documentation-preview
+          path: |
+            website/site
+            /tmp/roboguide-docs-screenshots

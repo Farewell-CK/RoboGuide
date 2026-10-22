@@ -70,7 +70,9 @@ file-03 重启后尝试使用已失效 Node leaf，被真实生命周期拒绝�
 effect/mandatory authority 及实际 Archive 重放检查。Python 全量 **3057 passed，
 0 skipped，488.54 秒**，真实 Python 3.9 bridge 检查不启动 Habitat/模型；inventory
 head 修改后恢复工具 **81 passed**。Clippy、私有 Rust 文档、493/494 文件格式/Ruff、
-324 源文件 strict mypy、函数文档和 MkDocs strict 检查通过，最终远程 CI 独立运行。
+324 源文件 strict mypy、函数文档和 MkDocs strict 检查通过。
+`cd1faaf` 的[完整远程 CI](https://github.com/Farewell-CK/RoboGuide/actions/runs/39784367836)
+已成功，包含新增实际 Archive、文件/Catalog 重放及冷恢复门禁。
 原日志保存在该证据根目录的 `archive-*` 文件；两项 Rust ignored 保留其原含义。
 
 尚须全部完成：未发布 Archive 的原 copier fence/明确 abort，接收归档的显式退休与
