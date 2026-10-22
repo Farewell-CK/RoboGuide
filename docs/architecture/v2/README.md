@@ -1,6 +1,7 @@
 # RoboGuide V2 架构基线
 
 面向读者的[架构手册](architecture-handbook.md)先解释职责、对象与完整闭环；本页及已接受 ADR 保持原权威。
+各段中的历史版本记录原切片引入时的合同；当前实现与剩余缺口见手册及最新存量核对，不能将旧段落单独当作现有能力清单。
 
 [ADR-0141](../../decisions/0141-unconfigured-resource-quota-usage-view.md)使 read-only quota view
 同时暴露现有 claims 与配置限额；尚未设限的 tenant/category 保留真实用量，并将上限/剩余量标为
