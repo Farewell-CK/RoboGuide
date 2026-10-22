@@ -74,6 +74,7 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
   await page.goto(base + '/architecture-tour/', { waitUntil: 'networkidle' });
   const english = page.locator('.md-select__link', { hasText: 'English' });
   assert.match(await english.getAttribute('href'), /en\/architecture-tour\/?$/);
+  await page.locator('.md-select > button').hover();
   await english.click();
   assert.match(new URL(page.url()).pathname, /^\/en\/architecture-tour\/?$/);
   await page.locator('[data-md-component="search-query"]').fill('Memory');
@@ -83,7 +84,7 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
   assert.ok(await page.evaluate(() => document.activeElement !== document.body), 'keyboard focus missing');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(base + '/', { waitUntil: 'networkidle' });
-  await page.locator('label[for="__drawer"]').first().click();
+  await page.locator('.md-header label[for="__drawer"]').click();
   assert.equal(await page.locator('#__drawer').isChecked(), true, 'mobile drawer');
   assert.deepEqual(errors, [], 'browser JavaScript errors');
   assert.equal(requests, 0, 'unexpected external CDN requests');
