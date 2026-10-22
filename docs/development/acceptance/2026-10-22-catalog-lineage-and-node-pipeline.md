@@ -90,6 +90,14 @@ receipt 267 us，health age 1154 ms；diagnostic dropped counter 为 0。两次�
 严格类型检查 316 个源文件通过。格式/Ruff、Clippy all-targets/all-features、私有 Rustdoc
 与 strict MkDocs 门禁均通过。新增原生产者及冷恢复实际门禁纳入 CI。
 
+首轮远端 [CI 39745505640](https://github.com/Farewell-CK/RoboGuide/actions/runs/39745505640)
+的 Python、Rust tests/Clippy/Rustdoc 通过，但原 quota process checker 仅接受 wrapper
+v47，提前拒绝 v48，后续 native gates 未运行。显式支持列表已补 v48，保留 v47 原
+语义；实际 `catalog-wrapper-quota-regression/` 通过相同真实 binary、mTLS、SQL 原 revision
+2/两条 durable command 与重启，Node 始终为 0。原 revision migration gate 的当前
+wrapper 断言同步更新；存储 probe 的历史显式 schema 默认不改写。此处不把首轮 CI
+写成成功，后续完整 CI 单独记录。
+
 ## 继续必需
 
 Archive、Controller/Artifact/Raft Snapshot 和在线 Replica 的实际引用生产/退休与内容

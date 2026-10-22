@@ -224,7 +224,10 @@ def run(output: Path, skip_build: bool, binary_path: Path | None) -> dict[str, A
         .decode()
         .strip()
     )
-    if schema != "roboguide.controller-checkpoint/v47":
+    if schema not in {
+        "roboguide.controller-checkpoint/v47",
+        "roboguide.controller-checkpoint/v48",
+    }:
         raise ValueError(f"unexpected Controller application schema {schema}")
     http_port, artifact_port, grpc_port = port(), port(), port()
     origin = f"https://127.0.0.1:{http_port}"
