@@ -1,0 +1,42 @@
+sequenceDiagram
+  %% roboguide:min-width: 1440px
+  autonumber
+  participant MI as Mission Service
+  participant APP as Controller Application
+  participant C as Orchestration / Control / Runtime
+  participant N as Node Service
+  participant L as Local EAIOS / provider
+  participant V as 独立 verifier
+  MI->>APP: 提交完整 MissionPlan 与原请求依据
+  APP->>C: 接纳 / 创建 Group / Ready Task
+  C->>C: Match → Schedule → Propose → Commit → Bind
+  Note over APP,C: Proposal 不占资源；Commit / attempt / intent 随权威事务持久化
+  opt Task 声明 Memory prerequisites
+    APP->>N: 持久 Prepare / import 命令
+    N->>L: 原 Task / attempt 的导入与当前内容查询
+    L-->>N: 原 provider / bytes / use 证明
+    N-->>APP: durable ACK / preparation / availability / use
+    Note over APP,N: 整组 pending prerequisites 通过后，才放行 Execute
+  end
+  APP->>N: 事务提交后发送 Execute outbox
+  N->>L: journal 接纳后的配置工作流
+  L-->>N: 本地执行结果与观察
+  N->>APP: 有序执行事实
+  APP->>C: attempt 归约 / 本地 Completed → AwaitingSatisfaction
+  APP-->>N: 应用持久接纳后 ACK
+  Note over APP,V: 撤权证明与满足证据独立收集，均不替代另一门禁
+  opt 存在该 Task 的 Memory 使用权
+    APP->>N: 原 context / provider revoke
+    N->>L: 不可逆撤权与原证明查询
+    N-->>APP: 全部所需原 provider 的证明
+  end
+  opt 计划要求独立 verifier
+    V->>APP: 原 Task / attempt / predicate 的独立证据
+  end
+  alt 满足已声明 basis
+    Note over APP,C: 按原声明核对满足证据，仍须先通过释放门禁
+    APP->>C: TaskSatisfied / 释放该 Task 的资源 / 推进 DAG
+  else 负向证据或所需证据不可用
+    APP->>C: 保留 ownership / stop / hold / 显式恢复
+  end
+  Note over APP,C: 配置独立原目标门禁时，Mission 完成还须其证明；活跃 peers 保留 ownership

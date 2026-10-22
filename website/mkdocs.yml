@@ -62,6 +62,7 @@ plugins:
             快速开始: Getting Started
             架构与概念: Architecture and Concepts
             当前代码架构图: Current Code Architecture
+            V2 现行架构: V2 Current Architecture
             核心概念: Core Concepts
             执行生命周期: Execution Lifecycle
             State 与 Memory: State and Memory

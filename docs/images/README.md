@@ -6,6 +6,9 @@
 - [roboguide-current-architecture.mmd](roboguide-current-architecture.mmd)：中文总体图单一源码。
 - [roboguide-current-architecture-english.mmd](roboguide-current-architecture-english.mmd)：英文总体图单一源码。
 - README、V2 入口、网站导览的标记区须与源码一致；`website/check_site.py` 检查漂移。
+- `architecture/` 保存网页直接显示的 SVG 与其余图的 Mermaid 下载文件；用
+  `node website/browser-tests/render-diagrams.cjs` 从原图册生成，摘要随
+  `website/diagram-assets.json` 校验，不手改 SVG。
 
 2026-10-20 当前部署 Mermaid 同步 ADR-0119 的 Operator TLS 前连接预算、完整请求 poll
 handoff 和 response I/O 期限；实际 writer/TLS witness/Commit 权威保留。

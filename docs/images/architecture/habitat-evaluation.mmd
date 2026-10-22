@@ -1,0 +1,12 @@
+flowchart TB
+  %% roboguide:min-width: 700px
+  EH[Eval Harness<br/>运行配置 / 启停 / 证据归档 / 指标] -->|正常 Mission Request| MI[Mission Service]
+  MI --> CT[Controller / 正常执行链]
+  CT <-->|Node Protocol| NS[部署配置的 Node Services]
+  NS <-->|本地工作流| B[Habitat Local EAIOS bridge / agent endpoints]
+  B <--> W[一个共享 Habitat world / 原 episode / skills]
+  W --> FM[官方 PDDL / benchmark metrics]
+  FM --> VF[部署侧独立 Task verifier<br/>冻结 source / goal / attempts]
+  VF -->|通用 verifier 证据| CT
+  CT -.只读导出事件 / attempts / Mission 状态.-> EH
+  FM -->|官方结果或 unavailable| EH
