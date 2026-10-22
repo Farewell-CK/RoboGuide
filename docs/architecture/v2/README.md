@@ -1,5 +1,7 @@
 # RoboGuide V2 架构基线
 
+面向读者的[架构手册](architecture-handbook.md)先解释职责、对象与完整闭环；本页及已接受 ADR 保持原权威。
+
 [ADR-0141](../../decisions/0141-unconfigured-resource-quota-usage-view.md)使 read-only quota view
 同时暴露现有 claims 与配置限额；尚未设限的 tenant/category 保留真实用量，并将上限/剩余量标为
 `null`。实际 API 查询不创建 Node 或资源 inventory。
