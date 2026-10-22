@@ -3,8 +3,16 @@
 // OpenRaft requires its concrete StorageError at every storage boundary; retain typed upstream failures.
 #![allow(clippy::result_large_err)]
 
+#[path = "store_apply.rs"]
+mod apply;
 #[path = "store_content.rs"]
 mod content;
+#[path = "store_producers.rs"]
+mod producers;
+#[path = "store_snapshot.rs"]
+mod snapshot;
+#[path = "store_work.rs"]
+mod work;
 
 use crate::*;
 use openraft::storage::{LogFlushed, RaftLogStorage, RaftStateMachine};
@@ -31,6 +39,10 @@ const REPLICA_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.3";
 const CONTENT_STORAGE_VERSION: i64 = 4;
 /// Closed original-recovery/content interpretation, separate from the unchanged domain wrapper.
 const CONTENT_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.4";
+/// Explicit original-producer generation; missing local source heads never mean no responsibility.
+const PRODUCER_STORAGE_VERSION: i64 = 5;
+/// Member-local producer-head interpretation, independent of source Snapshot payload metadata.
+const PRODUCER_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.5";
 /// Legacy names retained only as read-only views after the atomic format migration.
 const LEGACY_TABLES: [&str; 5] = [
     "replica_meta",
@@ -282,14 +294,33 @@ pub struct SqliteRaftStore {
     application_schema: String,
     /// Actual member-local original content ownership; absent for unchanged metadata-only stores.
     content: Option<ReplicaContentStore>,
+    /// Actual original queue admission on a managed worker clone; it is never serialized or renewed.
+    work_clock: Option<crate::content_store::ProducerClock>,
+    /// Bounds actual running plus queued heavy work per original store, retained inside each worker.
+    storage_jobs: Arc<tokio::sync::Semaphore>,
 }
 
 /// Explicit application lease, independent of descriptors briefly inherited by child processes.
-struct ReplicaWriterLease {
+pub(crate) struct ReplicaWriterLease {
     /// Shared open-file description locked while at least one application Store owns it.
     file: File,
     /// Open description for the actual SQLite inode, closing the hard-link alias gap.
     database: File,
+}
+
+impl ReplicaWriterLease {
+    /// Samples the actual held original SQL descriptor; no caller path, inode label or PID supplies it.
+    pub(crate) fn identity(&self) -> Result<(u64, u64), String> {
+        use std::os::unix::fs::MetadataExt;
+        let actual = self
+            .database
+            .metadata()
+            .map_err(|error| error.to_string())?;
+        if !actual.is_file() {
+            return Err("original parent SQL lease is not an actual regular descriptor".into());
+        }
+        Ok((actual.dev(), actual.ino()))
+    }
 }
 
 impl Drop for ReplicaWriterLease {
@@ -318,18 +349,22 @@ fn prepare_storage_format(
     profile: &str,
     application_schema: &str,
     content_identity: Option<&ReplicaContentIdentity>,
+    producers: bool,
 ) -> Result<(), String> {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
     let marker = schema_object_type(connection, "replica_storage_format")?;
-    let target_version = if content_identity.is_some() {
+    let target_version = if producers {
+        PRODUCER_STORAGE_VERSION
+    } else if content_identity.is_some() {
         CONTENT_STORAGE_VERSION
     } else {
         REPLICA_STORAGE_VERSION
     };
-    if (content_identity.is_some() && !matches!(version, 0 | CONTENT_STORAGE_VERSION))
-        || (content_identity.is_none() && version == CONTENT_STORAGE_VERSION)
+    if (content_identity.is_some() && version != 0 && version != target_version)
+        || (content_identity.is_none()
+            && matches!(version, CONTENT_STORAGE_VERSION | PRODUCER_STORAGE_VERSION))
     {
         return Err("complete-content Replica storage requires explicit original upgrade; metadata-only open/automatic migration refused".into());
     }
@@ -353,7 +388,7 @@ fn prepare_storage_format(
     }
     if matches!(
         version,
-        1 | 2 | REPLICA_STORAGE_VERSION | CONTENT_STORAGE_VERSION
+        1 | 2 | REPLICA_STORAGE_VERSION | CONTENT_STORAGE_VERSION | PRODUCER_STORAGE_VERSION
     ) && marker.as_deref() == Some("table")
     {
         if current.iter().any(|kind| kind.as_deref() != Some("table"))
@@ -372,6 +407,8 @@ fn prepare_storage_format(
             "roboguide.replica-storage/v0.1"
         } else if version == 2 {
             "roboguide.replica-storage/v0.2"
+        } else if version == PRODUCER_STORAGE_VERSION {
+            PRODUCER_STORAGE_SCHEMA
         } else if version == CONTENT_STORAGE_VERSION {
             CONTENT_STORAGE_SCHEMA
         } else {
@@ -508,6 +545,14 @@ fn prepare_storage_format(
                 .map_err(|error| error.to_string())?;
             transaction.commit().map_err(|error| error.to_string())?;
         }
+        if producers {
+            producers::read_heads(connection).map_err(|error| error.to_string())?;
+        } else if read_meta::<serde_json::Value>(connection, producers::HEADS_KEY)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Err("old Replica storage contains hidden original producer authority".into());
+        }
         read_leader_transfer_history(connection)?;
         SqliteRaftStore::validate_controller_supervision(connection)?;
         return Ok(());
@@ -604,7 +649,7 @@ fn prepare_storage_format(
              CREATE VIEW replica_log AS SELECT * FROM replica_v1_log;
              CREATE VIEW replica_events AS SELECT * FROM replica_v1_events;
              CREATE VIEW replica_snapshot AS SELECT * FROM replica_v1_snapshot;
-             PRAGMA user_version={target_version};",if content_identity.is_some(){CONTENT_STORAGE_SCHEMA}else{REPLICA_STORAGE_SCHEMA}),
+             PRAGMA user_version={target_version};",if producers{PRODUCER_STORAGE_SCHEMA}else if content_identity.is_some(){CONTENT_STORAGE_SCHEMA}else{REPLICA_STORAGE_SCHEMA}),
         )
         .map_err(|error| error.to_string())?;
     write_meta(
@@ -642,6 +687,14 @@ fn prepare_storage_format(
             &transaction,
             "content_state",
             &Option::<AcceptedContentState>::None,
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    if producers {
+        write_meta(
+            &transaction,
+            producers::HEADS_KEY,
+            &producers::ProducerHeads::default(),
         )
         .map_err(|error| error.to_string())?;
     }
@@ -1019,6 +1072,9 @@ impl SqliteRaftStore {
             profile,
             application_schema,
             content.as_ref().map(ReplicaContentStore::identity),
+            content
+                .as_ref()
+                .is_some_and(ReplicaContentStore::producer_journal_enabled),
         )?;
         connection
             .pragma_update(None, "journal_mode", "WAL")
@@ -1032,6 +1088,8 @@ impl SqliteRaftStore {
             profile: profile.into(),
             application_schema: application_schema.into(),
             content,
+            work_clock: None,
+            storage_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
         };
         let view = store.accepted_view()?;
         view.validate(application_schema, profile)
@@ -1040,6 +1098,10 @@ impl SqliteRaftStore {
             || store.content.is_some() && view.checkpoint.is_some() && view.content.is_none()
         {
             return Err("Replica storage generation lacks its exact complete-content view".into());
+        }
+        {
+            let connection = store.connection.lock().map_err(|error| error.to_string())?;
+            store.validate_content_producer_heads(&connection)?;
         }
         Ok(store)
     }
@@ -1145,6 +1207,86 @@ impl SqliteRaftStore {
             .lock()
             .map_err(|_| "replica store lock is poisoned")?;
         read_view(&connection).map_err(|error| error.to_string())
+    }
+
+    /// Persists exact local log records using the same original intent/SQL/flush path as OpenRaft.
+    /// This storage method grants no current quorum, Controller child, Task or device authority.
+    pub fn persist_log_entries(
+        &self,
+        entries: &[Entry<ControllerRaftConfig>],
+    ) -> Result<(), StorageError<u64>> {
+        if self.has_producer_journal() && self.work_clock.is_none() {
+            let (store, _capacity) = self.original_storage_work()?;
+            return store.persist_log_entries(entries);
+        }
+        let admissions = entries
+            .iter()
+            .map(|entry| self.retain_log_inputs(entry))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut published = Vec::new();
+        let mut connection = self.connection.lock().map_err(io_error)?;
+        let transaction = connection.transaction().map_err(io_error)?;
+        for (entry, admission) in entries.iter().zip(admissions) {
+            let encoded = serde_json::to_string(&entry).map_err(io_error)?;
+            match admission {
+                Some(crate::content_store::ProducerAdmission::New(permit)) => {
+                    permit.check().map_err(io_error)?;
+                    published.push(permit);
+                }
+                Some(crate::content_store::ProducerAdmission::Existing(original)) => {
+                    let actual: Option<String> = transaction
+                        .query_row(
+                            "SELECT data FROM replica_v1_log WHERE log_index=?1",
+                            [entry.log_id.index],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(io_error)?;
+                    if !matches!(original.disposition.as_str(), "published" | "unknown")
+                        || actual.as_deref() != Some(encoded.as_str())
+                    {
+                        return Err(io_error(
+                            "original log producer is retained; unknown/retired append cannot execute again",
+                        ));
+                    }
+                    continue;
+                }
+                None => {}
+            }
+            transaction.execute("INSERT INTO replica_v1_log(log_index,data) VALUES (?1,?2) ON CONFLICT(log_index) DO UPDATE SET data=excluded.data",
+                    params![entry.log_id.index,encoded]).map_err(io_error)?;
+        }
+        transaction.commit().map_err(io_error)?;
+        for permit in published {
+            let source = permit.source();
+            let position: LogId<u64> = serde_json::from_str(&source.position).map_err(io_error)?;
+            let raw: String = connection
+                .query_row(
+                    "SELECT data FROM replica_v1_log WHERE log_index=?1",
+                    [position.index],
+                    |row| row.get(0),
+                )
+                .map_err(io_error)?;
+            if format!("{:x}", Sha256::digest(raw.as_bytes())) != source.parent_record_digest {
+                return Err(io_error(
+                    "original log publication differs from its complete source",
+                ));
+            }
+            let proof = format!(
+                "{:x}",
+                Sha256::digest(
+                    serde_json::to_vec(&(
+                        self.profile.as_str(),
+                        permit.operation_id(),
+                        &position,
+                        &raw
+                    ))
+                    .map_err(io_error)?
+                )
+            );
+            self.publish_content_producer(Some(permit), &proof)?;
+        }
+        Ok(())
     }
 
     /// Reads the applied application ordinal without decoding complete history on each supervisor tick.
@@ -1529,18 +1671,21 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
         I::IntoIter: Send,
     {
         let entries = entries.into_iter().collect::<Vec<_>>();
-        let result = (|| {
-            let mut connection = self.connection.lock().map_err(io_error)?;
-            let transaction = connection.transaction().map_err(io_error)?;
-            for entry in entries {
-                self.retain_log_inputs(&entry)?;
-                let encoded = serde_json::to_string(&entry).map_err(io_error)?;
-                transaction.execute("INSERT INTO replica_v1_log(log_index,data) VALUES (?1,?2) ON CONFLICT(log_index) DO UPDATE SET data=excluded.data",
-                    params![entry.log_id.index,encoded]).map_err(io_error)?;
-            }
-            transaction.commit().map_err(io_error)?;
-            Ok(())
-        })();
+        if self.has_producer_journal() {
+            return self
+                .run_storage_work(move |store| {
+                    let result = store.persist_log_entries(&entries);
+                    callback.log_io_completed(
+                        result
+                            .as_ref()
+                            .map(|_| ())
+                            .map_err(|error| std::io::Error::other(error.to_string())),
+                    );
+                    result
+                })
+                .await;
+        }
+        let result = self.persist_log_entries(&entries);
         callback.log_io_completed(
             result
                 .as_ref()
@@ -1567,6 +1712,10 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
             )
         );
         self.release_content(&pins, &proof)?;
+        if self.has_producer_journal() {
+            self.reconcile_content_producers_locked(&connection)
+                .map_err(io_error)?;
+        }
         Ok(())
     }
 
@@ -1590,6 +1739,10 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
             )
         );
         self.release_content(&pins, &proof)?;
+        if self.has_producer_journal() {
+            self.reconcile_content_producers_locked(&connection)
+                .map_err(io_error)?;
+        }
         Ok(())
     }
 }
@@ -1615,88 +1768,12 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
         I::IntoIter: Send,
     {
         let entries = entries.into_iter().collect::<Vec<_>>();
-        let mut connection = self.connection.lock().map_err(io_error)?;
-        let transaction = connection.transaction().map_err(io_error)?;
-        let mut replies = Vec::new();
-        let mut replaced_views = Vec::<AcceptedContentState>::new();
-        for entry in entries {
-            let receipt = match &entry.payload {
-                EntryPayload::Blank => CommitReceipt::default(),
-                EntryPayload::Membership(membership) => {
-                    write_meta(
-                        &transaction,
-                        "membership",
-                        &StoredMembership::new(Some(entry.log_id), membership.clone()),
-                    )?;
-                    CommitReceipt::default()
-                }
-                EntryPayload::Normal(ReplicaCommand::Application(batch)) => {
-                    if self.content.is_some() {
-                        CommitReceipt {
-                            rejection: Some(
-                                "complete-content storage refuses metadata-only application Commit"
-                                    .into(),
-                            ),
-                            ..CommitReceipt::default()
-                        }
-                    } else {
-                        self.apply_batch(&transaction, batch)?
-                    }
-                }
-                EntryPayload::Normal(ReplicaCommand::ContentApplication {
-                    content_application,
-                }) => {
-                    let original =
-                        read_meta::<Option<AcceptedContentState>>(&transaction, "content_state")?
-                            .flatten();
-                    let reply = self.apply_content_batch(&transaction, content_application)?;
-                    if reply.accepted
-                        && let Some(original) = original
-                    {
-                        replaced_views.push(original);
-                    }
-                    reply
-                }
-                EntryPayload::Normal(ReplicaCommand::Certificate { certificate }) => {
-                    let mut trust: CertificateTrust = read_meta(&transaction, "certificate_trust")?
-                        .ok_or_else(|| io_error("legacy authority refuses certificate commands"))?;
-                    match trust.apply(certificate.clone()) {
-                        Ok(receipt) => {
-                            write_meta(&transaction, "certificate_trust", &trust)?;
-                            CommitReceipt {
-                                accepted: true,
-                                certificate: Some(receipt),
-                                ..CommitReceipt::default()
-                            }
-                        }
-                        Err(error) => CommitReceipt {
-                            rejection: Some(error),
-                            ..CommitReceipt::default()
-                        },
-                    }
-                }
-            };
-            write_meta(&transaction, "applied", &entry.log_id)?;
-            replies.push(receipt);
+        if self.has_producer_journal() {
+            return self
+                .run_storage_work(move |store| store.apply_entries(entries))
+                .await;
         }
-        transaction.commit().map_err(io_error)?;
-        if !replaced_views.is_empty()
-            && let Some(current) =
-                read_meta::<Option<AcceptedContentState>>(&connection, "content_state")?.flatten()
-        {
-            for previous in replaced_views {
-                if previous.batch_digest != current.batch_digest {
-                    let pins = self.content_references(
-                        ReplicaContentReferenceKind::View,
-                        &format!("view:{}", previous.batch_digest),
-                        &previous.batch_digest,
-                        &previous.inputs,
-                    )?;
-                    self.release_content(&pins, &current.batch_digest)?;
-                }
-            }
-        }
-        Ok(replies)
+        self.apply_entries(entries)
     }
 
     /// Provides the same serialized storage as a stable snapshot builder.
@@ -1717,237 +1794,27 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
         meta: &SnapshotMeta<u64, BasicNode>,
         snapshot: Box<ReplicaSnapshotData>,
     ) -> Result<(), StorageError<u64>> {
-        let data = snapshot.into_inner();
-        if data.len() > MAX_SNAPSHOT_BYTES {
-            return Err(io_error("replica snapshot exceeds bounds"));
+        if self.has_producer_journal() {
+            let meta = meta.clone();
+            return self
+                .run_storage_work(move |store| {
+                    store.install_snapshot_record(&meta, snapshot.into_inner(), None)
+                })
+                .await;
         }
-        let restored: StoreSnapshot = serde_json::from_slice(&data).map_err(io_error)?;
-        if restored.profile != self.profile
-            || restored.last_applied != meta.last_log_id
-            || restored.membership != meta.last_membership
-            || meta.snapshot_id
-                != snapshot_identity(restored.last_applied, restored.view.revision, &data)
-        {
-            return Err(io_error("replica snapshot identity/pointers differ"));
-        }
-        restored
-            .view
-            .validate(&self.application_schema, &self.profile)?;
-        if (self.content.is_none() && restored.view.content.is_some())
-            || (self.content.is_some()
-                && restored.view.checkpoint.is_some()
-                && restored.view.content.is_none())
-        {
-            return Err(io_error(
-                "snapshot cannot cross metadata-only/complete original recovery authority",
-            ));
-        }
-        {
-            let connection = self.connection.lock().map_err(io_error)?;
-            self.require_snapshot_successor(&connection, &restored.view)?;
-        }
-        let content_authority = format!("{:x}", Sha256::digest(&data));
-        let content_inputs = restored
-            .view
-            .content
-            .as_ref()
-            .map(|content| content.inputs.as_slice())
-            .unwrap_or_default();
-        let producer = format!("snapshot:{}", meta.snapshot_id);
-        self.pin_content(
-            ReplicaContentReferenceKind::Snapshot,
-            &producer,
-            &content_authority,
-            content_inputs,
-        )?;
-        self.verify_view_content(&restored.view)?;
-        if let Some(state) = &restored.view.content {
-            self.pin_content(
-                ReplicaContentReferenceKind::View,
-                &format!("view:{}", state.batch_digest),
-                &state.batch_digest,
-                &state.inputs,
-            )?;
-        }
-        if let Some(trust) = &restored.certificate_trust {
-            trust.validate().map_err(io_error)?;
-        }
-        if let Some(record) = &restored.leader_transfer {
-            let mut legacy = record.clone();
-            legacy.state = "unknown".into();
-            legacy.confirmed_epoch = None;
-            validate_leader_transfer(&legacy).map_err(io_error)?;
-        }
-        let mut connection = self.connection.lock().map_err(io_error)?;
-        let transaction = connection.transaction().map_err(io_error)?;
-        let previous_snapshot: Option<Vec<u8>> = transaction
-            .query_row(
-                "SELECT data FROM replica_v1_snapshot WHERE singleton=1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(io_error)?;
-        let previous_content: Option<AcceptedContentState> =
-            read_meta::<Option<AcceptedContentState>>(&transaction, "content_state")?.flatten();
-        self.require_snapshot_successor(&transaction, &restored.view)?;
-        let original: Option<CertificateTrust> = read_meta(&transaction, "certificate_trust")?;
-        match (&original, &restored.certificate_trust) {
-            (None, None) => {}
-            (Some(original), Some(incoming))
-                if original.bootstrap == incoming.bootstrap
-                    && incoming.revision >= original.revision
-                    && incoming.receipts.starts_with(&original.receipts) =>
-            {
-                write_meta(&transaction, "certificate_trust", incoming)?;
-            }
-            _ => {
-                return Err(io_error(
-                    "snapshot certificate authority is absent, stale or forked",
-                ));
-            }
-        }
-        transaction
-            .execute("DELETE FROM replica_v1_events", [])
-            .map_err(io_error)?;
-        transaction
-            .execute("DELETE FROM replica_v1_commands", [])
-            .map_err(io_error)?;
-        for command in &restored.view.commands {
-            transaction
-                .execute(
-                    "INSERT INTO replica_v1_commands VALUES (?1,?2,?3)",
-                    params![
-                        command.authority_revision,
-                        command.command_id,
-                        serde_json::to_string(command).map_err(io_error)?
-                    ],
-                )
-                .map_err(io_error)?;
-        }
-        let first_sequence = restored
-            .view
-            .events
-            .first()
-            .map_or(0, |event| event.sequence);
-        for (index, event) in restored.view.events.iter().enumerate() {
-            let expected = if first_sequence == 0 {
-                1
-            } else {
-                first_sequence + index as u64
-            };
-            if event.sequence != expected {
-                return Err(io_error("replica snapshot evidence is discontinuous"));
-            }
-            transaction
-                .execute(
-                    "INSERT INTO replica_v1_events(sequence,event_id,data,digest) VALUES (?1,?2,?3,?4)",
-                    params![
-                        event.sequence,
-                        event.event_id,
-                        serde_json::to_string(event).map_err(io_error)?,
-                        format!("{:x}",Sha256::digest(serde_json::to_vec(event).map_err(io_error)?))
-                    ],
-                )
-                .map_err(io_error)?;
-        }
-        write_meta(&transaction, "membership", &restored.membership)?;
-        write_meta(&transaction, "revision", &restored.view.revision)?;
-        if self.content.is_some() {
-            write_meta(&transaction, "content_state", &restored.view.content)?;
-        }
-        if let Some(checkpoint) = restored.view.checkpoint {
-            write_meta(&transaction, "checkpoint", &checkpoint)?;
-            write_meta(
-                &transaction,
-                "checkpoint_digest",
-                &state::checkpoint_identity(&checkpoint),
-            )?;
-        } else {
-            transaction
-                .execute(
-                    "DELETE FROM replica_v1_meta WHERE key IN ('checkpoint','checkpoint_digest')",
-                    [],
-                )
-                .map_err(io_error)?;
-        }
-        if let Some(anchor) = restored.view.history_anchor {
-            write_meta(&transaction, "history_anchor", &anchor)?;
-        } else {
-            transaction
-                .execute("DELETE FROM replica_v1_meta WHERE key='history_anchor'", [])
-                .map_err(io_error)?;
-        }
-        if let Some(applied) = restored.last_applied {
-            write_meta(&transaction, "applied", &applied)?;
-        } else {
-            transaction
-                .execute("DELETE FROM replica_v1_meta WHERE key='applied'", [])
-                .map_err(io_error)?;
-        }
-        transaction.execute("INSERT INTO replica_v1_snapshot(singleton,meta,data) VALUES (1,?1,?2) ON CONFLICT(singleton) DO UPDATE SET meta=excluded.meta,data=excluded.data",
-            params![serde_json::to_string(meta).map_err(io_error)?,data]).map_err(io_error)?;
-        transaction.commit().map_err(io_error)?;
-        if let Some(previous) = previous_snapshot {
-            let original: StoreSnapshot = serde_json::from_slice(&previous).map_err(io_error)?;
-            let authority = format!("{:x}", Sha256::digest(&previous));
-            let original_id =
-                snapshot_identity(original.last_applied, original.view.revision, &previous);
-            if original_id != meta.snapshot_id {
-                let inputs = original
-                    .view
-                    .content
-                    .as_ref()
-                    .map(|content| content.inputs.as_slice())
-                    .unwrap_or_default();
-                let pins = self.content_references(
-                    ReplicaContentReferenceKind::Snapshot,
-                    &format!("snapshot:{original_id}"),
-                    &authority,
-                    inputs,
-                )?;
-                self.release_content(&pins, &content_authority)?;
-            }
-        }
-        if let Some(previous) = previous_content
-            && read_view(&connection)?
-                .content
-                .as_ref()
-                .is_none_or(|current| current.batch_digest != previous.batch_digest)
-        {
-            let pins = self.content_references(
-                ReplicaContentReferenceKind::View,
-                &format!("view:{}", previous.batch_digest),
-                &previous.batch_digest,
-                &previous.inputs,
-            )?;
-            self.release_content(&pins, &content_authority)?;
-        }
-        Ok(())
+        self.install_snapshot_record(meta, snapshot.into_inner(), None)
     }
 
     /// Returns the exact persistent last snapshot for upstream streaming or recovery.
     async fn get_current_snapshot(
         &mut self,
     ) -> Result<Option<Snapshot<ControllerRaftConfig>>, StorageError<u64>> {
-        let connection = self.connection.lock().map_err(io_error)?;
-        let saved: Option<(String, Vec<u8>)> = connection
-            .query_row(
-                "SELECT meta,data FROM replica_v1_snapshot WHERE singleton=1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(io_error)?;
-        saved
-            .map(|(meta, data)| {
-                let body: StoreSnapshot = serde_json::from_slice(&data).map_err(io_error)?;
-                Ok(Snapshot {
-                    meta: serde_json::from_str(&meta).map_err(io_error)?,
-                    snapshot: Box::new(self.snapshot_data(&body, data)?),
-                })
-            })
-            .transpose()
+        if self.has_producer_journal() {
+            return self
+                .run_storage_work(|store| store.current_snapshot_record())
+                .await;
+        }
+        self.current_snapshot_record()
     }
 }
 
@@ -1956,75 +1823,11 @@ impl RaftSnapshotBuilder<ControllerRaftConfig> for SqliteRaftStore {
     async fn build_snapshot(
         &mut self,
     ) -> Result<Snapshot<ControllerRaftConfig>, StorageError<u64>> {
-        let connection = self.connection.lock().map_err(io_error)?;
-        let snapshot = StoreSnapshot {
-            profile: self.profile.clone(),
-            last_applied: read_meta(&connection, "applied")?,
-            membership: read_meta(&connection, "membership")?.unwrap_or_default(),
-            view: read_view(&connection)?,
-            certificate_trust: read_meta(&connection, "certificate_trust")?,
-            leader_transfer: None,
-        };
-        let data = serde_json::to_vec(&snapshot).map_err(io_error)?;
-        let meta = SnapshotMeta {
-            last_log_id: snapshot.last_applied,
-            last_membership: snapshot.membership.clone(),
-            snapshot_id: snapshot_identity(snapshot.last_applied, snapshot.view.revision, &data),
-        };
-        if data.len() > MAX_SNAPSHOT_BYTES {
-            return Err(io_error("replica snapshot exceeds bounds"));
+        if self.has_producer_journal() {
+            return self
+                .run_storage_work(|store| store.build_snapshot_record(None))
+                .await;
         }
-        snapshot
-            .view
-            .validate(&self.application_schema, &self.profile)?;
-        let authority = format!("{:x}", Sha256::digest(&data));
-        let inputs = snapshot
-            .view
-            .content
-            .as_ref()
-            .map(|state| state.inputs.as_slice())
-            .unwrap_or_default();
-        self.pin_content(
-            ReplicaContentReferenceKind::Snapshot,
-            &format!("snapshot:{}", meta.snapshot_id),
-            &authority,
-            inputs,
-        )?;
-        self.verify_view_content(&snapshot.view)?;
-        let previous: Option<Vec<u8>> = connection
-            .query_row(
-                "SELECT data FROM replica_v1_snapshot WHERE singleton=1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(io_error)?;
-        connection.execute("INSERT INTO replica_v1_snapshot(singleton,meta,data) VALUES (1,?1,?2) ON CONFLICT(singleton) DO UPDATE SET meta=excluded.meta,data=excluded.data",
-            params![serde_json::to_string(&meta).map_err(io_error)?,data]).map_err(io_error)?;
-        if let Some(previous) = previous {
-            let original: StoreSnapshot = serde_json::from_slice(&previous).map_err(io_error)?;
-            let original_id =
-                snapshot_identity(original.last_applied, original.view.revision, &previous);
-            if original_id != meta.snapshot_id {
-                let original_authority = format!("{:x}", Sha256::digest(&previous));
-                let inputs = original
-                    .view
-                    .content
-                    .as_ref()
-                    .map(|state| state.inputs.as_slice())
-                    .unwrap_or_default();
-                let pins = self.content_references(
-                    ReplicaContentReferenceKind::Snapshot,
-                    &format!("snapshot:{original_id}"),
-                    &original_authority,
-                    inputs,
-                )?;
-                self.release_content(&pins, &authority)?;
-            }
-        }
-        Ok(Snapshot {
-            meta,
-            snapshot: Box::new(self.snapshot_data(&snapshot, data)?),
-        })
+        self.build_snapshot_record(None)
     }
 }

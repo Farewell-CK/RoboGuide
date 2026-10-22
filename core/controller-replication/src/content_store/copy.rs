@@ -371,7 +371,7 @@ impl ReplicaContentStore {
             let connection = guard
                 .as_mut()
                 .ok_or("original content connection is closed")?;
-            layout::validate(connection, self.identity())?;
+            self.validate_connection(connection)?;
             if let Some(original) = operation(connection, &operation_id)? {
                 if original.intent.content != *content
                     || original.intent.source != source_identity
@@ -527,7 +527,7 @@ impl ReplicaContentStore {
         let connection = guard
             .as_mut()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, self.identity())?;
+        self.validate_connection(connection)?;
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
@@ -575,7 +575,7 @@ impl ReplicaContentStore {
         let connection = guard
             .as_ref()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, self.identity())?;
+        self.validate_connection(connection)?;
         operation(connection, &operation_key(command_id)?)?
             .map(|record| status(&record))
             .transpose()
@@ -595,14 +595,19 @@ impl ReplicaContentStore {
         let connection = guard
             .as_ref()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, self.identity())?;
+        self.validate_connection(connection)?;
         let raw: String = connection
             .query_row(
                 "SELECT record FROM content_objects WHERE content_key=?",
                 [digest(content)?],
                 |row| row.get(0),
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    "original qualified content is unavailable in this receiving backend".into()
+                }
+                _ => error.to_string(),
+            })?;
         let receipt: ReplicaContentReceipt =
             serde_json::from_str(&raw).map_err(|error| error.to_string())?;
         if receipt.content != *content || receipt.store_owner != self.identity().store_owner {
@@ -629,7 +634,7 @@ impl ReplicaContentStore {
         let connection = guard
             .as_mut()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, self.identity())?;
+        self.validate_connection(connection)?;
         let id = operation_key(command_id)?;
         let mut original =
             operation(connection, &id)?.ok_or("original receive operation is unavailable")?;

@@ -339,6 +339,15 @@ explicit content SQL v2 upgrade without rewriting raw history. Production Replic
 enabled this contract. Network quorum, interrupted producers, online Archive/GC/recovery/upgrades and
 configured routing remain in progress.
 
+[ADR-0160](../../decisions/0160-original-content-producer-journal-and-interruption-reconciliation.md)
+freezes each producer's original SQL source, complete inputs, actual incarnation and nonrenewing
+budget in a separate member-local journal. Snapshots never import this operational authority. Its
+explicit new profile is separate from existing v1/v2 upgrade entry points; missing original history
+remains unavailable. Explicit content SQL v3/parent storage v5 now connect actual producers,
+mandatory local heads, independent interruption reconciliation and bounded heavy workers; 39 owned
+process steps passed. Full original-deployment migration, network quorum and remaining N1/N3/N7
+requirements still need their own implementation and acceptance.
+
 ## 8. Frozen invariants
 
 - Proposal, Commit, Bind, dispatch, receipt, local outcome, satisfaction and release retain separate gates.

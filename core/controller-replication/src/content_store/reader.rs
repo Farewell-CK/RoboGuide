@@ -324,7 +324,7 @@ impl ReplicaContentStore {
             let connection = guard
                 .as_mut()
                 .ok_or("original content connection is closed")?;
-            layout::validate(connection, self.identity())?;
+            self.validate_connection(connection)?;
             if record(connection, &id)?.is_some() {
                 return Err(
                     "original reader ID is retained; observe it without reopening bytes".into(),
@@ -406,7 +406,7 @@ impl ReplicaContentStore {
         let connection = guard
             .as_ref()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, self.identity())?;
+        self.validate_connection(connection)?;
         record(connection, &key(reader_id)?)?
             .as_ref()
             .map(status)
@@ -427,7 +427,7 @@ impl ReplicaContentStore {
         let connection = guard
             .as_mut()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, self.identity())?;
+        self.validate_connection(connection)?;
         let mut original =
             record(connection, &key(reader_id)?)?.ok_or("original reader is unavailable")?;
         if original.receipt.is_some() || original.process_end.is_some() {
@@ -517,7 +517,7 @@ impl ReplicaContentReader {
         let connection = guard
             .as_mut()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, self.store.identity())?;
+        self.store.validate_connection(connection)?;
         publish(
             connection,
             &ReaderRecord {

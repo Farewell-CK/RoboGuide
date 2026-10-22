@@ -8,7 +8,7 @@ use ports::EventSink;
 use sha2::{Digest as _, Sha256};
 
 /// Creates real source CAS bytes, durable original upload history and original modern State authority.
-fn original(
+pub(crate) fn original(
     root: &Path,
 ) -> (
     state::SqliteEventLog,
@@ -101,7 +101,7 @@ fn save(log: &state::SqliteEventLog, id: &str, json: &str, sequence: u64) {
 }
 
 /// Captures actual current source rows and constructs only the exact original candidate delta.
-fn candidate(
+pub(crate) fn candidate(
     path: &Path,
     cas: &artifact_store::FileSystemArtifactStore,
     previous: &ReplicaView,

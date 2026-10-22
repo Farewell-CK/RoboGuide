@@ -1,5 +1,10 @@
 # RoboGuide
 
+[原内容生产者与中断对账](docs/development/acceptance/2026-10-23-original-content-producer-journal.md)
+以显式 content SQL v3/parent storage v5 接通 Log/View/Snapshot 原日志、实际作用域、
+独立原进程观察与 mandatory heads；39 个实际进程步骤通过。旧缺失历史仍 unavailable。
+下一步继续真实 mTLS 同成员 bytes+metadata 多数、完整迁移/恢复与其余非发布整改。
+
 原内容 Snapshot 已接实际存储生产者：原 candidate/完整 State 投影、log/view/Snapshot/
 reader 独立保留，缺真实 bytes 或 stale Snapshot 拒绝发布/安装。实际 Controller
 上传文件、独立接收 CAS、持有 Snapshot 的进程 SIGKILL/原 reader 退休及实际旧内容

@@ -164,6 +164,7 @@ jobs:
           --skip-build --abort-unpublished
           --replica-state-probe target/debug/examples/replica_state_probe
           --replica-snapshot-probe target/debug/examples/content_snapshot_probe
+          --original-producer-journal
           --output "${RUNNER_TEMP}/roboguide-content-archive"
 
       - name: Verify private Archive recipient retirement and actual GC with zero Nodes

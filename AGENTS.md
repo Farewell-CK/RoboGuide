@@ -1,5 +1,18 @@
 # Repository Guidelines
 
+ADR-0160 adds explicit content SQL v3/layout v0.3 and parent Raft storage v5/schema v0.5.
+Actual Log/View/Snapshot intent and complete pins precede effects; original SQL inode/process/budget,
+publication, actual scope close, independent observation and process absence remain separate.
+Mandatory local heads commit with parent metadata; missing heads/rows refuse before retirement.
+Original IDs never repeat uncertain effects, and Snapshot never imports member-local authority.
+Opted-in heavy asynchronous work owns the real leases/queue budget inside bounded blocking workers;
+wait cancellation cannot close them. The 39-process gate is check_content_archive_processes.py
+--original-producer-journal with its explicit Snapshot probe. Owners are content_store/producers.rs,
+store_producers.rs, store_apply.rs, store_snapshot.rs, store_work.rs and replica_producer_processes.py.
+Actual legacy v2 upgrade preserves raw rows and unavailable original budget/source; parent v4 is not
+implicitly upgraded. Full original deployment adoption/migration, network same-voter ACK, reader Drop
+and other N7 paths remain mandatory. No device/physical/online completion is implied.
+
 ADR-0159's private application v3 and explicit direct-storage v4 retain the complete original candidate,
 recomputable batch digest, original bare-event owner bindings and original State recovery projection.
 Metadata-only commands/opens refuse it; automatic v0.3 upgrades and independent prefix compaction are

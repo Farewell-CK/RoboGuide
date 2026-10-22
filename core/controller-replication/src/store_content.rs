@@ -50,7 +50,7 @@ impl SqliteRaftStore {
     pub(super) fn retain_log_inputs(
         &self,
         entry: &Entry<ControllerRaftConfig>,
-    ) -> Result<(), StorageError<u64>> {
+    ) -> Result<Option<crate::content_store::ProducerAdmission>, StorageError<u64>> {
         if let EntryPayload::Normal(ReplicaCommand::ContentApplication {
             content_application: candidate,
         }) = &entry.payload
@@ -61,6 +61,25 @@ impl SqliteRaftStore {
                 ));
             }
             let digest = candidate.identity().map_err(io_error)?;
+            if self.has_producer_journal() {
+                let raw = serde_json::to_string(entry).map_err(io_error)?;
+                return self.begin_content_producer(
+                    ReplicaContentProducerSource {
+                        kind: ReplicaContentProducerKind::Log,
+                        epoch: ControllerEpoch {
+                            term: entry.log_id.leader_id.term,
+                            replica_id: entry.log_id.leader_id.node_id,
+                        },
+                        position: serde_json::to_string(&entry.log_id).map_err(io_error)?,
+                        authority_digest: digest,
+                        parent_record_digest: format!("{:x}", Sha256::digest(raw.as_bytes())),
+                        checkpoint_digest: Some(state::checkpoint_identity(
+                            &candidate.batch.checkpoint,
+                        )),
+                    },
+                    &candidate.inputs,
+                );
+            }
             let producer = format!(
                 "log:{}:{}:{}",
                 entry.log_id.leader_id.term, entry.log_id.leader_id.node_id, entry.log_id.index
@@ -72,7 +91,7 @@ impl SqliteRaftStore {
                 &candidate.inputs,
             )?;
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Derives exact old log pins while the original SQL still retains those immutable candidate rows.
@@ -82,7 +101,7 @@ impl SqliteRaftStore {
         index: u64,
         suffix: bool,
     ) -> Result<Vec<ReplicaContentReference>, StorageError<u64>> {
-        if self.content.is_none() {
+        if self.content.is_none() || self.has_producer_journal() {
             return Ok(Vec::new());
         }
         let operator = if suffix { ">=" } else { "<=" };
@@ -250,6 +269,7 @@ impl SqliteRaftStore {
         &self,
         connection: &Connection,
         candidate: &ContentApplicationBatch,
+        admission: Option<&crate::content_store::ProducerAdmission>,
     ) -> Result<CommitReceipt, StorageError<u64>> {
         let previous = read_view(connection)?;
         let rejected = |message: String| CommitReceipt {
@@ -264,11 +284,57 @@ impl SqliteRaftStore {
                 "metadata-only Replica storage refuses complete-content authority".into(),
             ));
         };
+        if self.has_producer_journal() {
+            match admission {
+                Some(crate::content_store::ProducerAdmission::New(permit)) => {
+                    permit.check().map_err(io_error)?
+                }
+                Some(crate::content_store::ProducerAdmission::Existing(original)) => {
+                    let heads = super::producers::read_heads(connection)?;
+                    let accepted = candidate.accepted_state().map_err(io_error)?;
+                    if matches!(original.disposition.as_str(), "unknown" | "published")
+                        && heads
+                            .view
+                            .as_ref()
+                            .is_some_and(|head| head.operation_id == original.operation_id)
+                        && previous.content.as_ref() == Some(&accepted)
+                    {
+                        return Ok(CommitReceipt {
+                            accepted: true,
+                            revision: previous.revision,
+                            checkpoint_digest: previous
+                                .checkpoint
+                                .as_ref()
+                                .map(state::checkpoint_identity),
+                            rejection: None,
+                            certificate: None,
+                        });
+                    }
+                    return Err(io_error(
+                        "original view producer is retained; unknown/retired apply cannot execute again",
+                    ));
+                }
+                None => {
+                    return Err(io_error(
+                        "original view admission is mandatory before apply",
+                    ));
+                }
+            }
+        }
         if let Err(error) = candidate.validate_against(&previous, &self.profile) {
             return Ok(rejected(error));
         }
+        let mut producer_heads = if self.has_producer_journal() {
+            Some(super::producers::read_heads(connection)?)
+        } else {
+            None
+        };
         let digest = candidate.identity().map_err(io_error)?;
         for key in &candidate.inputs {
+            if self.has_producer_journal() {
+                content.verify_content(key).map_err(io_error)?;
+                continue;
+            }
             let encoded = serde_json::to_vec(&serde_json::to_value(key).map_err(io_error)?)
                 .map_err(io_error)?;
             let reference = ReplicaContentReference {
@@ -291,6 +357,17 @@ impl SqliteRaftStore {
                 "content_state",
                 &Some(candidate.accepted_state().map_err(io_error)?),
             )?;
+            if let Some(crate::content_store::ProducerAdmission::New(permit)) = admission {
+                permit.check().map_err(io_error)?;
+                let heads = producer_heads
+                    .as_mut()
+                    .ok_or_else(|| io_error("original view producer heads are missing"))?;
+                heads.view = Some(super::producers::ProducerHead {
+                    operation_id: permit.operation_id().into(),
+                    record_digest: permit.source().parent_record_digest.clone(),
+                });
+                write_meta(connection, super::producers::HEADS_KEY, heads)?;
+            }
         }
         Ok(receipt)
     }

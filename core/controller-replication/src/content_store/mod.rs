@@ -3,10 +3,15 @@
 mod copy;
 mod layout;
 mod pins;
+mod producers;
 mod reader;
 mod time;
 pub use copy::{ReplicaContentCopyStatus, ReplicaContentReceipt};
 pub use pins::ReplicaContentReadLease;
+pub(crate) use producers::{ProducerAdmission, ProducerClock, ProducerPermit};
+pub use producers::{
+    ReplicaContentProducerKind, ReplicaContentProducerSource, ReplicaContentProducerStatus,
+};
 pub use reader::{ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus};
 pub use time::ContentProcessEndObservation;
 #[cfg(test)]
@@ -23,6 +28,20 @@ use std::sync::{Arc, Mutex};
 pub const REPLICA_CONTENT_STORAGE_SCHEMA: &str = "roboguide.replica-content-storage/v0.1";
 /// Explicit reader-scope generation; original backend IDs remain unchanged across a drained upgrade.
 pub const REPLICA_CONTENT_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.2";
+/// Independent opt-in original producer journal, fenced from original copy/reader-only writers.
+pub const REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.3";
+
+/// Explicit storage interpretation; old maintenance entry points never acquire new producer authority.
+pub(super) enum ContentOpenMode {
+    /// Original copy/reader generation only.
+    Reader,
+    /// Explicit original v1 to reader v2 transition only.
+    ReaderUpgrade,
+    /// Already accepted complete producer journal only.
+    Producers,
+    /// Explicit fully drained reader v2 to producer v3 transition.
+    ProducerUpgrade,
+}
 /// Bound on retained reference IDs; exhaustion never discards original ownership.
 const MAX_REFERENCES: usize = 65_536;
 
@@ -104,6 +123,8 @@ struct ContentInner {
     writer: File,
     /// Actual metadata-inode lease; a hard-link alias cannot create another writer.
     database: File,
+    /// Exact admitted local format; ordinary APIs cannot reinterpret a live connection as another profile.
+    producers: bool,
 }
 
 impl Drop for ContentInner {
@@ -133,12 +154,12 @@ pub struct ReplicaContentStore {
 impl ReplicaContentStore {
     /// Initializes only a genuinely empty declared root; interrupted/existing authority is not replaced.
     pub fn create(root: &Path, profile_identity: &str, member: u64) -> Result<Self, String> {
-        layout::create(root, profile_identity, member)
+        layout::create(root, profile_identity, member, false)
     }
 
     /// Requires the complete original root, database and mandatory heads before any observation.
     pub fn open(root: &Path, profile_identity: &str, member: u64) -> Result<Self, String> {
-        layout::open(root, profile_identity, member, false)
+        layout::open(root, profile_identity, member, ContentOpenMode::Reader)
     }
 
     /// Explicitly drains old writers and fences the reader-scope generation without rewriting history.
@@ -147,7 +168,53 @@ impl ReplicaContentStore {
         profile_identity: &str,
         member: u64,
     ) -> Result<Self, String> {
-        layout::open(root, profile_identity, member, true)
+        layout::open(
+            root,
+            profile_identity,
+            member,
+            ContentOpenMode::ReaderUpgrade,
+        )
+    }
+
+    /// Creates only a fresh explicitly selected original producer journal, separate from old reader profiles.
+    pub fn create_with_producers(
+        root: &Path,
+        profile_identity: &str,
+        member: u64,
+    ) -> Result<Self, String> {
+        layout::create(root, profile_identity, member, true)
+    }
+
+    /// Opens only the complete original producer profile; missing journals never become empty authority.
+    pub fn open_with_producers(
+        root: &Path,
+        profile_identity: &str,
+        member: u64,
+    ) -> Result<Self, String> {
+        layout::open(root, profile_identity, member, ContentOpenMode::Producers)
+    }
+
+    /// Explicitly drains the original v2 writers and retains all legacy raw references as unavailable history.
+    pub fn upgrade_producer_journal(
+        root: &Path,
+        profile_identity: &str,
+        member: u64,
+    ) -> Result<Self, String> {
+        layout::open(
+            root,
+            profile_identity,
+            member,
+            ContentOpenMode::ProducerUpgrade,
+        )
+    }
+
+    /// Validates only this handle's original admitted SQL generation before any observation or mutation.
+    fn validate_connection(&self, connection: &Connection) -> Result<(), String> {
+        if self.inner.producers {
+            layout::validate_version(connection, self.identity(), 3)
+        } else {
+            layout::validate(connection, self.identity())
+        }
     }
 
     /// Reports only the actual opened software store; no availability or device fact is created.
@@ -164,6 +231,18 @@ impl ReplicaContentStore {
     /// Existing released pins remain released; changed source/generation never borrows an old ID.
     pub fn acquire_reference(&self, reference: &ReplicaContentReference) -> Result<bool, String> {
         validate_reference(reference)?;
+        if self.inner.producers
+            && matches!(
+                reference.kind,
+                ReplicaContentReferenceKind::Log
+                    | ReplicaContentReferenceKind::View
+                    | ReplicaContentReferenceKind::Snapshot
+            )
+        {
+            return Err(
+                "original managed producer pins require their complete intent transaction".into(),
+            );
+        }
         if matches!(
             reference.kind,
             ReplicaContentReferenceKind::Receive | ReplicaContentReferenceKind::Reader
@@ -180,7 +259,7 @@ impl ReplicaContentStore {
         let connection = guard
             .as_mut()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, &self.inner.identity)?;
+        self.validate_connection(connection)?;
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
@@ -226,6 +305,18 @@ impl ReplicaContentStore {
         release_digest: &str,
     ) -> Result<(), String> {
         validate_reference(reference)?;
+        if self.inner.producers
+            && matches!(
+                reference.kind,
+                ReplicaContentReferenceKind::Log
+                    | ReplicaContentReferenceKind::View
+                    | ReplicaContentReferenceKind::Snapshot
+            )
+        {
+            return Err(
+                "original producer release requires its own publication/retirement journal".into(),
+            );
+        }
         if !super::content::hex_digest(release_digest) {
             return Err("original content release lacks its exact proof digest".into());
         }
@@ -237,7 +328,7 @@ impl ReplicaContentStore {
         let connection = guard
             .as_mut()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, &self.inner.identity)?;
+        self.validate_connection(connection)?;
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
@@ -291,7 +382,7 @@ impl ReplicaContentStore {
         let connection = guard
             .as_ref()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, &self.inner.identity)?;
+        self.validate_connection(connection)?;
         let mut result = Vec::new();
         for id in layout::head(connection, "reference_ids")? {
             let record = reference_record(connection, &id)?

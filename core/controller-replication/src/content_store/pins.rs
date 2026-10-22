@@ -52,7 +52,7 @@ impl ReplicaContentStore {
         let connection = guard
             .as_mut()
             .ok_or("original content connection is closed")?;
-        layout::validate(connection, self.identity())?;
+        self.validate_connection(connection)?;
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
@@ -123,7 +123,7 @@ impl Drop for ReplicaContentReadLease {
                 let connection = guard
                     .as_mut()
                     .ok_or("original content connection is closed")?;
-                layout::validate(connection, self.store.identity())?;
+                self.store.validate_connection(connection)?;
                 let receipt = ReplicaContentReaderReceipt {
                     schema: "roboguide.replica-content-reader-receipt/v0.1".into(),
                     request_digest: super::copy::digest(original)?,

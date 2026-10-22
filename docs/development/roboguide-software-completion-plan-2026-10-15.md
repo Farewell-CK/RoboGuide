@@ -242,6 +242,16 @@ Snapshot，stale 不得回退原记录。实际 Controller 上传、两独立 CA
 operation intent/非续预算/中断对账、在线 Archive/GC/recovery 和原部署升级。此小步
 不关闭 N1/N3。见[存储生产者验收](acceptance/2026-10-23-original-content-snapshot-producers.md)。
 
+随后 [原生产者中断对账](acceptance/2026-10-23-original-content-producer-journal.md)以
+ADR-0160/content SQL v3/parent storage v5 接通实际 Log/View/Snapshot 原意图、完整 pins、
+原 SQL descriptor/实际进程/预算、Commit 后 publication 及独立原 scope/process-end。
+mandatory local heads 与实际 parent 同事务；Unknown 原 ID 不再执行，独立 storage
+repair 不改写早先不确定性。39 个实际进程步骤与 10 项定向检查已通过，含原 SQL 已提交
+而本地回执失败、SIGKILL/native wait、独立 target/reader、实际旧 writer/格式和缺行门禁。
+旧 legacy pins/缺失 source/budget 保留，原 parent 不隐式升级；完整部署迁移/adoption、
+真实 mTLS 同一 voters bytes+metadata ACK、online/路由、reader Drop 等 N7 与 N2–N7
+原所有条件仍须实施，N1/N3 保持开放。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

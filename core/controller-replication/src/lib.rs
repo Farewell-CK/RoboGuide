@@ -36,8 +36,10 @@ pub use content_application::{
     ContentApplicationBatch,
 };
 pub use content_store::{
-    ContentProcessEndObservation, REPLICA_CONTENT_LAYOUT_SCHEMA, REPLICA_CONTENT_STORAGE_SCHEMA,
-    ReplicaContentCopyStatus, ReplicaContentIdentity, ReplicaContentReadLease,
+    ContentProcessEndObservation, REPLICA_CONTENT_LAYOUT_SCHEMA,
+    REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA, REPLICA_CONTENT_STORAGE_SCHEMA,
+    ReplicaContentCopyStatus, ReplicaContentIdentity, ReplicaContentProducerKind,
+    ReplicaContentProducerSource, ReplicaContentProducerStatus, ReplicaContentReadLease,
     ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus,
     ReplicaContentReceipt, ReplicaContentReference, ReplicaContentReferenceKind,
     ReplicaContentStore,

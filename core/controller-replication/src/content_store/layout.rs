@@ -122,6 +122,7 @@ pub(super) fn create(
     root: &Path,
     profile_identity: &str,
     member: u64,
+    producers: bool,
 ) -> Result<ReplicaContentStore, String> {
     if !crate::content::hex_digest(profile_identity) {
         return Err("replica content profile identity is invalid".into());
@@ -172,7 +173,11 @@ pub(super) fn create(
     transaction
         .execute(
             "INSERT INTO metadata VALUES ('layout',?1)",
-            [REPLICA_CONTENT_LAYOUT_SCHEMA],
+            [if producers {
+                REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA
+            } else {
+                REPLICA_CONTENT_LAYOUT_SCHEMA
+            }],
         )
         .map_err(|error| error.to_string())?;
     for name in [
@@ -183,6 +188,12 @@ pub(super) fn create(
     ] {
         write_head(&transaction, name, &BTreeSet::new())?;
     }
+    if producers {
+        super::producers::initialize(&transaction, BTreeSet::new())?;
+        transaction
+            .execute_batch("PRAGMA user_version=3")
+            .map_err(|error| error.to_string())?;
+    }
     transaction.commit().map_err(|error| error.to_string())?;
     for name in ["content-v1", "staging-v1"] {
         fs::DirBuilder::new()
@@ -192,7 +203,7 @@ pub(super) fn create(
     }
     publish(&root.join("blobs"), &original)?;
     publish(&root.join(HEADER), &original)?;
-    validate(&connection, &original)?;
+    validate_version(&connection, &original, if producers { 3 } else { 2 })?;
     Ok(ReplicaContentStore {
         inner: Arc::new(ContentInner {
             root: root.into(),
@@ -200,6 +211,7 @@ pub(super) fn create(
             connection: Mutex::new(Some(connection)),
             writer,
             database,
+            producers,
         }),
     })
 }
@@ -209,7 +221,7 @@ pub(super) fn open(
     root: &Path,
     profile_identity: &str,
     member: u64,
-    upgrade: bool,
+    mode: ContentOpenMode,
 ) -> Result<ReplicaContentStore, String> {
     directory(root)?;
     let writer = locked(regular(&root.join(".writer.lock"), true)?)?;
@@ -266,10 +278,10 @@ pub(super) fn open(
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
     if version == 1 {
-        if !upgrade {
+        if !matches!(mode, ContentOpenMode::ReaderUpgrade) {
             return Err("original content v0.1 requires explicit reader-scope upgrade".into());
         }
-        validate_generation(&connection, &original, true)?;
+        validate_version(&connection, &original, 1)?;
         let transaction = connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
             .map_err(|error| {
@@ -286,7 +298,43 @@ pub(super) fn open(
             .map_err(|error| error.to_string())?;
         transaction.commit().map_err(|error| error.to_string())?;
     }
-    validate(&connection, &original)?;
+    let producers = matches!(
+        mode,
+        ContentOpenMode::Producers | ContentOpenMode::ProducerUpgrade
+    );
+    if version == 2 && matches!(mode, ContentOpenMode::ProducerUpgrade) {
+        validate_version(&connection, &original, 2)?;
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
+            .map_err(|error| {
+                format!("original producer-profile connections are not quiescent: {error}")
+            })?;
+        let mut legacy = BTreeSet::new();
+        for id in head(&transaction, "reference_ids")? {
+            let original = reference_record(&transaction, &id)?
+                .ok_or("original legacy producer reference disappeared")?;
+            if matches!(
+                original.reference.kind,
+                ReplicaContentReferenceKind::Log
+                    | ReplicaContentReferenceKind::View
+                    | ReplicaContentReferenceKind::Snapshot
+            ) {
+                legacy.insert(id);
+            }
+        }
+        super::producers::initialize(&transaction, legacy)?;
+        transaction
+            .execute(
+                "UPDATE metadata SET value=?1 WHERE key='layout'",
+                [REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute_batch("PRAGMA user_version=3")
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+    }
+    validate_version(&connection, &original, if producers { 3 } else { 2 })?;
     Ok(ReplicaContentStore {
         inner: Arc::new(ContentInner {
             root: root.into(),
@@ -294,6 +342,7 @@ pub(super) fn open(
             connection: Mutex::new(Some(connection)),
             writer,
             database,
+            producers,
         }),
     })
 }
@@ -339,14 +388,14 @@ pub(super) fn validate(
     connection: &Connection,
     original: &ReplicaContentIdentity,
 ) -> Result<(), String> {
-    validate_generation(connection, original, false)
+    validate_version(connection, original, 2)
 }
 
 /// Checks exact prior/current generation before an explicit original-writer-drained SQL transition.
-fn validate_generation(
+pub(super) fn validate_version(
     connection: &Connection,
     original: &ReplicaContentIdentity,
-    legacy: bool,
+    expected_version: i64,
 ) -> Result<(), String> {
     within_budget(connection)?;
     let version: i64 = connection
@@ -365,23 +414,30 @@ fn validate_generation(
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    let expected = vec![
+    let mut expected = vec![
         ("content_objects".into(), "table".into()),
         ("content_operations".into(), "table".into()),
         ("content_readers".into(), "table".into()),
         ("content_references".into(), "table".into()),
         ("metadata".into(), "table".into()),
     ];
-    if version != if legacy { 1 } else { 2 } || mode != "delete" || actual != expected {
+    if expected_version == 3 {
+        expected.insert(2, ("content_producers".into(), "table".into()));
+    }
+    if version != expected_version || mode != "delete" || actual != expected {
         return Err("original replica content SQL format/tables/triggers differ".into());
     }
-    for (table, key) in [
+    let mut tables = vec![
         ("metadata", "key"),
         ("content_references", "reference_id"),
         ("content_operations", "operation_id"),
         ("content_readers", "reader_id"),
         ("content_objects", "content_key"),
-    ] {
+    ];
+    if expected_version == 3 {
+        tables.push(("content_producers", "operation_id"));
+    }
+    for (table, key) in tables {
         let mut statement = connection
             .prepare(&format!("PRAGMA table_info({table})"))
             .map_err(|error| error.to_string())?;
@@ -430,12 +486,16 @@ fn validate_generation(
     {
         return Err("original replica content SQL identity differs".into());
     }
-    for (name, table, column) in [
+    let mut inventories = vec![
         ("reference_ids", "content_references", "reference_id"),
         ("operation_ids", "content_operations", "operation_id"),
         ("content_keys", "content_objects", "content_key"),
         ("reader_ids", "content_readers", "reader_id"),
-    ] {
+    ];
+    if expected_version == 3 {
+        inventories.push(("producer_ids", "content_producers", "operation_id"));
+    }
+    for (name, table, column) in inventories {
         let heads = head(connection, name)?;
         let mut statement = connection
             .prepare(&format!(
@@ -460,21 +520,37 @@ fn validate_generation(
     let count: i64 = connection
         .query_row("SELECT COUNT(*) FROM metadata", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
-    if count != if legacy { 5 } else { 6 } {
+    if count
+        != match expected_version {
+            1 => 5,
+            2 => 6,
+            3 => 8,
+            _ => return Err("unknown original content storage generation".into()),
+        }
+    {
         return Err("original content mandatory metadata changed".into());
     }
-    if !legacy {
+    if expected_version != 1 {
         let layout: String = connection
             .query_row("SELECT value FROM metadata WHERE key='layout'", [], |row| {
                 row.get(0)
             })
             .map_err(|error| error.to_string())?;
-        if layout != REPLICA_CONTENT_LAYOUT_SCHEMA {
+        if layout
+            != if expected_version == 3 {
+                REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA
+            } else {
+                REPLICA_CONTENT_LAYOUT_SCHEMA
+            }
+        {
             return Err("original content reader-scope layout marker differs".into());
         }
     }
     super::copy::validate_records(connection, original)?;
     super::reader::validate_records(connection, original)?;
+    if expected_version == 3 {
+        super::producers::validate_records(connection, original)?;
+    }
     Ok(())
 }
 

@@ -22,6 +22,7 @@ from check_artifact_authority_processes import call as http_call
 from check_artifact_authority_processes import grant
 from check_identity_processes import ROOT, client, pki, port, stop
 from check_state_verifier_processes import save
+from replica_producer_processes import run as run_original_producers
 from replica_snapshot_processes import run as run_snapshot_producers
 from replica_state_materialization_processes import run as run_state_materialization
 
@@ -35,8 +36,18 @@ def run(
     upgrade_original: bool = False,
     replica_state_probe: Path | None = None,
     replica_snapshot_probe: Path | None = None,
+    original_producer_journal: bool = False,
+    old_replica_snapshot_probe: Path | None = None,
 ) -> dict[str, Any]:
     """Retain actual software process, file, SQL and TLS evidence with zero Nodes."""
+    if original_producer_journal and replica_snapshot_probe is None:
+        raise ValueError(
+            "original producer journal acceptance requires the explicit maintained Snapshot probe"
+        )
+    if old_replica_snapshot_probe is not None and not original_producer_journal:
+        raise ValueError(
+            "original historical Snapshot probe requires the explicit producer journal gate"
+        )
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     if not skip_build:
         subprocess.run(
@@ -57,6 +68,7 @@ def run(
         Path(__file__).with_name("check_artifact_authority_processes.py"),
         Path(__file__).with_name("replica_state_materialization_processes.py"),
         Path(__file__).with_name("replica_snapshot_processes.py"),
+        Path(__file__).with_name("replica_producer_processes.py"),
         Path(__file__).with_name("check_replica_content_processes.py"),
         Path(__file__).with_name("replica_content_upgrade_processes.py"),
         *sorted((ROOT / "core/controller-replication/src").rglob("*.rs")),
@@ -306,6 +318,7 @@ def run(
             == 201
         )
         snapshot_producers = None
+        producer_journal = None
         if replica_snapshot_probe is not None:
             stop(process)
             snapshot_producers = run_snapshot_producers(
@@ -318,6 +331,15 @@ def run(
                 23,
                 31,
             )
+            if original_producer_journal:
+                producer_journal = run_original_producers(
+                    directory / "actual-original-producer-journal",
+                    replica_snapshot_probe,
+                    database,
+                    source,
+                    hashlib.sha256(b"explicit original content producer journal v0.1").hexdigest(),
+                    old_replica_snapshot_probe,
+                )
             process = launch()
         manifest = {
             "schema": "roboguide.memory-manifest/v0.1",
@@ -777,6 +799,7 @@ def run(
             "original_archive_abort": abort_result,
             "complete_original_state_materialization": state_materialization,
             "actual_original_snapshot_storage_producers": snapshot_producers,
+            "actual_original_producer_journal": producer_journal,
             "actual_original_wrapper_upgrade": upgrade_original,
             "original_producer_binary_digest": original_producer_digest,
             "original_embedded_checkpoint_schema": intent["checkpoint"]["schema"],
@@ -813,6 +836,8 @@ def main() -> None:
     parser.add_argument("--old-recovery-ref")
     parser.add_argument("--replica-state-probe", type=Path)
     parser.add_argument("--replica-snapshot-probe", type=Path)
+    parser.add_argument("--original-producer-journal", action="store_true")
+    parser.add_argument("--old-replica-snapshot-probe", type=Path)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -828,6 +853,10 @@ def main() -> None:
                 else None,
                 args.replica_snapshot_probe.resolve()
                 if args.replica_snapshot_probe is not None
+                else None,
+                args.original_producer_journal,
+                args.old_replica_snapshot_probe.resolve()
+                if args.old_replica_snapshot_probe is not None
                 else None,
             ),
             indent=2,

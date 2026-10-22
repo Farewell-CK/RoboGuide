@@ -338,6 +338,13 @@ CAS 与 Snapshot 进程 kill/reader 退休已验证；content SQL v2 的实际�
 显式升级保留原 raw history。生产 ReplicaConfig v0.3 仍未启用该合同，真实网络
 多数、中断 producer 对账、online Archive/GC/恢复/升级与路由继续实施。
 
+[ADR-0160](../../decisions/0160-original-content-producer-journal-and-interruption-reconciliation.md)
+进一步固定每个原生产者的 source SQL、完整输入、实际进程与不可续预算，采用独立
+member-local journal；Snapshot 不导入此操作权威。新 producer profile 与既有 v1/v2
+升级入口分开，旧缺失历史保持 unavailable。显式 content SQL v3/parent storage v5
+已接实际日志、mandatory heads、独立中断对账与有界重型 worker，39 个 owned process
+步骤通过。原部署完整迁移、真实网络多数与其余 N1/N3/N7 仍须分别完成。
+
 ## 8. 已冻结不变量
 
 - Proposal、Commit、Bind、dispatch、Node receipt、本地结果、Task satisfaction 与 release 分别有权威。
