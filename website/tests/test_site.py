@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import diagram_assets
 import site_support
 import sync_docs
 from check_site import Document
@@ -14,6 +16,31 @@ from check_site import Document
 
 class PublicationTests(unittest.TestCase):
     """Reject missing translations, version drift and accidental local publication."""
+
+    def test_stale_architecture_asset_refuses_publication(self) -> None:
+        """Changed source, SVG or source download must not publish an old architecture image."""
+        original = diagram_assets.ROOT
+        manifest = json.loads((original / "website/diagram-assets.json").read_text())
+        manifest["diagrams"] = manifest["diagrams"][:1]
+        item = manifest["diagrams"][0]
+        inputs = [manifest["renderer"], item["source"], item["svg"], item["mmd"]]
+        for changed in (item["source"], item["svg"], item["mmd"]):
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "website").mkdir()
+                (root / "website/diagram-assets.json").write_text(json.dumps(manifest))
+                for name in inputs:
+                    destination = root / name
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes((original / name).read_bytes())
+                with patch.object(diagram_assets, "ROOT", root):
+                    self.assertEqual(len(diagram_assets.diagram_registry()), 1)
+                    path = root / changed
+                    path.write_text(
+                        path.read_text().replace("flowchart TB", "flowchart LR") + "tampered"
+                    )
+                    with self.assertRaises(SystemExit):
+                        diagram_assets.diagram_registry()
 
     def test_translation_pair_is_required(self) -> None:
         """A new maintained guide without English must refuse synchronization."""

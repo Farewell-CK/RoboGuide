@@ -1,8 +1,10 @@
 # RoboGuide 架构手册
 
-核对日期：2026-10-22。代码基线：`45a82410867e01241394d1b9116aa53634ce2a06`。
+核对日期：2026-10-22。代码基线：`495a6d274f6f930016d97ec5514124876e539cfe`。
 本文是对 [V2 基线](README.md)、已接受 ADR 与当前代码的解释，不新增架构决策。
 [English](architecture-handbook.en.md)。
+
+当前代码的总体、执行、部署和评估视图见[Mermaid 架构图册](current-architecture.md)。
 
 ## 系统定位
 

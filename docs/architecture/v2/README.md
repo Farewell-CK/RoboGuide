@@ -1,1169 +1,355 @@
-# RoboGuide V2 架构基线
+# RoboGuide V2 现行架构
 
-面向读者的[架构手册](architecture-handbook.md)先解释职责、对象与完整闭环；本页及已接受 ADR 保持原权威。
-各段中的历史版本记录原切片引入时的合同；当前实现与剩余缺口见手册及最新存量核对，不能将旧段落单独当作现有能力清单。
+核对日期：2026-10-23；当前整改代码基线：`a0e74d04915b9380f3f4a4a8a6a480daa0e4af76`，
+位于唯一开发分支 `codex/nonrelease-remediation-closure`。本页同步 main 的 10 月 22 日图册，
+保留其原基线 `495a6d2`；下述新增整改尚未合回 main，不提前记为远端 main 能力。
+本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
+[English](README.en.md)。
 
-[ADR-0141](../../decisions/0141-unconfigured-resource-quota-usage-view.md)使 read-only quota view
-同时暴露现有 claims 与配置限额；尚未设限的 tenant/category 保留真实用量，并将上限/剩余量标为
-`null`。实际 API 查询不创建 Node 或资源 inventory。
+[图册与代码入口](current-architecture.md)提供总体、执行、部署、评估四张 Mermaid 图；
+[架构手册](architecture-handbook.md)提供读者路径；
+[对齐记录](../../development/architecture-code-alignment-2026-10-22.md)列出本次修正和代码依据。
+[旧正文快照](architecture-history-2026-10-22.md)保留原始说明、版本演进及早期验收边界。
 
-[ADR-0140](../../decisions/0140-control-resource-quota-commitment.md)把已配置的
-revisioned tenant/category quota policy 经 recovery-admin `/v1/resource-quotas` 和 authority journal
-接入正常 Commit、Group Commit、Recovery 与 exact release；Control wrapper v47 checkpoint 同时保存
-policy history、资源 claim 与老 reservation 的不可用迁移 fence。超额拒绝先于
-reservation/event 变化，旧 demand 未知不靠当前默认值补造。该 claim 仅是 Control 逻辑 quota，
-不拆分资源、不证明 GPU/OS/物理/硬实时强制。
+### 当前代码架构图 · 2026-10-22
 
-[ADR-0139](../../decisions/0139-original-file-worker-quota-and-kernel-proof.md)将文件 worker
-原 CPU/address-space 配额写入 admission SQL，缺声明拒绝；父端核对实际 kernel limit 并
-持久化 proof 后才给 read permit。配置声明和原进程实测分开，旧数据不补默认配额；实际
-parent-death/restart checker 也核验了原 SQL/API receipt 与 old-writer fence。
+<!-- architecture-overview:start -->
+```mermaid
+flowchart TB
+  %% roboguide:min-width: 1280px
+  U[用户 / Operator] --> MI[Mission Service · Python<br/>Request / Grounding / Plan / Review / 审批]
+  MW[可选运行期 MI worker<br/>原 Request / claim / provider nonce] -->|候选修订 + 独立 Review| O
+  MI -->|完整 MissionPlan · 应用接纳| O
 
-[ADR-0138](../../decisions/0138-original-controller-child-drain-before-transfer.md)要求原
-supervisor 持久化 spawn/PID/实际 wait，transfer 先 fence 应用、再排空原 child、最后才
-发送有原接收预算的 V3 target command；storage v3/recovery v0.7 fence 保护新证明。
+  subgraph CTRL[Controller 进程]
+    O[Orchestration<br/>Task DAG / 满足判定 / Mission 生命周期]
+    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / 日历 / tenant quota]
+    R[Runtime<br/>slot / attempt generation<br/>durable intent / 事实归约 / relation fence]
+    I[Integration<br/>Node Protocol / session / 路由]
+    O -->|Ready Task| C
+    C -->|已提交绑定| R
+    R -->|命令 intent| I
+    R -->|执行结果| O
+    S[State + Memory catalog<br/>来源 / 时间 / TTL / 策略 / manifest 元数据]
+    M[应用层 Memory 协调<br/>Prepare / import / probe / use / revoke / handoff]
+    A[Artifact adapter + CAS<br/>独立内容授权 / 哈希字节]
+    I -->|经应用接纳的来源事实| S
+    S -.当前依据.-> C
+    S -.目录 / selector.-> M
+    M -->|执行前与释放门禁| O
+    M -->|持久 Memory 命令| I
+  end
 
-[ADR-0137](../../decisions/0137-terminal-relation-target-stop-coverage.md)保留 relation 的
-exact target：Completed 但缺少 relation proof 的目标，仍与当前活跃 peers 一起经过原
-stop/hold 门禁。普通 Group stop 复用既有全组覆盖，不从本地终态推导设备停止。
+  I <-->|gRPC · 命令 / durable ACK / 事实| N[Node Service · Rust<br/>配置编译 / Local Integration Engine / journal]
+  N <-->|HTTP / gRPC / MCP 工作流| L[部署侧 Local EAIOS<br/>实际操作 / Local How / 即时安全]
+  N <-->|配置声明的 Memory 工作流| P[Local Memory provider<br/>原内容 / 当前使用许可 / Active Map / GC]
+  N <-->|选择性交换内容 bytes| A
+  V[部署侧独立 verifier / 原目标证据源] -->|原 plan / predicate / attempt / freshness| O
+```
+<!-- architecture-overview:end -->
 
-[ADR-0136](../../decisions/0136-member-local-leader-transfer-evidence.md)纠正 transfer 与
-Raft snapshot 的边界：成员本地不可覆盖历史、Unknown 不重发、目标实际 quorum 证明及
-源独立只读观察；显式 target command/storage v2/recovery v0.6 fence 保护新语义。
-
-[ADR-0135](../../decisions/0135-replica-upgrade-quiescence-and-recovery-validation.md)要求实际
-旧 SQLite 连接排空、迁移前原 identity、完整旧表 fence 与恢复 profile 校验；响应丢失和
-source child drain 仍须独立通过后续 HA 门禁。
-
-[ADR-0130](../../decisions/0130-replica-database-writer-and-legacy-fence.md)冻结 Replica
-数据库本体 writer、保留完整原数据的 storage v1 和只读旧表 fence，以及显式恢复 v0.5。
-当前代码已加入实现与单元回归；实际旧 binary、恢复和独立进程门禁通过前不宣称 F5 完成。
-
-[ADR-0131](../../decisions/0131-durable-leader-transfer-drain.md)的早期 intent/hold 记录
-由 ADR-0136 修正；本地运维记录不进入 Raft snapshot，source-child drain 须独立证明。
-
-[ADR-0132](../../decisions/0132-active-map-gc-reference-gate.md)以实际 Provider/Active Map
-引用取代 caller all-clear boolean，`ContentReclamation.collect` 保留最终 unlink authority。
-
-[ADR-0133](../../decisions/0133-local-process-os-quota-envelope.md)把 Local EAIOS 文件 worker
-的 CPU/address-space envelope 实际应用到子进程 `setrlimit`，并保留原 permit/wait/Unknown
-语义；它不代表 GPU、硬实时或设备安全。
-
-[ADR-0134](../../decisions/0134-relation-violation-whole-group-stop.md)把 Runtime relation
-violation/Unknown 接到应用的 whole-Group stop barrier，逐一保留当前 attempt 的独立确认。
-
-[ADR-0129](../../decisions/0129-executable-deployment-profile.md)以闭合部署输入和只读
-inspector 固定拓扑、原文件、store owner、信任连接与故障/退出证据；允许零 Node。
-[实际零 Node 验收](../../development/acceptance/2026-10-21-deployment-profile.md)不产生
-设备、执行或全阶段完成权威；原 schema/contract、当前观察和待验项分开保存。
-
-[ADR-0128](../../decisions/0128-explicit-memory-plan-provider-dto.md)要求 MI 的 provider DTO
-显式保留所选 v0.9 Memory prerequisites，旧 v0.8 默认与 v0.7 输出兼容保持；跨合同输出
-拒绝，模型仍不拥有执行或 Memory 可用性权威。
-[实际非空许可组合与恢复](../../development/acceptance/2026-10-21-runtime-mi-scoped-memory.md)
-已通过，其他类型、复杂拓扑与其余必需阶段继续。
-
-[ADR-0127](../../decisions/0127-memory-provider-complete-writer-leases.md)定义参考 Memory
-backend 全部 SQL inode 与 connection 的共同 writer 生命周期、v3 存储 fence 和显式
-recovery-profile v0.4。实际别名/提前解锁反例和
-[完整进程恢复验收](../../development/acceptance/2026-10-21-memory-provider-writer-recovery.md)
-均保留；全局引用和在线 HA 继续必需。
-
-[ADR-0126](../../decisions/0126-scoped-memory-for-runtime-plan-revision.md)定义显式 v0.3
-修订 Memory 许可：候选/Review 前冻结原属组清单与完整 child，不预绑定新组。原停止与
-撤权证明后才能发布，目标正常 Control 绑定、独立 import/use 和每 chunk 权限仍必需。
-wrapper v45 保护新权威；[五条实际软件链路](../../development/acceptance/2026-10-20-scoped-memory-plan-revision.md)
-验证该 generic 交接，非空 MI 整链和其余全部阶段继续验收。
-
-[ADR-0125](../../decisions/0125-task-owned-memory-import-preparation.md)要求接收 import 身份
-由原 Task/attempt preparation 决定；其他 Task 的 Imported 仅保留位置证据，不能充当新
-use grant 的原 import。已有 request 的完整 owner/原期限必须一致，backend 拒绝规则不变。
-
-[ADR-0124](../../decisions/0124-original-file-computation-process-exit.md)为部署侧文件参考
-backend 增加显式 owned-process 模式；原 PID/预算先持久化，每个有界读取取得当前许可。
-独立 OS wait 证据与 Cancel/执行终态分离；旧线程观察不能升级为进程退出或设备停止。
-
-[ADR-0123](../../decisions/0123-runtime-mi-authorized-work-discovery.md)增加按实际主体和 tenant
-过滤的只读运行期 MI 任务发现；Mission Service 以原 Mission 唯一索引定位 Request。
-发现结果不授予模型调用或执行权限，消费仍使用原 claim、nonce、Review 和安全切换门禁。
-
-[ADR-0122](../../decisions/0122-runtime-mi-recovery-writer-closure.md)以 recovery profile v0.3
-纳入 MI worker 的实际双 writer lease 和原 storage marker。完整原 SQL/nonce/budget/
-回包与独立观察可恢复；旧工具、活动 writer 与硬链接别名拒绝，不启动服务或推断连续性。
-
-[ADR-0120](../../decisions/0120-versioned-runtime-plan-revision.md)定义运行期版本
-权威：候选/Review/原预算先持久化，原完整 stop/revoke 门禁后才切换 Group；原目标、
-grounded identity、已满足 Task 与历史保留，MI 无资源/绑定权威。独立冻结的原 Mission goal
-gate 不被新 DAG 的完成替代；实际 peer leaf、原授权/预算、完整 stop/revoke/attempt 覆盖和
-旧 Group Execute fence 同时持久化。[ADR-0121](../../decisions/0121-durable-runtime-mission-intelligence-work.md)
-增加显式 v0.2 生成授权、SQL worker claim 和每 phase 原 nonce 许可；原 fault/stop hold
-固定后才允许 MI 工作。实际 Request/admission、原始 provider bytes 与只读对账保留，
-较早 SQL 副本不能重做调用。wrapper v44 / inner v23 / codec v28 拒绝旧 authority；
-自动发现已接线；Group-scoped Memory 交接继续实施，完整 F8 未关闭。见
-[运行期合同](../../development/runtime-plan-revision-v0.1.md)。
-
-[ADR-0119](../../decisions/0119-bounded-operator-network-isolation.md)将 Operator 请求的
-同步 poll 归还网络 worker，入口在 TLS 前限制连接并约束 response I/O。完整相同授权
-profile 的只读检查不排 writer；变化和 mutation 继续在原实际 writer 内复核。
-已提交只读快照与私有 candidate 不在慢 SQL 期间占 live Controller mutex。
-
-[ADR-0118](../../decisions/0118-synchronous-application-worker-isolation.md)归还原完整同步
-timer/Node/Artifact 的异步 network worker，并恢复所有 transfer 退出路径的正常 Raft
-heartbeat/election。原 writer/证书/ACK/预算权威不变；不从线程隔离推断全部历史故障因果。
-
-[ADR-0117](../../decisions/0117-quiescent-replica-cluster-recovery.md)要求完整副本恢复取得
-所有原 supervisor/Raft/child/Artifact writers。显式 v0.2 同集群 finalized CAS 恢复集合
-保留原 SQL、ACL 和预算，原 placements 与新恢复副本分开记账；重试不偷偷补做。
-
-[ADR-0116](../../decisions/0116-replicated-member-certificate-rotation.md)定义显式 replica
-v0.3 的同一成员 leaf 生命周期、原始身份/确认、不可逆退役、lost-key Abort 与 CA 材料
-迁移。Raft 事务和快照保留基础设施 revision，应用 authority 不被证书操作改写；实际
-TLS chain/身份在 member writer 排队后复核。旧 profile 不自动取得新权威。
-
-[ADR-0115](../../decisions/0115-bounded-observability-and-alert-delivery.md) 定义有界只读
-运行指标和真实 Prometheus/Alertmanager 投递。固定标签、丢样和 queue 不完整保持可见，
-监控不参与 Control/Runtime 决策，也不生成 Node 或设备事实。
-专用 metrics-reader 的权威由 wrapper v42 与 Mission authorization v0.2 保护，旧 wrapper
-不能夹带新角色，v41 原 process-exit/Memory/verifier 证据可按原启动事务迁移。
-
-[ADR-0114](../../decisions/0114-write-disabled-controller-recovery.md) 定义持久化错误后的
-write-disabled 进程策略、最后提交查询与绑定原 checkpoint 的显式恢复。原 writer ordering、
-Node durable ACK、来源时间和全部资源所有权不变；不确定复制/catalog 仍要求受控重放。
-
-[ADR-0113](../../decisions/0113-quiescent-recovery-bundles-and-node-writer-lease.md) 定义静止恢复包：
-完整 metadata、原 command/receipt 与实际内容共同校验；备份取得各原 writer lease，恢复到
-新目录且不续原预算。Node journal v13 在 recovery 前取得唯一 writer，Engine clone 共用它。
-
-[ADR-0112](../../decisions/0112-original-provider-content-reclamation.md) 限定原 provider 的内容
-回收权威：实际原 import/revoke/worker/active-map 引用核对、先持久 tombstone 再删除，
-副本删除不等于全局 Memory 或设备停止。Active Map 当前权限绑定原完整输入，兼容布尔 GC
-不授予删除权。完整 F4/F5 验收仍包含 Controller、snapshot、archive 与 CAS 的一致恢复。
-
-2026-10-20 [ADR-0111](../../decisions/0111-branch-integration-and-authority-version-fences.md)
-组合 Memory、发布合同前检与独立进程停止证据。Node v0.12/config v0.13/catalog v0.15
-分别保留 Memory tags 8–10 与 generation tag 11，preparation/Execute 固定原代次。
-wrapper v41/journal v12 fence 旧 writer；歧义 fork 停止权威不自动迁移。Artifact writer
-lease 由最后一个应用 store/clone/upload 显式释放，子进程继承 descriptor 不获得写入权。
-当前拓扑同步动态成员与 leader transfer；后续完整 F4 和 F5–F10 仍未关闭。
-
-2026-10-19 [ADR-0108](../../decisions/0108-durable-group-memory-handoff.md) 接通 Application
-持久双 Group Memory 交接：完整原停止/revoke → immutable child lineage → 原 receiver
-import/probe/use → 当前 State 与显式 commit → Execute。Control 继续独占成员与资源承诺；
-失败保留 ownership，原 scope/provenance/期限不改写。wrapper v40/codec v27 fence 旧 writer。
-Node 出站 Group 导出消费原 journal 活跃 operation context；软件 assurance 不建立设备证明。
-
-
-> 当前仓库架构语义的 source of truth。原始
-> [`RoboGuide_Architecture_Baseline_V2.docx`](RoboGuide_Architecture_Baseline_V2.docx)
-> 保留最初 V2 基线；后续已接受的演进由本文和编号 ADR 共同记录。
-
-![RoboGuide V2 总体架构](../../images/roboguide-v2-overall-architecture.png)
-
-2026-10-19 [ADR-0107](../../decisions/0107-original-revoke-observation-and-provider-progress.md)
-增加逐 provider 撤销进度与独立只读 use query。原 Unknown/预算保持不变；后续原 provider
-确认证据单独追加，完整 provider/context/stop gate 同时成立才可释放。一个原命令最多一个
-五分钟/十六代观察会话，不能补发副作用。wrapper v39/journal v11/codec v26 保护此边界。
+Controller 内部职责当前共址于 `integration-server`；图中实线表示协作或数据流，虚线表示只读依据。
+网页正文直接显示由同一 Mermaid 源码生成的矢量图，可放大查看；源码与图像在构建时校验一致性。
 
 ## 1. 系统定位
 
-RoboGuide 是面向异构具身智能体协作的通用分布式操作系统框架。它联合调度
-Capability、Compute、Space 和 Time，同时保留每个节点的本地自治能力。
+RoboGuide 是面向异构具身系统的分布式协调与执行框架。Mission 组织长期目标，系统在 Capability、
+Compute、Space、Time 上进行联合决策，并保留执行过程、证据、权限、资源义务和恢复历史。
+它可以接入机器人、计算节点、感知系统和基础设施；可执行能力来自部署声明与正式注册。
+零 Node 有效，代码或模型不能自行补造设备、能力与当前可用性。
 
-RoboGuide 不只是一个 Scheduler，还负责资源抽象、共享状态、任务与执行生命
-周期、分布式调用、协同和恢复语义。
+全局侧协调 `What / Who / When / Shared Where`。Local EAIOS 保留 `Immediate How`、局部规划、
+感知、导航、运动、硬件控制与最终即时安全。Node、PhysicalEntity、Host、LocalSystem 是不同身份，
+不因同进程、同机器或证书注册而自动等同。
 
 ## 2. 逻辑架构
 
-ADR-0105 的执行前 Memory 准备现已接入实际调用链。MissionPlan v0.9 只声明 selector/kind/
-payload/media，Control 在实际 binding 后选定 operation-owned provider；应用先持久原 context，
-Node Prepare ACK 后允许原导入，完整当前 bytes/原实例 Probe 通过后才放行整组 pending Execute。
-Node config v0.10 / Contract v0.9 明确协商；原 Linux boot/monotonic 预算与撤销 fence 逐块保护
-acquisition，并在 Local How 前复查。Controller 重启不续期或重做，wrapper v35 / inner v22 /
-journal v9 拒绝旧软件。真实两软件节点文件链路与证据边界见
-[准备验收](../../development/acceptance/2026-10-15-f4-memory-preparation.md)和
-[当前实现拓扑](implementation-topology.md)。完整 Group lifetime/handoff、typed-map 消费、
-active-map/GC 与后续整改仍须完成；这些软件记录不建立设备安全结论。
+| 职责 | 当前权威 | 代码位置 |
+| --- | --- | --- |
+| Mission Intelligence | 原 Request、Dialogue、Grounding、完整计划草案、Review、Repair、审批及提交对账；模型输出为候选 | [mission](../../../mission/src/mission/) |
+| Orchestration | 接纳完整 MissionPlan、DAG readiness、逻辑调度优先级、Task satisfaction、Mission 生命周期、hold 与计划版本历史 | [orchestration](../../../core/orchestration/src/) |
+| Control | eligibility、资源/日历承诺、Group membership、Actor/Role binding、tenant quota、恢复与显式 takeover 决策 | [control](../../../core/control/src/) |
+| Scheduler | 在给定 Candidate Set、Control 日历与来源化成本输入内做有界确定性选择；不拥有 reservation | [scheduler/policy.rs](../../../core/control/src/scheduler/policy.rs) |
+| Runtime | 逻辑 slot、原 attempt/generation、durable command intent、事实归约、relation、fence 与执行恢复上下文 | [runtime/execution](../../../core/runtime/src/execution/) |
+| Integration | 正式 Node Protocol、wire conversion、session/lease fence、Node 路由；等待应用持久接纳再 ACK | [integration](../../../core/integration/src/) |
+| Node Service | 配置编译、Local Integration Engine、command/receipt journal、本地工作流与恢复围栏 | [node-service](../../../core/node-service/src/) |
+| Controller Application | 组合上述权威，持有实际 writer、事务、timer、outbox、验证、Memory 和安全门禁 | [application](../../../apps/integration-server/src/application/) |
+| State / Memory / Artifact | 来源投影、目录元数据、独立内容与存储；按各自 owner 消费和授权 | [state](../../../core/state/src/)、[artifact-store](../../../core/artifact-store/src/)、[providers](../../../integrations/) |
 
-Typed-map 的字节副本以 `MapMemoryReplicaRecorded` 保存完整原 map 和
-`(selector, Node, consumer provider)`，由原 Spatial publication 校验；不另建通用 manifest。
-Memory API 的 `replicas` 表示字节导入，`map_replicas` 单独表示原地图工作流证据，
-两者不能证明 active-map、定位或语义可用性。wrapper v36 / event codec v25 保护该演进；
-Node 的现有 v0.9 prepared input 继续保留完整 raw map，导入仍使用当前 Group 内容授权。
+逻辑边界不等于微服务边界。`IntegrationRuntimeBridge` 位于 Orchestration 的组合边界，连接正式
+Node facts 与既有 Control/Runtime/State；它不建立第二份执行或资源权威。`domain` 保存对象与不变量，
+`ports` 提供 transport-neutral 合同；Integration 本身不依赖 Control、Runtime 或 State。
 
-[ADR-0106](../../decisions/0106-group-memory-use-leases-and-active-map.md) 规定独立于原准备窗口的
-运行期 Group 使用租约和 Local EAIOS active-map 权威，当前实施中。续约不能重置原 import/
-Execute 接纳预算；撤销/到期保留 stop/ownership 门禁。参考后端显式使用同 kernel 私有 Unix
-预算合同，不比较跨主机时钟；active-map 与设备定位保持独立证据。
+### Mission Request 与规划
 
-当前生命周期收敛见 [多 Node Memory 验收](../../development/acceptance/2026-10-19-f4-memory-group-lifecycle.md)。
-本地 completion 可先记录 `AwaitingSatisfaction`；正常 Task 仅等待自己原 context 与 provider
-撤销确认，活跃兄弟 Task 继续持有许可。整组终结/恢复核对全部原参与方，并单独检查需要的
-stop 证据。执行前 permit 取 preparation、availability、use 的最早原始到期时间；每次发送
-均以新 receive clock 重查整组 pending Memory inputs。wrapper v38 保护该收敛，未改变
-Node Protocol 或 Local EAIOS 的即时操作/安全权威。
+用户入口是 Mission Request。阻塞且可由用户回答的语义缺口进入 `NeedsClarification`；合理假设单独保留。
+实时 Node inventory、资源可用性、Local How 和部署故障不转成用户语义问题。零候选不使已知合法计划
+自动无效，Ready Task 可以等待当前部署证据变化。
 
-Control 活性与观测时间的已接受演进见 ADR-0076：Integration 仅提供当前精确 session/lease
-的连续接收证据，由 Control 在应用持久事务中决定续约/过期。原始 ingress receive time
-用于 State/health/peer/progress 的年龄；当前 decision time 用于资格、Commit、恢复与发送。
-续约不更新 reported health；已提交失效、route loss 或 restart 必须重新注册，不能从
-router active 或 latest heartbeat 隐式恢复。
-Peer readiness 入库后同样按当前 decision time 刷新 Runtime fence，延迟或重放的旧 ack
-不能撤销已过期状态；证据自身的 received_at 与 expires_at 保持原值。
+Canonical Capability Catalog 规定 provider-independent 的能力、Operation、参数与 baseline requirements。
+Capability Requirement 回答“槽位需要什么证明”，ExecutionIntent 回答“被选中后做什么”。模型不能填
+Node、endpoint、厂商 Skill 或内部工作流来绕过 Control。Review 独立于 Planner；Repair 有界且必须重新
+校验，用户事实不能由模型补造。审批是基于 intent、操作、世界上下文与显式风险策略的决定。
 
-ADR-0077 的 Mission isolation 是 Orchestration-owned 执行 hold，不是 Runtime terminal
-或第二资源表。精确 Mission 的派生 transition 在内存 candidate 与 event savepoint 内
-执行；只有明确 contract-local failure 才能回滚后持久隔离。raw Runtime 事实继续接受，
-Control/State/invariant/持久化或无法分类的失败继续 fail closed。恢复是 generation-bound
-显式重验，所有物理恢复仍走 stop-proof 与原 Match/Commit/Rebind 权威。
-Hold 同时阻止整组 continuation 的准备与发送，先前 repeat 授权不绕过 hold；显式恢复
-不刷新原 recovery deadline。hold、回滚与显式恢复机制已验证；真实运行期局部错误
-的首个来源由 ADR-0079 限定，其他无法证明 scope 的失败仍保持全局 fail closed。
+MI 在一次 deliberation 中使用同一 digest-bound GroundingContextSnapshot：明确允许的 World State 和
+Memory revision metadata 保留来源、receive time、TTL 和 gap。Memory metadata 不代表内容已读取。
+实时健康、placement、reservation 和 attempts 仍在 Control/执行边界。Request SQL 原子保留原代码、配置、
+Catalog、Prompt、依赖、provider-call metadata 与原始输出；缺失的历史依据保持 unavailable。
 
-ADR-0079 已实现该局部分类：对声明 completion deadline 的 accepted Task，
-以各 current attempt 的首次 Controller terminal receive time 检查 outcome 接纳契约。
-Runtime 保存原时刻，Orchestration 给出 exact-Task typed violation，Application 回滚后
-持久 hold。它不比较 Node 时钟、不以排队时间推定物理逾期，也不授权停止或自动重放。
-生产 timer 回归验证精确 hold、另一 Mission 完成、排队/重放/恢复、resume 409 及真实
-SQL 错误回滚；使用合成 Node facts，物理效果和 E6 未验证。详见 ADR 遗留项清单。
+默认 provider DTO 保持 MissionPlan v0.8；Memory prerequisites 必须显式选择 v0.9 schema，
+兼容归一化不能丢失已声明的 Memory 要求。
 
-ADR-0080 规定有界应用事实批处理：原始输入顺序、每项独立 candidate/input savepoint、
-嵌套 Mission savepoint 与 registration/route barriers 保留；完整派生事实按原时钟语义
-处理，只合并最终 checkpoint/Commit。Registered/Ack 和 outbox 仍在 durable acceptance
-后完成。真实 gRPC 和独立合成进程比较已验收，默认 8 条/2ms，显式 limit=1 兼容；
-该有限窗口不刷新证据、不提供硬实时保证，也不扩大 persistence 或 Control authority。
-
-ADR-0081 的增量 checkpoint 是 State 存储层的 opaque byte 表示：版本/digest/sequence
-完整链与原子 compaction 重建精确 authority snapshot，原恢复和 source-time 语义保留。
-它减少重复写入 bytes，仍编码完整 snapshot；存储/恢复软件检查已完成，debug 比较
-尚未建立吞吐收益，默认 full，incremental 为显式选项。该存储切片不提供
-event-complete replay 或 control replication。
-
-ADR-0082 规定 Orchestration-owned 的多 Mission logical dispatch：持久 priority、等待/
-service ordinal、每轮单 Mission 一个 Task 与每 transition 32 次预算。Control 的 due
-interval、Actor/Context、当前资格与唯一 Commit 权威保留；deployment admission limits
-只约束新的 nonterminal Mission/declared slots，held/cancelling 也占用名额。实现验收前
-不宣称物理公平或时限保证，复制阶段必须携带该 ledger，避免切换重置服务历史。
-
-ADR-0083 指定 opt-in quorum Controller replica profile：OpenRaft 负责共识，SQLite
-持久接受完整 authority checkpoint/event history；leader supervisor 管理唯一 Controller
-child，在每次 durable acceptance 和 Execute/Cancel delivery 验证 epoch/quorum。
-切换先重建已接受投影，再由既有 startup restore 保留 ownership/Unknown/hold/fairness
-和原 source time，不自动重放物理工作。软件实现与本机进程检查已完成，standalone 仍为默认；当前 profile
-限定静态三成员软件 profile；ADR-0091 要求非 loopback RPC 使用 mTLS，已验证本机隔离进程，
-跨独立主机的部署与物理连续性仍未证明。Memory/Artifact 内容保留其独立数据平面。
-
-ADR-0084 提供显式 generation-bound future planning preemption。Orchestration 核对更高
-当前 priority 和双方非 held/Ready 状态；Control 只释放未激活、未 Commit/Bind 的未来
-interval。原计划、等待年龄与物理 ownership 保留；due/running/recovery 不会经此 API 停止。
-
-ADR-0089/0092 的 Mission-local breaker 保存滚动十分钟内的同类失败样本；三次独立失败
-触发 quarantine，重放同一终态或拒绝的 resume 不增加次数，未审核 quarantine 不自动过期。
-Checkpoint v26 与 event codec v19 防止缺失/降级 authority，legacy 样本保持 unavailable。
-Operator mTLS 的证书身份与 viewer/operator/recovery-admin 权限分开，所有 mutation 先鉴权；
-header 不能赋权。Replica client 在发送 frame 前核验 exact target member 的 leaf digest。
-恢复 view v0.2 区分 exact Unknown attempt、当前 pending/manual 事项与已结束历史，恢复
-sequence 仅是操作指引。ADR-0090/0092 的显式本地 archive 有条数/bytes 上限和原子 manifest
-index；当前缺少 catalog snapshot/archive replay，软件拒绝删除 Map/Memory/localization
-重建证据，也拒绝 active/Unknown maintenance 和单副本 GC。以上不证明长期容量或物理恢复。
-
-| 组件 | 职责 |
-| --- | --- |
-| Mission / Application | 提供外部 Mission / Goal，不直接控制设备 |
-| Mission Intelligence | 持有文本指令的解释/澄清闭环，生成带 Context/ContextRole 的完整 MissionPlan、Task Graph 和 Execution Requirements |
-| Control Plane | 完成能力匹配、分配提案、共享资源协调、计划提交、Group 内 TaskExecution 绑定和恢复决策 |
-| Mission Orchestration | 持有完整 MissionPlan，推进 DAG readiness，并根据 Runtime execution facts 明确驱动 Mission/Group 终态 |
-| State & Memory Plane | 横向维护证据、共享系统视图、分配状态、Shared Belief 和分域记忆 |
-| Embodied Execution Group | 由 Control/Runtime 承载 Mission-level 多 Task 分布式执行上下文 |
-| Distributed Embodied Runtime | 持续承载已 Commit 的 Group/TaskExecution 运行上下文，管理 execution identity、事件、timer、取消和 checkpoint/resume |
-| Execution Coordination Relations | 在已 Commit 的并发 Role execution 之间维护与 NodeId 解耦的持续运行时约束 |
-| Integration | 提供 Node Protocol、Messaging、Transport、Session 和 Router，不拥有执行生命周期 |
-| Local Embodied Systems | 保留感知、导航、运动、硬件控制和即时安全能力 |
-| Physical World | 被执行过程改变，并持续向系统反馈 Observation |
-
-逻辑组件可以共址，也可以分布部署。部署拓扑不得改变组件的职责和权威语义。
-
-外部用户入口是 Mission Request，而不是完整 MissionPlan。`open_questions` 只承载不回答就
-无法安全、正确完成 Mission semantic commitment 的 blocking uncertainty；合理且不改变核心
-目标或 Task Graph 的解释进入 `assumptions`，Control-owned deployment feasibility 与
-Local-EAIOS-owned How 不得变成用户问题。Mission Intelligence 在 instruction
-仍有 open questions 时停留在 `NeedsClarification`，不得创建 Group；只有无 blocking 歧义并通过计划
-审查与部署风险策略后，才把内部 MissionPlan 提交给 Orchestration。Interpreter 不读取实时
-Node/Resource inventory；当前部署是否有 provider 由 Control Capability Matching 判断，不是
-Mission 语义有效性的组成部分。Plan Accepted 不等于 immediately schedulable，零 Candidate 的
-Ready Task 可以保留并等待后续部署事实变化。Request/dialogue 的持久化属于 Mission
-Intelligence，不是 State Node projection 或 Runtime execution state。完整边界见 ADR-0018 与
-ADR-0030 与 ADR-0038。
-
-Canonical Capability Catalog 是 Mission Intelligence 的稳定系统语言：Planner/Reviewer 只能
-引用 Catalog 中已知的 exact contract 与参数，未知 contract 使草案无效；Catalog 不包含实时
-Node、health、readiness 或 resource availability。已知 contract 即使当前 provider 为零，Mission
-仍可被接纳并在 Control Matching 后等待。v0.3 Catalog 分别定义 Capability attributes、
-Operation parameters 和 Operation 的 direct provider-level baseline capability requirements；
-integrated Local EAIOS operation 不把内部 grasp/navigation/perception 等 Local How 展开成全局
-requirements。Catalog 仍不冻结 embodiment
-taxonomy、结构化 entity schema 或动态 Catalog negotiation。详见 ADR-0031 与 ADR-0034。
-
-Mission Intelligence 通过 immutable `GroundingContextSnapshot` 消费 State & Memory evidence，
-但不直接查询各 authority 或获得写权限。当前 Grounding View 只纳入部署明确批准为全 Mission
-可消费 payload schema、并带 source/channel、source time、RoboGuide receive time、TTL、freshness
-和 confidence 的 World State
-`Reported/Observed/Derived/Belief` records，以及 Global `Semantic/Experience/Spatial` Memory
-revision metadata。Memory metadata 明确不代表 payload 已被读取或理解；Node health/liveness、
-capability/operation support、resources、leases、reservations、calendar、placement 与 Runtime
-attempts 全部继续隔离在 live deployment / Control 边界。Controller 计算的 receive-relative
-freshness 原样进入 Snapshot，Mission Service 不比较不同进程的 clock。Interpreter、Planner、
-Reviewer 与 Repairer 在一次 deliberation 内使用同一 digest-bound context；新的 clarification
-answer 或显式重新 deliberation 才重新 capture。`World` object class 本身不授予可见性；schema
-admission 默认空且其 digest 进入 selection policy identity。可恢复的 source acquisition failure
-在 snapshot 建立前进行配置有界的 retry；最终失败才以 gap 保留。Gap 不是用户歧义，只有它
-最终造成用户可回答的 blocking semantic fact 缺失时，clarification 才作为 fallback。空 Context
-合法。多问题 clarification answer 只有显式携带当前 `question_id` 才精确绑定；无 ID 时仅在
-唯一待答问题下自动绑定。
-详见 ADR-0037 与 ADR-0038。
-
-部署可以在启动时向 Mission Intelligence 提供经 Canonical Catalog 校验的抽象能力类别摘要，
-以及由环境适配器在执行前读取并绑定 episode、scene 和 dataset identity 的静态世界证据。
-这两类信息分别说明“部署可能具备什么能力”和“当前任务已知的世界事实”，均不包含 live
-Node Inventory、资源可用性或物理执行器选择。环境事实若尚未由 reset 确定，必须保留为
-unknown gap；不得由模型推测楼层、起点或可达性。只有任务需求与已知世界证据共同支持时，
-MI 才能声明具体的 typed capability constraint；Control 仍使用当前 Node 注册和资源承诺
-决定谁、何时、在哪里执行。规划世界证据进入版本化、不可变的 Grounding Context，并在
-B1 中与实际适配器文件及冻结 workload identity 交叉校验。Habitat shared-world adapter
-还会把实际注册文件的 digest-bound capability snapshot 带入 reset 后的只读空间 admission。
-在该部署中，唯一一次 Habitat reset 发生在 endpoint ONLINE 和 Mission 提交之前；子进程
-冻结实际起点、候选 endpoint 对精确 mobility intent 的负向可行性证据，并将同一份
-observations 交给后续 Stage2。Control 在应用层将该部署证据与实时注册及资源事实取交集，
-仅收窄候选，不向 MI 提供 live Node Inventory，也不提前选择或绑定物理执行器。跨楼层
-位置本身不证明距离型官方目标不可满足：例如 `any_at` 允许机器人在相邻楼层的容差内
-满足目标。当前精确实体目的地的部署负向筛选，对不在官方目标中的目的地保留原有
-楼层规则；距离型目标保留 `unknown`，由实际导航和 Habitat 官方谓词裁决。本地执行检查
-使用相同规则，正向结果不代表路线可达。详见 ADR-0044、ADR-0046、ADR-0047 与 ADR-0050。
-
-Mission semantic contract 的长期模型将 Capability、Operation 和 ExecutionIntent 分开：
-Capability Contract 是可匹配的 provider-independent 能力语言，Role 可以要求多个 capability
-并附带可由 Node profile 证明的 typed constraints；Operation 是下发给 Local EAIOS 的 canonical
-语义动作身份；ExecutionIntent 同时保留 Task-level objective、Operation 和结构化参数，不把
-RoleId、厂商 Skill 或执行步骤当作 operation。Canonical Capability Catalog 分别定义合法
-Capability/attribute 与 Operation/parameter，并声明 Operation 的 provider-level capability
-baseline，而非内部 workflow step。
-Live Node evidence 只由 Control 用于 Matching/Scheduling，Catalog membership 不表示当前可用。
-详见 ADR-0034。
-
-Mission Plan Review 是 Mission Intelligence 的独立语义检查，不是 Planner 内部不可观察的
-异常路径。Reviewer 只返回结构化问题及所需下一步，不直接修改草案；Mission Request Engine
-持久化每次 review evidence，并在确定性校验后执行有界 Repair。需要新用户事实的问题回到
-`NeedsClarification`，不能由 Repairer 猜测；只有通过确定性校验与 Review 的草案才能进入审批
-或提交。Dialogue 与内部 Draft/Review/Repair trace 是不同 evidence。详见 ADR-0032。
-
-Request Engine 使用 digest-bound typed recovery evidence 区分未提交草案和已发出的
-Controller submission。POST 前原子保存 submission fence；缺失回执、进程中断或不明
-响应只能只读查询原 Mission，不重新 POST，不用 Dialogue 覆盖可能已接纳的计划。
-明确拒绝后的显式 retry 重交同一原稿。新版 Controller `/admission` 在同一接纳事务中
-保存完整 HTTP body 摘要、Mission/Group 和接纳时间；只在与原发送指纹及当前原稿一致时
-恢复 Accepted。旧 status 查询不足以证明接纳；原 POST 错误、immutable review history
-和 B1 的注册/验证要求保留。见 ADR-0054、ADR-0055。
-
-Mission Actor、ContextRole 和 TaskRole 表达三个不同层级：Actor 是 Mission 范围的逻辑参与者，
-ContextRole 将 Actor 放入持续协作上下文，TaskRole 只引用 ContextRole 并声明该 Task 的执行槽。
-TaskRole 不重复 Actor。用户 Dialogue 使用有 speaker/kind/identity/reply/time 的持久化 turn；
-Draft/Review/Repair 属于单独的内部 deliberation trace。Planner 只声明用户/策略给出的时间约束，
-candidate/runtime-specific duration estimate 由 Control 消费带 provenance 的 planning estimate。
-Approval 是 operation、intent、world context 与 policy 的风险判断，不由 contract 名单单独决定。
-
-MissionPlan v0.8 可引用由语义 grounding 明确承认的 PhysicalEntity，并在 Context 内对
-ContextRole 声明 `distinct-physical-entities` 硬约束。Actor 仍是 Mission 内的逻辑连续性，
-PhysicalEntity 是部署拥有的执行身份，Node 是路由/能力/存活 authority；物理 Host 与 Local
-EAIOS 又各自独立。Control 首次绑定时依据当前部署 registry 和 live Node evidence 选择实体，
-在 Commit/Bind 重验并持久化 ActorBinding；registry 是部署拓扑证据，不作为 checkpoint
-中的当前事实。现有 Node Protocol 不能对单个 Node 后的多个实体分别下发动作，因此当前
-可执行配置显式限制为一 Node 一可寻址实体，不能将其误写成 Mission distinct Node 语义。
-恢复不得隐式更换已绑定 Actor 的实体。详见 ADR-0040。
-
-Control checkpoint 另存 registry identity、最高已准入 revision 与确定性内容摘要作为
-anti-rollback provenance；摘要不能解析为路由。restart 后部署仍必须供给 registry，低于
-watermark 或同 revision 不同内容均拒绝。旧 physical-binding checkpoint 缺少 watermark
-时需可信部署历史支持的显式迁移，不能用 bind-time revision 冒充最高 revision。详见 ADR-0043。
-
-调度不足与进程故障必须分离：Orchestration 用 typed scheduling disposition 区分可重试的
-deployment/resource 不足、已有 Actor 的 reconciliation-required、永久无效的输入契约和
-内部一致性错误。当前实体基数不足只留下 Ready Task 及持久化、去重的 deferral evidence；
-应用继续驱动其他 Mission，部署证据更新后重试。错误文本只用于诊断，不参与调度分类。
-时间窗口已错过的 deferral 仍停止自动重试。详见 ADR-0041。
-
-Commit 对每个 selected ResourceId 重新读取该 Node 的当前声明，核对 kind/capacity、
-eligibility 与 ownership/calendar 冲突后才统一写入；同类其他资源不能替代已选择 ID。
-旧的无 State 参数 Commit 入口只接受零资源 compatibility proposal，资源承诺必须使用
-state-aware Commit；不在 Control 内另建一份 Node resource truth。详见 ADR-0042。
-
-Task 的本地执行结束与 Mission 语义满足是两个不同事实。MissionPlan v0.7 为每个 Task 显式
-声明 expected effect 与 `satisfaction.basis`。`execution-report` 保留兼容 bootstrap 语义；
-`verifier-evidence` 要求 exact verifier contract/predicate，并由 State 按 exact source 保存带
-source、source time 和 RoboGuide receive time 的 verdict。Runtime 只归约 execution completion，
-不拥有 Task 或 Mission completion authority。Control 先将 TaskExecution 置为
-`AwaitingSatisfaction` 并记录 `TaskExecutionCompleted`；正 evidence 经 Orchestration 校验
-当前 Task policy 与 receive-time freshness 后记录 `TaskSatisfied`、释放 Task-scoped binding、
-推进 DAG。负 final verdict 记录 `TaskSatisfactionRejected`，Task 进入
-`SatisfactionRejected`；Mission 可按 final policy 失败，但不产生 `TaskExecutionFailed`。完整
-verdict artifact 由 deployment 按 digest 保留，事件是 receipt。该 slice 不进行多源融合、
-争议裁决或宣称全局物理真值。详见 ADR-0033、ADR-0034 与 ADR-0093。
-
-显式的 Local EAIOS 主动观测能力 `observation.acquire@v1` 与缓存读取 `observation.verify@v1`
-分开。前者可在具名实体的受控范围内定位与采集，后者不授予运动权限。二者的本地完成均
-不能替代 Mission 声明的独立 satisfaction evidence。部署可发布 reset geometry 和 finality
-profile，阻止 verifier 资源存活期无法闭合的拓扑；这些事实不选择 Node、不预留资源，也不
-把联合终态变为 distinct physical executors。受限的执行前工具纠错只允许模型在原 canonical
-contract 下重新选择，不具有 MI 重规划或 Control 重绑定权限。见 ADR-0094。
-Perception 与 rearrangement 的 live deployment 还会在 reset identity、官方 terminal verifier
-source 和 endpoint lifetime 都已发布后生成 digest-bound
-`roboguide.execution-planning-evidence/v0.2`。它作为同一份 deployment evidence 进入
-Planner、Reviewer、Repairer，并随 B1 archive 保留；它不是 live Node inventory、placement
-选择或资源预留。MI 用它核对 exact verifier、同时需求、等待终局的资源存活期及显式
-`execution_topology` 支持；独立 Tasks 可具有 DAG 边，仍由 Control 在释放后复用 endpoint。
-Context/Task mode、relations、容量与能力冲突以具体逻辑字段反馈，不能自动改写真实协作需求。
-旧 v0.1 保留其原字段和摘要，不推断缺失能力；缺失、篡改或跨 reset 的 artifact 在 MI
-请求前 fail closed。离线 prepare 只检查模板，不能宣称拥有本次 reset 的 verifier evidence。
-
-Mission Intelligence 的 verifier freshness 来自显式、版本化的系统 satisfaction policy；
-Planner、Reviewer、Repairer 消费同一不可变 policy 和 digest，不能为了填满 schema 猜测数值。
-该 policy 只规定已接收 verdict 在 satisfaction 判定时允许的年龄，不证明物理真值、source
-采样新鲜度或 verifier 当前可用性。Verification operation 的执行完成能否被接受，取决于其
-明确承诺与 requested effect，而不是 `verify` 名称；独立 positive-verdict 要求仍保留。
-MissionPlan shape、Runtime/Control authority 均不改变。当前可选的 deployment-owned terminal
-verifier ingress 只接纳与启动时冻结的 source、精确 predicate、当前物理 attempt 相符的证据；
-缺失或无效证据不会被 local Completed 替代，见 ADR-0039 与 ADR-0048。
-部署可显式要求环境权威联合终态由独立 verifier 确认。该策略仅在冻结的权威目标存在时
-生效：MI 草案校验要求每个 Task DAG 末端引用同一完整目标的精确 verifier contract、predicate
-与 receive-age bound；前置 Task 仍可在其自身操作契约下使用 `execution-report`。没有此策略时，
-`execution-report` 仅接受 Local EAIOS 已承诺的操作完成语义，不能因 Task 描述声称联合
-物理终态就被解释为独立真值。策略不凭谓词数推断 Actor 数，不修改 MissionPlan 或 Control
-authority；目标语法不受当前 verifier 支持时暴露部署能力缺口，不能弱化目标。见 ADR-0049。
+发送 Controller POST 前先保存原 submission fence；中断或丢失回包只读查询原 admission。
+HTTP 命令 journal 绑定实际主体、tenant、method/path/key 与原 Request，观察/对账不重做模型调用或提交。
+详见 [ADR-0037](../../decisions/0037-mission-grounding-context.md)、
+[ADR-0103](../../decisions/0103-http-command-reconciliation-and-node-identity-lifecycle.md)与
+[ADR-0128](../../decisions/0128-explicit-memory-plan-provider-dto.md)。
 
 ## 3. 核心抽象
 
 ### Embodied Node（具身节点）
 
-可被发现、能够执行任务或提供资源的系统参与者。节点类型可以包括 Robot、
-Perception、Interaction、Compute 和 Infrastructure Node。Node 不等同于 Robot。
+Node 是 execution/capability/liveness 接入边界，不等于机器人或物理机。通用 `roboguide-node` 通过
+Node Protocol 连接 Controller，并依据启动时校验的配置连接一个或多个 LocalSystem。实际执行的
+capability owner、Operation workflow、固定 endpoint 和状态映射由部署配置决定。
 
-每个参与节点运行一个通用 `roboguide-node`，作为 RoboGuide Runtime 在该节点上的
-接入端。Node 是独立的 execution/capability/liveness authority boundary，与物理机
-不是一一绑定：典型物理部署为每台设备一个 Node Service，仿真或特殊部署可在同一
-物理机上承载多个逻辑 Node（E1-I 已实证）。它通过 Node Protocol 主动连接 RoboGuide Server，并在进程内部使用声明式
-Local Integration Engine 连接一个或多个 Local Embodied Systems。配置与通用 driver 属于
-Node Service；具体 EAIOS 的 facade 在部署侧维护，不是每种 EAIOS 各自部署的 RoboGuide 服务
-或编译期插件。
+HTTP、dynamic gRPC、MCP 是现有通用 driver。新增 EAIOS 的厂商代码位于部署 facade，不把 SDK、ROS
+topic、硬件命令提升为 Core 语义。配置检查、process health、exact capability readiness、正式注册、
+当前 State/lease 与真实设备能力是不同证据。
 
-Local Integration Engine 只执行部署者提供的、启动时完整校验的本地配置。配置声明
-Local System、Capability profile、canonical Operation workflow、Sensor、Resource、固定 Endpoint、
-受限字段映射和执行生命
-周期；不得把厂商 SDK、ROS Topic、Atlas/Pilot 等 Local How 提升为全局协议或 Control
-语义。新增 Local EAIOS 不修改或重新编译 RoboGuide Server 与 `roboguide-node`。
-
-Node Protocol v0.4 保持既有 session、sequence、command receipt 与 execution lifecycle；在该
-transport 上显式协商的 Node Contract v0.6 承载 exact capability profile 的 readiness/typed
-attributes、独立 canonical Operation Support，以及包含 canonical Operation、semantic objective
-和 typed scalar parameters 的完整 `ExecutionIntent`。Node config v0.7 分离 profile evidence 与
-operation/workflow mapping。旧 Node
-Contract v0.4 和 node-config/v0.2-v0.6 是显式兼容输入，不能混用表示或静默丢弃 objective。
-
-ADR-0105 增加 Node Contract v0.7 / config v0.8 的显式 Memory continuity profile；IDL catalog
-v0.10 保持 Protocol v0.4。原实例与工作流合同在副作用前保存，Unknown 通过独立持久命令查询
-原 provider，不能换 ID/实例重复导入。完整输入与 original digest 在 Node restore/查询时复核。
-Controller wrapper v31、event codec v22 与 Node journal v7 保留回退边界。实际文件与 SQL
-故障/重启/旧程序验收见 [Memory 连续性记录](../../development/acceptance/2026-10-15-f4-memory-continuity.md)；
-Group 授权、active-map/GC 与空间融合仍是当前计划中的必需后续工作。
+wire Protocol、协商 Node Contract、Node config、IDL catalog、journal 和 Controller checkpoint 分别演进。
+兼容输入不自动获得新 Memory/use/stop authority；当前版本由[参考页](../../../website/pages/status.md)关联
+源码与构建来源，不能从旧切片版本号推导当前支持。
 
 ### Capability 与 Resource
 
-Capability 描述 Node 可证明的执行能力与 feasibility envelope；Operation 描述对 Local EAIOS 的
-canonical semantic invocation。Embodiment 是 Node profile 的独立描述维度，不是互斥 Capability
-分类。Role Requirement 回答“承担这个槽位必须证明什么”，ExecutionIntent 回答“被选中后要完成
-什么语义目标”，二者不互相复制。Control Matching 同时要求 capability feasibility 与 exact
-Operation Support；Operation Binding 仍只存在于 Node 私有配置。静态能力支持不代表运行时一定
-可用。
-RoboGuide 联合调度四类资源：
+Control 同时检查 capability profiles、typed attributes、exact Operation Support、当前 readiness、State
+consumer policy、lease、tenant 与绑定约束。Capability 存在不代表当前可执行。
 
-- Capability：可执行的具身或计算能力；
-- Compute：CPU、GPU、NPU、模型和执行容量；
-- Space：位置、路线、区域、占用和共享物理设施；
-- Time：前置关系、同步窗口、截止时间和占用区间。
+Capability、Compute、Space、Time 是联合决策维度。当前资源承诺以独占 ResourceId 为基础；Role 的
+units 与 immutable Mission tenant 进入持久 tenant/category quota ledger。quota 接入正常 Commit、
+Group Commit、recovery Commit 和 exact release，超额拒绝先于 reservation/event 变化。
+未设 limit 的现有 claim 仍显示 usage，limit/remaining 为 `null`。
 
-这里的 Time 是 Scheduler 的约束与 reservation 维度，不等于一个普通 `kind + integer capacity`
-资源。Space 也允许后续由 typed spatial evidence/authority 演化；当前 exclusive ResourceId 模型
-只是已实现的 bootstrap commitment profile，不是最终本体。
+该 quota 是逻辑核算，不表示 divisible allocation、GPU/OS 隔离或硬实时保证。部署侧 Memory 文件 worker
+的原 CPU/address-space `rlimit` 与实际 PID/kernel receipt 是单独的进程约束。Time 的 future interval
+属于 Control 日历，不能等同普通整数容量；完整空间/交通承诺仍需独立合同和验收。
 
 ### Embodied Execution Group（具身执行组）
 
-Mission 进入实际执行阶段后形成的长期分布式执行上下文，由 Members、Roles、多个
-TaskExecution、已提交的 Resource Bindings、Recovery Context 和 Lifecycle 组成。v0.x
-默认一个 Mission 创建一个 Group，但该策略不是未来拆分多个 Group 的领域硬约束。
+Actor 是 Mission 内连续的逻辑参与者；ContextRole 将 Actor 放入长期协作上下文；TaskRole 引用
+ContextRole 并声明本 Task 的执行槽。PhysicalEntity 是部署执行身份，Node 是寻址与注册边界。
+当前可执行物理绑定 profile 为一个 Node 一个可寻址实体；Host 可承载多个 Node。
 
-Role 是 Task 内与具体 Node 解耦的职责槽位：Capability 说明 Node 是否具备承担
-该 Role 的能力，Assignment 记录当前由哪个 Node 承担，Resource Binding 记录执行
-该职责已经提交的资源。Task 被明确满足后只释放属于该 Task 的临时 binding/reservation，不销毁
-Group。节点故障时，Group 内可以 partial release、rebind，并经 `Adapted → Active`
-继续执行；只有 Mission 完成或最终失败后，Group 才进入 `Completed/Failed → Released`。
+Orchestration 接纳完整计划时，通过 Control 建立 Group 与 TaskExecution。Control 独占 Group membership、
+Actor binding 和资源义务。Task 释放不销毁 Group；同一 Mission 可在显式运行期修订中退役原 Group、
+创建新 Group，保留已满足事实及历史。不能把“一 Mission 永远一个 Group”写成领域硬约束。
 
-Member 与 Binding 必须区分：GPU Node 可以是 Member，GPU quota 是 Compute
-Binding；走廊是 Spatial Binding，不是 Member。Group Manager 属于 Control Plane，
-负责 committed binding、reservation、rebind 和 release authority；Group 的 live execution
-context 由 Runtime 承载并跨节点运行。State 只保存二者的事实和投影。
+Runtime 用 `(GroupId, TaskRef, RoleId)` 作为逻辑 slot；物理 attempt 使用原 generation/session/identity。
+Node 或可复用执行字符串不能代替逻辑 slot。普通 recovery 不隐式迁移已绑定 Actor；显式 takeover
+还须精确实体、registry、停止证明和正常 Control 候选/Commit/Rebind 门禁。
 
 ### Execution Coordination Relation
 
-Task DAG 表达完成前置关系，不表达两个已经运行的执行单元之间持续成立的约束。
-MissionPlan v0.5 因此允许 `CoordinationContext` 声明有向 Execution Coordination Relation，并声明该 Context 的 Execution Coupling Mode。
-关系端点引用 `(TaskId, RoleId)` 逻辑执行槽；Group 接受后补全 Mission/Group identity，Runtime
-再把逻辑槽解析到当前 execution attempt。关系绝不直接引用 NodeId，因此 replacement/rebind
-不会改变其 Mission 语义。
-
-关系 specification 属于 Mission Intelligence 和被接受的完整 MissionPlan；Control 仍只拥有
-commitment、binding 和 recovery decision；Runtime 只拥有 live endpoint resolution、关系状态、
-有序归约和 checkpoint。State Plane 的 durable Event Log 保存 relation evidence，但 v0.1 不建立
-第二份 live relation projection，也不主动触发恢复。
-
-v0.1 只定义 `requires-active`：target execution 处于 Accepted/Running 时，source execution
-必须持续处于 Accepted/Running。Runtime 将关系归约为 `Dormant`、`Pending`、`Satisfied`、
-`Violated` 或 `Unknown`。`Violated/Unknown` 形成 coordination-required evidence，并 fence
-受约束 Task 的成功归约；即使关系重新变为 `Satisfied`，也必须由 Control/应用恢复流程显式
-确认后解除 fence。Runtime 不选择 replacement、不修改资源承诺，也不把关系违例伪装成
-某个 Node 的物理失败。完整边界见
-[`ADR-0020`](../../decisions/0020-execution-coordination-relations.md)。
-
-v0.4 增加 `Independent`、`SequentialHandoff`、`ConcurrentCooperation` 和
-`TightlyCoupledCooperation`。Mode 属于 Context，并可由 Task override；它只声明所需机制，
-不固化控制算法。Context 可用明确的 `ContextRole + StateExportId + payload schema` binding
-声明选择性的 pose/velocity，并直接按 logical Task/Role 读取 Runtime-owned execution status；
-两类 evidence 组成 Group shared view，另可声明 typed map revision/frame；
-Runtime/Orchestration 以只读方式从 State evidence 组装视图，并按现有 receive-time/TTL
-返回 Fresh/Stale/Unknown，不从 channel 名称猜测字段语义。
-Tightly-coupled Context 可声明 transport-neutral peer channel descriptor 与 Runtime 生命周期；
-Node Protocol 只承载当前 session 与注册 Local EAIOS 识别的双端、receive-relative readiness
-evidence，不承载 peer data-plane 消息。等待 readiness 的 committed/bound Task 保持 Ready，待
-两端证据成立后由现有事件循环 dispatch，不把等待误作 Mission 提交失败。
-Node config v0.6 可为每个 LocalSystem 声明至多一个固定 HTTP GET observer，读取该 Local
-EAIOS 已建立端点的有界 readiness set；owner 与 TTL 来自启动配置而非响应。采样失败不制造
-负证据，旧确认按 receive-time 到期并由 Runtime fence。
-高频 relative-state 计算、纠偏、formation/grasp/safety control 保留在 Local EAIOS。Typed relation
-的 state key、frame、freshness 等字段不包含阈值、公式或 DSL。当前 executable profile 只开放
-`requires-active` 和 `shared-spatial-reference`；后者复用 typed localization evidence 校验当前
-attempt/owner/map revision/frame 并进入现有 relation fence。详见
-[`ADR-0026`](../../decisions/0026-execution-coupling-and-group-views.md) 与
-[`ADR-0027`](../../decisions/0027-runtime-coordination-evidence-completion.md)。
+DAG 约束何时 Ready；relation 约束已经绑定的并发逻辑端点。当前可执行强关系包括 `requires-active`
+和 `shared-spatial-reference`；强地图依据绑定当前 attempt/owner/map revision/frame。
+Contract 能表达的 coupling mode 不等于每种 hazard、触觉、formation 或物理交接已经实现。
+未知、失效或冲突关系进入 fence/reconciliation；relation stop 覆盖 exact target 与所有所需 live peers，
+包括本地 Completed 但尚缺 relation proof 的目标。
 
 ## 4. 决策与承诺语义
 
-```text
-Plan → Match → Schedule → Propose → Coordinate → Commit → Bind → Execute
+```mermaid
+flowchart LR
+  P[接纳 / Group] --> M[Match]
+  M --> S[Schedule]
+  S --> Q[Propose]
+  Q --> C[Commit]
+  C --> B[Bind]
+  B --> D[Execute]
 ```
 
-1. Capability Matching 输出 Candidate Set，回答 `Who can?`；
-2. Embodied Scheduler 输出 Assignment Proposal，回答 `Who should / Where / When?`；
-3. Shared Resource Coordination 检测竞争，并执行 Reservation、Negotiation 或重新分配；
-4. Commit 使资源义务生效，并在 Allocation / Reservation State 中可观察；
-5. Mission Orchestration 在执行阶段从完整 DAG 创建一个 Mission-level Group 和全部 TaskExecution；
-6. Control 将每个 Task 的 Committed Plan 绑定回同一个 Group；
-7. Runtime 接收 committed execution configuration，承载绑定后的执行过程并产生 canonical
-   execution facts；Integration 只负责把 command/event 送达正确的 Node session。
-8. Runtime 按 Mission relation specification 把当前 execution attempts 解析回逻辑 Task/Role
-   端点，持续归约跨 execution 约束；该状态不改变 Proposal/Commit/Binding authority。
+Proposal 不预留资源。Commit 在实际 writer 内重新检查当前证据、tenant、quota、日历与冲突，形成资源
+义务；Bind 使用同一 policy/commit 身份。Allocation State 只投影 Control 结果，不是第二资源账本。
 
-未提交的 Proposal 绝不能被当作已经生效的资源分配。
+Scheduler 可以选当前或未来区间。未来 `Scheduled` 先占 planning calendar，到期后重新 Match/Propose/
+Commit/Bind；估算结束并不释放真实资源，超时运行保持占用。预算内没有候选、没有可行组合、搜索截断
+和 window missed 分别保留。未来未激活区间的逻辑抢占不授予运行中动作的停止权。
 
-当前 `BoundedJointScheduler` 只接收 DAG-Ready Task 的 exact Candidate Set 与 Control-owned
-calendar snapshot，在固定预算内对 Role、Node、独占 Resource 和最早可行半开时间区间做确定性
-回溯。MissionPlan v0.5 的 `resources[].units` 是所选资源的最低 declared capacity，不是可分割
-quota；`timing` 是相对 durable Mission acceptance 的窗口和 planning duration。Scheduler decision
-仍不是 Proposal 或 Commit。未来区间由 Control 持久化为 `Scheduled`，到期后重新执行
-Matching、Proposal、Commit、Bind 才能 dispatch；`Activated` 区间只是 planning evidence，实际
-resource ownership 仍由原 reservations authority 持有。运行超出 estimated end 时资源退化为
-开放占用，阻止冲突任务启动，不抢占本地执行。所有 normal/recovery Commit 都必须保护 future
-interval，Recovery 读取相同 calendar snapshot 但不建立新的 future reservation。decision 持有
-latest-start 与 completion deadline 共同约束的最迟激活时间；未完整绑定或已过期的 Task 不能
-Activate，window-missed evidence 按 Task 持久化去重并退出自动 timer dispatch，不会终止
-application timer。完整边界见
-[`ADR-0029`](../../decisions/0029-bounded-joint-scheduling-and-future-reservations.md)。
-
-Mission Intelligence 中的 Actor 只表达跨 Task 的逻辑参与者和语义连续性，不携带物理
-Node identity。若部署或实验必须指定某个 Actor 由某个 Node 实现，该关系作为独立的
-Control-owned placement constraint 输入：它只收窄首次 Matching 的 Candidate Set，仍需通过
-Schedule、Propose、Commit 和 Group Bind 才形成 authoritative `ActorBinding`。placement
-constraint 本身不预留资源，也不属于 MissionPlan、Runtime 或 State projection。普通
-recovery 不具备 Actor 迁移 authority：已绑定或有 placement 的 Actor 只能在其权威 Node
-上恢复；该 Node 不可用时 Candidate Set 为空，Group 保持 Blocked，不能借 Rebind 静默换狗。
-独立的显式 takeover 路径由 ADR-0070 定义：它只面向已经 Blocked/unbound 且有当前停止
-证明的 Role，要求精确 source/standby PhysicalEntity、registry revision、候选限制与外部证据
-摘要，并继续经过 Match、Schedule、Proposal、Commit、Rebind。普通 Role Rebind 不获得该
-authority；physical grounded Actor 和固定 placement 仍禁止迁移。
-
-Canonical capability identity 使用 `namespace.name@version`；按最后一个 `.` 分隔 name，
-因此 namespace 可以分层而 name 必须是单 segment。Node Config、Node Protocol 与结构化
-MissionPlan 必须遵守同一可逆规则，详见 ADR-0017。
+应用先持久化 accepted authority、attempt 与 command intent，再发 Execute/Cancel。Node receipt 证明
+journal 接纳；执行事实证明本地结果；Orchestration 按原 basis 判定 Task satisfaction，三个阶段分开。
+有 Memory 时，原 Task/context/provider 的 revoke proofs 先通过，才落定满足与正常资源释放。
+独立原目标门禁启用后，全部 Task 完成也不能单独完成 Mission。
 
 ## 5. 状态、证据、信念与记忆
 
-State & Memory 是横向基础设施，包含：
+State API 是既有 authority 的只读 federation，不是 Global Truth 或新的写入 owner。记录正交区分
+`Node / World / RoboGuide` 对象和 `Desired / Committed / Reported / Observed / Derived / Belief` 语义，
+保留 source/channel、payload schema、source time、receive time、TTL、confidence 和 lineage。
+独立来源不被隐式 last-writer-wins 覆盖；source clock 不与远端 decision clock 比较。
 
-- Node / Resource State；
-- Capability State；
-- Task / Execution State；
-- Spatial & World Model；
-- Allocation / Reservation State；
-- Shared Belief；
-- Distributed Memory。
+显式 consumer policy 将 tenant/source/schema/freshness/conflict/condition 接到 Match、Commit、Bind、
+Rebind、continuation、outbox readiness 和 satisfaction。Belief 是命名 producer；scalar 冲突规则及
+保守 Gaussian covariance intersection 保留原始 lineage，confidence 不转换成未经提供的 variance。
+重复输入、旧 epoch 或 restore 不刷新原 TTL。
 
-State 不假设单一 Global Truth。共同上层模型将 `Node`、`World`、`RoboGuide` 三类对象与
-`Desired`、`Committed`、`Reported`、`Observed`、`Derived`、`Belief` 六类语义正交组合；
-每条记录保留 source、channel、versioned payload schema、source-local observation time、
-RoboGuide-local receive time、TTL 和可选 confidence。不同来源对同一对象的记录独立保留，
-State 不自动执行 last-writer-wins 跨来源覆盖，也不自动把 Observation 提升为 Belief。
+独立 verifier 按原 accepted Task 固定来源，核对 plan/predicate、完整当前 attempts、freshness/finality
+和可选实际 CAS proof。Local Completed 可以停在 AwaitingSatisfaction。持续证据失效进入 stop/hold；
+缺证据不制造肯定或否定事实，终态后的争议保留为 incident。
 
-统一 State API 是对现有 authority 的只读 federation，类似 VFS 提供共同语义而允许底层
-异构。Mission Orchestration 提供 Desired，Control 提供 Committed，Node/Shared Node State
-提供 Reported/Observed，Runtime/Orchestration projection 提供 Derived；Belief 必须来自显式
-命名的 provider。查询 facade 不成为新的写入 authority，也不绕过 Control、Runtime 或
-Mission lifecycle。
+<a id="selective-memory-catalog-v01"></a>
 
-Node Config v0.7 允许不同 EAIOS 选择性声明 State exports 和 Memory providers。State export
-固定 local-system owner、对象、Reported/Observed 语义、schema、TTL、采样周期和本地
-observation workflow；采样失败只让旧记录变 stale。部署 facade 必须保证 observation
-无副作用，离线配置检查不能替代运行时验证。Memory provider 声明静态最大 scope，并可用固定
-HTTP、dynamic gRPC 或 MCP workflow 实现 discovery/export/import；底层数据库、文件布局和厂商
-接口保持异构。v0.5 provider 仍可作为 metadata-only 配置启动。Node Protocol v0.4 携带完整声明 snapshot 和有界
-`StateObservationBatch`，沿用 application-accepted durable ACK，并增加 immutable Execute/Cancel
-command identity 与 Node journal admission receipt；v0.2 endpoint 已退役并明确
-返回迁移错误。
+### Memory 目录与当前使用
 
-ADR-0104 冻结当前显式 State consumer 与 Belief/verifier 软件合同。Control 的来源策略覆盖
-Match、Commit、初始 Bind、Rebind、续执行和 outbox readiness；Orchestration 的 satisfaction
-门禁独立于 Runtime 本地完成。Belief producer 保留 raw lineage，使用显式 scalar 冲突规则或
-共同线性坐标系中的保守 Gaussian covariance intersection；不能由 confidence 发明方差，
-不能用旧 Node epoch、重启或重复输入刷新证据。可信 tenant/source 所有权控制 State 查询。
+Memory 与实时 State 分离。Execution、Spatial、Semantic、Experience、Artifact 使用 immutable manifest；
+Scope 限制语义消费者，Visibility 决定发现/交换，Placement 是 provider-qualified replica evidence。
+`Local + Discoverable` 合法；Artifact ref 或另一个 Task 的 Completed import 不授予当前 Task 使用权。
 
-通用 verifier 的来源随 accepted Task 冻结，报告必须覆盖完整当前 attempt、plan digest、
-predicate、freshness 和 finality；可要求实际 CAS proof。持续证据失效进入 stop/hold，
-终态后的争议是 incident。MI 将代码、配置、Prompt、Catalog、审批策略及真实 transport metadata
-与 Request 同事务持久化；历史缺失不补造。完整合同与软件/硬件边界见
-[ADR-0104](../../decisions/0104-state-consumers-belief-and-semantic-verifier.md) 及
-[F3 进程验收](../../development/acceptance/2026-10-15-f3.md)。
+Local Memory Provider 是统一操作边界，保留本地语义和 backend-storage authority。Node 的
+FilesystemMemoryLedger 只保存 manifest、索引和 reference fallback；配置 workflow 的 payload 不复制到
+该 ledger。目录 discovery 返回 publish-eligible 集合，不等于本地全部 Memory。State/checkpoint/Node
+Protocol 不保存 Memory blob；独立 Artifact 数据面保存并按摘要校验 opaque bytes。
 
-### Selective Memory Catalog v0.1
+当前已有 Controller-to-Node selective import、持久 outbox/receipt、Prepare、原 Task/attempt import、
+原实例只读对账、availability probe、current-use grant、renew/revoke 和 Group pending barrier。
+原 context、membership/policy、provider/session 与预算先持久化；Prepare ACK 后才能 import，完整当前
+内容与 use 证明通过后才能 Execute。Unknown 不更换 ID 重做；逐 provider 的只读 query 不制造副作用。
 
-Memory 与实时 State 分离。v0.1 支持 Execution、Spatial、Semantic、Experience、Artifact
-五类 immutable Memory revision，以及 Local、Execution Group、Global scope。Catalog 保存
-owner、provider、visibility、schema、provenance、可选 CAS reference 和 node-local replica
-evidence，但不取得本地 Memory 的 semantic ownership。
+正常完成仅撤销该 Task 的原 context/provider，活跃 peers 保留许可。整组终结、恢复和双 Group handoff
+核对完整原 stop/revoke；交接冻结双边 membership、attempt、policy/principal 和 deadline，发布 immutable
+child lineage 后目标仍须正常 Control 绑定及自己的 import/probe/use。模型或 staging 不授予可用性。
 
-Scope、Visibility、Placement 必须分开解释：Scope 决定谁可语义消费；Visibility 决定 metadata
-发现和 content exchange policy；Placement 是哪个 Node/provider 已 staging/import 的 evidence。
-因此 `Local + Discoverable` 合法，其他 Node 可看到 metadata 但不可消费内容；Artifact reference
-只表示已验证的共享 CAS content identity/availability，不表示 Node-local placement。manifest owner
-是 semantic authority，实际副本由 `(NodeId, ConsumerProviderId, status)` evidence 表示。
+<a id="spatial-memory-slice-v01"></a>
 
-节点侧 Local Memory Provider 是类似 VFS 的统一操作合同，不是统一存储实现。配置的
-HTTP/dynamic gRPC/MCP workflow 是真实 EAIOS adapter boundary，真实 EAIOS 保留 Memory semantic
-和 backend-storage authority。Node 内部 `LocalMemoryLedger`/`FilesystemMemoryLedger` 只保存用于
-幂等与 fallback discovery 的 immutable manifest，并从中重建 JSONL index；真实 import workflow
-成功后 ledger 不复制 payload bytes。缺少 workflow 时同一 filesystem 组件才作为 reference
-backend fallback。配置的 `storage_directory` 只属于该 ledger/fallback 和受控 export handoff，
-不是 EAIOS 存储位置。
+### Spatial Memory、Active Map 与回收
 
-其中 `discover` workflow 返回的是 provider 已授权 RoboGuide 发布的 publish-eligible
-immutable Memory 集合，不是 Local EAIOS 的全部 Memory。Node Service 只负责传递查询/上下文、
-做 manifest/scope 校验并执行 export、Artifact upload 和 publication mechanism，不拥有
-Memory promotion 或 sharing selection policy；未配置 workflow 时才使用已记录 manifest 的
-reference fallback。
+Typed map 保留完整原 producer、anchor、lineage、map revision 与 publication attempt；通用 manifest
+不能替代 Spatial provenance。字节 placement、地图 workflow import、active-map selection 与定位证明分别
+保留。当前已有来源文件的 CPU 几何、3D tile/配准及平面融合/增量软件路径，具体输入、算法和验收见
+[Spatial provider](../../../integrations/spatial-provider/README.md)，不把算法存在写成物理定位成功。
 
-Node 主动 export，消费者对明确 revision 选择性 import。ExecutionGroup 是 manifest 的 live
-scope，由 invocation 的逻辑 `group_id` 做本地一致性校验，不是 static provider config；当前并未
-形成 Controller-to-Node distributed Group-scoped authorization/handoff，不能把本地校验描述为完整
-的跨 restart/rebind authority。
+Active Map 的 effect 绑定原 typed input、Node、Group、attempt、provider 与 handoff target。
+原 provider GC 检查实际 imports、不可逆 revoke、workers、Active Map 和已存内容引用，先持久化 tombstone
+再 unlink。实际 FileJobs execution/use-lease 引用及恢复 scan 已接线；可表达 snapshot/archive/lineage 等
+引用类型不表示所有外部 producer 生命周期均已覆盖。完整跨服务生产、释放和在线内容恢复仍须验收。
+静止恢复包重查同包内实际 bytes 与已存活动引用；released history 不要求已删除内容。
 
-Memory、Artifact 与 Index 三者不合并：Memory 解释 owner/kind/scope/schema/provenance，Artifact
-Store 只保存 digest-addressed opaque bytes，Index 只加速本地 metadata retrieval。Runtime 不成为
-Memory DB，State 不保存 Memory blob；provider/CAS/catalog failure 只形成 retry/fence evidence，
-不直接终结 Task 或 Mission。Replica mutation 必须由接收 Node 的 exact consumer provider 通过
-admission；durable identity 为 `(MemorySelector, NodeId, ConsumerProviderId)`，同一 Node 的多个
-provider 不互相覆盖，且 Imported evidence 不可被后续失败尝试降级。当前 Node Protocol 尚不包含
-selective-import command，显式 consumer selection 与 durable command acceptance 仍是后续协议
-工作，不能用自动全量拉取替代。
-
-`Discoverable` Memory 可以只有 metadata；`Exchangeable` Memory 必须引用已经通过 digest
-与 size 校验的 Artifact CAS bytes。消费者按明确 revision 选择性 pull，并记录
-Staged/Imported/Rejected evidence；系统不全量复制、不建立 P2P 同步，也不把 replica evidence
-当作 Task 完成。五类 manifest 使用共同 catalog，强类型领域扩展仍可增加约束。
-
-### Spatial Memory Slice v0.1
-
-首个 Distributed Spatial Memory 实现把地图作为 State & Memory Plane 的不可变 Artifact：
-`MapId`/`MapRevisionId` 是逻辑引用，SHA-256 `ContentDigest` 是 bytes 身份。State 只保存
-manifest、provenance、lineage、固定物理 `SpatialAnchor` 和 Node replica 状态；地图二进制
-由独立 Artifact data plane 的 content-addressed store 持有。Producer 和 Consumer 可以属于
-不同 Mission，Consumer 通过预分配 revision 显式 pull，不发生 Task-level handoff、ownership
-transfer 或 Runtime 动态 output binding。
-
-Node Protocol v0.4 不承载地图 bytes。Integration 提供 streaming Artifact transport，Node
-Service 在受控 cache/sandbox 中完成 digest 校验和本地路径映射，再交给 Local EAIOS。当前 v0
-只覆盖 immutable publish/import/localization verification；实时同步、融合、active-map 选择、
-删除/GC 和安全策略延后。完整边界见 [`ADR-0016`](../../decisions/0016-distributed-spatial-memory.md)
-与 [`contracts/spatial/v0.1`](../../../contracts/spatial/v0.1/README.md)。
-
-Typed map catalog 是通用 Memory 的首条验证链路，而不是第二套 Memory authority。
-`/v1/memories` 通过只读 adapter 暴露 map revision；带
-`roboguide.spatial-memory/v0.1` schema 的发布仍必须走 `/v1/maps`，继续执行 anchor、lineage、
-replica 和 localization evidence 校验。通用合同见
-[`contracts/memory/v0.1`](../../../contracts/memory/v0.1/README.md)，State 合同见
-[`contracts/state/v0.1`](../../../contracts/state/v0.1/README.md)，完整 ownership 决策见
-[`ADR-0024`](../../decisions/0024-federated-state-and-selective-memory.md)。
-强 localization evidence 同时可投影到当前 attempt 的 Runtime relation 与 Group spatial view；
-Spatial Memory 仍是 durable evidence authority，Runtime 只保留 live reducer 所需的 identity，
-不会保存 map bytes、pose stream 或本地控制状态。
-
-```text
-Observation → Source / Provenance → Timestamp → Freshness / Uncertainty
-            → Fusion / Reconciliation → Shared Belief
-```
-
-Shared Belief 是面向决策的视图，不等于绝对 Ground Truth。冲突或过期证据必须
-能够被表达和保留。Memory 具有 Local、Execution Group 和 Global 三种作用域；
-Group 专属上下文默认不向全局广播。
+当前整改基线另接通实际 import Replica、Catalog/child lineage、provider/Artifact Snapshot、
+Archive 原命令和接收副本的独立引用与退休。standalone 源 Artifact 的 Completed 上传退休
+与离线 GC 使用 wrapper v52/codec v31、显式 storage v5/recovery v0.16；全部原 writer 和
+已知 Controller 引用闭包、实际 hash/inode、原 intent/tombstone 先于 unlink。MI 原声明要
+显式撤销 policy、Mission/switch 终结及独立原目标/kernel 完成证明才解除，parent 退休不
+释放 child。原 Unknown 只读重试，已释放 history 可不含已删 bytes。实际范围见
+[源回收验收](../../development/acceptance/2026-10-23-source-artifact-reclamation.md)。
+该离线入口拒绝 Replica/online authority；Raft/在线 producer 与多数派数据面仍须完成。
 
 ## 6. Runtime 与本地自治
 
-Runtime 是持续归约已经 Commit 的分布式具身执行事实的运行环境。它维护 live execution
-registry、logical slot/physical attempt identity、ordered facts、command intent、relation state、
-fence 与 checkpoint/resume。Application composition 驱动 timer 与 durable cancellation，
-Orchestration 推进 DAG/Task lifecycle，Control 持有 Group/commit/recovery authority；Runtime
-不执行 Matching、Scheduling、Reservation、Commit 或 replacement selection。
+Runtime 保留原 attempt history、ordered facts、durable generation、命令意图与 relation fence。
+应用驱动 timer、取消与投递；Orchestration 推进 Mission/Task，Control 选择替代并重验资源。进程恢复后
+仍不确定的执行保持 Unknown。发出消息、receipt、心跳或本地 Completed 均不能单独证明设备停止。
 
-Runtime 同时维护已接受 Mission 的 live execution relations，但只对当前事实进行保守归约。
-进程恢复会把仍依赖非终态 execution 的关系恢复为 `Unknown` 并保持 reconciliation fence；
-新的 physical attempt 只要重新占据同一个 `(GroupId, TaskRef, RoleId)` 逻辑槽，关系即可重新
-解析，而无需修改 specification。Runtime 已为每个逻辑槽维护 durable generation、当前 attempt
-与不可变 attempt history；关系实现不得用 NodeId 或可复用 execution 字符串充当稳定语义端点。
+Node journal 在本地工作流前持久接纳完整 identified command；重启不因相同 identity 再启动动作。
+正式 `Registered` / sequence `Ack` 等待应用权威事务接纳事实。接入与异步 worker 隔离、有界事实批处理、
+Operator TLS 前连接预算和 response I/O 期限均保留原 writer/ACK/预算顺序，不成为硬实时保证。
 
-Integration 定义 Node Protocol、Messaging、Transport、Session、Router 和 wire conversion。
-DDS、ROS 2、gRPC、MQTT 和序列化属于 Integration 实现选型，不因此获得 execution
-lifecycle authority。当前 `core/integration` 只包含 formal Node Protocol v0.4 wire/session/router，
-不依赖 Control、State 或 Runtime。依赖这些 authority 的 `IntegrationRuntimeBridge` 属于
-Controller application composition，位于 `core/orchestration`，只把已验证的 transport facts
-交给既有 Control/State/Runtime，不选择 replacement 或 Local How。
+Mission isolation 是 Orchestration-owned hold。可归因的 exact-Task 本地契约错误在私有 candidate/savepoint
+回滚后持久化 hold；无法分类或全局 Control/State/持久化错误 fail closed。hold 阻止新 dispatch/continuation，
+原事实仍可接纳；resume 重验原 generation、当前证据和停止门禁，不刷新预算。
 
-Node Service / Local Integration Engine 将 canonical execution intent 映射到本地 How，并维护
-节点侧 durable execution continuity；它不管理 Mission 或 Group 生命周期。旧同步 HTTP
-NodeGateway 已退役；`core/artifact-store` 是独立的 filesystem CAS infrastructure，属于
-Artifact 数据平面，不是新增 Local EAIOS 的生产插件机制。具体 EAIOS 的 SDK、Immediate
-How 与 Local Safety 属于 deployment-owned `integrations/` facade。
-
-节点侧部署边界固定为单一 `roboguide-node` 服务。其 Local Integration Engine 可内置
-多种通用传输驱动，但具体能力 owner 在单个 Node 配置内必须唯一，不得在未知物理执行
-状态下自动切换本地系统或重放动作。
-
-Extension Conformance v0.2 复用 Node Service 的配置编译器，要求 Node Config v0.7 分别声明
-exact capability profile 的 attributes/readiness 和 canonical operation workflow，并离线验证唯一
-owner、固定 endpoint/method/service/tool、
-受限 request mapping、execution state mapping、required resources 与选择性 State/Memory
-声明。验证不联系 Controller
-或 Local EAIOS，并显式声明没有执行 runtime/hardware probe。未知、timeout、重复 execution
-identity 和 restart ambiguity 的 fencing 是 Node Service implementation guarantee，由独立的
-engine/journal tests 覆盖，不冒充当前 deployment 的动态认证结果。
-开发者路径与真实三-driver 配置样例见
-[`docs/extensions/device-extension-conformance-v0.2.md`](../../extensions/device-extension-conformance-v0.2.md)，
-ownership 决策见 [`ADR-0021`](../../decisions/0021-device-extension-boundary-conformance.md)，
-旧 HTTP adapter 退役与 Artifact Store 隔离见
-[`ADR-0022`](../../decisions/0022-retire-legacy-adapters-and-isolate-artifact-store.md)。
-
-Node Protocol 的 `Registered` 与 sequence `Ack` 不是 transport receipt。Integration 通过
-completion envelope 等待 Controller composition 使用既有 authority 接受并持久化 fact，
-只有成功后才回复 Node；Integration 本身不解释或产生该 decision。语义见
-[`ADR-0023`](../../decisions/0023-application-accepted-node-protocol-facts.md)。
-
-Controller dispatch 采用 durable intent/outbox：Runtime 保存 logical slot 与每次 physical
-attempt，应用先提交 checkpoint 再路由命令。Node Protocol v0.4 的 identified command receipt
-只证明 Node journal 已持久接受 Execute/Cancel；生命周期仍由 execution facts 证明。restart 或
-route loss 后非终态 attempt 进入 `Unknown` 对账 fence；显式替代须等待 ADR-0057 的真实停止。
-绝不依据消息发送
-结果盲目重放物理动作。Mission cancellation 先进入 durable `Cancelling` 并保留 Group ownership，
-直到各 attempt 有 terminal evidence 才释放。完整边界见
-[`ADR-0028`](../../decisions/0028-durable-command-recovery-and-attempts.md)。
-
-Controller 可从已接受的 v0.8 MissionPlan 导出版本化、digest 绑定的 Execution Session
-descriptor；只有选中 Operation 的注册 Local System 显式声明支持时，才随 durable Execute
-command 传至 Node workflow。其他部署沿用原命令；该 descriptor 只描述同一 Group 内的
-Task/Role、Actor 与 DAG 先决关系，不是 Mission 语义、新的 placement authority 或
-`ExecutionIntent` 参数。Node 在调用 Local EAIOS 前校验精确 slot 和 descriptor。当前
-Habitat shared-world deployment 据此选择双 Actor、双 endpoint 并发 barrier，或单 Actor
-在同一 endpoint 上逐 Task 复用一次 reset 的 simulator world。后一拓扑的 Task readiness、
-资源释放与下一次 dispatch 始终由 Orchestration/Control 决定；Local EAIOS 仅保持已有
-物理世界并发布各 Task 的真实 local outcome。缺少/不支持的拓扑不会凭目标谓词数量补造
-第二 assignment。Node Protocol v0.4 的 `Execute.execution_session_json` 是 additive wire
-字段，旧命令可为空；需要 session 的 Node 必须在注册 metadata 中显式声明该 schema，
-Controller 对路由能力与非空 session 不一致的情况在发送前 fail closed。该部署须成套升级
-Controller 与 Node，避免拓扑证据被
-静默丢弃。详见
-[`ADR-0045`](../../decisions/0045-shared-world-execution-session.md)。
-
-单 Actor 执行段中，只有 Control 已分配的 endpoint 调用原始 EMOS `CrabAgent` 模型并受
-canonical action guard 约束。共用 Habitat world 的其他 endpoint 仍由原始
-`MultiLLMPolicy`/`HierarchicalPolicy` 推进，但以部署层临时的无模型 idle policy 选择
-EMOS 已有的 `WaitSkillPolicy`；执行段结束后恢复原始 agent 实例。它不创建 Task、修改
-模型所选动作、下发导航命令或改写官方 PDDL 判定。双 Actor 双 assignment 路径仍各自调用
-原始 Stage2；idle policy 的激活和调用次数必须独立归档。该策略与原生 EMOS 允许未分配
-agent 自行调用模型选择 `wait` 的路径不同，比较实验应显式记录这一 arm 差异。
-
-Controlled Stage2 还通过 Local EAIOS 的执行期反馈桥接读取原始技能的实际终止结果，
-将模型客户端提前生成的 `Success` receipt 替换为精确 tool call/agent/invocation 绑定的
-完成、预算耗尽、策略中断或未知观测。原始完成方法只调用一次，已有 post-step 本地
-terminal measure 可以更新此前的 policy-input 观测；它不新增动作、仿真 step、模型调用、
-控制预算或官方谓词查询。模型下一次决策使用该反馈，所选动作仍须经过独立 Contract
-Guard。此环只属于 Local How，不能证明 Task/Mission satisfaction、改变 Control ownership
-或触发 MI 重规划；与原生 EMOS 的 synthetic receipt 路径不同，须在 arm 配置与证据中
-披露。详见 [`ADR-0069`](../../decisions/0069-observed-local-skill-feedback.md)。
-
-当前 Habitat Local EAIOS 还提供默认关闭的 canonical `object.relocate@v1` 执行 profile：
-完整 object/source/destination 及 Execution Session 跨 endpoint/IPC 保留，原始 nav/pick/place
-工具受精确契约与已观察阶段约束。局部导航完成不能结束搬运；原始 place 完成后以原始
-wait 保持已完成 endpoint，让同伴继续。单 Actor 顺序复用和双 Actor 不同物体并发共用原有
-拓扑；同一物体并发、取消后搬运续跑及 `any_at` 专用 Local How 组合明确拒绝。它不增加
-Core 资源语义，不放宽官方成功或 Formal admission。Task3 受控物理预检已经运行，
-正式配对公平性与批量就绪仍需独立验证。默认关闭的精确对象完成 profile
-（[ADR-0073](../../decisions/0073-bound-relocation-place-completion.md)）用本次 canonical
-对象距离驱动原始 place 释放，并以实际 grasp release 核验本地完成。它允许技能退出后的
-持物 reset，模型仍自行选择动作；Local How v0.8 / feedback v0.3 明示受控臂差异，
-不会改动原生文件或官方评测。
-[当前实现图和边界](../../extensions/habitat-relocation-profile.md)单独记录该可选路径。
-
-显式 `independent-live/v0.1` deployment profile 进一步允许 1–4 个 endpoint、最多 32 个
-independent Task/Role slot 的稀疏调度和后续复用；同一 Task 的并发 Role 必须引用不同逻辑
-Actor，并有冻结候选 endpoint 的一对一匹配。Control 仍独占资源和 Actor binding 权威；
-Local EAIOS 只在原有物理步边界接收实际 dispatch，保留运行中同伴，未分配及本地完成的
-endpoint 使用原始 model-free wait。新 Task 的原始模型初始化按 attempt 执行一次；
-相同 attempt 的原生零动作重初始化被隔离，属于明确披露的 Local How 差异。
-可选 `observation.verify@v1` 的 `detected(entity-ref)` profile 只读取已有检测缓存，
-不调用模型、激活传感器或改变状态；全局 sensor 结果保持全局 scope。阴性 observation
-不能证明肯定目标成立，官方判定仍来自原始 Habitat。三 endpoint 的搬运 readiness
-仅覆盖实际有搬运操作的子集；Drone 不被合成机械臂能力。
-见 [ADR-0074](../../decisions/0074-independent-live-endpoint-profile.md) 和
-[当前实现图及未通过的物理 release 门禁](../../extensions/habitat-independent-live-profile.md)。
-
-Global Coordination 负责 `What / Who / When / Shared Where`。Local Embodied
-Systems 保留 `Immediate How`、Navigation、Local Planning、Perception、Motion、
-Hardware Control 和 Safety。
-
-对于部署明示的距离型导航目标，Local EAIOS 可以在不改变 canonical destination、
-Stage2 所选实体工具调用和官方目标的前提下，将该实体解析为目标容差内、当前机器人
-导航网格上有路径的物理导航点。此解析只属于该 deployment 的 Local How，必须记录
-所用官方目标谓词、阈值、候选点、路径查询和适配器版本；无可证路径时明确失败，不能
-把到达局部导航点或静态路径当作官方谓词成立。未经明示的目标类型保持原有执行方式。
-部署启用该行为后与原生 EMOS 的 Local How 不同，对照实验必须记录这一差异。详见
-[`ADR-0051`](../../decisions/0051-goal-region-local-navigation.md)。
-
-当前解析器在原始点和投影点之外，有界检查 NavMesh 顶点、三角形内部最近点及重心，
-避免只检查顶点而遗漏内部可达落点。动作证据 v0.5 记录几何工作、路径预算与截断状态；
-所有候选仍须通过原有三维目标及停止范围检查。有限搜索未命中不证明物理任务不可能，
-也不改变 Control 的承诺、MI 的任务语义或官方成功判定。
-
-部署还可独立启用默认关闭的 reset route-support 观测。它在同一次实际 reset 后，用
-复制后的导航参数与隔离的 PathFinder 查询原始点和投影中心点，记录 `supported`、
-`not_found` 或 `unavailable`，并绑定 workload、起点、Local How 与实际模块/原生库摘要。
-该预检不运行顶点扫描，不提前填充原始 action cache，不调用随机采样或物理 step。
-`not_found` 只表示这两个候选未提供静态路径证据，不能作为 Actor 后续 Task 的永久
-Node 排除。观测本身用于归档与独立诊断，不进入 MI 输入或 Control 硬候选规则。
-B1 明确启用时，归档缺失/身份不一致作为 harness 失败在提交前暴露；正常的未知证据
-不改变 Formal admission。详见
-[`ADR-0052`](../../decisions/0052-reset-route-support-observations.md)。
-
-独立的默认关闭初次调度 consumer（[ADR-0053](../../decisions/0053-initial-candidate-preferences.md)）
-可将正向静态路径证据投影为 canonical operation/parameters 对应的候选成本。
-Controller 在当前双 endpoint 容量约束下比较初次并发任务的候选组合，Control/Scheduler
-只调整已有 CandidateSet 的搜索顺序，不扩大候选、不创建 binding 或资源承诺。
-未知和有限搜索未找到仍可参与调度；资源不足保留现有可恢复 deferral。
-偏好有 receive-time 时限，首次成功 Bind 后失效，恢复不重新激活；MI、任务语义、
-Local How、官方 benchmark authority 和 Formal admission 均保持各自权威。
-
-独立的默认关闭几何扩展（[ADR-0062](../../decisions/0062-scoped-static-navigation-region-evidence.md)）
-可在同一隔离网格上检查完整起点连通区域与目标容差的三角面关系，记录静态相交、
-静态不相交或未知。它不增加路径查询和物理 step；预算耗尽、参考点旋转或边界不确定
-不能伪装成完整负证据。B1 检查 source/profile/identity 与新版本归档。初次 consumer
-可将其转成中性的 exact-operation support grade，优先减少静态不相交组合，再比较
-正向路径覆盖和成本；只改变现有候选搜索顺序，包括静态不相交在内的候选仍可使用。
-完整静态网格观测没有动态物理不可达、永久 Actor 排除或全局不可解的权威。
-
-独立、默认关闭的初始支持度反馈
-（[ADR-0066](../../decisions/0066-initial-operation-support-feedback.md)）
-在正常 MI 规划、审查与批准之后、唯一 Controller submit 之前运行。Controller 查询
-使用当前 Control Matching 的私有副本和不落盘的 query sink，只投影精确逻辑 slot、
-支持分类、源摘要及原始 receive-time 有效期，不输出 Node/Resource 标识。仅限新
-Controller 首个 admission 前的初始世界，后续 Task、restore 和 recovery 不重用起点。
-全部部署组合均含完整 scoped disjoint 才返回 blocked；有限 miss 与 unknown 保留可能性。
-
-Request Engine 在显式配置要求下，将 blocked/unavailable 保存为部署就绪 hold。
-默认零次模型恢复时，显式 retry 只重新检查同一计划。assessment v0.2 还投影当次查询
-真实 Control eligibility 的首个排除原因计数，区分健康、状态过期、lease、operation、
-Role contract 与部署候选条件；不输出 Node/Resource 标识，不从之后的健康快照猜原因。
-query 中断不会成为模糊提交。not_blocked 也不是 route 或资源承诺。
-
-独立、默认关闭的部署重检 agent（[ADR-0067](../../decisions/0067-bounded-mi-deployment-reconsideration.md)）
-复用 Responses Repairer 的新 request mode，基于相同冻结任务输入和精确计划反馈提议
-重查、完整修订草案或保持等待。原 Request 的次数/时限在调用前持久化；相同反馈、
-过期或变更的来源、重启、错误输出与提交不明均不能暗中增加重试预算。修订必须重新通过
-确定性校验、Reviewer、必要风险批准和 Control 预检；真实协作与完整目标仍保留。
-模型提议不选择执行器，也不执行物理恢复。正式提交后只走已有接纳对账与执行权威。
-新 observations v0.4 保存独立 session，公共 Request v0.4 和 MissionPlan 不变。
-Formal population 与官方 benchmark authority 保持独立。
-
-```mermaid
-flowchart LR
-    MI[生产 MI 规划与审查及必要批准] --> Q[可选 Controller 只读预检]
-    E[冻结 reset 来源与当前 Control eligibility] --> Q
-    Q -->|blocked / unavailable| H[Request durable hold]
-    H -->|显式 retry 同一计划| Q
-    H -->|单独启用并持久化预算| R[MI Repairer 部署重检 agent]
-    R -->|recheck 同一计划| Q
-    R -->|revise_plan 完整草案| V[完整校验与新 Reviewer及必要批准]
-    V --> Q
-    R -->|wait 或预算来源不足| H
-    Q -->|not_blocked| S[唯一 Mission submit]
-    S --> C[Control Match Schedule Commit Bind]
-    C --> X[Runtime Node Local EAIOS]
-    X --> B[独立官方 benchmark 判定]
-```
-
-这是已实现且默认关闭的路径图；离线测试不证明模型未来遵循契约、物理缺口可修复或
-真实 Episode3 已成功。提交不明只查询原接纳证据，不返回模型改写或另一次 POST。
-
-默认关闭的 step-aware Local How（[ADR-0063](../../decisions/0063-step-aware-local-navmesh-resolution.md)）
-让执行动作与 reset observer 共用复制后的导航配置。只细化垂直体素，保留已声明的正台阶
-高度，而不扩大机器人能力。它属于本地执行策略，会影响实际路线；不是只读诊断，也
-不是 Control 的路线证明。Local How v0.4 与实际动作网格证据明确记录启用状态，官方
-PDDL 仍独立裁决物理终态。
-
-空间到达 Local How（[ADR-0064](../../decisions/0064-spatial-route-arrival-local-navigation.md)）
-是另一个明确声明、默认关闭的本地控制分支：三维接近选定导航点前继续跟随路径，
-之后才朝向原实体并报告本地完成。它保留原阈值、速度和执行预算，单次原 base action
-下发、无额外模型或 Gym step；找不到路径不伪造直线。Local How v0.6 与 action evidence
-v0.4 明示与原生控制的区别，未改变官方谓词、Control 资源权威或 Orchestration 满足边界。
-
-启用该 profile 时，Local EAIOS 在联合 Gym step 前按厂商实际动作顺序准备导航目标、
-路径和控制指令（[ADR-0065](../../decisions/0065-joint-navigation-preparation.md)）。全部
-成功才进入一次原 step；预期的有界路径失败成为带 endpoint 和当前 attempt 的本地失败，
-不会让同一联合 step 的其他导航动作先移动。既有 Completed 事实保留。第一次物理 step
-前失败的官方执行结果保持 unavailable，reset 真值仅是诊断。准备初始化执行缓存，
-不是只读观察；它不新增 Control 路线权威，也不保证任意物理异常的原子回滚。
-
-另一个默认关闭的目标感知到达 profile
-（[ADR-0068](../../decisions/0068-live-reference-goal-region-arrival.md)）允许选择有真实路径的
-目标区域内落点，保留原停止范围估计作为证据。该控制分支必须读取机器人当前实际参考
-位置，只有其完整三维距离进入既有局部余量且原导航点/朝向条件均满足，才报告本地完成；
-否则继续沿路线接近。它不增加动作、模型或 Gym step，不改变原速度及技能/episode 预算。
-Local How v0.7 与动作证据 v0.6 明示该执行臂差异；reset observer 仍用明确披露的保守停止
-范围探测，未命中不排除 Node。官方联合 PDDL、Control 和 Orchestration 的权威保持不变。
-
-```text
-one Habitat reset -> original prepared observations -> assigned Stage2 execution
-                                                        |
-                                           active agent NavMesh
-                                      (original / opt-in step-aware copy)
-                                                        |
-                           original Oracle / opt-in spatial or live-goal arrival
-                                                        |
-                                   opt-in selected joint navigation preparation
-                                      (failure -> attributed local outcome)
-                                                        |
-                                             one original Gym step
-                                                        |---- optional v0.6 motion taps
-                                                        |     (original request / filter return /
-                                                        |      actual before-after base positions)
-                                                        |     -> bounded diagnostic archive only
-                                                        |
-                                               official PDDL outcome
-        |
-        +-> isolated bounded route queries -> reset-route-support.json
-                     ^                            ^
-                     |                            |
-             copied agent NavMesh -> optional bounded complete-component geometry
-                                                  |
-                                  B1 identity/source/geometry check
-                                                  |
-                                      diagnostic archive only
-                                                  |
-                               optional neutral cost/support projection
-                                                  |
-                              initial eligible-candidate ordering
-                              (first Bind / expiry / restore fence)
-
-existing floor matrix -> Control Match -> Scheduler -> Proposal -> Commit -> Bind
-                                             ^
-                                  optional initial search order
-```
-
-上述 motion taps 默认关闭，只包装已有的本地 step_filter/update_base 调用。
-原方法仍执行一次，观测不增加 PathFinder、碰撞、Gym 或模型调用。真实请求、过滤返回、
-更新前后位姿及失败step的pending记录独立保存；返回端点差异仅是诊断比较，不证明碰撞、
-到达或官方成功。数据绑定已有canonical Task/Role/attempt，顺序复用时不继承旧Task记录；
-读取到的action/mesh能力数值只说明部署导航模型，不能替代真实硬件能力认证。
-详见[本地导航证据指导](../../development/local-navigation-evidence.md)。
+Habitat 是可选 Local EAIOS，通用 Core 不依赖其 simulator。一个原进程拥有一次 reset 的共享 world，
+agent endpoints 经配置 Node Service 接入；Control 分配、DAG 与资源释放保持全局权威。
+Local How 中的导航、Contract Guard、实际 skill feedback、idle/wait 与 retained-world continuation
+分别按显式 profile 启用并披露与原生臂的差异。Local completion、TaskSatisfied 与官方 PDDL/benchmark
+结果分别保留；Eval Harness 不绕过系统调用 skills，缺失官方结果保持 unavailable。
 
 ## 7. 对账与恢复
 
-```text
-Detect → Reconcile → Adapt
-```
+恢复由当前 owner 和最低必要权限推进：Local Autonomy、Runtime 通信对账、Control Group/资源恢复、
+重新调度，以及独立授权的 MI 计划修订。观察进度、模型建议、取消回执和恢复预算不是物理停止证明。
 
-恢复只升级到完成任务所需的最低层级：
+### 停止与执行恢复
 
-| 层级 | 所有者 | 处理方式 |
-| --- | --- | --- |
-| L0 | Local Autonomy | 避障、短程重规划、运动重试、安全停机 |
-| L1 | Runtime | 重连或恢复调用/通信 |
-| L2 | Execution Group | 替换成员、重新绑定或调整 Group |
-| L3 | Scheduler / Coordination | 重新 Propose、Coordinate 和 Commit |
-| L4 | Mission Intelligence | Task Graph 已无法满足 Mission 时重新规划 |
+应用冻结 exact operation-owned State export、原 attempt/generation/session、policy 与 deadline。
+需要的 durable Cancel receipt、terminal Cancelled 与独立 fresh safe-state 是不同门禁；自然 Failed/Completed
+保留原结果，不补造 Cancelled。SoftwareProcess 原 PID/instance 的实际 OS wait 只证明软件进程退出。
+缺证明或超时保留 ownership，不能因为用户重试或 Controller restart 获得新时限。
 
-该分级是长期职责模型。当前实现的下发前流程见
-[ADR-0054](../../decisions/0054-mission-recovery-boundary.md)：类型分类、草案有界修复、
-提交 fence 和权威接纳核对（ADR-0055）。当前 operation-progress v0.1（ADR-0056）通过
-注册 State export 记录操作量度和源身份，使用原 receive time/TTL，区分 Working、Waiting、
-Blocked、Unknown。仅明确给出的量度与 stall interval 参与 Stalled 判断，观测不改变执行。
-Habitat 可选 observer（ADR-0058）把既定目标的几何改善量投影为该通用 State payload，
-保留原始技能、producer freshness 与准确 attempt identity；wait 没有工作 counter。
+Role recovery 核对 dispatch-frozen/current operation-owner 的 isolated-stop 和 repeat support；耦合部署须
+使用相应完整 Group gate。原停止/Memory revoke 通过后，正常 Match/Schedule/Propose/Commit/Rebind
+形成新 attempt；候选不足保持 Pending/Blocked。原 Group continuation 还须完整原 owner、当前集合与
+原资源承诺，完成 peers 不重执行。运行中抢占和复杂耦合迁移仍需各自安全合同及组合验收。
 
-显式执行恢复（ADR-0057）记录当前 attempt/owner、重复操作授权及持久化时间/次数预算。
-真实 Cancelled 终态到达后才允许 Control partial release，随后复用 Match -> Schedule ->
-Propose -> Commit -> Rebind。确认停止的原 owner 可以作为独立 opt-in policy 参与匹配，
-以保留 Actor 物理绑定；普通替代 Matching 仍排除原节点。新 attempt 在原节点上重试也
-获得新 identity，旧 release 不会再执行一次。Stop timeout 保留旧资源，候选不足保持
-pending，已 Commit 但未 Rebind 的替代在预算过期时由 Control Abort。未受影响任务不释放。
+### 运行期计划修订
 
-部署停止/continuation 契约（[ADR-0059](../../decisions/0059-deployment-stop-continuation-contract.md)）
-沿用 operation-owner LocalSystem 注册 metadata，在 dispatch 冻结。独立 Role 恢复必须
-同时声明 isolated execution stop 与 context-preserving repeat，当前注册仍相同；否则在
-发出 recovery Cancel 之前拒绝。replacement Matching/Commit/stateful Rebind 与 Execute
-outbox delivery 再检查能力。默认 Habitat shared-world 声明联合停止和不支持中断续跑；
-其正常顺序 Task 能力独立。部署支持不是停止证明或重复授权，不进入 MI 任务语义。
+当前已有版本化 runtime plan revision、独立原 Mission goal gate、受当前 principal/tenant 约束的 MI
+work discovery、原 Request lookup、SQL worker claim、每 provider phase 唯一 nonce、原回包/不明结果
+对账、独立 Review，以及 scoped Memory 声明。这些已组成当前运行期 MI 软件路径。
 
-部署侧 retained-world continuation 依 [ADR-0060](../../decisions/0060-retained-shared-world-continuation.md)
-已实现本地路径：显式 opt-in 后，联合 Cancelled 可保留原世界并等待同一 session、原 intent 的新
-attempt；已 Completed 端不重执行，步数不重置，重启不重建旧世界。Controller Group
-recovery 依 ADR-0061 独立提供；单 Role 恢复仍拒绝联合停止。该本地机制不释放资源、不创建 attempt，
-不修改 MI、任务语义或官方成功判断。
+故障/hold、原停止/撤权、原目标、当前 owner、Review 与不可续期预算均是发布/切换门禁。
+候选前冻结原属组 Memory child 声明；原 CAS 核验后才可发布，新 Group 继续正常 Control/import/use。
+原计划版本和已完成事实保留，原 Group 的 Execute outbox 永久 fence。运行期模型不能直接写 binding，
+新 DAG 不能把原目标解释为已经达成。详见
+[运行期计划合同](../../development/runtime-plan-revision-v0.1.md)和
+[MI/scoped Memory 验收](../../development/acceptance/2026-10-21-runtime-mi-scoped-memory.md)。
 
-```mermaid
-flowchart LR
-  L[Local EAIOS operation-specific progress] --> S[Registered State export]
-  S --> O[Runtime readonly observation]
-  D[Exact operation-owner deployment declaration] --> G{Frozen/current support matches?}
-  U[Explicit bounded recovery command] --> G
-  G -->|isolated stop + context-preserving repeat| C[Durable Cancel]
-  G -->|missing / coupled / changed / unsupported| B[Reject Role recovery before Cancel]
-  C --> P[Current owner reports Cancelled]
-  P --> R[Control partial release]
-  R --> M[Match / Schedule / Propose / Commit / Rebind]
-  M --> V[Recheck replacement support before Execute delivery]
-  V --> N[New physical attempt]
-  X[Unknown / Cancel receipt] --> F[Retain ownership and reconcile]
-  subgraph H[Local shared-world continuation - default off]
-    HS[Actual joint Cancelled / retained Completed] --> HG{Same world / intent / fresh attempts / budget?}
-    HG -->|all stopped slots assigned| HR[Original Stage2 in same Habitat world]
-    HG -->|changed / expired / restart / missing slot| HF[Close or reject without reset]
-    HR --> HE[Retain segment history and official final metrics]
-  end
-```
+### 权威持久化、Replica 与恢复包
 
-自动进度触发取消、自动重写计划与执行期 MI replacement revision 尚未实现。
+Controller 使用实际单 writer、authority journal、事件与完整 checkpoint 的原子事务。
+增量 checkpoint 是可选 opaque byte 存储格式，按 schema/sequence/revision/digest 重建同一完整快照；
+不自动提供 event-complete reducer。持久化失败可进入 write-disabled，禁止 mutations/ACK/outbox，
+保留最后提交查询；recovery-admin 的原 generation/checkpoint/journal probe 只解除适用的原 fence。
 
-整组原绑定恢复已依 [ADR-0061](../../decisions/0061-confirmed-stop-group-continuation.md)
-实现并离线验证：显式冻结全部 current attempts 与重复授权，取得完整停止证明后由 Control 重新
-验证原资源承诺，再准备完整的新 attempts。暂停保留 ownership；不能逐 Role 释放、
-迁移 endpoint 或续时间/步数预算。完整新 outbox checkpoint Commit 后重新读取时钟，
-再次核对原 owner/注册、当前完整集合及资源。默认仍关闭；已有单 Actor 原世界物理续跑
-验证与实际 Controller/Node 进程验收，多 Actor 的物理联合停机与续跑仍未验证。
-部署 opt-in 在注册前冻结运行目录 Node 配置摘要，并核对两个 Adapter 的固定只读能力声明；
-此检查不发送恢复命令，也不改变资源、任务或官方判定。
-现有单 Role 恢复与本地续跑边界保持独立。
+默认 standalone；显式 Replica profile 使用 OpenRaft/SQLite、epoch/quorum 和 supervisor Controller child。
+当前已有 learner/joint-consensus 成员变更、leader transfer、证书 Stage/Retire/Abort 与实际 TLS pin/CA
+重检。成员本地 transfer/spawn/PID/wait journal 不由 Raft snapshot 覆盖；V3 transfer 先 fence 源应用，
+等待原 child durable wait，再按原 quorum/receive-relative budget 发原 target command。丢回包保留 Unknown，
+不能因重启或同 ID 再发选举。副本身份不是 Node/device identity。
 
-```mermaid
-flowchart LR
-  U[Explicit complete-set repeat authorization] --> R[Runtime frozen members and durable budgets]
-  D[Frozen and current exact deployment support] --> R
-  R --> C[Durable whole-set Cancel outbox]
-  C --> S{Actual stop facts for every affected attempt?}
-  S -->|missing / Unknown / expired| F[Retain original commitments and expose fence]
-  S -->|Cancelled or natural Completed| P[Control retained-binding Proposal]
-  P --> K[Control rechecks current eligibility, physical identity and resource ownership]
-  K --> A[Atomic new attempts only for Cancelled slots]
-  A --> Q[Persist checkpoint and events]
-  Q --> V[Fresh clock and unchanged complete-set check]
-  V --> E[New Execute outbox to original endpoints]
-  E --> L[Local EAIOS same-world admission and remaining budget]
-  X[Already Completed peer] --> W[Preserved outcome and passive original wait]
-  W --> L
-  M[Ordinary Mission Cancel] --> B[Abort continuation and await physical stopping]
-```
-
-`Unknown`、Cancel receipt 或心跳都不是物理停止证明。没有配置 progress observer 的部署
-返回 Unknown；operation-specific 误报率及真实硬件停止保证须另行受控验证。
+静止 recovery-tool 依据显式 profile 冻结全部实际 writer/inode lease，校验完整 SQL、原 receipts、declared
+CAS bytes、活动 Memory/Active Map/handoff references，再恢复到新目录。它不启动服务、不续预算、不把
+历史缺失补成当前事实。quorum 元数据、内容恢复、跨独立主机连续性和设备停止需要独立证据。
+上述原引用与离线回收已在当前整改基线通过实际门禁，尚未合回 main；原对齐记录保留其
+10 月 22 日观察范围。Raft/在线 producer 不由这些独立进程证明关闭。
 
 ## 8. 已冻结不变量
 
-- Proposal 与 Commit 相互区分；
-- 已提交 Binding 是可观察的系统状态；
-- Group 成员关系和 Binding 具有明确生命周期；
-- Local Safety 不能被远程全局控制覆盖；
-- Shared Belief 表达不确定性、过期性、来源和冲突；
-- Node 在线状态与 Capability 可用性相互区分；
-- Runtime execution completion 与 Orchestration-owned Task satisfaction 是不同系统事实，均不等于
-  单次 adapter 调用返回值；
-- Task DAG 与 live execution relation 相互补充：前者控制 readiness，后者约束并发运行；
-- Execution relation 的稳定端点是逻辑 Task/Role，不是 NodeId 或 adapter-local handle；
-- 恢复必须针对当前世界重新对账，不能重放过期命令；
-- State 和 Memory 具有作用域；
-- State record 必须保留 object semantic、source、channel 和 receive-time，不宣称全局真值；
-- Memory local ownership、shared discoverability 与 selective exchange 相互区分；
-- 替换实现不能改写架构语义。
+- Proposal、Commit、Bind、dispatch、Node receipt、本地结果、Task satisfaction 与 release 分别有权威。
+- Control 持有 Group membership、资源承诺和 Actor binding；Runtime 不选择 replacement。
+- Actor、ContextRole、TaskRole、Node、PhysicalEntity、LocalSystem 与 Host 不互相替代。
+- DAG readiness 与 live relation 分开；稳定 relation endpoint 是逻辑 Task/Role。
+- 独立来源、receive time、TTL、uncertainty 与原预算保留；restore/replay 不刷新证据。
+- State query 和 rebuildable catalog 不成为 Global Truth、新资源账本或 Memory blob store。
+- Memory Scope、Visibility、Placement 和 current use 独立；已有 import 不代表另一 Task 的许可。
+- Unknown 与缺失停止/撤权证明保持 ownership；消息发送、终态、取消标志和软件 OS wait 不等于设备安全。
+- Local EAIOS 保留 Local How 与即时安全；模型、共识、证书、检查器与恢复包不创建设备事实。
+- 替换实现、兼容版本、部署共址与资料重排不能改写已接受的权威和生命周期。
 
 ## 9. 开放架构问题
 
-Phase 1 真机 observation 必须区分 local-system/process health 与 exact canonical capability
-readiness。Node 负责本地 probe，State 保存最新事实，Control 的共享 eligibility predicate
-消费事实；Integration 不推断 readiness。Spatial localization 的强验证证据属于横向 State &
-Memory evidence，必须关联 execution 与 artifact identity，不能由 Runtime 或 `has_map=true`
-自行推断。渐进方案见
-[`ADR-0019`](../../decisions/0019-capability-readiness-and-localization-evidence.md)。
+实现、组合验收与部署证明必须分别列出，不能用“阶段未关闭”否认已有代码，也不能反向宣告整体完成。
 
-V2 有意保留七个问题：State Authority、Spatial Authority、Control Topology、
-Execution Group Authority、Scheduling vs Runtime Coordination、Temporal Assurance
-和 Resource Commitment Semantics。跟踪列表以及 MVP 决策见
-[`implementation-backlog.md`](../../implementation-backlog.md)。
+| 主题 | 当前审查代码已有 | 尚需的完整能力或验收 |
+| --- | --- | --- |
+| Memory / Spatial | selective import、use/revoke、双 Group handoff、Active Map/GC、已存活动引用恢复校验、空间文件算法 | 全外部引用 producer 生命周期、typed-map/多类型与复杂故障组合、在线跨服务内容一致性 |
+| HA / 恢复 | 动态成员、原 child 排空、transfer、证书轮换、SQL/CAS 静止恢复 | 在线内容/完整 archive/catalog 恢复、滚动升级/回退、独立故障域与 RTO/RPO |
+| 资源 / 调度 | 有界搜索、来源化成本、future calendar、逻辑 quota、文件 worker POSIX proof | divisible allocation、GPU/load/traffic 成本与执行、完整空间交通承诺 |
+| 协调 / 计划修订 | relation stop/hold、continuation、运行期 MI、原目标、Review、scoped Memory 文件链路 | 运行中抢占、复杂耦合迁移/handoff、更多 Memory/typed-map 与跨阶段组合 |
+| Federation | 持久 prepare/commit/abort session 及恢复校验 | 实际双域 transport、身份/tenant/domain 授权、路由与双域恢复服务 |
+| 运维 | write-disabled、metrics-reader、监控配置、短窗口软件 firing/resolved、部分 I/O 隔离 | 其余 listener/阻塞路径、长期 SLO、完整 runbook/告警/版本组合及硬件证据 |
 
-Execution Coordination Relation 当前从 execution lifecycle 推导 `requires-active`，并从 strong
-localization evidence 推导 `shared-spatial-reference`；它仍不解析 hazard、距离、速度或触觉等
-领域信号，也不提供硬实时 stop/pause actuation。其余 typed relation 虽可由 contract 表达，
-但会被 implementation profile 在 Group 创建前拒绝。版本化条件事实、deadline/window、目标侧
-协调命令和安全认证必须在获得真实场景证据后分别演进；Local Safety 始终保留最终权威。
+[全部非发布计划](../../development/roboguide-software-completion-plan-2026-10-15.md)保留目标与完整验收门禁；
+[存量复核](../../development/roboguide-branch-audit-2026-10-22.md)是其冻结代码时点的证据。
+两者均不宣告当前 SoftwareComplete。后续分支只在合并并重新核对后升级为本页的主线事实。
 
 ## 10. 版本关系
 
-V2 取代 V1.1，成为当前权威架构基线。V1.1 保存在
-[`../v1.1/README.md`](../v1.1/README.md)，用于历史比较。架构变化必须先更新
-基线，再同步总体架构图、README、PPT、论文和实现文档。
+V2 取代 [V1.1](../v1.1/README.md)。本次按当前代码整理叙述，不另立 V3，也不回写历史实验或验收。
+原始 [V2 DOCX](RoboGuide_Architecture_Baseline_V2.docx)、
+[V2 PNG](../../images/roboguide-v2-overall-architecture.png)与
+[旧正文快照](architecture-history-2026-10-22.md)仅表示各自历史时点。
 
-## 2026-10-14 整改补充
+改变 authority、依赖方向、生命周期或 public contract 仍须 ADR，并同步本页、图册、实现状态与代码。
+普通增量实现应更新对应现行章节及来源基线；演进历史进入 ADR/验收，不继续前插到正文形成互相矛盾的清单。
 
-入口命令与动态 Node 身份的权威边界见 [ADR-0103](../../decisions/0103-http-command-reconciliation-and-node-identity-lifecycle.md)：
-命令进展与 Request 原子关联，恢复不重复副作用；注册表只经管理事务改变，运输层消费提交后的投影。
-
-2026-10-15 用户批准[全部非发布软件整改](../../development/roboguide-software-completion-plan-2026-10-15.md)，
-包含原先后置的运行期计划、抢占、quota、耦合交接、空间融合和 Federation。该批准不授予
-合成设备事实的权力；SoftwareComplete 与真实硬件证据分开。停止权威接入遵循
-[ADR-0102](../../decisions/0102-complete-software-remediation-and-stop-authority.md)，当前仍在实施中。
-
-[ADR-0099](../../decisions/0099-remediation-authority-transactions-and-recovery-fences.md) 将 Command Journal 纳入完整 Checkpoint 的原子提交、quorum 复制、snapshot 与恢复校验；State 仍不成为 Control 或设备副作用的重放权威。Mission HTTP 的 tenant 随首次 Request 存储提交，Artifact 证书主体的资源授权独立于 Node/session Header。Node Memory 导入使用有界 worker；Unknown 导入保持副作用恢复 fence。readiness 消费存储与 quorum 的实际状态，设备 Unknown 单独呈现 degraded。实验和物理连续性仍需独立证据。
-
-[ADR-0100](../../decisions/0100-selective-memory-import-authority.md) 定义 exact current binding 的 selective-import：Application 持久化有界 outbox/receipt，Control 与 Runtime 分别核对绑定和 attempt，Node 在本地 Execute journal 上核对消费身份。Group scope 只授予同 Group 当前参与者，不隐式授予 handoff 或自动复制。Local EAIOS 仍拥有内容语义。
-
-[ADR-0101](../../decisions/0101-relation-stop-and-explicit-safe-state-evidence.md) 最初要求 relation reconciliation 使用持久 Cancel outbox、Mission hold，以及 exact-session、schema、TTL 和来源受限的安全状态证据。后续 ADR-0102/0110 已接通软件 stop authority、deadline、完整 release/resume gate 和独立原进程退出证据，见 [F1 验收](../../development/acceptance/2026-10-15-f1.md)。设备停止证据与 Local EAIOS 的即时安全权威保持独立。
-
-原切片的分层发现见[历史审计清单](../../development/roboguide-remediation-remaining-2026-10-14.md)。当前 Controller/supervisor 已共享 wrapper v44，早期 v27/v26 不一致已关闭；当前剩余工作以[全部非发布计划](../../development/roboguide-software-completion-plan-2026-10-15.md)为准，仍包含完整 HA 升级和在线数据面恢复。
-
-停止证据补充（[ADR-0110](../../decisions/0110-execution-generation-and-process-stop-evidence.md)）：软件进程退出证明与执行终态、Cancel receipt 分离。v0.3 明确绑定原进程实例和完整当前 attempt 集；自然失败保持 Failed，缺失证明继续持有资源。该软件部署不建立设备停止保证。
+<a id="2026-10-14"></a>

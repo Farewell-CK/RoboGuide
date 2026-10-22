@@ -8,6 +8,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from diagram_assets import diagram_registry
 from site_support import ROOT, contract_versions, source_revision, validate_pairs
 
 
@@ -48,13 +49,46 @@ def maintained_routes() -> set[str]:
     for prefix in ("", "en/"):
         routes.add(prefix + "reference/index.html")
         routes.add(prefix + "docs/architecture/v2/architecture-handbook/index.html")
+        routes.add(prefix + "docs/architecture/v2/current-architecture/index.html")
+        routes.add(prefix + "docs/architecture/v2/index.html")
     return routes
+
+
+def architecture_diagram_errors() -> list[str]:
+    """Reject overview drift between downloadable Mermaid and maintained entry pages."""
+    errors: list[str] = []
+    for suffix in ("", ".en"):
+        asset_suffix = "-english" if suffix else ""
+        source = (
+            ROOT / f"docs/images/roboguide-current-architecture{asset_suffix}.mmd"
+        ).read_text()
+        expected = "```mermaid\n" + source.rstrip() + "\n```"
+        paths = [
+            f"docs/architecture/v2/current-architecture{suffix}.md",
+            f"website/pages/architecture-tour{suffix}.md",
+        ]
+        if not suffix:
+            paths.extend(("README.md", "docs/architecture/v2/README.md"))
+        else:
+            paths.append("docs/architecture/v2/README.en.md")
+        for name in paths:
+            text = (ROOT / name).read_text()
+            start = "<!-- architecture-overview:start -->"
+            end = "<!-- architecture-overview:end -->"
+            if text.count(start) != 1 or text.count(end) != 1:
+                errors.append(f"{name}: missing or duplicate architecture overview markers")
+            elif text.split(start)[1].split(end)[0].strip() != expected:
+                errors.append(
+                    f"{name}: overview differs from canonical {suffix or 'Chinese'} Mermaid"
+                )
+    return errors
 
 
 def inspect(site: Path) -> list[str]:
     """Return publication errors; archived anchor imperfections remain separately counted."""
     validate_pairs(ROOT / "website/pages")
-    errors: list[str] = []
+    diagram_registry()
+    errors = architecture_diagram_errors()
     documents = {
         path.resolve(): Document(path.read_text(encoding="utf-8")) for path in site.rglob("*.html")
     }

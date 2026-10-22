@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block extrahead %}
   {{ super() }}
-  {# Load the pinned local runtime before Material initializes diagram observers. #}
-  <script src="{{ 'javascripts/vendor/mermaid-11.12.2.min.js' | url }}"></script>
+  {# Static architecture figures need no 2.7 MB runtime; retain it for live Mermaid pages. #}
+  {% if page and 'class="mermaid"' in page.content %}
+    <script src="{{ 'javascripts/vendor/mermaid-11.12.2.min.js' | url }}"></script>
+  {% endif %}
+{% endblock %}
+{% block header %}
+  {{ super() | replace('data-md-component="search" role="dialog"', 'data-md-component="search" role="dialog" aria-label="' ~ lang.t('search') ~ '"') }}
 {% endblock %}

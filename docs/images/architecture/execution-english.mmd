@@ -1,0 +1,42 @@
+sequenceDiagram
+  %% roboguide:min-width: 1440px
+  autonumber
+  participant MI as Mission Service
+  participant APP as Controller Application
+  participant C as Orchestration / Control / Runtime
+  participant N as Node Service
+  participant L as Local EAIOS / provider
+  participant V as Independent verifier
+  MI->>APP: Complete MissionPlan and original Request evidence
+  APP->>C: Admit / create Group / Ready Task
+  C->>C: Match → Schedule → Propose → Commit → Bind
+  Note over APP,C: Proposal reserves nothing, authority transaction persists Commit / attempt / intent
+  opt Task declares Memory prerequisites
+    APP->>N: Durable Prepare / import commands
+    N->>L: Original Task / attempt import and current-content query
+    L-->>N: Original provider / bytes / use proof
+    N-->>APP: Durable ACK / preparation / availability / use
+    Note over APP,N: All pending Group prerequisites must pass before Execute
+  end
+  APP->>N: Send Execute outbox after transaction Commit
+  N->>L: Configured workflow after journal admission
+  L-->>N: Local execution result and observations
+  N->>APP: Ordered execution facts
+  APP->>C: Reduce attempt / local Completed → AwaitingSatisfaction
+  APP-->>N: ACK after durable application acceptance
+  Note over APP,V: Revocation proofs and satisfaction evidence are collected independently
+  opt Task owns Memory use permission
+    APP->>N: Original context / provider revoke
+    N->>L: Irreversible revoke and original-proof query
+    N-->>APP: All required original-provider proofs
+  end
+  opt Plan requires independent verifier
+    V->>APP: Independent original Task / attempt / predicate evidence
+  end
+  alt Declared satisfaction basis passes
+    Note over APP,C: Check declared satisfaction evidence, release gates still apply first
+    APP->>C: TaskSatisfied / release Task resources / advance DAG
+  else Negative or required evidence unavailable
+    APP->>C: Retain ownership / stop / hold / explicit recovery
+  end
+  Note over APP,C: A configured independent original-goal gate also needs proof, active peers retain ownership

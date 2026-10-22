@@ -1,6 +1,6 @@
 # Implementation status and evidence limits
 
-Content baseline: `51af590ca9491cb5f20614f58c7882c395a458bd` plus this ADR-0157 implementation, reviewed 2026-10-23. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
+Content baseline: `a0e74d04915b9380f3f4a4a8a6a480daa0e4af76`, including ADR-0157, reviewed 2026-10-23. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
 
 | Area | Existing software paths | Remaining or independently validated work |
 | --- | --- | --- |

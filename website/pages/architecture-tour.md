@@ -1,6 +1,7 @@
 # 架构导览
 
-先区分三种视图：逻辑架构解释谁负责，代码模块说明实现位置，部署拓扑说明哪些进程实际运行。完整说明见[V2 架构手册](docs/architecture/v2/architecture-handbook.md)。
+先区分三种视图：逻辑架构解释谁负责，代码模块说明实现位置，部署拓扑说明哪些进程实际运行。
+[V2 现行架构](docs/architecture/v2/index.md)已按当前主线整合；[架构手册](docs/architecture/v2/architecture-handbook.md)提供阅读路径。
 
 ## 系统定位
 
@@ -18,27 +19,48 @@ RoboGuide 联合协调 Capability、Compute、Space、Time，以 Mission 为长�
 
 State、Memory、身份和持久化横跨这些职责；它们不是一条串行流水线的最后一步。
 
-## 当前进程部署
+## 当前代码架构
 
+按 2026-10-22 主线代码核对。Controller 内部职责共用应用事务；State、Memory 与验证横向支撑执行。
+
+<!-- architecture-overview:start -->
 ```mermaid
 flowchart TB
-  MI[Mission Service / MI] -->|HTTP| APP
-  subgraph Controller[integration-server 进程]
-    APP[Application / writer / transaction]
-    O[Orchestration] --- C[Control]
-    R[Runtime] --- I[Integration]
-    S[State / catalog / Artifact adapter]
-    APP --- O
-    APP --- R
-    APP --- S
-  end
-  I <-->|Node Protocol| N[Node Service]
-  N <--> L[Local EAIOS / Memory provider]
-  VF[独立 verifier] --> APP
-  HA[显式 Replica / supervisor] -.-> APP
-```
+  %% roboguide:min-width: 1280px
+  U[用户 / Operator] --> MI[Mission Service · Python<br/>Request / Grounding / Plan / Review / 审批]
+  MW[可选运行期 MI worker<br/>原 Request / claim / provider nonce] -->|候选修订 + 独立 Review| O
+  MI -->|完整 MissionPlan · 应用接纳| O
 
-零 Node 是有效配置。多个 Node 可以共用一台 Host。显式副本共识、内容复制、跨域 Federation 与物理连续性分别需要自己的合同和证据。详见[当前实现拓扑](docs/architecture/v2/implementation-topology.md)。
+  subgraph CTRL[Controller 进程]
+    O[Orchestration<br/>Task DAG / 满足判定 / Mission 生命周期]
+    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / 日历 / tenant quota]
+    R[Runtime<br/>slot / attempt generation<br/>durable intent / 事实归约 / relation fence]
+    I[Integration<br/>Node Protocol / session / 路由]
+    O -->|Ready Task| C
+    C -->|已提交绑定| R
+    R -->|命令 intent| I
+    R -->|执行结果| O
+    S[State + Memory catalog<br/>来源 / 时间 / TTL / 策略 / manifest 元数据]
+    M[应用层 Memory 协调<br/>Prepare / import / probe / use / revoke / handoff]
+    A[Artifact adapter + CAS<br/>独立内容授权 / 哈希字节]
+    I -->|经应用接纳的来源事实| S
+    S -.当前依据.-> C
+    S -.目录 / selector.-> M
+    M -->|执行前与释放门禁| O
+    M -->|持久 Memory 命令| I
+  end
+
+  I <-->|gRPC · 命令 / durable ACK / 事实| N[Node Service · Rust<br/>配置编译 / Local Integration Engine / journal]
+  N <-->|HTTP / gRPC / MCP 工作流| L[部署侧 Local EAIOS<br/>实际操作 / Local How / 即时安全]
+  N <-->|配置声明的 Memory 工作流| P[Local Memory provider<br/>原内容 / 当前使用许可 / Active Map / GC]
+  N <-->|选择性交换内容 bytes| A
+  V[部署侧独立 verifier / 原目标证据源] -->|原 plan / predicate / attempt / freshness| O
+```
+<!-- architecture-overview:end -->
+
+[完整 Mermaid 架构图册](docs/architecture/v2/current-architecture.md)包含执行与持久化顺序、进程/存储部署、
+Habitat/Eval 接入图、代码依据表和可下载源码。零 Node 有效；Node 不等于 Host。
+Replica 元数据共识、内容恢复和物理连续性分别有自己的合同与证据。旧 V2 PNG 保留为历史概念快照。
 
 ## 不变量
 

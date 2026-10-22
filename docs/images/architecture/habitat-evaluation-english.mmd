@@ -1,0 +1,12 @@
+flowchart TB
+  %% roboguide:min-width: 700px
+  EH[Eval Harness<br/>Run config / startup and shutdown / archives / metrics] -->|Normal Mission Request| MI[Mission Service]
+  MI --> CT[Controller / normal execution chain]
+  CT <-->|Node Protocol| NS[Deployment-configured Node Services]
+  NS <-->|Local workflows| B[Habitat Local EAIOS bridge / agent endpoints]
+  B <--> W[One shared Habitat world / original episode / skills]
+  W --> FM[Official PDDL / benchmark metrics]
+  FM --> VF[Deployment-owned independent Task verifier<br/>Frozen source / goal / attempts]
+  VF -->|Generic verifier evidence| CT
+  CT -.Read-only events / attempts / Mission status.-> EH
+  FM -->|Official result or unavailable| EH

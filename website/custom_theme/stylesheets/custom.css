@@ -36,6 +36,7 @@
 .md-typeset .mermaid { overflow-x: auto; padding: 1rem 0; }
 .md-typeset .mermaid svg { max-width: 100%; height: auto; }
 .md-typeset a:not(.md-button):hover { text-decoration: underline; text-underline-offset: .2em; }
+.md-typeset p a:not(.md-button), .md-typeset td a { text-decoration: underline; text-underline-offset: .2em; }
 .md-typeset .md-button { font-weight: 600; border-radius: .25rem; margin: .4rem .4rem .4rem 0; }
 .md-typeset .md-button--primary { color: #fff; background: #174b85; border-color: #174b85; }
 .md-typeset .md-button--primary:hover { color: #fff; background: #103b6b; border-color: #103b6b; }
@@ -64,7 +65,7 @@
   border-color: currentColor;
 }
 .rg-diagram-scroll { max-width: 100%; overflow-x: auto; margin: 1rem 0; }
-.rg-diagram-scroll > .mermaid { min-width: 38rem; padding: .5rem 0; }
+.rg-diagram-scroll > .mermaid { min-width: var(--rg-diagram-min-width, 38rem); padding: .5rem 0; }
 .rg-diagram-hint { display: none; }
 @media (max-width: 44.99em) {
   .rg-diagram-hint { display: block; font-size: .72rem; color: var(--md-default-fg-color--light); }
@@ -80,3 +81,13 @@
   background: #103b6b;
   border-color: #103b6b;
 }
+/* Architecture figures are pre-rendered from verified Mermaid and remain visible without JS. */
+.rg-architecture-figure { margin: 1.25rem 0; }
+.rg-architecture-figure > a { display: block; background: #fff; border: 1px solid var(--md-default-fg-color--lightest); }
+.rg-architecture-figure img { display: block; width: auto; max-width: 100%; height: auto; margin: 0 auto; }
+.rg-architecture-figure figcaption { padding-top: .4rem; font-size: .74rem; }
+.rg-diagram-source { margin: .5rem 0 1.5rem; }
+.rg-diagram-source summary { cursor: pointer; }
+/* Material adds table scroll wrappers with JS; preserve the same reading boundary without it. */
+.no-js .md-typeset table:not([class]) { display: block; max-width: 100%; overflow-x: auto; }
+.no-js .md-header .md-select__inner { left: auto; right: 0; }

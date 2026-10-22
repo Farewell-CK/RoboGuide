@@ -1,0 +1,30 @@
+flowchart TB
+  %% roboguide:min-width: 1280px
+  U[User / Operator] --> MI[Mission Service · Python<br/>Request / Grounding / Plan / Review / approval]
+  MW[Optional runtime MI worker<br/>Original Request / claim / provider nonce] -->|Candidate revision + independent Review| O
+  MI -->|Complete MissionPlan · application admission| O
+
+  subgraph CTRL[Controller process]
+    O[Orchestration<br/>Task DAG / satisfaction / Mission lifecycle]
+    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / calendar / tenant quota]
+    R[Runtime<br/>Slot / attempt generation<br/>Durable intent / fact reduction / relation fence]
+    I[Integration<br/>Node Protocol / session / routing]
+    O -->|Ready Task| C
+    C -->|Committed binding| R
+    R -->|Command intent| I
+    R -->|Execution outcome| O
+    S[State + Memory catalog<br/>Source / time / TTL / policy / manifest metadata]
+    M[Application Memory coordination<br/>Prepare / import / probe / use / revoke / handoff]
+    A[Artifact adapter + CAS<br/>Separate content authorization / hashed bytes]
+    I -->|Application-accepted source facts| S
+    S -.Current evidence.-> C
+    S -.Catalog / selector.-> M
+    M -->|Pre-execution and release gates| O
+    M -->|Durable Memory commands| I
+  end
+
+  I <-->|gRPC · commands / durable ACK / facts| N[Node Service · Rust<br/>Compiled config / Local Integration Engine / journal]
+  N <-->|HTTP / gRPC / MCP workflows| L[Deployment-owned Local EAIOS<br/>Actual operations / Local How / immediate safety]
+  N <-->|Configured Memory workflows| P[Local Memory provider<br/>Original content / current-use permission / Active Map / GC]
+  N <-->|Selective content-byte exchange| A
+  V[Deployment-owned independent verifier / original-goal source] -->|Original plan / predicate / attempt / freshness| O
