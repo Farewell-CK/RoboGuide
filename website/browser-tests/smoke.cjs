@@ -127,7 +127,7 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
   await page.goto(base + '/', { waitUntil: 'networkidle' });
   await page.locator('.md-header label[for="__drawer"]').click();
   assert.equal(await page.locator('#__drawer').isChecked(), true, 'mobile drawer');
-  const staticContext = await browser.newContext({ javaScriptEnabled: false });
+  const staticContext = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 } });
   const staticPage = await staticContext.newPage();
   for (const prefix of ['', '/en']) {
     for (const name of ['current-architecture/', '']) {
@@ -136,6 +136,7 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
       assert.equal(await staticPage.locator('.rg-architecture-figure img').count(), name ? 4 : 2);
       await staticPage.waitForFunction(() => [...document.querySelectorAll('.rg-architecture-figure img')]
         .every(image => image.complete && image.naturalWidth > 0));
+      assert.equal(await staticPage.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'static page overflow');
     }
   }
   const [expanded] = await Promise.all([

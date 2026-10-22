@@ -88,3 +88,6 @@
 .rg-architecture-figure figcaption { padding-top: .4rem; font-size: .74rem; }
 .rg-diagram-source { margin: .5rem 0 1.5rem; }
 .rg-diagram-source summary { cursor: pointer; }
+/* Material adds table scroll wrappers with JS; preserve the same reading boundary without it. */
+.no-js .md-typeset table:not([class]) { display: block; max-width: 100%; overflow-x: auto; }
+.no-js .md-header .md-select__inner { left: auto; right: 0; }
