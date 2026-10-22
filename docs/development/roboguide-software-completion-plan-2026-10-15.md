@@ -170,6 +170,14 @@ source/Archive writer descriptor 与 kernel/process fence、tombstone-before-rec
 组合已通过。本项仅关闭前条的未发布 copy abort；接收归档退休/GC、全生产者
 对账、未归属 Catalog、Raft/online 及完整 N2–N7 继续必需。
 
+[私有接收 Archive 回收](acceptance/2026-10-22-private-archive-reclamation.md)以
+ADR-0155/recovery v0.14 接通全部原 writer、空完整 consumer inventory、唯一原
+producer 与原 compact receipt 的显式离线退休。原 tombstone/终态 storage v4
+seal 先于独立原 GC intent/unlink；旧 ID 只读，partial unlink 不补造完成，新原
+GC 仅处理剩余 bytes。实际零 Node/CLI/OS 锁、两种文件故障、旧 reader 拒绝和
+已删 bytes 的冷恢复通过。本项不关闭源 Artifact 全引用 GC、其它 producer 释放、
+未归属旧 Catalog、Raft/online 或完整 N2–N7。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

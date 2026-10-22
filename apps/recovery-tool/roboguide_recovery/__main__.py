@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .archive_reclamation import run as maintain_archive
 from .bundle import abort_snapshots, backup, reconcile_snapshots, restore, verify
 from .profile import MAX_PROFILE_BYTES
 
@@ -34,13 +35,37 @@ def main() -> None:
     abort.add_argument("--profile", type=Path, required=True)
     abort.add_argument("--destination", type=Path, required=True)
     abort.add_argument("--command-id", required=True)
+    for operation in ("retire-archive", "gc-archive"):
+        maintenance = subcommands.add_parser(operation)
+        maintenance.add_argument("--profile", type=Path, required=True)
+        maintenance.add_argument("--controller", required=True)
+        maintenance.add_argument("--archive-command", required=True)
+        maintenance.add_argument("--original-intent-digest", required=True)
+        maintenance.add_argument("--command-id", required=True)
+        maintenance.add_argument("--reason", required=True)
     args = parser.parse_args()
-    if args.operation in {"backup", "reconcile-snapshots", "abort-snapshots"}:
+    if args.operation in {
+        "backup",
+        "reconcile-snapshots",
+        "abort-snapshots",
+        "retire-archive",
+        "gc-archive",
+    }:
         raw = args.profile.read_bytes()
         if len(raw) > MAX_PROFILE_BYTES:
             parser.error("recovery profile exceeds its byte bound")
         profile = json.loads(raw)
-        if args.operation == "backup":
+        if args.operation in {"retire-archive", "gc-archive"}:
+            result = maintain_archive(
+                profile,
+                args.controller,
+                args.archive_command,
+                args.original_intent_digest,
+                args.command_id,
+                args.reason,
+                reclaim=args.operation == "gc-archive",
+            )
+        elif args.operation == "backup":
             result = backup(profile, args.destination, args.command_id)
         elif args.operation == "reconcile-snapshots":
             result = reconcile_snapshots(profile, args.bundle, args.manifest_digest)

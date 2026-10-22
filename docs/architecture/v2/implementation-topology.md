@@ -4,9 +4,15 @@
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
 
+ADR-0155 的后续接线只处理原 command 私有 Archive 接收 owner：全部实际 writer、
+空已知 consumer inventory、唯一原 Archive reference 和精确源 compact receipt
+先于退休 tombstone；终态 storage v4 密封旧 writer，另一个原 GC intent/budget
+先于 unlink。显式 recovery v0.14 保留退休历史，不要求已删除 bytes。当前实施中；
+其它生产者、源 Artifact 全引用 GC 和 N2–N7 仍须各自完整实现与验收。
+
 ADR-0154 接续原 Archive producer 的未发布 cleanup：新显式 abort 在原 writer 中
 保存自己的原输入和预算，实际 source/Archive 租约 fence 后先持久 tombstone，再
-退休该 source pin；copy 原历史和接收引用不改写。当前开始实现与实际验证，不能
+退休该 source pin；copy 原历史和接收引用不改写。实际升级/清理/冷恢复已验证，不能
 以缺 publication、超时或新 cleanup 预算推断设备停止或续期原 copy。wrapper v50 /
 operations v0.2 / recovery v0.13 在该实现包接通，现有 v49 历史须精确保留。
 

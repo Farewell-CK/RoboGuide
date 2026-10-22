@@ -19,6 +19,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.11",
     archive_references.SCHEMA,
     "roboguide.recovery-profile/v0.13",
+    "roboguide.recovery-profile/v0.14",
 }
 WRAPPER = "roboguide.controller-checkpoint/v48"
 WRAPPERS = {WRAPPER, archive_references.WRAPPER, "roboguide.controller-checkpoint/v50"}

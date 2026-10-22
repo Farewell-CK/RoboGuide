@@ -1,19 +1,27 @@
 # RoboGuide
 
-未发布 Archive 的显式 abort 正在验证：wrapper v50 / operations v0.2 保留原 copy
+私有接收 Archive 新增离线显式退休与 GC：全部原 writer、空的已知 consumer 清单、
+唯一原 producer 和精确 compact receipt 先于保留决策 tombstone；终态 storage v4
+拒绝旧 writer，独立原 GC intent/budget 先于 unlink。原 Unknown 重试只观察，新命令
+可处理剩余 bytes，不改写先前结果。显式 [recovery v0.14](contracts/recovery/bundle-v0.14/README.md)
+保留完整终态 history；这不是普通可写 v4 CAS。实际零 Node/CLI/文件门禁通过，见
+[ADR-0155](docs/decisions/0155-private-archive-recipient-retirement-and-reclamation.md)。
+源 Artifact 全引用 GC、其他生产者/旧 Catalog、Raft/online 和全部其余整改仍继续实施。
+
+未发布 Archive 的显式 abort 已通过实际升级/文件/冷恢复验证：wrapper v50 / operations v0.2 保留原 copy
 预算与历史，独立 cleanup intent 在真实 source/Archive writer fence 后先持久
 tombstone，再以精确 SQL receipt 退休该 source pin。partial 与接收引用保留；已发布
 归档拒绝 abort。见 [ADR-0154](docs/decisions/0154-original-unpublished-archive-abort.md)
 和 [recovery v0.13](contracts/recovery/bundle-v0.13/README.md)。这只是软件 copier
 隔离，不产生设备停止事实；归档退休/GC、在线及其余完整整改继续实施。
 
-正在接通完整内容归档：显式 Archive command v0.2 在原 SQL writer 内先记录原命令、
+显式 Archive command v0.2 在原 SQL writer 内先记录原命令、
 内容和预算，真实复制并验证后才压缩事件。wrapper v49 / Artifact storage v3 保存
 原 Controller reference authority；recovery v0.12 / bundle v0.4 保留完整 Catalog、
 source/target CAS、原引用和 mandatory 空目录。旧格式工具须拒绝，原命令只读对账
 不重新复制或续期。见 [ADR-0152](docs/decisions/0152-original-archive-content-and-catalog-recovery.md)
 及 [ADR-0153](docs/decisions/0153-artifact-reference-authority-inventory.md)。当前在执行
-实际零 Node 进程验收；GC/Raft Snapshot/在线多数派及其余完整整改继续实施。
+实际零 Node/文件/Catalog/冷恢复验收已通过；GC/Raft Snapshot/在线多数派及其余完整整改继续实施。
 
 Artifact Snapshot 维护可显式选择 storage v2 / recovery v0.11：保留原 owner，复制前持久
 原引用和预算；中断后原命令只允许查询对账，完整原发布验证后才退休。恢复保留原 active

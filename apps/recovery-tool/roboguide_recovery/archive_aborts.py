@@ -166,13 +166,21 @@ def operations(
         else None
     )
     new = marker == (MARKER,)
-    if current and (not new or profile_schema != SCHEMA or "event_archive_aborts" not in tables):
+    if current and (
+        not new
+        or profile_schema not in {SCHEMA, "roboguide.recovery-profile/v0.14"}
+        or "event_archive_aborts" not in tables
+    ):
         raise ValueError("original Archive cleanup requires wrapper v50 and recovery v0.13")
     if not new:
         if "event_archive_aborts" in tables:
             raise ValueError("original Archive cleanup journal is hidden under an old marker")
         return []
-    if profile_schema != SCHEMA or not current or "event_archive_aborts" not in tables:
+    if (
+        profile_schema not in {SCHEMA, "roboguide.recovery-profile/v0.14"}
+        or not current
+        or "event_archive_aborts" not in tables
+    ):
         raise ValueError("original Archive cleanup authority cannot be omitted or downgraded")
     by_id = {
         original["request"]["command_id"]: (original, state, published)

@@ -1,5 +1,17 @@
 # Repository Guidelines
 
+ADR-0155 adds offline private Archive-recipient retirement and explicit GC under recovery v0.14.
+All original writers and the actual recipient descriptor precede a sole-producer/empty-consumer
+check, complete original compact/publication proof and nonrenewable OS-admin retention intent.
+Durable tombstone and terminal storage v4 seal precede unlink; v4 is not an ordinary writable CAS.
+Independent original GC intents retain their own actual writer/process/inode evidence. Failed
+publication or partial unlink remains Unknown; retries only observe, new explicit GC may handle
+remaining bytes without rewriting earlier results. Mandatory command heads prevent lost rows from
+becoming empty authority. v0.14 cold recovery requires original terminal metadata but no already
+deleted bytes; older profiles/binaries refuse. Actual native retirement/GC/cold acceptance passes in
+check_archive_recipient_processes.py; no Nodes/devices/models/simulators are created. Source Artifact
+full-reference GC, other producer release, legacy Catalog, Raft/online and all N2-N7 remain required.
+
 ADR-0154 adds explicit original unpublished-Archive cleanup under wrapper v50 / operations v0.2
 and recovery v0.13. Migration validates v49 history without changing its original embedded
 checkpoints, bytes or budgets. Cleanup has its own nonrenewable intent; actual held source/Archive

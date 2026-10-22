@@ -14,7 +14,7 @@ from . import archive_aborts, artifact_layout
 from .snapshot_references import OperationBudget, canonical, digest
 
 SCHEMA = "roboguide.recovery-profile/v0.12"
-SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.13"}
+SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.13", "roboguide.recovery-profile/v0.14"}
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {WRAPPER, "roboguide.controller-checkpoint/v50"}
 MAX_HISTORY_BYTES = 256 * 1024 * 1024
@@ -510,6 +510,12 @@ def validate(
                 ):
                     raise ValueError("Archive original retained event/Catalog bytes changed")
             content = root / prefix / "content"
+            from . import archive_retirement
+
+            if archive_retirement.retired(content, publication, profile_schema, budget):
+                if state != "compacted" or receipt != digest(canonical(publication)):
+                    raise ValueError("retired receiving Archive lacks its original compact receipt")
+                continue
             owner = artifact_layout.validate_storage(content, profile_schema)
             assert owner is not None
             if owner["owner_id"] != publication["target_owner"]:

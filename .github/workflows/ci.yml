@@ -121,6 +121,12 @@ jobs:
           uv run --frozen python tools/quality/check_content_archive_processes.py
           --skip-build --abort-unpublished --output "${RUNNER_TEMP}/roboguide-content-archive"
 
+      - name: Verify private Archive recipient retirement and actual GC with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_archive_recipient_processes.py
+          --output "${RUNNER_TEMP}/roboguide-archive-recipient"
+          --old-controller "${GITHUB_WORKSPACE}/target/debug/integration-server"
+
       - name: Verify original file Catalog replay after actual Archive
         run: >
           uv run --frozen python tools/quality/check_memory_preparation_processes.py
@@ -131,6 +137,19 @@ jobs:
         run: >
           uv run --frozen python tools/quality/check_catalog_archive_recovery_processes.py
           --from /tmp/rg-ci-catalog-archive --output "${RUNNER_TEMP}/roboguide-catalog-archive-recovery"
+
+      - name: Retain native gate failure observations
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-gate-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            /tmp/rg-ci-*/**/*.log
+            /tmp/rg-ci-*/**/result.json
+            /tmp/rg-ci-*/*.sqlite3
+            /tmp/rg-ci-*/**/source-identity.json
 
   python:
     name: Python

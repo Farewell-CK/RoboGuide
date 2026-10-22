@@ -15,7 +15,11 @@ SCHEMA = "roboguide.recovery-profile/v0.9"
 REFERENCE_SCHEMA = "roboguide.recovery-profile/v0.10"
 MAINTENANCE_SCHEMA = "roboguide.recovery-profile/v0.11"
 ARCHIVE_SCHEMA = "roboguide.recovery-profile/v0.12"
-ARCHIVE_SCHEMAS = {ARCHIVE_SCHEMA, "roboguide.recovery-profile/v0.13"}
+ARCHIVE_SCHEMAS = {
+    ARCHIVE_SCHEMA,
+    "roboguide.recovery-profile/v0.13",
+    "roboguide.recovery-profile/v0.14",
+}
 OWNER_FILE = ".retention-owner.json"
 FENCE_FILE = "blobs"
 OBJECTS = "objects-v1"
@@ -23,6 +27,7 @@ MAINTENANCE_SCHEMAS = {
     MAINTENANCE_SCHEMA,
     "roboguide.recovery-profile/v0.12",
     "roboguide.recovery-profile/v0.13",
+    "roboguide.recovery-profile/v0.14",
 }
 MAX_OWNER_BYTES = 4096
 
@@ -113,7 +118,7 @@ def validate_storage(root: Path, profile_schema: str) -> dict[str, Any] | None:
 def reference_authorities(root: Path, owner: dict[str, Any]) -> set[str]:
     """Retain every known original consumer, including a partial same-owner binding publication."""
     directory = real_directory(root / "reference-authorities-v1")
-    if _record(directory / "identity.json", schema="roboguide.artifact-storage/v3") != owner:
+    if _record(directory / "identity.json", schema=owner["schema"]) != owner:
         raise ValueError("original Artifact reference authority inventory owner differs")
     controllers = real_directory(directory / "controllers")
     result: dict[str, dict[str, Any]] = {}
