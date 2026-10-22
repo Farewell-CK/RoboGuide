@@ -1,0 +1,173 @@
+{
+  "architecture-tour.en.md": [
+    "1-positioning",
+    "2-layer-map",
+    "3-one-instructions-complete-journey",
+    "4-invariants",
+    "5-recovery-ladder",
+    "6-coordination-runtime-constraints-beyond-the-dag",
+    "7-versions-and-open-questions"
+  ],
+  "architecture-tour.md": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6-dag",
+    "7"
+  ],
+  "getting-started.en.md": [
+    "build-and-test",
+    "eval-harness",
+    "next-steps"
+  ],
+  "getting-started.md": [
+    "eval-harness",
+    "_5"
+  ],
+  "index.en.md": [
+    "roboguide-technical-docs",
+    "core-ideas",
+    "system-composition",
+    "where-to-start",
+    "version-snapshot"
+  ],
+  "index.md": [
+    "roboguide"
+  ],
+  "modules/control.en.md": [
+    "module-map-control-plane",
+    "position-in-the-architecture",
+    "authority-boundary",
+    "data-flow",
+    "normal-path-sequence",
+    "recovery-path-sequence-l2",
+    "module-map",
+    "key-types",
+    "future-reservations-and-calendar-semantics",
+    "test-coverage-themes-of-15-test-files",
+    "related-adrs"
+  ],
+  "modules/control.md": [
+    "l2",
+    "15",
+    "adr"
+  ],
+  "modules/domain-ports.en.md": [
+    "module-map-domain-values-ports-foundations",
+    "coredomain-domain-values-shared-across-authorities",
+    "position-in-the-architecture-root-of-the-core-dependency-graph",
+    "module-map",
+    "key-types",
+    "design-notes",
+    "coreports-transport-neutral-port-catalog",
+    "coretestkit-deterministic-test-infrastructure",
+    "test-double-sequence-the-pattern-of-all-higher-level-tests",
+    "related-adrs"
+  ],
+  "modules/domain-ports.md": [
+    "domain",
+    "coredomain",
+    "coreports",
+    "coretestkit",
+    "adr"
+  ],
+  "modules/evaluation.en.md": [
+    "module-map-eval-harness-local-integrations",
+    "evaluation-experiment-driven-evaluation-infrastructure",
+    "position-in-the-architecture",
+    "formal-b1-sequence",
+    "module-map",
+    "integrations-deployment-side-local-eaios-adapters",
+    "console-read-only-mission-journey-visualizer",
+    "related-adrs"
+  ],
+  "modules/evaluation.md": [
+    "evaluation",
+    "formal-b1",
+    "integrations-local-eaios",
+    "console",
+    "adr"
+  ],
+  "modules/integration-node-service.en.md": [
+    "module-map-integration-node-service",
+    "coreintegration-node-protocol-v04-transport",
+    "transport-and-node-architecture",
+    "node-protocol-lifecycle-sequence",
+    "corenode-service-the-generic-node-service",
+    "composition-roots-apps",
+    "related-adrs"
+  ],
+  "modules/integration-node-service.md": [
+    "coreintegration-node-protocol-v04",
+    "node-protocol",
+    "corenode-service",
+    "apps",
+    "adr"
+  ],
+  "modules/mission.en.md": [
+    "module-map-mission-intelligence",
+    "position-in-the-architecture",
+    "request-pipeline-sequence",
+    "module-groups",
+    "prompts-missionpromptsv0",
+    "key-design-facts",
+    "http-surface-appsmission-service-default-1270018070",
+    "tests-23-files-fully-offline",
+    "related-adrs"
+  ],
+  "modules/mission.md": [
+    "promptsmissionpromptsv0",
+    "http-appsmission-service-1270018070",
+    "23",
+    "adr"
+  ],
+  "modules/orchestration.en.md": [
+    "module-map-mission-orchestration",
+    "position-in-the-architecture",
+    "data-flow",
+    "end-to-end-sequence",
+    "module-map",
+    "key-types",
+    "cancellation-and-recovery-semantics",
+    "test-coverage-themes-of-9-test-files",
+    "related-adrs"
+  ],
+  "modules/orchestration.md": [
+    "9",
+    "adr"
+  ],
+  "modules/runtime.en.md": [
+    "module-map-distributed-runtime",
+    "position-in-the-architecture",
+    "logical-slots-vs-physical-attempts",
+    "data-flow",
+    "dispatch-and-fact-reduction-sequence",
+    "peer-channel-lifecycle",
+    "key-types",
+    "test-coverage",
+    "related-adrs"
+  ],
+  "modules/runtime.md": [
+    "peer-channel",
+    "adr"
+  ],
+  "modules/state.en.md": [
+    "module-map-state-memory-plane",
+    "position-in-the-architecture",
+    "data-flow-map-publication-and-import",
+    "sequence-one-controlled-map-import",
+    "corestate-module-map",
+    "coreartifact-store-artifact-data-plane",
+    "memory-semantics-cheat-sheet",
+    "related-adrs"
+  ],
+  "modules/state.md": [
+    "state-memory-plane",
+    "corestate",
+    "coreartifact-storeartifact",
+    "memory",
+    "adr"
+  ]
+}

@@ -1167,7 +1167,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
     │   ├── README.md
     │   ├── roboguide-v2-overall-architecture.png
     │   └── distributed-embodied-ai-os-architecture-v1.1.png
-└── website/               # MkDocs Material 技术文档站（Cloudflare Pages 部署）
+└── website/               # MkDocs Material 技术文档站（Cloudflare Workers 静态资产）
 ```
 
 技术文档站点由 [`website/`](website/) 提供：MkDocs Material 构建，部署于 Cloudflare

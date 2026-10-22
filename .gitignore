@@ -32,3 +32,6 @@ logs/
 # Documentation site generated content (see website/sync_docs.py)
 /website/docs/
 /website/site/
+
+# Optional browser validation dependencies; never needed by the static site.
+/website/browser-tests/node_modules/
