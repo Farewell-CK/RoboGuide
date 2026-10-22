@@ -1,7 +1,7 @@
 # RoboGuide V2 current architecture
 
-Reviewed: 2026-10-23. Current remediation baseline: `ab6ab4679e71fff26cefdacada33fe41a6fbf10b`
-plus this ADR-0158 implementation,
+Reviewed: 2026-10-23. Current remediation baseline: `a0c2ce130b61f19c8c9d8012ffa59664bad64dfc`
+plus ADR-0159 member-local storage; online integration remains in progress,
 on the single development branch `codex/nonrelease-remediation-closure`. The atlas retains its
 October 22 source baseline `495a6d2`. These later remediation changes have not merged back to main;
 they are not claims about the current remote main branch.
@@ -317,6 +317,13 @@ Metadata quorum, content recovery, cross-host continuity and device stopping nee
 original reference/offline GC work above has actual acceptance on the reviewed development baseline,
 without being merged to main. The original alignment review retains its October 22 observation scope;
 independent process gates do not close Raft/online producers.
+
+[ADR-0159](../../decisions/0159-original-content-quorum-and-raft-reference-lifecycle.md) is implementing
+original-content quorum. Source owner/digest/size stay separate from each receiving member/store owner.
+Log/Snapshot/reader/current-view references precede byte effects. Success requires the same actual
+members to persist metadata and every required byte, satisfying each current/joint voter majority.
+Complete Catalog/Archive/Snapshot recovery and upgrade/rollback remain mandatory. Current v0.3 does not
+provide this new contract; online HA is not complete before implementation and actual gates pass.
 
 ## 8. Frozen invariants
 

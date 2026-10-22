@@ -5,6 +5,8 @@
 //! Quorum durability for one Controller authority; replicas never match, bind or execute work.
 
 mod certificates;
+mod content;
+mod content_store;
 mod store;
 mod supervision;
 #[cfg(test)]
@@ -24,6 +26,13 @@ use std::time::Duration;
 pub use certificates::{
     CertificateAction, CertificateMutation, CertificateObservation, CertificateProbe,
     CertificateReceipt, CertificateRequest, CertificateTrust, MemberCertificates, ReplicaCommand,
+};
+pub use content::{ArtifactContentKey, ContentQuorumTarget, MemberContentObservation};
+pub use content_store::{
+    ContentProcessEndObservation, REPLICA_CONTENT_STORAGE_SCHEMA, ReplicaContentCopyStatus,
+    ReplicaContentIdentity, ReplicaContentReader, ReplicaContentReaderReceipt,
+    ReplicaContentReaderStatus, ReplicaContentReceipt, ReplicaContentReference,
+    ReplicaContentReferenceKind, ReplicaContentStore,
 };
 pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};
 pub use supervision::{ControllerDrainProof, ControllerProcessExit, ControllerProcessIdentity};

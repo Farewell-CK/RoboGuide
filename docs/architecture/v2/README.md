@@ -1,7 +1,7 @@
 # RoboGuide V2 现行架构
 
-核对日期：2026-10-23；当前整改代码基线：`ab6ab4679e71fff26cefdacada33fe41a6fbf10b`
-加本包 ADR-0158，
+核对日期：2026-10-23；当前整改代码基线：`a0c2ce130b61f19c8c9d8012ffa59664bad64dfc`
+加本包 ADR-0159 的 member-local 存储，在线接线仍实施中，
 位于唯一开发分支 `codex/nonrelease-remediation-closure`。本页同步 main 的 10 月 22 日图册，
 保留其原基线 `495a6d2`；下述新增整改尚未合回 main，不提前记为远端 main 能力。
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
@@ -318,6 +318,13 @@ CAS bytes、活动 Memory/Active Map/handoff references，再恢复到新目录�
 历史缺失补成当前事实。quorum 元数据、内容恢复、跨独立主机连续性和设备停止需要独立证据。
 上述原引用与离线回收已在当前整改基线通过实际门禁，尚未合回 main；原对齐记录保留其
 10 月 22 日观察范围。Raft/在线 producer 不由这些独立进程证明关闭。
+
+正在按 [ADR-0159](../../decisions/0159-original-content-quorum-and-raft-reference-lifecycle.md)
+接原内容多数派：原 owner/digest/size 与每个接收 member/实际 store owner 独立，
+log/Snapshot/reader/current-view 引用先于 bytes effects。成功 ACK 要求同一批实际
+成员同时持久 metadata 和完整 bytes，并分别满足 current/joint voters 多数；
+Catalog/Archive/Snapshot 和升级/回退须完整闭环。当前 v0.3 尚不提供该新合同，
+实现和实际 gate 通过前不记为在线 HA 完成。
 
 ## 8. 已冻结不变量
 

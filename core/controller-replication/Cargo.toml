@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+artifact-store = { path = "../artifact-store" }
 libc = "0.2"
 openraft = { version = "=0.9.25", features = ["serde", "storage-v2"] }
 state = { path = "../state" }

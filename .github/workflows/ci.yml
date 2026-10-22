@@ -79,6 +79,17 @@ jobs:
       - name: Build actual Artifact layout process probe
         run: cargo build --locked -p artifact-store --example layout_probe
 
+      - name: Build actual member-local content process probe
+        run: cargo build --locked -p controller-replication --example content_store_probe
+
+      - name: Verify actual member-local content interruption and reader ownership
+        run: >
+          uv run --frozen python tools/quality/check_replica_content_processes.py
+          --probe target/debug/examples/content_store_probe
+          --profile 2d14edd6619be91bcec675bb0e53a5fcb4590a662f1a0548e8eb009edcb8f867
+          --member 23 --payload-mib 64
+          --output "${RUNNER_TEMP}/roboguide-member-content"
+
       - name: Verify actual Artifact owner and cold restore with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_artifact_owner_processes.py

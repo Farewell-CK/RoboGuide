@@ -206,6 +206,20 @@ Memory SQL v4、Controller/Node 合同不变。实际原 copy SIGKILL/wait、两
 完整目录校验漏掉 nested SQL 必要父目录的缺口，额外旁系目录重算 manifest 仍拒绝。
 N1 下一项为 Raft Snapshot/online Replica producers；N2–N7 原所有条件继续保留。
 
+[ADR-0159](../decisions/0159-original-content-quorum-and-raft-reference-lifecycle.md)落实这项
+N1/N3 接线：先原 qualified owner/实际存储及 log/Snapshot/reader pins，再真实 mTLS/
+batch 同成员多数 ACK，然后完整 Catalog/Archive/Snapshot 换主与 cold 恢复，最后
+原数据显式排空/升级/受控回退和故障矩阵。任何内部小步不单独关闭 N1/N3；当前
+v0.3 仍是 metadata profile，不能把新 DTO 或 fresh profile gate 算成旧部署升级。
+
+ADR-0159 的首步已实现 `core/controller-replication/src/content_store/`：实际独立
+member/root/SQL inode owner、qualified source CAS、intent/receive pin 先于读取，完整
+hash/size/fsync 后才有原 receipt；managed reader 自有 pin 和实际句柄/lease 生命周期。
+中断的原命令不重复，原 process-end 观察与真实读取/复制 receipt 分开；旧 Unknown
+不因新的 storage repair 改写。同成员/joint 多数校验也已实现，但尚未接真实 Raft/
+mTLS Commit/Snapshot，不能关闭 N1/N3。实际进程证据与限制见
+[原内容存储验收](acceptance/2026-10-23-original-replica-content-storage.md)。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

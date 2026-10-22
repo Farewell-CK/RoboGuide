@@ -1,5 +1,11 @@
 # RoboGuide
 
+正在按 [ADR-0159](docs/decisions/0159-original-content-quorum-and-raft-reference-lifecycle.md)
+实现原 owner 内容多数派：新 member-local `core/controller-replication/src/content_store/`
+先持久原 copy/reader intent 和独立引用，再读取实际 bytes；真实文件/SQL/inode/进程
+证据保留 Unknown，读取句柄退出与 Snapshot 释放分别核对。当前部署 v0.3 仍只复制
+元数据；新后端和同成员多数校验尚不代表在线 HA、设备停止或整体整改完成。
+
 恢复后未发布的原 provider Snapshot 可提交完整原/当前 profile，由实际全部 writer
 排空后精确退休当前原记录；原 instance/request/generation pins 不变，沿用原 v0.1
 receipt 和 SQL v4，历史源与 partial 保留，不复制或续期。实际 provider/CLI/SIGKILL/

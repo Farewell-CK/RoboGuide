@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+ADR-0159 is implementing original-owner content durability for the future explicit Replica v0.4.
+`core/controller-replication/content.rs` validates same-member complete metadata/byte majorities
+including joint configurations; DTOs alone are never transport or storage evidence. The new
+member-local `content_store/` retains actual root/database-inode leases, mandatory bounded SQL
+heads, qualified original owners, copy intent/receive pins and managed reader pins before I/O.
+Actual file closure and separate original-process absence release only their own pins; interruption
+keeps Unknown and never invents a byte/OS-wait/device receipt. Current production v0.3 still
+replicates metadata only. Real mTLS/admission, full Catalog/Archive/Snapshot, old-profile upgrades,
+configured Node/Mission routing and all remaining P1-P7 requirements are not closed by this backend.
+
 ADR-0158 adds `retire-provider-snapshot` for the original unpublished provider copy after relocation
 or profile change. Complete original/current profiles and all actual root/use/four-SQL-inode writers
 precede exact original instance/request/pin checks. Only the current provider's original v0.1 abort

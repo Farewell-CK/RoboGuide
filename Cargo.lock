@@ -420,6 +420,7 @@ dependencies = [
 name = "controller-replication"
 version = "0.1.0"
 dependencies = [
+ "artifact-store",
  "libc",
  "openraft",
  "ports",
