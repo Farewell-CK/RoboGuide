@@ -1,6 +1,7 @@
 # RoboGuide V2 架构基线
 
-面向读者的[架构手册](architecture-handbook.md)先解释职责、对象与完整闭环；本页及已接受 ADR 保持原权威。
+当前实现先看[代码架构图（Mermaid）](current-architecture.md)：总体职责、执行闭环、进程存储和评估接入。
+[架构手册](architecture-handbook.md)解释对象与语义；本页及已接受 ADR 保持原权威。
 各段中的历史版本记录原切片引入时的合同；当前实现与剩余缺口见手册及最新存量核对，不能将旧段落单独当作现有能力清单。
 
 [ADR-0141](../../decisions/0141-unconfigured-resource-quota-usage-view.md)使 read-only quota view
@@ -157,7 +158,45 @@ Node 出站 Group 导出消费原 journal 活跃 operation context；软件 assu
 > [`RoboGuide_Architecture_Baseline_V2.docx`](RoboGuide_Architecture_Baseline_V2.docx)
 > 保留最初 V2 基线；后续已接受的演进由本文和编号 ADR 共同记录。
 
-![RoboGuide V2 总体架构](../../images/roboguide-v2-overall-architecture.png)
+### 当前代码架构图 · 2026-10-22
+
+<!-- architecture-overview:start -->
+```mermaid
+flowchart TB
+  %% roboguide:min-width: 1280px
+  U[用户 / Operator] --> MI[Mission Service · Python<br/>Request / Grounding / Plan / Review / 审批]
+  MW[可选运行期 MI worker<br/>原 Request / claim / provider nonce] -->|候选修订 + 独立 Review| O
+  MI -->|完整 MissionPlan · 应用接纳| O
+
+  subgraph CTRL[Controller 进程]
+    O[Orchestration<br/>Task DAG / 满足判定 / Mission 生命周期]
+    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / 日历 / tenant quota]
+    R[Runtime<br/>slot / attempt generation<br/>durable intent / 事实归约 / relation fence]
+    I[Integration<br/>Node Protocol / session / 路由]
+    O -->|Ready Task| C
+    C -->|已提交绑定| R
+    R -->|命令 intent| I
+    R -->|执行结果| O
+    S[State + Memory catalog<br/>来源 / 时间 / TTL / 策略 / manifest 元数据]
+    M[应用层 Memory 协调<br/>Prepare / import / probe / use / revoke / handoff]
+    A[Artifact adapter + CAS<br/>独立内容授权 / 哈希字节]
+    I -->|经应用接纳的来源事实| S
+    S -.当前依据.-> C
+    S -.目录 / selector.-> M
+    M -->|执行前与释放门禁| O
+    M -->|持久 Memory 命令| I
+  end
+
+  I <-->|gRPC · 命令 / durable ACK / 事实| N[Node Service · Rust<br/>配置编译 / Local Integration Engine / journal]
+  N <-->|HTTP / gRPC / MCP 工作流| L[部署侧 Local EAIOS<br/>实际操作 / Local How / 即时安全]
+  N <-->|配置声明的 Memory 工作流| P[Local Memory provider<br/>原内容 / 当前使用许可 / Active Map / GC]
+  N <-->|选择性交换内容 bytes| A
+  V[部署侧独立 verifier / 原目标证据源] -->|原 plan / predicate / attempt / freshness| O
+```
+<!-- architecture-overview:end -->
+
+[完整 Mermaid 图册与代码对应表](current-architecture.md)。原
+[V2 PNG](../../images/roboguide-v2-overall-architecture.png)是历史概念快照。
 
 2026-10-19 [ADR-0107](../../decisions/0107-original-revoke-observation-and-provider-progress.md)
 增加逐 provider 撤销进度与独立只读 use query。原 Unknown/预算保持不变；后续原 provider

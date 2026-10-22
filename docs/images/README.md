@@ -1,5 +1,12 @@
 # 文档图片资源
 
+当前代码架构改用可维护的 Mermaid 源码（2026-10-22），见
+[架构图册与代码依据](../architecture/v2/current-architecture.md)。
+
+- [roboguide-current-architecture.mmd](roboguide-current-architecture.mmd)：中文总体图单一源码。
+- [roboguide-current-architecture-english.mmd](roboguide-current-architecture-english.mmd)：英文总体图单一源码。
+- README、V2 入口、网站导览的标记区须与源码一致；`website/check_site.py` 检查漂移。
+
 2026-10-20 当前部署 Mermaid 同步 ADR-0119 的 Operator TLS 前连接预算、完整请求 poll
 handoff 和 response I/O 期限；实际 writer/TLS witness/Commit 权威保留。
 
@@ -28,7 +35,7 @@ journal probe、专用 metrics-reader、wrapper v42 与真实监控通知链路�
 
 当前图片：
 
-- `roboguide-v2-overall-architecture.png`：当前 RoboGuide V2 总体架构图，已嵌入 V2 DOCX；
+- `roboguide-v2-overall-architecture.png`：历史 V2 概念快照，已嵌入原始 V2 DOCX；当前实现使用上方 Mermaid；
 - `distributed-embodied-ai-os-architecture-v1.1.png`：历史 Distributed Embodied AI OS 总体架构 V1.1。
 
 2026-10-20 当前部署 Mermaid 另同步 ADR-0112/0113：原 provider tombstone/reclamation、

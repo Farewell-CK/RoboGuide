@@ -4,6 +4,8 @@
 本文是对 [V2 基线](README.md)、已接受 ADR 与当前代码的解释，不新增架构决策。
 [English](architecture-handbook.en.md)。
 
+当前代码的总体、执行、部署和评估视图见[Mermaid 架构图册](current-architecture.md)。
+
 ## 系统定位
 
 RoboGuide 组织异构具身系统持续完成 Mission：理解目标、形成计划、选择参与者、承诺资源、
