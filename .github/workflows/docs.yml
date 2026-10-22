@@ -42,6 +42,7 @@ jobs:
           cache: npm
           cache-dependency-path: website/browser-tests/package-lock.json
       - name: Check diagrams, navigation and responsive reading
+        timeout-minutes: 8
         run: |
           npm ci --ignore-scripts --prefix website/browser-tests
           cd website/browser-tests

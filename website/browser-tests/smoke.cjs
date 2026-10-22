@@ -11,7 +11,7 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const errors = [];
   let requests = 0;
-  const context = await browser.newContext();
+  const context = await browser.newContext({ reducedMotion: 'reduce' });
   // The whole static site, including diagram rendering, must work without third-party CDNs.
   await context.route('**/*', route => {
     if (new URL(route.request().url()).origin === new URL(base).origin) return route.continue();
@@ -40,9 +40,6 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
         assert.equal(response.status(), 200, `${width} ${scheme}: ${route}`);
         await page.locator('article h1').waitFor({timeout: 15000});
         await page.evaluate(value => document.body.setAttribute('data-md-color-scheme', value), scheme);
-        await page.evaluate(() => Promise.all(document.getAnimations()
-          .filter(animation => animation.effect.getComputedTiming().iterations !== Infinity)
-          .map(animation => animation.finished.catch(() => {}))));
         await page.waitForFunction(() => !document.querySelector('pre.mermaid'));
         if (route.includes('architecture') || route === '/' || route === '/en/') {
           await page.waitForFunction(() => window.__docsRoots.some(root =>
@@ -57,9 +54,6 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
       }
       await page.goto(base + '/', { waitUntil: 'networkidle' });
       await page.evaluate(value => document.body.setAttribute('data-md-color-scheme', value), scheme);
-        await page.evaluate(() => Promise.all(document.getAnimations()
-          .filter(animation => animation.effect.getComputedTiming().iterations !== Infinity)
-          .map(animation => animation.finished.catch(() => {}))));
       const ratios = await page.locator('.md-typeset .md-button').evaluateAll(buttons => {
         const luminance = rgb => rgb.map(v => v / 255).map(v =>
           v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4)
