@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper before explicit current-administrator adoption of unaccounted legacy Catalog.
+const PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v50";
 /// Previous wrapper before independent original unpublished-Archive cleanup authority.
 const PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v49";
 /// Previous wrapper before independent Catalog archive recovery authority.
@@ -1100,6 +1102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA
@@ -1152,6 +1155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA

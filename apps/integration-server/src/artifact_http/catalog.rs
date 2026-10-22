@@ -442,6 +442,10 @@ impl ArtifactCatalog {
             if let EventPayload::ArtifactCatalogReferenceTransition { record } = event.payload() {
                 retention.apply(record)?;
             }
+            if let EventPayload::ArtifactCatalogLegacyAdopted { receipt } = event.payload() {
+                retention.apply_adoption(receipt)?;
+            }
+            retention.observe_publication(&event)?;
             if let EventPayload::ArtifactUploadTransition { record } = event.payload() {
                 super::upload_authority::validate_record_transition(&upload_records, record)?;
                 upload_records.insert(record.upload_id.clone(), record.clone());
@@ -466,6 +470,7 @@ impl ArtifactCatalog {
         }
         validate_disjoint_memory_namespace(&projection, &memory_projection)
             .map_err(|error| format!("Memory selector replay failed: {error}"))?;
+        retention.validate_complete()?;
         if retention.records().next().is_some() {
             let actual = store
                 .as_ref()
@@ -856,7 +861,15 @@ impl ArtifactCatalog {
                     .apply(record)
                     .map_err(HttpError::conflict)?;
             }
+            if let EventPayload::ArtifactCatalogLegacyAdopted { receipt } = event {
+                retention_candidate
+                    .apply_adoption(receipt)
+                    .map_err(HttpError::conflict)?;
+            }
         }
+        retention_candidate
+            .validate_complete()
+            .map_err(HttpError::conflict)?;
         let mut projection = self
             .projection
             .lock()

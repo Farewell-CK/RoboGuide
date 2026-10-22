@@ -454,6 +454,7 @@ fn prior_wrapper_preserves_original_memory_history_and_restart_fences() {
         serde_json::from_str(&server_checkpoint_json(&fixture.controller).unwrap()).unwrap();
     for schema in [
         PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA,
+        PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA,
         PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA,
         PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA,
         PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA,

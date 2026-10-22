@@ -1,5 +1,5 @@
 {
-  "code_commit": "6c5a099bcda9ca1fce9f7039b0c4f53fed5e514b",
+  "code_commit": "f739dbefca1460e460a4109fe60be17fe6455055",
   "reviewed_at": "2026-10-22",
   "versions": {
     "MissionPlan (configured default)": "roboguide.mission-plan/v0.8",
@@ -8,7 +8,7 @@
     "Node Protocol": "roboguide.node-protocol/v0.4",
     "Node Contract (explicit safety/Memory profile)": "roboguide.node.v0.12",
     "Node config (latest explicit profile)": "roboguide.node-config/v0.13",
-    "Controller checkpoint": "roboguide.controller-checkpoint/v50",
+    "Controller checkpoint": "roboguide.controller-checkpoint/v51",
     "Capability Catalog": "roboguide.capability-catalog/v0.3"
   }
 }

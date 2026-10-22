@@ -92,6 +92,26 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
             .revalidate_artifact_principal(self.principal)?;
         self.authority.admit_artifact_payload(payload)?;
         match payload {
+            EventPayload::ArtifactCatalogLegacyAdopted { receipt } => {
+                receipt.validate()?;
+                if self.principal.grant.role != ArtifactRole::Admin
+                    || receipt.authority.principal_id != self.principal.subject
+                    || receipt.authority.tenant_id != self.principal.tenant_id
+                    || receipt.authority.certificate_digest != self.principal.certificate_digest
+                {
+                    return Err(
+                        "legacy Catalog adoption differs from its actual current administrator"
+                            .into(),
+                    );
+                }
+                let (manifest, _) = receipt.publication.manifest()?;
+                self.authority.authorize_memory_access(
+                    self.principal,
+                    &manifest,
+                    domain::MemoryAccessOperation::Discover,
+                    None,
+                )?;
+            }
             EventPayload::ArtifactUploadTransition { record }
                 if record.principal_id != self.principal.subject
                     || record.tenant_id != self.principal.tenant_id =>

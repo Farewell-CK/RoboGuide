@@ -217,11 +217,15 @@ pub(super) fn read(
         }
         return Ok(None);
     };
-    if baseline.schema == crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
-        || head
-            .as_ref()
-            .is_some_and(|head| head.schema == crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA)
-    {
+    if matches!(
+        baseline.schema.as_str(),
+        crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA | "roboguide.controller-checkpoint/v50"
+    ) || head.as_ref().is_some_and(|head| {
+        matches!(
+            head.schema.as_str(),
+            crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA | "roboguide.controller-checkpoint/v50"
+        )
+    }) {
         super::archive_operation::require_storage(connection)?;
         super::archive_abort::validate_storage(connection)?;
     } else if baseline.schema == "roboguide.controller-checkpoint/v49"

@@ -244,12 +244,30 @@ pub(super) fn inputs(
     for row in catalog {
         let payload: EventPayload = serde_json::from_str(&row.payload_json)
             .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
+        retained
+            .observe_publication(&EventRecord::new(
+                EventId::new(row.event_id.clone())
+                    .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?,
+                TimestampMs::new(row.timestamp_ms),
+                CorrelationId::new(row.correlation_id.clone())
+                    .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?,
+                row.causation_id
+                    .clone()
+                    .map(EventId::new)
+                    .transpose()
+                    .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?,
+                payload.clone(),
+            ))
+            .map_err(SqliteEventLogError::Codec)?;
         match payload {
             EventPayload::ArtifactUploadTransition { record } => {
                 uploads.insert(record.upload_id.clone(), record);
             }
             EventPayload::ArtifactCatalogReferenceTransition { record } => retained
                 .apply(&record)
+                .map_err(SqliteEventLogError::Codec)?,
+            EventPayload::ArtifactCatalogLegacyAdopted { receipt } => retained
+                .apply_adoption(&receipt)
                 .map_err(SqliteEventLogError::Codec)?,
             EventPayload::MemoryManifestPublished { manifest } => {
                 publications.insert(manifest.selector().clone(), manifest);
@@ -401,6 +419,7 @@ impl ArchiveIntent {
             || !matches!(
                 self.checkpoint.schema.as_str(),
                 "roboguide.controller-checkpoint/v49"
+                    | "roboguide.controller-checkpoint/v50"
                     | crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
             )
             || self.checkpoint.event_sequence < self.manifest.end_sequence

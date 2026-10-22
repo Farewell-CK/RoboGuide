@@ -749,6 +749,7 @@ fn previous_wrapper_cannot_contain_process_stop_authority() {
         application::validate_isolation_checkpoint_schema(&saved).unwrap();
         for schema in [
             PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA,
+            PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA,
             PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA,
             PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA,
             PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA,

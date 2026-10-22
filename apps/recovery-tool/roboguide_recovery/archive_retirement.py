@@ -366,7 +366,7 @@ def retired(
     owner = read(root / artifact_layout.OWNER_FILE, 4096, canonical_required=False)
     if not marker.exists() and not marker.is_symlink() and owner.get("schema") != STORAGE:
         return False
-    if profile_schema != SCHEMA:
+    if profile_schema not in {SCHEMA, "roboguide.recovery-profile/v0.15"}:
         raise ValueError("retired private Archive requires explicit recovery v0.14")
     validate_seal(root, publication, budget)
     return True

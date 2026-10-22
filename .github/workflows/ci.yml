@@ -106,6 +106,16 @@ jobs:
           uv run --frozen python tools/quality/check_catalog_reference_recovery_processes.py
           --from /tmp/rg-ci-catalog-mi --output "${RUNNER_TEMP}/roboguide-catalog-recovery"
 
+      - name: Produce actual unaccounted Catalog under the explicit legacy storage profile
+        run: >
+          uv run --frozen python tools/quality/check_memory_preparation_processes.py
+          --output /tmp/rg-ci-legacy-catalog --process-workers --async-workers 1
+
+      - name: Verify explicit Catalog adoption with actual mTLS SQL and cold restore
+        run: >
+          uv run --frozen python tools/quality/check_catalog_adoption_processes.py
+          --from /tmp/rg-ci-legacy-catalog --output "${RUNNER_TEMP}/roboguide-catalog-adoption"
+
       - name: Verify Artifact journal migration and actual cold restore with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_artifact_owner_processes.py

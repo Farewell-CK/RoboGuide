@@ -51,6 +51,7 @@ mod catalog;
 pub use authorization::ArtifactPrincipal;
 use authorization::*;
 mod access;
+mod adoption;
 mod authenticated;
 mod protocol;
 mod retention;

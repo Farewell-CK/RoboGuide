@@ -1,5 +1,12 @@
 # RoboGuide
 
+旧未归属 Catalog 可经当前 tenant Artifact admin 显式接管保留责任：读取原 publication
+digest 后提交精确原命令，实际 source envelope/metadata、CAS owner/bytes 与 typed parent
+先核对，引用及完整 receipt 同一事务提交。历史 publisher/tenant 仍为 unknown，不增加
+read/use/import 权限。wrapper v51 / codec v30 / [recovery v0.15](contracts/recovery/bundle-v0.15/README.md)
+拒绝丢失 receipt 或改写原 source，见 [ADR-0156](docs/decisions/0156-explicit-original-legacy-catalog-adoption.md)。
+真实旧 v50 producer、mTLS/SQL 回滚/重启/冷恢复已通过；其余源 GC、Raft/online 和完整整改继续实施。
+
 私有接收 Archive 新增离线显式退休与 GC：全部原 writer、空的已知 consumer 清单、
 唯一原 producer 和精确 compact receipt 先于保留决策 tombstone；终态 storage v4
 拒绝旧 writer，独立原 GC intent/budget 先于 unlink。原 Unknown 重试只观察，新命令

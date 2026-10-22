@@ -50,7 +50,9 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
     assert original["passed"] is True and original["registered_nodes"] == 0
     raw_profile = json.loads((source / "profile.json").read_bytes())
     profile = raw_profile | {
-        "schema": "roboguide.recovery-profile/v0.14",
+        "schema": "roboguide.recovery-profile/v0.15"
+        if raw_profile["schema"] == "roboguide.recovery-profile/v0.15"
+        else "roboguide.recovery-profile/v0.14",
         "profile_id": "private-recipient",
     }
     archive_root = Path(
@@ -263,7 +265,7 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
         "restore-original",
     )
     receipt = recover(*restore_args)
-    assert receipt["schema"] == "roboguide.restore-receipt/v0.14"
+    assert receipt["schema"] == profile["schema"].replace("recovery-profile", "restore-receipt")
     assert recover(*restore_args) == receipt
     old_profile = output / "old-profile.json"
     save(old_profile, profile | {"schema": "roboguide.recovery-profile/v0.13"})
@@ -277,7 +279,10 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
         "old-refused",
         passed=False,
     )
-    assert "recovery v0.14" in refused["stderr"] and not (output / "old-refused").exists()
+    assert (
+        any(version in refused["stderr"] for version in ("recovery v0.14", "recovery v0.15"))
+        and not (output / "old-refused").exists()
+    )
     damaged = output / "missing-tombstone"
     shutil.copytree(backed, damaged)
     manifest = json.loads((damaged / "manifest.json").read_bytes())

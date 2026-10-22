@@ -51,7 +51,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
 
     shutil.copytree(source / "cas", working / "cas", ignore=omit_sockets)
     profile: dict[str, Any] = {
-        "schema": "roboguide.recovery-profile/v0.13",
+        "schema": "roboguide.recovery-profile/v0.15",
         "profile_id": "actual-catalog-original-owner",
         "revision": 1,
         "max_bytes": 512 * 1024**2,
@@ -150,7 +150,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         "original-restore",
     )
     restored_receipt = execute(*restore_arguments)
-    assert restored_receipt["schema"] == "roboguide.restore-receipt/v0.13"
+    assert restored_receipt["schema"] == "roboguide.restore-receipt/v0.15"
     assert execute(*restore_arguments) == restored_receipt
     assert original_heads(restored / "stores/controller/controller.sqlite3") == heads
     old_writer = None
@@ -161,17 +161,29 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         old_database = old_working / "controller.sqlite3"
         shutil.copy2(restored / "stores/controller/controller.sqlite3", old_database)
         before = original_heads(old_database)
+        old_schema = subprocess.check_output(
+            [str(old_controller), "--application-schema"], cwd=ROOT, text=True, timeout=15
+        ).strip()
+        retained_old_owner = old_schema in {
+            "roboguide.controller-checkpoint/v49",
+            "roboguide.controller-checkpoint/v50",
+        }
+        old_cas = old_working / ("retained-cas" if retained_old_owner else "legacy-cas")
+        old_environment = dict(environment)
+        if retained_old_owner:
+            shutil.copytree(restored / "stores/artifact", old_cas)
+            old_environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = "roboguide.artifact-storage/v3"
         argv = [
             str(old_controller),
             address(),
             str(old_database),
             address(),
             address(),
-            str(old_working / "legacy-cas"),
+            str(old_cas),
         ]
         try:
             completed = subprocess.run(
-                argv, cwd=ROOT, env=environment, capture_output=True, timeout=15
+                argv, cwd=ROOT, env=old_environment, capture_output=True, timeout=15
             )
         except subprocess.TimeoutExpired as error:
             raise AssertionError(
@@ -182,7 +194,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         assert completed.returncode != 0
         message = completed.stderr.decode(errors="replace")
         assert "unsupported" in message.lower() and any(
-            version in message for version in ("v29", "v48", "v49", "v50")
+            version in message for version in ("v29", "v48", "v49", "v50", "v51")
         ), message
         assert original_heads(old_database) == before
         old_writer = {

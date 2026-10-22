@@ -10,7 +10,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from . import archive_references, artifact_layout
+from . import archive_references, artifact_layout, catalog_adoptions
 from .snapshot_references import OperationBudget, canonical
 
 SCHEMA = "roboguide.recovery-profile/v0.10"
@@ -20,9 +20,15 @@ SUPPORTED = {
     archive_references.SCHEMA,
     "roboguide.recovery-profile/v0.13",
     "roboguide.recovery-profile/v0.14",
+    "roboguide.recovery-profile/v0.15",
 }
 WRAPPER = "roboguide.controller-checkpoint/v48"
-WRAPPERS = {WRAPPER, archive_references.WRAPPER, "roboguide.controller-checkpoint/v50"}
+WRAPPERS = {
+    WRAPPER,
+    archive_references.WRAPPER,
+    "roboguide.controller-checkpoint/v50",
+    "roboguide.controller-checkpoint/v51",
+}
 CODEC = "domain.EventPayload.json/v29"
 MAX_EVIDENCE_BYTES = 64 * 1024 * 1024
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -148,6 +154,9 @@ def _controller(
     publications: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {}
     released_commands: dict[str, tuple[str, str]] = {}
     total = 0
+    original_envelopes: dict[tuple[str, str], dict[str, Any]] = {}
+    pending_adoptions: set[tuple[str, str]] = set()
+    adoptions: dict[str, dict[str, Any]] = {}
 
     def progress() -> int:
         """Keep every SQL scan inside the original operation deadline."""
@@ -171,6 +180,12 @@ def _controller(
             else None
         )
         current = checkpoint is not None and checkpoint[0] in WRAPPERS
+        if (
+            checkpoint is not None
+            and checkpoint[0] == catalog_adoptions.WRAPPER
+            and profile_schema != catalog_adoptions.SCHEMA
+        ):
+            raise ValueError("legacy Catalog adoption wrapper requires explicit recovery v0.15")
         if "events" not in tables:
             if current:
                 raise ValueError("mandatory original Catalog reference authority table is missing")
@@ -199,7 +214,11 @@ def _controller(
             budget,
             current=checkpoint is not None
             and checkpoint[0]
-            in {archive_references.WRAPPER, "roboguide.controller-checkpoint/v50"},
+            in {
+                archive_references.WRAPPER,
+                "roboguide.controller-checkpoint/v50",
+                "roboguide.controller-checkpoint/v51",
+            },
         )
         from . import archive_aborts
 
@@ -208,15 +227,40 @@ def _controller(
             profile_schema,
             budget,
             original_archives,
-            current=checkpoint is not None and checkpoint[0] == archive_aborts.WRAPPER,
+            current=checkpoint is not None
+            and checkpoint[0] in {archive_aborts.WRAPPER, "roboguide.controller-checkpoint/v51"},
         )
-        history = ((row["payload_schema"], row["payload_json"]) for row in archived)
+        history = iter(archived)
         from itertools import chain
 
-        for schema, raw in chain(
-            history,
-            connection.execute("SELECT payload_schema,payload_json FROM events ORDER BY sequence"),
+        envelope_columns = (
+            "sequence",
+            "event_id",
+            "timestamp_ms",
+            "correlation_id",
+            "causation_id",
+            "payload_schema",
+            "payload_json",
+        )
+        if (
+            not set(envelope_columns) <= columns
+            and checkpoint is not None
+            and checkpoint[0] == catalog_adoptions.WRAPPER
         ):
+            raise ValueError("mandatory original legacy-adoption envelope columns are missing")
+        selected_columns = ",".join(
+            name if name in columns else "NULL AS " + name for name in envelope_columns
+        )
+        for envelope in chain(
+            history,
+            (
+                dict(zip(envelope_columns, row, strict=True))
+                for row in connection.execute(
+                    "SELECT " + selected_columns + " FROM events ORDER BY sequence"
+                )
+            ),
+        ):
+            schema, raw = envelope["payload_schema"], envelope["payload_json"]
             budget.check()
             total += len(raw.encode())
             if total > budget.max_bytes:
@@ -233,6 +277,8 @@ def _controller(
                 if original is None:
                     if record["retirement"] is not None:
                         raise ValueError("Catalog retirement has no original acquisition")
+                    if key in publications:
+                        pending_adoptions.add(key)
                 elif original != record:
                     unchanged, previous = dict(record), dict(original)
                     unchanged["retirement"] = previous["retirement"] = None
@@ -250,6 +296,29 @@ def _controller(
                         )
                     released_commands[command] = key
                 heads[key] = record
+            if "ArtifactCatalogLegacyAdopted" in payload:
+                if (
+                    schema != catalog_adoptions.CODEC
+                    or profile_schema != catalog_adoptions.SCHEMA
+                    or checkpoint is None
+                    or checkpoint[0] != catalog_adoptions.WRAPPER
+                ):
+                    raise ValueError(
+                        "legacy Catalog adoption requires its exact wrapper/codec/profile"
+                    )
+                receipt = payload["ArtifactCatalogLegacyAdopted"]["receipt"]
+                record = _record(receipt["record"])
+                key = _key(record["selector"])
+                if key not in original_envelopes or heads.get(key) != record:
+                    raise ValueError(
+                        "legacy adoption lacks original publication and atomic reference"
+                    )
+                catalog_adoptions.validate(receipt, original_envelopes[key], record)
+                command = receipt["command_id"]
+                if command in adoptions and adoptions[command] != receipt:
+                    raise ValueError("legacy adoption command reused different original input")
+                adoptions[command] = receipt
+                pending_adoptions.discard(key)
             for kind in ("MemoryManifestPublished", "MapArtifactPublished"):
                 if kind not in payload:
                     continue
@@ -262,6 +331,13 @@ def _controller(
                 if key in publications and publications[key] != (kind, manifest):
                     raise ValueError("Catalog publication replaced its immutable original source")
                 publications[key] = kind, manifest
+                original_envelopes.setdefault(
+                    key, {name: envelope[name] for name in envelope_columns}
+                )
+        if pending_adoptions:
+            raise ValueError(
+                "legacy Catalog reference lacks its mandatory original adoption receipt"
+            )
         if publications and not current:
             raise ValueError("legacy Catalog ownership is unaccounted; explicit migration required")
         if current and set(heads) != set(publications):

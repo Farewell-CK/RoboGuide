@@ -4,6 +4,11 @@
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
 
+ADR-0156 接续未归属旧 Catalog 的显式保留责任接管：原 envelope/metadata 和实际
+CAS owner/bytes 不变，当前 tenant admin/TLS grant/命令另记完整 receipt，与新引用
+原子提交。历史 publisher/tenant 缺失保持 unknown；不授予 read/use/import 权限。
+wrapper v51/codec v30/recovery v0.15 在本包实施中，旧 writer 不可忽略接管 authority。
+
 ADR-0155 的后续接线只处理原 command 私有 Archive 接收 owner：全部实际 writer、
 空已知 consumer inventory、唯一原 Archive reference 和精确源 compact receipt
 先于退休 tombstone；终态 storage v4 密封旧 writer，另一个原 GC intent/budget

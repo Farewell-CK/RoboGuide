@@ -1,6 +1,6 @@
 # Implementation status and evidence limits
 
-Content baseline: `6c5a099bcda9ca1fce9f7039b0c4f53fed5e514b` plus this ADR-0155 implementation, reviewed 2026-10-22. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
+Content baseline: `f739dbefca1460e460a4109fe60be17fe6455055` plus this ADR-0156 implementation, reviewed 2026-10-22. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
 
 | Area | Existing software paths | Remaining or independently validated work |
 | --- | --- | --- |
@@ -18,6 +18,8 @@ Original content Archive and actual Catalog compaction/restart/cold recovery are
 [Unpublished original Archive cleanup](docs/development/acceptance/2026-10-22-original-archive-abort.md) adds actual writer fences, original tombstone/SQL receipts and actual v49-to-v50 upgrade verification. Partial files and receiving references remain; cleanup does not authorize deletion of receiving content.
 
 [Private receiving-owner reclamation](docs/development/acceptance/2026-10-22-private-archive-reclamation.md) separately checks all original writers, an empty known-consumer inventory and the sole producer. The terminal storage v4 fence and original tombstone precede unlink. This v4 expresses only irreversible retirement and is not an ordinary writable CAS.
+
+[Explicit legacy Catalog adoption](docs/development/acceptance/2026-10-22-original-catalog-adoption.md) binds the original raw publication envelope, actual owner/bytes and typed parent, retaining current admin/TLS evidence separately. Historical publisher/tenant remain unavailable; no extra read/use/import permission is added. Wrapper v51/recovery v0.15 refuses missing original receipts.
 
 ## Reading the evidence
 

@@ -811,6 +811,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.12",
                 "roboguide.recovery-profile/v0.13",
                 "roboguide.recovery-profile/v0.14",
+                "roboguide.recovery-profile/v0.15",
             }
             else databases
         )
@@ -926,7 +927,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.14"
+        "roboguide.restore-receipt/v0.15"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.15"
+        else "roboguide.restore-receipt/v0.14"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.14"
         else "roboguide.restore-receipt/v0.13"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.13"
@@ -1019,6 +1022,7 @@ def restore(
             "roboguide.recovery-profile/v0.12",
             "roboguide.recovery-profile/v0.13",
             "roboguide.recovery-profile/v0.14",
+            "roboguide.recovery-profile/v0.15",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:

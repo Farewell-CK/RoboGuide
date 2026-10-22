@@ -389,6 +389,17 @@ where
         ("GET", "/metrics/prometheus") => {
             run_blocking(|| artifact_metrics_prometheus(catalog, uploads))?
         }
+        ("GET", path)
+            if path.starts_with("/v1/artifact-references/") && path.ends_with("/legacy") =>
+        {
+            run_blocking(|| super::adoption::observe(catalog, &authenticated, path))?
+        }
+        ("POST", path)
+            if path.starts_with("/v1/artifact-references/") && path.ends_with("/adopt") =>
+        {
+            let request = head.read_json(stream).await?;
+            run_blocking(|| super::adoption::adopt(catalog, &authenticated, &request, path))?
+        }
         ("GET", path) if path.starts_with("/v1/artifact-references/") => {
             run_blocking(|| super::retention::observe(catalog, &authenticated, path))?
         }

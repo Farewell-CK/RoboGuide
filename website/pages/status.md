@@ -1,6 +1,6 @@
 # 实现状态与证据边界
 
-内容核对基线：`6c5a099bcda9ca1fce9f7039b0c4f53fed5e514b` 加本包 ADR-0155 实现（2026-10-22）。下表依据代码与既有验收档案；原始存量详见[10 月 22 日核对](docs/development/roboguide-branch-audit-2026-10-22.md)。
+内容核对基线：`f739dbefca1460e460a4109fe60be17fe6455055` 加本包 ADR-0156 实现（2026-10-22）。下表依据代码与既有验收档案；原始存量详见[10 月 22 日核对](docs/development/roboguide-branch-audit-2026-10-22.md)。
 
 | 方面 | 已有软件路径 | 仍需完成或独立验证 |
 | --- | --- | --- |
@@ -18,6 +18,8 @@
 [原未发布 Archive 清理](docs/development/acceptance/2026-10-22-original-archive-abort.md)新增实际 writer fence、原 tombstone/SQL receipt 和 v49→v50 升级验证。partial 文件及接收方引用保留；清理原 copy 不授予删除接收内容的权限。
 
 [私有接收 owner 回收](docs/development/acceptance/2026-10-22-private-archive-reclamation.md)单独核对全部原 writer、空的已知 consumer 清单和唯一 producer；终态 storage v4 fence 与原 tombstone 先于 unlink。v4 只表达该接收 owner 的不可逆终态，不能作为普通可写 CAS。
+
+[旧 Catalog 显式接管](docs/development/acceptance/2026-10-22-original-catalog-adoption.md)固定原 publication raw envelope、实际 owner/bytes 和 typed parent；当前 admin/TLS 另记 receipt。历史 publisher/tenant 仍 unavailable，不授予额外 read/use/import 权限。wrapper v51/recovery v0.15 拒绝丢失原 receipt。
 
 ## 如何解读证据
 

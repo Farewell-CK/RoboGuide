@@ -231,6 +231,19 @@ impl ArtifactCatalog {
         source: &ArtifactPublicationSource,
         now: TimestampMs,
     ) -> Result<Vec<EventPayload>, String> {
+        self.publication_reference_events_inner(manifest, parents, typed_map, source, now, false)
+    }
+
+    /// Shares exact dependency verification while only explicit adoption may account for legacy metadata.
+    pub(super) fn publication_reference_events_inner(
+        &self,
+        manifest: &MemoryArtifactManifest,
+        parents: &[MemoryArtifactManifest],
+        typed_map: Option<&MapArtifactManifest>,
+        source: &ArtifactPublicationSource,
+        now: TimestampMs,
+        allow_existing: bool,
+    ) -> Result<Vec<EventPayload>, String> {
         let Some(store) = &self.retained_store else {
             return Ok(Vec::new());
         };
@@ -304,7 +317,7 @@ impl ArtifactCatalog {
             return Ok(Vec::new());
         }
         drop(retained);
-        if self.memory_source(manifest.selector())?.is_some() {
+        if !allow_existing && self.memory_source(manifest.selector())?.is_some() {
             return Err(
                 "existing Catalog publication lacks original ownership; migration required".into(),
             );
@@ -341,6 +354,12 @@ impl ArtifactCatalog {
             return Ok(Vec::new());
         }
         let (manifest, parents, typed_map) = match payload {
+            EventPayload::ArtifactCatalogLegacyAdopted { receipt } => {
+                receipt.validate()?;
+                return Ok(vec![EventPayload::ArtifactCatalogReferenceTransition {
+                    record: receipt.record.clone(),
+                }]);
+            }
             EventPayload::MemoryManifestPublished { manifest } => {
                 (manifest.clone(), Vec::new(), None)
             }

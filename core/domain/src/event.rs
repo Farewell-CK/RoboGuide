@@ -5,6 +5,11 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Explicit current retention adoption preserves the exact original unaccounted publication.
+    ArtifactCatalogLegacyAdopted {
+        /// Full original publication and actual current adopting authority, never guessed historical facts.
+        receipt: crate::ArtifactCatalogAdoption,
+    },
     /// Original Catalog publication or exact irreversible retirement retains all independent owners.
     ArtifactCatalogReferenceTransition {
         /// Complete original authority and immutable dependency set, never a semantic access grant.

@@ -61,9 +61,16 @@ def run(
     schema = subprocess.check_output(
         [str(binary), "--application-schema"], cwd=ROOT, text=True
     ).strip()
-    if schema not in {"roboguide.controller-checkpoint/v49", "roboguide.controller-checkpoint/v50"}:
+    if schema not in {
+        "roboguide.controller-checkpoint/v49",
+        "roboguide.controller-checkpoint/v50",
+        "roboguide.controller-checkpoint/v51",
+    }:
         raise ValueError("unsupported explicit original Archive process profile")
-    cleanup_authority = schema == "roboguide.controller-checkpoint/v50"
+    cleanup_authority = schema in {
+        "roboguide.controller-checkpoint/v50",
+        "roboguide.controller-checkpoint/v51",
+    }
     if abort_unpublished and not cleanup_authority:
         raise ValueError("explicit original cleanup requires wrapper v50")
     if upgrade_original and (not cleanup_authority or old_controller is None):
@@ -406,7 +413,9 @@ def run(
             compacted = rows()
         stop(process)
         profile: dict[str, Any] = {
-            "schema": "roboguide.recovery-profile/v0.13"
+            "schema": "roboguide.recovery-profile/v0.15"
+            if schema == "roboguide.controller-checkpoint/v51"
+            else "roboguide.recovery-profile/v0.13"
             if cleanup_authority
             else "roboguide.recovery-profile/v0.12",
             "profile_id": "original-content-archive",
@@ -486,7 +495,9 @@ def run(
             "restore-original",
         )
         assert receipt["schema"] == (
-            "roboguide.restore-receipt/v0.13"
+            "roboguide.restore-receipt/v0.15"
+            if schema == "roboguide.controller-checkpoint/v51"
+            else "roboguide.restore-receipt/v0.13"
             if cleanup_authority
             else "roboguide.restore-receipt/v0.12"
         )

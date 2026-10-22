@@ -178,6 +178,13 @@ GC 仅处理剩余 bytes。实际零 Node/CLI/OS 锁、两种文件故障、旧 
 已删 bytes 的冷恢复通过。本项不关闭源 Artifact 全引用 GC、其它 producer 释放、
 未归属旧 Catalog、Raft/online 或完整 N2–N7。
 
+[原未归属 Catalog 接管](acceptance/2026-10-22-original-catalog-adoption.md)以
+ADR-0156/wrapper v51/codec v30/recovery v0.15 接通真实旧 publication 的显式当前
+保留责任。实际原 raw envelope/metadata/CAS 与 parent 固定，当前 admin/TLS/原
+command 及引用同事务提交；历史身份仍 unavailable，不新增 read/use/import 权限。
+实际旧 v50 producer、SQL rollback/restart/冷恢复和旧 reader 拒绝通过。源 Artifact
+全引用 GC、其它 producer 释放、Raft/online 与完整 N2–N7 继续实施。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

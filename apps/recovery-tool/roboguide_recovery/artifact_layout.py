@@ -19,6 +19,7 @@ ARCHIVE_SCHEMAS = {
     ARCHIVE_SCHEMA,
     "roboguide.recovery-profile/v0.13",
     "roboguide.recovery-profile/v0.14",
+    "roboguide.recovery-profile/v0.15",
 }
 OWNER_FILE = ".retention-owner.json"
 FENCE_FILE = "blobs"
@@ -28,6 +29,7 @@ MAINTENANCE_SCHEMAS = {
     "roboguide.recovery-profile/v0.12",
     "roboguide.recovery-profile/v0.13",
     "roboguide.recovery-profile/v0.14",
+    "roboguide.recovery-profile/v0.15",
 }
 MAX_OWNER_BYTES = 4096
 

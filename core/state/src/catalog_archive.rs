@@ -231,18 +231,7 @@ impl SqliteEventLog {
 
     /// Replays the independent original Catalog prefix before the current unarchived event tail.
     pub fn catalog_replay_events(&self) -> Result<Vec<EventRecord>, SqliteEventLogError> {
-        self.ensure_no_open_batch()?;
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
-        let mut records = read(&connection)?;
-        let mut statement=connection.prepare("SELECT sequence,event_id,timestamp_ms,correlation_id,causation_id,payload_schema,payload_json FROM events ORDER BY sequence")?;
-        records.extend(
-            statement
-                .query_map([], event_from_row)?
-                .collect::<Result<Vec<_>, _>>()?,
-        );
+        let records = self.catalog_replay_stored_events()?;
         let mut result = Vec::with_capacity(records.len());
         for event in records {
             validate_persisted_event(&event)?;
@@ -263,6 +252,54 @@ impl SqliteEventLog {
             ));
         }
         Ok(result)
+    }
+
+    /// Reads the complete original Catalog prefix/tail under one SQL mutex without rewriting payload bytes.
+    pub fn catalog_replay_stored_events(&self) -> Result<Vec<PersistedEvent>, SqliteEventLogError> {
+        self.catalog_replay_stored_events_bounded(usize::MAX, usize::MAX)
+    }
+
+    /// Bounds the complete original envelope scan before materializing a legacy-adoption candidate.
+    pub fn catalog_replay_stored_events_bounded(
+        &self,
+        max_bytes: usize,
+        max_events: usize,
+    ) -> Result<Vec<PersistedEvent>, SqliteEventLogError> {
+        self.ensure_no_open_batch()?;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        let mut records = read(&connection)?;
+        let mut statement=connection.prepare("SELECT sequence,event_id,timestamp_ms,correlation_id,causation_id,payload_schema,payload_json FROM events ORDER BY sequence")?;
+        let mut total = records.iter().try_fold(0usize, |bytes, row| {
+            bytes.checked_add(row.payload_json.len()).ok_or_else(|| {
+                SqliteEventLogError::Codec("original Catalog scan byte overflow".into())
+            })
+        })?;
+        if records.len() > max_events || total > max_bytes {
+            return Err(SqliteEventLogError::Codec(
+                "original Catalog evidence exceeds its bounded scan".into(),
+            ));
+        }
+        for row in statement.query_map([], event_from_row)? {
+            let row = row?;
+            total = total.checked_add(row.payload_json.len()).ok_or_else(|| {
+                SqliteEventLogError::Codec("original Catalog scan byte overflow".into())
+            })?;
+            if records.len() >= max_events || total > max_bytes {
+                return Err(SqliteEventLogError::Codec(
+                    "original Catalog evidence exceeds its bounded scan".into(),
+                ));
+            }
+            records.push(row);
+        }
+        for event in &records {
+            validate_persisted_event(event)?;
+        }
+        crate::artifact_retention::validate_adoption_sources(&records)
+            .map_err(SqliteEventLogError::Codec)?;
+        Ok(records)
     }
 }
 

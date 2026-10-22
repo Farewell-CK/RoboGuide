@@ -20,6 +20,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.12",
     "roboguide.recovery-profile/v0.13",
     "roboguide.recovery-profile/v0.14",
+    "roboguide.recovery-profile/v0.15",
 }
 MAX_OPERATIONS = 4096
 MAX_INPUTS = 16_384

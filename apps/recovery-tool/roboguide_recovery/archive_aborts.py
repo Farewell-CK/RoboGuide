@@ -168,7 +168,8 @@ def operations(
     new = marker == (MARKER,)
     if current and (
         not new
-        or profile_schema not in {SCHEMA, "roboguide.recovery-profile/v0.14"}
+        or profile_schema
+        not in {SCHEMA, "roboguide.recovery-profile/v0.14", "roboguide.recovery-profile/v0.15"}
         or "event_archive_aborts" not in tables
     ):
         raise ValueError("original Archive cleanup requires wrapper v50 and recovery v0.13")
@@ -177,7 +178,8 @@ def operations(
             raise ValueError("original Archive cleanup journal is hidden under an old marker")
         return []
     if (
-        profile_schema not in {SCHEMA, "roboguide.recovery-profile/v0.14"}
+        profile_schema
+        not in {SCHEMA, "roboguide.recovery-profile/v0.14", "roboguide.recovery-profile/v0.15"}
         or not current
         or "event_archive_aborts" not in tables
     ):

@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+ADR-0156 adds explicit tenant Artifact-admin adoption of an existing unaccounted publication under
+wrapper v51 / codec v30 / recovery v0.15. Actual original raw envelope/metadata and same-owner CAS
+are verified; typed parents require their own original references. Complete current stable admin,
+TLS/grant/command and immutable original publication commit atomically with Catalog/lineage pins.
+Historical publisher/tenant remain unavailable, never filled from current identity. No read/use/import
+permission is added. Original retries retain time/evidence; missing same-transaction adoption receipt
+or changed raw source refuses replay/recovery. Archive preserves complete envelopes. The actual old
+v50 file producer plus current mTLS/SQL/rollback/restart/cold gate is check_catalog_adoption_processes.py;
+CI separately uses the explicit legacy storage profile without claiming an older binary. Node/Memory
+contracts stay. Source Artifact full-reference GC, Raft/online and all P1-P7 requirements still apply.
+
 ADR-0155 adds offline private Archive-recipient retirement and explicit GC under recovery v0.14.
 All original writers and the actual recipient descriptor precede a sole-producer/empty-consumer
 check, complete original compact/publication proof and nonrenewable OS-admin retention intent.
