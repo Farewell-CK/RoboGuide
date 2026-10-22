@@ -41,12 +41,16 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: website/browser-tests/package-lock.json
-      - name: Check diagrams, navigation and responsive reading
-        timeout-minutes: 8
+      - name: Install browser validation dependencies
+        timeout-minutes: 15
         run: |
           npm ci --ignore-scripts --prefix website/browser-tests
           cd website/browser-tests
           npx playwright install --with-deps chromium
+      - name: Check diagrams, navigation and responsive reading
+        timeout-minutes: 8
+        run: |
+          cd website/browser-tests
           python -m http.server 39801 --bind 127.0.0.1 --directory ../site > /tmp/docs-preview.log 2>&1 &
           npm test
       - uses: actions/upload-artifact@v4
