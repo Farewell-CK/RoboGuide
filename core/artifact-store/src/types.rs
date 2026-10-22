@@ -19,6 +19,8 @@ pub struct FileSystemArtifactStore {
     pub(crate) blob_directory: &'static str,
     /// Persistent software backend identity; legacy roots do not manufacture one.
     pub(crate) owner_id: Option<String>,
+    /// Startup-selected explicit format, never inferred from later directory contents.
+    pub(crate) storage_version: u8,
     /// Exclusive lease shared by every clone and in-progress upload from this store.
     pub(crate) _writer_lock: Arc<ArtifactWriterLease>,
 }

@@ -846,6 +846,9 @@ fn configured_artifact_store(
         artifact_store::ARTIFACT_LAYOUT_SCHEMA => Ok(
             artifact_store::FileSystemArtifactStore::new_with_retention(root)?,
         ),
+        artifact_store::ARTIFACT_REFERENCE_LAYOUT_SCHEMA => {
+            Ok(artifact_store::FileSystemArtifactStore::new_with_reference_journal(root)?)
+        }
         _ => Err("unsupported explicit Artifact storage schema".into()),
     }
 }

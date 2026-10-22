@@ -1,5 +1,14 @@
 # RoboGuide recovery tool
 
+[Profile v0.11](../../contracts/recovery/bundle-v0.11/README.md) explicitly selects Artifact storage
+v2 with the original owner and mandatory maintenance journal. The actual CLI writes original
+Snapshot intent/pins before copying; interruption keeps them active and the same command cannot
+copy again. Complete original bundle verification permits exact release; `reconcile-snapshots`
+copies zero files and `abort-snapshots` holds every original writer before fencing an unpublished
+copy. Bundle v0.3 and restore receipt v0.11 preserve the original active intent, exact bytes,
+kernel/UID and budgets. They retain the v0.10 Catalog, Memory v4 and Replica v3 contracts. Archive,
+online majority/content replication, GC and complete P1-P7 remain separate required work.
+
 [Profile v0.10](../../contracts/recovery/bundle-v0.10/README.md) keeps the v0.9 storage contracts
 and verifies original Controller wrapper v48 / event v29 Catalog/lineage ownership against actual
 CAS owners in the same complete bundle. Missing reference/publication history, absent original

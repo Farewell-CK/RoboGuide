@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+ADR-0151 adds explicit Artifact storage v2 with the same original owner/inode identity, a persistent
+upgrade intent and mandatory member-local maintenance journal. Old v1 formats refuse it. Recovery
+profile v0.11 / bundle v0.3 produces immutable original-owner Snapshot intents before actual copy,
+retains kernel/UID/nonrenewable budgets, and verifies every active journal input against same-owner
+bundle CAS. Original IDs cannot repeat uncertain copy; readonly reconcile copies no files, exact
+verified publication retires pins, and all-original-writer abort retains partial evidence. Restored
+history keeps the original active intent. Native gates are `check_artifact_snapshot_processes.py`
+and `check_artifact_owner_processes.py --reference-journal`; the latter uses actual mTLS/Controller/
+old-binary/cold restore with zero Nodes. Archive/Raft Snapshot/online producers, GC and full P1-P7
+remain required until separately implemented and validated; no process proof establishes devices.
+
 ADR-0150 connects the existing validated Node reader to the bounded application batch with at most
 eight in-flight facts per actual session. Submission and ACK preserve original order; every ACK
 still requires actual application Commit. Original receive time and the first enqueue completion

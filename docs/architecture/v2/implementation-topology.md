@@ -4,6 +4,13 @@
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
 
+ADR-0151 接入显式 Artifact storage v2：在原 root writer 内保留同一 owner，
+以持久升级意图和旧格式 fence 接入原维护引用日志。实际 Snapshot/Archive producer 须
+先持久原命令、内容集合、kernel/预算，再进行复制/发布；Unknown 留存，完整原发布
+验证或独立停止后的显式 abort 才退休。Recovery v0.11/bundle v0.3 接通实际 Artifact
+Snapshot 复制生产者；恢复保留原 active intent。Archive/Raft Snapshot/在线 Replica
+生产者与 GC 仍继续实施，不能由 Snapshot gate 推断已经完成；引用不是内容读权。
+
 ADR-0150 保留 Node v0.4 原 wire/sequence/application completion 合同，在原验证 ingress
 后以每 session 最多 8 个待完成事实接通已有有界应用批处理。提交仍按原 wire 顺序同步
 排入同一应用 writer；ACK 只按原顺序在实际 Commit 后发送。每项完成等待在入应用队列前

@@ -14,7 +14,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from . import artifact_layout, catalog_references, snapshot_references
+from . import artifact_layout, artifact_snapshots, catalog_references, snapshot_references
 from .profile import (
     IDENTIFIER,
     MAX_PROFILE_BYTES,
@@ -411,6 +411,8 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         if snapshot_references.supports(profile["schema"]):
             with acquire_all(components, profile_schema=profile["schema"]):
                 snapshot_references.complete(components, saved, digest(previous), budget)
+                if profile["schema"] == artifact_snapshots.SCHEMA:
+                    artifact_snapshots.complete(components, saved, digest(previous), budget)
         return {
             "manifest_digest": digest(previous),
             "files": len(saved["files"]),
@@ -422,6 +424,11 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         snapshot_operations = (
             snapshot_references.prepare(profile, components, destination, command_id, budget)
             if snapshot_references.supports(profile["schema"])
+            else []
+        )
+        artifact_operations = (
+            artifact_snapshots.prepare(profile, components, destination, command_id, budget)
+            if profile["schema"] == artifact_snapshots.SCHEMA
             else []
         )
         partial = _target(destination, command_id)
@@ -511,7 +518,9 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         catalog_references.validate(partial, components, record_map, budget, profile["schema"])
         manifest = {
             "schema": (
-                "roboguide.recovery-bundle/v0.2"
+                "roboguide.recovery-bundle/v0.3"
+                if profile["schema"] == artifact_snapshots.SCHEMA
+                else "roboguide.recovery-bundle/v0.2"
                 if snapshot_references.supports(profile["schema"])
                 else "roboguide.recovery-bundle/v0.1"
             ),
@@ -525,6 +534,9 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         if snapshot_references.supports(profile["schema"]):
             manifest["snapshot_operations"] = snapshot_operations
             snapshot_references.validate_bundle(partial, manifest, budget)
+        if profile["schema"] == artifact_snapshots.SCHEMA:
+            manifest["artifact_snapshot_operations"] = artifact_operations
+            artifact_snapshots.validate_bundle(partial, manifest, budget)
         raw = canonical(manifest)
         if len(raw) > MAX_MANIFEST_BYTES:
             raise ValueError("complete recovery manifest exceeds its bound")
@@ -545,6 +557,8 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             verified = verify(destination, digest(raw), deadline_ns=budget.deadline_ns)
             budget.check()
             snapshot_references.complete(components, verified, digest(raw), budget)
+            if profile["schema"] == artifact_snapshots.SCHEMA:
+                artifact_snapshots.complete(components, verified, digest(raw), budget)
     return {"manifest_digest": digest(raw), "files": len(records), "bytes": budget.bytes}
 
 
@@ -572,12 +586,22 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
             }
             | (
                 {"snapshot_operations"}
-                if manifest.get("schema") == "roboguide.recovery-bundle/v0.2"
+                if manifest.get("schema")
+                in {"roboguide.recovery-bundle/v0.2", "roboguide.recovery-bundle/v0.3"}
+                else set()
+            )
+            | (
+                {"artifact_snapshot_operations"}
+                if manifest.get("schema") == "roboguide.recovery-bundle/v0.3"
                 else set()
             )
         )
         or manifest["schema"]
-        not in {"roboguide.recovery-bundle/v0.1", "roboguide.recovery-bundle/v0.2"}
+        not in {
+            "roboguide.recovery-bundle/v0.1",
+            "roboguide.recovery-bundle/v0.2",
+            "roboguide.recovery-bundle/v0.3",
+        }
     ):
         raise ValueError("recovery bundle manifest is not closed or versioned")
     components = validate(manifest["profile"])
@@ -651,11 +675,17 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                     validate_replica_storage(connection, manifest["profile"]["schema"])
     record_map = {str(row["path"]): row for row in files}
     if (snapshot_references.supports(manifest["profile"]["schema"])) != (
-        manifest["schema"] == "roboguide.recovery-bundle/v0.2"
+        manifest["schema"] in {"roboguide.recovery-bundle/v0.2", "roboguide.recovery-bundle/v0.3"}
     ):
         raise ValueError("snapshot profile and bundle schema differ")
-    if manifest["schema"] == "roboguide.recovery-bundle/v0.2":
+    if manifest["schema"] in {"roboguide.recovery-bundle/v0.2", "roboguide.recovery-bundle/v0.3"}:
         snapshot_references.validate_bundle(bundle, manifest, budget)
+    if (manifest["profile"]["schema"] == artifact_snapshots.SCHEMA) != (
+        manifest["schema"] == "roboguide.recovery-bundle/v0.3"
+    ):
+        raise ValueError("Artifact Snapshot profile and bundle schema differ")
+    if manifest["schema"] == "roboguide.recovery-bundle/v0.3":
+        artifact_snapshots.validate_bundle(bundle, manifest, budget)
     for component in components:
         if component["kind"] == "artifact":
             artifact_layout.validate_bundle(
@@ -682,6 +712,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.8",
                 "roboguide.recovery-profile/v0.9",
                 "roboguide.recovery-profile/v0.10",
+                "roboguide.recovery-profile/v0.11",
             }
             else databases
         )
@@ -709,6 +740,8 @@ def reconcile_snapshots(
         raise ValueError("snapshot proof lacks its original explicit reference protocol")
     with acquire_all(components, profile_schema=profile["schema"]):
         receipts = snapshot_references.complete(components, manifest, expected_digest, budget)
+        if manifest["profile"]["schema"] == artifact_snapshots.SCHEMA:
+            receipts += artifact_snapshots.complete(components, manifest, expected_digest, budget)
     return {
         "schema": "roboguide.snapshot-reconciliation/v0.1",
         "manifest_digest": expected_digest,
@@ -730,6 +763,10 @@ def abort_snapshots(profile: dict[str, Any], destination: Path, command_id: str)
         receipts = snapshot_references.abort(
             profile, components, destination.absolute(), command_id, budget
         )
+        if profile["schema"] == artifact_snapshots.SCHEMA:
+            receipts += artifact_snapshots.abort(
+                profile, components, destination.absolute(), command_id, budget
+            )
     return {
         "schema": "roboguide.snapshot-abort/v0.1",
         "receipts": receipts,
@@ -791,7 +828,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.10"
+        "roboguide.restore-receipt/v0.11"
+        if manifest["profile"]["schema"] == artifact_snapshots.SCHEMA
+        else "roboguide.restore-receipt/v0.10"
         if manifest["profile"]["schema"] == catalog_references.SCHEMA
         else "roboguide.restore-receipt/v0.9"
         if manifest["profile"]["schema"] == artifact_layout.SCHEMA
@@ -870,6 +909,7 @@ def restore(
             "roboguide.recovery-profile/v0.8",
             "roboguide.recovery-profile/v0.9",
             "roboguide.recovery-profile/v0.10",
+            "roboguide.recovery-profile/v0.11",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:

@@ -106,6 +106,16 @@ jobs:
           uv run --frozen python tools/quality/check_catalog_reference_recovery_processes.py
           --from /tmp/rg-ci-catalog-mi --output "${RUNNER_TEMP}/roboguide-catalog-recovery"
 
+      - name: Verify Artifact journal migration and actual cold restore with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_artifact_owner_processes.py
+          --skip-build --reference-journal --output "${RUNNER_TEMP}/roboguide-artifact-journal"
+
+      - name: Verify actual Artifact Snapshot interruption and original reconciliation
+        run: >
+          uv run --frozen python tools/quality/check_artifact_snapshot_processes.py
+          --skip-build --output "${RUNNER_TEMP}/roboguide-artifact-snapshot"
+
   python:
     name: Python
     runs-on: ubuntu-24.04

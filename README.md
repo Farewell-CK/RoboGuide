@@ -1,5 +1,11 @@
 # RoboGuide
 
+Artifact Snapshot 维护可显式选择 storage v2 / recovery v0.11：保留原 owner，复制前持久
+原引用和预算；中断后原命令只允许查询对账，完整原发布验证后才退休。恢复保留原 active
+intent，明确 abort 须持有所有原 writer 并保留 partial。见
+[ADR-0151](docs/decisions/0151-original-artifact-maintenance-reference-journal.md)和
+[恢复合同](contracts/recovery/bundle-v0.11/README.md)。Archive/在线多数派/GC 仍继续实施。
+
 Node 输入以每 session 最多 8 条待完成事实接入已有应用批处理，保留原接收时间和等待期限，
 按原顺序在持久提交后发送 ACK。拒绝、超时或失联保留原 route/Unknown 边界。见
 [ADR-0150](docs/decisions/0150-bounded-node-application-pipeline.md)。

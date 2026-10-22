@@ -31,17 +31,24 @@ impl FileSystemArtifactStore {
     /// A second initializer for the same canonical root fails without inspecting or cleaning
     /// staging files owned by the active writer.
     pub fn new(root: impl Into<PathBuf>) -> Result<Self, ArtifactStoreError> {
-        Self::open_layout(root.into(), false)
+        Self::open_layout(root.into(), 0)
     }
 
     /// Opens the explicit retained layout, preserving original bytes and fencing older writers.
     /// A partial migration resumes its original nonce; missing or conflicting identity refuses.
     pub fn new_with_retention(root: impl Into<PathBuf>) -> Result<Self, ArtifactStoreError> {
-        Self::open_layout(root.into(), true)
+        Self::open_layout(root.into(), 1)
+    }
+
+    /// Opens explicit same-owner storage v2 with mandatory original maintenance-reference history.
+    pub fn new_with_reference_journal(
+        root: impl Into<PathBuf>,
+    ) -> Result<Self, ArtifactStoreError> {
+        Self::open_layout(root.into(), 2)
     }
 
     /// Acquires the actual writer before any format check, migration, or managed-directory effect.
-    fn open_layout(root: PathBuf, retained: bool) -> Result<Self, ArtifactStoreError> {
+    fn open_layout(root: PathBuf, version: u8) -> Result<Self, ArtifactStoreError> {
         let root =
             std::path::absolute(root).map_err(|error| io_error("resolve artifact root", error))?;
         create_directory(&root, "create artifact root")?;
@@ -53,11 +60,16 @@ impl FileSystemArtifactStore {
             &root.join(STAGING_DIRECTORY),
             "create artifact staging directory",
         )?;
-        let layout = crate::layout::open(&root, retained)?;
+        let layout = if version == 2 {
+            crate::layout::open_references(&root)?
+        } else {
+            crate::layout::open(&root, version == 1)?
+        };
         Ok(Self {
             root,
             blob_directory: layout.blob_directory,
             owner_id: layout.owner_id,
+            storage_version: version,
             _writer_lock: writer_lock,
         })
     }
@@ -70,6 +82,17 @@ impl FileSystemArtifactStore {
     /// Returns the original software backend identity without granting content access or use.
     pub fn owner_id(&self) -> Option<&str> {
         self.owner_id.as_deref()
+    }
+
+    /// Reports the explicitly opened format without interpreting storage identity as permission.
+    pub fn storage_schema(&self) -> &'static str {
+        if self.storage_version == 2 {
+            crate::layout::ARTIFACT_REFERENCE_LAYOUT_SCHEMA
+        } else if self.storage_version == 1 {
+            crate::layout::ARTIFACT_LAYOUT_SCHEMA
+        } else {
+            "legacy"
+        }
     }
 
     /// Starts an upload using a caller-provided, path-safe temporary identifier.

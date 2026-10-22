@@ -14,6 +14,7 @@ from . import artifact_layout
 from .snapshot_references import OperationBudget, canonical
 
 SCHEMA = "roboguide.recovery-profile/v0.10"
+SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.11"}
 WRAPPER = "roboguide.controller-checkpoint/v48"
 CODEC = "domain.EventPayload.json/v29"
 MAX_EVIDENCE_BYTES = 64 * 1024 * 1024
@@ -169,7 +170,7 @@ def _controller(
             return heads, publications
         columns = {row[1] for row in connection.execute("PRAGMA table_info(events)")}
         if not {"sequence", "payload_schema", "payload_json"} <= columns:
-            if current or profile_schema == SCHEMA:
+            if current or profile_schema in SUPPORTED:
                 raise ValueError("mandatory Catalog reference event columns are missing")
             return heads, publications
         has_reference_codec = (
@@ -178,11 +179,11 @@ def _controller(
             ).fetchone()
             is not None
         )
-        if has_reference_codec and (not current or profile_schema != SCHEMA):
+        if has_reference_codec and (not current or profile_schema not in SUPPORTED):
             raise ValueError(
                 "Catalog reference authority requires original wrapper and recovery v0.10"
             )
-        if profile_schema != SCHEMA:
+        if profile_schema not in SUPPORTED:
             return heads, publications
         for schema, raw in connection.execute(
             "SELECT payload_schema,payload_json FROM events ORDER BY sequence"

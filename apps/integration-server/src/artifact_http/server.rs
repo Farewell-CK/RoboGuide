@@ -381,7 +381,7 @@ where
                 "200 OK",
                 serde_json::json!({
                     "schema": "roboguide.artifact-store-observation/v0.1",
-                    "storage_schema": if store.owner_id().is_some() { artifact_store::ARTIFACT_LAYOUT_SCHEMA } else { "legacy" },
+                    "storage_schema": store.storage_schema(),
                     "owner_id": store.owner_id(),
                 }),
             ))

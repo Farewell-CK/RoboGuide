@@ -27,6 +27,7 @@ def supports(profile_schema: str) -> bool:
         SCHEMA,
         "roboguide.recovery-profile/v0.9",
         "roboguide.recovery-profile/v0.10",
+        "roboguide.recovery-profile/v0.11",
     }
 
 

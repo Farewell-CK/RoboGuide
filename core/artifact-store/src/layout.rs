@@ -13,6 +13,8 @@ use std::path::Path;
 
 /// Explicit physical layout contract; this is software storage identity, never a read grant.
 pub const ARTIFACT_LAYOUT_SCHEMA: &str = "roboguide.artifact-storage/v1";
+/// Explicit format whose mandatory original maintenance journal fences v1 writers.
+pub const ARTIFACT_REFERENCE_LAYOUT_SCHEMA: &str = "roboguide.artifact-storage/v2";
 /// Immutable original backend metadata required by retained-layout recovery profiles.
 pub const ARTIFACT_OWNER_FILE: &str = ".retention-owner.json";
 /// Finalized content tree whose old path is a regular-file format fence.
@@ -21,6 +23,9 @@ pub const RETAINED_BLOB_DIRECTORY: &str = "objects-v1";
 const INTENT_FILE: &str = ".retention-intent.json";
 /// Maximum complete owner metadata accepted before allocation or deserialization.
 const MAX_OWNER_BYTES: u64 = 4096;
+
+mod references;
+pub(crate) use references::open_references;
 
 /// Frozen local directory-rename evidence, not a claim about a restored filesystem inode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +60,11 @@ fn exists(path: &Path) -> Result<bool, ArtifactStoreError> {
 
 /// Parses one exact bounded regular-file record without following a mutable symlink leaf.
 fn read_owner(path: &Path) -> Result<Owner, ArtifactStoreError> {
+    read_owner_for(path, ARTIFACT_LAYOUT_SCHEMA)
+}
+
+/// Parses only the explicitly selected original layout, never upgrading an unknown stored identity.
+fn read_owner_for(path: &Path, schema: &str) -> Result<Owner, ArtifactStoreError> {
     let mut file = open_regular_file(path, "read artifact owner")?;
     if file
         .metadata()
@@ -81,7 +91,7 @@ fn read_owner(path: &Path) -> Result<Owner, ArtifactStoreError> {
     let owner: Owner = serde_json::from_slice(&bytes)
         .map_err(|error| io_error("decode artifact owner", io::Error::other(error)))?;
     let nonce = owner.owner_id.strip_prefix("artifact-store:").unwrap_or("");
-    if owner.schema != ARTIFACT_LAYOUT_SCHEMA
+    if owner.schema != schema
         || nonce.len() != 64
         || !nonce
             .bytes()
@@ -170,6 +180,14 @@ pub(crate) fn open(root: &Path, retained: bool) -> Result<OpenLayout, ArtifactSt
     let intent_path = root.join(INTENT_FILE);
     let old = root.join(BLOB_DIRECTORY);
     let objects = root.join(RETAINED_BLOB_DIRECTORY);
+    if exists(&root.join(references::UPGRADE_INTENT))?
+        || exists(&root.join(references::JOURNAL_DIRECTORY))?
+    {
+        return Err(unsafe_path_error(
+            "open artifact layout",
+            "original maintenance journal requires explicit Artifact storage v2",
+        ));
+    }
     if !retained {
         if exists(&owner_path)? || exists(&intent_path)? || exists(&objects)? {
             return Err(unsafe_path_error(

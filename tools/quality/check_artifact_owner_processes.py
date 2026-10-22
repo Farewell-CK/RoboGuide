@@ -28,6 +28,7 @@ def run(
     skip_build: bool,
     old_controller: Path | None,
     old_recovery_ref: str | None = None,
+    reference_journal: bool = False,
 ) -> dict[str, Any]:
     """Exercise real storage, Controller and CLI processes with zero registered Nodes."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -51,7 +52,7 @@ def run(
     checksum = "sha256:" + hashlib.sha256(payload).hexdigest()
     source = directory / "artifacts"
     source_paths = [
-        *sorted((ROOT / "core/artifact-store/src").glob("*.rs")),
+        *sorted((ROOT / "core/artifact-store/src").rglob("*.rs")),
         ROOT / "apps/integration-server/src/main.rs",
         ROOT / "apps/integration-server/src/artifact_http/server.rs",
         ROOT / "core/artifact-store/examples/layout_probe.rs",
@@ -110,6 +111,10 @@ def run(
     assert retained_blob.stat().st_ino == actual_inode and retained_blob.read_bytes() == payload
     assert (source / "blobs").is_file()
     assert execute([str(probe), "retained", str(source)])["owner_id"] == owner_id
+    if reference_journal:
+        assert execute([str(probe), "references", str(source)])["owner_id"] == owner_id
+        assert execute([str(probe), "references", str(source)])["owner_id"] == owner_id
+        execute([str(probe), "retained", str(source)], passed=False)
     execute([str(probe), "legacy", str(source)], passed=False)
     certificates = directory / "pki"
     digests = pki(certificates)
@@ -176,7 +181,10 @@ def run(
                 f"ROBOGUIDE_{plane}_MTLS_ROLE_MAP": str(policy),
             }
         )
-    environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = "roboguide.artifact-storage/v1"
+    storage_schema = (
+        "roboguide.artifact-storage/v2" if reference_journal else "roboguide.artifact-storage/v1"
+    )
+    environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = storage_schema
     environment["TOKIO_WORKER_THREADS"] = "1"
     control_port, artifact_port, grpc_port = port(), port(), port()
     control_origin, artifact_origin = (
@@ -234,7 +242,7 @@ def run(
         status, observation = call(artifact_origin, admin, "GET", "/v1/artifact-store")
         observed = json.loads(observation)
         assert status == 200 and observed["owner_id"] == owner_id
-        assert observed["storage_schema"] == "roboguide.artifact-storage/v1"
+        assert observed["storage_schema"] == storage_schema
         assert (
             call(
                 artifact_origin,
@@ -281,7 +289,9 @@ def run(
         assert request(control_origin, admin, "/v1/inventory")[1]["nodes"] == []
         stop(process)
         profile: dict[str, Any] = {
-            "schema": "roboguide.recovery-profile/v0.9",
+            "schema": "roboguide.recovery-profile/v0.11"
+            if reference_journal
+            else "roboguide.recovery-profile/v0.9",
             "profile_id": "actual-artifact-owner",
             "revision": 1,
             "max_bytes": 16 * 1024 * 1024,
@@ -339,6 +349,10 @@ def run(
                     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                     target.write_bytes(content.read())
             old_environment = dict(environment, PYTHONPATH=str(old_source / "apps/recovery-tool"))
+            old_cli_profile = old_profile
+            if reference_journal:
+                old_cli_profile = directory / "original-v1-profile.json"
+                save(old_cli_profile, profile | {"schema": "roboguide.recovery-profile/v0.10"})
             execute(
                 [
                     sys.executable,
@@ -346,7 +360,7 @@ def run(
                     "roboguide_recovery",
                     "backup",
                     "--profile",
-                    str(old_profile),
+                    str(old_cli_profile),
                     "--destination",
                     str(directory / "old-cli-refused"),
                     "--command-id",
@@ -356,7 +370,11 @@ def run(
                 selected_environment=old_environment,
             )
             error = (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
-            assert b"must be real directories" in error
+            assert (
+                b"Artifact original owner metadata is invalid" in error
+                if reference_journal
+                else b"must be real directories" in error
+            ), error
             assert not (directory / "old-cli-refused").exists()
             old_recovery = {
                 "revision": old_recovery_ref,
@@ -366,9 +384,17 @@ def run(
         old_proof = None
         if old_controller is not None:
             old_arguments = [str(old_controller.resolve(strict=True)), *arguments[1:]]
-            execute(old_arguments, passed=False)
+            old_environment = dict(environment)
+            if reference_journal:
+                old_environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = (
+                    "roboguide.artifact-storage/v1"
+                )
+            execute(old_arguments, passed=False, selected_environment=old_environment)
             error = (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
-            assert b"artifact directory component must be a directory" in error
+            assert (
+                b"original owner identity is invalid" in error
+                or b"artifact directory component must be a directory" in error
+            ), error
             old_proof = {
                 "binary_digest": "sha256:"
                 + hashlib.sha256(old_controller.read_bytes()).hexdigest(),
@@ -401,7 +427,11 @@ def run(
             "--command-id",
             "restore",
         )
-        assert receipt["schema"] == "roboguide.restore-receipt/v0.9"
+        assert receipt["schema"] == (
+            "roboguide.restore-receipt/v0.11"
+            if reference_journal
+            else "roboguide.restore-receipt/v0.9"
+        )
         recovered = restored / "stores/artifact"
         process = launch(recovered)
         assert (
@@ -416,7 +446,11 @@ def run(
         (recovered / ".retention-owner.json").unlink()
         execute([*arguments[:-1], str(recovered)], passed=False)
         error = (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
-        assert b"original owner intent is missing" in error
+        assert (
+            b"original maintenance journal requires explicit Artifact storage v2" in error
+            if reference_journal
+            else b"original owner intent is missing" in error
+        )
         assert not (recovered / ".retention-owner.json").exists()
         assert not (recovered / ".retention-intent.json").exists()
         missing = json.loads(json.dumps(profile))
@@ -441,6 +475,7 @@ def run(
         result = {
             "passed": True,
             "actual_owner_id": owner_id,
+            "original_maintenance_journal": reference_journal,
             "old_controller": old_proof,
             "old_recovery": old_recovery,
             "actual_original_inode_preserved": True,
@@ -469,10 +504,17 @@ def main() -> None:
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--old-controller", type=Path)
     parser.add_argument("--old-recovery-ref")
+    parser.add_argument("--reference-journal", action="store_true")
     args = parser.parse_args()
     print(
         json.dumps(
-            run(args.output.resolve(), args.skip_build, args.old_controller, args.old_recovery_ref),
+            run(
+                args.output.resolve(),
+                args.skip_build,
+                args.old_controller,
+                args.old_recovery_ref,
+                args.reference_journal,
+            ),
             sort_keys=True,
         )
     )

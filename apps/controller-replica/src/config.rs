@@ -138,7 +138,12 @@ impl ProcessConfig {
         if self
             .controller_environment
             .get("ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA")
-            .is_some_and(|value| value != "legacy" && value != "roboguide.artifact-storage/v1")
+            .is_some_and(|value| {
+                !matches!(
+                    value.as_str(),
+                    "legacy" | "roboguide.artifact-storage/v1" | "roboguide.artifact-storage/v2"
+                )
+            })
         {
             return Err("unsupported explicit Controller Artifact storage schema".into());
         }

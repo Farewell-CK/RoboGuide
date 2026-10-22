@@ -145,6 +145,12 @@ lineage/Archive 引用的 owner 依赖，不把这些后续生产者标成已经
 MI/Memory 组合通过。N1 的下一必需工作为 Archive/Artifact/Raft Snapshot/在线 Replica
 生产者与内容闭包、GC 及未归属旧 Catalog 显式迁移；N2–N7 继续保留全部原完成条件。
 
+[Artifact 原 Snapshot 生产者验收](acceptance/2026-10-22-artifact-snapshot-producer.md)
+以 ADR-0151/storage v2/recovery v0.11 接通实际 CAS owner、复制前引用、原 kernel 预算、
+真实 CLI SIGKILL/wait、发布后回执失败、readonly retry、明确 abort 与冷恢复原 active。
+旧实际 binary/CLI 拒绝新格式。此项是 N1 的另一个生产者；下一项继续 Archive/Raft
+Snapshot/online Replica 与 GC，不把本项重分类成完整 N1 已完成。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

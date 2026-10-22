@@ -8,13 +8,14 @@ use std::path::PathBuf;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     if !(2..=3).contains(&arguments.len()) {
-        return Err("usage: layout_probe <legacy|retained> <root> [input-file]".into());
+        return Err("usage: layout_probe <legacy|retained|references> <root> [input-file]".into());
     }
     let root = PathBuf::from(&arguments[1]);
     let store = match arguments[0].as_str() {
         "legacy" => FileSystemArtifactStore::new(&root)?,
         "retained" => FileSystemArtifactStore::new_with_retention(&root)?,
-        _ => return Err("explicit artifact layout must be legacy or retained".into()),
+        "references" => FileSystemArtifactStore::new_with_reference_journal(&root)?,
+        _ => return Err("explicit artifact layout must be legacy, retained or references".into()),
     };
     let artifact = if let Some(input) = arguments.get(2) {
         let mut bytes = Vec::new();
