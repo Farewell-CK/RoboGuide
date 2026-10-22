@@ -18,27 +18,50 @@ RoboGuide coordinates Capability, Compute, Space and Time around a long-lived Mi
 
 State, Memory, identity and persistence span these responsibilities; they are not a final serial processing stage.
 
-## Current process deployment
+## Current code architecture
 
+Reviewed against mainline code on 2026-10-22. Controller modules share application transactions;
+State, Memory and verification support the execution chain horizontally.
+
+<!-- architecture-overview:start -->
 ```mermaid
 flowchart TB
-  MI[Mission Service / MI] -->|HTTP| APP
-  subgraph Controller[integration-server process]
-    APP[Application / writer / transaction]
-    O[Orchestration] --- C[Control]
-    R[Runtime] --- I[Integration]
-    S[State / catalog / Artifact adapter]
-    APP --- O
-    APP --- R
-    APP --- S
-  end
-  I <-->|Node Protocol| N[Node Service]
-  N <--> L[Local EAIOS / Memory provider]
-  VF[Independent verifier] --> APP
-  HA[Explicit Replica / supervisor] -.-> APP
-```
+  %% roboguide:min-width: 1280px
+  U[User / Operator] --> MI[Mission Service · Python<br/>Request / Grounding / Plan / Review / approval]
+  MW[Optional runtime MI worker<br/>Original Request / claim / provider nonce] -->|Candidate revision + independent Review| O
+  MI -->|Complete MissionPlan · application admission| O
 
-Zero Nodes is valid, and multiple Nodes may share a Host. Replica consensus, content replication, cross-domain Federation and physical continuity require separate contracts and evidence. See [implementation topology](docs/architecture/v2/implementation-topology.md).
+  subgraph CTRL[Controller process]
+    O[Orchestration<br/>Task DAG / satisfaction / Mission lifecycle]
+    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / calendar / tenant quota]
+    R[Runtime<br/>Slot / attempt generation<br/>Durable intent / fact reduction / relation fence]
+    I[Integration<br/>Node Protocol / session / routing]
+    O -->|Ready Task| C
+    C -->|Committed binding| R
+    R -->|Command intent| I
+    R -->|Execution outcome| O
+    S[State + Memory catalog<br/>Source / time / TTL / policy / manifest metadata]
+    M[Application Memory coordination<br/>Prepare / import / probe / use / revoke / handoff]
+    A[Artifact adapter + CAS<br/>Separate content authorization / hashed bytes]
+    I -->|Application-accepted source facts| S
+    S -.Current evidence.-> C
+    S -.Catalog / selector.-> M
+    M -->|Pre-execution and release gates| O
+    M -->|Durable Memory commands| I
+  end
+
+  I <-->|gRPC · commands / durable ACK / facts| N[Node Service · Rust<br/>Compiled config / Local Integration Engine / journal]
+  N <-->|HTTP / gRPC / MCP workflows| L[Deployment-owned Local EAIOS<br/>Actual operations / Local How / immediate safety]
+  N <-->|Configured Memory workflows| P[Local Memory provider<br/>Original content / current-use permission / Active Map / GC]
+  N <-->|Selective content-byte exchange| A
+  V[Deployment-owned independent verifier / original-goal source] -->|Original plan / predicate / attempt / freshness| O
+```
+<!-- architecture-overview:end -->
+
+The [complete Mermaid architecture atlas](docs/architecture/v2/current-architecture.en.md) contains
+execution/durability, process/storage and Habitat/Eval views, plus a code evidence table and downloadable sources.
+Zero Nodes is valid. A Node is not a Host; Replica metadata consensus, content recovery and physical continuity
+remain separate. The old V2 PNG is a historical conceptual snapshot.
 
 ## Invariants
 

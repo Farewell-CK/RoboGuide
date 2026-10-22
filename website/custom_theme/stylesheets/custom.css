@@ -64,7 +64,7 @@
   border-color: currentColor;
 }
 .rg-diagram-scroll { max-width: 100%; overflow-x: auto; margin: 1rem 0; }
-.rg-diagram-scroll > .mermaid { min-width: 38rem; padding: .5rem 0; }
+.rg-diagram-scroll > .mermaid { min-width: var(--rg-diagram-min-width, 38rem); padding: .5rem 0; }
 .rg-diagram-hint { display: none; }
 @media (max-width: 44.99em) {
   .rg-diagram-hint { display: block; font-size: .72rem; color: var(--md-default-fg-color--light); }

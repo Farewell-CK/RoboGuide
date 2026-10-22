@@ -137,11 +137,48 @@ Memory 撤销部分失败的独立只读恢复由
 逐 provider 原证明、单一有界观察会话、追加证据及原作用域 release gate。原 Unknown
 和预算保持不变，观察不重发副作用。wrapper v39 / Node journal v11 保护此合同。
 
-## V2 总体架构
+## 当前总体架构
 
-![RoboGuide V2 Overall Architecture](docs/images/roboguide-v2-overall-architecture.png)
+以下 Mermaid 依据 2026-10-22 主线代码重画。[完整架构图与代码依据](docs/architecture/v2/current-architecture.md)
+分别说明执行闭环、进程/存储部署，以及 Habitat / Eval Harness 接入。
 
-独立原图位于 [`docs/images/roboguide-v2-overall-architecture.png`](docs/images/roboguide-v2-overall-architecture.png)，并已嵌入 V2 DOCX。仓库内的结构化摘要见 [`docs/architecture/v2/README.md`](docs/architecture/v2/README.md)。
+<!-- architecture-overview:start -->
+```mermaid
+flowchart TB
+  %% roboguide:min-width: 1280px
+  U[用户 / Operator] --> MI[Mission Service · Python<br/>Request / Grounding / Plan / Review / 审批]
+  MW[可选运行期 MI worker<br/>原 Request / claim / provider nonce] -->|候选修订 + 独立 Review| O
+  MI -->|完整 MissionPlan · 应用接纳| O
+
+  subgraph CTRL[Controller 进程]
+    O[Orchestration<br/>Task DAG / 满足判定 / Mission 生命周期]
+    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / 日历 / tenant quota]
+    R[Runtime<br/>slot / attempt generation<br/>durable intent / 事实归约 / relation fence]
+    I[Integration<br/>Node Protocol / session / 路由]
+    O -->|Ready Task| C
+    C -->|已提交绑定| R
+    R -->|命令 intent| I
+    R -->|执行结果| O
+    S[State + Memory catalog<br/>来源 / 时间 / TTL / 策略 / manifest 元数据]
+    M[应用层 Memory 协调<br/>Prepare / import / probe / use / revoke / handoff]
+    A[Artifact adapter + CAS<br/>独立内容授权 / 哈希字节]
+    I -->|经应用接纳的来源事实| S
+    S -.当前依据.-> C
+    S -.目录 / selector.-> M
+    M -->|执行前与释放门禁| O
+    M -->|持久 Memory 命令| I
+  end
+
+  I <-->|gRPC · 命令 / durable ACK / 事实| N[Node Service · Rust<br/>配置编译 / Local Integration Engine / journal]
+  N <-->|HTTP / gRPC / MCP 工作流| L[部署侧 Local EAIOS<br/>实际操作 / Local How / 即时安全]
+  N <-->|配置声明的 Memory 工作流| P[Local Memory provider<br/>原内容 / 当前使用许可 / Active Map / GC]
+  N <-->|选择性交换内容 bytes| A
+  V[部署侧独立 verifier / 原目标证据源] -->|原 plan / predicate / attempt / freshness| O
+```
+<!-- architecture-overview:end -->
+
+[V2 语义基线](docs/architecture/v2/README.md)与已接受 ADR 保持权威。
+[原 V2 PNG](docs/images/roboguide-v2-overall-architecture.png)和 DOCX 作为历史概念快照保留。
 
 State/MI 的当前整改见 [ADR-0104](docs/decisions/0104-state-consumers-belief-and-semantic-verifier.md) 与
 [F3 验收](docs/development/acceptance/2026-10-15-f3.md)：显式来源策略进入 Control、Belief 保留原始

@@ -54,7 +54,9 @@ GITHUB_BASE = "https://github.com/Farewell-CK/RoboGuide"
 LOCAL_PAGES_DIR = WEBSITE_DIR / "pages"
 
 #: File suffixes that are copied into the site docs tree; everything else is ignored.
-COPY_SUFFIXES: frozenset[str] = frozenset({".md", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".docx"})
+COPY_SUFFIXES: frozenset[str] = frozenset(
+    {".md", ".mmd", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".docx"}
+)
 
 #: Curated sync plan as ``(repository path, site path)`` pairs. Directories are
 #: mirrored recursively; single files are copied individually.
@@ -84,6 +86,7 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         "架构与概念",
         "architecture-tour.md",
         (
+            ("当前代码架构图", "docs/architecture/v2/current-architecture.md"),
             ("核心概念", "concepts.md"),
             ("执行生命周期", "lifecycle.md"),
             ("State 与 Memory", "state-memory.md"),
@@ -329,6 +332,8 @@ def rewrite_markdown_file(
     rewritten_text = LINK_PATTERN.sub(replace, text)
     rewritten_text = rewritten_text.replace("[English](architecture-handbook.en.md)", "")
     rewritten_text = rewritten_text.replace("[中文](architecture-handbook.md)", "")
+    rewritten_text = rewritten_text.replace("[English](current-architecture.en.md)。", "")
+    rewritten_text = rewritten_text.replace("[中文](current-architecture.md).", "")
     rewritten_text = pin_links(rewritten_text)
     rewritten_text = rewritten_text.replace("#原生-workload-与观测", "#workload")
     if rewritten_text != text:

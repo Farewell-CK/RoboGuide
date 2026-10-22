@@ -4,6 +4,8 @@ Reviewed: 2026-10-22. Code baseline: `45a82410867e01241394d1b9116aa53634ce2a06`.
 This explains the [V2 baseline](README.md), accepted ADRs and current code; it introduces no new architecture decision.
 [中文](architecture-handbook.md).
 
+See the [Mermaid architecture atlas](current-architecture.en.md) for current code, execution, deployment and evaluation views.
+
 ## Purpose and system boundary
 
 RoboGuide coordinates heterogeneous embodied systems over a Mission: interpret objectives, build plans,

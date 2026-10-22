@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const base = process.env.DOCS_URL || 'http://127.0.0.1:39801';
 const output = process.env.DOCS_SCREENSHOTS || '/tmp/roboguide-docs-screenshots';
-const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/getting-started/', '/en/getting-started/', '/status/', '/en/status/', '/docs/architecture/v2/architecture-handbook/'];
+const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/getting-started/', '/en/getting-started/', '/status/', '/en/status/', '/docs/architecture/v2/architecture-handbook/', '/docs/architecture/v2/current-architecture/', '/en/docs/architecture/v2/current-architecture/'];
 (async () => {
   fs.mkdirSync(output, { recursive: true });
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
@@ -44,6 +44,18 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
         if (route.includes('architecture') || route === '/' || route === '/en/') {
           await page.waitForFunction(() => window.__docsRoots.some(root =>
             root.host.closest('article') && root.querySelector('svg')));
+        }
+        if (route.includes('/current-architecture/')) {
+          await page.waitForFunction(() => window.__docsRoots
+            .filter(root => root.host.closest('article') && root.querySelector('svg')).length === 4);
+          const diagrams = await page.evaluate(() => window.__docsRoots
+            .filter(root => root.host.closest('article')).flatMap(root => [...root.querySelectorAll('svg')])
+            .map(svg => ({ error: svg.getAttribute('aria-roledescription') === 'error', text: svg.textContent })));
+          assert.equal(diagrams.length, 4, `architecture atlas diagram count: ${route}`);
+          assert.ok(diagrams.every(diagram => !diagram.error && !diagram.text.includes('Syntax error')), route);
+          const widths = await page.locator('.rg-diagram-scroll > .mermaid').evaluateAll(diagrams => diagrams.map(diagram => diagram.getBoundingClientRect().width));
+          assert.ok(widths[0] >= 1280 && widths[1] >= 1440 && widths[2] >= 1440, `readable diagram widths: ${route} ${widths}`);
+          await page.screenshot({ path: path.join(output, `architecture-${width}-${scheme}-${route.startsWith('/en/') ? 'en' : 'zh'}.png`), fullPage: true });
         }
         assert.equal(await page.locator('.error-icon, svg[aria-roledescription="error"]').count(), 0, route);
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `${width}: ${route}`);
