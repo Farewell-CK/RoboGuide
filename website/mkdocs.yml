@@ -14,6 +14,8 @@ theme:
   features:
     # NOTE: navigation.instant is intentionally disabled — it is incompatible
     # with the mkdocs-static-i18n language switcher.
+    - navigation.sections
+    - navigation.path
     - navigation.top
     - navigation.footer
     - navigation.indexes
@@ -27,11 +29,15 @@ theme:
         name: 跟随系统
     - media: "(prefers-color-scheme: light)"
       scheme: default
+      primary: blue
+      accent: blue
       toggle:
         icon: material/weather-sunny
         name: 切换到浅色模式
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+      primary: blue
+      accent: blue
       toggle:
         icon: material/weather-night
         name: 切换到深色模式
@@ -52,37 +58,23 @@ plugins:
           build: true
           site_name: RoboGuide Technical Docs
           nav_translations:
-            首页: Home
+            项目概览: Overview
             快速开始: Getting Started
-            架构导览: Architecture Tour
-            模块地图: Module Maps
-            Integration 与 Node Service: Integration & Node Service
-            Eval Harness 与本地集成: Eval Harness & Integrations
-            文档索引: Document Index
-            项目范围: Project Scope
-            MVP 定义: MVP Definition
-            待定决策清单: Open Decisions
-            架构: Architecture
-            V2 架构基线: V2 Architecture Baseline
-            V1.1 历史架构: V1.1 Historical Architecture
-            架构图索引: Architecture Diagrams
-            架构决策记录（ADR）: Architecture Decision Records
-            开发: Development
-            编码规范: Coding Standards
-            运行时可靠性故障矩阵: Runtime Reliability Fault Matrix
-            C1 前生产链准入审计: Pre-C1 Readiness Audit
-            MI 协调指导验证: MI Coordination Guidance Validation
-            设备扩展规范 v0.1: Device Extension Spec v0.1
-            设备扩展规范 v0.2: Device Extension Spec v0.2
-            E1 公平性集成计划: E1 Fairness Integration Plan
-            E1 测试框架就绪审计: E1 Harness Readiness Audit
-            E1 公平性基础: E1 Fairness Foundation
-            E1 公平性评审挑战: E1 Fairness Reviewer Challenges
-            评估证据有效性规范: Evaluation Evidence Validity
-            F01-F07 集成回归: F01-F07 Integration Regression
-            Robonix 地图适配器: Robonix Map Adapter
-            Habitat Local EAIOS 桥: Habitat Local EAIOS Bridge
-            仓库 README: Repository README
+            架构与概念: Architecture and Concepts
+            核心概念: Core Concepts
+            执行生命周期: Execution Lifecycle
+            State 与 Memory: State and Memory
+            V2 架构手册: V2 Architecture Handbook
+            开发与接入: Development and Integration
+            模块地图: Module Map
+            Integration 与 Node Service: Integration and Node Service
+            Eval Harness 与本地集成: Eval Harness and Integrations
+            部署与运维: Deployment and Operations
+            状态与参考: Status and Reference
+            版本与构建来源: Versions and Build Provenance
+            ADR 主题索引: ADR Topics
+            原始文档档案: Original Archives
+            ADR 全索引: ADR Catalog
   - literate-nav:
       nav_file: SUMMARY.md
 
@@ -91,6 +83,8 @@ exclude_docs: |
   SUMMARY.md
 
 markdown_extensions:
+  - attr_list
+  - md_in_html
   - admonition
   - def_list
   - tables
