@@ -12,17 +12,23 @@ from typing import Any
 from .profile import real_directory
 
 SCHEMA = "roboguide.recovery-profile/v0.9"
+REFERENCE_SCHEMA = "roboguide.recovery-profile/v0.10"
 OWNER_FILE = ".retention-owner.json"
 FENCE_FILE = "blobs"
 OBJECTS = "objects-v1"
 MAX_OWNER_BYTES = 4096
 
 
+def supports(profile_schema: str) -> bool:
+    """Keep original retained layout explicit in both the original and reference-aware profiles."""
+    return profile_schema in {SCHEMA, REFERENCE_SCHEMA}
+
+
 def metadata_files(component: dict[str, Any], profile_schema: str) -> list[str]:
     """Select only the explicit format's mandatory original identity and old-layout fence."""
     return (
         [OWNER_FILE, FENCE_FILE]
-        if component["kind"] == "artifact" and profile_schema == SCHEMA
+        if component["kind"] == "artifact" and supports(profile_schema)
         else []
     )
 
@@ -58,7 +64,7 @@ def validate_storage(root: Path, profile_schema: str) -> dict[str, Any] | None:
     """Require explicit complete retained format while keeping old profile semantics closed."""
     real_directory(root)
     pending = root / ".retention-intent.json"
-    if profile_schema != SCHEMA:
+    if not supports(profile_schema):
         if any(
             path.exists() or path.is_symlink()
             for path in (root / OWNER_FILE, pending, root / OBJECTS)
@@ -79,7 +85,7 @@ def validate_bundle(
     root: Path, component: dict[str, Any], records: dict[str, dict[str, Any]], profile_schema: str
 ) -> None:
     """Bind mandatory original owner records to the exact declared immutable component files."""
-    if profile_schema != SCHEMA:
+    if not supports(profile_schema):
         return
     component_id = component["component_id"]
     for name in metadata_files(component, profile_schema):

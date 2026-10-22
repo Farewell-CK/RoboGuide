@@ -11,13 +11,18 @@ pub(crate) fn map_authorization_manifest(
 
 /// Checks typed resource bounds and its original producer namespace without inventing missing ownership.
 pub(super) fn authorized_map_read(
-    _catalog: &ArtifactCatalog,
+    catalog: &ArtifactCatalog,
     authority: &dyn MemoryProviderAdmission,
     principal: &ArtifactPrincipal,
     map: &MapArtifactManifest,
     operation: domain::MemoryAccessOperation,
     import_id: Option<&str>,
 ) -> Result<(), HttpError> {
+    if operation != domain::MemoryAccessOperation::Discover {
+        catalog
+            .require_live_map_publication(map)
+            .map_err(HttpError::forbidden)?;
+    }
     if import_id.is_none()
         && principal.grant.role != ArtifactRole::Admin
         && !principal

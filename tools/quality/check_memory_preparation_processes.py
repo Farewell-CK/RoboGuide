@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from authority_recovery_profile import run as run_authority_recovery
+from catalog_retention_processes import CatalogRetentionCheck
+from catalog_retention_processes import configure as configure_catalog_retention
 from check_identity_processes import request as tls_request
 from check_state_verifier_processes import ROOT, address, save, stop, wait_for
 from memory_content_reclamation import run as run_reclamation
@@ -74,6 +76,7 @@ def identity() -> dict[str, str]:
             "runtime_mi_process_driver.py",
             "memory_content_reclamation.py",
             "authority_recovery_profile.py",
+            "catalog_retention_processes.py",
             "monitoring_processes.py",
         )
     ]
@@ -134,6 +137,7 @@ def run(
     async_workers: int = 8,
     process_workers: bool = False,
     revision_old_controller: Path | None = None,
+    artifact_retention: bool = False,
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
     if not 1 <= async_workers <= 64:
@@ -160,6 +164,9 @@ def run(
     }
     environment["PYTHONPATH"] = str(ROOT / "integrations/memory-provider")
     contexts, leaves = tls(directory, nodes, memory_id, environment, monitoring_tools is not None)
+    if artifact_retention:
+        environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = "roboguide.artifact-storage/v1"
+        configure_catalog_retention(directory, leaves["admin"])
     if handoff_case is not None and handoff_case.startswith("revision"):
         authorization_path = directory / "operator-authorization.json"
         authorization = json.loads(authorization_path.read_bytes())
@@ -489,6 +496,7 @@ def run(
                 "use_case": use_case,
                 "large_transfer": large_transfer,
                 "group_lifecycle": group_lifecycle,
+                "artifact_retention": artifact_retention,
                 "controller_diagnostics": "controller-diagnostics.jsonl",
             },
         )
@@ -542,6 +550,10 @@ def run(
             25 * 60 if large_transfer else (60 if handoff_case is not None else 20),
         )
         assert published == manifest, published
+        catalog_retention = None
+        if artifact_retention:
+            catalog_retention = CatalogRetentionCheck(directory, cas, contexts, manifest, exchange)
+            catalog_retention.begin(publication_faults=handoff_case is None)
         authority_recovery_result = None
         if authority_recovery:
             if monitoring_tools is not None:
@@ -583,6 +595,8 @@ def run(
                 source_identity=initial_identity, configuration_identity=configuration_identity
             )
             result["process_workers"] = process_workers
+            if catalog_retention is not None:
+                result["catalog_references"] = catalog_retention.lineages()
             if process_workers and handoff_case == "complete":
                 with closing(
                     sqlite3.connect(
@@ -677,6 +691,8 @@ def run(
         save(directory / "mission.json", accepted)
         status, response = exchange("/v1/missions", accepted)
         assert status == 202, response
+        if catalog_retention is not None:
+            catalog_retention.blocked()
         receipts = []
         for index in range(2):
             task_id = "hash-" + str(index)
@@ -1029,6 +1045,7 @@ def run(
                 "sqlite": sqlite3.sqlite_version,
             },
             "verifier_receipts": receipts,
+            "catalog_references": None if catalog_retention is None else catalog_retention.finish(),
         }
         save(directory / "result.json", result)
         return result
@@ -1070,6 +1087,7 @@ def main() -> None:
     parser.add_argument("--monitoring-tools", type=Path)
     parser.add_argument("--async-workers", type=int, choices=range(1, 65), default=8)
     parser.add_argument("--process-workers", action="store_true")
+    parser.add_argument("--artifact-retention", action="store_true")
     parser.add_argument("--old-controller", type=Path)
     parser.add_argument(
         "--handoff-case",
@@ -1092,6 +1110,23 @@ def main() -> None:
         "--use-case", choices=("revoke", "expire", "backend-restart", "controller-restart")
     )
     arguments = parser.parse_args()
+    if arguments.artifact_retention and (
+        arguments.group_lifecycle
+        or arguments.use_lifecycle
+        or arguments.use_case
+        or arguments.use_query_recovery
+        or arguments.use_query_case
+    ):
+        parser.error(
+            "--artifact-retention extends the completion or original handoff/revision profile"
+        )
+    if arguments.artifact_retention and arguments.handoff_case not in (
+        None,
+        "complete",
+        "revision",
+        "revision-mi",
+    ):
+        parser.error("--artifact-retention requires a complete original child publication profile")
     if arguments.old_controller and not (arguments.handoff_case or "").startswith("revision"):
         parser.error("--old-controller is an actual revision Memory downgrade check")
     if (arguments.handoff_case or "").startswith("revision") and not arguments.process_workers:
@@ -1130,6 +1165,7 @@ def main() -> None:
                     arguments.async_workers,
                     arguments.process_workers,
                     arguments.old_controller,
+                    arguments.artifact_retention,
                 ),
                 sort_keys=True,
             )

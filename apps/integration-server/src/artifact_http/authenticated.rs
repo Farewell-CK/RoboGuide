@@ -15,6 +15,43 @@ pub(super) struct AuthenticatedAdmission<'a> {
 }
 
 impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
+    /// Rechecks exact current TLS/grant interpretation through SQL Commit without catalog lock recursion.
+    fn revalidate_artifact_request(&self) -> Result<(), String> {
+        self.authority.revalidate_artifact_principal(self.principal)
+    }
+    /// Keeps retirement proof on actual original Control/application history after current TLS checks.
+    fn catalog_retirement_proof(
+        &self,
+        record: &domain::ArtifactCatalogReference,
+    ) -> Result<String, String> {
+        self.authority
+            .revalidate_artifact_principal(self.principal)?;
+        if self.principal.grant.role != ArtifactRole::Admin
+            || record.tenant_id != self.principal.tenant_id
+        {
+            return Err(
+                "Catalog retirement requires the original tenant's actual administrator".into(),
+            );
+        }
+        self.authority.catalog_retirement_proof(record)
+    }
+    /// Freezes actual transport and committed grant interpretation, never caller-declared headers.
+    fn publication_source(&self) -> Result<ArtifactPublicationSource, String> {
+        self.authority
+            .revalidate_artifact_principal(self.principal)?;
+        Ok(ArtifactPublicationSource {
+            tenant_id: self.principal.tenant_id.clone(),
+            principal_id: self.principal.subject.clone(),
+            authority_digest: super::retention::evidence_digest(&serde_json::json!({
+                "principal": self.principal.subject,
+                "tenant": self.principal.tenant_id,
+                "certificate": self.principal.certificate_digest,
+                "registry": self.principal.registry_id,
+                "revision": self.principal.registry_revision,
+                "grant": self.principal.grant,
+            }))?,
+        })
+    }
     /// Rejects remote legacy claims and binds current producer/provider to the actual certificate.
     fn admit_map_publication(
         &self,
@@ -62,6 +99,7 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
                 return Err("upload transition crosses original authenticated owner".into());
             }
             EventPayload::MemoryManifestPublished { manifest } => {
+                self.catalog.require_live_publication(manifest.selector())?;
                 self.catalog.authorize_publication_bytes(
                     self.principal,
                     manifest
@@ -72,6 +110,7 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
                 )?;
             }
             EventPayload::MapArtifactPublished { manifest } => {
+                self.catalog.require_live_map_publication(manifest)?;
                 self.catalog.authorize_publication_bytes(
                     self.principal,
                     Some((
@@ -85,6 +124,7 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
             EventPayload::MemoryArtifactStaged { manifest, .. }
             | EventPayload::MemoryArtifactImported { manifest, .. }
             | EventPayload::MemoryArtifactRejected { manifest, .. } => {
+                self.catalog.require_live_publication(manifest.selector())?;
                 self.authority.authorize_memory_access(
                     self.principal,
                     manifest,
@@ -93,6 +133,7 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
                 )?;
             }
             EventPayload::MapMemoryReplicaRecorded { manifest, .. } => {
+                self.catalog.require_live_map_publication(manifest)?;
                 if self.import_id.is_none() {
                     return Err(
                         "typed-map byte placement requires its original prepared purpose".into(),

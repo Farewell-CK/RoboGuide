@@ -3,6 +3,21 @@
 use super::*;
 /// Composition-owned admission for Node-authored typed evidence and generic Memory claims.
 pub trait MemoryProviderAdmission: Send + Sync {
+    /// Rechecks the request's actual current identity at Commit without acquiring catalog caches.
+    fn revalidate_artifact_request(&self) -> Result<(), String> {
+        Ok(())
+    }
+    /// Produces actual original application-use retirement evidence; absence retains all ownership.
+    fn catalog_retirement_proof(
+        &self,
+        _record: &domain::ArtifactCatalogReference,
+    ) -> Result<String, String> {
+        Err("original Catalog application-use proof is unavailable".into())
+    }
+    /// Returns original publication attribution only from actual transport or frozen delegation.
+    fn publication_source(&self) -> Result<ArtifactPublicationSource, String> {
+        Err("original authenticated Artifact publication source is unavailable".into())
+    }
     /// Permits one exact protected parent reference only through a durable stopped-Group child
     /// exchange and an independently current authenticated original import. Hash knowledge grants none.
     fn authorize_handoff_blob_reference(
@@ -139,6 +154,7 @@ pub struct MemoryPublicationIdentity {
 }
 
 /// Admission check serialized with one durable catalog/evidence append.
+#[derive(Clone, Copy)]
 enum EvidenceWriteAdmission<'a> {
     /// Exact provider-bound map publication checked inside the actual catalog writer ordering.
     Map {
@@ -189,6 +205,10 @@ impl MemoryPublicationIdentity {
 /// Shared catalog and evidence-log authority used by the artifact listener.
 #[derive(Clone)]
 pub struct ArtifactCatalog {
+    /// Explicit actual CAS owner; legacy catalogs never acquire new authority by inference.
+    pub(super) retained_store: Option<FileSystemArtifactStore>,
+    /// Committed original Catalog/lineage retention, independent of semantic access policies.
+    pub(super) retention: Arc<Mutex<state::ArtifactRetentionProjection>>,
     /// Rebuildable original byte ownership receipts; entries never authorize semantic consumption.
     pub(super) upload_records: Arc<Mutex<BTreeMap<String, domain::ArtifactUploadRecord>>>,
     /// Rebuildable metadata projection guarded for concurrent HTTP requests.
@@ -278,6 +298,7 @@ impl ArtifactCatalog {
         &self,
         selector: &MemorySelector,
     ) -> Result<Option<(MemoryArtifactManifest, Option<MapArtifactManifest>)>, String> {
+        self.require_live_publication(selector)?;
         let generic = self.memory(selector).map_err(|e| e.message)?;
         let map_selector = MapRevisionSelector::new(
             domain::MapId::new(selector.memory_id().as_str()).map_err(|e| e.to_string())?,
@@ -305,6 +326,15 @@ impl ArtifactCatalog {
         manifest: &MemoryArtifactManifest,
     ) -> Result<(), String> {
         self.ensure_available().map_err(|error| error.message)?;
+        self.require_live_publication(manifest.selector())?;
+        self.validate_application_metadata(manifest)
+    }
+
+    /// Rechecks immutable history without granting new use or reviving a retired child on restart.
+    fn validate_application_metadata(
+        &self,
+        manifest: &MemoryArtifactManifest,
+    ) -> Result<(), String> {
         let projection = self
             .projection
             .lock()
@@ -332,7 +362,8 @@ impl ArtifactCatalog {
         manifest: &MemoryArtifactManifest,
         timestamp: TimestampMs,
     ) -> Result<(), String> {
-        self.validate_application_memory_publication(manifest)?;
+        self.validate_application_metadata(manifest)?;
+        self.install_application_reference(manifest)?;
         let result = self
             .memory_projection
             .lock()
@@ -381,15 +412,29 @@ impl ArtifactCatalog {
         })
     }
     /// Replays the catalog while sharing a process-local event-log write serializer.
+    #[cfg(test)]
     pub fn replay_with_gate(
         event_log: &SqliteEventLog,
         write_gate: Arc<Mutex<()>>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::replay_with_store(event_log, write_gate, None)
+    }
+
+    /// Replays real owner-bound references without attributing existing unaccounted publications.
+    pub fn replay_with_store(
+        event_log: &SqliteEventLog,
+        write_gate: Arc<Mutex<()>>,
+        store: Option<FileSystemArtifactStore>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut projection = MapCatalogProjection::new();
         let mut memory_projection = MemoryCatalogProjection::new();
         let mut upload_records = BTreeMap::new();
+        let mut retention = state::ArtifactRetentionProjection::default();
         let mut timestamp_high_water = TimestampMs::new(0);
         for event in event_log.decoded_events()? {
+            if let EventPayload::ArtifactCatalogReferenceTransition { record } = event.payload() {
+                retention.apply(record)?;
+            }
             if let EventPayload::ArtifactUploadTransition { record } = event.payload() {
                 super::upload_authority::validate_record_transition(&upload_records, record)?;
                 upload_records.insert(record.upload_id.clone(), record.clone());
@@ -414,7 +459,31 @@ impl ArtifactCatalog {
         }
         validate_disjoint_memory_namespace(&projection, &memory_projection)
             .map_err(|error| format!("Memory selector replay failed: {error}"))?;
+        if retention.records().next().is_some() {
+            let actual = store
+                .as_ref()
+                .filter(|store| store.owner_id().is_some())
+                .ok_or(
+                    "original Catalog references require their actual retained Artifact owner",
+                )?;
+            for record in retention.records() {
+                if record.retirement.is_some() {
+                    continue;
+                }
+                for dependency in &record.dependencies {
+                    if Some(dependency.store_owner_id.as_str()) != actual.owner_id() {
+                        return Err(
+                            "original Catalog reference belongs to another actual Artifact owner"
+                                .into(),
+                        );
+                    }
+                    actual.verify_artifact(&dependency.content_digest, dependency.byte_size)?;
+                }
+            }
+        }
         Ok(Self {
+            retained_store: store.filter(|store| store.owner_id().is_some()),
+            retention: Arc::new(Mutex::new(retention)),
             upload_records: Arc::new(Mutex::new(upload_records)),
             projection: Arc::new(Mutex::new(projection)),
             memory_projection: Arc::new(Mutex::new(memory_projection)),
@@ -623,8 +692,30 @@ impl ArtifactCatalog {
             .write_gate
             .lock()
             .map_err(|_| HttpError::internal("event-log write gate is poisoned"))?;
+        self.append_under_writer(payload, admission)
+    }
+
+    /// Commits authenticated evidence while the caller retains the original shared writer gate.
+    pub(super) fn append_authorized_under_writer(
+        &self,
+        payload: EventPayload,
+        authority: &dyn MemoryProviderAdmission,
+    ) -> Result<TimestampMs, HttpError> {
+        self.append_under_writer(
+            payload,
+            Some(EvidenceWriteAdmission::Artifact { authority }),
+        )
+    }
+
+    /// Reduces one candidate and its reference events without releasing the original writer ordering.
+    fn append_under_writer(
+        &self,
+        payload: EventPayload,
+        admission: Option<EvidenceWriteAdmission<'_>>,
+    ) -> Result<TimestampMs, HttpError> {
         self.ensure_available()?;
         let payload = self.resolve_typed_memory_replica(payload)?;
+        let mut publication_source = None;
         if let Some(admission) = admission {
             let authority = match &admission {
                 EvidenceWriteAdmission::Artifact { authority }
@@ -635,6 +726,19 @@ impl ArtifactCatalog {
             authority
                 .admit_artifact_payload(&payload)
                 .map_err(HttpError::forbidden)?;
+            if self.retained_store.is_some()
+                && matches!(
+                    &payload,
+                    EventPayload::MemoryManifestPublished { .. }
+                        | EventPayload::MapArtifactPublished { .. }
+                )
+            {
+                publication_source = Some(
+                    authority
+                        .publication_source()
+                        .map_err(HttpError::forbidden)?,
+                );
+            }
             match admission {
                 EvidenceWriteAdmission::Map {
                     authority,
@@ -670,6 +774,58 @@ impl ArtifactCatalog {
                 }
             }
         }
+        let timestamp = self.next_timestamp()?;
+        let reference_events = self
+            .publication_events(&payload, publication_source.as_ref(), timestamp)
+            .map_err(HttpError::conflict)?;
+        if self.retained_store.is_some()
+            && matches!(
+                &payload,
+                EventPayload::MemoryManifestPublished { .. }
+                    | EventPayload::MapArtifactPublished { .. }
+            )
+            && let Some(admission) = admission
+        {
+            // Actual hashing may consume time; repeat the original permission checks before locks/SQL.
+            match admission {
+                EvidenceWriteAdmission::Map {
+                    authority,
+                    publisher,
+                    execution_id,
+                } => {
+                    authority
+                        .admit_artifact_payload(&payload)
+                        .map_err(HttpError::forbidden)?;
+                    let EventPayload::MapArtifactPublished { manifest } = &payload else {
+                        unreachable!("validated map admission")
+                    };
+                    authority
+                        .admit_map_publication(manifest, publisher, execution_id)
+                        .map_err(HttpError::forbidden)?;
+                }
+                EvidenceWriteAdmission::Memory {
+                    authority,
+                    publisher,
+                } => {
+                    authority
+                        .admit_artifact_payload(&payload)
+                        .map_err(HttpError::forbidden)?;
+                    admit_memory_payload(&payload, authority, publisher)?;
+                }
+                EvidenceWriteAdmission::Artifact { authority } => authority
+                    .admit_artifact_payload(&payload)
+                    .map_err(HttpError::forbidden)?,
+                EvidenceWriteAdmission::NodePublisher { .. } => {
+                    unreachable!("Node evidence is not a publication")
+                }
+            }
+        }
+        let request_authority = admission.map(|admission| match admission {
+            EvidenceWriteAdmission::Artifact { authority }
+            | EvidenceWriteAdmission::Map { authority, .. }
+            | EvidenceWriteAdmission::Memory { authority, .. }
+            | EvidenceWriteAdmission::NodePublisher { authority, .. } => authority,
+        });
         let mut upload_records = self
             .upload_records
             .lock()
@@ -682,7 +838,18 @@ impl ArtifactCatalog {
             EventPayload::ArtifactUploadTransition { record } => Some(record.clone()),
             _ => None,
         };
-        let timestamp = self.next_timestamp()?;
+        let mut retention = self
+            .retention
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("Artifact retention unavailable"))?;
+        let mut retention_candidate = retention.clone();
+        for event in reference_events.iter().chain(std::iter::once(&payload)) {
+            if let EventPayload::ArtifactCatalogReferenceTransition { record } = event {
+                retention_candidate
+                    .apply(record)
+                    .map_err(HttpError::conflict)?;
+            }
+        }
         let mut projection = self
             .projection
             .lock()
@@ -717,6 +884,9 @@ impl ArtifactCatalog {
         let checkpoint = current_checkpoint(&log)?;
         log.begin_batch()
             .map_err(|error| HttpError::conflict(format!("spatial catalog is busy: {error}")))?;
+        for event in reference_events {
+            log.append(timestamp, &correlation, None, event);
+        }
         log.append(timestamp, &correlation, None, payload);
         match log.take_error() {
             Ok(Some(error)) => {
@@ -748,6 +918,16 @@ impl ArtifactCatalog {
                 format!("controller checkpoint carry-forward failed: {error}"),
             ));
         }
+        if let Some(authority) = request_authority
+            && let Err(error) = authority.revalidate_artifact_request()
+        {
+            return match log.rollback_batch() {
+                Ok(()) => Err(HttpError::forbidden(error)),
+                Err(rollback) => Err(self.fence(format!(
+                    "{error}; rollback outcome is uncertain: {rollback}"
+                ))),
+            };
+        }
         if let Err(error) = log.commit_batch() {
             let rollback = log.rollback_batch();
             let rollback_detail = rollback
@@ -760,6 +940,7 @@ impl ArtifactCatalog {
         }
         *projection = candidate;
         *memory_projection = memory_candidate;
+        *retention = retention_candidate;
         if let Some(record) = upload_record {
             upload_records.insert(record.upload_id.clone(), record);
         }

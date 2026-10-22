@@ -53,6 +53,8 @@ use authorization::*;
 mod access;
 mod authenticated;
 mod protocol;
+mod retention;
+pub use retention::ArtifactPublicationSource;
 mod server;
 mod upload_authority;
 mod upload_registry;

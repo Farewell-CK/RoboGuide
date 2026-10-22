@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper without original Artifact Catalog/lineage content reference authority.
+const PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v47";
 /// Interim wrapper with Control resource claims but no revisioned quota policy history.
 const PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v46";
 /// Previous main wrapper before Control resource commitment accounting was wired.
@@ -247,6 +249,17 @@ impl artifact_http::LocalizationEvidenceObserver for ControllerLocalizationObser
 }
 
 impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
+    /// Requires complete original context/provider retirement proof under the actual application writer.
+    fn catalog_retirement_proof(
+        &self,
+        record: &domain::ArtifactCatalogReference,
+    ) -> Result<String, String> {
+        let controller = self
+            .controller
+            .lock()
+            .map_err(|_| "Controller authority unavailable")?;
+        application::catalog_retention::retirement_proof(&controller, record)
+    }
     /// Revalidates the actual current route and provider before exact original/current attempt checks.
     fn admit_map_publication(
         &self,
@@ -374,6 +387,11 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
             .controller
             .lock()
             .map_err(|_| "Memory content authority unavailable")?;
+        if operation != domain::MemoryAccessOperation::Discover
+            && let Some(catalog) = &live.memory_preparation.catalog
+        {
+            catalog.require_live_publication(manifest.selector())?;
+        }
         let control = live.bridge.control();
         if operation != domain::MemoryAccessOperation::Discover
             && matches!(manifest.scope(), domain::MemoryScope::Local)
@@ -1002,9 +1020,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let diagnostic_handle = observability::MetricsObserver::handle(diagnostic_writer.handle());
     let event_log = event_log.with_diagnostics(diagnostic_handle.clone());
     let artifact_store = configured_artifact_store(Path::new(&artifact_root))?;
-    let artifact_catalog =
-        artifact_http::ArtifactCatalog::replay_with_gate(&event_log, event_write_gate.clone())
-            .map_err(|error| format!("spatial catalog startup replay failed: {error}"))?;
+    let artifact_catalog = artifact_http::ArtifactCatalog::replay_with_store(
+        &event_log,
+        event_write_gate.clone(),
+        Some(artifact_store.clone()),
+    )
+    .map_err(|error| format!("spatial catalog startup replay failed: {error}"))?;
     let artifact_listener = tokio::net::TcpListener::bind(artifact_address).await?;
     let latest_sequence = event_log.latest_sequence()?;
     let checkpoint = event_log.load_checkpoint()?;
@@ -1069,6 +1090,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RESOURCE_COMMIT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
@@ -1118,6 +1140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RESOURCE_COMMIT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA

@@ -413,6 +413,17 @@ pub(super) fn publish(
             .ok_or("revision CAS unavailable")?
             .verify_artifact(artifact.content_digest().as_str(), artifact.byte_size())
             .map_err(|error| error.to_string())?;
+        let reference_events = catalog.publication_reference_events(
+            &authorization.request.child,
+            std::slice::from_ref(&authorization.parent),
+            None,
+            &artifact_http::ArtifactPublicationSource {
+                tenant_id: state.tenant.clone(),
+                principal_id: authorization.principal.clone(),
+                authority_digest: authorization.digest.clone(),
+            },
+            now,
+        )?;
         let after = KernelTime::observe()?;
         current(
             controller,
@@ -425,6 +436,15 @@ pub(super) fn publish(
         )?;
         if switch.budget.remaining(&after) == 0 {
             return Err("original revision stop/publication budget expired".into());
+        }
+        for event in reference_events {
+            controller.bridge.event_sink().clone().append(
+                now,
+                &domain::CorrelationId::new("revision-memory-publication")
+                    .expect("fixed correlation"),
+                None,
+                event,
+            );
         }
         controller.bridge.event_sink().clone().append(
             now,

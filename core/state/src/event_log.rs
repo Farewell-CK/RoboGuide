@@ -101,6 +101,8 @@ const EVENT_PAYLOAD_SCHEMA_V24: &str = "domain.EventPayload.json/v24";
 const EVENT_PAYLOAD_SCHEMA_V27: &str = "domain.EventPayload.json/v27";
 /// Codec retaining an immutable accepted runtime plan revision and original satisfied Task lineage.
 const EVENT_PAYLOAD_SCHEMA_V28: &str = "domain.EventPayload.json/v28";
+/// Codec retaining original Artifact Catalog/lineage content ownership and irreversible retirement.
+const EVENT_PAYLOAD_SCHEMA_V29: &str = "domain.EventPayload.json/v29";
 /// Codec including independent original-revoke observation evidence.
 const EVENT_PAYLOAD_SCHEMA_V26: &str = "domain.EventPayload.json/v26";
 /// Complete provider-qualified typed-map byte-import evidence.
@@ -392,6 +394,13 @@ impl SqliteEventLog {
         checkpoint_store::initialize(&connection)?;
         let checkpoint_cache = checkpoint_store::read(&connection)?;
         migrate_event_schema(&connection)?;
+        connection.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_artifact_reference_selector ON events (
+                json_extract(payload_json, '$.ArtifactCatalogReferenceTransition.record.selector.memory_id'),
+                json_extract(payload_json, '$.ArtifactCatalogReferenceTransition.record.selector.revision_id'),
+                sequence
+             ) WHERE payload_schema = 'domain.EventPayload.json/v29';",
+        )?;
         let metadata_event_number = connection
             .query_row(
                 "SELECT value FROM event_log_metadata WHERE key = 'next_event_number'",
@@ -1072,6 +1081,44 @@ impl SqliteEventLog {
         }
         Ok(())
     }
+
+    /// Reads one original committed publication head through its maintained exact-selector index.
+    /// The caller installs it only after application Commit; open private batches remain invisible.
+    pub fn artifact_catalog_reference(
+        &self,
+        selector: &domain::MemorySelector,
+    ) -> Result<Option<domain::ArtifactCatalogReference>, SqliteEventLogError> {
+        self.ensure_no_open_batch()?;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        let raw: Option<String> = connection.query_row(
+            "SELECT payload_json FROM events
+             WHERE payload_schema = 'domain.EventPayload.json/v29'
+               AND json_extract(payload_json, '$.ArtifactCatalogReferenceTransition.record.selector.memory_id') = ?1
+               AND json_extract(payload_json, '$.ArtifactCatalogReferenceTransition.record.selector.revision_id') = ?2
+             ORDER BY sequence DESC LIMIT 1",
+            params![selector.memory_id().as_str(), selector.revision_id().as_str()],
+            |row| row.get(0),
+        ).optional()?;
+        raw.map(|raw| {
+            let payload: EventPayload = serde_json::from_str(&raw)
+                .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
+            validate_payload_schema(EVENT_PAYLOAD_SCHEMA_V29, &payload)?;
+            match payload {
+                EventPayload::ArtifactCatalogReferenceTransition { record }
+                    if &record.selector == selector =>
+                {
+                    Ok(record)
+                }
+                _ => Err(SqliteEventLogError::Codec(
+                    "original Artifact reference index returned a different purpose".into(),
+                )),
+            }
+        })
+        .transpose()
+    }
 }
 
 /// Parses one supported event payload codec marker before inspecting its JSON body.
@@ -1104,6 +1151,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V26 => Ok(26),
         EVENT_PAYLOAD_SCHEMA_V27 => Ok(27),
         EVENT_PAYLOAD_SCHEMA_V28 => Ok(28),
+        EVENT_PAYLOAD_SCHEMA_V29 => Ok(29),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -1117,6 +1165,10 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::ArtifactCatalogReferenceTransition { record } => {
+            record.validate().map_err(SqliteEventLogError::Codec)?;
+            29
+        }
         EventPayload::MissionPlanRevisionCommitted { .. }
         | EventPayload::MissionGoalEvidenceAdmitted { .. } => 28,
         EventPayload::MemoryHandoffTransition { .. } => 27,
@@ -1319,6 +1371,7 @@ impl SqliteEventLog {
 /// Selects the newest codec marker only for payloads introduced by that codec.
 fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
     match payload {
+        EventPayload::ArtifactCatalogReferenceTransition { .. } => EVENT_PAYLOAD_SCHEMA_V29,
         EventPayload::MissionPlanRevisionCommitted { .. }
         | EventPayload::MissionGoalEvidenceAdmitted { .. } => EVENT_PAYLOAD_SCHEMA_V28,
         EventPayload::MemoryHandoffTransition { .. } => EVENT_PAYLOAD_SCHEMA_V27,

@@ -12,6 +12,11 @@ mod allocation;
 mod artifact_authorization;
 mod artifact_upload;
 pub use artifact_upload::{ArtifactUploadPhase, ArtifactUploadRecord};
+mod artifact_retention;
+pub use artifact_retention::{
+    ArtifactCatalogReference, ArtifactCatalogRetirement, ArtifactContentDependency,
+    ArtifactDependencyKind, ArtifactTypedMapProvenance,
+};
 mod attestation;
 mod belief;
 mod capability;

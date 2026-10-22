@@ -5,6 +5,11 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Original Catalog publication or exact irreversible retirement retains all independent owners.
+    ArtifactCatalogReferenceTransition {
+        /// Complete original authority and immutable dependency set, never a semantic access grant.
+        record: crate::ArtifactCatalogReference,
+    },
     /// Complete independently authorized original-goal measurement, separate from Task or stop facts.
     MissionGoalEvidenceAdmitted {
         /// Immutable source/principal/input identity and original Controller receive time.

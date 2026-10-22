@@ -124,6 +124,9 @@ pub(crate) fn authorize(
     request: &MemoryImportRequest,
     now: domain::TimestampMs,
 ) -> Result<Option<MemoryAuthorityStamp>, String> {
+    if let Some(catalog) = &controller.memory_preparation.catalog {
+        catalog.require_live_publication(request.manifest.selector())?;
+    }
     super::memory_handoff::authorize_input(
         controller,
         &request.execution_id,

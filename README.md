@@ -1,5 +1,17 @@
 # RoboGuide
 
+Node 输入以每 session 最多 8 条待完成事实接入已有应用批处理，保留原接收时间和等待期限，
+按原顺序在持久提交后发送 ACK。拒绝、超时或失联保留原 route/Unknown 边界。见
+[ADR-0150](docs/decisions/0150-bounded-node-application-pipeline.md)。
+
+显式 retained Artifact 部署现在将真实 Catalog 发布、Group handoff 和 MI 修订 child
+发布与原内容引用放在同一权威事务内。shared wrapper v48 / codec v29 保留实际 owner、
+原 tenant/principal、完整 manifest/Spatial provenance 和各 child 独立的 parent lineage。
+管理员精确退休须有原上下文/provider 撤权证明；重试和历史重放不能续期或重新激活。
+[Recovery v0.10](contracts/recovery/bundle-v0.10/README.md)核对同一 bundle 的原引用与 CAS，
+缺失内容拒绝发布。见 [ADR-0149](docs/decisions/0149-catalog-and-lineage-content-references.md)。
+Archive/Raft Snapshot、在线内容复制和其余完整整改仍继续实施。
+
 Controller Artifact CAS 可显式选择 storage v1：持久 backend identity、原目录 inode 迁移
 intent、`objects-v1` 内容和旧路径文件 fence。旧 binary/backup 拒绝新格式；显式
 recovery v0.9 保存原 owner/fence 和完整 bytes。`GET /v1/artifact-store` 是受限运维观察，

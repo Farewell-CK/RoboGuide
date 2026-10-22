@@ -4,6 +4,23 @@
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
 
+ADR-0150 保留 Node v0.4 原 wire/sequence/application completion 合同，在原验证 ingress
+后以每 session 最多 8 个待完成事实接通已有有界应用批处理。提交仍按原 wire 顺序同步
+排入同一应用 writer；ACK 只按原顺序在实际 Commit 后发送。每项完成等待在入应用队列前
+固定同一 deadline，轮询其它消息不续期。注册先独立完成，registration update 仍由应用
+barrier 独立提交；拒绝、失联、超时及取消保留既有 Unknown/route fence，不推断副作用未发生。
+原 receive time、source freshness、lease、Memory budget 与物理停止门禁不改变。
+
+ADR-0149 的 Catalog 内容保留权威使用 shared wrapper v48 / event codec v29。
+显式 retained Artifact owner 下，真实 generic/typed 发布在同一原 writer/SQL Commit
+写入完整 Catalog reference；派生 child 同时固定原 parent 的独立 lineage dependency。
+每项保留实际 store owner、provider、selector、原 manifest digest、bytes digest/size，
+并绑定原 principal/tenant/权威命令和 generation。幂等发布沿用原 receipt，不刷新时钟。
+引用保留权不能授予内容读权；未归属的旧 Catalog 保持保守 fence，不能猜 tenant 补造权限。
+显式退休须冻结原记录、当前原授权和完整 application-use 检查；Unknown 不退休，退休
+后拒绝该 selector 的新发布/准备/导入。父 Catalog 退休不释放仍被 child 保留的 lineage。
+当前变更的完整进程验收以及后续 Archive/Snapshot/在线 HA 接线完成前，不宣告 N1 闭合。
+
 Relation stop 保留 exact Task/Role target；缺少 relation proof 的 Completed target 与
 当前 live peers 一起进入现有独立 stop/hold 门禁。单元合同的合成 Node 观察不进入部署。
 

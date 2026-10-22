@@ -47,7 +47,8 @@ fn validate_manifest(manifest: &ArchiveManifest) -> Result<(), String> {
 fn requires_catalog_history(payload: &EventPayload) -> bool {
     matches!(
         payload,
-        EventPayload::MapArtifactDeclared { .. }
+        EventPayload::ArtifactCatalogReferenceTransition { .. }
+            | EventPayload::MapArtifactDeclared { .. }
             | EventPayload::ArtifactUploadTransition { .. }
             | EventPayload::MapArtifactPublished { .. }
             | EventPayload::MapArtifactStaged { .. }

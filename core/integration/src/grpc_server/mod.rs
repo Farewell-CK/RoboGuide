@@ -1445,58 +1445,15 @@ async fn run_grpc_session(
             }
         }
     });
-    let session_result: Result<(), Status> = async {
-        while let Some(message) = validated_receiver.recv().await {
-            let ReceivedNodeMessage {
-                message,
-                metadata,
-                queue_ticket,
-            } = message?;
-            drop(queue_ticket);
-            let sequence = match &message.message {
-                Some(NodePayload::Heartbeat(value)) => value.sequence,
-                Some(NodePayload::RegistrationUpdate(value)) => value.sequence,
-                Some(NodePayload::StateObservationBatch(value)) => value.sequence,
-                Some(NodePayload::PeerChannelReadiness(value)) => value.sequence,
-                Some(NodePayload::CommandReceipt(value)) => value.sequence,
-                Some(NodePayload::MemoryImportReceipt(value)) => value.sequence,
-                Some(NodePayload::MemoryImportQueryReceipt(value)) => value.sequence,
-                Some(NodePayload::MemoryControlReceipt(value)) => value.sequence,
-                Some(NodePayload::MemoryUseReceipt(value)) => value.sequence,
-                Some(NodePayload::MemoryUseQueryReceipt(value)) => value.sequence,
-                Some(NodePayload::ExecutionEvent(value)) => value.sequence,
-                Some(NodePayload::ExecutionSnapshot(value)) => value.last_sequence,
-                _ => 0,
-            };
-            let delivery = deliver_received_fact(
-                &events,
-                GrpcNodeEvent::NodeMessage {
-                    node_id: node_id.clone(),
-                    session_id: session_id.clone(),
-                    message,
-                },
-                node_policy.application_acceptance_timeout(),
-                metadata.clone(),
-                &observation,
-            )
-            .await;
-            delivery?;
-            if sequence > 0 {
-                let _ = outbound.send(Ok(ServerMessage {
-                    message: Some(ServerPayload::Ack(Ack { sequence })),
-                }));
-                if let Some(metadata) = &metadata {
-                    observation.diagnostics.timing(
-                        metadata.kind,
-                        DiagnosticStage::Ack,
-                        metadata.received_instant.elapsed(),
-                        metadata.identity.as_ref(),
-                    );
-                }
-            }
-        }
-        Ok(())
+    let session_result = pipeline::ApplicationSession {
+        events: &events,
+        node_id: &node_id,
+        session_id: &session_id,
+        acceptance_timeout: node_policy.application_acceptance_timeout(),
+        observation: &observation,
+        outbound: &outbound,
     }
+    .run(&mut validated_receiver)
     .await;
     reader_task.abort();
     let removed = remove_current_route(&router, &node_id, &session_id)?;
@@ -1607,6 +1564,7 @@ fn validate_scalar_map(
 pub(crate) mod certificate;
 mod diagnostics;
 mod memory_control;
+mod pipeline;
 mod session;
 pub use memory_control::prepared_memory_import_digest;
 

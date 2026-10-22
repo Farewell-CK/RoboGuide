@@ -1,5 +1,26 @@
 # Repository Guidelines
 
+ADR-0150 connects the existing validated Node reader to the bounded application batch with at most
+eight in-flight facts per actual session. Submission and ACK preserve original order; every ACK
+still requires actual application Commit. Original receive time and the first enqueue completion
+deadline survive subsequent polling. First rejection/unavailability/timeout ends the route; pending
+facts remain uncertain rather than being declared unexecuted. Registration and topology barriers,
+source TTL, Memory budgets, Node contract and independent stop proofs retain their meaning.
+
+ADR-0149 connects actual retained-owner Catalog publication and application handoff/MI child
+publication to original content references in the same writer/SQL authority transaction. Shared
+wrapper v48 / event codec v29 retain tenant/principal/authority/generation/time, separate actual
+CAS owner/provider/manifest/content identity, and each child's independent parent lineage. Spatial
+dependencies keep complete canonical original metadata rather than only its discovery projection.
+Explicit tenant-admin retirement requires exact original record and original application context/
+provider revoke proof; Unknown retains ownership. Retry never renews acquisition or retirement;
+retired selectors cannot publish or prepare/import anew, and historical cache replay never revives
+them. Recovery v0.10 checks complete original reference/publication history and every active owner/
+CAS dependency in one quiescent bundle; released history requires no deleted content. Native gates
+extend the actual file-process profile with `--artifact-retention` and
+`check_catalog_reference_recovery_processes.py`. These are software/file/process proofs only;
+complete Archive/Raft Snapshot/online producers and P1-P7 remain mandatory.
+
 ADR-0148 adds explicit Artifact storage v1 via `ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA` or
 `FileSystemArtifactStore::new_with_retention`. The original root writer precedes OS-random backend
 identity/actual directory-inode intent, atomic `blobs` to `objects-v1` migration, regular-file old

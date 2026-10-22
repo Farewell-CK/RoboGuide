@@ -14,7 +14,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from . import artifact_layout, snapshot_references
+from . import artifact_layout, catalog_references, snapshot_references
 from .profile import (
     IDENTIFIER,
     MAX_PROFILE_BYTES,
@@ -115,7 +115,7 @@ def _check_cas_path(
     if name in artifact_layout.metadata_files(component, profile_schema):
         return
     if component["kind"] == "artifact" and parts[0] in {"blobs", "objects-v1"}:
-        expected = "objects-v1" if profile_schema == artifact_layout.SCHEMA else "blobs"
+        expected = "objects-v1" if artifact_layout.supports(profile_schema) else "blobs"
         if (
             len(parts) != 4
             or parts[0] != expected
@@ -483,7 +483,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                     }
                 )
             for name in trees:
-                if profile["schema"] == artifact_layout.SCHEMA:
+                if artifact_layout.supports(profile["schema"]):
                     (partial / "stores" / identifier / name).mkdir(
                         mode=0o700, parents=True, exist_ok=True
                     )
@@ -508,6 +508,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                 _validate_memory_content_references(
                     partial, component["component_id"], record_map, budget
                 )
+        catalog_references.validate(partial, components, record_map, budget, profile["schema"])
         manifest = {
             "schema": (
                 "roboguide.recovery-bundle/v0.2"
@@ -664,6 +665,9 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
             _validate_memory_content_references(
                 bundle, component["component_id"], record_map, budget
             )
+    catalog_references.validate(
+        bundle, components, record_map, budget, manifest["profile"]["schema"]
+    )
     for component in components:
         databases, _, _ = layout(component, profile_schema=manifest["profile"]["schema"])
         required = (
@@ -677,6 +681,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.7",
                 "roboguide.recovery-profile/v0.8",
                 "roboguide.recovery-profile/v0.9",
+                "roboguide.recovery-profile/v0.10",
             }
             else databases
         )
@@ -786,7 +791,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.9"
+        "roboguide.restore-receipt/v0.10"
+        if manifest["profile"]["schema"] == catalog_references.SCHEMA
+        else "roboguide.restore-receipt/v0.9"
         if manifest["profile"]["schema"] == artifact_layout.SCHEMA
         else "roboguide.restore-receipt/v0.8"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.8"
@@ -862,6 +869,7 @@ def restore(
             "roboguide.recovery-profile/v0.7",
             "roboguide.recovery-profile/v0.8",
             "roboguide.recovery-profile/v0.9",
+            "roboguide.recovery-profile/v0.10",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:

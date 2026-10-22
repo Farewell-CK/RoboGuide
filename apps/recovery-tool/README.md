@@ -1,5 +1,13 @@
 # RoboGuide recovery tool
 
+[Profile v0.10](../../contracts/recovery/bundle-v0.10/README.md) keeps the v0.9 storage contracts
+and verifies original Controller wrapper v48 / event v29 Catalog/lineage ownership against actual
+CAS owners in the same complete bundle. Missing reference/publication history, absent original
+owner or missing bytes refuses before publication. Parent retirement does not retire a child's
+independent lineage. Released history needs no deleted content; restore starts no service and
+never renews original time, permission, generation or budget. This is declared-store recovery,
+not global reference coverage, an online replica ACK or physical continuity.
+
 [Profile v0.9](../../contracts/recovery/bundle-v0.9/README.md) requires the actual Artifact retained
 layout v1, including `.retention-owner.json`, the `blobs` regular-file old-writer fence, `objects-v1`
 CAS and staging. Original metadata and all bytes are verified together; missing/conflicting identity

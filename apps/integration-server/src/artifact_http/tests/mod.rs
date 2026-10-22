@@ -7,6 +7,7 @@ use domain::{
     MemorySelector, MemoryVisibility, MissionId, SpatialAnchorId,
 };
 use ports::MapCatalogReader;
+mod retention;
 mod security;
 
 /// Opaque checkpoint schema used to prove Spatial Memory never rewrites controller content.
@@ -447,7 +448,8 @@ fn response_body(response: &[u8], status: &str) -> Vec<u8> {
     let header = std::str::from_utf8(&response[..separator]).expect("response header is UTF-8");
     assert!(
         header.starts_with(&format!("HTTP/1.1 {status}")),
-        "{header}"
+        "expected {status}, received {}",
+        String::from_utf8_lossy(response)
     );
     response[separator + 4..].to_vec()
 }

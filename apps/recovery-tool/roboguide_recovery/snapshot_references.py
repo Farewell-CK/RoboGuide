@@ -23,7 +23,11 @@ DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 def supports(profile_schema: str) -> bool:
     """Require explicit profiles that preserve the original Snapshot producer authority."""
-    return profile_schema in {SCHEMA, "roboguide.recovery-profile/v0.9"}
+    return profile_schema in {
+        SCHEMA,
+        "roboguide.recovery-profile/v0.9",
+        "roboguide.recovery-profile/v0.10",
+    }
 
 
 class OperationBudget(Protocol):

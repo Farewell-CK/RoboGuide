@@ -91,6 +91,17 @@ struct HandoffReceiverProof {
     use_record: super::memory_use::MemoryUseRecord,
 }
 
+/// Retains both original endpoints until the existing handoff has its actual committed receiver proof.
+pub(crate) fn holds_catalog(
+    controller: &ControllerState,
+    selector: &domain::MemorySelector,
+) -> bool {
+    controller.memory_handoffs.values().any(|record| {
+        record.phase != HandoffPhase::Committed
+            && (record.parent.selector() == selector || record.request.child.selector() == selector)
+    })
+}
+
 /// Returns the target from its immutable child scope without guessing a Mission topology.
 fn target(record: &HandoffRecord) -> &ExecutionGroupId {
     let domain::MemoryScope::ExecutionGroup(target) = record.request.child.scope() else {
@@ -652,6 +663,32 @@ pub(crate) fn tick(
                 )?;
                 controller.memory_handoffs.insert(id, record);
                 continue;
+            }
+            let reference_events = catalog.publication_reference_events(
+                &record.request.child,
+                std::slice::from_ref(&record.parent),
+                None,
+                &artifact_http::ArtifactPublicationSource {
+                    tenant_id: record.tenant_id.clone(),
+                    principal_id: record.principal.clone(),
+                    authority_digest: digest(&serde_json::json!({
+                        "request": record.request,
+                        "attempts": record.attempts_digest,
+                        "principal": record.principal,
+                        "tenant": record.tenant_id,
+                        "admitted_at_ms": record.admitted_at_ms,
+                    }))?,
+                },
+                now,
+            )?;
+            for event in reference_events {
+                controller.bridge.event_sink().clone().append(
+                    now,
+                    &domain::CorrelationId::new("memory-handoff-publication")
+                        .expect("fixed correlation"),
+                    None,
+                    event,
+                );
             }
             controller.bridge.event_sink().clone().append(
                 now,

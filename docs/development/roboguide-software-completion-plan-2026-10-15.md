@@ -138,6 +138,13 @@ Artifact/Raft Snapshot、Archive 和在线副本生命周期仍属 N1/N3 必需�
 及显式 v0.9 的真实内容恢复。实际旧 binary 与旧 CLI 拒绝新布局；本项是 Catalog/
 lineage/Archive 引用的 owner 依赖，不把这些后续生产者标成已经完成。
 
+[原 Catalog/child lineage 与输入流水验收](acceptance/2026-10-22-catalog-lineage-and-node-pipeline.md)
+接通 ADR-0149 的真实 HTTP 发布及 handoff/MI child 发布、原 tenant/provider/owner 引用、
+精确退休/重试/原 SQL 回滚和 recovery v0.10 原 CAS 对账。ADR-0150 接通原有界应用 batch，
+保留 wire 顺序、receive time、首个 deadline 与 Commit 后 ACK，实际单 worker 的原目标/
+MI/Memory 组合通过。N1 的下一必需工作为 Archive/Artifact/Raft Snapshot/在线 Replica
+生产者与内容闭包、GC 及未归属旧 Catalog 显式迁移；N2–N7 继续保留全部原完成条件。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

@@ -157,6 +157,61 @@ pub(super) async fn deliver_received_fact(
     metadata: Option<NodeFactMetadata>,
     observation: &GrpcSessionObservation,
 ) -> Result<(), Status> {
+    submit_received_fact(events, event, acceptance_timeout, metadata, observation)?
+        .wait()
+        .await
+}
+
+/// One already-enqueued original fact; repeated polling keeps its first completion deadline.
+pub(super) struct PendingNodeFactAcceptance {
+    /// Original application disposition, independently of subsequent transport polling.
+    decision: oneshot::Receiver<Result<(), ApplicationAcceptanceFailure>>,
+    /// First bounded application wait, fixed before the synchronous queue send.
+    deadline: tokio::time::Instant,
+    /// First local submission instant used only for observation.
+    started: std::time::Instant,
+    /// Original Controller receive identity/time, never replaced by a queue-dequeue sample.
+    metadata: Option<NodeFactMetadata>,
+    /// Existing bounded observation sink, never application authority.
+    diagnostics: ports::DiagnosticHandle,
+}
+
+impl PendingNodeFactAcceptance {
+    /// Waits against the same original deadline even when a select cancels an earlier poll.
+    pub(super) async fn wait(&mut self) -> Result<(), Status> {
+        let result = tokio::time::timeout_at(self.deadline, &mut self.decision).await;
+        if let Some(metadata) = &self.metadata {
+            self.diagnostics.timing(
+                metadata.kind,
+                DiagnosticStage::Completion,
+                self.started.elapsed(),
+                metadata.identity.as_ref(),
+            );
+        }
+        let decision = result
+            .map_err(|_| Status::deadline_exceeded("Controller fact acceptance timed out"))?
+            .map_err(|_| Status::unavailable("Controller fact response was dropped"))?;
+        decision.map_err(|failure| match failure {
+            ApplicationAcceptanceFailure::Rejected(reason) => {
+                Status::failed_precondition(format!("Controller rejected fact: {reason}"))
+            }
+            ApplicationAcceptanceFailure::Unavailable(reason) => {
+                Status::unavailable(format!("Controller fact acceptance unavailable: {reason}"))
+            }
+        })
+    }
+}
+
+/// Sends one fact synchronously in wire order before independently awaiting its frozen disposition.
+pub(super) fn submit_received_fact(
+    events: &mpsc::UnboundedSender<GrpcNodeEventDelivery>,
+    event: GrpcNodeEvent,
+    acceptance_timeout: std::time::Duration,
+    metadata: Option<NodeFactMetadata>,
+    observation: &GrpcSessionObservation,
+) -> Result<PendingNodeFactAcceptance, Status> {
+    let started = std::time::Instant::now();
+    let deadline = tokio::time::Instant::now() + acceptance_timeout;
     let (response, decision) = oneshot::channel();
     let mut delivery = GrpcNodeEventDelivery::requiring_acceptance(event, response);
     delivery.queue_ticket = metadata
@@ -166,25 +221,11 @@ pub(super) async fn deliver_received_fact(
     events
         .send(delivery)
         .map_err(|_| Status::unavailable("Controller fact consumer is closed"))?;
-    let started = std::time::Instant::now();
-    let result = tokio::time::timeout(acceptance_timeout, decision).await;
-    if let Some(metadata) = &metadata {
-        observation.diagnostics.timing(
-            metadata.kind,
-            DiagnosticStage::Completion,
-            started.elapsed(),
-            metadata.identity.as_ref(),
-        );
-    }
-    let decision = result
-        .map_err(|_| Status::deadline_exceeded("Controller fact acceptance timed out"))?
-        .map_err(|_| Status::unavailable("Controller fact response was dropped"))?;
-    decision.map_err(|failure| match failure {
-        ApplicationAcceptanceFailure::Rejected(reason) => {
-            Status::failed_precondition(format!("Controller rejected fact: {reason}"))
-        }
-        ApplicationAcceptanceFailure::Unavailable(reason) => {
-            Status::unavailable(format!("Controller fact acceptance unavailable: {reason}"))
-        }
+    Ok(PendingNodeFactAcceptance {
+        decision,
+        deadline,
+        started,
+        metadata,
+        diagnostics: observation.diagnostics.clone(),
     })
 }

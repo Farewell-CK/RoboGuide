@@ -4,6 +4,7 @@ use sha2::{Digest as _, Sha256};
 
 mod actor_placement;
 pub(crate) mod attestation;
+pub(crate) mod catalog_retention;
 mod deployment_document;
 mod deployment_feasibility;
 mod deployment_operation_admission;
