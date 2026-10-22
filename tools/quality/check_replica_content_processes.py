@@ -15,6 +15,8 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+from replica_content_upgrade_processes import run as run_upgrade
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -38,18 +40,30 @@ class Processes:
         self.output = output
         self.owned: list[tuple[subprocess.Popen[bytes], dict[str, Any]]] = []
 
-    def start(self, request: dict[str, Any], label: str) -> subprocess.Popen[bytes]:
+    def start(
+        self, request: dict[str, Any], label: str, binary: Path | None = None
+    ) -> subprocess.Popen[bytes]:
         """Persist exact input before spawning its actual independent process."""
         path = self.output / f"request-{len(self.owned):03d}-{label}.json"
         save(path, request)
         process = subprocess.Popen(
-            [str(self.binary), str(path)],
+            [str(binary or self.binary), str(path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             close_fds=True,
         )
-        self.owned.append((process, {"pid": process.pid, "label": label, "request": str(path)}))
+        self.owned.append(
+            (
+                process,
+                {
+                    "pid": process.pid,
+                    "label": label,
+                    "request": str(path),
+                    "binary": str(binary or self.binary),
+                },
+            )
+        )
         return process
 
     def wait(
@@ -155,10 +169,21 @@ def stop_after_intent(process: subprocess.Popen[bytes], root: Path, command: str
     raise ValueError("actual copy intent did not become durable within the original wait bound")
 
 
-def run(binary: Path, output: Path, profile: str, member: int, payload_mib: int) -> dict[str, Any]:
+def run(
+    binary: Path,
+    output: Path,
+    profile: str,
+    member: int,
+    payload_mib: int,
+    old_probe: Path | None = None,
+) -> dict[str, Any]:
     """Prove local Unknown/lease/byte boundaries without contacting Raft or creating Nodes."""
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise ValueError("the actual maintained content process probe must already be built")
+    if old_probe is not None and (not old_probe.is_file() or not os.access(old_probe, os.X_OK)):
+        raise ValueError(
+            "the explicit original content probe must be an actual retained executable"
+        )
     if len(profile) != 64 or any(character not in "0123456789abcdef" for character in profile):
         raise ValueError("the explicit original software profile must be a full lowercase digest")
     if member <= 0 or not 32 <= payload_mib <= 512:
@@ -174,10 +199,11 @@ def run(binary: Path, output: Path, profile: str, member: int, payload_mib: int)
             str(path.relative_to(ROOT)): digest(path)
             for path in sorted(
                 [
-                    *(ROOT / "core/controller-replication/src/content_store").glob("*.rs"),
-                    ROOT / "core/controller-replication/examples/content_store_probe.rs",
-                    ROOT / "core/controller-replication/src/content.rs",
-                    ROOT / "core/controller-replication/src/lib.rs",
+                    *(ROOT / "core/controller-replication/src").rglob("*.rs"),
+                    *(ROOT / "core/controller-replication/examples").glob("*.rs"),
+                    *(ROOT / "core/artifact-store/src").rglob("*.rs"),
+                    *(ROOT / "core/state/src").rglob("*.rs"),
+                    Path(__file__).with_name("replica_content_upgrade_processes.py"),
                 ]
             )
         },
@@ -378,6 +404,10 @@ def run(binary: Path, output: Path, profile: str, member: int, payload_mib: int)
         result["original_reader_end"] = ended_reader
         result["actual_complete_reader"] = complete
         result["actual_partial_reader"] = partial
+        if old_probe is not None:
+            result["actual_original_reader_scope_upgrade"] = run_upgrade(
+                workers, old_probe, output, store, copy, inspect
+            )
 
         holder = workers.start({"action": "hold", "store": store}, "original-store-clone")
         workers.ready(holder)
@@ -435,6 +465,14 @@ def run(binary: Path, output: Path, profile: str, member: int, payload_mib: int)
         )
         if not (target / ".retention-owner.json").is_file():
             raise ValueError("failed original-store validation removed its authority marker")
+        if (
+            digest(binary) != result["probe_sha256"]
+            or digest(Path(__file__).resolve()) != result["checker_sha256"]
+            or any(digest(ROOT / path) != frozen for path, frozen in result["source_files"].items())
+        ):
+            raise ValueError(
+                "actual content executable/checker/original source changed during observation"
+            )
         result.update(
             actual_sigkill_unknown=True,
             actual_sql_commit_failure=True,
@@ -461,6 +499,7 @@ def main() -> None:
     parser.add_argument("--profile", required=True)
     parser.add_argument("--member", type=int, required=True)
     parser.add_argument("--payload-mib", type=int, default=128)
+    parser.add_argument("--old-probe", type=Path)
     arguments = parser.parse_args()
     result = run(
         arguments.probe.resolve(),
@@ -468,6 +507,7 @@ def main() -> None:
         arguments.profile,
         arguments.member,
         arguments.payload_mib,
+        arguments.old_probe.resolve() if arguments.old_probe is not None else None,
     )
     print(
         json.dumps(

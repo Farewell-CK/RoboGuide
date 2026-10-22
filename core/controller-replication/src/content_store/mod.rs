@@ -2,9 +2,11 @@
 
 mod copy;
 mod layout;
+mod pins;
 mod reader;
 mod time;
 pub use copy::{ReplicaContentCopyStatus, ReplicaContentReceipt};
+pub use pins::ReplicaContentReadLease;
 pub use reader::{ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus};
 pub use time::ContentProcessEndObservation;
 #[cfg(test)]
@@ -19,6 +21,8 @@ use std::sync::{Arc, Mutex};
 
 /// Explicit member-local content authority, separate from both application CAS and Raft metadata.
 pub const REPLICA_CONTENT_STORAGE_SCHEMA: &str = "roboguide.replica-content-storage/v0.1";
+/// Explicit reader-scope generation; original backend IDs remain unchanged across a drained upgrade.
+pub const REPLICA_CONTENT_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.2";
 /// Bound on retained reference IDs; exhaustion never discards original ownership.
 const MAX_REFERENCES: usize = 65_536;
 
@@ -134,7 +138,16 @@ impl ReplicaContentStore {
 
     /// Requires the complete original root, database and mandatory heads before any observation.
     pub fn open(root: &Path, profile_identity: &str, member: u64) -> Result<Self, String> {
-        layout::open(root, profile_identity, member)
+        layout::open(root, profile_identity, member, false)
+    }
+
+    /// Explicitly drains old writers and fences the reader-scope generation without rewriting history.
+    pub fn upgrade_reader_scopes(
+        root: &Path,
+        profile_identity: &str,
+        member: u64,
+    ) -> Result<Self, String> {
+        layout::open(root, profile_identity, member, true)
     }
 
     /// Reports only the actual opened software store; no availability or device fact is created.

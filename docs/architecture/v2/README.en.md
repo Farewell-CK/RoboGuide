@@ -1,7 +1,7 @@
 # RoboGuide V2 current architecture
 
-Reviewed: 2026-10-23. Current remediation baseline: `5e1d30787b31fa59ec5b7e52301e73c717da5ca6`
-plus ADR-0159 complete original State capture and installation; online integration remains in progress,
+Reviewed: 2026-10-23. Current remediation baseline: `6e7f7d21cf57e7b84329ab468440aa1813fa65cc`
+plus ADR-0159 direct storage/Snapshot integration; online integration remains in progress,
 on the single development branch `codex/nonrelease-remediation-closure`. The atlas retains its
 October 22 source baseline `495a6d2`. These later remediation changes have not merged back to main;
 they are not claims about the current remote main branch.
@@ -330,6 +330,14 @@ inactive SQL transaction, preserving original IDs, empty journals, pending copy/
 Modern metadata-only imports refuse before writing. Independent actual capture/import and Controller/
 CAS reads pass. The original v0.3 missing-marker process failure remains evidence; private transport,
 Snapshot and content-quorum integration continue.
+
+Private application v3/direct storage v4 retain the complete candidate, original event owners,
+recomputable batch digest and State recovery. Actual log/view/Snapshot/managed SnapshotData readers
+hold independent pins; missing real bytes and stale installs refuse. Actual Controller uploads,
+independent receiver CAS and killed Snapshot-reader retirement pass, as does a retained old binary's
+explicit content SQL v2 upgrade without rewriting raw history. Production ReplicaConfig v0.3 has not
+enabled this contract. Network quorum, interrupted producers, online Archive/GC/recovery/upgrades and
+configured routing remain in progress.
 
 ## 8. Frozen invariants
 

@@ -1,5 +1,12 @@
 # RoboGuide
 
+原内容 Snapshot 已接实际存储生产者：原 candidate/完整 State 投影、log/view/Snapshot/
+reader 独立保留，缺真实 bytes 或 stale Snapshot 拒绝发布/安装。实际 Controller
+上传文件、独立接收 CAS、持有 Snapshot 的进程 SIGKILL/原 reader 退休及实际旧内容
+二进制升级通过。该 gate 直接调用真实 Raft storage，未启动网络共识；生产 v0.3
+仍不支持在线内容多数派。mTLS、同 voting 多数 ACK 与其余整改继续实施，见
+[ADR-0159](docs/decisions/0159-original-content-quorum-and-raft-reference-lifecycle.md)。
+
 正在按 [ADR-0159](docs/decisions/0159-original-content-quorum-and-raft-reference-lifecycle.md)
 实现原 owner 内容多数派：新 member-local `core/controller-replication/src/content_store/`
 先持久原 copy/reader intent 和独立引用，再读取实际 bytes；真实文件/SQL/inode/进程

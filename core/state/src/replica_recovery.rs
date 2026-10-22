@@ -380,6 +380,93 @@ pub(super) fn install(
 }
 
 impl ReplicaRecoveryProjection {
+    /// Requires original retained auxiliary history to remain an immutable prefix of a later view.
+    /// New original commands/actual receipts may extend history; Unknown never becomes absent.
+    pub fn follows(&self, previous: &Self) -> Result<(), SqliteEventLogError> {
+        self.validate_shape()?;
+        previous.validate_shape()?;
+        if self.metadata.get("archive_authority_id")
+            != previous.metadata.get("archive_authority_id")
+            || self.history_floor()? < previous.history_floor()?
+        {
+            return Err(SqliteEventLogError::Codec(
+                "later replica recovery changed original authority/floor".into(),
+            ));
+        }
+        for old in &previous.archive_operations {
+            let current = self
+                .archive_operations
+                .iter()
+                .find(|current| current.command_id == old.command_id)
+                .ok_or_else(|| {
+                    SqliteEventLogError::Codec(
+                        "later replica recovery lost an original copy intent".into(),
+                    )
+                })?;
+            if current.intent_json != old.intent_json
+                || (old.receipt_json.is_some() && current != old)
+                || (old.state == "compacted" && current.state != old.state)
+            {
+                return Err(SqliteEventLogError::Codec(
+                    "later replica recovery rewrote original copy evidence".into(),
+                ));
+            }
+        }
+        for old in &previous.archive_aborts {
+            let current = self
+                .archive_aborts
+                .iter()
+                .find(|current| current.command_id == old.command_id)
+                .ok_or_else(|| {
+                    SqliteEventLogError::Codec(
+                        "later replica recovery lost an original cleanup intent".into(),
+                    )
+                })?;
+            if current.original_command_id != old.original_command_id
+                || current.intent_json != old.intent_json
+                || (old.receipt_json.is_some() && current != old)
+            {
+                return Err(SqliteEventLogError::Codec(
+                    "later replica recovery rewrote original cleanup evidence".into(),
+                ));
+            }
+        }
+        if previous.catalog_archive_events.as_ref().is_some_and(|old| {
+            self.catalog_archive_events
+                .as_ref()
+                .is_none_or(|current| !current.starts_with(old))
+        }) || previous.archive_manifests.as_ref().is_some_and(|old| {
+            self.archive_manifests
+                .as_ref()
+                .is_none_or(|current| !current.starts_with(old))
+        }) {
+            return Err(SqliteEventLogError::Codec(
+                "later replica recovery lost original Catalog/manifest history".into(),
+            ));
+        }
+        if self.history_floor()? == previous.history_floor()? {
+            for key in [
+                "archive_manifest",
+                "archive_timestamp_floor",
+                "catalog_archive_checkpoint",
+            ] {
+                if self.metadata.get(key) != previous.metadata.get(key) {
+                    return Err(SqliteEventLogError::Codec(
+                        "unchanged source floor has different original Archive coverage".into(),
+                    ));
+                }
+            }
+            if self.catalog_archive_events != previous.catalog_archive_events
+                || self.archive_manifests != previous.archive_manifests
+            {
+                return Err(SqliteEventLogError::Codec(
+                    "unchanged source floor changed original Catalog/manifest rows".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Rejects unbounded/incomplete projection shape before SQL allocation or namespace replacement.
     fn validate_shape(&self) -> Result<(), SqliteEventLogError> {
         if self.schema != REPLICA_RECOVERY_PROJECTION_SCHEMA

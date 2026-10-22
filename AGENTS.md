@@ -1,5 +1,19 @@
 # Repository Guidelines
 
+ADR-0159's private application v3 and explicit direct-storage v4 retain the complete original candidate,
+recomputable batch digest, original bare-event owner bindings and original State recovery projection.
+Metadata-only commands/opens refuse it; automatic v0.3 upgrades and independent prefix compaction are
+refused. Log append, current view, Snapshot publication/install and each actual SnapshotData reader
+have separate pins. Missing actual target bytes refuse Snapshot build/install; stale Snapshot cannot
+regress accepted commands, originals or floors. `content_snapshot_probe` plus the zero-Node Archive
+gate's `--replica-snapshot-probe` exercise real original Controller uploads and direct storage/owned
+processes, never an actual network quorum or leader authority. Content layout v0.2/SQL v2 adds explicit
+retention-only scopes; actual v1 producer upgrade preserves raw rows/owner/budgets and fences old
+binaries. Identity v0.1 remains original. Owners include content_application.rs, store_content.rs,
+snapshot_data.rs and content_store/pins.rs. Production ReplicaConfig v0.3 still rejects v0.4. Real
+mTLS byte transfer/same-voter ACK, storage producer interruption reconciliation, complete online
+Archive/GC/recovery/upgrade and Node/Mission routing remain mandatory; N1/N3 are not complete.
+
 ADR-0159 is implementing original-owner content durability for the future explicit Replica v0.4.
 State's `replica_recovery.rs` now exports original auxiliary recovery under the actual original
 writer and atomically imports it beside complete events/commands/checkpoint. It retains raw original

@@ -6,7 +6,11 @@
 
 mod certificates;
 mod content;
+mod content_application;
+#[cfg(test)]
+mod content_application_tests;
 mod content_store;
+mod snapshot_data;
 mod store;
 mod supervision;
 #[cfg(test)]
@@ -17,7 +21,6 @@ mod transport;
 use openraft::{BasicNode, Raft};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Cursor;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -28,12 +31,18 @@ pub use certificates::{
     CertificateReceipt, CertificateRequest, CertificateTrust, MemberCertificates, ReplicaCommand,
 };
 pub use content::{ArtifactContentKey, ContentQuorumTarget, MemberContentObservation};
-pub use content_store::{
-    ContentProcessEndObservation, REPLICA_CONTENT_STORAGE_SCHEMA, ReplicaContentCopyStatus,
-    ReplicaContentIdentity, ReplicaContentReader, ReplicaContentReaderReceipt,
-    ReplicaContentReaderStatus, ReplicaContentReceipt, ReplicaContentReference,
-    ReplicaContentReferenceKind, ReplicaContentStore,
+pub use content_application::{
+    AcceptedContentState, ApplicationArtifactWriter, CONTENT_APPLICATION_SCHEMA,
+    ContentApplicationBatch,
 };
+pub use content_store::{
+    ContentProcessEndObservation, REPLICA_CONTENT_LAYOUT_SCHEMA, REPLICA_CONTENT_STORAGE_SCHEMA,
+    ReplicaContentCopyStatus, ReplicaContentIdentity, ReplicaContentReadLease,
+    ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus,
+    ReplicaContentReceipt, ReplicaContentReference, ReplicaContentReferenceKind,
+    ReplicaContentStore,
+};
+pub use snapshot_data::ReplicaSnapshotData;
 pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};
 pub use supervision::{ControllerDrainProof, ControllerProcessExit, ControllerProcessIdentity};
 pub use transport::{ReplicaFenceClient, ReplicaServer};
@@ -45,7 +54,7 @@ openraft::declare_raft_types!(
         R = CommitReceipt,
         NodeId = u64,
         Node = BasicNode,
-        SnapshotData = Cursor<Vec<u8>>
+        SnapshotData = ReplicaSnapshotData
 );
 
 /// Existing OpenRaft election, log ordering, quorum and snapshot engine.

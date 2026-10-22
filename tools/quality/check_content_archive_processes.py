@@ -22,6 +22,7 @@ from check_artifact_authority_processes import call as http_call
 from check_artifact_authority_processes import grant
 from check_identity_processes import ROOT, client, pki, port, stop
 from check_state_verifier_processes import save
+from replica_snapshot_processes import run as run_snapshot_producers
 from replica_state_materialization_processes import run as run_state_materialization
 
 
@@ -33,6 +34,7 @@ def run(
     abort_unpublished: bool = False,
     upgrade_original: bool = False,
     replica_state_probe: Path | None = None,
+    replica_snapshot_probe: Path | None = None,
 ) -> dict[str, Any]:
     """Retain actual software process, file, SQL and TLS evidence with zero Nodes."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -54,6 +56,11 @@ def run(
         Path(__file__).with_name("archive_abort_processes.py"),
         Path(__file__).with_name("check_artifact_authority_processes.py"),
         Path(__file__).with_name("replica_state_materialization_processes.py"),
+        Path(__file__).with_name("replica_snapshot_processes.py"),
+        Path(__file__).with_name("check_replica_content_processes.py"),
+        Path(__file__).with_name("replica_content_upgrade_processes.py"),
+        *sorted((ROOT / "core/controller-replication/src").rglob("*.rs")),
+        *sorted((ROOT / "core/controller-replication/examples").glob("*.rs")),
         ROOT / "core/state/examples/replica_state_probe.rs",
     ]
     frozen = {
@@ -298,6 +305,20 @@ def run(
             )[0]
             == 201
         )
+        snapshot_producers = None
+        if replica_snapshot_probe is not None:
+            stop(process)
+            snapshot_producers = run_snapshot_producers(
+                directory / "actual-snapshot-producers",
+                replica_snapshot_probe,
+                ROOT / "target/debug/examples/content_store_probe",
+                database,
+                source,
+                hashlib.sha256(b"explicit local Snapshot storage producer gate v0.1").hexdigest(),
+                23,
+                31,
+            )
+            process = launch()
         manifest = {
             "schema": "roboguide.memory-manifest/v0.1",
             "selector": {"memory_id": "original-source-file", "revision_id": "one"},
@@ -755,6 +776,7 @@ def run(
             "actual_uploads": 2 if abort_result is not None else 1,
             "original_archive_abort": abort_result,
             "complete_original_state_materialization": state_materialization,
+            "actual_original_snapshot_storage_producers": snapshot_producers,
             "actual_original_wrapper_upgrade": upgrade_original,
             "original_producer_binary_digest": original_producer_digest,
             "original_embedded_checkpoint_schema": intent["checkpoint"]["schema"],
@@ -790,6 +812,7 @@ def main() -> None:
     parser.add_argument("--old-controller", type=Path)
     parser.add_argument("--old-recovery-ref")
     parser.add_argument("--replica-state-probe", type=Path)
+    parser.add_argument("--replica-snapshot-probe", type=Path)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -802,6 +825,9 @@ def main() -> None:
                 args.upgrade_original,
                 args.replica_state_probe.resolve()
                 if args.replica_state_probe is not None
+                else None,
+                args.replica_snapshot_probe.resolve()
+                if args.replica_snapshot_probe is not None
                 else None,
             ),
             indent=2,

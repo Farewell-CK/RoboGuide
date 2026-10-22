@@ -232,6 +232,16 @@ N7 另须覆盖 Controller 的 SQL inode 与 writer 代际：当前 Integration 
 canonical sibling lease 覆盖相对路径/symlink，不覆盖不同 hardlink 名字；需要实际
 不同 CAS/旧 live writer 的故障门禁。metadata probe 的独立 inode 锁不计为产品修复。
 
+ADR-0159 的 direct-storage v4/private Commit v3 已保存完整原 candidate、可独立重算
+的 digest、原 event→owner 与完整 State projection；log/current-view/Snapshot/实际
+SnapshotData reader 有独立 pins。缺实际 bytes 拒绝 build/install；替换只释放旧
+Snapshot，stale 不得回退原记录。实际 Controller 上传、两独立 CAS、10 个存储进程
+和原 Snapshot reader kill/退休通过；content layout v0.2 另以实际旧 v1 binary 的
+42 进程升级通过。生产 ReplicaConfig 仍只支持 v0.3，未发布半接线 v0.4。后续仍须
+真实 mTLS byte/观察与 same-voter ACK、未发布 Snapshot/回滚 log producer 的完整原
+operation intent/非续预算/中断对账、在线 Archive/GC/recovery 和原部署升级。此小步
+不关闭 N1/N3。见[存储生产者验收](acceptance/2026-10-23-original-content-snapshot-producers.md)。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

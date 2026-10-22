@@ -162,11 +162,17 @@ pub(super) fn create(
     let transaction = connection
         .transaction()
         .map_err(|error| error.to_string())?;
-    transaction.execute_batch("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE content_references(reference_id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE content_operations(operation_id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE content_objects(content_key TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE content_readers(reader_id TEXT PRIMARY KEY,record TEXT NOT NULL); PRAGMA user_version=1;").map_err(|error|error.to_string())?;
+    transaction.execute_batch("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE content_references(reference_id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE content_operations(operation_id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE content_objects(content_key TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE content_readers(reader_id TEXT PRIMARY KEY,record TEXT NOT NULL); PRAGMA user_version=2;").map_err(|error|error.to_string())?;
     transaction
         .execute(
             "INSERT INTO metadata VALUES ('identity',?1)",
             [serde_json::to_string(&original).map_err(|error| error.to_string())?],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO metadata VALUES ('layout',?1)",
+            [REPLICA_CONTENT_LAYOUT_SCHEMA],
         )
         .map_err(|error| error.to_string())?;
     for name in [
@@ -203,6 +209,7 @@ pub(super) fn open(
     root: &Path,
     profile_identity: &str,
     member: u64,
+    upgrade: bool,
 ) -> Result<ReplicaContentStore, String> {
     directory(root)?;
     let writer = locked(regular(&root.join(".writer.lock"), true)?)?;
@@ -244,7 +251,7 @@ pub(super) fn open(
     {
         return Err("original content SQL requires its native DELETE journal before open".into());
     }
-    let connection = Connection::open_with_flags(
+    let mut connection = Connection::open_with_flags(
         root.join(DATABASE),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
     )
@@ -255,6 +262,30 @@ pub(super) fn open(
     connection
         .execute_batch("PRAGMA synchronous=FULL;")
         .map_err(|error| error.to_string())?;
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    if version == 1 {
+        if !upgrade {
+            return Err("original content v0.1 requires explicit reader-scope upgrade".into());
+        }
+        validate_generation(&connection, &original, true)?;
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
+            .map_err(|error| {
+                format!("original reader-scope connections are not quiescent: {error}")
+            })?;
+        transaction
+            .execute(
+                "INSERT INTO metadata VALUES ('layout',?1)",
+                [REPLICA_CONTENT_LAYOUT_SCHEMA],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute_batch("PRAGMA user_version=2")
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+    }
     validate(&connection, &original)?;
     Ok(ReplicaContentStore {
         inner: Arc::new(ContentInner {
@@ -308,6 +339,15 @@ pub(super) fn validate(
     connection: &Connection,
     original: &ReplicaContentIdentity,
 ) -> Result<(), String> {
+    validate_generation(connection, original, false)
+}
+
+/// Checks exact prior/current generation before an explicit original-writer-drained SQL transition.
+fn validate_generation(
+    connection: &Connection,
+    original: &ReplicaContentIdentity,
+    legacy: bool,
+) -> Result<(), String> {
     within_budget(connection)?;
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -332,7 +372,7 @@ pub(super) fn validate(
         ("content_references".into(), "table".into()),
         ("metadata".into(), "table".into()),
     ];
-    if version != 1 || mode != "delete" || actual != expected {
+    if version != if legacy { 1 } else { 2 } || mode != "delete" || actual != expected {
         return Err("original replica content SQL format/tables/triggers differ".into());
     }
     for (table, key) in [
@@ -420,8 +460,18 @@ pub(super) fn validate(
     let count: i64 = connection
         .query_row("SELECT COUNT(*) FROM metadata", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
-    if count != 5 {
+    if count != if legacy { 5 } else { 6 } {
         return Err("original content mandatory metadata changed".into());
+    }
+    if !legacy {
+        let layout: String = connection
+            .query_row("SELECT value FROM metadata WHERE key='layout'", [], |row| {
+                row.get(0)
+            })
+            .map_err(|error| error.to_string())?;
+        if layout != REPLICA_CONTENT_LAYOUT_SCHEMA {
+            return Err("original content reader-scope layout marker differs".into());
+        }
     }
     super::copy::validate_records(connection, original)?;
     super::reader::validate_records(connection, original)?;

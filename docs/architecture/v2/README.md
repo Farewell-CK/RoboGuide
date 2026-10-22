@@ -1,7 +1,7 @@
 # RoboGuide V2 现行架构
 
-核对日期：2026-10-23；当前整改代码基线：`5e1d30787b31fa59ec5b7e52301e73c717da5ca6`
-加本包 ADR-0159 的完整原 State 捕获与安装，在线接线仍实施中，
+核对日期：2026-10-23；当前整改代码基线：`6e7f7d21cf57e7b84329ab468440aa1813fa65cc`
+加本包 ADR-0159 的 direct storage/Snapshot 接线，在线接线仍实施中，
 位于唯一开发分支 `codex/nonrelease-remediation-closure`。本页同步 main 的 10 月 22 日图册，
 保留其原基线 `495a6d2`；下述新增整改尚未合回 main，不提前记为远端 main 能力。
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
@@ -330,6 +330,13 @@ Catalog/Archive/Snapshot 和升级/回退须完整闭环。当前 v0.3 尚不提
 ID、zero-operation/pending copy/abort 和原 floor；旧 metadata-only 入口缺投影时
 在写入前拒绝。真实独立捕获/安装及 Controller/CAS 读取已验证。v0.3 的原三副本
 缺 marker 负例保留，完整私有协议、Snapshot 和内容多数派接线继续实施。
+
+私有 application v3/direct storage v4 保留完整 candidate、原 event→owner、可重算
+batch digest 与完整 State projection。实际 log/view/Snapshot/managed SnapshotData
+分别持有引用，缺真实 bytes 或 stale 安装拒绝。实际 Controller 上传、两独立接收
+CAS 与 Snapshot 进程 kill/reader 退休已验证；content SQL v2 的实际旧 binary
+显式升级保留原 raw history。生产 ReplicaConfig v0.3 仍未启用该合同，真实网络
+多数、中断 producer 对账、online Archive/GC/恢复/升级与路由继续实施。
 
 ## 8. 已冻结不变量
 

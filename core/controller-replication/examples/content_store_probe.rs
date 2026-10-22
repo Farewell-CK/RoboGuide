@@ -36,6 +36,11 @@ enum Request {
         /// Actual member/root/profile inputs.
         store: Store,
     },
+    /// Explicitly upgrades an actual original v0.1 store after all original writers have drained.
+    Upgrade {
+        /// Original actual member/root/profile, whose identity and retained rows are unchanged.
+        store: Store,
+    },
     /// Actually copies bytes under an original immutable command; duplicate IDs only observe.
     Copy {
         /// Actual target member/root/profile.
@@ -182,6 +187,9 @@ fn run(request: Request) -> Result<Value, String> {
         Request::Source { root, payload } => source(&root, &payload),
         Request::Create { store } => Ok(
             json!({"identity":ReplicaContentStore::create(&store.root,&store.profile,store.member)?.identity()}),
+        ),
+        Request::Upgrade { store } => Ok(
+            json!({"identity":ReplicaContentStore::upgrade_reader_scopes(&store.root,&store.profile,store.member)?.identity()}),
         ),
         Request::Copy {
             store,

@@ -10,7 +10,7 @@ mod tests;
 pub const APPLICATION_COMMIT_SCHEMA: &str = "roboguide.application-commit/v2";
 
 /// Exact transaction candidate requiring one durable quorum decision before local Commit.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApplicationCommitBatch {
     /// Immutable DTO codec identity.

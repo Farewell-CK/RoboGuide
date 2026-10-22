@@ -7,22 +7,30 @@ use sha2::{Digest as _, Sha256};
 use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 
+/// Preserves original v0.1 canonical digest bytes when a legacy payload reader had no scope field.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Complete original reader admission; no serialized field alone grants semantic consumption.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ReaderIntent {
+pub(super) struct ReaderIntent {
     /// Explicit internal storage interpretation.
-    schema: String,
+    pub(super) schema: String,
     /// Original one-shot producer reader identity.
-    reader_id: String,
+    pub(super) reader_id: String,
     /// Actual original receiving content backend.
-    receiver: ReplicaContentIdentity,
+    pub(super) receiver: ReplicaContentIdentity,
     /// Full original qualified content.
-    content: ArtifactContentKey,
+    pub(super) content: ArtifactContentKey,
     /// Exact log/Snapshot/transport producer authorization.
-    authority_digest: String,
+    pub(super) authority_digest: String,
     /// Original actual process and nonrenewing read budget, admitted before queue/open.
-    budget: ContentBudget,
+    pub(super) budget: ContentBudget,
+    /// Explicit infrastructure retention scope rather than an actual payload FD read.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(super) retention_only: bool,
 }
 
 /// Actual original handle-close proof; closing a partial read does not prove complete bytes.
@@ -51,6 +59,9 @@ pub struct ReplicaContentReaderReceipt {
     pub complete: bool,
     /// Actual same-kernel sample after closing the original file descriptor.
     pub closed_ms: u64,
+    /// Explicit retention-scope closure; no actual content bytes or file are claimed in this case.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub retention_only: bool,
 }
 
 /// Immutable original reader observation; an unresolved operation retains its independent pin.
@@ -72,13 +83,13 @@ pub struct ReplicaContentReaderStatus {
 /// Original operation retains separate close and post-exit observations; neither is renewed on retry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ReaderRecord {
+pub(super) struct ReaderRecord {
     /// Original admission before any file payload is read.
-    intent: ReaderIntent,
+    pub(super) intent: ReaderIntent,
     /// Actual original descriptor closure only.
-    receipt: Option<ReplicaContentReaderReceipt>,
+    pub(super) receipt: Option<ReplicaContentReaderReceipt>,
     /// Separate original-process absence under all held content writer leases.
-    process_end: Option<ContentProcessEndObservation>,
+    pub(super) process_end: Option<ContentProcessEndObservation>,
 }
 
 /// Managed actual reader; dropping it closes its FD but deliberately retains unresolved durable pins.
@@ -108,12 +119,12 @@ impl Drop for ReplicaContentReader {
 }
 
 /// Derives a fixed path-safe original reader row identity independently of caller labels.
-fn key(reader_id: &str) -> Result<String, String> {
+pub(super) fn key(reader_id: &str) -> Result<String, String> {
     digest(&reader_id)
 }
 
 /// Derives this actual reader's independent pin; Snapshot replacement cannot own its release.
-fn reference(intent: &ReaderIntent) -> Result<ReplicaContentReference, String> {
+pub(super) fn reference(intent: &ReaderIntent) -> Result<ReplicaContentReference, String> {
     Ok(ReplicaContentReference {
         reference_id: format!("reader:{}", key(&intent.reader_id)?),
         kind: ReplicaContentReferenceKind::Reader,
@@ -124,7 +135,7 @@ fn reference(intent: &ReaderIntent) -> Result<ReplicaContentReference, String> {
 }
 
 /// Reads one bounded original operation without treating a missing row as an unused command.
-fn record(connection: &Connection, id: &str) -> Result<Option<ReaderRecord>, String> {
+pub(super) fn record(connection: &Connection, id: &str) -> Result<Option<ReaderRecord>, String> {
     use rusqlite::OptionalExtension;
     let raw: Option<String> = connection
         .query_row(
@@ -155,7 +166,7 @@ fn status(original: &ReaderRecord) -> Result<ReplicaContentReaderStatus, String>
 }
 
 /// Persists this exact original reader outcome and pin release in the same FULL SQL transaction.
-fn publish(connection: &mut Connection, original: &ReaderRecord) -> Result<(), String> {
+pub(super) fn publish(connection: &mut Connection, original: &ReaderRecord) -> Result<(), String> {
     let transaction = connection
         .transaction()
         .map_err(|error| error.to_string())?;
@@ -236,7 +247,14 @@ pub(super) fn validate_records(
                 || receipt.reader_id != intent.reader_id
                 || receipt.content != intent.content
                 || receipt.store_owner != identity.store_owner
-                || receipt.file_inode == 0
+                || receipt.retention_only != intent.retention_only
+                || (!intent.retention_only && receipt.file_inode == 0)
+                || (intent.retention_only
+                    && (receipt.file_device != 0
+                        || receipt.file_inode != 0
+                        || receipt.bytes_read != 0
+                        || receipt.observed_digest != artifact_store::digest_bytes(b"")
+                        || receipt.complete))
                 || receipt.bytes_read > intent.content.byte_size
                 || receipt
                     .observed_digest
@@ -293,6 +311,7 @@ impl ReplicaContentStore {
             content: content.clone(),
             authority_digest: authority_digest.into(),
             budget: ContentBudget::issue(duration_ms)?,
+            retention_only: false,
         };
         let id = key(reader_id)?;
         let expected = reference(&intent)?;
@@ -487,6 +506,7 @@ impl ReplicaContentReader {
                 && self.intent.budget.validates_completion(closed_ms),
             observed_digest,
             closed_ms,
+            retention_only: false,
         };
         let mut guard = self
             .store

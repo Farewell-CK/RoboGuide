@@ -155,6 +155,11 @@ pub struct CertificateMutation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum ReplicaCommand {
+    /// Explicit complete original recovery/content candidate, refused by metadata-only storage.
+    ContentApplication {
+        /// Exact private v3 candidate; metadata acceptance alone is not an application success ACK.
+        content_application: Box<ContentApplicationBatch>,
+    },
     /// Closed infrastructure envelope; legacy profile cannot apply it.
     Certificate {
         /// Original authenticated mutation and its real confirmations.

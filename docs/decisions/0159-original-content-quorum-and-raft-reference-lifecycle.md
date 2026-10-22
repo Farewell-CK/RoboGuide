@@ -60,6 +60,13 @@ Raft log、实际 Snapshot build/publication、每个外发 reader/接收操作�
 receive/install 与独立 original reader 结束证明才释放相应责任，超时/断连不代替证明。
 managed reader 持有原存储 lease 生命周期；旧进程/FD 尚在时不能接受新 writer。
 
+OpenRaft 的实际 SnapshotData 使用管理句柄保留独立 reader scope，reader/copy 的
+member-local authority 不放进 Snapshot bytes。scope 关闭只证明该实际基础设施句柄
+结束，字段明确 `retention_only`，不伪造 payload read/count/hash 或设备退出。新 scope
+使用 content SQL v2/layout v0.2；原 backend identity v0.1 不改。显式全原 writer 排空
+upgrade 验证原 v1 的完整 heads/rows，原 raw intent/receipt、IDs、预算与 owner 不
+重写，仅原子增加 layout/SQL fence；旧二进制拒绝新 SQL，普通 open 不自动升级。
+
 Snapshot install/learner catch-up 先校验并实际取得全部原内容，再原子接受 metadata
 和完成 receipt；缺 bytes 维持不可用，不能暴露已就绪的 leader 应用。新 leader
 materialization 保留原逻辑 Store/Catalog authority 和内容 owner 映射，不能每次换主

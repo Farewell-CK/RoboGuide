@@ -895,7 +895,7 @@ async fn sql_failure_and_corrupt_accepted_evidence_fail_closed() {
     .unwrap();
     assert!(
         target
-            .install_snapshot(&snapshot.meta, Box::new(Cursor::new(data)))
+            .install_snapshot(&snapshot.meta, Box::new(ReplicaSnapshotData::new(data)))
             .await
             .is_err()
     );
@@ -957,11 +957,14 @@ async fn raft_snapshot_preserves_member_local_transfer_history() {
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert!(body.get("leader_transfer").is_none());
     target
-        .install_snapshot(&snapshot.meta, Box::new(Cursor::new(bytes.clone())))
+        .install_snapshot(
+            &snapshot.meta,
+            Box::new(ReplicaSnapshotData::new(bytes.clone())),
+        )
         .await
         .unwrap();
     unrelated
-        .install_snapshot(&snapshot.meta, Box::new(Cursor::new(bytes)))
+        .install_snapshot(&snapshot.meta, Box::new(ReplicaSnapshotData::new(bytes)))
         .await
         .unwrap();
     assert_eq!(target.leader_transfer_record().unwrap(), Some(own));
