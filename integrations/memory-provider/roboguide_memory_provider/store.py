@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from .storage import DATABASES, WRITER_SCHEMA, ProviderStorage
+from .storage import DATABASES, SNAPSHOT_WRITER_SCHEMA, WRITER_SCHEMA, ProviderStorage
 
 MAX_METADATA_BYTES = 600 * 1024
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -86,6 +86,7 @@ class MemoryStore:
         max_bytes: int,
         export_config: Path | None = None,
         export_directory: Path | None = None,
+        enable_snapshot_references: bool = False,
     ) -> None:
         """Open a single-writer durable backend with a persistent observed instance identity."""
         if not provider_id or len(provider_id) > 128 or not 0 < max_bytes <= 1024**3:
@@ -99,6 +100,7 @@ class MemoryStore:
         if not self.input_roots or any(not path.is_dir() for path in self.input_roots):
             raise ValueError("explicit existing readonly staging roots are required")
         self.max_bytes = max_bytes
+        self.snapshot_references_enabled = enable_snapshot_references
         if (export_config is None) != (export_directory is None):
             raise ValueError("export config and controlled handoff directory must be paired")
         self._export_directory = export_directory.resolve(strict=True) if export_directory else None
@@ -132,11 +134,17 @@ class MemoryStore:
             if saved_provider != provider_id:
                 raise ValueError("stored provider ownership differs from configuration")
             self.instance_id = str(instance)
+            if enable_snapshot_references:
+                self._enable_snapshot_references()
             self._content = self.root / "content"
             self._content.mkdir(mode=0o700, exist_ok=True)
             if self._content.is_symlink():
                 raise ValueError("content root cannot be a symlink")
             sync_directory(self.root)
+            from .replica_references import ReplicaReferences
+
+            self.replica_references = ReplicaReferences(self)
+            self.replica_references.restore()
         except BaseException:
             if hasattr(self, "_db"):
                 self._db.close()
@@ -146,13 +154,16 @@ class MemoryStore:
     def _initialize_storage(self) -> None:
         """Migrate only quiescent original SQL and durably fence older provider writers."""
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1, 2, 3):
+        if version not in (0, 1, 2, 3, 4):
             raise ValueError("unsupported Memory backend schema")
-        if version == 3:
+        if version in (3, 4):
+            if version == 4 and not self.snapshot_references_enabled:
+                raise ValueError("Memory v4 requires explicit snapshot references configuration")
             marker = self._db.execute(
                 "SELECT schema,databases_json FROM provider_writer_format"
             ).fetchall()
-            if marker != [(WRITER_SCHEMA, canonical(list(DATABASES)).decode())]:
+            writer_schema = SNAPSHOT_WRITER_SCHEMA if version == 4 else WRITER_SCHEMA
+            if marker != [(writer_schema, canonical(list(DATABASES)).decode())]:
                 raise ValueError("original provider writer marker is unavailable")
             required = {
                 "identity",
@@ -163,12 +174,28 @@ class MemoryStore:
                 "content_references",
                 "provider_writer_format",
             }
+            if version == 4:
+                required.add("snapshot_operations")
             actual = {
                 row[0]
                 for row in self._db.execute("SELECT name FROM sqlite_schema WHERE type='table'")
             }
             if not required <= actual:
                 raise ValueError("original provider authority table is unavailable")
+            if version == 4:
+                columns = {
+                    row[1] for row in self._db.execute("PRAGMA table_info(snapshot_operations)")
+                }
+                if columns != {
+                    "operation_id",
+                    "command_id",
+                    "request_json",
+                    "state",
+                    "receipt_json",
+                }:
+                    raise ValueError(
+                        "original snapshot operation authority columns are unavailable"
+                    )
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=FULL")
             return
@@ -233,6 +260,32 @@ class MemoryStore:
             raise
         # DELETE-mode Commit places the format/old-writer fence in the actual main file, so an
         # older alias cannot miss it by choosing a different WAL filename.
+        self._db.execute("PRAGMA journal_mode=WAL")
+
+    def _enable_snapshot_references(self) -> None:
+        """Upgrade only an explicitly selected and already validated original v3 authority."""
+        if self._db.execute("PRAGMA user_version").fetchone()[0] == 4:
+            return
+        if self._db.execute("PRAGMA journal_mode=DELETE").fetchone() != ("delete",):
+            raise ValueError("original provider snapshot migration requires drained connections")
+        self._db.execute("PRAGMA synchronous=FULL")
+        self._db.execute("BEGIN EXCLUSIVE")
+        try:
+            self._db.execute(
+                "CREATE TABLE snapshot_operations (operation_id TEXT PRIMARY KEY, "
+                "command_id TEXT UNIQUE NOT NULL, "
+                "request_json BLOB NOT NULL, state TEXT NOT NULL "
+                "CHECK(state IN ('active','released','aborted')), receipt_json BLOB)"
+            )
+            self._db.execute(
+                "UPDATE provider_writer_format SET schema=? WHERE schema=?",
+                (SNAPSHOT_WRITER_SCHEMA, WRITER_SCHEMA),
+            )
+            self._db.execute("PRAGMA user_version=4")
+            self._db.commit()
+        except BaseException:
+            self._db.rollback()
+            raise
         self._db.execute("PRAGMA journal_mode=WAL")
 
     def close(self) -> None:
@@ -422,6 +475,7 @@ class MemoryStore:
                     "INSERT INTO imports VALUES (?,?,?,?,?,'pending')",
                     (original["import_id"], identity, manifest_bytes, digest, size),
                 )
+                self.replica_references.acquire(original)
             target = self._content / digest[7:]
             temporary: str | None = None
             try:

@@ -1,5 +1,25 @@
 # Repository Guidelines
 
+ADR-0147 adds opt-in provider `--enable-snapshot-references` (Memory SQL v4 / writer v0.2)
+and explicit recovery v0.8. Actual all-root/inode leases precede a unique original command,
+provider-instance/content set and kernel-budget intent plus snapshot pins, before any copy.
+Verified original publication precedes exact retirement; interrupted copy cannot repeat or renew
+its budget. Reconciliation verifies original bundle bytes and never copies. Explicit abort takes
+all original leases, durably fences the synchronous copy and preserves partial evidence; it is
+not a distributed transaction abort or physical proof. Restored SQL retains its original active
+intent until explicit proof-based reconciliation. Default v3 stays unchanged; old writers/profiles
+refuse v4. Owners are `apps/recovery-tool/roboguide_recovery/snapshot_references.py` and the actual
+zero-Node gate `tools/quality/check_snapshot_reference_processes.py`. Artifact/Raft Snapshot,
+Archive/Catalog/lineage, online replication and the rest of P1-P7 remain separate required work.
+
+ADR-0146 makes the actual original import journal produce a provider-local Replica reference in
+the same transaction as intent, before opening the source file. The reserved owner hashes the full
+original command/provider instance/preparation; its one immutable import has generation 1. Restart
+rebuilds missing projections without reactivating released rows. ContentReclamation consumes exact
+irreversible original-provider revoke before retirement; workers/maps/other refs remain independent
+gates. This is an existing-v3-authority projection, not a new read grant or cross-owner completeness
+claim. See `integrations/memory-provider/roboguide_memory_provider/replica_references.py`.
+
 ADR-0145 verifies stored active Memory references, Active Map refs/heads and pending handoff
 source/target against exact CAS bytes in the same quiescent recovery bundle. Missing content,
 tombstone conflicts and absent mandatory reference tables refuse backup/verify before publication;

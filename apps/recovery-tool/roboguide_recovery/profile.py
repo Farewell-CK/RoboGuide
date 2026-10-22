@@ -63,6 +63,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.5",
         "roboguide.recovery-profile/v0.6",
         "roboguide.recovery-profile/v0.7",
+        "roboguide.recovery-profile/v0.8",
     }:
         expected.add("artifact_replica_sets")
     if set(profile) != expected or profile["schema"] not in {
@@ -73,6 +74,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.5",
         "roboguide.recovery-profile/v0.6",
         "roboguide.recovery-profile/v0.7",
+        "roboguide.recovery-profile/v0.8",
     }:
         raise ValueError("recovery profile is not closed or versioned")
     if (
@@ -120,6 +122,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.5",
             "roboguide.recovery-profile/v0.6",
             "roboguide.recovery-profile/v0.7",
+            "roboguide.recovery-profile/v0.8",
         }:
             raise ValueError("replica supervisor leases require explicit recovery profile v0.2")
         if item["kind"] == "runtime-mi" and profile["schema"] not in {
@@ -128,6 +131,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.5",
             "roboguide.recovery-profile/v0.6",
             "roboguide.recovery-profile/v0.7",
+            "roboguide.recovery-profile/v0.8",
         }:
             raise ValueError("runtime MI leases require explicit recovery profile v0.3")
         if (
@@ -265,12 +269,14 @@ def acquire_all(
                 "roboguide.recovery-profile/v0.5",
                 "roboguide.recovery-profile/v0.6",
                 "roboguide.recovery-profile/v0.7",
+                "roboguide.recovery-profile/v0.8",
             }:
                 paths.extend(root / name for name in [".memory-use.lock", *databases])
             if component["kind"] == "replica" and profile_schema in {
                 "roboguide.recovery-profile/v0.5",
                 "roboguide.recovery-profile/v0.6",
                 "roboguide.recovery-profile/v0.7",
+                "roboguide.recovery-profile/v0.8",
             }:
                 paths.append(root / component["database"])
         for path in sorted(paths):
@@ -335,9 +341,12 @@ def validate_memory_storage(connection: sqlite3.Connection, profile_schema: str)
         "roboguide.recovery-profile/v0.5",
         "roboguide.recovery-profile/v0.6",
         "roboguide.recovery-profile/v0.7",
+        "roboguide.recovery-profile/v0.8",
     }:
-        message = "Memory recovery requires its actual v3 composite writer marker"
-        if version != 3:
+        snapshot = profile_schema == "roboguide.recovery-profile/v0.8"
+        expected_version = 4 if snapshot else 3
+        message = f"Memory recovery requires its actual v{expected_version} composite writer marker"
+        if version != expected_version:
             raise ValueError(message)
         try:
             marker = connection.execute(
@@ -354,10 +363,29 @@ def validate_memory_storage(connection: sqlite3.Connection, profile_schema: str)
         ]
         if (
             len(marker) != 1
-            or marker[0][0] != "roboguide.memory-provider-writer/v0.1"
+            or marker[0][0]
+            != (
+                "roboguide.memory-provider-writer/v0.2"
+                if snapshot
+                else "roboguide.memory-provider-writer/v0.1"
+            )
             or databases != expected
         ):
             raise ValueError(message)
+        if (
+            snapshot
+            and connection.execute(
+                "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='snapshot_operations'"
+            ).fetchone()
+            is None
+        ):
+            raise ValueError("Memory snapshot operation authority is missing")
+        if snapshot:
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(snapshot_operations)")
+            }
+            if columns != {"operation_id", "command_id", "request_json", "state", "receipt_json"}:
+                raise ValueError("Memory snapshot operation authority columns are missing")
     elif version >= 3:
         raise ValueError("Memory composite writers require explicit recovery profile v0.4")
 
@@ -369,6 +397,7 @@ def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str
         "roboguide.recovery-profile/v0.5": 1,
         "roboguide.recovery-profile/v0.6": 2,
         "roboguide.recovery-profile/v0.7": 3,
+        "roboguide.recovery-profile/v0.8": 3,
     }.get(profile_schema)
     if expected_version is None:
         if version != 0:

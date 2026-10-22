@@ -1,5 +1,21 @@
 # Local immutable-file Memory provider
 
+Actual imports produce reserved `replica + import:` references in the same transaction as the
+original import intent, before source reading. Original-provider revoke is required for retirement;
+restart and readonly queries cannot reactivate a released original. See
+[ADR-0146](../../docs/decisions/0146-original-import-replica-reference-producer.md).
+
+Optional `--enable-snapshot-references` explicitly selects Memory SQL v4/writer v0.2. The original
+v3 marker, identity and complete tables are validated and legacy connections drained before upgrade.
+Without that flag the default remains v3; a v4 store refuses startup without explicit negotiation.
+The recovery tool's explicit profile v0.8 produces original snapshot intent and pins under all
+actual writer/inode leases, before copying. Public reference commands cannot edit its reserved
+`snapshot-operation:` namespace. Cold restore retains original intent; only verified original
+publication or an explicit complete local copy fence permits retirement. See
+[Snapshot contract](../../contracts/recovery/bundle-v0.8/README.md) and
+`tools/quality/check_snapshot_reference_processes.py`. This does not expose Unix over a network,
+grant current Memory-use permission or establish global CAS/HA/device facts.
+
 The reference implementation owns one shared writer across `memory.sqlite3`, `memory-use.sqlite3`,
 `file-jobs.sqlite3` and `active-map/active-map.sqlite3`. Root/use locks and each actual database
 inode remain locked until the last managed connection closes, even after `MemoryStore.close()`.

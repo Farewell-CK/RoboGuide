@@ -189,7 +189,8 @@ def test_actual_import_grant_query_replay_and_reopen_preserve_budget(
     assert first["status"] == "granted" and first["receiver_budget"] == request["receiver_budget"]
     assert leases.require(invocation) == request["control"]["lease_id"]
     reference_rows = store._db.execute(
-        "SELECT reference_id,kind,owner,generation,active FROM content_references"
+        "SELECT reference_id,kind,owner,generation,active FROM content_references "
+        "WHERE kind='use_lease'"
     ).fetchall()
     assert len(reference_rows) == 1
     assert reference_rows[0][1:] == ("use_lease", request["control"]["lease_id"], 1, 1)
@@ -604,6 +605,56 @@ def test_reclamation_requires_actual_original_revoke_and_preserves_history(
         changed = {**command, "byte_size": command["byte_size"] - 1}
         with pytest.raises(ValueError, match="conflicts"):
             owner.tombstone(changed)
+    finally:
+        jobs.close()
+
+
+def test_original_replica_cannot_be_released_by_public_reference_command(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """The actual import pin survives caller release and is retired only by original revoke."""
+    store, leases, grant, _ = prepared
+    original = grant["imports"][0]
+    owner_id = store.replica_references.owner(original)
+    reference = content_reference_request(store, grant) | {
+        "kind": "replica",
+        "owner": owner_id,
+        "reference_id": "replica:" + owner_id,
+    }
+    public_release = reference | {"operation": "release"}
+    public_release.pop("byte_size")
+    with pytest.raises(ValueError, match="original import journal"):
+        ContentReferences(store).apply(public_release)
+    jobs = FileJobs(store, leases)
+    reclamation = ContentReclamation(store, leases, jobs, None)
+    command = reclamation_request(store, grant)
+    try:
+        assert reclamation.tombstone(command)["state"] == "blocked"
+        assert store._db.execute(
+            "SELECT active FROM content_references WHERE reference_id=?",
+            (reference["reference_id"],),
+        ).fetchone() == (1,)
+        leases.apply(revoke(grant))
+        store._db.execute(
+            "CREATE TRIGGER reject_replica_retire BEFORE UPDATE ON content_references "
+            "WHEN OLD.kind='replica' BEGIN SELECT RAISE(ABORT,'retirement SQL failure'); END"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="retirement SQL failure"):
+            reclamation.tombstone(command)
+        assert store._db.execute("SELECT COUNT(*) FROM content_tombstones").fetchone() == (0,)
+        assert store._db.execute(
+            "SELECT active FROM content_references WHERE reference_id=?",
+            (reference["reference_id"],),
+        ).fetchone() == (1,)
+        store._db.execute("DROP TRIGGER reject_replica_retire")
+        assert reclamation.tombstone(command)["state"] == "tombstoned"
+        assert reclamation.collect(command)["state"] == "deleted"
+        store.replica_references.restore()
+        assert store._db.execute(
+            "SELECT generation,active FROM content_references WHERE reference_id=?",
+            (reference["reference_id"],),
+        ).fetchone() == (1, 0)
+        assert not store._content.joinpath(reference["content_digest"][7:]).exists()
     finally:
         jobs.close()
 
@@ -1213,7 +1264,9 @@ def test_content_references_reject_tcp_even_when_handler_has_reclamation_authori
             connection.close()
         assert response.status == 409
         assert "private Unix transport" in payload["error"]
-        assert store._db.execute("SELECT COUNT(*) FROM content_references").fetchone() == (0,)
+        assert store._db.execute(
+            "SELECT COUNT(*) FROM content_references WHERE kind<>'replica'"
+        ).fetchone() == (0,)
     finally:
         server.shutdown()
         server.server_close()

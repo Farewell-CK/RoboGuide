@@ -76,7 +76,9 @@ def request(
         connection.close()
 
 
-def start(root: Path, inputs: Path, log: BinaryIO) -> subprocess.Popen[bytes]:
+def start(
+    root: Path, inputs: Path, log: BinaryIO, *, snapshot_references: bool = False
+) -> subprocess.Popen[bytes]:
     """Start the shipped provider binary and verify its actual private socket announcement."""
     environment = {
         key: value
@@ -99,6 +101,7 @@ def start(root: Path, inputs: Path, log: BinaryIO) -> subprocess.Popen[bytes]:
             "--enable-use-leases",
             "--enable-file-jobs",
             "--enable-content-reclamation",
+            *(["--enable-snapshot-references"] if snapshot_references else []),
         ],
         cwd=ROOT,
         env=environment,

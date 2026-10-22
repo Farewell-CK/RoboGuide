@@ -1,5 +1,20 @@
 # RoboGuide
 
+Snapshot 引用已有实际恢复工具生产者：显式启用 Memory SQL v4 / recovery profile v0.8，
+在所有原 writer/inode 租约内先持久化原命令、内容集合、预算和引用，再复制真实 bytes。
+发布结果须完整验证后才退休；中断保留引用，只读对账不重新复制。冷恢复不改写原 active
+intent；显式 abort 只封住原同步复制并保留 partial 证据。操作与部署步骤见
+[恢复工具](apps/recovery-tool/README.md)和
+[ADR-0147](docs/decisions/0147-original-provider-snapshot-reference-lifecycle.md)。
+默认仍为 v3，Node/Controller 合同不变；在线 HA 和全局引用覆盖继续按原计划实施。
+
+原 Memory import 现在由实际 journal 在读取文件前的同一 SQL 事务生成本地 Replica 引用；
+重启保留 Unknown，不重新激活已退休引用。原 provider 的不可逆 revoke 是退休前提，
+其它 worker/map 引用继续独立阻止回收。实现为
+[`replica_references.py`](integrations/memory-provider/roboguide_memory_provider/replica_references.py)，
+权威边界见 [ADR-0146](docs/decisions/0146-original-import-replica-reference-producer.md)。
+这只是完整 Memory 引用整改的一项生产者，不代表跨 owner、在线 HA 或整体整改完成。
+
 [原 Controller 子进程排空](docs/decisions/0138-original-controller-child-drain-before-transfer.md)
 将原 spawn、实际 PID/内核身份和原 supervisor 的 wait 写入独立日志。Transfer 先封住源
 应用，确认原退出后才发送 V3 选举请求；排队消耗原接收预算，重启不替换未对账进程。
@@ -91,7 +106,7 @@ RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智�
 
 [运行指标与告警](docs/development/observability-v0.1.md)已接入有界 histogram/queue/drop、
 stop/recovery 信号与真实 Prometheus/Alertmanager。专用 metrics-reader 只能抓取运行指标；
-该监控切片引入 wrapper v42；当前共享 wrapper 为 v45，Mission 授权 v0.2，Node journal v13。新权限具备旧 writer/
+该监控切片引入 wrapper v42；当前共享 wrapper 为 v47，Mission 授权 v0.2，Node journal v13。新权限具备旧 writer/
 降级门禁；采集缺失不算健康，短期软件通知验证不声明长期 SLO 或设备安全。
 
 [Controller 故障恢复入口](docs/development/controller-write-recovery-v0.1.md)在实际持久化
@@ -231,7 +246,7 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 - `contracts/capability/v0.3/` 提供 deployment-independent Canonical Capability Catalog；Planner
   与 Reviewer 获得同一 capability/operation 词汇表，确定性 admission 拒绝 unknown identity、
   未知/缺失参数、约束属性和类型不匹配，但 Catalog membership 不代表当前存在 provider；
-- Mission 输出使用 `contracts/mission/v0.7/` 中的版本化合同；v0.2-v0.6 作为兼容输入；Mission
+- Mission 输出默认使用 `contracts/mission/v0.8/`，显式 v0.9 支持 Memory 前提；v0.2-v0.7 保持兼容输入；Mission
   Actor、ContextRole 与 TaskRole 已正规化，每个 TaskRole 可声明多个 exact Capability requirements、
   Resource requirements 与独立 semantic `ExecutionIntent`；每个 Task 显式声明 expected effect 及
   `execution-report` 或 `verifier-evidence` satisfaction policy；
@@ -1072,7 +1087,7 @@ V2 仍保留七类架构问题：State Authority、Spatial Authority、Control T
 │   └── node.toml
 ├── contracts/
 │   ├── capability/v0.1/ ... v0.3/
-│   ├── mission/v0.2/ ... v0.7/
+│   ├── mission/v0.2/ ... v0.9/
 │   ├── mission/request-v0.1/ ... request-v0.4/
 │   ├── mission/grounding-context-v0.1/
 │   ├── mission/inventory-v0.1/

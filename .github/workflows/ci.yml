@@ -65,6 +65,16 @@ jobs:
           uv run --frozen python tools/quality/check_memory_reference_processes.py
           --output "${RUNNER_TEMP}/roboguide-memory-references"
 
+      - name: Verify actual import Replica retention with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_import_replica_processes.py
+          --output "${RUNNER_TEMP}/roboguide-import-replicas"
+
+      - name: Verify original Snapshot references with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_snapshot_reference_processes.py
+          --output "${RUNNER_TEMP}/roboguide-snapshot-references"
+
   python:
     name: Python
     runs-on: ubuntu-24.04

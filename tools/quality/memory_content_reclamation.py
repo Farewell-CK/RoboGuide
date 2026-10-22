@@ -63,11 +63,19 @@ def run(directory: Path, backend: str, restart: Callable[[], None]) -> dict[str,
             "BEGIN SELECT RAISE(ABORT,'original reclamation receipt SQL failure'); END"
         )
     try:
-        request(backend, "/v1/content/collect", command)
+        interrupted_status, interrupted = request(backend, "/v1/content/collect", command)
     except (http.client.RemoteDisconnected, ConnectionError) as error:
         save(directory / "reclamation-interrupted-response.json", {"error": repr(error)})
     else:
-        raise AssertionError("actual final receipt SQL fault did not interrupt the operation")
+        assert interrupted_status == 503, interrupted
+        assert interrupted == {"error": "original Memory storage outcome is unavailable"}
+        save(
+            directory / "reclamation-interrupted-response.json",
+            {
+                "status": interrupted_status,
+                "response": interrupted,
+            },
+        )
     assert not content.exists()
     status, observed = request(
         backend, "/v1/content/reclamation", {"command_id": command["command_id"]}, method="GET"

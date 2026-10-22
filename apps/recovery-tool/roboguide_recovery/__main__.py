@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .bundle import backup, restore, verify
+from .bundle import abort_snapshots, backup, reconcile_snapshots, restore, verify
 from .profile import MAX_PROFILE_BYTES
 
 
@@ -26,12 +26,26 @@ def main() -> None:
     recover.add_argument("--manifest-digest", required=True)
     recover.add_argument("--destination", type=Path, required=True)
     recover.add_argument("--command-id", required=True)
+    reconcile = subcommands.add_parser("reconcile-snapshots")
+    reconcile.add_argument("--profile", type=Path, required=True)
+    reconcile.add_argument("--bundle", type=Path, required=True)
+    reconcile.add_argument("--manifest-digest", required=True)
+    abort = subcommands.add_parser("abort-snapshots")
+    abort.add_argument("--profile", type=Path, required=True)
+    abort.add_argument("--destination", type=Path, required=True)
+    abort.add_argument("--command-id", required=True)
     args = parser.parse_args()
-    if args.operation == "backup":
+    if args.operation in {"backup", "reconcile-snapshots", "abort-snapshots"}:
         raw = args.profile.read_bytes()
         if len(raw) > MAX_PROFILE_BYTES:
             parser.error("recovery profile exceeds its byte bound")
-        result = backup(json.loads(raw), args.destination, args.command_id)
+        profile = json.loads(raw)
+        if args.operation == "backup":
+            result = backup(profile, args.destination, args.command_id)
+        elif args.operation == "reconcile-snapshots":
+            result = reconcile_snapshots(profile, args.bundle, args.manifest_digest)
+        else:
+            result = abort_snapshots(profile, args.destination, args.command_id)
     elif args.operation == "restore":
         result = restore(args.bundle, args.manifest_digest, args.destination, args.command_id)
     else:

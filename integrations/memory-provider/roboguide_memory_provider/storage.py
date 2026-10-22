@@ -18,6 +18,7 @@ DATABASES = (
     "active-map/active-map.sqlite3",
 )
 WRITER_SCHEMA = "roboguide.memory-provider-writer/v0.1"
+SNAPSHOT_WRITER_SCHEMA = "roboguide.memory-provider-writer/v0.2"
 
 
 class ProviderConnection(sqlite3.Connection):
@@ -78,7 +79,9 @@ class ProviderStorage:
                 if name == "memory.sqlite3":
                     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as probe:
                         version = probe.execute("PRAGMA user_version").fetchone()[0]
-                    if version == 3 and any(not (root / child).exists() for child in DATABASES):
+                    if version in (3, 4) and any(
+                        not (root / child).exists() for child in DATABASES
+                    ):
                         raise ValueError("original provider managed database is missing")
             self._verify()
             self._quiesce()

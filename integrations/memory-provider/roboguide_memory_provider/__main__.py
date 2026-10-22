@@ -9,6 +9,7 @@ import os
 import signal
 import socket
 import socketserver
+import sqlite3
 import stat
 import struct
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -134,6 +135,8 @@ def handler_type(
                     self._respond(404, {"error": "unknown readonly Memory route"})
             except (ValueError, KeyError, TypeError, OSError) as error:
                 self._respond(409, {"error": str(error)[:512]})
+            except sqlite3.Error:
+                self._respond(503, {"error": "original Memory storage outcome is unavailable"})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib HTTP dispatch contract.
             """Import an exact actual staged file once under its complete original identity."""
@@ -208,6 +211,8 @@ def handler_type(
                 )
             except (ValueError, KeyError, TypeError, OSError) as error:
                 self._respond(409, {"error": str(error)[:512]})
+            except sqlite3.Error:
+                self._respond(503, {"error": "original Memory storage outcome is unavailable"})
 
     return Handler
 
@@ -233,6 +238,11 @@ def main() -> None:
     parser.add_argument("--export-directory", type=Path)
     parser.add_argument("--enable-active-map", action="store_true")
     parser.add_argument("--enable-content-reclamation", action="store_true")
+    parser.add_argument(
+        "--enable-snapshot-references",
+        action="store_true",
+        help="explicitly upgrade the original Memory store to snapshot-reference SQL v4",
+    )
     args = parser.parse_args()
     if not ipaddress.ip_address(args.listen_host).is_loopback:
         parser.error("this Local EAIOS facade requires a literal loopback address")
@@ -261,6 +271,7 @@ def main() -> None:
         args.max_bytes,
         args.export_config,
         args.export_directory,
+        args.enable_snapshot_references,
     )
     leases: UseLeases | None = None
     jobs: FileJobs | None = None

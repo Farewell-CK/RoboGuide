@@ -63,16 +63,16 @@ flowchart TB
 - **[Getting started](getting-started.md)** — prerequisites, build, tests, and three runnable demo paths
 - **[Architecture tour](architecture-tour.md)** — reader-oriented layers, one instruction's full journey, recovery ladder
 - **[Module maps](modules/domain-ports.md)** — responsibility, key types, main flows, and implementation status of every crate/package (grounded in code facts)
-- **[Architecture Decision Records](docs/decisions/index.md)** — full index of all 47 ADRs
+- **[Architecture Decision Records](docs/decisions/index.md)** — index of the in-repo ADRs
 - **[V2 architecture baseline](docs/architecture/v2/index.md)** — mirrored in-repo source of truth
 
 ## Version snapshot
 
 | Contract | Current version |
 | --- | --- |
-| MissionPlan | `roboguide.mission-plan/v0.8` (v0.2–v0.7 compatible input) |
+| MissionPlan | Default `roboguide.mission-plan/v0.8`; explicit v0.9 supports Memory prerequisites (v0.2–v0.7 compatible input) |
 | Node Protocol (wire) | `roboguide.node-protocol/v0.4` |
-| Node Contract (semantic) | `roboguide.node.v0.6` (v0.4/v0.5 compatible) |
-| Node Config | `roboguide.node-config/v0.7` (v0.2–v0.6 compatible) |
+| Node Contract (semantic) | `roboguide.node.v0.12`; explicit version negotiation |
+| Node Config | `roboguide.node-config/v0.13`; older versions retain their original permissions |
 | Canonical Capability Catalog | `capability-catalog/v0.3` |
-| Controller checkpoint | `roboguide.controller-checkpoint/v17` |
+| Controller checkpoint | `roboguide.controller-checkpoint/v47` |

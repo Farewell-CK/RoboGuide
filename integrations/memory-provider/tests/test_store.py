@@ -6,10 +6,12 @@ import hashlib
 import json
 import sqlite3
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 import pytest
+from roboguide_memory_provider.replica_references import ReplicaReferences
 from roboguide_memory_provider.store import MemoryStore, canonical, original_content_digest
 
 
@@ -73,6 +75,78 @@ def test_real_bytes_import_restart_query_and_no_reimport(tmp_path: Path) -> None
         with pytest.raises(ValueError, match="ambiguous"):
             store.import_artifact(evidence, manifest, str(staged))
         assert not content.exists()
+    finally:
+        store.close()
+
+
+def test_replica_intent_precedes_actual_source_read_and_survives_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Independent SQL inspection at source-open sees the exact pin, even if reading fails."""
+    source = tmp_path / "source"
+    source.write_bytes(b"original provider replica bytes")
+    root = tmp_path / "backend"
+    store = MemoryStore(root, "files", (tmp_path,), 1024)
+    evidence, manifest = original(store, source.read_bytes())
+
+    def refuse_source(name: str) -> None:
+        """Inspect durable original SQL before interrupting the actual file-open boundary."""
+        assert name == str(source)
+        with closing(sqlite3.connect(root / "memory.sqlite3")) as observer:
+            assert observer.execute("SELECT state FROM imports").fetchall() == [("pending",)]
+            assert observer.execute(
+                "SELECT content_digest,kind,owner,generation,active FROM content_references"
+            ).fetchall() == [
+                (
+                    manifest["artifact"]["content_digest"],
+                    "replica",
+                    ReplicaReferences.owner(evidence),
+                    1,
+                    1,
+                )
+            ]
+        raise OSError("actual source-open interruption")
+
+    monkeypatch.setattr(store, "_open_staged", refuse_source)
+    try:
+        with pytest.raises(OSError, match="source-open interruption"):
+            store.import_artifact(evidence, manifest, str(source))
+        assert store.query(evidence)["outcome"] == "unknown"
+        before = store._db.total_changes
+        store.query(evidence)
+        assert store._db.total_changes == before
+    finally:
+        store.close()
+    reopened = MemoryStore(root, "files", (tmp_path,), 1024)
+    try:
+        assert reopened._db.execute(
+            "SELECT generation,active FROM content_references WHERE kind='replica'"
+        ).fetchall() == [(1, 1)]
+        with pytest.raises(ValueError, match="ambiguous"):
+            reopened.import_artifact(evidence, manifest, str(source))
+        assert not tuple(reopened._content.iterdir())
+    finally:
+        reopened.close()
+
+
+def test_replica_sql_failure_rolls_back_import_before_any_file_effect(tmp_path: Path) -> None:
+    """An actual Replica INSERT abort cannot leave an import intent or copy any CAS bytes."""
+    source = tmp_path / "source"
+    source.write_bytes(b"actual SQL rollback source")
+    store = MemoryStore(tmp_path / "backend", "files", (tmp_path,), 1024)
+    evidence, manifest = original(store, source.read_bytes())
+    try:
+        store._db.execute(
+            "CREATE TRIGGER reject_replica BEFORE INSERT ON content_references "
+            "WHEN NEW.kind='replica' BEGIN SELECT RAISE(ABORT,'replica SQL failure'); END"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="replica SQL failure"):
+            store.import_artifact(evidence, manifest, str(source))
+        assert store._db.execute("SELECT COUNT(*) FROM imports").fetchone() == (0,)
+        assert not tuple(store._content.iterdir())
+        store._db.execute("DROP TRIGGER reject_replica")
+        result = store.import_artifact(evidence, manifest, str(source))["result"]
+        assert isinstance(result, dict) and result["durable"] is True
     finally:
         store.close()
 

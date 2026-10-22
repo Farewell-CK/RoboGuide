@@ -73,6 +73,12 @@ class ContentReferences:
             raise ValueError("content reference digest, kind, or generation is invalid")
         if kind == "execution" and owner.startswith("file-job:"):
             raise ValueError("file-job execution references are owned by the job journal")
+        if reference.startswith("replica:import:") or (
+            kind == "replica" and owner.startswith("import:")
+        ):
+            raise ValueError("import Replica references are owned by the original import journal")
+        if reference.startswith("snapshot-operation:") or owner.startswith("snapshot-operation:"):
+            raise ValueError("snapshot references are owned by the original snapshot journal")
         if operation == "acquire" and (
             type(request["byte_size"]) is not int
             or not 0 <= request["byte_size"] <= self.store.max_bytes

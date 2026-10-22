@@ -14,6 +14,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from . import snapshot_references
 from .profile import (
     IDENTIFIER,
     MAX_PROFILE_BYTES,
@@ -206,7 +207,7 @@ def _validate_memory_content_references(
                 for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
             if (
-                connection.execute("PRAGMA user_version").fetchone()[0] == 3
+                connection.execute("PRAGMA user_version").fetchone()[0] in (3, 4)
                 and not {"content_references", "content_tombstones"} <= tables
             ):
                 raise ValueError("Memory v3 content reference authority table is missing")
@@ -394,10 +395,13 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
     if destination.is_dir() and not destination.is_symlink():
         with _regular(destination / "manifest.json") as handle:
             previous = handle.read(MAX_MANIFEST_BYTES + 1)
-        saved = verify(destination, digest(previous))
+        saved = verify(destination, digest(previous), deadline_ns=budget.deadline_ns)
         budget.check()
         if saved["command_id"] != command_id or saved["profile"] != profile:
             raise ValueError("original recovery command/source identity conflicts")
+        if profile["schema"] == snapshot_references.SCHEMA:
+            with acquire_all(components, profile_schema=profile["schema"]):
+                snapshot_references.complete(components, saved, digest(previous), budget)
         return {
             "manifest_digest": digest(previous),
             "files": len(saved["files"]),
@@ -406,6 +410,11 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
     with acquire_all(components, profile_schema=profile["schema"]):
         budget.check()
         validate_replica_sets(profile, components)
+        snapshot_operations = (
+            snapshot_references.prepare(profile, components, destination, command_id, budget)
+            if profile["schema"] == snapshot_references.SCHEMA
+            else []
+        )
         partial = _target(destination, command_id)
         records = []
         for component in components:
@@ -474,7 +483,11 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                     partial, component["component_id"], record_map, budget
                 )
         manifest = {
-            "schema": "roboguide.recovery-bundle/v0.1",
+            "schema": (
+                "roboguide.recovery-bundle/v0.2"
+                if profile["schema"] == snapshot_references.SCHEMA
+                else "roboguide.recovery-bundle/v0.1"
+            ),
             "command_id": command_id,
             "profile": profile,
             "profile_digest": digest(canonical(profile)),
@@ -482,6 +495,9 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             "scope": "declared-stores-only",
             "physical_continuity": "not-established",
         }
+        if profile["schema"] == snapshot_references.SCHEMA:
+            manifest["snapshot_operations"] = snapshot_operations
+            snapshot_references.validate_bundle(partial, manifest, budget)
         raw = canonical(manifest)
         if len(raw) > MAX_MANIFEST_BYTES:
             raise ValueError("complete recovery manifest exceeds its bound")
@@ -498,10 +514,14 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             raise ValueError("recovery destination changed before publication")
         partial.rename(destination)
         _sync(destination.parent)
+        if profile["schema"] == snapshot_references.SCHEMA:
+            verified = verify(destination, digest(raw), deadline_ns=budget.deadline_ns)
+            budget.check()
+            snapshot_references.complete(components, verified, digest(raw), budget)
     return {"manifest_digest": digest(raw), "files": len(records), "bytes": budget.bytes}
 
 
-def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
+def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None) -> dict[str, Any]:
     """Verify every declared byte and full SQLite identity against an externally pinned digest."""
     started_ns = time.monotonic_ns()
     bundle = real_directory(bundle)
@@ -513,16 +533,24 @@ def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
     if (
         not isinstance(manifest, dict)
         or set(manifest)
-        != {
-            "schema",
-            "command_id",
-            "profile",
-            "profile_digest",
-            "files",
-            "scope",
-            "physical_continuity",
-        }
-        or manifest["schema"] != "roboguide.recovery-bundle/v0.1"
+        != (
+            {
+                "schema",
+                "command_id",
+                "profile",
+                "profile_digest",
+                "files",
+                "scope",
+                "physical_continuity",
+            }
+            | (
+                {"snapshot_operations"}
+                if manifest.get("schema") == "roboguide.recovery-bundle/v0.2"
+                else set()
+            )
+        )
+        or manifest["schema"]
+        not in {"roboguide.recovery-bundle/v0.1", "roboguide.recovery-bundle/v0.2"}
     ):
         raise ValueError("recovery bundle manifest is not closed or versioned")
     components = validate(manifest["profile"])
@@ -537,6 +565,8 @@ def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
         raise ValueError("recovery bundle profile identity conflicts")
     budget = Budget(manifest["profile"])
     budget.deadline_ns = started_ns + manifest["profile"]["budget_seconds"] * 1_000_000_000
+    if deadline_ns is not None:
+        budget.deadline_ns = min(budget.deadline_ns, deadline_ns)
     budget.check()
     files = manifest["files"]
     if not isinstance(files, list) or len(files) > budget.max_files:
@@ -588,6 +618,12 @@ def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
                 ) as connection:
                     validate_replica_storage(connection, manifest["profile"]["schema"])
     record_map = {str(row["path"]): row for row in files}
+    if (manifest["profile"]["schema"] == snapshot_references.SCHEMA) != (
+        manifest["schema"] == "roboguide.recovery-bundle/v0.2"
+    ):
+        raise ValueError("snapshot profile and bundle schema differ")
+    if manifest["schema"] == "roboguide.recovery-bundle/v0.2":
+        snapshot_references.validate_bundle(bundle, manifest, budget)
     for component in components:
         if component["kind"] == "memory":
             _validate_memory_content_references(
@@ -604,6 +640,7 @@ def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
                 "roboguide.recovery-profile/v0.5",
                 "roboguide.recovery-profile/v0.6",
                 "roboguide.recovery-profile/v0.7",
+                "roboguide.recovery-profile/v0.8",
             }
             else databases
         )
@@ -616,6 +653,45 @@ def verify(bundle: Path, expected_digest: str) -> dict[str, Any]:
         raise ValueError("recovery bundle has missing or undeclared files")
     budget.check()
     return dict(manifest)
+
+
+def reconcile_snapshots(
+    profile: dict[str, Any], bundle: Path, expected_digest: str
+) -> dict[str, Any]:
+    """Retire original snapshot pins after verifying the complete original copy."""
+    components = validate(profile)
+    if profile["schema"] != snapshot_references.SCHEMA:
+        raise ValueError("snapshot reconciliation requires explicit recovery profile v0.8")
+    budget = Budget(profile)
+    manifest = verify(bundle, expected_digest, deadline_ns=budget.deadline_ns)
+    if manifest["profile"]["schema"] != snapshot_references.SCHEMA:
+        raise ValueError("snapshot proof lacks its original explicit reference protocol")
+    with acquire_all(components, profile_schema=profile["schema"]):
+        receipts = snapshot_references.complete(components, manifest, expected_digest, budget)
+    return {
+        "schema": "roboguide.snapshot-reconciliation/v0.1",
+        "manifest_digest": expected_digest,
+        "receipts": receipts,
+        "copied_files": 0,
+    }
+
+
+def abort_snapshots(profile: dict[str, Any], destination: Path, command_id: str) -> dict[str, Any]:
+    """Irreversibly fence an unpublished synchronous copy; retain all original partial evidence."""
+    components = validate(profile)
+    if profile["schema"] != snapshot_references.SCHEMA or IDENTIFIER.fullmatch(command_id) is None:
+        raise ValueError("snapshot abort requires explicit v0.8 and its original command")
+    budget = Budget(profile)
+    with acquire_all(components, profile_schema=profile["schema"]):
+        receipts = snapshot_references.abort(
+            profile, components, destination.absolute(), command_id, budget
+        )
+    return {
+        "schema": "roboguide.snapshot-abort/v0.1",
+        "receipts": receipts,
+        "partial_evidence_preserved": True,
+        "copied_files": 0,
+    }
 
 
 def _replica_placements(manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -671,7 +747,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.7"
+        "roboguide.restore-receipt/v0.8"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.8"
+        else "roboguide.restore-receipt/v0.7"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.7"
         else "roboguide.restore-receipt/v0.6"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.6"
@@ -741,6 +819,7 @@ def restore(
             "roboguide.recovery-profile/v0.5",
             "roboguide.recovery-profile/v0.6",
             "roboguide.recovery-profile/v0.7",
+            "roboguide.recovery-profile/v0.8",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:

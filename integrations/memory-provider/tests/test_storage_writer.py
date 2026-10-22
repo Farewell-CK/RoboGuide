@@ -107,3 +107,27 @@ def test_missing_managed_database_stays_missing_after_refused_open(tmp_path: Pat
             MemoryStore(store.root, "files", (tmp_path,), 1024)
         assert not missing.exists()
     assert not locked(store.root)
+
+
+def test_wrong_original_provider_cannot_upgrade_snapshot_storage(tmp_path: Path) -> None:
+    """A mismatched configured provider must refuse before changing the original v3 writer fence."""
+    root = tmp_path / "provider"
+    store = MemoryStore(root, "original", (tmp_path,), 1024)
+    identity = store.instance_id
+    store.close()
+    with pytest.raises(ValueError, match="ownership differs"):
+        MemoryStore(root, "different", (tmp_path,), 1024, enable_snapshot_references=True)
+    with closing(sqlite3.connect(root / "memory.sqlite3")) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (3,)
+        assert connection.execute("SELECT schema FROM provider_writer_format").fetchall() == [
+            ("roboguide.memory-provider-writer/v0.1",)
+        ]
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_schema WHERE name='snapshot_operations'"
+            ).fetchone()
+            is None
+        )
+    reopened = MemoryStore(root, "original", (tmp_path,), 1024)
+    assert reopened.instance_id == identity
+    reopened.close()

@@ -1,5 +1,32 @@
 # RoboGuide recovery tool
 
+[Profile v0.8](../../contracts/recovery/bundle-v0.8/README.md) adds the actual Memory Snapshot
+reference producer. Explicit provider `--enable-snapshot-references` drains and upgrades original
+v3 SQL to v4; default v3 remains supported by its original profiles. v0.8 retains Replica storage
+v3 and the complete v0.7 original process journal contract. All source writer/inode leases precede
+original command/content/kernel-budget intent and snapshot pins. Full actual bundle verification
+precedes original source release. Cold restore preserves its pre-publication active intent;
+explicit reconciliation can retire it using the verified original bundle, without copying.
+See [ADR-0147](../../docs/decisions/0147-original-provider-snapshot-reference-lifecycle.md).
+
+```bash
+PYTHONPATH=apps/recovery-tool python -m roboguide_recovery reconcile-snapshots \
+  --profile /absolute/current-v0.8-profile.json --bundle /absolute/original-bundle \
+  --manifest-digest sha256:ORIGINAL_PINNED_MANIFEST_DIGEST
+PYTHONPATH=apps/recovery-tool python -m roboguide_recovery abort-snapshots \
+  --profile /absolute/original-v0.8-profile.json --destination /absolute/unpublished-bundle \
+  --command-id original-backup-id
+```
+
+Reconciliation checks the exact original provider instance, operation descriptor and all original
+SQL/CAS bytes. It never performs another copy or renews the original budget. An unpublished
+interrupted operation cannot retry its copy; explicit abort must take every original writer lease
+and durably fence the original command before retiring pins. It refuses a published/replaced
+destination and preserves the partial directory. A live actual copier or provider refuses these
+leases. This is a local synchronous-copy fence, not a distributed abort or device-stop proof.
+Unknown or unavailable proof keeps the pins. Artifact/Raft Snapshot, event Archive, Catalog/lineage
+and online cross-host content closure remain separately required.
+
 [Profile v0.5](../../contracts/recovery/bundle-v0.5/README.md) adds the Replica database v1
 storage fence and actual database-inode writer lease while retaining the complete v0.4 Memory
 contract. Old Replica table names become read-only views; old binaries and profiles refuse the

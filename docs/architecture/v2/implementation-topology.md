@@ -283,3 +283,32 @@ Memory preparation、use/revoke 和独立进程停止保留各自证据。共享
 Memory handoff 的 binding 保留。停止确认本身不释放正在交接的源 Group。
 Artifact 的单 writer lease 随最后一个应用 store/clone/upload 显式释放；无写入权的子进程
 继承 descriptor 不延长该应用的写入权，也不允许仍有上传时启动第二 writer。
+
+## 原 import 的本地 Replica 引用（ADR-0146）
+
+原接收 provider 的 `imports` journal 是导入副作用的权威。它在读取文件前的同一 SQL
+事务产生保守的 Replica 引用投影；owner 绑定完整原 command、provider instance、
+preparation/attempt 身份。首次导入是该不可变 owner 的 generation 1，不重试为新代际。
+SQL 中断、缺失内容和重启均不退休。只读 import 查询不写入、不重新导入。
+
+ContentReclamation 先从原 UseLeases journal 验证精确、不可逆 revoke，再退休该 import
+的投影；FileJobs、当前 lease、Active Map 及其它引用仍独立阻止回收。恢复从原 imports
+及 tombstone 重建投影，不能把历史 Completed 当成当前可用或将已退休引用重新激活。
+该投影复用 v3 的既有表和权威，既有原 import/revoke 门禁继续独立生效，不增加权限或
+新权威 schema。API 禁止修改保留的 import namespace。Controller Artifact CAS 是另一个
+owner；Catalog/lineage、在线副本及 Snapshot/Archive 的跨 owner 生命周期仍须独立接通。
+
+## 显式静止 Snapshot 引用（ADR-0147）
+
+显式 Memory snapshot profile 在实际原 provider SQL 中保存原操作意图和内容集合，
+并在第一项复制副作用前取得本地 snapshot 引用。所有原 writer/inode 租约先冻结，
+source provider instance 与集合不能随 retry 改变；未确认操作不重新复制、不续预算。
+完整 bundle 的实际 bytes、SQL 和外部固定 manifest digest 验证通过后，才可退休原引用。
+失去响应、SQL 失败或进程中断保留 active 引用，并通过只读检查原发布结果对账。
+冷恢复保留原 intent；原 copy 完成不凭空变成 restored provider 的新操作证明。
+
+该操作仅由同 UID、实际持有全部原租约的恢复工具执行；不增加远程 Unix 访问权限。
+它是配置 opt-in 的 Memory SQL v4 / recovery-profile v0.8。v3 原权威先原样验证、由
+SQLite 排空旧连接后才迁移，旧 writer 和旧 recovery profile 拒绝新权限。v3/default
+部署继续保持原合同。Snapshot 属于独立内容 owner，不能借它证明在线 HA、设备停止或
+Controller Artifact CAS 的全局引用覆盖。

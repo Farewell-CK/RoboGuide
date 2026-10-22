@@ -109,6 +109,14 @@ class ContentReclamation:
         for binding in self.store._exports:
             if self.store._artifact(binding["manifest"])[0] == digest:
                 blockers.append("configured_source_export")
+        for original in originals:
+            try:
+                proof = self.leases.retired_import_evidence(original)
+            except (ValueError, KeyError, TypeError) as error:
+                blockers.append(f"original_import:{original['import_id']}:{error}")
+            else:
+                self.store.replica_references.retire(original, self.leases)
+                evidence.append(proof)
         references = self.store._db.execute(
             "SELECT reference_id,kind,owner FROM content_references "
             "WHERE content_digest=? AND active=1 ORDER BY reference_id LIMIT ?",
@@ -120,11 +128,6 @@ class ContentReclamation:
             blockers.extend(f"{kind}:{owner}:{reference}" for reference, kind, owner in references)
         blockers.extend(self.jobs.reclamation_blockers(digest))
         blockers.extend(self.leases.content_retention_blockers(digest))
-        for original in originals:
-            try:
-                evidence.append(self.leases.retired_import_evidence(original))
-            except (ValueError, KeyError, TypeError) as error:
-                blockers.append(f"original_import:{original['import_id']}:{error}")
         if self.active_maps is not None:
             blockers.extend(self.active_maps.reclamation_blockers(digest))
         return sorted(set(blockers)), evidence

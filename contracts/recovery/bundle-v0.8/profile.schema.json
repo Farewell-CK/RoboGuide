@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "roboguide.recovery-profile/v0.8",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "profile_id",
+    "revision",
+    "max_bytes",
+    "max_files",
+    "budget_seconds",
+    "components",
+    "artifact_replica_sets"
+  ],
+  "properties": {
+    "schema": {
+      "const": "roboguide.recovery-profile/v0.8"
+    },
+    "profile_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775807
+    },
+    "max_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1125899906842624
+    },
+    "max_files": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "budget_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "component_id",
+          "kind",
+          "root",
+          "database",
+          "trees",
+          "depends_on"
+        ],
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+          },
+          "kind": {
+            "enum": [
+              "controller",
+              "replica",
+              "node",
+              "mission",
+              "artifact",
+              "memory",
+              "files",
+              "runtime-mi"
+            ]
+          },
+          "root": {
+            "type": "string",
+            "pattern": "^/",
+            "maxLength": 4096
+          },
+          "database": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trees": {
+            "type": "array",
+            "maxItems": 1024,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "maxItems": 1024,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "controller",
+                    "replica",
+                    "node",
+                    "mission",
+                    "runtime-mi"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "database": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^/]+$"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "database": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "artifact_replica_sets": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 9,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+        }
+      }
+    }
+  }
+}

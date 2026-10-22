@@ -113,6 +113,26 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-22）
 
+本轮连续实施冻结 `main@45a82410867e01241394d1b9116aa53634ce2a06`，只在
+`codex/nonrelease-remediation-closure` 开发。不得为工作包另建分支；阶段提交、推送和
+CI 均使用该分支，全部非发布软件验收完成后再合入 main。原工作树及实验目录保留。
+证据根目录为 `/data/workspace/roboguide-evidence/nonrelease-closure/`，P0 的
+`baseline.json` 固定原提交、分支、工作树和范围；后续每包保留原命令、退出码、源码/
+配置 identity 和 SQL/CAS 观察。历史 `/tmp` 文件若不可用须按原项重跑，不由文字记录
+补造结果。Unix socket 使用独立短运行目录，避免证据目录长度影响实际协议。
+
+本轮 P0–P7 分别对应下表 N0–N7（P0 同时承担完整 F0–F10/R01–R20 证据索引）。
+所有既有必需项继续适用。P3 的内容成功 ACK 要求当前 voting 配置的实际字节和元数据
+已持久化；joint configuration 须分别满足两组多数。副本元数据成功不能替代内容 ACK。
+跨 owner 内容身份包含实际 store owner、provider/backend instance、digest 和 size；
+同 digest 不合并不同 owner 的保留责任。引用保留权不授予内容读权。
+
+本轮[实际 import 与 provider Snapshot 生产者验收](acceptance/2026-10-22-import-and-snapshot-references.md)
+接通 ADR-0146 的原 import→Replica pin→原 revoke→本地回收，以及 ADR-0147 的显式
+v4/v0.8 Snapshot 原意图→实际复制→完整验证→精确退休/对账。实际旧 writer、SIGKILL/
+wait、SQL 与回包中断、冷恢复和双 Node 文件组合已验证；Catalog/lineage、Controller
+Artifact/Raft Snapshot、Archive 和在线副本生命周期仍属 N1/N3 必需工作。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

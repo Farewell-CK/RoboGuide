@@ -58,16 +58,16 @@ flowchart TB
 - **[快速开始](getting-started.md)** —— 环境、构建、测试，以及三条可运行的演示路径
 - **[架构导览](architecture-tour.md)** —— 读者视角的分层语义、一个任务的完整旅程、恢复阶梯
 - **[模块地图](modules/domain-ports.md)** —— 每个 crate / 包的职责、关键类型、主流程与实现状态（基于代码事实）
-- **[架构决策记录](docs/decisions/index.md)** —— 47 份 ADR 全索引
+- **[架构决策记录](docs/decisions/index.md)** —— 仓库内 ADR 全索引
 - **[V2 架构基线](docs/architecture/v2/index.md)** —— 仓库内架构 source of truth 的镜像
 
 ## 版本快照
 
 | 契约 | 当前版本 |
 | --- | --- |
-| MissionPlan | `roboguide.mission-plan/v0.8`（v0.2–v0.7 兼容输入） |
+| MissionPlan | 默认 `roboguide.mission-plan/v0.8`；显式 v0.9 支持 Memory 前提（v0.2–v0.7 兼容输入） |
 | Node Protocol（wire） | `roboguide.node-protocol/v0.4` |
-| Node Contract（语义） | `roboguide.node.v0.6`（v0.4/v0.5 兼容） |
-| Node Config | `roboguide.node-config/v0.7`（v0.2–v0.6 兼容） |
+| Node Contract（语义） | `roboguide.node.v0.12`；按版本显式协商 |
+| Node Config | `roboguide.node-config/v0.13`；旧版本保持原有权限 |
 | Canonical Capability Catalog | `capability-catalog/v0.3` |
-| Controller checkpoint | `roboguide.controller-checkpoint/v17` |
+| Controller checkpoint | `roboguide.controller-checkpoint/v47` |
