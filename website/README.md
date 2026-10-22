@@ -57,6 +57,18 @@ Mermaid 11.12.2 is vendored with its MIT license to avoid runtime CDN failures. 
 artifact is `https://unpkg.com/mermaid@11.12.2/dist/mermaid.min.js`; no external font or diagram requests
 are required. Keep the version, license and template path together when upgrading.
 
+Maintained architecture diagrams are also committed as SVGs and displayed directly in the article,
+with a full-size link and expandable/downloadable Mermaid source. They remain visible with JavaScript
+disabled. After changing a registered Mermaid fence, regenerate its assets:
+
+```bash
+node website/browser-tests/render-diagrams.cjs
+```
+
+`diagram-assets.json` binds each SVG and downloadable source to the original fenced source and vendored
+renderer. Synchronization refuses changed source or asset bytes until regeneration. Ordinary unregistered
+Mermaid diagrams continue to use Material's local renderer. Do not edit generated SVGs by hand.
+
 ## CI and publication
 
 `.github/workflows/docs.yml` runs type/style/function-documentation checks, publication regressions,
@@ -71,3 +83,21 @@ clean, switch or consume uncommitted files in another session's checkout.
 After publication, read `/build-info.json`, both homepages, architecture pages and search/assets.
 Compare the deployed source SHA with the intended commit. A successful upload alone does not prove
 that the deployment uses the expected source. Keep the preceding verified commit for rollback.
+
+## Production branch isolation
+
+The production Worker must build `main` only. In Cloudflare Workers & Pages → `roboguide-docs` →
+Settings → Builds → Branch control, set the production branch to `main`. Keep preview builds disabled
+until the preview deploy command has been checked to avoid promotion to the production Worker.
+Branch controls are a Cloudflare account setting; `wrangler.jsonc` does not select the production Git
+branch. A repository change alone cannot fix an older branch's deploy command.
+
+On 2026-10-22, the production build metadata changed from main's `495a6d2` to development commit
+`6c5a099`, and both new atlas routes returned 404. This was verified from actual `build-info.json` and
+HTTP responses; it was not merely a missing Mermaid render. After each publication, compare the live
+source to the intended main commit and check the actual V2/atlas routes and image assets.
+
+Cloudflare documents the separate production/preview branch controls in its
+[Build branches guide](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/).
+Do not perform the irreversible Worker Previews migration as part of a documentation update without
+separate authorization; disabling preview builds is reversible.

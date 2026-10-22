@@ -32,6 +32,7 @@ import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
+from diagram_assets import diagram_registry, render_figures
 from site_support import (
     legacy_anchors,
     pin_links,
@@ -87,6 +88,7 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         "architecture-tour.md",
         (
             ("当前代码架构图", "docs/architecture/v2/current-architecture.md"),
+            ("V2 现行架构", "docs/architecture/v2/index.md"),
             ("核心概念", "concepts.md"),
             ("执行生命周期", "lifecycle.md"),
             ("State 与 Memory", "state-memory.md"),
@@ -169,6 +171,8 @@ def build_file_mapping() -> dict[str, str]:
                 site_relative = Path(destination) / relative
                 if site_relative.name == "README.md":
                     site_relative = site_relative.with_name("index.md")
+                elif site_relative.name == "README.en.md":
+                    site_relative = site_relative.with_name("index.en.md")
                 mapping[file_path.relative_to(REPO_ROOT).as_posix()] = site_relative.as_posix()
         elif source_path.is_file():
             site_relative = Path(destination)
@@ -330,10 +334,7 @@ def rewrite_markdown_file(
         return f"]({rewritten}{title})"
 
     rewritten_text = LINK_PATTERN.sub(replace, text)
-    rewritten_text = rewritten_text.replace("[English](architecture-handbook.en.md)", "")
-    rewritten_text = rewritten_text.replace("[中文](architecture-handbook.md)", "")
-    rewritten_text = rewritten_text.replace("[English](current-architecture.en.md)。", "")
-    rewritten_text = rewritten_text.replace("[中文](current-architecture.md).", "")
+    rewritten_text = re.sub(r"\[(?:English|中文)\]\([^()\s]+\.md\)[。.]?", "", rewritten_text)
     rewritten_text = pin_links(rewritten_text)
     rewritten_text = rewritten_text.replace("#原生-workload-与观测", "#workload")
     if rewritten_text != text:
@@ -531,6 +532,12 @@ def main() -> int:
             SITE_DOCS_DIR / site_posix, repo_posix, site_posix, mapping, broken_by_file
         )
         rewritten_pages += 1
+    registry = diagram_registry()
+    for path in SITE_DOCS_DIR.rglob("*.md"):
+        text = path.read_text(encoding="utf-8")
+        rendered = render_figures(text, registry)
+        if rendered != text:
+            path.write_text(rendered, encoding="utf-8")
     summaries = parse_adr_summaries(mapping)
     write_adr_overview(summaries)
     write_reference(SITE_DOCS_DIR)

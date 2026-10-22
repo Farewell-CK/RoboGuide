@@ -1,6 +1,6 @@
 # Current code architecture (Mermaid)
 
-Reviewed: 2026-10-22. Code baseline: `c6debbeb09d598b871f617cc74267d84a62e884e`.
+Reviewed: 2026-10-22. Code baseline: `495a6d274f6f930016d97ec5514124876e539cfe`.
 [中文](current-architecture.md). These views redraw the implemented V2 architecture from modules,
 call chains and composition roots. They introduce no new authority or change to [V2 semantics](README.md).
 Accepted ADRs govern subsequent evolution.

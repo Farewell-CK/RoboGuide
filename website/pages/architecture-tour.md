@@ -1,6 +1,7 @@
 # 架构导览
 
-先区分三种视图：逻辑架构解释谁负责，代码模块说明实现位置，部署拓扑说明哪些进程实际运行。完整说明见[V2 架构手册](docs/architecture/v2/architecture-handbook.md)。
+先区分三种视图：逻辑架构解释谁负责，代码模块说明实现位置，部署拓扑说明哪些进程实际运行。
+[V2 现行架构](docs/architecture/v2/index.md)已按当前主线整合；[架构手册](docs/architecture/v2/architecture-handbook.md)提供阅读路径。
 
 ## 系统定位
 

@@ -1,0 +1,23 @@
+flowchart TB
+  %% roboguide:min-width: 1440px
+  subgraph MIP[Mission Service 进程]
+    MS[Python HTTP / Request Engine] --- RQ[(Request / HTTP journal / provenance SQL)]
+  end
+  MW[可选 runtime MI worker 进程] --- WQ[(原 claim / nonce / provider 调用 SQL)]
+  MS -->|Controller HTTP API| APP
+  MW <-->|显式 runtime revision API| APP
+  subgraph CP[Controller 进程]
+    APP[Application + Orchestration / Control / Runtime / State / Integration]
+    APP --- DB[(权威 journal + 完整 checkpoint · SQLite)]
+    APP --- CAS[(Artifact CAS · 独立内容目录)]
+  end
+  subgraph NP[Node 进程]
+    NODE[Node Service / Local Integration Engine] --- NJ[(Node command / receipt journal)]
+  end
+  APP <-->|Node Protocol gRPC| NODE
+  NODE <-->|配置工作流| LOCAL[独立 Local EAIOS / Memory provider]
+  LOCAL --- PS[(provider 自有 SQL / 内容 / 原进程证据)]
+  CAS <-->|独立授权的数据面| NODE
+  HA[可选 Replica 成员 / supervisor<br/>各自 Raft SQL + 原 Controller child 日志] -.元数据 quorum / epoch / child 管理.-> APP
+  REC[静止 recovery-tool<br/>原 writer / inode lease / 活动引用校验] --> BUNDLE[(完整 profile SQL + 内容包<br/>校验后恢复到新目录)]
+  OBS[只读 metrics / deployment inspector] -.认证观察.-> APP

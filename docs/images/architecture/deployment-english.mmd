@@ -1,0 +1,23 @@
+flowchart TB
+  %% roboguide:min-width: 1440px
+  subgraph MIP[Mission Service process]
+    MS[Python HTTP / Request Engine] --- RQ[(Request / HTTP journal / provenance SQL)]
+  end
+  MW[Optional runtime MI worker process] --- WQ[(Original claim / nonce / provider-call SQL)]
+  MS -->|Controller HTTP API| APP
+  MW <-->|Explicit runtime revision API| APP
+  subgraph CP[Controller process]
+    APP[Application + Orchestration / Control / Runtime / State / Integration]
+    APP --- DB[(Authority journal + complete checkpoint · SQLite)]
+    APP --- CAS[(Artifact CAS · separate content root)]
+  end
+  subgraph NP[Node process]
+    NODE[Node Service / Local Integration Engine] --- NJ[(Node command / receipt journal)]
+  end
+  APP <-->|Node Protocol gRPC| NODE
+  NODE <-->|Configured workflows| LOCAL[Separate Local EAIOS / Memory provider]
+  LOCAL --- PS[(Provider-owned SQL / content / original process evidence)]
+  CAS <-->|Separately authorized data plane| NODE
+  HA[Optional Replica members / supervisors<br/>Own Raft SQL + original Controller child journals] -.Metadata quorum / epoch / child management.-> APP
+  REC[Quiescent recovery-tool<br/>Original writer / inode leases / active-reference checks] --> BUNDLE[(Complete profile SQL + content bundle<br/>Verify and restore to new roots)]
+  OBS[Read-only metrics / deployment inspector] -.Authenticated observation.-> APP

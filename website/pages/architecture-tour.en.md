@@ -1,6 +1,8 @@
 # Architecture tour
 
-Keep three views separate: logical architecture explains responsibility, code modules locate implementation, and deployment topology identifies actual processes. The [V2 architecture handbook](docs/architecture/v2/architecture-handbook.md) develops all three.
+Keep three views separate: logical responsibilities, code modules and deployed processes.
+The [V2 current architecture](docs/architecture/v2/index.md) integrates the reviewed mainline implementation;
+the [handbook](docs/architecture/v2/architecture-handbook.md) provides a reading path.
 
 ## Purpose
 
