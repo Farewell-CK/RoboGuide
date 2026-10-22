@@ -15,6 +15,7 @@ from .profile import real_directory
 from .snapshot_references import OperationBudget, canonical, digest, digest_profile
 
 SCHEMA = "roboguide.recovery-profile/v0.11"
+SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.12"}
 MAX_OPERATIONS = 4096
 MAX_INPUTS = 16_384
 MAX_RECORD_BYTES = 2 * 1024 * 1024
@@ -185,10 +186,10 @@ def _validate_request(request: dict[str, Any], owner: str) -> None:
 
 
 def operations(
-    root: Path, budget: OperationBudget
+    root: Path, budget: OperationBudget, *, profile_schema: str = SCHEMA
 ) -> list[tuple[Path, dict[str, Any], dict[str, Any] | None]]:
     """Read original history; unknown files or incomplete records keep a strict fence."""
-    owner = artifact_layout.validate_storage(root, SCHEMA)
+    owner = artifact_layout.validate_storage(root, profile_schema)
     assert owner is not None
     directory = real_directory(root / "maintenance-v1/operations")
     result = []
@@ -312,9 +313,9 @@ def prepare(
         if component["kind"] != "artifact":
             continue
         root = Path(component["root"])
-        owner = artifact_layout.validate_storage(root, SCHEMA)
+        owner = artifact_layout.validate_storage(root, profile["schema"])
         assert owner is not None
-        history = operations(root, budget)
+        history = operations(root, budget, profile_schema=profile["schema"])
         if len(history) >= MAX_OPERATIONS:
             raise ValueError("original Artifact operation history is full")
         if any(request["command_id"] == command_id for _, request, _ in history):
@@ -363,7 +364,7 @@ def _original(
     selected = next(
         (
             row
-            for row in operations(root, budget)
+            for row in operations(root, budget, profile_schema=manifest["profile"]["schema"])
             if row[1]["operation_id"] == descriptor["operation_id"]
         ),
         None,
@@ -405,7 +406,9 @@ def validate_bundle(bundle: Path, manifest: dict[str, Any], budget: OperationBud
             raise ValueError(
                 "Artifact Snapshot bundle lost its original pre-publication active intent"
             )
-        for _, request, retired in operations(root, budget):
+        for _, request, retired in operations(
+            root, budget, profile_schema=manifest["profile"]["schema"]
+        ):
             if retired is not None:
                 continue
             for value in request["inputs"]:
@@ -471,13 +474,13 @@ def abort(
         if component["kind"] != "artifact":
             continue
         root = Path(component["root"])
-        owner = artifact_layout.validate_storage(root, SCHEMA)
+        owner = artifact_layout.validate_storage(root, profile["schema"])
         assert owner is not None
         purpose = _purpose(profile, component, destination, command_id, owner["owner_id"])
         selected = next(
             (
                 row
-                for row in operations(root, budget)
+                for row in operations(root, budget, profile_schema=profile["schema"])
                 if row[1]["operation_id"] == digest(canonical(purpose))
             ),
             None,

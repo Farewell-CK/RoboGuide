@@ -226,6 +226,13 @@ pub struct ArtifactCatalog {
 }
 
 impl ArtifactCatalog {
+    /// Shares the already owned retained backend for explicit maintenance, never granting Memory use.
+    pub(crate) fn archive_source(&self) -> Result<FileSystemArtifactStore, String> {
+        self.ensure_available().map_err(|error| error.message)?;
+        self.retained_store
+            .clone()
+            .ok_or_else(|| "Archive requires the original retained Artifact owner".into())
+    }
     /// Resolves one byte-replica claim to the sole published Spatial source under writer ordering.
     fn resolve_typed_memory_replica(
         &self,
@@ -431,7 +438,7 @@ impl ArtifactCatalog {
         let mut upload_records = BTreeMap::new();
         let mut retention = state::ArtifactRetentionProjection::default();
         let mut timestamp_high_water = TimestampMs::new(0);
-        for event in event_log.decoded_events()? {
+        for event in event_log.catalog_replay_events()? {
             if let EventPayload::ArtifactCatalogReferenceTransition { record } = event.payload() {
                 retention.apply(record)?;
             }
@@ -953,7 +960,7 @@ impl ArtifactCatalog {
     ) -> Result<Vec<(domain::LocalizationVerificationEvidence, TimestampMs)>, String> {
         self.ensure_available().map_err(|error| error.message)?;
         self.event_log
-            .decoded_events()
+            .catalog_replay_events()
             .map_err(|error| error.to_string())
             .map(|events| {
                 events

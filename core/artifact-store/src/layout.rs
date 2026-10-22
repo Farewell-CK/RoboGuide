@@ -15,6 +15,8 @@ use std::path::Path;
 pub const ARTIFACT_LAYOUT_SCHEMA: &str = "roboguide.artifact-storage/v1";
 /// Explicit format whose mandatory original maintenance journal fences v1 writers.
 pub const ARTIFACT_REFERENCE_LAYOUT_SCHEMA: &str = "roboguide.artifact-storage/v2";
+/// Explicit format retaining the inventory of original Controller reference authorities.
+pub const ARTIFACT_ARCHIVE_LAYOUT_SCHEMA: &str = "roboguide.artifact-storage/v3";
 /// Immutable original backend metadata required by retained-layout recovery profiles.
 pub const ARTIFACT_OWNER_FILE: &str = ".retention-owner.json";
 /// Finalized content tree whose old path is a regular-file format fence.
@@ -24,8 +26,75 @@ const INTENT_FILE: &str = ".retention-intent.json";
 /// Maximum complete owner metadata accepted before allocation or deserialization.
 const MAX_OWNER_BYTES: u64 = 4096;
 
+mod authorities;
 mod references;
+pub(crate) use authorities::{bind_authority, open_authorities};
 pub(crate) use references::open_references;
+
+/// Inspects an already accepted retained root under a shared lease without initialization or repair.
+pub(crate) fn inspect_retained(root: &Path) -> Result<(String, &'static str), ArtifactStoreError> {
+    validate_directory_tree(root, false, "inspect retained Artifact root")?;
+    if exists(&root.join(INTENT_FILE))?
+        || exists(&root.join(references::UPGRADE_INTENT))?
+        || exists(&root.join(authorities::UPGRADE_INTENT))?
+    {
+        return Err(unsafe_path_error(
+            "inspect retained Artifact root",
+            "original upgrade is incomplete",
+        ));
+    }
+    let value: serde_json::Value = {
+        let mut bytes = Vec::new();
+        open_regular_file(
+            &root.join(ARTIFACT_OWNER_FILE),
+            "inspect retained Artifact owner",
+        )?
+        .take(MAX_OWNER_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| io_error("read retained Artifact owner", error))?;
+        if bytes.len() as u64 > MAX_OWNER_BYTES {
+            return Err(unsafe_path_error(
+                "inspect retained Artifact owner",
+                "owner exceeds bound",
+            ));
+        }
+        serde_json::from_slice(&bytes)
+            .map_err(|error| io_error("parse retained Artifact owner", io::Error::other(error)))?
+    };
+    let schema = match value.get("schema").and_then(serde_json::Value::as_str) {
+        Some(ARTIFACT_LAYOUT_SCHEMA) => ARTIFACT_LAYOUT_SCHEMA,
+        Some(ARTIFACT_REFERENCE_LAYOUT_SCHEMA) => ARTIFACT_REFERENCE_LAYOUT_SCHEMA,
+        Some(ARTIFACT_ARCHIVE_LAYOUT_SCHEMA) => ARTIFACT_ARCHIVE_LAYOUT_SCHEMA,
+        _ => {
+            return Err(unsafe_path_error(
+                "inspect retained Artifact owner",
+                "original schema is unsupported",
+            ));
+        }
+    };
+    let owner = read_owner_for(&root.join(ARTIFACT_OWNER_FILE), schema)?;
+    if read_owner_for(&root.join(BLOB_DIRECTORY), schema)? != owner {
+        return Err(unsafe_path_error(
+            "inspect retained Artifact owner",
+            "original fence conflicts",
+        ));
+    }
+    if matches!(
+        schema,
+        ARTIFACT_REFERENCE_LAYOUT_SCHEMA | ARTIFACT_ARCHIVE_LAYOUT_SCHEMA
+    ) {
+        references::validate_journal(root, &owner)?;
+    }
+    if schema == ARTIFACT_ARCHIVE_LAYOUT_SCHEMA {
+        authorities::validate(root, &owner)?;
+    }
+    validate_directory_tree(
+        &root.join(RETAINED_BLOB_DIRECTORY),
+        false,
+        "inspect retained Artifact bytes",
+    )?;
+    Ok((owner.owner_id, schema))
+}
 
 /// Frozen local directory-rename evidence, not a claim about a restored filesystem inode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

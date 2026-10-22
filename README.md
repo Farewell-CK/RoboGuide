@@ -1,5 +1,13 @@
 # RoboGuide
 
+正在接通完整内容归档：显式 Archive command v0.2 在原 SQL writer 内先记录原命令、
+内容和预算，真实复制并验证后才压缩事件。wrapper v49 / Artifact storage v3 保存
+原 Controller reference authority；recovery v0.12 / bundle v0.4 保留完整 Catalog、
+source/target CAS、原引用和 mandatory 空目录。旧格式工具须拒绝，原命令只读对账
+不重新复制或续期。见 [ADR-0152](docs/decisions/0152-original-archive-content-and-catalog-recovery.md)
+及 [ADR-0153](docs/decisions/0153-artifact-reference-authority-inventory.md)。当前在执行
+实际零 Node 进程验收；GC/Raft Snapshot/在线多数派及其余完整整改继续实施。
+
 Artifact Snapshot 维护可显式选择 storage v2 / recovery v0.11：保留原 owner，复制前持久
 原引用和预算；中断后原命令只允许查询对账，完整原发布验证后才退休。恢复保留原 active
 intent，明确 abort 须持有所有原 writer 并保留 partial。见

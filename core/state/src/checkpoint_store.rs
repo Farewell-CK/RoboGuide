@@ -217,6 +217,13 @@ pub(super) fn read(
         }
         return Ok(None);
     };
+    if baseline.schema == crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+        || head
+            .as_ref()
+            .is_some_and(|head| head.schema == crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA)
+    {
+        super::archive_operation::require_storage(connection)?;
+    }
     if baseline.schema != CHAIN_SCHEMA {
         if head.is_some() || count != 0 {
             return Err(SqliteEventLogError::Codec(
@@ -339,6 +346,12 @@ pub(super) fn write(
     sequence: u64,
 ) -> Result<StoredCheckpoint, SqliteEventLogError> {
     validate_snapshot(schema, json.as_bytes())?;
+    if schema == crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA {
+        super::archive_operation::initialize(
+            connection,
+            previous.is_some_and(|previous| previous.snapshot.schema == schema),
+        )?;
+    }
     if previous.is_some_and(|previous| sequence < previous.snapshot.event_sequence) {
         return Err(SqliteEventLogError::Codec(
             "checkpoint event tail regressed".into(),

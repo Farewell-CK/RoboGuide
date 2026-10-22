@@ -7,7 +7,7 @@ pub(super) const UPGRADE_INTENT: &str = ".maintenance-upgrade.json";
 /// Bounded mandatory original-operation history, never a transient staging directory.
 pub(crate) const JOURNAL_DIRECTORY: &str = "maintenance-v1";
 /// Original software identity inside the journal, independently of its file path.
-const JOURNAL_IDENTITY: &str = "identity.json";
+pub(super) const JOURNAL_IDENTITY: &str = "identity.json";
 
 /// Reads bounded original metadata before examining its version, without following a symlink.
 fn metadata_value(path: &Path) -> Result<serde_json::Value, ArtifactStoreError> {
@@ -27,7 +27,7 @@ fn metadata_value(path: &Path) -> Result<serde_json::Value, ArtifactStoreError> 
 }
 
 /// Checks a closed same-owner journal header before any service can use the new format.
-fn validate_journal(root: &Path, owner: &Owner) -> Result<(), ArtifactStoreError> {
+pub(super) fn validate_journal(root: &Path, owner: &Owner) -> Result<(), ArtifactStoreError> {
     let journal = root.join(JOURNAL_DIRECTORY);
     validate_directory_tree(&journal, false, "validate Artifact maintenance journal")?;
     validate_directory_tree(
@@ -35,11 +35,7 @@ fn validate_journal(root: &Path, owner: &Owner) -> Result<(), ArtifactStoreError
         false,
         "validate original Artifact operation history",
     )?;
-    if read_owner_for(
-        &journal.join(JOURNAL_IDENTITY),
-        ARTIFACT_REFERENCE_LAYOUT_SCHEMA,
-    )? != *owner
-    {
+    if read_owner_for(&journal.join(JOURNAL_IDENTITY), &owner.schema)? != *owner {
         return Err(unsafe_path_error(
             "validate Artifact maintenance journal",
             "original owner differs",
@@ -49,7 +45,11 @@ fn validate_journal(root: &Path, owner: &Owner) -> Result<(), ArtifactStoreError
 }
 
 /// Publishes or resumes one exact metadata replacement; no original backend identity is generated.
-fn replace_owner(root: &Path, name: &str, owner: &Owner) -> Result<(), ArtifactStoreError> {
+pub(super) fn replace_owner(
+    root: &Path,
+    name: &str,
+    owner: &Owner,
+) -> Result<(), ArtifactStoreError> {
     let path = root.join(name);
     let existing = metadata_value(&path)?;
     let schema = existing
@@ -58,29 +58,33 @@ fn replace_owner(root: &Path, name: &str, owner: &Owner) -> Result<(), ArtifactS
         .unwrap_or_default();
     if !matches!(
         schema,
-        ARTIFACT_LAYOUT_SCHEMA | ARTIFACT_REFERENCE_LAYOUT_SCHEMA
-    ) {
+        ARTIFACT_LAYOUT_SCHEMA | ARTIFACT_REFERENCE_LAYOUT_SCHEMA | ARTIFACT_ARCHIVE_LAYOUT_SCHEMA
+    ) || !(schema == owner.schema
+        || (schema == ARTIFACT_LAYOUT_SCHEMA && owner.schema == ARTIFACT_REFERENCE_LAYOUT_SCHEMA)
+        || (schema == ARTIFACT_REFERENCE_LAYOUT_SCHEMA
+            && owner.schema == ARTIFACT_ARCHIVE_LAYOUT_SCHEMA))
+    {
         return Err(unsafe_path_error(
             "upgrade Artifact owner",
             "original schema differs",
         ));
     }
     let mut original = read_owner_for(&path, schema)?;
-    original.schema = ARTIFACT_REFERENCE_LAYOUT_SCHEMA.into();
+    original.schema = owner.schema.clone();
     if original != *owner {
         return Err(unsafe_path_error(
             "upgrade Artifact owner",
             "original immutable owner differs",
         ));
     }
-    if schema == ARTIFACT_REFERENCE_LAYOUT_SCHEMA {
+    if schema == owner.schema {
         return Ok(());
     }
     let temporary = format!(".maintenance-replace-{name}.json");
     // A crash can leave only this exact original operation's deterministic file.
     let pending = root.join(&temporary);
     if exists(&pending)? {
-        if read_owner_for(&pending, ARTIFACT_REFERENCE_LAYOUT_SCHEMA)? != *owner {
+        if read_owner_for(&pending, &owner.schema)? != *owner {
             return Err(unsafe_path_error(
                 "resume Artifact owner",
                 "replacement identity conflicts",
@@ -109,10 +113,14 @@ fn replace_owner(root: &Path, name: &str, owner: &Owner) -> Result<(), ArtifactS
 }
 
 /// Writes a new exact bounded immutable record; an existing file must match its original bytes.
-fn create_record(root: &Path, name: &str, owner: &Owner) -> Result<(), ArtifactStoreError> {
+pub(super) fn create_record(
+    root: &Path,
+    name: &str,
+    owner: &Owner,
+) -> Result<(), ArtifactStoreError> {
     let path = root.join(name);
     if exists(&path)? {
-        if read_owner_for(&path, ARTIFACT_REFERENCE_LAYOUT_SCHEMA)? != *owner {
+        if read_owner_for(&path, &owner.schema)? != *owner {
             return Err(unsafe_path_error(
                 "initialize Artifact journal",
                 "original identity conflicts",

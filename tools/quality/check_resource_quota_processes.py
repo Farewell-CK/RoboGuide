@@ -227,6 +227,7 @@ def run(output: Path, skip_build: bool, binary_path: Path | None) -> dict[str, A
     if schema not in {
         "roboguide.controller-checkpoint/v47",
         "roboguide.controller-checkpoint/v48",
+        "roboguide.controller-checkpoint/v49",
     }:
         raise ValueError(f"unexpected Controller application schema {schema}")
     http_port, artifact_port, grpc_port = port(), port(), port()

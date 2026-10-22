@@ -1,8 +1,16 @@
 # 当前软件实现与部署拓扑
 
-更新：2026-10-21。对应全部非发布软件整改计划；后续目标不视为当前能力。
+更新：2026-10-22。对应全部非发布软件整改计划；后续目标不视为当前能力。
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
+
+ADR-0152/0153 的显式 Archive 路径使用 wrapper v49、Artifact storage v3 与
+recovery v0.12 / bundle v0.4。原 SQL authority 在读取内容前持久原 intent/pin；
+CAS inventory 记录实际原 Controller store identity，冷备份须包含所有已知 consumer。
+独立 Archive root writer 保护接收端副本；实际发布验证后才原子保存 Catalog 恢复投影、
+history floor 和原 compact receipt。接收端原 reference 独立保留。完整目录清单保存
+嵌套 backend 的 mandatory 空目录；缺记录、目录或字节均拒绝。实际门禁验证中，
+尚不能据此宣告 N1/在线 HA/设备连续性完成。
 
 ADR-0151 接入显式 Artifact storage v2：在原 root writer 内保留同一 owner，
 以持久升级意图和旧格式 fence 接入原维护引用日志。实际 Snapshot/Archive producer 须
@@ -10,6 +18,13 @@ ADR-0151 接入显式 Artifact storage v2：在原 root writer 内保留同一 o
 验证或独立停止后的显式 abort 才退休。Recovery v0.11/bundle v0.3 接通实际 Artifact
 Snapshot 复制生产者；恢复保留原 active intent。Archive/Raft Snapshot/在线 Replica
 生产者与 GC 仍继续实施，不能由 Snapshot gate 推断已经完成；引用不是内容读权。
+
+ADR-0152 的 Archive 实施保留两份不同责任：State 的原事件前缀/完整 Catalog 恢复证据，
+以及实际 Artifact owner 对该归档内容副本的引用。只有原前缀、checkpoint、Catalog
+checkpoint 和同 owner 内容闭包都持久发布/验证后才可 compact；原引用在原 SQL
+compact 结果可独立对账后退休。缺字节或 Unknown 不删除引用/历史。Catalog 恢复证据
+由明确版本的独立投影保存，不能丢弃后假定 application checkpoint 已经包含它。
+此项完成实现与实际门禁前仍属后续目标，Node/物理停止不由 Archive 产生。
 
 ADR-0150 保留 Node v0.4 原 wire/sequence/application completion 合同，在原验证 ingress
 后以每 session 最多 8 个待完成事实接通已有有界应用批处理。提交仍按原 wire 顺序同步

@@ -116,6 +116,22 @@ jobs:
           uv run --frozen python tools/quality/check_artifact_snapshot_processes.py
           --skip-build --output "${RUNNER_TEMP}/roboguide-artifact-snapshot"
 
+      - name: Verify actual original content Archive with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_content_archive_processes.py
+          --skip-build --output "${RUNNER_TEMP}/roboguide-content-archive"
+
+      - name: Verify original file Catalog replay after actual Archive
+        run: >
+          uv run --frozen python tools/quality/check_memory_preparation_processes.py
+          --output /tmp/rg-ci-catalog-archive --process-workers --artifact-retention
+          --content-archive --async-workers 1
+
+      - name: Verify actual archived Catalog cold recovery
+        run: >
+          uv run --frozen python tools/quality/check_catalog_archive_recovery_processes.py
+          --from /tmp/rg-ci-catalog-archive --output "${RUNNER_TEMP}/roboguide-catalog-archive-recovery"
+
   python:
     name: Python
     runs-on: ubuntu-24.04

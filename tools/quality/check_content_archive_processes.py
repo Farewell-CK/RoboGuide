@@ -1,0 +1,635 @@
+"""Check actual zero-Node mTLS Archive publication, SQL interruption and original cold recovery."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import io
+import json
+import os
+import sqlite3
+import ssl
+import subprocess
+import sys
+import tarfile
+import time
+import urllib.error
+from pathlib import Path
+from typing import Any
+
+from check_artifact_authority_processes import call as http_call
+from check_artifact_authority_processes import grant
+from check_identity_processes import ROOT, client, pki, port, stop
+from check_state_verifier_processes import save
+
+
+def run(
+    directory: Path, skip_build: bool, old_controller: Path | None, old_recovery_ref: str | None
+) -> dict[str, Any]:
+    """Retain actual software process, file, SQL and TLS evidence with zero Nodes."""
+    directory.mkdir(mode=0o700, parents=True, exist_ok=False)
+    if not skip_build:
+        subprocess.run(
+            ["cargo", "build", "--locked", "-p", "integration-server"],
+            cwd=ROOT,
+            check=True,
+            timeout=240,
+        )
+    binary = ROOT / "target/debug/integration-server"
+    source_paths = [
+        *sorted((ROOT / "apps/integration-server/src").rglob("*.rs")),
+        *sorted((ROOT / "core/state/src").rglob("*.rs")),
+        *sorted((ROOT / "core/artifact-store/src").rglob("*.rs")),
+        *sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py")),
+        ROOT / "Cargo.lock",
+        Path(__file__),
+    ]
+    frozen = {
+        str(path.relative_to(ROOT)): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in source_paths
+    }
+    save(directory / "source-identity.json", frozen)
+    binary_digest = "sha256:" + hashlib.sha256(binary.read_bytes()).hexdigest()
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
+    }
+    certificates = directory / "pki"
+    leaves = pki(certificates)
+    admin = client(certificates, "admin")
+    viewer = client(certificates, "viewer")
+    artifact_policy = directory / "artifact-policy.json"
+    operator_policy = directory / "operator-policy.json"
+    save(
+        artifact_policy,
+        {
+            "schema_version": "roboguide.artifact-authorization/v0.1",
+            "registry_id": "archive-file-authority",
+            "revision": 1,
+            "grants": {"sha256:" + leaves["admin"]: grant("archive-file-admin", "admin", "local")},
+        },
+    )
+    save(
+        operator_policy,
+        {
+            "schema_version": "roboguide.operator-authorization/v0.1",
+            "registry_id": "archive-operator-authority",
+            "revision": 1,
+            "grants": {
+                "sha256:" + leaves["admin"]: {
+                    "principal_id": "archive-recovery-admin",
+                    "role": "recovery-admin",
+                    "tenant_ids": ["*"],
+                },
+                "sha256:" + leaves["viewer"]: {
+                    "principal_id": "archive-viewer",
+                    "role": "operator",
+                    "tenant_ids": ["local"],
+                },
+            },
+        },
+    )
+    for plane, policy in (("ARTIFACT", artifact_policy), ("OPERATOR", operator_policy)):
+        environment.update(
+            {
+                f"ROBOGUIDE_{plane}_MTLS_SERVER_CERT": str(certificates / "server.crt"),
+                f"ROBOGUIDE_{plane}_MTLS_SERVER_KEY": str(certificates / "server.key"),
+                f"ROBOGUIDE_{plane}_MTLS_CLIENT_CA": str(certificates / "ca.crt"),
+                f"ROBOGUIDE_{plane}_MTLS_ROLE_MAP": str(policy),
+            }
+        )
+    controller_root = directory / "controller"
+    controller_root.mkdir()
+    source = directory / "artifact"
+    archive = directory / "archive"
+    archive.mkdir()
+    database = controller_root / "events.sqlite3"
+    environment.update(
+        {
+            "ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA": "roboguide.artifact-storage/v3",
+            "ROBOGUIDE_EVENT_ARCHIVE_DIRECTORY": str(archive),
+            "TOKIO_WORKER_THREADS": "1",
+        }
+    )
+    grpc_port, operator_port, artifact_port = port(), port(), port()
+    operator_origin = f"https://127.0.0.1:{operator_port}"
+    artifact_origin = f"https://127.0.0.1:{artifact_port}"
+    arguments = [
+        str(binary),
+        f"127.0.0.1:{grpc_port}",
+        str(database),
+        f"127.0.0.1:{operator_port}",
+        f"127.0.0.1:{artifact_port}",
+        str(source),
+    ]
+    processes: list[subprocess.Popen[bytes]] = []
+    trace: list[dict[str, Any]] = []
+    commands: list[dict[str, Any]] = []
+
+    def call(
+        origin: str,
+        context: ssl.SSLContext,
+        method: str,
+        path: str,
+        body: dict[str, Any] | bytes | None = None,
+    ) -> tuple[int, bytes]:
+        """Keep actual authenticated statuses and response hashes."""
+        encoded = json.dumps(body).encode() if isinstance(body, dict) else body
+        status, raw = http_call(origin, context, method, path, encoded)
+        item: dict[str, Any] = {
+            "origin": origin,
+            "caller": "admin" if context is admin else "viewer",
+            "method": method,
+            "path": path,
+            "status": status,
+            "response_digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        }
+        try:
+            item["response_json"] = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        trace.append(item)
+        save(directory / "http-trace.json", trace)
+        return status, raw
+
+    def launch(
+        selected_database: Path = database,
+        selected_source: Path = source,
+        selected_archive: Path = archive,
+    ) -> subprocess.Popen[bytes]:
+        """Start only the actual Controller, retaining its own logs and real readiness outcome."""
+        path = directory / f"controller-{len(processes)}.log"
+        with path.open("wb") as output:
+            process = subprocess.Popen(
+                [
+                    arguments[0],
+                    arguments[1],
+                    str(selected_database),
+                    arguments[3],
+                    arguments[4],
+                    str(selected_source),
+                ],
+                cwd=ROOT,
+                env=environment | {"ROBOGUIDE_EVENT_ARCHIVE_DIRECTORY": str(selected_archive)},
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=output,
+            )
+        processes.append(process)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError(f"actual Controller exited; inspect {path}")
+            try:
+                if call(operator_origin, admin, "GET", "/readyz")[0] == 200:
+                    return process
+            except (OSError, urllib.error.URLError):
+                pass
+            time.sleep(0.05)
+        raise TimeoutError("actual Archive Controller readiness unavailable")
+
+    def execute(
+        parameters: list[str], passed: bool = True, extra_environment: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        """Keep actual standalone CLI/binary wait results and unmodified raw command output."""
+        completed = subprocess.run(
+            parameters,
+            cwd=ROOT,
+            env=environment | (extra_environment or {}),
+            capture_output=True,
+            timeout=90,
+        )
+        label = f"command-{len(commands)}"
+        (directory / (label + ".stdout")).write_bytes(completed.stdout)
+        (directory / (label + ".stderr")).write_bytes(completed.stderr)
+        commands.append({"argv": parameters, "exit_code": completed.returncode})
+        save(directory / "commands.json", commands)
+        if not passed:
+            assert completed.returncode != 0
+            return {}
+        assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+        result = json.loads(completed.stdout)
+        assert isinstance(result, dict)
+        return result
+
+    def recovery(*parameters: str, passed: bool = True) -> dict[str, Any]:
+        """Use the shipped independent CLI against complete externally pinned real bundle bytes."""
+        return execute(
+            [sys.executable, "-m", "roboguide_recovery", *parameters],
+            passed,
+            {"PYTHONPATH": str(ROOT / "apps/recovery-tool")},
+        )
+
+    def rows(selected_database: Path = database) -> list[tuple[Any, ...]]:
+        """Read original SQL intent/state/receipt independently after production requests."""
+        with sqlite3.connect(selected_database.as_uri() + "?mode=ro", uri=True) as connection:
+            return connection.execute(
+                "SELECT command_id,intent_json,state,receipt_json FROM event_archive_operations "
+                "ORDER BY command_id"
+            ).fetchall()
+
+    try:
+        process = launch()
+        assert json.loads(call(operator_origin, admin, "GET", "/v1/inventory")[1])["nodes"] == []
+        payload = (ROOT / "core/domain/src/memory.rs").read_bytes()
+        checksum = "sha256:" + hashlib.sha256(payload).hexdigest()
+        upload = "original-archive-file"
+        assert (
+            call(artifact_origin, admin, "POST", "/v1/artifact-uploads", {"upload_id": upload})[0]
+            == 201
+        )
+        assert (
+            call(artifact_origin, admin, "PUT", f"/v1/artifact-uploads/{upload}/content", payload)[
+                0
+            ]
+            == 202
+        )
+        assert (
+            call(
+                artifact_origin,
+                admin,
+                "POST",
+                f"/v1/artifact-uploads/{upload}/finalize",
+                {"content_digest": checksum, "byte_size": len(payload)},
+            )[0]
+            == 201
+        )
+        manifest = {
+            "schema": "roboguide.memory-manifest/v0.1",
+            "selector": {"memory_id": "original-source-file", "revision_id": "one"},
+            "kind": "artifact",
+            "provider_id": "archive-file-owner",
+            "owner": {"owner": "robo_guide", "component": "archive-file-owner"},
+            "scope": {"kind": "global"},
+            "visibility": "exchangeable",
+            "payload_schema": "opaque-file/v1",
+            "media_type": "application/octet-stream",
+            "artifact": {"content_digest": checksum, "byte_size": len(payload)},
+            "source_mission_id": None,
+            "source_execution_id": None,
+            "source_task_ref": None,
+            "created_at": 1,
+        }
+        memory_path = "/v1/memories/original-source-file/revisions/one"
+        status, raw = call(artifact_origin, admin, "POST", memory_path, manifest)
+        assert status == 403, raw
+        status, raw = call(operator_origin, admin, "GET", "/v1/maintenance/archive")
+        assert status == 200
+        cutoff = json.loads(raw)["latest_sequence"]
+        command = {
+            "schema": "roboguide.archive-command/v0.2",
+            "command_id": "original-archive",
+            "end_sequence": cutoff,
+            "budget_ms": 60_000,
+        }
+        assert call(operator_origin, viewer, "POST", "/v1/maintenance/archive", command)[0] == 403
+        with sqlite3.connect(database) as connection:
+            before = connection.execute(
+                "SELECT sequence,payload_schema,payload_json FROM events ORDER BY sequence"
+            ).fetchall()
+            connection.execute(
+                "CREATE TRIGGER refuse_archive_floor BEFORE INSERT ON event_log_metadata "
+                "WHEN NEW.key='history_floor' BEGIN SELECT RAISE(ABORT,"
+                "'actual Archive SQL publication fault'); END"
+            )
+        assert call(operator_origin, admin, "POST", "/v1/maintenance/archive", command)[0] == 503
+        original = rows()
+        assert len(original) == 1 and original[0][2:] == ("pending", None)
+        intent = json.loads(original[0][1])
+        publication = (
+            archive
+            / "archives-v1"
+            / hashlib.sha256(intent["request"]["authority_id"].encode()).hexdigest()
+            / ("archive-" + hashlib.sha256(b"original-archive").hexdigest())
+        )
+        assert (publication / "publication.json").is_file()
+        target = publication / "content/objects-v1/sha256" / checksum[7:9] / checksum[7:]
+        assert target.read_bytes() == payload
+        original_files = {
+            str(path.relative_to(publication)): (
+                path.stat().st_ino,
+                path.stat().st_mtime_ns,
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+            for path in publication.rglob("*")
+            if path.is_file()
+        }
+        with sqlite3.connect(database) as connection:
+            assert (
+                connection.execute(
+                    "SELECT sequence,payload_schema,payload_json FROM events ORDER BY sequence"
+                ).fetchall()
+                == before
+            )
+            assert connection.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name='catalog_archive_events'"
+            ).fetchone() == (0,)
+            connection.execute("DROP TRIGGER refuse_archive_floor")
+        stop(process)
+        process = launch()
+        assert call(operator_origin, admin, "POST", "/v1/maintenance/archive", command)[0] == 200
+        compacted = rows()
+        assert compacted[0][1] == original[0][1] and compacted[0][2] == "compacted"
+        assert call(operator_origin, admin, "POST", "/v1/maintenance/archive", command)[0] == 200
+        assert rows() == compacted
+        assert {
+            str(path.relative_to(publication)): (
+                path.stat().st_ino,
+                path.stat().st_mtime_ns,
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+            for path in publication.rglob("*")
+            if path.is_file()
+        } == original_files
+        assert call(artifact_origin, admin, "GET", "/v1/artifact-uploads/" + upload)[0] == 200
+        assert call(artifact_origin, admin, "GET", "/v1/artifacts/" + checksum) == (200, payload)
+        stop(process)
+        process = launch()
+        assert call(artifact_origin, admin, "GET", "/v1/artifact-uploads/" + upload)[0] == 200
+        assert call(artifact_origin, admin, "GET", "/v1/artifacts/" + checksum) == (200, payload)
+        assert json.loads(call(operator_origin, admin, "GET", "/v1/inventory")[1])["nodes"] == []
+        stop(process)
+        profile: dict[str, Any] = {
+            "schema": "roboguide.recovery-profile/v0.12",
+            "profile_id": "original-content-archive",
+            "revision": 1,
+            "max_bytes": 32 * 1024 * 1024,
+            "max_files": 512,
+            "budget_seconds": 60,
+            "artifact_replica_sets": [],
+            "components": [
+                {
+                    "component_id": "controller",
+                    "kind": "controller",
+                    "root": str(controller_root),
+                    "database": "events.sqlite3",
+                    "trees": [],
+                    "depends_on": [],
+                },
+                {
+                    "component_id": "artifact",
+                    "kind": "artifact",
+                    "root": str(source),
+                    "database": None,
+                    "trees": [],
+                    "depends_on": ["controller"],
+                },
+                {
+                    "component_id": "archive",
+                    "kind": "archive",
+                    "root": str(archive),
+                    "database": None,
+                    "trees": [],
+                    "depends_on": ["controller", "artifact"],
+                },
+            ],
+        }
+        profile_path = directory / "profile.json"
+        save(profile_path, profile)
+        # Source Catalog evidence, Archive destination and known consumers are all mandatory.
+        for label, components in (
+            ("missing-archive", profile["components"][:2]),
+            ("missing-controller", [profile["components"][1] | {"depends_on": []}]),
+        ):
+            broken = directory / (label + ".json")
+            save(broken, profile | {"components": components})
+            recovery(
+                "backup",
+                "--profile",
+                str(broken),
+                "--destination",
+                str(directory / label),
+                "--command-id",
+                label,
+                passed=False,
+            )
+            assert not (directory / label).exists()
+        bundle = directory / "bundle"
+        created = recovery(
+            "backup",
+            "--profile",
+            str(profile_path),
+            "--destination",
+            str(bundle),
+            "--command-id",
+            "original-cold-copy",
+        )
+        recovery("verify", "--bundle", str(bundle), "--manifest-digest", created["manifest_digest"])
+        restored = directory / "restored"
+        receipt = recovery(
+            "restore",
+            "--bundle",
+            str(bundle),
+            "--manifest-digest",
+            created["manifest_digest"],
+            "--destination",
+            str(restored),
+            "--command-id",
+            "restore-original",
+        )
+        assert receipt["schema"] == "roboguide.restore-receipt/v0.12"
+        assert rows(restored / "stores/controller/events.sqlite3") == compacted
+        process = launch(
+            restored / "stores/controller/events.sqlite3",
+            restored / "stores/artifact",
+            restored / "stores/archive",
+        )
+        assert call(artifact_origin, admin, "GET", "/v1/artifact-uploads/" + upload)[0] == 200
+        assert call(artifact_origin, admin, "GET", "/v1/artifacts/" + checksum) == (200, payload)
+        stop(process)
+        # Removing one receiving CAS entry still refuses after re-pinning the owned bundle.
+        saved_manifest = json.loads((bundle / "manifest.json").read_bytes())
+        target_name = "stores/archive/" + target.relative_to(archive).as_posix()
+        target_raw = (bundle / target_name).read_bytes()
+        (bundle / target_name).unlink()
+        changed = dict(
+            saved_manifest,
+            files=[row for row in saved_manifest["files"] if row["path"] != target_name],
+        )
+        changed_raw = json.dumps(
+            changed, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+        (bundle / "manifest.json").write_bytes(changed_raw)
+        recovery(
+            "verify",
+            "--bundle",
+            str(bundle),
+            "--manifest-digest",
+            "sha256:" + hashlib.sha256(changed_raw).hexdigest(),
+            passed=False,
+        )
+        (bundle / target_name).write_bytes(target_raw)
+        (bundle / "manifest.json").write_bytes(
+            json.dumps(
+                saved_manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode()
+        )
+        recovery("verify", "--bundle", str(bundle), "--manifest-digest", created["manifest_digest"])
+        binding = (
+            "stores/artifact/reference-authorities-v1/controllers/"
+            + intent["request"]["authority_id"].split(":", 1)[1]
+            + ".json"
+        )
+        binding_raw = (bundle / binding).read_bytes()
+        (bundle / binding).unlink()
+        missing_binding = dict(
+            saved_manifest, files=[row for row in saved_manifest["files"] if row["path"] != binding]
+        )
+        missing_raw = json.dumps(
+            missing_binding, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+        (bundle / "manifest.json").write_bytes(missing_raw)
+        recovery(
+            "verify",
+            "--bundle",
+            str(bundle),
+            "--manifest-digest",
+            "sha256:" + hashlib.sha256(missing_raw).hexdigest(),
+            passed=False,
+        )
+        assert (
+            b"original known Artifact consumer record is missing"
+            in (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
+        )
+        (bundle / binding).write_bytes(binding_raw)
+        (bundle / "manifest.json").write_bytes(
+            json.dumps(
+                saved_manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode()
+        )
+        recovery("verify", "--bundle", str(bundle), "--manifest-digest", created["manifest_digest"])
+        old_writer = None
+        if old_controller is not None:
+            old_root = directory / "old-writer"
+            old_root.mkdir()
+            old_database = old_root / "events.sqlite3"
+            with (
+                sqlite3.connect(database) as original_sql,
+                sqlite3.connect(old_database) as copied_sql,
+            ):
+                original_sql.backup(copied_sql)
+            execute(
+                [
+                    str(old_controller),
+                    arguments[1],
+                    str(old_database),
+                    arguments[3],
+                    arguments[4],
+                    str(old_root / "fresh-cas"),
+                ],
+                False,
+                {"ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA": "roboguide.artifact-storage/v2"},
+            )
+            assert b"v49" in (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
+            old_writer = {
+                "binary_digest": "sha256:"
+                + hashlib.sha256(old_controller.read_bytes()).hexdigest(),
+                "actual_exit_code": commands[-1]["exit_code"],
+            }
+        old_cli = None
+        if old_recovery_ref is not None:
+            extracted = subprocess.run(
+                ["git", "archive", old_recovery_ref, "apps/recovery-tool/roboguide_recovery"],
+                cwd=ROOT,
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            old_root = directory / "old-cli"
+            old_root.mkdir()
+            with tarfile.open(fileobj=io.BytesIO(extracted.stdout)) as archive_file:
+                for member in archive_file.getmembers():
+                    if (
+                        not (member.isfile() or member.isdir())
+                        or ".." in Path(member.name).parts
+                        or Path(member.name).is_absolute()
+                    ):
+                        raise ValueError("unsafe old CLI source archive")
+                    archive_file.extract(member, old_root, filter="data")
+            legacy = directory / "old-cli-profile.json"
+            save(
+                legacy,
+                profile
+                | {
+                    "schema": "roboguide.recovery-profile/v0.11",
+                    "components": profile["components"][:2],
+                },
+            )
+            execute(
+                [
+                    sys.executable,
+                    "-m",
+                    "roboguide_recovery",
+                    "backup",
+                    "--profile",
+                    str(legacy),
+                    "--destination",
+                    str(directory / "old-cli-refused"),
+                    "--command-id",
+                    "old-cli",
+                ],
+                False,
+                {"PYTHONPATH": str(old_root / "apps/recovery-tool")},
+            )
+            assert (
+                b"owner metadata is invalid"
+                in (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
+            )
+            old_cli = {
+                "source_commit": old_recovery_ref,
+                "actual_exit_code": commands[-1]["exit_code"],
+            }
+        assert {
+            str(path.relative_to(ROOT)): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in source_paths
+        } == frozen
+        assert "sha256:" + hashlib.sha256(binary.read_bytes()).hexdigest() == binary_digest
+        result = {
+            "passed": True,
+            "binary_digest": binary_digest,
+            "original_owner": intent["request"]["source_owner"],
+            "original_authority": intent["request"]["authority_id"],
+            "actual_uploads": 1,
+            "actual_catalog_publications": 0,
+            "actual_archive_sql_failure": True,
+            "exact_retry_copied_files": 0,
+            "original_budget_unchanged": True,
+            "upload_catalog_replayed_after_actual_restart": True,
+            "cold_restore_catalog_and_archive": True,
+            "receiving_missing_bytes_refused_after_manifest_repin": True,
+            "undeclared_archive_and_consumer_refused": True,
+            "old_controller": old_writer,
+            "old_cli": old_cli,
+            "registered_nodes": 0,
+            "devices": 0,
+            "models": 0,
+            "simulators": 0,
+        }
+        save(directory / "result.json", result)
+        return result
+    finally:
+        for process in reversed(processes):
+            stop(process)
+
+
+def main() -> None:
+    """Run only an explicitly owned software/file acceptance; hardware remains unavailable."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--old-controller", type=Path)
+    parser.add_argument("--old-recovery-ref")
+    args = parser.parse_args()
+    print(
+        json.dumps(
+            run(
+                args.output.absolute(), args.skip_build, args.old_controller, args.old_recovery_ref
+            ),
+            indent=2,
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

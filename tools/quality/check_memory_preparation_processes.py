@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from authority_recovery_profile import run as run_authority_recovery
+from catalog_archive_processes import run as run_catalog_archive
 from catalog_retention_processes import CatalogRetentionCheck
 from catalog_retention_processes import configure as configure_catalog_retention
 from check_identity_processes import request as tls_request
@@ -77,6 +78,7 @@ def identity() -> dict[str, str]:
             "memory_content_reclamation.py",
             "authority_recovery_profile.py",
             "catalog_retention_processes.py",
+            "catalog_archive_processes.py",
             "monitoring_processes.py",
         )
     ]
@@ -138,6 +140,7 @@ def run(
     process_workers: bool = False,
     revision_old_controller: Path | None = None,
     artifact_retention: bool = False,
+    content_archive: bool = False,
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
     if not 1 <= async_workers <= 64:
@@ -167,6 +170,12 @@ def run(
     if artifact_retention:
         environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = "roboguide.artifact-storage/v1"
         configure_catalog_retention(directory, leaves["admin"])
+    if content_archive:
+        if not artifact_retention or handoff_case is not None:
+            raise ValueError("content Archive requires the completed original Catalog file profile")
+        environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = "roboguide.artifact-storage/v3"
+        environment["ROBOGUIDE_EVENT_ARCHIVE_DIRECTORY"] = str(directory / "content-archives")
+        (directory / "content-archives").mkdir()
     if handoff_case is not None and handoff_case.startswith("revision"):
         authorization_path = directory / "operator-authorization.json"
         authorization = json.loads(authorization_path.read_bytes())
@@ -997,6 +1006,22 @@ def run(
 
             reclamation_result = run_reclamation(directory, backends[1], restart_consumer)
             assert exchange(f"/v1/missions/{mission_id}")[1]["status"] == "Completed"
+        catalog_result = None if catalog_retention is None else catalog_retention.finish()
+        archive_result = None
+        if content_archive:
+            assert catalog_retention is not None
+
+            def restart_archive_controller() -> None:
+                """Reap the original Controller before reopening its same SQL/CAS."""
+                nonlocal controller
+                assert controller is not None
+                stop(controller)
+                controller = start(controller_command, "controller-after-original-archive")
+                wait_for(lambda: exchange("/healthz")[0] == 200, "actual original archive replay")
+
+            archive_result = run_catalog_archive(
+                directory, catalog_retention, exchange, restart_archive_controller
+            )
         assert identity() == initial_identity, "pinned code or binary changed during conformance"
         assert {
             str(path.relative_to(directory)): "sha256:"
@@ -1045,7 +1070,8 @@ def run(
                 "sqlite": sqlite3.sqlite_version,
             },
             "verifier_receipts": receipts,
-            "catalog_references": None if catalog_retention is None else catalog_retention.finish(),
+            "catalog_references": catalog_result,
+            "content_archive": archive_result,
         }
         save(directory / "result.json", result)
         return result
@@ -1088,6 +1114,7 @@ def main() -> None:
     parser.add_argument("--async-workers", type=int, choices=range(1, 65), default=8)
     parser.add_argument("--process-workers", action="store_true")
     parser.add_argument("--artifact-retention", action="store_true")
+    parser.add_argument("--content-archive", action="store_true")
     parser.add_argument("--old-controller", type=Path)
     parser.add_argument(
         "--handoff-case",
@@ -1110,6 +1137,8 @@ def main() -> None:
         "--use-case", choices=("revoke", "expire", "backend-restart", "controller-restart")
     )
     arguments = parser.parse_args()
+    if arguments.content_archive and (not arguments.artifact_retention or arguments.handoff_case):
+        parser.error("--content-archive requires the completed --artifact-retention file profile")
     if arguments.artifact_retention and (
         arguments.group_lifecycle
         or arguments.use_lifecycle
@@ -1166,6 +1195,7 @@ def main() -> None:
                     arguments.process_workers,
                     arguments.old_controller,
                     arguments.artifact_retention,
+                    arguments.content_archive,
                 ),
                 sort_keys=True,
             )

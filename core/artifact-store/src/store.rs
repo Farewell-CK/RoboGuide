@@ -47,6 +47,24 @@ impl FileSystemArtifactStore {
         Self::open_layout(root.into(), 2)
     }
 
+    /// Opens same-owner v3, which inventories all original Controller consumers before reference work.
+    pub fn new_with_archive_references(
+        root: impl Into<PathBuf>,
+    ) -> Result<Self, ArtifactStoreError> {
+        Self::open_layout(root.into(), 3)
+    }
+
+    /// Retains an original Controller store as a consumer before its Catalog/Archive producer effects.
+    pub fn bind_reference_authority(&self, authority_id: &str) -> Result<(), ArtifactStoreError> {
+        if self.storage_version != 3 {
+            return Err(unsafe_path_error(
+                "bind Artifact reference authority",
+                "explicit storage v3 is required",
+            ));
+        }
+        crate::layout::bind_authority(&self.root, authority_id)
+    }
+
     /// Acquires the actual writer before any format check, migration, or managed-directory effect.
     fn open_layout(root: PathBuf, version: u8) -> Result<Self, ArtifactStoreError> {
         let root =
@@ -60,7 +78,9 @@ impl FileSystemArtifactStore {
             &root.join(STAGING_DIRECTORY),
             "create artifact staging directory",
         )?;
-        let layout = if version == 2 {
+        let layout = if version == 3 {
+            crate::layout::open_authorities(&root)?
+        } else if version == 2 {
             crate::layout::open_references(&root)?
         } else {
             crate::layout::open(&root, version == 1)?
@@ -86,7 +106,9 @@ impl FileSystemArtifactStore {
 
     /// Reports the explicitly opened format without interpreting storage identity as permission.
     pub fn storage_schema(&self) -> &'static str {
-        if self.storage_version == 2 {
+        if self.storage_version == 3 {
+            crate::layout::ARTIFACT_ARCHIVE_LAYOUT_SCHEMA
+        } else if self.storage_version == 2 {
             crate::layout::ARTIFACT_REFERENCE_LAYOUT_SCHEMA
         } else if self.storage_version == 1 {
             crate::layout::ARTIFACT_LAYOUT_SCHEMA

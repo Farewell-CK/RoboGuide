@@ -1,5 +1,19 @@
 # Repository Guidelines
 
+ADR-0152/0153 introduce original content Archive command v0.2, shared wrapper v49 and explicit
+Artifact storage v3. Original State-store identity/journal are mandatory even at zero operations;
+accepted loss refuses replacement. CAS v3 retains every known Controller reference authority.
+State's actual Archive intent/pins precede content effects; publication verification precedes the
+atomic Catalog recovery/history-floor/exact-command compact receipt. Original retries inspect only;
+receiving Archive references retain bytes independently. Recovery v0.12 / bundle v0.4 freezes all
+original Controller/CAS/Archive writers, includes all known consumers, and preserves mandatory
+nested empty directories. Old formats refuse actual v3 owners. Owners are State's archive modules,
+application/archive_content.rs, Artifact layout/authorities.rs and recovery/archive_references.py.
+The actual zero-Node gate is check_content_archive_processes.py. Actual file Catalog replay and
+original cold recovery gates also pass; see acceptance/2026-10-22-original-content-archive.md.
+Archive GC, Raft Snapshot/online producers and all remaining P1-P7 requirements remain mandatory.
+No software root, process or backup identity establishes devices or physical continuity.
+
 ADR-0151 adds explicit Artifact storage v2 with the same original owner/inode identity, a persistent
 upgrade intent and mandatory member-local maintenance journal. Old v1 formats refuse it. Recovery
 profile v0.11 / bundle v0.3 produces immutable original-owner Snapshot intents before actual copy,

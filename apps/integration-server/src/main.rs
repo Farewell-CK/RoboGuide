@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper before independent Catalog archive recovery authority.
+const PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v48";
 /// Previous wrapper without original Artifact Catalog/lineage content reference authority.
 const PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v47";
 /// Interim wrapper with Control resource claims but no revisioned quota policy history.
@@ -849,6 +851,9 @@ fn configured_artifact_store(
         artifact_store::ARTIFACT_REFERENCE_LAYOUT_SCHEMA => {
             Ok(artifact_store::FileSystemArtifactStore::new_with_reference_journal(root)?)
         }
+        artifact_store::ARTIFACT_ARCHIVE_LAYOUT_SCHEMA => {
+            Ok(artifact_store::FileSystemArtifactStore::new_with_archive_references(root)?)
+        }
         _ => Err("unsupported explicit Artifact storage schema".into()),
     }
 }
@@ -1093,6 +1098,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RESOURCE_COMMIT_SERVER_CHECKPOINT_SCHEMA
@@ -1143,6 +1149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA
                     | PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_RESOURCE_COMMIT_SERVER_CHECKPOINT_SCHEMA
@@ -1377,6 +1384,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     controller.memory_preparation.catalog = Some(artifact_catalog.clone());
+    if artifact_store.storage_schema() == artifact_store::ARTIFACT_ARCHIVE_LAYOUT_SCHEMA {
+        artifact_store.bind_reference_authority(&event_log.archive_authority_id()?)?;
+    }
     application::plan_revision::install_catalog(&controller)?;
     controller.bridge.publish_node_identity_registry()?;
     let controller = Arc::new(Mutex::new(controller));

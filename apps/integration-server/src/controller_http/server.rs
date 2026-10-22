@@ -33,6 +33,20 @@ mod operator_tests;
 /// Operator role permitted to acknowledge a crash-loop quarantine.
 const RECOVERY_ADMIN_ROLE: &str = "recovery-admin";
 
+/// Explicit original content Archive command; source owner, destination and caller are deployment facts.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContentArchiveCommand {
+    /// Exact negotiated maintenance contract, never normalized to the legacy body.
+    schema: String,
+    /// First original command, retained across uncertain publication/SQL/response outcomes.
+    command_id: String,
+    /// Explicit checkpoint-covered event cutoff within normal bounded maintenance limits.
+    end_sequence: u64,
+    /// Original same-kernel effect budget, never renewed by command retry.
+    budget_ms: u64,
+}
+
 /// Authenticated operator context attached to one HTTP connection.
 #[derive(Debug, Clone, Default)]
 struct OperatorPrincipal {
@@ -1769,7 +1783,7 @@ where
                     "manifest_page_limit": limit.clamp(1,128),
                     "max_segment_events": state::MAX_ARCHIVE_EVENTS,
                     "max_segment_bytes": state::MAX_ARCHIVE_BYTES,
-                    "catalog_and_localization_history_gc": "unsupported_until_recovery_contract_exists",
+                    "catalog_and_localization_history_gc": "explicit_roboguide.archive-command/v0.2",
                     "automatic_gc": false,
                     "replicated_writer_requires_coordinated_maintenance": log.replication_profile().is_some(),
                 }))
@@ -1816,6 +1830,14 @@ where
                 )
                 .await;
             };
+            let content_command = if body.get("schema").is_some() {
+                match serde_json::from_value::<ContentArchiveCommand>(body.clone()) {
+                    Ok(command) if command.schema == "roboguide.archive-command/v0.2" && command.end_sequence == cutoff => Some(command),
+                    _ => return write_http_response(stream,"400 Bad Request",serde_json::json!({"error":"invalid explicit original content Archive command"})).await,
+                }
+            } else {
+                None
+            };
             let archive_root = std::env::var_os("ROBOGUIDE_EVENT_ARCHIVE_DIRECTORY")
                 .map(std::path::PathBuf::from)
                 .filter(|path| path.is_absolute());
@@ -1830,6 +1852,11 @@ where
             let log = event_log.clone();
             let gate = event_write_gate.clone();
             let shared_controller = controller.clone();
+            let subject = principal
+                .subject
+                .clone()
+                .unwrap_or_else(|| "trusted-loopback:recovery-admin".into());
+            let original_tenant = tenant.clone().unwrap_or_else(|| "*".into());
             let result = tokio::task::spawn_blocking(move || {
                 let _write_guard = gate
                     .lock()
@@ -1838,8 +1865,15 @@ where
                 if live.orchestrator.mission_ids().iter().any(|mission| live.orchestrator.execution(mission).is_some_and(|execution| matches!(execution.lifecycle(),orchestration::MissionExecutionLifecycle::Accepted | orchestration::MissionExecutionLifecycle::Running | orchestration::MissionExecutionLifecycle::Cancelling))) || !live.bridge.current_unknown_attempts().is_empty() {
                     return Err(state::SqliteEventLogError::ArchivePolicy("archive maintenance requires no nonterminal Missions or unknown physical attempts".into()));
                 }
+                let source = if content_command.is_some() { Some(live.memory_preparation.catalog.as_ref().ok_or_else(||state::SqliteEventLogError::ArchivePolicy("Archive requires its original Catalog/source backend".into()))?.archive_source().map_err(state::SqliteEventLogError::ArchivePolicy)?) } else { None };
                 drop(live);
-                log.archive_and_gc(cutoff, &state::FileArchiveSink::new(archive_root))
+                if let Some(command)=content_command {
+                    let source=source.expect("explicit command resolves its original source under the writer");
+                    let request=state::ArchiveRequest { command_id:command.command_id,principal:subject,tenant:original_tenant,source_owner:source.owner_id().expect("retained source has original identity").into(),destination:archive_root.to_str().ok_or_else(||state::SqliteEventLogError::ArchivePolicy("Archive path must be UTF-8".into()))?.into(),authority_id:log.archive_authority_id()?,budget_ms:command.budget_ms };
+                    let current_gate=gate.clone();
+                    let witness=Arc::new(move || { let live=shared_controller.lock().map_err(|_|"Archive authority mutex is poisoned".to_string())?; current_gate.validate(&live) });
+                    log.archive_and_gc_with_catalog(cutoff,&application::archive_content::ContentArchiveSink::new(source,witness),request)
+                } else { log.archive_and_gc(cutoff, &state::FileArchiveSink::new(archive_root)) }
             })
             .await
             .map_err(|error| format!("archive worker failed: {error}"))?;

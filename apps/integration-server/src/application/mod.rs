@@ -3,6 +3,7 @@
 use sha2::{Digest as _, Sha256};
 
 mod actor_placement;
+pub(crate) mod archive_content;
 pub(crate) mod attestation;
 pub(crate) mod catalog_retention;
 mod deployment_document;

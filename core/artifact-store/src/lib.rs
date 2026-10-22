@@ -12,15 +12,17 @@ mod digest;
 mod layout;
 mod path_validation;
 mod port_adapter;
+mod readonly;
 mod store;
 mod types;
 mod upload;
 
 pub use digest::{digest_bytes, digest_reader, normalize_digest};
 pub use layout::{
-    ARTIFACT_LAYOUT_SCHEMA, ARTIFACT_OWNER_FILE, ARTIFACT_REFERENCE_LAYOUT_SCHEMA,
-    RETAINED_BLOB_DIRECTORY,
+    ARTIFACT_ARCHIVE_LAYOUT_SCHEMA, ARTIFACT_LAYOUT_SCHEMA, ARTIFACT_OWNER_FILE,
+    ARTIFACT_REFERENCE_LAYOUT_SCHEMA, RETAINED_BLOB_DIRECTORY,
 };
+pub use readonly::ArtifactReadOnlyStore;
 pub use types::{ArtifactStoreError, ArtifactUpload, FileSystemArtifactStore, StoredArtifact};
 
 #[cfg(test)]

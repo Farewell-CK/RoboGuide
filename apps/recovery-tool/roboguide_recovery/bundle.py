@@ -14,7 +14,13 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from . import artifact_layout, artifact_snapshots, catalog_references, snapshot_references
+from . import (
+    archive_references,
+    artifact_layout,
+    artifact_snapshots,
+    catalog_references,
+    snapshot_references,
+)
 from .profile import (
     IDENTIFIER,
     MAX_PROFILE_BYTES,
@@ -81,6 +87,54 @@ def _sync(path: Path) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _directories(root: Path, budget: Budget) -> list[Path]:
+    """Retain actual original directories, including empty mandatory nested backend structures."""
+    result: list[Path] = []
+    pending = [real_directory(root)]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                budget.check()
+                if entry.is_symlink():
+                    raise ValueError("original recovery directory cannot contain symlinks")
+                if entry.is_dir(follow_symlinks=False):
+                    if len(result) >= budget.max_files * 4 + 8192:
+                        raise ValueError("original recovery directories exceed bounded evidence")
+                    path = real_directory(Path(entry.path))
+                    result.append(path)
+                    pending.append(path)
+    return result
+
+
+def _validate_directories(root: Path, manifest: dict[str, Any], budget: Budget) -> None:
+    """Check original directory coverage without repairing the source bundle."""
+    directories = manifest.get("directories")
+    if (
+        not isinstance(directories, list)
+        or len(directories) > budget.max_files * 4 + 8192
+        or any(not isinstance(value, str) for value in directories)
+        or directories != sorted(set(directories))
+    ):
+        raise ValueError("original recovery directory coverage is not closed or bounded")
+    by_id = {item["component_id"]: item for item in manifest["profile"]["components"]}
+    for value in directories:
+        budget.check()
+        path = relative(value)
+        parts = Path(path).parts
+        if parts[0] != "stores" or (len(parts) > 1 and parts[1] not in by_id):
+            raise ValueError("original recovery directory is outside declared storage")
+        if len(parts) > 2:
+            _, trees, _ = layout(by_id[parts[1]], profile_schema=manifest["profile"]["schema"])
+            selected = Path(*parts[2:])
+            if not any(selected.is_relative_to(Path(tree)) for tree in trees):
+                raise ValueError("original recovery directory is outside selected content trees")
+        real_directory(root / path)
+    actual = sorted(path.relative_to(root).as_posix() for path in _directories(root, budget))
+    if directories != actual:
+        raise ValueError("original recovery directory coverage is missing or changed")
 
 
 def _sync_tree(root: Path, budget: Budget) -> None:
@@ -411,7 +465,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         if snapshot_references.supports(profile["schema"]):
             with acquire_all(components, profile_schema=profile["schema"]):
                 snapshot_references.complete(components, saved, digest(previous), budget)
-                if profile["schema"] == artifact_snapshots.SCHEMA:
+                if profile["schema"] in artifact_snapshots.SUPPORTED:
                     artifact_snapshots.complete(components, saved, digest(previous), budget)
         return {
             "manifest_digest": digest(previous),
@@ -428,7 +482,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         )
         artifact_operations = (
             artifact_snapshots.prepare(profile, components, destination, command_id, budget)
-            if profile["schema"] == artifact_snapshots.SCHEMA
+            if profile["schema"] in artifact_snapshots.SUPPORTED
             else []
         )
         partial = _target(destination, command_id)
@@ -494,6 +548,11 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                     (partial / "stores" / identifier / name).mkdir(
                         mode=0o700, parents=True, exist_ok=True
                     )
+                if profile["schema"] == archive_references.SCHEMA:
+                    for source_directory in _directories(root / name, budget):
+                        (
+                            partial / "stores" / identifier / source_directory.relative_to(root)
+                        ).mkdir(mode=0o700, parents=True, exist_ok=True)
                 for source_path in _walk(root / name, budget):
                     selected = source_path.relative_to(root)
                     target = partial / "stores" / identifier / selected
@@ -516,10 +575,13 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                     partial, component["component_id"], record_map, budget
                 )
         catalog_references.validate(partial, components, record_map, budget, profile["schema"])
-        manifest = {
+        archive_references.validate(partial, components, record_map, budget, profile["schema"])
+        manifest: dict[str, Any] = {
             "schema": (
-                "roboguide.recovery-bundle/v0.3"
-                if profile["schema"] == artifact_snapshots.SCHEMA
+                "roboguide.recovery-bundle/v0.4"
+                if profile["schema"] == archive_references.SCHEMA
+                else "roboguide.recovery-bundle/v0.3"
+                if profile["schema"] in artifact_snapshots.SUPPORTED
                 else "roboguide.recovery-bundle/v0.2"
                 if snapshot_references.supports(profile["schema"])
                 else "roboguide.recovery-bundle/v0.1"
@@ -531,10 +593,14 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             "scope": "declared-stores-only",
             "physical_continuity": "not-established",
         }
+        if profile["schema"] == archive_references.SCHEMA:
+            manifest["directories"] = sorted(
+                path.relative_to(partial).as_posix() for path in _directories(partial, budget)
+            )
         if snapshot_references.supports(profile["schema"]):
             manifest["snapshot_operations"] = snapshot_operations
             snapshot_references.validate_bundle(partial, manifest, budget)
-        if profile["schema"] == artifact_snapshots.SCHEMA:
+        if profile["schema"] in artifact_snapshots.SUPPORTED:
             manifest["artifact_snapshot_operations"] = artifact_operations
             artifact_snapshots.validate_bundle(partial, manifest, budget)
         raw = canonical(manifest)
@@ -557,7 +623,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             verified = verify(destination, digest(raw), deadline_ns=budget.deadline_ns)
             budget.check()
             snapshot_references.complete(components, verified, digest(raw), budget)
-            if profile["schema"] == artifact_snapshots.SCHEMA:
+            if profile["schema"] in artifact_snapshots.SUPPORTED:
                 artifact_snapshots.complete(components, verified, digest(raw), budget)
     return {"manifest_digest": digest(raw), "files": len(records), "bytes": budget.bytes}
 
@@ -587,12 +653,22 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
             | (
                 {"snapshot_operations"}
                 if manifest.get("schema")
-                in {"roboguide.recovery-bundle/v0.2", "roboguide.recovery-bundle/v0.3"}
+                in {
+                    "roboguide.recovery-bundle/v0.2",
+                    "roboguide.recovery-bundle/v0.3",
+                    "roboguide.recovery-bundle/v0.4",
+                }
+                else set()
+            )
+            | (
+                {"directories"}
+                if manifest.get("schema") == "roboguide.recovery-bundle/v0.4"
                 else set()
             )
             | (
                 {"artifact_snapshot_operations"}
-                if manifest.get("schema") == "roboguide.recovery-bundle/v0.3"
+                if manifest.get("schema")
+                in {"roboguide.recovery-bundle/v0.3", "roboguide.recovery-bundle/v0.4"}
                 else set()
             )
         )
@@ -601,6 +677,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
             "roboguide.recovery-bundle/v0.1",
             "roboguide.recovery-bundle/v0.2",
             "roboguide.recovery-bundle/v0.3",
+            "roboguide.recovery-bundle/v0.4",
         }
     ):
         raise ValueError("recovery bundle manifest is not closed or versioned")
@@ -673,18 +750,33 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                     sqlite3.connect((bundle / name).as_uri() + "?mode=ro&immutable=1", uri=True)
                 ) as connection:
                     validate_replica_storage(connection, manifest["profile"]["schema"])
+    if (manifest["profile"]["schema"] == archive_references.SCHEMA) != (
+        manifest["schema"] == "roboguide.recovery-bundle/v0.4"
+    ):
+        raise ValueError("Archive profile and original directory-aware bundle schema differ")
+    if manifest["schema"] == "roboguide.recovery-bundle/v0.4":
+        _validate_directories(bundle, manifest, budget)
     record_map = {str(row["path"]): row for row in files}
     if (snapshot_references.supports(manifest["profile"]["schema"])) != (
-        manifest["schema"] in {"roboguide.recovery-bundle/v0.2", "roboguide.recovery-bundle/v0.3"}
+        manifest["schema"]
+        in {
+            "roboguide.recovery-bundle/v0.2",
+            "roboguide.recovery-bundle/v0.3",
+            "roboguide.recovery-bundle/v0.4",
+        }
     ):
         raise ValueError("snapshot profile and bundle schema differ")
-    if manifest["schema"] in {"roboguide.recovery-bundle/v0.2", "roboguide.recovery-bundle/v0.3"}:
+    if manifest["schema"] in {
+        "roboguide.recovery-bundle/v0.2",
+        "roboguide.recovery-bundle/v0.3",
+        "roboguide.recovery-bundle/v0.4",
+    }:
         snapshot_references.validate_bundle(bundle, manifest, budget)
-    if (manifest["profile"]["schema"] == artifact_snapshots.SCHEMA) != (
-        manifest["schema"] == "roboguide.recovery-bundle/v0.3"
+    if (manifest["profile"]["schema"] in artifact_snapshots.SUPPORTED) != (
+        manifest["schema"] in {"roboguide.recovery-bundle/v0.3", "roboguide.recovery-bundle/v0.4"}
     ):
         raise ValueError("Artifact Snapshot profile and bundle schema differ")
-    if manifest["schema"] == "roboguide.recovery-bundle/v0.3":
+    if manifest["schema"] in {"roboguide.recovery-bundle/v0.3", "roboguide.recovery-bundle/v0.4"}:
         artifact_snapshots.validate_bundle(bundle, manifest, budget)
     for component in components:
         if component["kind"] == "artifact":
@@ -696,6 +788,9 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 bundle, component["component_id"], record_map, budget
             )
     catalog_references.validate(
+        bundle, components, record_map, budget, manifest["profile"]["schema"]
+    )
+    archive_references.validate(
         bundle, components, record_map, budget, manifest["profile"]["schema"]
     )
     for component in components:
@@ -713,6 +808,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.9",
                 "roboguide.recovery-profile/v0.10",
                 "roboguide.recovery-profile/v0.11",
+                "roboguide.recovery-profile/v0.12",
             }
             else databases
         )
@@ -740,7 +836,7 @@ def reconcile_snapshots(
         raise ValueError("snapshot proof lacks its original explicit reference protocol")
     with acquire_all(components, profile_schema=profile["schema"]):
         receipts = snapshot_references.complete(components, manifest, expected_digest, budget)
-        if manifest["profile"]["schema"] == artifact_snapshots.SCHEMA:
+        if manifest["profile"]["schema"] in artifact_snapshots.SUPPORTED:
             receipts += artifact_snapshots.complete(components, manifest, expected_digest, budget)
     return {
         "schema": "roboguide.snapshot-reconciliation/v0.1",
@@ -763,7 +859,7 @@ def abort_snapshots(profile: dict[str, Any], destination: Path, command_id: str)
         receipts = snapshot_references.abort(
             profile, components, destination.absolute(), command_id, budget
         )
-        if profile["schema"] == artifact_snapshots.SCHEMA:
+        if profile["schema"] in artifact_snapshots.SUPPORTED:
             receipts += artifact_snapshots.abort(
                 profile, components, destination.absolute(), command_id, budget
             )
@@ -828,8 +924,10 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.11"
-        if manifest["profile"]["schema"] == artifact_snapshots.SCHEMA
+        "roboguide.restore-receipt/v0.12"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.12"
+        else "roboguide.restore-receipt/v0.11"
+        if manifest["profile"]["schema"] in artifact_snapshots.SUPPORTED
         else "roboguide.restore-receipt/v0.10"
         if manifest["profile"]["schema"] == catalog_references.SCHEMA
         else "roboguide.restore-receipt/v0.9"
@@ -892,6 +990,8 @@ def restore(
         _, trees, _ = layout(component, profile_schema=manifest["profile"]["schema"])
         for name in trees:
             (root / name).mkdir(mode=0o700, parents=True, exist_ok=True)
+    for directory in manifest.get("directories", []):
+        (partial / directory).mkdir(mode=0o700, parents=True, exist_ok=True)
     for row in manifest["files"]:
         target = partial / row["path"]
         if _copy(bundle / row["path"], target, budget) != (row["content_digest"], row["byte_size"]):
@@ -910,6 +1010,7 @@ def restore(
             "roboguide.recovery-profile/v0.9",
             "roboguide.recovery-profile/v0.10",
             "roboguide.recovery-profile/v0.11",
+            "roboguide.recovery-profile/v0.12",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:

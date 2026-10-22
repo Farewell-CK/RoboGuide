@@ -15,7 +15,7 @@ pub const MAX_ARCHIVE_BYTES: usize = 16 * 1024 * 1024;
 static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Checks the closed manifest shape before constructing paths or removing history.
-fn validate_manifest(manifest: &ArchiveManifest) -> Result<(), String> {
+pub(super) fn validate_manifest(manifest: &ArchiveManifest) -> Result<(), String> {
     let digest_valid = |digest: &str| {
         digest.strip_prefix("sha256:").is_some_and(|value| {
             value.len() == 64
@@ -24,8 +24,10 @@ fn validate_manifest(manifest: &ArchiveManifest) -> Result<(), String> {
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         })
     };
-    if manifest.schema != "roboguide.event-archive/v1"
-        || manifest.start_sequence == 0
+    if !matches!(
+        manifest.schema.as_str(),
+        "roboguide.event-archive/v1" | "roboguide.event-archive/v2"
+    ) || manifest.start_sequence == 0
         || manifest.end_sequence < manifest.start_sequence
         || manifest.end_sequence - manifest.start_sequence + 1 != manifest.event_count
         || manifest.event_count > MAX_ARCHIVE_EVENTS
@@ -44,10 +46,12 @@ fn validate_manifest(manifest: &ArchiveManifest) -> Result<(), String> {
 }
 
 /// Preserves evidence whose catalog or localization consumer currently requires full event replay.
-fn requires_catalog_history(payload: &EventPayload) -> bool {
+pub(super) fn requires_catalog_history(payload: &EventPayload) -> bool {
     matches!(
         payload,
         EventPayload::ArtifactCatalogReferenceTransition { .. }
+            | EventPayload::SemanticVerifierEvidenceAdmitted { .. }
+            | EventPayload::MissionGoalEvidenceAdmitted { .. }
             | EventPayload::MapArtifactDeclared { .. }
             | EventPayload::ArtifactUploadTransition { .. }
             | EventPayload::MapArtifactPublished { .. }
@@ -126,12 +130,44 @@ pub struct ArchiveManifest {
 
 /// Pluggable durable sink for one immutable archive segment.
 pub trait ArchiveSink {
+    /// Rechecks an actual caller witness immediately before the original maintenance SQL Commit.
+    fn require_commit_permission(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
     /// Stores or verifies an exact segment before SQLite rows may be deleted.
     fn append_segment(
         &self,
         manifest: &ArchiveManifest,
         bytes: &[u8],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Publishes the original complete Catalog/checkpoint/content closure; legacy sinks refuse.
+    fn append_catalog_segment(
+        &self,
+        _manifest: &ArchiveManifest,
+        _bytes: &[u8],
+        _catalog: &[PersistedEvent],
+        _checkpoint: &PersistedCheckpoint,
+        _intent: &super::archive_operation::ArchiveIntent,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("archive sink lacks original Catalog/content publication authority".into())
+    }
+
+    /// Verifies an already published original operation without repeating copying or renewing budgets.
+    fn inspect_catalog_segment(
+        &self,
+        _intent: &super::archive_operation::ArchiveIntent,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Err("original archive publication is unavailable for readonly reconciliation".into())
+    }
+
+    /// Confirms original publication durability before compaction, without copying or renewing work.
+    fn confirm_catalog_segment(
+        &self,
+        intent: &super::archive_operation::ArchiveIntent,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        self.inspect_catalog_segment(intent)
+    }
 }
 
 /// Local append-only segment sink. Existing identical segments are idempotent; mismatches fail.
@@ -220,6 +256,9 @@ impl ArchiveSink for FileArchiveSink {
         bytes: &[u8],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         validate_manifest(manifest)?;
+        if manifest.schema != "roboguide.event-archive/v1" {
+            return Err("legacy file archive sink cannot publish Catalog/content closure".into());
+        }
         if bytes.len() > MAX_ARCHIVE_BYTES {
             return Err("archive segment exceeds byte bound".into());
         }
@@ -277,7 +316,18 @@ impl SqliteEventLog {
         sink: &S,
     ) -> Result<ArchiveManifest, SqliteEventLogError> {
         self.require_writes_enabled()?;
-        self.observe_write_result(self.archive_and_gc_inner(end_sequence, sink))
+        self.observe_write_result(self.archive_and_gc_inner(end_sequence, sink, None))
+    }
+
+    /// Archives Catalog evidence only with an explicit complete original recovery checkpoint.
+    pub fn archive_and_gc_with_catalog<S: ArchiveSink>(
+        &self,
+        end_sequence: u64,
+        sink: &S,
+        request: super::archive_operation::ArchiveRequest,
+    ) -> Result<ArchiveManifest, SqliteEventLogError> {
+        self.require_writes_enabled()?;
+        self.observe_write_result(self.archive_and_gc_inner(end_sequence, sink, Some(request)))
     }
 
     /// Performs only the already-authorized local maintenance transaction and immutable sink check.
@@ -285,8 +335,11 @@ impl SqliteEventLog {
         &self,
         end_sequence: u64,
         sink: &S,
+        request: Option<super::archive_operation::ArchiveRequest>,
     ) -> Result<ArchiveManifest, SqliteEventLogError> {
         self.ensure_no_open_batch()?;
+        let retain_catalog = request.is_some();
+        let command_id = request.as_ref().map(|request| request.command_id.clone());
         if end_sequence == 0 {
             return Err(SqliteEventLogError::ArchivePolicy(
                 "archive cutoff must be positive".into(),
@@ -297,10 +350,42 @@ impl SqliteEventLog {
                 "archive/GC requires a coordinated replica maintenance protocol".into(),
             ));
         }
-        let mut connection = self
+        let connection = self
             .connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        let existing = if let Some(request) = &request {
+            let existing = super::archive_operation::existing(&connection, &request.command_id)?;
+            if let Some((intent, receipt)) = &existing {
+                if &intent.request != request || intent.manifest.end_sequence != end_sequence {
+                    return Err(SqliteEventLogError::ArchivePolicy(
+                        "original Archive command identity conflicts".into(),
+                    ));
+                }
+                if let Some(receipt) = receipt {
+                    let intent = intent.clone();
+                    let receipt = receipt.clone();
+                    drop(connection);
+                    let proof = sink
+                        .inspect_catalog_segment(&intent)
+                        .map_err(|error| SqliteEventLogError::ArchiveSink(error.to_string()))?;
+                    if proof != receipt {
+                        return Err(SqliteEventLogError::Codec(
+                            "original Archive publication proof changed".into(),
+                        ));
+                    }
+                    return Ok(intent.manifest.clone());
+                }
+            }
+            existing
+        } else {
+            if !super::catalog_archive::read(&connection)?.is_empty()
+                || connection.query_row("SELECT EXISTS(SELECT 1 FROM event_log_metadata WHERE key='catalog_archive_checkpoint')", [], |row| row.get::<_,bool>(0))?
+            {
+                return Err(SqliteEventLogError::ArchivePolicy("original Catalog archive coverage requires the explicit content contract for every later segment".into()));
+            }
+            None
+        };
         let checkpoint = checkpoint_store::read(&connection)?.ok_or_else(|| {
             SqliteEventLogError::ArchivePolicy(
                 "archive requires a complete controller checkpoint".into(),
@@ -313,6 +398,13 @@ impl SqliteEventLog {
             )));
         }
         let floor = read_history_floor(&connection)?;
+        if retain_catalog
+            && checkpoint.snapshot.schema != crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+        {
+            return Err(SqliteEventLogError::ArchivePolicy(
+                "Catalog archive requires current original authority wrapper".into(),
+            ));
+        }
         let previous_timestamp_floor = read_archive_timestamp_floor(&connection)?;
         if end_sequence <= floor {
             return Err(SqliteEventLogError::ArchivePolicy(format!(
@@ -359,7 +451,7 @@ impl SqliteEventLog {
             validate_persisted_event(event)?;
             let payload: EventPayload = serde_json::from_str(&event.payload_json)
                 .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
-            if requires_catalog_history(&payload) {
+            if !retain_catalog && requires_catalog_history(&payload) {
                 return Err(SqliteEventLogError::ArchivePolicy(
                     "cutoff contains catalog/localization evidence that still requires full replay"
                         .into(),
@@ -380,8 +472,13 @@ impl SqliteEventLog {
             }
         }
         drop(statement);
-        let manifest = ArchiveManifest {
-            schema: "roboguide.event-archive/v1".into(),
+        let mut manifest = ArchiveManifest {
+            schema: if retain_catalog {
+                "roboguide.event-archive/v2"
+            } else {
+                "roboguide.event-archive/v1"
+            }
+            .into(),
             start_sequence: events[0].sequence,
             end_sequence,
             event_count: events.len() as u64,
@@ -389,9 +486,81 @@ impl SqliteEventLog {
             checkpoint_sequence: checkpoint.snapshot.event_sequence,
             checkpoint_digest: Some(checkpoint_identity(&checkpoint.snapshot)),
         };
-        sink.append_segment(&manifest, &bytes)
+        let catalog = if request.is_some() {
+            super::catalog_archive::current(&connection)?
+        } else {
+            Vec::new()
+        };
+        let first_publication = existing.is_none();
+        let intent = if let Some(request) = request {
+            if let Some((intent, _)) = &existing {
+                if intent.manifest.segment_digest != manifest.segment_digest {
+                    return Err(SqliteEventLogError::ArchivePolicy(
+                        "original pending Archive source changed".into(),
+                    ));
+                }
+                manifest = intent.manifest.clone();
+                Some(intent.clone())
+            } else {
+                let intent = super::archive_operation::ArchiveIntent::new(
+                    request,
+                    manifest.clone(),
+                    checkpoint.snapshot.as_ref().clone(),
+                    &catalog,
+                    &events,
+                )?;
+                super::archive_operation::admit(&connection, &intent)?;
+                Some(intent)
+            }
+        } else {
+            None
+        };
+        // The original application writer remains held by the caller. Transport/byte work and
+        // current Controller witnesses must not run under the storage mutex needed by readers.
+        drop(connection);
+        let publication = if let Some(intent) = &intent {
+            if first_publication {
+                sink.append_catalog_segment(
+                    &manifest,
+                    &bytes,
+                    &catalog,
+                    &checkpoint.snapshot,
+                    intent,
+                )
+                .and_then(|()| sink.confirm_catalog_segment(intent))
+            } else {
+                sink.confirm_catalog_segment(intent)
+            }
+        } else {
+            sink.append_segment(&manifest, &bytes)
+                .map(|()| String::new())
+        };
+        let proof =
+            publication.map_err(|error| SqliteEventLogError::ArchiveSink(error.to_string()))?;
+        sink.require_commit_permission()
             .map_err(|error| SqliteEventLogError::ArchiveSink(error.to_string()))?;
+        self.require_writes_enabled()?;
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        if read_history_floor(&connection)? != floor {
+            return Err(SqliteEventLogError::ArchivePolicy(
+                "original Archive history floor changed during publication".into(),
+            ));
+        }
+        if let Some(intent) = &intent
+            && super::archive_operation::existing(&connection, &intent.request.command_id)?.as_ref()
+                != Some(&(intent.clone(), None))
+        {
+            return Err(SqliteEventLogError::ArchivePolicy(
+                "original Archive pending ownership changed before compaction".into(),
+            ));
+        }
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if retain_catalog {
+            super::catalog_archive::extend(&transaction, &events, end_sequence)?;
+        }
         transaction.execute_batch("CREATE TABLE IF NOT EXISTS event_archive_manifests (start_sequence INTEGER PRIMARY KEY, end_sequence INTEGER UNIQUE NOT NULL, manifest_json TEXT NOT NULL)")?;
         transaction.execute(
             "DELETE FROM events WHERE sequence > ?1 AND sequence <= ?2",
@@ -419,6 +588,14 @@ impl SqliteEventLog {
             ],
         )?;
         transaction.execute("INSERT INTO event_archive_manifests(start_sequence,end_sequence,manifest_json) VALUES (?1,?2,?3)", params![manifest.start_sequence,manifest.end_sequence,serde_json::to_string(&manifest).map_err(|error| SqliteEventLogError::Codec(error.to_string()))?])?;
+        if retain_catalog {
+            let changed = transaction.execute("UPDATE event_archive_operations SET state='compacted',receipt_json=?1 WHERE command_id=?2 AND state='pending'",params![proof,command_id])?;
+            if changed != 1 {
+                return Err(SqliteEventLogError::Codec(
+                    "original Archive command lost its exact pending ownership".into(),
+                ));
+            }
+        }
         transaction.commit()?;
         Ok(manifest)
     }

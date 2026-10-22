@@ -1,5 +1,13 @@
 # RoboGuide recovery tool
 
+[Profile v0.12](../../contracts/recovery/bundle-v0.12/README.md) requires the v3 Artifact reference
+authority inventory, wrapper v49 Archive journal and all declared original consumers. It verifies
+pending source pins and independently retained receiving Archive bytes alongside complete Catalog
+recovery. Bundle v0.4 preserves mandatory nested empty directories; missing directories, references,
+owners or content refuse publication. Restore receipt v0.12 retains original history and budgets.
+Actual zero-Node TLS/SQL/CLI and file Mission gates remain separate from online majority, Archive
+abort/GC and the remaining mandatory P1-P7 work.
+
 [Profile v0.11](../../contracts/recovery/bundle-v0.11/README.md) explicitly selects Artifact storage
 v2 with the original owner and mandatory maintenance journal. The actual CLI writes original
 Snapshot intent/pins before copying; interruption keeps them active and the same command cannot

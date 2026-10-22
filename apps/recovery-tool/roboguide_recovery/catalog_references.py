@@ -10,12 +10,13 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from . import artifact_layout
+from . import archive_references, artifact_layout
 from .snapshot_references import OperationBudget, canonical
 
 SCHEMA = "roboguide.recovery-profile/v0.10"
-SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.11"}
+SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.11", archive_references.SCHEMA}
 WRAPPER = "roboguide.controller-checkpoint/v48"
+WRAPPERS = {WRAPPER, archive_references.WRAPPER}
 CODEC = "domain.EventPayload.json/v29"
 MAX_EVIDENCE_BYTES = 64 * 1024 * 1024
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -163,7 +164,7 @@ def _controller(
             if "controller_checkpoint" in tables
             else None
         )
-        current = checkpoint is not None and checkpoint[0] == WRAPPER
+        current = checkpoint is not None and checkpoint[0] in WRAPPERS
         if "events" not in tables:
             if current:
                 raise ValueError("mandatory original Catalog reference authority table is missing")
@@ -185,8 +186,19 @@ def _controller(
             )
         if profile_schema not in SUPPORTED:
             return heads, publications
-        for schema, raw in connection.execute(
-            "SELECT payload_schema,payload_json FROM events ORDER BY sequence"
+        archived = archive_references.catalog_history(connection, profile_schema, budget)
+        archive_references.operations(
+            connection,
+            profile_schema,
+            budget,
+            current=checkpoint is not None and checkpoint[0] == archive_references.WRAPPER,
+        )
+        history = ((row["payload_schema"], row["payload_json"]) for row in archived)
+        from itertools import chain
+
+        for schema, raw in chain(
+            history,
+            connection.execute("SELECT payload_schema,payload_json FROM events ORDER BY sequence"),
         ):
             budget.check()
             total += len(raw.encode())

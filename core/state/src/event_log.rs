@@ -23,8 +23,13 @@ use checkpoint_store::StoredCheckpoint;
 mod application_replication;
 #[path = "archive.rs"]
 mod archive;
+#[path = "archive_operation.rs"]
+mod archive_operation;
 #[path = "authority_journal.rs"]
 mod authority_journal;
+#[path = "catalog_archive.rs"]
+mod catalog_archive;
+pub use archive_operation::{ArchiveContent, ArchiveIntent, ArchiveRequest};
 #[path = "write_availability.rs"]
 mod write_availability;
 pub use application_replication::{
@@ -1093,7 +1098,7 @@ impl SqliteEventLog {
             .connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
-        let raw: Option<String> = connection.query_row(
+        let mut raw: Option<String> = connection.query_row(
             "SELECT payload_json FROM events
              WHERE payload_schema = 'domain.EventPayload.json/v29'
                AND json_extract(payload_json, '$.ArtifactCatalogReferenceTransition.record.selector.memory_id') = ?1
@@ -1102,6 +1107,17 @@ impl SqliteEventLog {
             params![selector.memory_id().as_str(), selector.revision_id().as_str()],
             |row| row.get(0),
         ).optional()?;
+        if raw.is_none() {
+            for event in catalog_archive::read(&connection)?.into_iter().rev() {
+                let payload: EventPayload = serde_json::from_str(&event.payload_json)
+                    .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
+                if matches!(&payload,EventPayload::ArtifactCatalogReferenceTransition{record} if &record.selector==selector)
+                {
+                    raw = Some(event.payload_json);
+                    break;
+                }
+            }
+        }
         raw.map(|raw| {
             let payload: EventPayload = serde_json::from_str(&raw)
                 .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;

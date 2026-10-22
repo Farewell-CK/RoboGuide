@@ -141,7 +141,10 @@ impl ProcessConfig {
             .is_some_and(|value| {
                 !matches!(
                     value.as_str(),
-                    "legacy" | "roboguide.artifact-storage/v1" | "roboguide.artifact-storage/v2"
+                    "legacy"
+                        | "roboguide.artifact-storage/v1"
+                        | "roboguide.artifact-storage/v2"
+                        | "roboguide.artifact-storage/v3"
                 )
             })
         {

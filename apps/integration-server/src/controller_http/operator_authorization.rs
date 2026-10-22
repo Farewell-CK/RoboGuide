@@ -59,7 +59,7 @@ impl AuthorizedRequestGate {
     }
 
     /// Resolves current exact certificate grants while caller holds the sole application writer.
-    fn validate(&self, live: &ControllerState) -> Result<(), String> {
+    pub(super) fn validate(&self, live: &ControllerState) -> Result<(), String> {
         let principal = &self.principal;
         if let Some(certificate) = &principal.certificate {
             let elapsed =

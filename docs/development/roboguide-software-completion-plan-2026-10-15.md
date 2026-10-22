@@ -151,6 +151,16 @@ MI/Memory 组合通过。N1 的下一必需工作为 Archive/Artifact/Raft Snaps
 旧实际 binary/CLI 拒绝新格式。此项是 N1 的另一个生产者；下一项继续 Archive/Raft
 Snapshot/online Replica 与 GC，不把本项重分类成完整 N1 已完成。
 
+[原内容 Archive 验收](acceptance/2026-10-22-original-content-archive.md)以
+ADR-0152/0153 接通显式原 Archive producer：原 SQL intent/pin、实际源与接收
+owner、完整 checkpoint/Catalog/bytes 发布校验和精确 compact receipt；原命令重试
+不复制，接收方独立保留。wrapper v49/storage v3/recovery v0.12/bundle v0.4 记录
+所有已知原 Controller reference authorities 及 mandatory 嵌套空目录。实际零 Node
+SQL 故障/旧工具/缺内容门禁，以及真实双软件 Node 原文件/Catalog 归档重放与冷恢复
+与持久 inventory head 缺行拒绝已通过。Archive abort/退休/GC、
+Raft Snapshot/online Replica、未归属旧 Catalog 迁移和 N2–N7 仍须全部实施，不因
+本项通过而删除原完成条件。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main
