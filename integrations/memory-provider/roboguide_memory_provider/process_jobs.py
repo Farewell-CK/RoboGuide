@@ -417,10 +417,17 @@ class ProcessFileJobs(FileJobs):
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         pass
-            process.stdin.close()
-            process.stdout.close()
-            if process.returncode is not None:
-                self._record_exit(execution, process, process.returncode)
+            try:
+                # A buffered pipe can raise EPIPE again during close after an actual child exit.
+                # Persist the independently reaped original result before closing those handles.
+                if process.returncode is not None:
+                    self._record_exit(execution, process, process.returncode)
+            finally:
+                for stream in (process.stdin, process.stdout):
+                    try:
+                        stream.close()
+                    except BrokenPipeError:
+                        pass
 
     def safe_state(self) -> dict[str, object]:
         """Publish v0.3 from explicit original generation and durable actual OS wait evidence."""

@@ -195,6 +195,44 @@ def test_natural_child_failure_reports_real_exit_without_cancel_receipt(
         store.close()
 
 
+def test_child_exit_before_first_write_retains_wait_after_actual_broken_pipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An actual dead child may break flush/close; neither may erase its native wait result."""
+    store, original, _ = declared_file(tmp_path)
+    invocation = attempt(original)
+    jobs = ProcessFileJobs(store)
+    original_popen = subprocess.Popen
+    children: list[subprocess.Popen[bytes]] = []
+
+    def reap_before_parent_control_write(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+        """Terminate and wait only for this real owned child before returning its actual pipe."""
+        process = original_popen(*args, **kwargs)
+        process.terminate()
+        process.wait(timeout=5)
+        children.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", reap_before_parent_control_write)
+    try:
+        outcome = jobs.compute(invocation)
+        assert outcome["state"] == "FAILED" and "Broken pipe" in str(outcome["reason"])
+        proof = observations(jobs)[0]
+        assert proof["terminal_state"] == "FAILED"
+        assert proof["process_exit"]["pid"] == children[0].pid
+        assert proof["process_exit"]["exit_code"] == children[0].returncode < 0
+        assert jobs.quota_evidence(invocation["execution_id"])["kernel_proof"] is None
+        assert jobs._db.execute("SELECT count(*) FROM software_stop_commands").fetchone() == (0,)
+        assert not jobs.reclamation_blockers()
+        jobs.close()
+        jobs = ProcessFileJobs(store)
+        assert observations(jobs) == [proof]
+        assert jobs.compute(invocation) == outcome and jobs._processes == {}
+    finally:
+        jobs.close()
+        store.close()
+
+
 def test_old_outcomes_migrate_without_acquiring_process_evidence(tmp_path: Path) -> None:
     """Original thread results remain byte-for-byte history and never acquire an invented PID."""
     store, original, _ = declared_file(tmp_path)
