@@ -1,5 +1,22 @@
 # Repository Guidelines
 
+ADR-0157 adds explicit source upload retirement under wrapper v52/event v31 and offline source
+reclamation under Artifact storage v5/recovery v0.16. Original Completed uploads and Catalog/lineage
+are independent claims. All actual original writers and every known Controller authority precede
+the bounded complete reference check, original GC intent and irreversible tombstone, before unlink.
+Same-command retry only observes; a new explicit command may handle remaining bytes without
+rewriting earlier Unknown. SQL DELETE-header/mandatory heads/rows and actual read/finalize fences
+survive cold recovery; released history needs no deleted bytes. Current v0.16 artifact components
+declare actual storage v3 or v5; v4 stays terminal private Archive. Runtime MI declarations require
+explicit original-policy revocation, terminal Mission, closed switches and independent original-goal/
+kernel completion evidence before Catalog retirement. Old-profile Snapshot retirement retains both
+complete original/current profiles and actual writer evidence without copying or rewriting source
+history. Owners are artifact_http/upload_retirement.rs, core/state/upload_retention.rs, Artifact
+layout/reclamation.rs and recovery's artifact_* reclamation/reference modules. The native gate is
+check_artifact_reclamation_processes.py with actual adoption or completed MI inputs; it creates no
+new Nodes/devices/models/simulators. Replica/online authority is refused. Raft/online producers,
+legacy provider Snapshot closure, hot-journal maintenance and complete P1-P7 remain required.
+
 ADR-0156 adds explicit tenant Artifact-admin adoption of an existing unaccounted publication under
 wrapper v51 / codec v30 / recovery v0.15. Actual original raw envelope/metadata and same-owner CAS
 are verified; typed parents require their own original references. Complete current stable admin,

@@ -1,5 +1,14 @@
 # RoboGuide
 
+源 Artifact 已接通独立上传退休与离线引用回收：wrapper v52/codec v31 保留完整原
+Completed receipt，显式 storage v5/recovery v0.16 在全部实际 writer 下核对已知
+Catalog/lineage、上传、Memory/MI、Snapshot/Archive 和验证引用。原 intent/tombstone
+先于 unlink，Unknown 原命令只观察；退休历史可不含已删 bytes。有效 MI policy 仍保留
+声明，显式撤销和原目标/原 kernel 完成证明齐备后才解除。实现与实际文件/SQL/mTLS/
+冷恢复见 [ADR-0157](docs/decisions/0157-source-artifact-retention-release-and-reclamation.md)
+及[本轮验收](docs/development/acceptance/2026-10-23-source-artifact-reclamation.md)。
+此离线入口拒绝 Replica/online 权威；Raft/在线生产者及其余完整整改继续实施。
+
 旧未归属 Catalog 可经当前 tenant Artifact admin 显式接管保留责任：读取原 publication
 digest 后提交精确原命令，实际 source envelope/metadata、CAS owner/bytes 与 typed parent
 先核对，引用及完整 receipt 同一事务提交。历史 publisher/tenant 仍为 unknown，不增加

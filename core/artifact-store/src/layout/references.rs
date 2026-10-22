@@ -58,11 +58,15 @@ pub(super) fn replace_owner(
         .unwrap_or_default();
     if !matches!(
         schema,
-        ARTIFACT_LAYOUT_SCHEMA | ARTIFACT_REFERENCE_LAYOUT_SCHEMA | ARTIFACT_ARCHIVE_LAYOUT_SCHEMA
+        ARTIFACT_LAYOUT_SCHEMA
+            | ARTIFACT_REFERENCE_LAYOUT_SCHEMA
+            | ARTIFACT_ARCHIVE_LAYOUT_SCHEMA
+            | ARTIFACT_GC_LAYOUT_SCHEMA
     ) || !(schema == owner.schema
         || (schema == ARTIFACT_LAYOUT_SCHEMA && owner.schema == ARTIFACT_REFERENCE_LAYOUT_SCHEMA)
         || (schema == ARTIFACT_REFERENCE_LAYOUT_SCHEMA
-            && owner.schema == ARTIFACT_ARCHIVE_LAYOUT_SCHEMA))
+            && owner.schema == ARTIFACT_ARCHIVE_LAYOUT_SCHEMA)
+        || (schema == ARTIFACT_ARCHIVE_LAYOUT_SCHEMA && owner.schema == ARTIFACT_GC_LAYOUT_SCHEMA))
     {
         return Err(unsafe_path_error(
             "upgrade Artifact owner",

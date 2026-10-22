@@ -336,12 +336,13 @@ pub(crate) fn flush_unisolated_commands(
 
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
-    // Wrappers v45-v50 add infrastructure/content/quota authority while retaining exactly the
+    // Wrappers v45-v51 add infrastructure/content/quota authority while retaining exactly the
     // original v45 scoped revision, safety and Memory isolation contract checked by this function.
     // Their independent SQL/checkpoint journals remain subject to their own strict storage gates.
     let current_isolation_contract = matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_UPLOAD_RETIREMENT_SERVER_CHECKPOINT_SCHEMA
             | PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA
             | PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA

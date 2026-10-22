@@ -5,6 +5,11 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Releases only one original completed upload claim without rewriting completion or deleting bytes.
+    ArtifactUploadRetired {
+        /// Complete original byte/source proof and current authenticated retirement command.
+        receipt: crate::ArtifactUploadRetirement,
+    },
     /// Explicit current retention adoption preserves the exact original unaccounted publication.
     ArtifactCatalogLegacyAdopted {
         /// Full original publication and actual current adopting authority, never guessed historical facts.

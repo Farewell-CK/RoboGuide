@@ -54,9 +54,14 @@ impl FileSystemArtifactStore {
         Self::open_layout(root.into(), 3)
     }
 
+    /// Opens explicit source storage v5, retaining all original authorities and irreversible GC fences.
+    pub fn new_with_reclamation(root: impl Into<PathBuf>) -> Result<Self, ArtifactStoreError> {
+        Self::open_layout(root.into(), 5)
+    }
+
     /// Retains an original Controller store as a consumer before its Catalog/Archive producer effects.
     pub fn bind_reference_authority(&self, authority_id: &str) -> Result<(), ArtifactStoreError> {
-        if self.storage_version != 3 {
+        if !matches!(self.storage_version, 3 | 5) {
             return Err(unsafe_path_error(
                 "bind Artifact reference authority",
                 "explicit storage v3 is required",
@@ -78,7 +83,9 @@ impl FileSystemArtifactStore {
             &root.join(STAGING_DIRECTORY),
             "create artifact staging directory",
         )?;
-        let layout = if version == 3 {
+        let layout = if version == 5 {
+            crate::layout::open_reclamation(&root)?
+        } else if version == 3 {
             crate::layout::open_authorities(&root)?
         } else if version == 2 {
             crate::layout::open_references(&root)?
@@ -154,7 +161,9 @@ impl FileSystemArtifactStore {
 
     /// Reports the explicitly opened format without interpreting storage identity as permission.
     pub fn storage_schema(&self) -> &'static str {
-        if self.storage_version == 3 {
+        if self.storage_version == 5 {
+            crate::layout::ARTIFACT_GC_LAYOUT_SCHEMA
+        } else if self.storage_version == 3 {
             crate::layout::ARTIFACT_ARCHIVE_LAYOUT_SCHEMA
         } else if self.storage_version == 2 {
             crate::layout::ARTIFACT_REFERENCE_LAYOUT_SCHEMA
@@ -307,6 +316,7 @@ impl FileSystemArtifactStore {
     /// Opens a finalized artifact for streaming reads by digest.
     pub fn open_artifact(&self, digest: &str) -> Result<File, ArtifactStoreError> {
         let digest = normalize_digest(digest)?;
+        self.require_live_content(&digest)?;
         let path = self.blob_path(&digest);
         validate_blob_parent(&path, true)?;
         match fs::symlink_metadata(&path) {
@@ -343,6 +353,10 @@ impl FileSystemArtifactStore {
     /// Reports whether a digest path currently exists as a regular file.
     pub fn contains(&self, digest: &str) -> Result<bool, ArtifactStoreError> {
         let digest = normalize_digest(digest)?;
+        match self.require_live_content(&digest) {
+            Err(ArtifactStoreError::ArtifactNotFound { .. }) => return Ok(false),
+            result => result?,
+        }
         let path = self.blob_path(&digest);
         validate_blob_parent(&path, true)?;
         match fs::symlink_metadata(path) {
@@ -366,6 +380,7 @@ impl FileSystemArtifactStore {
         expected_size: u64,
     ) -> Result<StoredArtifact, ArtifactStoreError> {
         let digest = normalize_digest(digest)?;
+        self.require_live_content(&digest)?;
         let path = self.blob_path(&digest);
         if !self.existing_matches(&path, &digest, expected_size)? {
             return match fs::symlink_metadata(&path) {
@@ -392,6 +407,14 @@ impl FileSystemArtifactStore {
             .join("sha256")
             .join(&hex[..2])
             .join(hex)
+    }
+
+    /// Checks mandatory original GC authority before any read, deduplication or new publication effect.
+    pub(crate) fn require_live_content(&self, digest: &str) -> Result<(), ArtifactStoreError> {
+        if self.storage_version == 5 {
+            crate::layout::require_live_content(&self.root, digest)?;
+        }
+        Ok(())
     }
 
     /// Verifies an existing digest path before treating a retry as deduplicated.

@@ -32,7 +32,7 @@ def run(source: Path, directory: Path) -> dict[str, Any]:
         )
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     profile: dict[str, Any] = {
-        "schema": "roboguide.recovery-profile/v0.15",
+        "schema": "roboguide.recovery-profile/v0.16",
         "profile_id": "actual-catalog-archive-recovery",
         "revision": 1,
         "max_bytes": 512 * 1024**2,
@@ -51,6 +51,7 @@ def run(source: Path, directory: Path) -> dict[str, Any]:
             {
                 "component_id": "artifact",
                 "kind": "artifact",
+                "storage_schema": "roboguide.artifact-storage/v3",
                 "root": str(source / "cas"),
                 "database": None,
                 "trees": [],
@@ -144,7 +145,7 @@ def run(source: Path, directory: Path) -> dict[str, Any]:
         "--command-id",
         "restore-original-catalog",
     )
-    assert receipt["schema"] == "roboguide.restore-receipt/v0.15"
+    assert receipt["schema"] == "roboguide.restore-receipt/v0.16"
     assert retained(restored / "stores/controller/controller.sqlite3") == original
     assert retained(source / "controller.sqlite3") == original
     assert (

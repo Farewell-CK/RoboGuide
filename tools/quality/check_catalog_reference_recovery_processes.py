@@ -51,7 +51,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
 
     shutil.copytree(source / "cas", working / "cas", ignore=omit_sockets)
     profile: dict[str, Any] = {
-        "schema": "roboguide.recovery-profile/v0.15",
+        "schema": "roboguide.recovery-profile/v0.16",
         "profile_id": "actual-catalog-original-owner",
         "revision": 1,
         "max_bytes": 512 * 1024**2,
@@ -70,6 +70,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
             {
                 "component_id": "artifact",
                 "kind": "artifact",
+                "storage_schema": "roboguide.artifact-storage/v3",
                 "root": str(working / "cas"),
                 "database": None,
                 "trees": [],
@@ -150,7 +151,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         "original-restore",
     )
     restored_receipt = execute(*restore_arguments)
-    assert restored_receipt["schema"] == "roboguide.restore-receipt/v0.15"
+    assert restored_receipt["schema"] == "roboguide.restore-receipt/v0.16"
     assert execute(*restore_arguments) == restored_receipt
     assert original_heads(restored / "stores/controller/controller.sqlite3") == heads
     old_writer = None
@@ -167,6 +168,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         retained_old_owner = old_schema in {
             "roboguide.controller-checkpoint/v49",
             "roboguide.controller-checkpoint/v50",
+            "roboguide.controller-checkpoint/v51",
         }
         old_cas = old_working / ("retained-cas" if retained_old_owner else "legacy-cas")
         old_environment = dict(environment)
@@ -194,7 +196,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         assert completed.returncode != 0
         message = completed.stderr.decode(errors="replace")
         assert "unsupported" in message.lower() and any(
-            version in message for version in ("v29", "v48", "v49", "v50", "v51")
+            version in message for version in ("v29", "v48", "v49", "v50", "v51", "v52")
         ), message
         assert original_heads(old_database) == before
         old_writer = {
@@ -230,7 +232,11 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
                 }
             )
     old_profile = directory / "old-profile.json"
-    save(old_profile, profile | {"schema": "roboguide.recovery-profile/v0.9"})
+    old_definition = json.loads(json.dumps(profile))
+    old_definition["schema"] = "roboguide.recovery-profile/v0.9"
+    for component in old_definition["components"]:
+        component.pop("storage_schema", None)
+    save(old_profile, old_definition)
     refused_profile = execute(
         "backup",
         "--profile",

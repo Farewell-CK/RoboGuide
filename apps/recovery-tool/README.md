@@ -1,5 +1,22 @@
 # RoboGuide recovery tool
 
+[Profile v0.16](../../contracts/recovery/bundle-v0.16/README.md) preserves all preceding complete
+contracts and explicitly declares each ordinary Artifact component's actual storage v3 or v5.
+Storage v5 adds the original same-owner GC journal and mandatory command/tombstone heads. The
+offline `gc-artifact --profile <profile> --artifact <id> --content-digest <sha256> --byte-size <size>
+--command-id <id> --reason <reason>` takes all original writer leases, checks every known Controller
+and independent content reference, and commits original intent/tombstone before unlink. Unknown
+commands only observe on retry. Active Catalog/lineage, uploads, unresolved use/import/handoff,
+MI policy/goal, verifier, Snapshot and Archive claims refuse deletion. Actual Replica/online
+authority is not supported by this offline entry and is refused rather than treated as quiescent.
+`retire-artifact-snapshot` additionally requires the original profile/intent and all original/current
+writers for an unpublished old-profile Snapshot; `reconcile-artifact-snapshot-retirement` only
+publishes the exact retained pending receipt. Neither operation copies or deletes payloads.
+Cold recovery retains all original Unknown/history and permits absent already released bytes.
+See the [actual acceptance](../../docs/development/acceptance/2026-10-23-source-artifact-reclamation.md).
+Hot rollback journals currently refuse readonly startup/backup; explicit native rollback maintenance,
+Raft/online and the complete P1-P7 matrix remain required work.
+
 [Profile v0.13](../../contracts/recovery/bundle-v0.13/README.md) preserves original wrapper v49
 copy intents while validating v50 / operations v0.2 unpublished-Archive cleanup. Actual source/
 Archive writer fences, original cleanup budgets, durable tombstones and exact SQL receipts remain

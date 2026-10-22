@@ -1,18 +1,27 @@
 # 当前软件实现与部署拓扑
 
-更新：2026-10-22。对应全部非发布软件整改计划；后续目标不视为当前能力。
+更新：2026-10-23。对应全部非发布软件整改计划；后续目标不视为当前能力。
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
+
+ADR-0157 接通源 Artifact 的离线回收：Completed 上传保留与 Catalog/lineage 独立，
+只有原主体/同 tenant admin 的显式原命令才能退休上传所有权；历史结果不改写。
+wrapper v52/codec v31、显式 storage v5/recovery v0.16，全部原 writer 与已知
+引用闭包先于原 GC intent/tombstone/unlink。v4 仍只表示终结的私有 Archive，
+不能作为普通 CAS。实际 adoption/MI 原 history、parent/child 独立保留、SQL/unlink 故障、
+重启和冷恢复通过；MI 要求显式 policy 撤销、Mission/switch 终结和独立原目标/kernel
+证明才解除声明保留。Replica/online 不受此离线入口支持，遇到则拒绝。完整 N1/N3
+及其余 N2–N7 不因此完成，实际范围见[验收记录](../../development/acceptance/2026-10-23-source-artifact-reclamation.md)。
 
 ADR-0156 接续未归属旧 Catalog 的显式保留责任接管：原 envelope/metadata 和实际
 CAS owner/bytes 不变，当前 tenant admin/TLS grant/命令另记完整 receipt，与新引用
 原子提交。历史 publisher/tenant 缺失保持 unknown；不授予 read/use/import 权限。
-wrapper v51/codec v30/recovery v0.15 在本包实施中，旧 writer 不可忽略接管 authority。
+wrapper v51/codec v30/recovery v0.15 已通过实际门禁，当前 v52/v0.16 延续完整原 authority。
 
 ADR-0155 的后续接线只处理原 command 私有 Archive 接收 owner：全部实际 writer、
 空已知 consumer inventory、唯一原 Archive reference 和精确源 compact receipt
 先于退休 tombstone；终态 storage v4 密封旧 writer，另一个原 GC intent/budget
-先于 unlink。显式 recovery v0.14 保留退休历史，不要求已删除 bytes。当前实施中；
+先于 unlink。显式 recovery v0.14 保留退休历史，不要求已删除 bytes。实际门禁已通过；
 其它生产者、源 Artifact 全引用 GC 和 N2–N7 仍须各自完整实现与验收。
 
 ADR-0154 接续原 Archive producer 的未发布 cleanup：新显式 abort 在原 writer 中
@@ -26,7 +35,7 @@ recovery v0.12 / bundle v0.4。原 SQL authority 在读取内容前持久原 int
 CAS inventory 记录实际原 Controller store identity，冷备份须包含所有已知 consumer。
 独立 Archive root writer 保护接收端副本；实际发布验证后才原子保存 Catalog 恢复投影、
 history floor 和原 compact receipt。接收端原 reference 独立保留。完整目录清单保存
-嵌套 backend 的 mandatory 空目录；缺记录、目录或字节均拒绝。实际门禁验证中，
+嵌套 backend 的 mandatory 空目录；缺记录、目录或字节均拒绝。实际门禁已通过，
 尚不能据此宣告 N1/在线 HA/设备连续性完成。
 
 ADR-0151 接入显式 Artifact storage v2：在原 root writer 内保留同一 owner，
@@ -41,7 +50,7 @@ ADR-0152 的 Archive 实施保留两份不同责任：State 的原事件前缀/�
 checkpoint 和同 owner 内容闭包都持久发布/验证后才可 compact；原引用在原 SQL
 compact 结果可独立对账后退休。缺字节或 Unknown 不删除引用/历史。Catalog 恢复证据
 由明确版本的独立投影保存，不能丢弃后假定 application checkpoint 已经包含它。
-此项完成实现与实际门禁前仍属后续目标，Node/物理停止不由 Archive 产生。
+实际实现及门禁见原验收记录；Node/物理停止不由 Archive 产生。
 
 ADR-0150 保留 Node v0.4 原 wire/sequence/application completion 合同，在原验证 ingress
 后以每 session 最多 8 个待完成事实接通已有有界应用批处理。提交仍按原 wire 顺序同步

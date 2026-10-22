@@ -111,7 +111,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 每阶段通过对应验收后才进入依赖阶段。类型、文档、占位返回值、内部直调和通用测试通过
 不能独立关闭功能。阶段记录必须包含当前源码/配置 identity、复现命令、调用链、结果和剩余项。
 
-## 当前执行队列（2026-10-22）
+## 当前执行队列（2026-10-23）
 
 本轮连续实施冻结 `main@45a82410867e01241394d1b9116aa53634ce2a06`，只在
 `codex/nonrelease-remediation-closure` 开发。不得为工作包另建分支；阶段提交、推送和
@@ -184,6 +184,19 @@ ADR-0156/wrapper v51/codec v30/recovery v0.15 接通真实旧 publication 的显
 command 及引用同事务提交；历史身份仍 unavailable，不新增 read/use/import 权限。
 实际旧 v50 producer、SQL rollback/restart/冷恢复和旧 reader 拒绝通过。源 Artifact
 全引用 GC、其它 producer 释放、Raft/online 与完整 N2–N7 继续实施。
+
+[源 Artifact 保留释放与回收](acceptance/2026-10-23-source-artifact-reclamation.md)以
+ADR-0157/wrapper v52/codec v31/storage v5/recovery v0.16 接通独立 Completed 上传
+退休、全部已知原 Controller/引用闭包检查、原 intent/tombstone-before-unlink 与
+不确定结果只读重试。真实原 adoption 和 MI child lineage 输入分别完成 SQL rollback/
+重启、有效 policy 拒绝/显式撤销/独立原目标证明、parent 退休后 child 继续保留、
+真实 unlink PermissionError/Unknown、新命令余量删除、重新出现 bytes 不复活、
+旧 binary/profile 拒绝和完整冷恢复。旧 profile Snapshot 由完整原/当前 profile 与实际
+全部 writer 的独立原 receipt 退休，历史源不改写。
+本项只关闭 standalone 已支持 authority 的离线源回收；N1 继续接 Raft Snapshot/
+online Replica producer，以及 provider 旧 profile Snapshot 的完整闭环。N3 多数派
+内容 ACK 不变。新 GC SQL 的 hot rollback journal 显式维护属于 N7 必需项，当前只读
+启动/备份拒绝而非自动修复；N2–N7 原所有完成条件保留。
 
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。

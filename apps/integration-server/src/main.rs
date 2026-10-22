@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper before independent original completed-upload retention release.
+const PRE_UPLOAD_RETIREMENT_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v51";
 /// Previous wrapper before explicit current-administrator adoption of unaccounted legacy Catalog.
 const PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v50";
 /// Previous wrapper before independent original unpublished-Archive cleanup authority.
@@ -858,6 +860,9 @@ fn configured_artifact_store(
         artifact_store::ARTIFACT_ARCHIVE_LAYOUT_SCHEMA => {
             Ok(artifact_store::FileSystemArtifactStore::new_with_archive_references(root)?)
         }
+        artifact_store::ARTIFACT_GC_LAYOUT_SCHEMA => {
+            Ok(artifact_store::FileSystemArtifactStore::new_with_reclamation(root)?)
+        }
         _ => Err("unsupported explicit Artifact storage schema".into()),
     }
 }
@@ -1102,6 +1107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_UPLOAD_RETIREMENT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA
@@ -1155,6 +1161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_UPLOAD_RETIREMENT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA
@@ -1392,7 +1399,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     controller.memory_preparation.catalog = Some(artifact_catalog.clone());
-    if artifact_store.storage_schema() == artifact_store::ARTIFACT_ARCHIVE_LAYOUT_SCHEMA {
+    if matches!(
+        artifact_store.storage_schema(),
+        artifact_store::ARTIFACT_ARCHIVE_LAYOUT_SCHEMA | artifact_store::ARTIFACT_GC_LAYOUT_SCHEMA
+    ) {
         artifact_store.bind_reference_authority(&event_log.archive_authority_id()?)?;
     }
     application::plan_revision::install_catalog(&controller)?;

@@ -19,9 +19,15 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.13",
     "roboguide.recovery-profile/v0.14",
     "roboguide.recovery-profile/v0.15",
+    "roboguide.recovery-profile/v0.16",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
-WRAPPERS = {WRAPPER, "roboguide.controller-checkpoint/v50", "roboguide.controller-checkpoint/v51"}
+WRAPPERS = {
+    WRAPPER,
+    "roboguide.controller-checkpoint/v50",
+    "roboguide.controller-checkpoint/v51",
+    "roboguide.controller-checkpoint/v52",
+}
 MAX_HISTORY_BYTES = 256 * 1024 * 1024
 MAX_CATALOG_BYTES = 64 * 1024 * 1024
 MAX_METADATA = 128 * 1024 * 1024
@@ -31,6 +37,7 @@ PROTECTED = {
     "ArtifactCatalogReferenceTransition",
     "ArtifactCatalogLegacyAdopted",
     "ArtifactUploadTransition",
+    "ArtifactUploadRetired",
     "MapArtifactDeclared",
     "MapArtifactPublished",
     "MapArtifactStaged",
@@ -141,7 +148,7 @@ def catalog_history(
             or next(iter(payload)) not in PROTECTED
             or not isinstance(row["payload_schema"], str)
             or re.fullmatch(
-                r"domain.EventPayload.json/v(?:[1-9]|1[0-9]|2[0-9]|30)", row["payload_schema"]
+                r"domain.EventPayload.json/v(?:[1-9]|[12][0-9]|3[01])", row["payload_schema"]
             )
             is None
         ):
@@ -428,7 +435,11 @@ def validate(
                 rows,
                 current=checkpoint is not None
                 and checkpoint[0]
-                in {archive_aborts.WRAPPER, "roboguide.controller-checkpoint/v51"},
+                in {
+                    archive_aborts.WRAPPER,
+                    "roboguide.controller-checkpoint/v51",
+                    "roboguide.controller-checkpoint/v52",
+                },
             )
             cleanups: dict[str, list[tuple[dict[str, Any], dict[str, Any] | None]]] = {}
             for cleanup_intent, cleanup_receipt in cleanup:

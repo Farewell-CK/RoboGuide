@@ -1,6 +1,62 @@
 //! Original-owner scoped children for a new revision Group; no provisional physical binding.
 
 use super::*;
+
+/// Keeps original revision declarations pinned until explicit policy revocation and complete closure.
+/// Historical completed plans retain their source/goal evidence without requiring deleted payloads.
+pub(crate) fn catalog_retirement_evidence(
+    controller: &ControllerState,
+    selector: &MemorySelector,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut result = Vec::new();
+    for (mission, state) in &controller.runtime_revisions {
+        if !state
+            .candidates
+            .values()
+            .flat_map(|candidate| candidate.memory.values())
+            .any(|record| {
+                record.parent.selector() == selector || record.request.child.selector() == selector
+            })
+        {
+            continue;
+        }
+        let mission = domain::MissionId::new(mission).map_err(|error| error.to_string())?;
+        let execution = controller
+            .orchestrator
+            .execution(&mission)
+            .ok_or("original revision Mission is unavailable")?;
+        if !state.revoked
+            || !matches!(
+                execution.lifecycle(),
+                orchestration::MissionExecutionLifecycle::Completed
+                    | orchestration::MissionExecutionLifecycle::Failed
+                    | orchestration::MissionExecutionLifecycle::Cancelled
+            )
+            || state
+                .switches
+                .iter()
+                .any(|switch| !matches!(switch.phase, Phase::Applied | Phase::Cancelled))
+        {
+            return Err("original runtime revision still retains its Catalog declarations".into());
+        }
+        super::goal::validate_restored(controller, &mission, state)?;
+        if execution.lifecycle() == orchestration::MissionExecutionLifecycle::Completed
+            && (execution.goal_gate() != Some(state.goal_contract_digest.as_str())
+                || execution.goal_receipt_digest().is_none_or(|receipt| {
+                    state
+                        .goal_evidence
+                        .get(receipt)
+                        .is_none_or(|proof| proof.completed_time.is_none())
+                }))
+        {
+            return Err(
+                "original revision lacks its independent original-goal completion proof".into(),
+            );
+        }
+        result.push(serde_json::json!({"mission":mission,"revision":state,"execution":execution}));
+    }
+    Ok(result)
+}
 use domain::{MemoryArtifactManifest, MemoryScope, MemorySelector};
 use ports::EventSink;
 

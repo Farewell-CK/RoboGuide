@@ -39,3 +39,5 @@ Controller Artifact 的原 store owner 与 Local Memory provider 分别保留自
 [私有接收 owner 的回收](docs/development/acceptance/2026-10-22-private-archive-reclamation.md)进一步接通独立退休：全部实际 writer、空的完整 consumer 清单和唯一原 producer 先于 tombstone/终态 storage v4 seal。独立 GC intent 先于 unlink，原 Unknown 只读；新命令处理剩余 bytes 并保留先前不确定性。v0.14 冷恢复验证完整终态元数据，已退休 history 不再要求已删 bytes。该范围仍不覆盖源 Artifact 全引用或在线 producer 的完整释放与 GC。
 
 原未归属 Catalog 通过[显式接管](docs/development/acceptance/2026-10-22-original-catalog-adoption.md)建立当前保留责任。原 envelope/raw manifest 与实际 CAS 不能由当前主体重写，历史 publisher/tenant 缺失仍为 unknown；当前 admin/TLS/command 独立保存。v0.15 额外核对原 receipt 与同事务 acquisition，任何接管都不新增消费权限。
+
+[源 Artifact 离线回收](docs/development/acceptance/2026-10-23-source-artifact-reclamation.md)进一步接通 standalone 已知引用闭包：独立上传退休、有效 MI policy 拒绝、显式撤销与原目标/kernel 证明、parent 退休后 child 继续保留，以及原 Snapshot/Archive 和验证责任。显式 storage v5/recovery v0.16 保存原命令与 mandatory tombstone/heads，先持久再 unlink；Unknown 相同命令只观察，重新出现的同 owner bytes 不复活。实际旧 profile Snapshot 退休同时取得原/当前全部 writer，不改历史源。Raft/online 权威由此入口拒绝，仍须继续完成对应生产者和多数派数据面；hot journal 显式维护也继续列在运维整改中。

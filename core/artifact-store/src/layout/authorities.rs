@@ -111,11 +111,7 @@ pub(super) fn validate(root: &Path, owner: &Owner) -> Result<(), ArtifactStoreEr
         false,
         "validate original Controller inventory",
     )?;
-    if read_owner_for(
-        &directory.join("identity.json"),
-        ARTIFACT_ARCHIVE_LAYOUT_SCHEMA,
-    )? != *owner
-    {
+    if read_owner_for(&directory.join("identity.json"), &owner.schema)? != *owner {
         return Err(unsafe_path_error(
             "validate Artifact reference authorities",
             "original owner conflicts",
@@ -240,6 +236,12 @@ pub(super) fn validate(root: &Path, owner: &Owner) -> Result<(), ArtifactStoreEr
 
 /// Completes only the original same-owner migration, preserving all prior maintenance history.
 pub(crate) fn open_authorities(root: &Path) -> Result<OpenLayout, ArtifactStoreError> {
+    if exists(&root.join(super::reclamation::UPGRADE_INTENT))? {
+        return Err(unsafe_path_error(
+            "open Artifact v3",
+            "original reclamation upgrade requires explicit storage v5",
+        ));
+    }
     let path = root.join(UPGRADE_INTENT);
     let owner_path = root.join(ARTIFACT_OWNER_FILE);
     if !exists(&path)? && exists(&owner_path)? {
@@ -348,10 +350,17 @@ pub(crate) fn bind_authority(root: &Path, id: &str) -> Result<(), ArtifactStoreE
             "actual original Controller identity is invalid",
         ));
     }
-    let owner = read_owner_for(
-        &root.join(ARTIFACT_OWNER_FILE),
-        ARTIFACT_ARCHIVE_LAYOUT_SCHEMA,
-    )?;
+    let (_, schema) = inspect_retained(root)?;
+    if !matches!(
+        schema,
+        ARTIFACT_ARCHIVE_LAYOUT_SCHEMA | ARTIFACT_GC_LAYOUT_SCHEMA
+    ) {
+        return Err(unsafe_path_error(
+            "bind Artifact authority",
+            "original consumer inventory is unavailable",
+        ));
+    }
+    let owner = read_owner_for(&root.join(ARTIFACT_OWNER_FILE), schema)?;
     validate(root, &owner)?;
     let directory = root.join(DIRECTORY).join("controllers");
     let path = directory.join(format!("{hex}.json"));

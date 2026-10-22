@@ -1,5 +1,11 @@
 # RoboGuide 分支同步与剩余整改核对（2026-10-20）
 
+2026-10-23 同一分支 `codex/nonrelease-remediation-closure` 接续 `51af590` 完成
+[源 Artifact 离线回收与 MI 历史释放](acceptance/2026-10-23-source-artifact-reclamation.md)。
+原上传/Catalog/lineage 独立退休，实际 writer/引用闭包与原 tombstone 先于 unlink；
+实际旧数据、SQL/文件故障、重启、MI 独立原目标和冷恢复通过。此入口拒绝 Replica/
+online 权威；Raft/在线 producer、typed-map 整链及 N2–N7 继续实施，尚非 SoftwareComplete。
+
 2026-10-22 后续进度与执行顺序已落实到
 [实施计划的当前执行队列](roboguide-software-completion-plan-2026-10-15.md)。
 上次审计后的 live-session 新提交 `227fb62` 已与 main 组合验证并合入；全量 Python

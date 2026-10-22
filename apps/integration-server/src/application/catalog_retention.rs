@@ -81,6 +81,8 @@ pub(crate) fn retirement_proof(
     if super::memory_handoff::holds_catalog(controller, &record.selector) {
         return Err("original pending handoff retains its Catalog source/target".into());
     }
+    let revisions =
+        super::plan_revision::catalog_retirement_evidence(controller, &record.selector)?;
     let canonical = serde_json::to_value(serde_json::json!({
         "selector": record.selector,
         "generation": record.generation,
@@ -89,6 +91,7 @@ pub(crate) fn retirement_proof(
         "preparations": preparations,
         "uses": uses,
         "imports": imports,
+        "runtime_revisions": revisions,
     }))
     .map_err(|error| error.to_string())?;
     Ok(format!(

@@ -65,11 +65,13 @@ def run(
         "roboguide.controller-checkpoint/v49",
         "roboguide.controller-checkpoint/v50",
         "roboguide.controller-checkpoint/v51",
+        "roboguide.controller-checkpoint/v52",
     }:
         raise ValueError("unsupported explicit original Archive process profile")
     cleanup_authority = schema in {
         "roboguide.controller-checkpoint/v50",
         "roboguide.controller-checkpoint/v51",
+        "roboguide.controller-checkpoint/v52",
     }
     if abort_unpublished and not cleanup_authority:
         raise ValueError("explicit original cleanup requires wrapper v50")
@@ -413,7 +415,9 @@ def run(
             compacted = rows()
         stop(process)
         profile: dict[str, Any] = {
-            "schema": "roboguide.recovery-profile/v0.15"
+            "schema": "roboguide.recovery-profile/v0.16"
+            if schema == "roboguide.controller-checkpoint/v52"
+            else "roboguide.recovery-profile/v0.15"
             if schema == "roboguide.controller-checkpoint/v51"
             else "roboguide.recovery-profile/v0.13"
             if cleanup_authority
@@ -451,6 +455,10 @@ def run(
                 },
             ],
         }
+        if schema == "roboguide.controller-checkpoint/v52":
+            for component in profile["components"]:
+                if component["kind"] == "artifact":
+                    component["storage_schema"] = "roboguide.artifact-storage/v3"
         profile_path = directory / "profile.json"
         save(profile_path, profile)
         # Source Catalog evidence, Archive destination and known consumers are all mandatory.
@@ -495,7 +503,9 @@ def run(
             "restore-original",
         )
         assert receipt["schema"] == (
-            "roboguide.restore-receipt/v0.15"
+            "roboguide.restore-receipt/v0.16"
+            if schema == "roboguide.controller-checkpoint/v52"
+            else "roboguide.restore-receipt/v0.15"
             if schema == "roboguide.controller-checkpoint/v51"
             else "roboguide.restore-receipt/v0.13"
             if cleanup_authority
@@ -662,6 +672,9 @@ def run(
                         raise ValueError("unsafe old CLI source archive")
                     archive_file.extract(member, old_root, filter="data")
             legacy = directory / "old-cli-profile.json"
+            old_components = json.loads(json.dumps(profile["components"][:2]))
+            for component in old_components:
+                component.pop("storage_schema", None)
             save(
                 legacy,
                 profile
@@ -669,7 +682,7 @@ def run(
                     "schema": "roboguide.recovery-profile/v0.12"
                     if cleanup_authority
                     else "roboguide.recovery-profile/v0.11",
-                    "components": profile["components"][:2],
+                    "components": old_components,
                 },
             )
             execute(

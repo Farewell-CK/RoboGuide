@@ -5,7 +5,7 @@
 //! State & Memory Plane facade for implemented observable projections.
 
 /// Current composition authority wrapper, shared by Controller, replica supervisor and storage fences.
-pub const CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v51";
+pub const CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v52";
 
 /// Returns whether a supported Controller wrapper requires an exact durable command journal head.
 pub fn checkpoint_requires_authority_journal(schema: &str) -> bool {
@@ -35,13 +35,16 @@ pub fn checkpoint_requires_authority_journal(schema: &str) -> bool {
             | "roboguide.controller-checkpoint/v48"
             | "roboguide.controller-checkpoint/v49"
             | "roboguide.controller-checkpoint/v50"
+            | "roboguide.controller-checkpoint/v51"
             | CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
     )
 }
 
 mod allocation;
 mod artifact_retention;
+mod upload_retention;
 pub use artifact_retention::ArtifactRetentionProjection;
+pub use upload_retention::validate_upload_retirement;
 #[cfg(test)]
 mod artifact_retention_tests;
 mod belief;

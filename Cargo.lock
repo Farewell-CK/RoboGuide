@@ -99,6 +99,7 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
  "ports",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

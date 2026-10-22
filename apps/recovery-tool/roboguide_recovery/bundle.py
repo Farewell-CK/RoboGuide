@@ -575,6 +575,9 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                     partial, component["component_id"], record_map, budget
                 )
         catalog_references.validate(partial, components, record_map, budget, profile["schema"])
+        from .artifact_source_references import validate_bundle as validate_source_content
+
+        validate_source_content(partial, components, record_map, budget, profile["schema"])
         archive_references.validate(partial, components, record_map, budget, profile["schema"])
         manifest: dict[str, Any] = {
             "schema": (
@@ -793,6 +796,9 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
     archive_references.validate(
         bundle, components, record_map, budget, manifest["profile"]["schema"]
     )
+    from .artifact_source_references import validate_bundle as validate_source_content
+
+    validate_source_content(bundle, components, record_map, budget, manifest["profile"]["schema"])
     for component in components:
         databases, _, _ = layout(component, profile_schema=manifest["profile"]["schema"])
         required = (
@@ -812,6 +818,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.13",
                 "roboguide.recovery-profile/v0.14",
                 "roboguide.recovery-profile/v0.15",
+                "roboguide.recovery-profile/v0.16",
             }
             else databases
         )
@@ -927,7 +934,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.15"
+        "roboguide.restore-receipt/v0.16"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.16"
+        else "roboguide.restore-receipt/v0.15"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.15"
         else "roboguide.restore-receipt/v0.14"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.14"
@@ -1023,6 +1032,7 @@ def restore(
             "roboguide.recovery-profile/v0.13",
             "roboguide.recovery-profile/v0.14",
             "roboguide.recovery-profile/v0.15",
+            "roboguide.recovery-profile/v0.16",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:

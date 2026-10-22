@@ -92,6 +92,25 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
             .revalidate_artifact_principal(self.principal)?;
         self.authority.admit_artifact_payload(payload)?;
         match payload {
+            EventPayload::ArtifactUploadRetired { receipt } => {
+                receipt.validate()?;
+                if receipt.principal_id != self.principal.subject
+                    || receipt.tenant_id != self.principal.tenant_id
+                    || receipt.certificate_digest != self.principal.certificate_digest
+                    || (self.principal.grant.role != ArtifactRole::Admin
+                        && self.principal.subject != receipt.upload.principal_id)
+                    || self
+                        .catalog
+                        .retained_store
+                        .as_ref()
+                        .and_then(|store| store.owner_id())
+                        != Some(receipt.store_owner_id.as_str())
+                {
+                    return Err(
+                        "upload retirement differs from its actual current tenant/owner".into(),
+                    );
+                }
+            }
             EventPayload::ArtifactCatalogLegacyAdopted { receipt } => {
                 receipt.validate()?;
                 if self.principal.grant.role != ArtifactRole::Admin

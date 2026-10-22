@@ -55,6 +55,9 @@ impl ArtifactReadOnlyStore {
     /// Opens only one actual regular CAS file after exact path validation; callers bound all reads.
     pub fn open_artifact(&self, digest: &str) -> Result<File, ArtifactStoreError> {
         let digest = normalize_digest(digest)?;
+        if self.schema == crate::ARTIFACT_GC_LAYOUT_SCHEMA {
+            crate::layout::require_live_content(&self.root, &digest)?;
+        }
         let hex = &digest[7..];
         let path = self
             .root

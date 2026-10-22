@@ -230,6 +230,7 @@ pub(super) fn inputs(
     let mut retained = crate::ArtifactRetentionProjection::default();
     let mut publications = BTreeMap::new();
     let mut uploads = BTreeMap::new();
+    let mut retired_uploads = BTreeMap::new();
     let mut blobs = BTreeMap::new();
     let mut add = |digest: String, size: u64| -> Result<(), SqliteEventLogError> {
         if let Some(old) = blobs.insert(digest, size)
@@ -262,6 +263,16 @@ pub(super) fn inputs(
         match payload {
             EventPayload::ArtifactUploadTransition { record } => {
                 uploads.insert(record.upload_id.clone(), record);
+            }
+            EventPayload::ArtifactUploadRetired { receipt } => {
+                crate::validate_upload_retirement(&uploads, &retired_uploads, &receipt)
+                    .map_err(SqliteEventLogError::Codec)?;
+                if receipt.store_owner_id != source_owner {
+                    return Err(SqliteEventLogError::ArchivePolicy(
+                        "upload retirement names another actual source owner".into(),
+                    ));
+                }
+                retired_uploads.insert(receipt.upload.upload_id.clone(), receipt);
             }
             EventPayload::ArtifactCatalogReferenceTransition { record } => retained
                 .apply(&record)
@@ -305,7 +316,8 @@ pub(super) fn inputs(
         if matches!(
             record.phase,
             domain::ArtifactUploadPhase::Completed | domain::ArtifactUploadPhase::Prepared
-        ) && let (Some(digest), Some(size)) = (&record.content_digest, record.byte_size)
+        ) && !retired_uploads.contains_key(&record.upload_id)
+            && let (Some(digest), Some(size)) = (&record.content_digest, record.byte_size)
         {
             add(digest.clone(), size)?;
         }
@@ -420,6 +432,7 @@ impl ArchiveIntent {
                 self.checkpoint.schema.as_str(),
                 "roboguide.controller-checkpoint/v49"
                     | "roboguide.controller-checkpoint/v50"
+                    | "roboguide.controller-checkpoint/v51"
                     | crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
             )
             || self.checkpoint.event_sequence < self.manifest.end_sequence

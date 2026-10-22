@@ -219,11 +219,15 @@ pub(super) fn read(
     };
     if matches!(
         baseline.schema.as_str(),
-        crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA | "roboguide.controller-checkpoint/v50"
+        crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            | "roboguide.controller-checkpoint/v50"
+            | "roboguide.controller-checkpoint/v51"
     ) || head.as_ref().is_some_and(|head| {
         matches!(
             head.schema.as_str(),
-            crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA | "roboguide.controller-checkpoint/v50"
+            crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+                | "roboguide.controller-checkpoint/v50"
+                | "roboguide.controller-checkpoint/v51"
         )
     }) {
         super::archive_operation::require_storage(connection)?;

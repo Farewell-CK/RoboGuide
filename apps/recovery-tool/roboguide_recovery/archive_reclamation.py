@@ -360,7 +360,12 @@ def run(
 ) -> dict[str, Any]:
     """Execute one OS-admin operation; exact retries only observe history."""
     if (
-        profile.get("schema") not in {retirement.SCHEMA, "roboguide.recovery-profile/v0.15"}
+        profile.get("schema")
+        not in {
+            retirement.SCHEMA,
+            "roboguide.recovery-profile/v0.15",
+            "roboguide.recovery-profile/v0.16",
+        }
         or IDENTIFIER.fullmatch(command_id) is None
         or not reason.strip()
         or len(reason) > 1024

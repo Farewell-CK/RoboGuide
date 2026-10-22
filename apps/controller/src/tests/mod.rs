@@ -81,6 +81,7 @@ fn event_task_ref(payload: &EventPayload) -> Option<&TaskRef> {
         }
         EventPayload::MissionSchedulingPriorityChanged { .. }
         | EventPayload::ArtifactCatalogReferenceTransition { .. }
+        | EventPayload::ArtifactUploadRetired { .. }
         | EventPayload::ArtifactCatalogLegacyAdopted { .. }
         | EventPayload::MemoryHandoffTransition { .. }
         | EventPayload::ArtifactUploadTransition { .. } => None,

@@ -116,6 +116,21 @@ jobs:
           uv run --frozen python tools/quality/check_catalog_adoption_processes.py
           --from /tmp/rg-ci-legacy-catalog --output "${RUNNER_TEMP}/roboguide-catalog-adoption"
 
+      - name: Build actual readonly source reclamation observer
+        run: cargo build --locked -p artifact-store --example reclamation_probe
+
+      - name: Verify source GC with actual original retirement and cold restore
+        run: >
+          uv run --frozen python tools/quality/check_artifact_reclamation_processes.py
+          --from "${RUNNER_TEMP}/roboguide-catalog-adoption"
+          --output "${RUNNER_TEMP}/roboguide-source-reclamation"
+
+      - name: Verify released original MI history and independent child lineage through source GC
+        run: >
+          uv run --frozen python tools/quality/check_artifact_reclamation_processes.py
+          --from /tmp/rg-ci-catalog-mi
+          --output "${RUNNER_TEMP}/roboguide-mi-source-reclamation"
+
       - name: Verify Artifact journal migration and actual cold restore with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_artifact_owner_processes.py

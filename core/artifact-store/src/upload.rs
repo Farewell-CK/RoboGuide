@@ -21,6 +21,7 @@ impl ArtifactUpload {
     ) -> Result<(), ArtifactStoreError> {
         self.ensure_active()?;
         let expected_digest = normalize_digest(expected_digest)?;
+        self.store.require_live_content(&expected_digest)?;
         if self.size != expected_size {
             return Err(ArtifactStoreError::SizeMismatch {
                 expected: expected_size,
@@ -89,6 +90,7 @@ impl ArtifactUpload {
     ) -> Result<StoredArtifact, ArtifactStoreError> {
         self.ensure_active()?;
         let expected_digest = normalize_digest(expected_digest)?;
+        self.store.require_live_content(&expected_digest)?;
         if self.size != expected_size {
             return Err(ArtifactStoreError::SizeMismatch {
                 expected: expected_size,

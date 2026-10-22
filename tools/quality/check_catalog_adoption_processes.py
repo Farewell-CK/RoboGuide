@@ -335,7 +335,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
                 if "MemoryManifestPublished" in json.loads(row["payload_json"])
             ] == original_publications
         profile = {
-            "schema": "roboguide.recovery-profile/v0.15",
+            "schema": "roboguide.recovery-profile/v0.16",
             "profile_id": "legacy-adoption",
             "revision": 1,
             "max_bytes": 32 * 1024 * 1024,
@@ -354,6 +354,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
                 {
                     "component_id": "artifact",
                     "kind": "artifact",
+                    "storage_schema": "roboguide.artifact-storage/v3",
                     "root": str(working / "cas"),
                     "database": None,
                     "trees": [],
@@ -416,10 +417,14 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
             "original-restore",
         )
         receipt = recover(*restore_args)
-        assert receipt["schema"] == "roboguide.restore-receipt/v0.15"
+        assert receipt["schema"] == "roboguide.restore-receipt/v0.16"
         assert recover(*restore_args) == receipt
         old_profile = output / "old-profile.json"
-        save(old_profile, profile | {"schema": "roboguide.recovery-profile/v0.14"})
+        old_definition = json.loads(json.dumps(profile))
+        old_definition["schema"] = "roboguide.recovery-profile/v0.15"
+        for component in old_definition["components"]:
+            component.pop("storage_schema", None)
+        save(old_profile, old_definition)
         refused = recover(
             "backup",
             "--profile",
@@ -430,11 +435,12 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
             "old-profile",
             passed=False,
         )
-        assert "recovery v0.15" in refused["stderr"] and not (output / "old-refused").exists()
+        assert "recovery v0.16" in refused["stderr"] and not (output / "old-refused").exists()
         old_proof = None
         if old_controller is not None:
             old_sql = output / "old-controller.sqlite3"
             shutil.copy2(restored / "stores/controller/controller.sqlite3", old_sql)
+            shutil.copytree(restored / "stores/artifact", output / "old-cas")
             old = subprocess.run(
                 [
                     str(old_controller),
@@ -449,7 +455,8 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
                     key: value
                     for key, value in os.environ.items()
                     if not key.startswith("ROBOGUIDE_")
-                },
+                }
+                | {"ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA": "roboguide.artifact-storage/v3"},
                 capture_output=True,
                 timeout=15,
             )
@@ -458,6 +465,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
                 value in old.stderr.decode(errors="replace")
                 for value in (
                     "v51",
+                    "v52",
                     "v30",
                     "unsupported",
                     "unknown variant `ArtifactCatalogLegacyAdopted`",
@@ -500,6 +508,15 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
             stop(process)
         for log in logs:
             log.close()
+        save(
+            output / "owned-process-exits.json",
+            {
+                "all_owned_processes_reaped": all(value.poll() is not None for value in processes),
+                "processes": [
+                    {"pid": value.pid, "returncode": value.returncode} for value in processes
+                ],
+            },
+        )
 
 
 def main() -> None:

@@ -211,6 +211,8 @@ pub struct ArtifactCatalog {
     pub(super) retention: Arc<Mutex<state::ArtifactRetentionProjection>>,
     /// Rebuildable original byte ownership receipts; entries never authorize semantic consumption.
     pub(super) upload_records: Arc<Mutex<BTreeMap<String, domain::ArtifactUploadRecord>>>,
+    /// Independent irreversible completed-upload releases; original completion records remain intact.
+    pub(super) upload_retirements: Arc<Mutex<BTreeMap<String, domain::ArtifactUploadRetirement>>>,
     /// Rebuildable metadata projection guarded for concurrent HTTP requests.
     pub(super) projection: Arc<Mutex<MapCatalogProjection>>,
     /// Generic non-map Memory metadata sharing the same evidence log and CAS.
@@ -436,6 +438,7 @@ impl ArtifactCatalog {
         let mut projection = MapCatalogProjection::new();
         let mut memory_projection = MemoryCatalogProjection::new();
         let mut upload_records = BTreeMap::new();
+        let mut upload_retirements = BTreeMap::new();
         let mut retention = state::ArtifactRetentionProjection::default();
         let mut timestamp_high_water = TimestampMs::new(0);
         for event in event_log.catalog_replay_events()? {
@@ -449,6 +452,10 @@ impl ArtifactCatalog {
             if let EventPayload::ArtifactUploadTransition { record } = event.payload() {
                 super::upload_authority::validate_record_transition(&upload_records, record)?;
                 upload_records.insert(record.upload_id.clone(), record.clone());
+            }
+            if let EventPayload::ArtifactUploadRetired { receipt } = event.payload() {
+                state::validate_upload_retirement(&upload_records, &upload_retirements, receipt)?;
+                upload_retirements.insert(receipt.upload.upload_id.clone(), receipt.clone());
             }
             timestamp_high_water = timestamp_high_water.max(event.timestamp());
             if let Err(error) = projection.apply_event(&event) {
@@ -497,6 +504,7 @@ impl ArtifactCatalog {
             retained_store: store.filter(|store| store.owner_id().is_some()),
             retention: Arc::new(Mutex::new(retention)),
             upload_records: Arc::new(Mutex::new(upload_records)),
+            upload_retirements: Arc::new(Mutex::new(upload_retirements)),
             projection: Arc::new(Mutex::new(projection)),
             memory_projection: Arc::new(Mutex::new(memory_projection)),
             event_log: event_log.clone(),
@@ -850,6 +858,16 @@ impl ArtifactCatalog {
             EventPayload::ArtifactUploadTransition { record } => Some(record.clone()),
             _ => None,
         };
+        let mut upload_retirements = self.upload_retirements.lock().map_err(|_| {
+            HttpError::service_unavailable("upload retirement evidence unavailable")
+        })?;
+        let upload_retirement = if let EventPayload::ArtifactUploadRetired { receipt } = &payload {
+            state::validate_upload_retirement(&upload_records, &upload_retirements, receipt)
+                .map_err(HttpError::conflict)?;
+            Some(receipt.clone())
+        } else {
+            None
+        };
         let mut retention = self
             .retention
             .lock()
@@ -963,6 +981,9 @@ impl ArtifactCatalog {
         *retention = retention_candidate;
         if let Some(record) = upload_record {
             upload_records.insert(record.upload_id.clone(), record);
+        }
+        if let Some(receipt) = upload_retirement {
+            upload_retirements.insert(receipt.upload.upload_id.clone(), receipt);
         }
         Ok(timestamp)
     }

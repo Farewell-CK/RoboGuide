@@ -17,6 +17,8 @@ pub const ARTIFACT_LAYOUT_SCHEMA: &str = "roboguide.artifact-storage/v1";
 pub const ARTIFACT_REFERENCE_LAYOUT_SCHEMA: &str = "roboguide.artifact-storage/v2";
 /// Explicit format retaining the inventory of original Controller reference authorities.
 pub const ARTIFACT_ARCHIVE_LAYOUT_SCHEMA: &str = "roboguide.artifact-storage/v3";
+/// Normal retained source CAS with mandatory irreversible content-reclamation history; v4 stays terminal.
+pub const ARTIFACT_GC_LAYOUT_SCHEMA: &str = "roboguide.artifact-storage/v5";
 /// Immutable original backend metadata required by retained-layout recovery profiles.
 pub const ARTIFACT_OWNER_FILE: &str = ".retention-owner.json";
 /// Finalized content tree whose old path is a regular-file format fence.
@@ -27,8 +29,10 @@ const INTENT_FILE: &str = ".retention-intent.json";
 const MAX_OWNER_BYTES: u64 = 4096;
 
 mod authorities;
+mod reclamation;
 mod references;
 pub(crate) use authorities::{bind_authority, open_authorities};
+pub(crate) use reclamation::{open_reclamation, require_live_content};
 pub(crate) use references::open_references;
 
 /// Inspects an already accepted retained root under a shared lease without initialization or repair.
@@ -37,6 +41,7 @@ pub(crate) fn inspect_retained(root: &Path) -> Result<(String, &'static str), Ar
     if exists(&root.join(INTENT_FILE))?
         || exists(&root.join(references::UPGRADE_INTENT))?
         || exists(&root.join(authorities::UPGRADE_INTENT))?
+        || exists(&root.join(reclamation::UPGRADE_INTENT))?
     {
         return Err(unsafe_path_error(
             "inspect retained Artifact root",
@@ -65,6 +70,7 @@ pub(crate) fn inspect_retained(root: &Path) -> Result<(String, &'static str), Ar
         Some(ARTIFACT_LAYOUT_SCHEMA) => ARTIFACT_LAYOUT_SCHEMA,
         Some(ARTIFACT_REFERENCE_LAYOUT_SCHEMA) => ARTIFACT_REFERENCE_LAYOUT_SCHEMA,
         Some(ARTIFACT_ARCHIVE_LAYOUT_SCHEMA) => ARTIFACT_ARCHIVE_LAYOUT_SCHEMA,
+        Some(ARTIFACT_GC_LAYOUT_SCHEMA) => ARTIFACT_GC_LAYOUT_SCHEMA,
         _ => {
             return Err(unsafe_path_error(
                 "inspect retained Artifact owner",
@@ -81,12 +87,20 @@ pub(crate) fn inspect_retained(root: &Path) -> Result<(String, &'static str), Ar
     }
     if matches!(
         schema,
-        ARTIFACT_REFERENCE_LAYOUT_SCHEMA | ARTIFACT_ARCHIVE_LAYOUT_SCHEMA
+        ARTIFACT_REFERENCE_LAYOUT_SCHEMA
+            | ARTIFACT_ARCHIVE_LAYOUT_SCHEMA
+            | ARTIFACT_GC_LAYOUT_SCHEMA
     ) {
         references::validate_journal(root, &owner)?;
     }
-    if schema == ARTIFACT_ARCHIVE_LAYOUT_SCHEMA {
+    if matches!(
+        schema,
+        ARTIFACT_ARCHIVE_LAYOUT_SCHEMA | ARTIFACT_GC_LAYOUT_SCHEMA
+    ) {
         authorities::validate(root, &owner)?;
+    }
+    if schema == ARTIFACT_GC_LAYOUT_SCHEMA {
+        reclamation::validate(root, &owner)?;
     }
     validate_directory_tree(
         &root.join(RETAINED_BLOB_DIRECTORY),

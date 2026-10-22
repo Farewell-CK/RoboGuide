@@ -1,6 +1,6 @@
 # 实现状态与证据边界
 
-内容核对基线：`f739dbefca1460e460a4109fe60be17fe6455055` 加本包 ADR-0156 实现（2026-10-22）。下表依据代码与既有验收档案；原始存量详见[10 月 22 日核对](docs/development/roboguide-branch-audit-2026-10-22.md)。
+内容核对基线：`51af590ca9491cb5f20614f58c7882c395a458bd` 加本包 ADR-0157 实现（2026-10-23）。下表依据代码与既有验收档案；原始存量详见[10 月 22 日核对](docs/development/roboguide-branch-audit-2026-10-22.md)。
 
 | 方面 | 已有软件路径 | 仍需完成或独立验证 |
 | --- | --- | --- |
@@ -8,7 +8,7 @@
 | Control / quota | Match/Commit/Bind、calendar、恢复、tenant/category quota 原子记账与 usage view | divisible allocation、全资源本地强制、完整时空/成本证据 |
 | Runtime / stop | attempt/generation、durable intent、relations、whole-Group stop、原进程 exit proof | 运行中抢占、耦合多 Role 迁移、hazard/regrasp 与设备 stop |
 | State / verifier | 来源策略、Belief lineage、TTL、原 Task verifier 与 CAS proof | 当前部署的物理来源、冲突与持续效果证明 |
-| Memory / Spatial | 准备/use/revoke/handoff、文件空间算法、provider 局部 GC；原 import Replica、Catalog/lineage、Snapshot/Archive 引用、原未发布 Archive abort、私有接收 owner 退休/GC、active ref 与恢复 CAS 对账 | 源 Artifact 全引用 GC、全部生产者覆盖、跨主机内容与组合恢复 |
+| Memory / Spatial | 准备/use/revoke/handoff、文件空间算法、provider 局部 GC；原 import Replica、Catalog/lineage、Snapshot/Archive 引用、Archive abort/私有接收 GC、源上传退休和 standalone 已知引用闭包离线 GC | Raft/online 全部生产者覆盖、provider 旧 Snapshot 闭环、跨主机内容与组合恢复 |
 | Replica / recovery | 证书轮换、原 child drain、V3 transfer、writer/inode fence、静止完整 bundle | binary/profile 升级回退、在线内容恢复与跨主机故障矩阵 |
 | Federation | Control 内持久 session | 真实跨域 transport、授权、路由与双域恢复 |
 | 运维 | write-disabled、已提交视图、恢复探针、真实短窗口监控检查 | 全 listener/阻塞收敛、完整 runbook、长期 SLO 与总体退出条件 |
@@ -20,6 +20,8 @@
 [私有接收 owner 回收](docs/development/acceptance/2026-10-22-private-archive-reclamation.md)单独核对全部原 writer、空的已知 consumer 清单和唯一 producer；终态 storage v4 fence 与原 tombstone 先于 unlink。v4 只表达该接收 owner 的不可逆终态，不能作为普通可写 CAS。
 
 [旧 Catalog 显式接管](docs/development/acceptance/2026-10-22-original-catalog-adoption.md)固定原 publication raw envelope、实际 owner/bytes 和 typed parent；当前 admin/TLS 另记 receipt。历史 publisher/tenant 仍 unavailable，不授予额外 read/use/import 权限。wrapper v51/recovery v0.15 拒绝丢失原 receipt。
+
+[源 Artifact 离线回收](docs/development/acceptance/2026-10-23-source-artifact-reclamation.md)使用 wrapper v52/storage v5/recovery v0.16：原上传、Catalog/child、Memory/MI、Snapshot/Archive 与验证引用分别核对；原 tombstone 先于 unlink。实际 MI policy 撤销、独立原目标、parent/child 释放、文件/SQL 故障和冷恢复通过。该入口拒绝 Replica/online 权威，不能代替多数派内容 ACK。
 
 ## 如何解读证据
 

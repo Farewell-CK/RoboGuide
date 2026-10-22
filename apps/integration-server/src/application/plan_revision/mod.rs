@@ -552,5 +552,5 @@ pub(crate) use admission::{candidate_view, submit, view};
 pub(crate) use checkpoint::{attach_deployment, deserialize_states, validate_restored};
 pub(crate) use goal::apply_pending as apply_goal_pending;
 pub(crate) use goal::{observe_goal_ingress, submit_goal};
-pub(crate) use memory::{install_catalog, permits_parent_reference};
+pub(crate) use memory::{catalog_retirement_evidence, install_catalog, permits_parent_reference};
 pub(crate) use switching::{blocks_mission, close_terminal, observe_trigger, tick};

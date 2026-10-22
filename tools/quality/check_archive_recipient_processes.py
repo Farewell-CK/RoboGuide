@@ -50,8 +50,9 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
     assert original["passed"] is True and original["registered_nodes"] == 0
     raw_profile = json.loads((source / "profile.json").read_bytes())
     profile = raw_profile | {
-        "schema": "roboguide.recovery-profile/v0.15"
-        if raw_profile["schema"] == "roboguide.recovery-profile/v0.15"
+        "schema": raw_profile["schema"]
+        if raw_profile["schema"]
+        in {"roboguide.recovery-profile/v0.15", "roboguide.recovery-profile/v0.16"}
         else "roboguide.recovery-profile/v0.14",
         "profile_id": "private-recipient",
     }
@@ -268,7 +269,11 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
     assert receipt["schema"] == profile["schema"].replace("recovery-profile", "restore-receipt")
     assert recover(*restore_args) == receipt
     old_profile = output / "old-profile.json"
-    save(old_profile, profile | {"schema": "roboguide.recovery-profile/v0.13"})
+    old_definition = json.loads(json.dumps(profile))
+    old_definition["schema"] = "roboguide.recovery-profile/v0.13"
+    for component in old_definition["components"]:
+        component.pop("storage_schema", None)
+    save(old_profile, old_definition)
     refused = recover(
         "backup",
         "--profile",

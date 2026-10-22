@@ -183,6 +183,11 @@ pub(super) fn finalize_authorized_upload(
     let digest =
         artifact_store::normalize_digest(input.content_digest.as_str()).map_err(map_cas_error)?;
     let mut record = catalog.owned_upload(id, principal)?;
+    if catalog.upload_retirement(id)?.is_some() {
+        return Err(HttpError::conflict(
+            "original upload ownership is irreversibly retired",
+        ));
+    }
     if record.phase == ArtifactUploadPhase::Abandoned {
         return Err(HttpError::conflict("artifact upload was abandoned"));
     }
@@ -433,8 +438,12 @@ impl ArtifactCatalog {
             .upload_records
             .lock()
             .map_err(|_| HttpError::service_unavailable("upload evidence unavailable"))?;
+        let retired = self.upload_retirements.lock().map_err(|_| {
+            HttpError::service_unavailable("upload retirement evidence unavailable")
+        })?;
         Ok(records.values().any(|record| {
             record.phase == ArtifactUploadPhase::Completed
+                && !retired.contains_key(&record.upload_id)
                 && record.principal_id == principal.subject
                 && record.tenant_id == principal.tenant_id
                 && record.content_digest.as_deref() == Some(digest)
@@ -445,6 +454,13 @@ impl ArtifactCatalog {
     /// Returns whether the CAS digest has an earlier immutable upload or published manifest proof.
     pub(super) fn has_verified_content(&self, digest: &str, size: u64) -> Result<bool, HttpError> {
         self.ensure_available()?;
+        let retired = self
+            .upload_retirements
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("upload retirement evidence unavailable"))?
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
         let uploaded = self
             .upload_records
             .lock()
@@ -452,6 +468,7 @@ impl ArtifactCatalog {
             .values()
             .any(|record| {
                 record.phase == ArtifactUploadPhase::Completed
+                    && !retired.contains(&record.upload_id)
                     && record.content_digest.as_deref() == Some(digest)
                     && record.byte_size == Some(size)
             });
@@ -515,6 +532,13 @@ impl ArtifactCatalog {
         let Some((digest, size)) = artifact else {
             return Ok(());
         };
+        let retired = self
+            .upload_retirements
+            .lock()
+            .map_err(|_| "upload retirement evidence unavailable")?
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
         let owns = self
             .upload_records
             .lock()
@@ -522,6 +546,7 @@ impl ArtifactCatalog {
             .values()
             .any(|r| {
                 r.phase == ArtifactUploadPhase::Completed
+                    && !retired.contains(&r.upload_id)
                     && r.principal_id == principal.subject
                     && r.tenant_id == principal.tenant_id
                     && r.content_digest.as_deref() == Some(digest)

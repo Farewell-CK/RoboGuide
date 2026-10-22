@@ -20,6 +20,7 @@ ARCHIVE_SCHEMAS = {
     "roboguide.recovery-profile/v0.13",
     "roboguide.recovery-profile/v0.14",
     "roboguide.recovery-profile/v0.15",
+    "roboguide.recovery-profile/v0.16",
 }
 OWNER_FILE = ".retention-owner.json"
 FENCE_FILE = "blobs"
@@ -30,6 +31,7 @@ MAINTENANCE_SCHEMAS = {
     "roboguide.recovery-profile/v0.13",
     "roboguide.recovery-profile/v0.14",
     "roboguide.recovery-profile/v0.15",
+    "roboguide.recovery-profile/v0.16",
 }
 MAX_OWNER_BYTES = 4096
 
@@ -48,7 +50,9 @@ def metadata_files(component: dict[str, Any], profile_schema: str) -> list[str]:
     )
 
 
-def _record(path: Path, *, schema: str = "roboguide.artifact-storage/v1") -> dict[str, Any]:
+def _record(
+    path: Path, *, schema: str | frozenset[str] = "roboguide.artifact-storage/v1"
+) -> dict[str, Any]:
     """Read one bounded no-follow regular-file owner without accepting a replacement identity."""
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(descriptor, "rb") as stream:
@@ -62,7 +66,11 @@ def _record(path: Path, *, schema: str = "roboguide.artifact-storage/v1") -> dic
     if (
         not isinstance(value, dict)
         or set(value) != {"schema", "owner_id", "source_device", "source_inode"}
-        or value["schema"] != schema
+        or (
+            value["schema"] not in schema
+            if isinstance(schema, frozenset)
+            else value["schema"] != schema
+        )
         or not isinstance(value["owner_id"], str)
         or re.fullmatch(r"artifact-store:[0-9a-f]{64}", value["owner_id"]) is None
         or any(
@@ -84,6 +92,10 @@ def validate_storage(root: Path, profile_schema: str) -> dict[str, Any] | None:
         root / ".archive-reference-upgrade.json"
     ).is_symlink():
         raise ValueError("original Artifact reference-authority upgrade is pending")
+    if (root / ".reclamation-upgrade.json").exists() or (
+        root / ".reclamation-upgrade.json"
+    ).is_symlink():
+        raise ValueError("original Artifact reclamation upgrade is pending")
     if maintenance_pending.exists() or maintenance_pending.is_symlink():
         raise ValueError("original Artifact maintenance upgrade is still pending")
     if not supports(profile_schema):
@@ -96,24 +108,32 @@ def validate_storage(root: Path, profile_schema: str) -> dict[str, Any] | None:
     if pending.exists() or pending.is_symlink():
         raise ValueError("original Artifact owner migration is still pending")
     schema = (
-        "roboguide.artifact-storage/v3"
+        frozenset({"roboguide.artifact-storage/v3", "roboguide.artifact-storage/v5"})
+        if profile_schema == "roboguide.recovery-profile/v0.16"
+        else "roboguide.artifact-storage/v3"
         if profile_schema in ARCHIVE_SCHEMAS
         else "roboguide.artifact-storage/v2"
         if profile_schema in MAINTENANCE_SCHEMAS
         else "roboguide.artifact-storage/v1"
     )
     owner = _record(root / OWNER_FILE, schema=schema)
-    if _record(root / FENCE_FILE, schema=schema) != owner:
+    if _record(root / FENCE_FILE, schema=owner["schema"]) != owner:
         raise ValueError("Artifact original owner and old-layout fence conflict")
     real_directory(root / OBJECTS)
     real_directory(root / "staging")
     if profile_schema in MAINTENANCE_SCHEMAS:
         journal = real_directory(root / "maintenance-v1")
         real_directory(journal / "operations")
-        if _record(journal / "identity.json", schema=schema) != owner:
+        if _record(journal / "identity.json", schema=owner["schema"]) != owner:
             raise ValueError("original Artifact journal identity differs from its actual owner")
     if profile_schema in ARCHIVE_SCHEMAS:
         reference_authorities(root, owner)
+    if owner["schema"] == "roboguide.artifact-storage/v5":
+        from .artifact_gc_journal import validate as validate_gc
+
+        if _record(root / "reclamation-v1/identity.json", schema=owner["schema"]) != owner:
+            raise ValueError("original reclamation journal owner differs")
+        validate_gc(root, owner["owner_id"])
     return owner
 
 
@@ -209,4 +229,8 @@ def validate_bundle(
             != "content"
         ):
             raise ValueError("Artifact bundle lacks its mandatory original maintenance journal")
-    validate_storage(root / "stores" / component_id, profile_schema)
+    owner = validate_storage(root / "stores" / component_id, profile_schema)
+    if profile_schema == "roboguide.recovery-profile/v0.16" and (
+        owner is None or owner["schema"] != component["storage_schema"]
+    ):
+        raise ValueError("original Artifact bundle format differs from the explicit declaration")

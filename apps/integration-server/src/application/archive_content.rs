@@ -188,7 +188,11 @@ impl ContentArchiveSink {
         if self.source.owner_id() != Some(intent.request.source_owner.as_str()) {
             return Err("Archive original source owner differs".into());
         }
-        if self.source.storage_schema() != artifact_store::ARTIFACT_ARCHIVE_LAYOUT_SCHEMA {
+        if !matches!(
+            self.source.storage_schema(),
+            artifact_store::ARTIFACT_ARCHIVE_LAYOUT_SCHEMA
+                | artifact_store::ARTIFACT_GC_LAYOUT_SCHEMA
+        ) {
             return Err("original Archive source requires explicit Artifact storage v3".into());
         }
         let root = Path::new(&intent.request.destination);

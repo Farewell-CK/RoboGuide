@@ -544,7 +544,7 @@ where
                 .unwrap_or(0);
             Ok(Response::Json(
                 "200 OK",
-                serde_json::json!({"schema_version":"roboguide.artifact-upload-observation/v0.1","record":record,"received_bytes":received_bytes}),
+                serde_json::json!({"schema_version":"roboguide.artifact-upload-observation/v0.1","record":record,"received_bytes":received_bytes,"retirement":catalog.upload_retirement(id)?}),
             ))
         })?,
         (method, path)
@@ -561,6 +561,13 @@ where
                 &principal,
             )
             .await?
+        }
+        ("POST", path)
+            if path.starts_with("/v1/artifact-uploads/") && path.ends_with("/retire") =>
+        {
+            let request = head.read_json(stream).await?;
+            principal.authorize_body(&request)?;
+            run_blocking(|| super::upload_retirement::retire(catalog, &authenticated, &request))?
         }
         ("POST", path)
             if path.starts_with("/v1/artifact-uploads/") && path.ends_with("/finalize") =>

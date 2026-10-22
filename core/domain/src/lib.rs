@@ -12,6 +12,8 @@ mod allocation;
 mod artifact_authorization;
 mod artifact_upload;
 pub use artifact_upload::{ArtifactUploadPhase, ArtifactUploadRecord};
+mod artifact_upload_retirement;
+pub use artifact_upload_retirement::ArtifactUploadRetirement;
 mod artifact_adoption;
 mod artifact_retention;
 pub use artifact_adoption::{

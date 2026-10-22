@@ -21,6 +21,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.13",
     "roboguide.recovery-profile/v0.14",
     "roboguide.recovery-profile/v0.15",
+    "roboguide.recovery-profile/v0.16",
 }
 WRAPPER = "roboguide.controller-checkpoint/v48"
 WRAPPERS = {
@@ -28,6 +29,7 @@ WRAPPERS = {
     archive_references.WRAPPER,
     "roboguide.controller-checkpoint/v50",
     "roboguide.controller-checkpoint/v51",
+    "roboguide.controller-checkpoint/v52",
 }
 CODEC = "domain.EventPayload.json/v29"
 MAX_EVIDENCE_BYTES = 64 * 1024 * 1024
@@ -182,10 +184,16 @@ def _controller(
         current = checkpoint is not None and checkpoint[0] in WRAPPERS
         if (
             checkpoint is not None
-            and checkpoint[0] == catalog_adoptions.WRAPPER
-            and profile_schema != catalog_adoptions.SCHEMA
+            and checkpoint[0] in catalog_adoptions.WRAPPERS
+            and profile_schema not in catalog_adoptions.SUPPORTED
         ):
             raise ValueError("legacy Catalog adoption wrapper requires explicit recovery v0.15")
+        if (
+            checkpoint is not None
+            and checkpoint[0] == "roboguide.controller-checkpoint/v52"
+            and profile_schema != "roboguide.recovery-profile/v0.16"
+        ):
+            raise ValueError("upload-retention wrapper requires explicit recovery v0.16")
         if "events" not in tables:
             if current:
                 raise ValueError("mandatory original Catalog reference authority table is missing")
@@ -218,6 +226,7 @@ def _controller(
                 archive_references.WRAPPER,
                 "roboguide.controller-checkpoint/v50",
                 "roboguide.controller-checkpoint/v51",
+                "roboguide.controller-checkpoint/v52",
             },
         )
         from . import archive_aborts
@@ -228,7 +237,12 @@ def _controller(
             budget,
             original_archives,
             current=checkpoint is not None
-            and checkpoint[0] in {archive_aborts.WRAPPER, "roboguide.controller-checkpoint/v51"},
+            and checkpoint[0]
+            in {
+                archive_aborts.WRAPPER,
+                "roboguide.controller-checkpoint/v51",
+                "roboguide.controller-checkpoint/v52",
+            },
         )
         history = iter(archived)
         from itertools import chain
@@ -245,7 +259,7 @@ def _controller(
         if (
             not set(envelope_columns) <= columns
             and checkpoint is not None
-            and checkpoint[0] == catalog_adoptions.WRAPPER
+            and checkpoint[0] in catalog_adoptions.WRAPPERS
         ):
             raise ValueError("mandatory original legacy-adoption envelope columns are missing")
         selected_columns = ",".join(
@@ -299,9 +313,9 @@ def _controller(
             if "ArtifactCatalogLegacyAdopted" in payload:
                 if (
                     schema != catalog_adoptions.CODEC
-                    or profile_schema != catalog_adoptions.SCHEMA
+                    or profile_schema not in catalog_adoptions.SUPPORTED
                     or checkpoint is None
-                    or checkpoint[0] != catalog_adoptions.WRAPPER
+                    or checkpoint[0] not in catalog_adoptions.WRAPPERS
                 ):
                     raise ValueError(
                         "legacy Catalog adoption requires its exact wrapper/codec/profile"
@@ -354,6 +368,7 @@ def validate(
 ) -> None:
     """Resolve each active direct/lineage claim to its own actual bundled owner and CAS file."""
     owners: dict[str, str] = {}
+    tombstones: dict[str, set[str]] = {}
     for component in components:
         budget.check()
         if component["kind"] == "artifact" and artifact_layout.supports(profile_schema):
@@ -364,6 +379,14 @@ def validate(
             if owner["owner_id"] in owners:
                 raise ValueError("distinct Artifact components duplicate one original owner")
             owners[owner["owner_id"]] = component["component_id"]
+            if owner["schema"] == "roboguide.artifact-storage/v5":
+                from .artifact_gc_journal import validate as validate_gc
+
+                tombstones[owner["owner_id"]] = set(
+                    validate_gc(
+                        root / "stores" / component["component_id"], owner["owner_id"], budget
+                    )[1]
+                )
     for component in components:
         budget.check()
         if component["kind"] != "controller":
@@ -450,6 +473,10 @@ def validate(
                 owner_component = owners.get(dependency["store_owner_id"])
                 if owner_component is None:
                     raise ValueError("active Catalog reference's actual Artifact owner is absent")
+                if dependency["content_digest"] in tombstones.get(
+                    dependency["store_owner_id"], set()
+                ):
+                    raise ValueError("active Catalog/lineage conflicts with original GC tombstone")
                 checksum = dependency["content_digest"][7:]
                 path = f"stores/{owner_component}/objects-v1/sha256/{checksum[:2]}/{checksum}"
                 content = files.get(path)

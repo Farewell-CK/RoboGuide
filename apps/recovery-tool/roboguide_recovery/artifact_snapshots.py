@@ -21,6 +21,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.13",
     "roboguide.recovery-profile/v0.14",
     "roboguide.recovery-profile/v0.15",
+    "roboguide.recovery-profile/v0.16",
 }
 MAX_OPERATIONS = 4096
 MAX_INPUTS = 16_384
@@ -242,6 +243,24 @@ def operations(
                 _read(path / "receipt.json.pending") if "receipt.json.pending" in names else None
             )
             evidence = receipt if receipt is not None else pending
+            if (
+                evidence is not None
+                and evidence.get("schema") == "roboguide.artifact-snapshot-receipt/v0.2"
+            ):
+                from .artifact_snapshot_retirement import validate_receipt
+
+                if (
+                    profile_schema != "roboguide.recovery-profile/v0.16"
+                    or owner["schema"] != "roboguide.artifact-storage/v5"
+                ):
+                    raise ValueError(
+                        "upgraded Snapshot retirement requires original storage v5/recovery v0.16"
+                    )
+                validate_receipt(evidence, request)
+                if receipt is not None and pending is not None and receipt != pending:
+                    raise ValueError("original upgraded Snapshot pending retirement conflicts")
+                result.append((path, request, receipt))
+                continue
             if evidence is not None and (
                 set(evidence)
                 != {
@@ -277,6 +296,16 @@ def _inputs(root: Path, budget: OperationBudget) -> list[dict[str, Any]]:
         return []
     real_directory(directory)
     result: list[dict[str, Any]] = []
+    tombstones = set()
+    owner = (
+        artifact_layout.validate_storage(root, "roboguide.recovery-profile/v0.16")
+        if (root / "reclamation-v1").exists()
+        else None
+    )
+    if owner is not None and owner["schema"] == "roboguide.artifact-storage/v5":
+        from .artifact_gc_journal import validate as validate_gc
+
+        tombstones = set(validate_gc(root, owner["owner_id"], budget)[1])
     total = scanned = 0
     with os.scandir(directory) as prefixes:
         for prefix in prefixes:
@@ -298,6 +327,8 @@ def _inputs(root: Path, budget: OperationBudget) -> list[dict[str, Any]]:
                         or not entry.name.startswith(prefix.name)
                     ):
                         raise ValueError("original Artifact CAS entry is invalid or exceeds bound")
+                    if "sha256:" + entry.name in tombstones:
+                        continue
                     size = entry.stat(follow_symlinks=False).st_size
                     total += size
                     if total > budget.max_bytes:
