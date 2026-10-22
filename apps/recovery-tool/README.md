@@ -1,5 +1,15 @@
 # RoboGuide recovery tool
 
+`retire-provider-snapshot --profile <current> --original-profile <original> --provider <component-id>
+--operation-id <original-operation> --original-intent-digest <sha256>` closes an original unpublished
+provider Snapshot after relocation/profile changes. Current profile v0.16 and the unchanged original
+profile must expose every actual writer. Both provider instances, complete original requests and
+generation-1 pins must match; released/published copies require normal publication verification.
+It invokes the existing original v0.1 abort transaction only in the current provider, never copies,
+deletes payloads or changes a separate historical source. All previous SQL/writer/Node schemas stay.
+See [ADR-0158](../../docs/decisions/0158-relocated-original-provider-snapshot-abort.md) and the
+[actual process acceptance](../../docs/development/acceptance/2026-10-23-relocated-provider-snapshot.md).
+
 [Profile v0.16](../../contracts/recovery/bundle-v0.16/README.md) preserves all preceding complete
 contracts and explicitly declares each ordinary Artifact component's actual storage v3 or v5.
 Storage v5 adds the original same-owner GC journal and mandatory command/tombstone heads. The

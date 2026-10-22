@@ -37,6 +37,13 @@ bytes 再执行自己的 unlink，不能重写较早 Unknown 或刷新它的预�
 writer 被持有且原 destination 未发布后，才保存原 v0.2 abort receipt。旧 intent/
 预算及历史源不改写，复制或 unlink 均为零；原故障域无法排空则继续保留 pin。
 
+`retire-provider-snapshot` 对恢复/调整 profile 后的原 Memory provider Snapshot
+另提交完整原 profile、component/operation/request digest。原/current 两份完整
+writer 和实际 provider instance/request/pins 均核对后，只在当前 provider 执行
+既有原 v0.1 abort 事务；不修改独立历史源、partial 或原预算，不改 SQL v4/Node
+合同。源已 released 或目标已发布须使用 verify/reconcile，不能降格 abort。
+完整目录包含已声明 nested SQL 的必要父目录；其它旁系目录仍拒绝。
+
 冷恢复核对所有 mandatory 原 journal/head/rows/tombstones/retirement/原 bytes。
 已释放历史不要求已删内容；活动 Catalog、上传或验证证据与 tombstone 冲突时拒绝。
 恢复保留原命令与原 Unknown，不启动服务、Node、模型、模拟器或设备。

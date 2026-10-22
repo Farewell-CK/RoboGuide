@@ -1,6 +1,7 @@
 # RoboGuide V2 现行架构
 
-核对日期：2026-10-23；当前整改代码基线：`a0e74d04915b9380f3f4a4a8a6a480daa0e4af76`，
+核对日期：2026-10-23；当前整改代码基线：`ab6ab4679e71fff26cefdacada33fe41a6fbf10b`
+加本包 ADR-0158，
 位于唯一开发分支 `codex/nonrelease-remediation-closure`。本页同步 main 的 10 月 22 日图册，
 保留其原基线 `495a6d2`；下述新增整改尚未合回 main，不提前记为远端 main 能力。
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
@@ -242,6 +243,12 @@ Archive 原命令和接收副本的独立引用与退休。standalone 源 Artifa
 释放 child。原 Unknown 只读重试，已释放 history 可不含已删 bytes。实际范围见
 [源回收验收](../../development/acceptance/2026-10-23-source-artifact-reclamation.md)。
 该离线入口拒绝 Replica/online authority；Raft/在线 producer 与多数派数据面仍须完成。
+
+ADR-0158 补齐 provider 原未发布 Snapshot 的恢复后退出：完整原/current profile
+与实际全部 writer 先于当前原 SQL 中的精确 abort，原 provider instance/request/pins
+不能替换。继续沿用原 v0.1 receipt/SQL v4，不改独立历史源或 copy 预算；实际
+provider/copy/wait/双端 writer/SQL rollback/冷恢复已通过，见
+[本轮验收](../../development/acceptance/2026-10-23-relocated-provider-snapshot.md)。
 
 ## 6. Runtime 与本地自治
 

@@ -73,6 +73,7 @@ jobs:
       - name: Verify original Snapshot references with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_snapshot_reference_processes.py
+          --relocated-abort
           --output "${RUNNER_TEMP}/roboguide-snapshot-references"
 
       - name: Build actual Artifact layout process probe

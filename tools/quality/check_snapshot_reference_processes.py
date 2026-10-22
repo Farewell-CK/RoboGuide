@@ -108,7 +108,9 @@ def legacy_writer(root: Path, inputs: Path, output: Path, revision: str) -> dict
     }
 
 
-def run(output: Path, runtime: Path, legacy_ref: str | None) -> dict[str, Any]:
+def run(
+    output: Path, runtime: Path, legacy_ref: str | None, relocated_abort: bool = False
+) -> dict[str, Any]:
     """Run shipped provider/CLI processes, real SQL failures, SIGKILL/wait and cold restoration."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -130,6 +132,7 @@ def run(output: Path, runtime: Path, legacy_ref: str | None) -> dict[str, Any]:
     source_paths = [
         Path(__file__),
         ROOT / "tools/quality/check_memory_reference_processes.py",
+        ROOT / "tools/quality/provider_snapshot_retirement_processes.py",
         *sorted((PROVIDER / "roboguide_memory_provider").glob("*.py")),
         *sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py")),
     ]
@@ -421,6 +424,21 @@ def run(output: Path, runtime: Path, legacy_ref: str | None) -> dict[str, Any]:
             passed=False,
         )
         assert authority(root) == interrupted_before
+        relocated_retirement = None
+        if relocated_abort:
+            from provider_snapshot_retirement_processes import run as retire_restored
+
+            relocated_retirement = retire_restored(
+                root,
+                profile,
+                selected,
+                unpublished,
+                runtime,
+                output,
+                lambda path: launch(path, snapshots=True),
+                cli,
+                authority,
+            )
         aborted = cli(
             "abort-snapshots",
             "--profile",
@@ -469,6 +487,7 @@ def run(output: Path, runtime: Path, legacy_ref: str | None) -> dict[str, Any]:
             "active_source_copy_blocks_abort": True,
             "interrupted_copy_irreversibly_fenced": True,
             "cold_restore_retained_original_intent": True,
+            "relocated_original_provider_retirement": relocated_retirement,
             "registered_nodes": 0,
             "devices": 0,
             "models": 0,
@@ -488,6 +507,15 @@ def run(output: Path, runtime: Path, legacy_ref: str | None) -> dict[str, Any]:
                     process.wait(timeout=10)
         for log in logs:
             log.close()
+        save(
+            output / "owned-process-exits.json",
+            {
+                "all_owned_processes_reaped": all(value.poll() is not None for value in processes),
+                "processes": [
+                    {"pid": value.pid, "returncode": value.returncode} for value in processes
+                ],
+            },
+        )
 
 
 def main() -> None:
@@ -496,10 +524,14 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--runtime-root", type=Path)
     parser.add_argument("--legacy-ref")
+    parser.add_argument("--relocated-abort", action="store_true")
     args = parser.parse_args()
     runtime = args.runtime_root or Path(tempfile.mkdtemp(prefix="rg-snapshot-"))
     print(
-        json.dumps(run(args.output.resolve(), runtime.resolve(), args.legacy_ref), sort_keys=True)
+        json.dumps(
+            run(args.output.resolve(), runtime.resolve(), args.legacy_ref, args.relocated_abort),
+            sort_keys=True,
+        )
     )
 
 

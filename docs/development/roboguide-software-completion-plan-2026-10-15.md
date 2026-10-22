@@ -194,9 +194,17 @@ ADR-0157/wrapper v52/codec v31/storage v5/recovery v0.16 接通独立 Completed 
 旧 binary/profile 拒绝和完整冷恢复。旧 profile Snapshot 由完整原/当前 profile 与实际
 全部 writer 的独立原 receipt 退休，历史源不改写。
 本项只关闭 standalone 已支持 authority 的离线源回收；N1 继续接 Raft Snapshot/
-online Replica producer，以及 provider 旧 profile Snapshot 的完整闭环。N3 多数派
+online Replica producer；provider 旧 profile Snapshot 的未发布恢复路径见下条。N3 多数派
 内容 ACK 不变。新 GC SQL 的 hot rollback journal 显式维护属于 N7 必需项，当前只读
 启动/备份拒绝而非自动修复；N2–N7 原所有完成条件保留。
+
+[恢复后原 provider Snapshot 退休](acceptance/2026-10-23-relocated-provider-snapshot.md)以
+ADR-0158 接通完整原/当前 profile、全部实际 root/use/四 SQL inode writer、双 SQL
+原 instance/request/pins 核对后的既有 v0.1 abort 原事务。原 source/partial/预算不改，
+Memory SQL v4、Controller/Node 合同不变。实际原 copy SIGKILL/wait、两端 writer
+占用拒绝、SQL rollback、精确 retry、provider 重启和 v0.16 冷恢复通过；同时修复
+完整目录校验漏掉 nested SQL 必要父目录的缺口，额外旁系目录重算 manifest 仍拒绝。
+N1 下一项为 Raft Snapshot/online Replica producers；N2–N7 原所有条件继续保留。
 
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。

@@ -1,5 +1,11 @@
 # RoboGuide
 
+恢复后未发布的原 provider Snapshot 可提交完整原/当前 profile，由实际全部 writer
+排空后精确退休当前原记录；原 instance/request/generation pins 不变，沿用原 v0.1
+receipt 和 SQL v4，历史源与 partial 保留，不复制或续期。实际 provider/CLI/SIGKILL/
+双端 writer/SQL 故障/冷恢复通过，见 [ADR-0158](docs/decisions/0158-relocated-original-provider-snapshot-abort.md)
+及[验收](docs/development/acceptance/2026-10-23-relocated-provider-snapshot.md)。
+
 源 Artifact 已接通独立上传退休与离线引用回收：wrapper v52/codec v31 保留完整原
 Completed receipt，显式 storage v5/recovery v0.16 在全部实际 writer 下核对已知
 Catalog/lineage、上传、Memory/MI、Snapshot/Archive 和验证引用。原 intent/tombstone

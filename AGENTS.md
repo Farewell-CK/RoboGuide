@@ -1,5 +1,18 @@
 # Repository Guidelines
 
+ADR-0158 adds `retire-provider-snapshot` for the original unpublished provider copy after relocation
+or profile change. Complete original/current profiles and all actual root/use/four-SQL-inode writers
+precede exact original instance/request/pin checks. Only the current provider's original v0.1 abort
+receipt and generation-1 pins change atomically; the separate historical source, partial files and
+original budgets stay. Released/published copies require original publication proof. SQL failure,
+missing/changed source or occupied writers retain pins. Memory SQL v4/writer v0.2, wrapper v52 and
+Node contracts stay; this reuses ADR-0147 authority. Recovery directory validation accepts only
+explicit SQL/tree structural ancestors, refusing added siblings after manifest repinning. Owners are
+recovery/provider_snapshot_retirement.py and the native
+check_snapshot_reference_processes.py --relocated-abort gate. It uses actual provider/copy/wait/
+cold restore and creates zero Nodes/devices/models/simulators. Raft/online producer, hot-journal
+maintenance and all remaining P1-P7 requirements still apply.
+
 ADR-0157 adds explicit source upload retirement under wrapper v52/event v31 and offline source
 reclamation under Artifact storage v5/recovery v0.16. Original Completed uploads and Catalog/lineage
 are independent claims. All actual original writers and every known Controller authority precede

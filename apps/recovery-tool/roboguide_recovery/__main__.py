@@ -11,6 +11,7 @@ from .artifact_reclamation import run as reclaim_artifact
 from .artifact_snapshot_retirement import run as retire_artifact_snapshot
 from .bundle import abort_snapshots, backup, reconcile_snapshots, restore, verify
 from .profile import MAX_PROFILE_BYTES
+from .provider_snapshot_retirement import run as retire_provider_snapshot
 
 
 def main() -> None:
@@ -61,6 +62,12 @@ def main() -> None:
         snapshot_retirement.add_argument("--original-intent-digest", required=True)
         snapshot_retirement.add_argument("--command-id", required=True)
         snapshot_retirement.add_argument("--reason", required=True)
+    provider_retirement = subcommands.add_parser("retire-provider-snapshot")
+    provider_retirement.add_argument("--profile", type=Path, required=True)
+    provider_retirement.add_argument("--original-profile", type=Path, required=True)
+    provider_retirement.add_argument("--provider", required=True)
+    provider_retirement.add_argument("--operation-id", required=True)
+    provider_retirement.add_argument("--original-intent-digest", required=True)
     args = parser.parse_args()
     if args.operation in {
         "backup",
@@ -71,12 +78,27 @@ def main() -> None:
         "gc-artifact",
         "retire-artifact-snapshot",
         "reconcile-artifact-snapshot-retirement",
+        "retire-provider-snapshot",
     }:
         raw = args.profile.read_bytes()
         if len(raw) > MAX_PROFILE_BYTES:
             parser.error("recovery profile exceeds its byte bound")
         profile = json.loads(raw)
-        if args.operation in {"retire-artifact-snapshot", "reconcile-artifact-snapshot-retirement"}:
+        if args.operation == "retire-provider-snapshot":
+            original_raw = args.original_profile.read_bytes()
+            if len(original_raw) > MAX_PROFILE_BYTES:
+                parser.error("original recovery profile exceeds its byte bound")
+            result = retire_provider_snapshot(
+                profile,
+                json.loads(original_raw),
+                args.provider,
+                args.operation_id,
+                args.original_intent_digest,
+            )
+        elif args.operation in {
+            "retire-artifact-snapshot",
+            "reconcile-artifact-snapshot-retirement",
+        }:
             original_raw = args.original_profile.read_bytes()
             if len(original_raw) > MAX_PROFILE_BYTES:
                 parser.error("original recovery profile exceeds its byte bound")

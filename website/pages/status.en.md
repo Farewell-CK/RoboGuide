@@ -1,6 +1,6 @@
 # Implementation status and evidence limits
 
-Content baseline: `a0e74d04915b9380f3f4a4a8a6a480daa0e4af76`, including ADR-0157, reviewed 2026-10-23. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
+Content baseline: `ab6ab4679e71fff26cefdacada33fe41a6fbf10b` plus this ADR-0158 implementation, reviewed 2026-10-23. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
 
 | Area | Existing software paths | Remaining or independently validated work |
 | --- | --- | --- |
@@ -8,7 +8,7 @@ Content baseline: `a0e74d04915b9380f3f4a4a8a6a480daa0e4af76`, including ADR-0157
 | Control / quota | Match/Commit/Bind, calendar, recovery, atomic tenant/category quota and usage view | Divisible allocation, local enforcement of all resources, full space/time/cost evidence |
 | Runtime / stop | Attempts/generations, durable intents, relations, whole-Group stop and original-process exit proof | Running preemption, coupled Role migration, hazard/regrasp and device stopping |
 | State / verifier | Source policies, Belief lineage, TTL, original Task verifiers and CAS proof | Actual deployment sources, conflicts and continuous physical effects |
-| Memory / Spatial | Preparation/use/revoke/handoff, file algorithms, provider-local GC; original import Replica, Catalog/lineage, Snapshot/Archive references, Archive abort/private recipient GC, source upload retirement and offline GC over supported standalone reference closure | Complete Raft/online producer coverage, legacy provider Snapshot closure, cross-host content and composed recovery |
+| Memory / Spatial | Preparation/use/revoke/handoff, file algorithms, provider-local GC; original import Replica, Catalog/lineage, Snapshot/Archive references, relocated provider Snapshot retirement, Archive abort/private recipient GC, source upload retirement and offline GC over supported standalone reference closure | Complete Raft/online producer coverage, cross-host content and composed recovery |
 | Replica / recovery | Certificate rotation, original child drain, V3 transfer, inode/writer fences and quiescent bundles | Binary/profile upgrade/rollback, online content recovery and cross-host fault matrix |
 | Federation | Durable Control sessions | Actual cross-domain transport, authorization, routing and dual-domain recovery |
 | Operations | Write-disabled, committed views, recovery probes and short real monitoring checks | Remaining listener/blocking paths, complete runbooks, long-term SLO and overall exit criteria |

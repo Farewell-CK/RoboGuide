@@ -127,9 +127,14 @@ def _validate_directories(root: Path, manifest: dict[str, Any], budget: Budget) 
         if parts[0] != "stores" or (len(parts) > 1 and parts[1] not in by_id):
             raise ValueError("original recovery directory is outside declared storage")
         if len(parts) > 2:
-            _, trees, _ = layout(by_id[parts[1]], profile_schema=manifest["profile"]["schema"])
+            databases, trees, _ = layout(
+                by_id[parts[1]], profile_schema=manifest["profile"]["schema"]
+            )
             selected = Path(*parts[2:])
-            if not any(selected.is_relative_to(Path(tree)) for tree in trees):
+            if not any(
+                selected.is_relative_to(Path(tree)) or Path(tree).is_relative_to(selected)
+                for tree in trees
+            ) and not any(selected in Path(database).parents for database in databases):
                 raise ValueError("original recovery directory is outside selected content trees")
         real_directory(root / path)
     actual = sorted(path.relative_to(root).as_posix() for path in _directories(root, budget))

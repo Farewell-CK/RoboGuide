@@ -1,6 +1,7 @@
 # RoboGuide V2 current architecture
 
-Reviewed: 2026-10-23. Current remediation baseline: `a0e74d04915b9380f3f4a4a8a6a480daa0e4af76`
+Reviewed: 2026-10-23. Current remediation baseline: `ab6ab4679e71fff26cefdacada33fe41a6fbf10b`
+plus this ADR-0158 implementation,
 on the single development branch `codex/nonrelease-remediation-closure`. The atlas retains its
 October 22 source baseline `495a6d2`. These later remediation changes have not merged back to main;
 they are not claims about the current remote main branch.
@@ -240,6 +241,12 @@ Mission/switches and independent original-goal/kernel completion evidence. Paren
 the child's pin intact. Unknown retries only observe, and released history needs no deleted bytes.
 See the [actual acceptance](../../development/acceptance/2026-10-23-source-artifact-reclamation.md).
 The offline entry refuses Replica/online authority; Raft/online producers and majority content remain required.
+
+ADR-0158 closes recovery of an original unpublished provider Snapshot. Complete original/current
+profiles and all actual writers precede exact abort in the current original SQL. Provider instance,
+request and pins cannot be replaced. The original v0.1 receipt/SQL v4 and historical source/budget remain
+unchanged. Actual provider/copy/wait, both writer fences, SQL rollback and cold recovery pass; see the
+[acceptance](../../development/acceptance/2026-10-23-relocated-provider-snapshot.md).
 
 ## 6. Runtime and local autonomy
 

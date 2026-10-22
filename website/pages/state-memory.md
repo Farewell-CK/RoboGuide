@@ -40,4 +40,6 @@ Controller Artifact 的原 store owner 与 Local Memory provider 分别保留自
 
 原未归属 Catalog 通过[显式接管](docs/development/acceptance/2026-10-22-original-catalog-adoption.md)建立当前保留责任。原 envelope/raw manifest 与实际 CAS 不能由当前主体重写，历史 publisher/tenant 缺失仍为 unknown；当前 admin/TLS/command 独立保存。v0.15 额外核对原 receipt 与同事务 acquisition，任何接管都不新增消费权限。
 
+[恢复后的原 provider Snapshot 退休](docs/development/acceptance/2026-10-23-relocated-provider-snapshot.md)持有完整原/当前 profile 的全部实际 writer，核对实际同一 provider instance、完整原 request 与 generation-1 pins，再在当前原事务写入既有 v0.1 abort receipt。独立历史源、partial 和原预算不改；已发布/曾 released 的 copy 仍须完整原 publication proof。实际 provider/复制进程、双端 writer 占用、SQL rollback、原 retry、重启与冷恢复通过，0 Nodes/设备/外部模型/模拟器。
+
 [源 Artifact 离线回收](docs/development/acceptance/2026-10-23-source-artifact-reclamation.md)进一步接通 standalone 已知引用闭包：独立上传退休、有效 MI policy 拒绝、显式撤销与原目标/kernel 证明、parent 退休后 child 继续保留，以及原 Snapshot/Archive 和验证责任。显式 storage v5/recovery v0.16 保存原命令与 mandatory tombstone/heads，先持久再 unlink；Unknown 相同命令只观察，重新出现的同 owner bytes 不复活。实际旧 profile Snapshot 退休同时取得原/当前全部 writer，不改历史源。Raft/online 权威由此入口拒绝，仍须继续完成对应生产者和多数派数据面；hot journal 显式维护也继续列在运维整改中。
