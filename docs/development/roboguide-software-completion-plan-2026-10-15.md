@@ -220,6 +220,18 @@ hash/size/fsync 后才有原 receipt；managed reader 自有 pin 和实际句柄
 mTLS Commit/Snapshot，不能关闭 N1/N3。实际进程证据与限制见
 [原内容存储验收](acceptance/2026-10-23-original-replica-content-storage.md)。
 
+随后在 `5e1d307` 实际零 Node 三副本换证流程复现现代 checkpoint 换主丢失原
+Archive marker；原失败日志保留。`State/replica_recovery` 现以原 writer 下完整投影与
+inactive 单事务导入保留原 ID、zero-operation/copy/abort/Catalog/manifest/floor，现代
+旧入口缺投影时在写入前拒绝。实际独立 capture/import/Controller 重启、原字节读取
+与完整 v0.16 冷恢复通过，未补造任何原 authority。此验证共用实际原 CAS，只验证
+静止 metadata 捕获与安装；v0.4 网络、Raft storage/Snapshot 与内容多数接线继续为
+N1/N3 必需。见[完整 State 投影验收](acceptance/2026-10-23-complete-original-state-projection.md)。
+
+N7 另须覆盖 Controller 的 SQL inode 与 writer 代际：当前 Integration Server 的
+canonical sibling lease 覆盖相对路径/symlink，不覆盖不同 hardlink 名字；需要实际
+不同 CAS/旧 live writer 的故障门禁。metadata probe 的独立 inode 锁不计为产品修复。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

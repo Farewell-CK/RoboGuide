@@ -153,10 +153,15 @@ jobs:
           uv run --frozen python tools/quality/check_artifact_snapshot_processes.py
           --skip-build --output "${RUNNER_TEMP}/roboguide-artifact-snapshot"
 
+      - name: Build complete original State materialization probe
+        run: cargo build --locked -p state --example replica_state_probe
+
       - name: Verify actual original content Archive with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_content_archive_processes.py
-          --skip-build --abort-unpublished --output "${RUNNER_TEMP}/roboguide-content-archive"
+          --skip-build --abort-unpublished
+          --replica-state-probe target/debug/examples/replica_state_probe
+          --output "${RUNNER_TEMP}/roboguide-content-archive"
 
       - name: Verify private Archive recipient retirement and actual GC with zero Nodes
         run: >

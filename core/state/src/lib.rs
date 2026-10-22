@@ -73,8 +73,10 @@ pub use event_log::{
     ArchiveAbortIntent, ArchiveAbortReceipt, ArchiveAbortRequest, ArchiveAbortSink, ArchiveContent,
     ArchiveCopierFence, ArchiveIntent, ArchiveLeaseIdentity, ArchiveManifest, ArchiveRequest,
     ArchiveSink, AuthorityWriteStatus, CheckpointStoragePolicy, CheckpointWriteStats,
-    ControlCommandJournalEntry, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,
-    PersistedCheckpoint, PersistedEvent, SqliteEventLog, SqliteEventLogError, WriteFailure,
+    CompleteReplicaState, ControlCommandJournalEntry, FileArchiveSink, MAX_ARCHIVE_BYTES,
+    MAX_ARCHIVE_EVENTS, PersistedCheckpoint, PersistedEvent, REPLICA_RECOVERY_PROJECTION_SCHEMA,
+    ReplicaArchiveAbort, ReplicaArchiveManifest, ReplicaArchiveOperation,
+    ReplicaRecoveryProjection, SqliteEventLog, SqliteEventLogError, WriteFailure,
     WriteRecoveryCommand, WriteRecoveryReceipt, checkpoint_identity, validate_persisted_event,
 };
 pub use memory::MemoryCatalogProjection;

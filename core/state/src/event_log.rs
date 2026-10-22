@@ -21,6 +21,12 @@ mod checkpoint_store;
 use checkpoint_store::StoredCheckpoint;
 #[path = "application_replication.rs"]
 mod application_replication;
+#[path = "replica_recovery.rs"]
+mod replica_recovery;
+pub use replica_recovery::{
+    CompleteReplicaState, REPLICA_RECOVERY_PROJECTION_SCHEMA, ReplicaArchiveAbort,
+    ReplicaArchiveManifest, ReplicaArchiveOperation, ReplicaRecoveryProjection,
+};
 #[path = "archive.rs"]
 mod archive;
 #[path = "archive_abort.rs"]
@@ -981,9 +987,16 @@ impl SqliteEventLog {
                 commands,
             };
             batch.validate()?;
-            replicator
-                .confirm_batch(batch)
-                .map_err(SqliteEventLogError::Replication)?;
+            if replicator.requires_recovery_projection() {
+                let recovery = replica_recovery::export(&connection)?;
+                replicator
+                    .confirm_recovery_batch(batch, recovery)
+                    .map_err(SqliteEventLogError::Replication)?;
+            } else {
+                replicator
+                    .confirm_batch(batch)
+                    .map_err(SqliteEventLogError::Replication)?;
+            }
         }
         let authority_revision = authority_journal::revision(&connection)?;
         connection.execute("INSERT INTO event_log_metadata(key,value) VALUES ('journal_committed_revision',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [authority_revision.to_string()])?;

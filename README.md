@@ -6,6 +6,11 @@
 证据保留 Unknown，读取句柄退出与 Snapshot 释放分别核对。当前部署 v0.3 仍只复制
 元数据；新后端和同成员多数校验尚不代表在线 HA、设备停止或整体整改完成。
 
+State 的原始恢复投影已接入原提交 writer 与 inactive 原子安装 API，保留原 Archive ID、
+原零操作/Unknown 日志、完整 Catalog prefix 和 manifest/floor。旧 v2 安装入口遇到现代
+checkpoint 会明确拒绝缺失投影。当前零 Node 三副本原版本流程实际复现了漏传 Archive
+marker 的失败；完整投影的网络、Replica/Snapshot 与内容多数派接线正在继续实施。
+
 恢复后未发布的原 provider Snapshot 可提交完整原/当前 profile，由实际全部 writer
 排空后精确退休当前原记录；原 instance/request/generation pins 不变，沿用原 v0.1
 receipt 和 SQL v4，历史源与 partial 保留，不复制或续期。实际 provider/CLI/SIGKILL/

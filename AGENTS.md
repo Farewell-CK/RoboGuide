@@ -1,6 +1,18 @@
 # Repository Guidelines
 
 ADR-0159 is implementing original-owner content durability for the future explicit Replica v0.4.
+State's `replica_recovery.rs` now exports original auxiliary recovery under the actual original
+writer and atomically imports it beside complete events/commands/checkpoint. It retains raw original
+Archive ID, zero-operation journals, pending copy/abort, Catalog prefix and manifest/floor evidence;
+modern metadata-only materialization refuses before writes. Explicit new ports receive this complete
+projection; old v2 ports never acquire it implicitly. The actual original v0.3 zero-Node certificate
+process gate reproduced a missing Archive marker after peer restart at the 5e1d307 baseline. The
+full State API's SQL tests do not close its transport/Replica storage/Snapshot/content wiring.
+`core/state/examples/replica_state_probe.rs` and the owned zero-Node Archive check's optional
+`--replica-state-probe` retain actual capture/import PID/wait, original metadata identities and
+Controller/CAS reopen evidence. The helper is `tools/quality/replica_state_materialization_processes.py`;
+it uses the actual same original CAS and does not prove online replication or fix the product's
+separate hardlink/writer-generation gap. See the complete-original-State acceptance.
 `core/controller-replication/content.rs` validates same-member complete metadata/byte majorities
 including joint configurations; DTOs alone are never transport or storage evidence. The new
 member-local `content_store/` retains actual root/database-inode leases, mandatory bounded SQL

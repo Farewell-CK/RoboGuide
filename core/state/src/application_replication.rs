@@ -40,6 +40,19 @@ pub trait ApplicationBatchReplicator: Send + Sync {
     fn assert_write_authority(&self) -> Result<(), String>;
     /// Confirms durable quorum acceptance of the exact validated candidate.
     fn confirm_batch(&self, batch: ApplicationCommitBatch) -> Result<(), String>;
+    /// Explicitly negotiates the original complete recovery projection; legacy ports keep v2 semantics.
+    fn requires_recovery_projection(&self) -> bool {
+        false
+    }
+    /// Accepts the complete original auxiliary authority beside the unchanged semantic v2 batch.
+    /// A port which did not implement the explicit new profile must refuse rather than discard it.
+    fn confirm_recovery_batch(
+        &self,
+        _batch: ApplicationCommitBatch,
+        _recovery: ReplicaRecoveryProjection,
+    ) -> Result<(), String> {
+        Err("replica port has no negotiated complete original recovery profile".into())
+    }
 }
 
 /// Hashes the complete application identity without coupling it to local storage representation.
@@ -189,8 +202,53 @@ impl SqliteEventLog {
         history_floor: Option<u64>,
         commands: &[ControlCommandJournalEntry],
     ) -> Result<(), SqliteEventLogError> {
+        self.install_replica_authority_inner(events, checkpoint, history_floor, commands, None)
+    }
+
+    /// Atomically materializes the complete original State/Catalog/Archive projection and authority.
+    /// The composition must first drain its original managed writers and supply actual accepted bytes.
+    pub fn install_replica_authority_with_recovery(
+        &self,
+        events: &[PersistedEvent],
+        checkpoint: &PersistedCheckpoint,
+        commands: &[ControlCommandJournalEntry],
+        recovery: &ReplicaRecoveryProjection,
+    ) -> Result<(), SqliteEventLogError> {
+        let floor = recovery.history_floor()?;
+        self.install_replica_authority_inner(
+            events,
+            checkpoint,
+            (floor > 0).then_some(floor),
+            commands,
+            Some(recovery),
+        )
+    }
+
+    /// Shares inactive atomic import while refusing hidden modern auxiliary authority on the old path.
+    fn install_replica_authority_inner(
+        &self,
+        events: &[PersistedEvent],
+        checkpoint: &PersistedCheckpoint,
+        history_floor: Option<u64>,
+        commands: &[ControlCommandJournalEntry],
+        recovery: Option<&ReplicaRecoveryProjection>,
+    ) -> Result<(), SqliteEventLogError> {
         self.require_writes_enabled()?;
         self.ensure_no_open_batch()?;
+        if let Some(recovery) = recovery {
+            recovery.validate_for(events, checkpoint)?;
+        } else if matches!(
+            checkpoint.schema.as_str(),
+            crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+                | "roboguide.controller-checkpoint/v49"
+                | "roboguide.controller-checkpoint/v50"
+                | "roboguide.controller-checkpoint/v51"
+        ) {
+            return Err(SqliteEventLogError::Codec(
+                "modern replica materialization requires its original complete recovery projection"
+                    .into(),
+            ));
+        }
         if self.replicator.is_some()
             || history_floor.is_some_and(|floor| floor > checkpoint.event_sequence)
         {
@@ -225,6 +283,9 @@ impl SqliteEventLog {
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(recovery) = recovery {
+            super::replica_recovery::install(&transaction, recovery)?;
+        }
         transaction.execute("DELETE FROM control_command_journal", [])?;
         transaction.execute(
             "DELETE FROM event_log_metadata WHERE key='journal_committed_revision'",
@@ -266,6 +327,10 @@ impl SqliteEventLog {
                 [],
             )?;
         }
+        let imported = checkpoint_store::read(&transaction)?;
+        if recovery.is_some() {
+            super::catalog_archive::current(&transaction)?;
+        }
         transaction.commit()?;
         *self
             .committed_authority_revision
@@ -279,7 +344,7 @@ impl SqliteEventLog {
         *self
             .checkpoint_cache
             .lock()
-            .map_err(|_| SqliteEventLogError::LockPoisoned)? = checkpoint_store::read(&connection)?;
+            .map_err(|_| SqliteEventLogError::LockPoisoned)? = imported;
         *self
             .pending_checkpoint_cache
             .lock()

@@ -1,7 +1,7 @@
 # RoboGuide V2 current architecture
 
-Reviewed: 2026-10-23. Current remediation baseline: `a0c2ce130b61f19c8c9d8012ffa59664bad64dfc`
-plus ADR-0159 member-local storage; online integration remains in progress,
+Reviewed: 2026-10-23. Current remediation baseline: `5e1d30787b31fa59ec5b7e52301e73c717da5ca6`
+plus ADR-0159 complete original State capture and installation; online integration remains in progress,
 on the single development branch `codex/nonrelease-remediation-closure`. The atlas retains its
 October 22 source baseline `495a6d2`. These later remediation changes have not merged back to main;
 they are not claims about the current remote main branch.
@@ -324,6 +324,12 @@ Log/Snapshot/reader/current-view references precede byte effects. Success requir
 members to persist metadata and every required byte, satisfying each current/joint voter majority.
 Complete Catalog/Archive/Snapshot recovery and upgrade/rollback remain mandatory. Current v0.3 does not
 provide this new contract; online HA is not complete before implementation and actual gates pass.
+
+Complete original State/Catalog/Archive capture now runs under the original writer and imports in one
+inactive SQL transaction, preserving original IDs, empty journals, pending copy/abort and floors.
+Modern metadata-only imports refuse before writing. Independent actual capture/import and Controller/
+CAS reads pass. The original v0.3 missing-marker process failure remains evidence; private transport,
+Snapshot and content-quorum integration continue.
 
 ## 8. Frozen invariants
 

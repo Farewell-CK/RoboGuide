@@ -16,6 +16,23 @@ owner。supervisor 独立内容存储保存这些 qualified origins、实际 byt
 leader 的应用 CAS 通过精确已接受的原 owner→实际本地副本映射读取恢复内容；复制
 不能改写原 Catalog/lineage/上传/验证 evidence 或借某个接收方的身份补造源事实。
 
+新 private application-commit v3 包含原 v2 semantic batch 与完整原 State recovery
+projection，保留原 Archive authority、零操作 marker、原 copy/abort 的完整 raw rows、
+manifest、Catalog archive head/rows 和原 history/timestamp floor。v0.4 保留完整原
+未归档事件尾，不沿用独立删除 metadata prefix 的自动 compaction；达到 bounds 时须
+先完成真实 coordinated Archive，不能把只剩 checkpoint/digest 的旧前缀猜回内容。
+materialization 在同一 inactive SQL transaction 安装原 projection、完整事件/命令与
+checkpoint，原通用 v2 materialization 不可补造缺失的 Archive ID/journal。迁移原
+v0.3 已压缩部署须取得原完整数据；不能用 fresh profile 绕过缺失。此项保持 domain
+checkpoint/Node 语义，新的持久化/私有传输权限由显式 profile/storage/codec fence 承担。
+
+内容输入还包括 Prepared 上传的实际 frozen staging bytes，不能等到 finalize 才把它
+当成需要多数持久的数据。无原 owner 的旧裸 digest 须有原事件/实际 backend 的精确
+来源绑定；新 leader 的当前 owner 不能补成历史来源。actual member content store 与
+应用 CAS 各保留自己的真实 UUID，bootstrap/变更须经实际 TLS 观察并在 Raft 中固定
+实际 store 注册；配置的 member 数字不产生 Node/设备。复制读取只由确切原 candidate/
+log/Snapshot/current-view 输入授权，不授予用户/Task 的 semantic read/use。
+
 原 metadata revision/checkpoint/batch digest、原 issuing epoch 与确切当前 voting
 membership 一起固定。应用成功 ACK 必须由同一批成员同时提供实际已应用 metadata
 和实际持久 bytes 的独立观察，完整所需集合不能丢项。该同一批成员须超过每组 voters

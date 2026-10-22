@@ -22,6 +22,7 @@ from check_artifact_authority_processes import call as http_call
 from check_artifact_authority_processes import grant
 from check_identity_processes import ROOT, client, pki, port, stop
 from check_state_verifier_processes import save
+from replica_state_materialization_processes import run as run_state_materialization
 
 
 def run(
@@ -31,6 +32,7 @@ def run(
     old_recovery_ref: str | None,
     abort_unpublished: bool = False,
     upgrade_original: bool = False,
+    replica_state_probe: Path | None = None,
 ) -> dict[str, Any]:
     """Retain actual software process, file, SQL and TLS evidence with zero Nodes."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -51,6 +53,8 @@ def run(
         Path(__file__),
         Path(__file__).with_name("archive_abort_processes.py"),
         Path(__file__).with_name("check_artifact_authority_processes.py"),
+        Path(__file__).with_name("replica_state_materialization_processes.py"),
+        ROOT / "core/state/examples/replica_state_probe.rs",
     ]
     frozen = {
         str(path.relative_to(ROOT)): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
@@ -414,6 +418,24 @@ def run(
             )
             compacted = rows()
         stop(process)
+        state_materialization = None
+        if replica_state_probe is not None:
+            state_materialization = run_state_materialization(
+                directory,
+                replica_state_probe,
+                database,
+                source,
+                archive,
+                launch,
+                execute,
+                call,
+                artifact_origin,
+                operator_origin,
+                admin,
+                upload,
+                checksum,
+                payload,
+            )
         profile: dict[str, Any] = {
             "schema": "roboguide.recovery-profile/v0.16"
             if schema == "roboguide.controller-checkpoint/v52"
@@ -732,6 +754,7 @@ def run(
             "original_authority": intent["request"]["authority_id"],
             "actual_uploads": 2 if abort_result is not None else 1,
             "original_archive_abort": abort_result,
+            "complete_original_state_materialization": state_materialization,
             "actual_original_wrapper_upgrade": upgrade_original,
             "original_producer_binary_digest": original_producer_digest,
             "original_embedded_checkpoint_schema": intent["checkpoint"]["schema"],
@@ -766,6 +789,7 @@ def main() -> None:
     parser.add_argument("--upgrade-original", action="store_true")
     parser.add_argument("--old-controller", type=Path)
     parser.add_argument("--old-recovery-ref")
+    parser.add_argument("--replica-state-probe", type=Path)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -776,6 +800,9 @@ def main() -> None:
                 args.old_recovery_ref,
                 args.abort_unpublished,
                 args.upgrade_original,
+                args.replica_state_probe.resolve()
+                if args.replica_state_probe is not None
+                else None,
             ),
             indent=2,
         )
