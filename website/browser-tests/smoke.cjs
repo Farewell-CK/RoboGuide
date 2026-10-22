@@ -53,6 +53,25 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
       }
       await page.goto(base + '/', { waitUntil: 'networkidle' });
       await page.evaluate(value => document.body.setAttribute('data-md-color-scheme', value), scheme);
+      const ratios = await page.locator('.md-typeset .md-button').evaluateAll(buttons => {
+        const luminance = rgb => rgb.map(v => v / 255).map(v =>
+          v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4)
+          .reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
+        const channels = value => value.match(/[\d.]+/g).map(Number);
+        return buttons.map(button => {
+          let element = button;
+          let background;
+          while (element) {
+            const value = channels(getComputedStyle(element).backgroundColor);
+            if (value.length === 3 || value[3] > 0) { background = value.slice(0, 3); break; }
+            element = element.parentElement;
+          }
+          const foreground = channels(getComputedStyle(button).color).slice(0, 3);
+          const a = luminance(foreground), b = luminance(background || [255, 255, 255]);
+          return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+        });
+      });
+      assert.ok(ratios.every(value => value >= 4.5), `button contrast: ${scheme} ${ratios}`);
       await page.screenshot({ path: path.join(output, `home-${width}-${scheme}.png`), fullPage: true });
       console.log(`Passed responsive/diagram checks: ${width}px ${scheme}`);
     }

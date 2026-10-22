@@ -58,3 +58,14 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+/* Readable secondary actions and diagrams at narrow widths. */
+.md-typeset .md-button:not(.md-button--primary) {
+  color: var(--md-typeset-a-color);
+  border-color: currentColor;
+}
+.rg-diagram-scroll { max-width: 100%; overflow-x: auto; margin: 1rem 0; }
+.rg-diagram-scroll > .mermaid { min-width: 38rem; padding: .5rem 0; }
+.rg-diagram-hint { display: none; }
+@media (max-width: 44.99em) {
+  .rg-diagram-hint { display: block; font-size: .72rem; color: var(--md-default-fg-color--light); }
+}
