@@ -16,6 +16,7 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
   await context.route('**/*', route => {
     if (new URL(route.request().url()).origin === new URL(base).origin) return route.continue();
     requests += 1;
+    console.error("Unexpected external request:", route.request().url());
     return route.abort();
   });
   await context.addInitScript(() => {
@@ -67,7 +68,14 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
             element = element.parentElement;
           }
           const foreground = channels(getComputedStyle(button).color).slice(0, 3);
-          const a = luminance(foreground), b = luminance(background || [255, 255, 255]);
+          if (!background) {
+            const probe = document.createElement('span');
+            probe.style.backgroundColor = 'var(--md-default-bg-color)';
+            document.body.append(probe);
+            background = channels(getComputedStyle(probe).backgroundColor).slice(0, 3);
+            probe.remove();
+          }
+          const a = luminance(foreground), b = luminance(background);
           return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
         });
       });

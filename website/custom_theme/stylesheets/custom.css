@@ -69,3 +69,14 @@
 @media (max-width: 44.99em) {
   .rg-diagram-hint { display: block; font-size: .72rem; color: var(--md-default-fg-color--light); }
 }
+.md-typeset .md-button:not(.md-button--primary):hover,
+.md-typeset .md-button:not(.md-button--primary):focus {
+  color: var(--md-default-bg-color);
+  background: var(--md-typeset-a-color);
+  border-color: var(--md-typeset-a-color);
+}
+.md-typeset .md-button--primary:focus {
+  color: #fff;
+  background: #103b6b;
+  border-color: #103b6b;
+}
