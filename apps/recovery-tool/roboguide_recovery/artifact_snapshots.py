@@ -15,7 +15,7 @@ from .profile import real_directory
 from .snapshot_references import OperationBudget, canonical, digest, digest_profile
 
 SCHEMA = "roboguide.recovery-profile/v0.11"
-SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.12"}
+SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.12", "roboguide.recovery-profile/v0.13"}
 MAX_OPERATIONS = 4096
 MAX_INPUTS = 16_384
 MAX_RECORD_BYTES = 2 * 1024 * 1024

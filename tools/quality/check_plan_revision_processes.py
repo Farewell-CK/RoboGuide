@@ -115,7 +115,7 @@ def migrate_original(
     status, observed = https(origin, context, f"/v1/missions/{mission}/admission")
     assert status == 200 and observed == receipt
     after = checkpoint(directory)
-    assert after["schema"] == "roboguide.controller-checkpoint/v49"
+    assert after["schema"] == "roboguide.controller-checkpoint/v50"
     assert after["integration"]["schema"] == "roboguide.controller-checkpoint/v23"
     assert not after["integration"]["nodes"]
     assert not after.get("runtime_revisions")

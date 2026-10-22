@@ -27,14 +27,18 @@ def call(
     path: str,
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
+    *,
+    timeout_seconds: float = 5,
 ) -> tuple[int, bytes]:
     """Read bounded actual HTTP bytes with explicit local TLS and no ambient proxy routing."""
+    if not 0 < timeout_seconds <= 60:
+        raise ValueError("actual HTTP observation requires an explicit bounded response wait")
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context)
     )
     message = urllib.request.Request(origin + path, method=method, data=body, headers=headers or {})
     try:
-        response = opener.open(message, timeout=5)  # noqa: S310 - owned loopback listeners.
+        response = opener.open(message, timeout=timeout_seconds)  # noqa: S310 - owned loopback.
     except urllib.error.HTTPError as error:
         response = error
     with response:

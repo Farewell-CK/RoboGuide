@@ -223,6 +223,13 @@ pub(super) fn read(
             .is_some_and(|head| head.schema == crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA)
     {
         super::archive_operation::require_storage(connection)?;
+        super::archive_abort::validate_storage(connection)?;
+    } else if baseline.schema == "roboguide.controller-checkpoint/v49"
+        || head
+            .as_ref()
+            .is_some_and(|head| head.schema == "roboguide.controller-checkpoint/v49")
+    {
+        super::archive_operation::require_storage(connection)?;
     }
     if baseline.schema != CHAIN_SCHEMA {
         if head.is_some() || count != 0 {

@@ -5,7 +5,7 @@
 //! State & Memory Plane facade for implemented observable projections.
 
 /// Current composition authority wrapper, shared by Controller, replica supervisor and storage fences.
-pub const CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v49";
+pub const CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v50";
 
 /// Returns whether a supported Controller wrapper requires an exact durable command journal head.
 pub fn checkpoint_requires_authority_journal(schema: &str) -> bool {
@@ -33,6 +33,7 @@ pub fn checkpoint_requires_authority_journal(schema: &str) -> bool {
             | "roboguide.controller-checkpoint/v46"
             | "roboguide.controller-checkpoint/v47"
             | "roboguide.controller-checkpoint/v48"
+            | "roboguide.controller-checkpoint/v49"
             | CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
     )
 }
@@ -64,12 +65,13 @@ pub use decision_policy::{
 };
 pub use decision_state::DecisionStateSnapshot;
 pub use event_log::{
-    APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch, ArchiveContent,
-    ArchiveIntent, ArchiveManifest, ArchiveRequest, ArchiveSink, AuthorityWriteStatus,
-    CheckpointStoragePolicy, CheckpointWriteStats, ControlCommandJournalEntry, FileArchiveSink,
-    MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS, PersistedCheckpoint, PersistedEvent, SqliteEventLog,
-    SqliteEventLogError, WriteFailure, WriteRecoveryCommand, WriteRecoveryReceipt,
-    checkpoint_identity, validate_persisted_event,
+    APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch,
+    ArchiveAbortIntent, ArchiveAbortReceipt, ArchiveAbortRequest, ArchiveAbortSink, ArchiveContent,
+    ArchiveCopierFence, ArchiveIntent, ArchiveLeaseIdentity, ArchiveManifest, ArchiveRequest,
+    ArchiveSink, AuthorityWriteStatus, CheckpointStoragePolicy, CheckpointWriteStats,
+    ControlCommandJournalEntry, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,
+    PersistedCheckpoint, PersistedEvent, SqliteEventLog, SqliteEventLogError, WriteFailure,
+    WriteRecoveryCommand, WriteRecoveryReceipt, checkpoint_identity, validate_persisted_event,
 };
 pub use memory::MemoryCatalogProjection;
 pub use node::InMemorySharedNodeState;

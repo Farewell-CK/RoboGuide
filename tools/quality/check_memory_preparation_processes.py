@@ -168,7 +168,7 @@ def run(
     environment["PYTHONPATH"] = str(ROOT / "integrations/memory-provider")
     contexts, leaves = tls(directory, nodes, memory_id, environment, monitoring_tools is not None)
     if artifact_retention:
-        environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = "roboguide.artifact-storage/v1"
+        environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = "roboguide.artifact-storage/v3"
         configure_catalog_retention(directory, leaves["admin"])
     if content_archive:
         if not artifact_retention or handoff_case is not None:
@@ -256,7 +256,15 @@ def run(
         endpoint: str = origin,
     ) -> tuple[int, dict[str, Any]]:
         """Keep the actual certificate identity independent of JSON metadata and Node IDs."""
-        return tls_request(endpoint, context or contexts["admin"], path, body)
+        return tls_request(
+            endpoint,
+            context or contexts["admin"],
+            path,
+            body,
+            timeout_seconds=45
+            if body is not None and path.startswith("/v1/maintenance/archive")
+            else 3,
+        )
 
     def preparations() -> dict[str, Any]:
         """Read only application-committed pre-execution authority."""

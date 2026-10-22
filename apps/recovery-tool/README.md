@@ -1,5 +1,13 @@
 # RoboGuide recovery tool
 
+[Profile v0.13](../../contracts/recovery/bundle-v0.13/README.md) preserves original wrapper v49
+copy intents while validating v50 / operations v0.2 unpublished-Archive cleanup. Actual source/
+Archive writer fences, original cleanup budgets, durable tombstones and exact SQL receipts remain
+independent of copy and receiving-reference history. Unknown retains its source pin; expired cleanup
+never renews a copy. Missing mandatory cleanup history/tombstone refuses recovery. It preserves the
+v0.12 complete directory/consumer/CAS contracts. Receiving Archive retirement/GC and online/full
+P1-P7 acceptance remain separate required work.
+
 [Profile v0.12](../../contracts/recovery/bundle-v0.12/README.md) requires the v3 Artifact reference
 authority inventory, wrapper v49 Archive journal and all declared original consumers. It verifies
 pending source pins and independently retained receiving Archive bytes alongside complete Catalog

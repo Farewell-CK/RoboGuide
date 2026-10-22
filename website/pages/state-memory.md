@@ -34,4 +34,4 @@ Execution、Spatial、Semantic、Experience、Artifact 内容由原 provider 保
 
 参阅[State 模块](modules/state.md)、[Memory/恢复档案](archives.md)与[运维路径](operations.md)。
 
-Controller Artifact 的原 store owner 与 Local Memory provider 分别保留自己的副本责任，同 digest 不合并所有权。原 Catalog/lineage、Snapshot 和 Archive 引用先于复制或发布，Unknown 保留引用；完整原 publication 与精确 SQL receipt 才退休该 source pin。Archive 接收副本独立保留。显式 storage v3/recovery v0.12 校验已知原 consumer 与内容，缺已知登记行也拒绝。Artifact GC、Archive abort/退休、Raft Snapshot 和在线生产者仍须完成，见[原验收](docs/development/acceptance/2026-10-22-original-content-archive.md)。
+Controller Artifact 的原 store owner 与 Local Memory provider 分别保留自己的副本责任，同 digest 不合并所有权。原 Catalog/lineage、Snapshot 和 Archive 引用先于复制或发布，Unknown 保留引用；完整原 publication 与精确 SQL receipt 才退休该 source pin。Archive 接收副本独立保留。显式 storage v3/recovery v0.13 校验已知原 consumer、原 cleanup journal/tombstone 与内容，缺已知登记行也拒绝。[原未发布 Archive abort](docs/development/acceptance/2026-10-22-original-archive-abort.md)要求实际全部原 writer 和独立 cleanup budget，保留 partial 与接收引用。Artifact GC、接收 Archive 退休、Raft Snapshot 和在线生产者仍须完成；此前 Archive producer 见[原验收](docs/development/acceptance/2026-10-22-original-content-archive.md)。

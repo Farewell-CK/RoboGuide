@@ -161,6 +161,15 @@ SQL 故障/旧工具/缺内容门禁，以及真实双软件 Node 原文件/Cata
 Raft Snapshot/online Replica、未归属旧 Catalog 迁移和 N2–N7 仍须全部实施，不因
 本项通过而删除原完成条件。
 
+[原未发布 Archive 清理验收](acceptance/2026-10-22-original-archive-abort.md)以
+ADR-0154/wrapper v50/operations v0.2/recovery v0.13 接通原 cleanup intent、实际
+source/Archive writer descriptor 与 kernel/process fence、tombstone-before-receipt，
+以及 SQL 故障后只读原操作对账。实际 v49→v50 保留原 checkpoint/bytes/budget；
+过期 cleanup 仍 Unknown，原 copy ID 不重发，已发布 copy 不能 abort，接收方 pin
+及 partial 文件不删除。实际零 Node 升级与真实双软件 Node 文件/Catalog/冷恢复
+组合已通过。本项仅关闭前条的未发布 copy abort；接收归档退休/GC、全生产者
+对账、未归属 Catalog、Raft/online 及完整 N2–N7 继续必需。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

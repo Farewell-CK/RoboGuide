@@ -7,6 +7,17 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Actual retained source-writer file description, observed while its original lease remains held.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactWriterIdentity {
+    /// Original software CAS owner, independently of current filesystem path.
+    pub owner_id: String,
+    /// Actual OS device containing the original locked writer description.
+    pub lease_device: u64,
+    /// Actual original locked writer inode; a recreated path cannot substitute for it.
+    pub lease_inode: u64,
+}
+
 /// Filesystem-backed content-addressed artifact store.
 ///
 /// The store stages uploads and publishes them only after digest and size

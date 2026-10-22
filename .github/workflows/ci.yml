@@ -119,7 +119,7 @@ jobs:
       - name: Verify actual original content Archive with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_content_archive_processes.py
-          --skip-build --output "${RUNNER_TEMP}/roboguide-content-archive"
+          --skip-build --abort-unpublished --output "${RUNNER_TEMP}/roboguide-content-archive"
 
       - name: Verify original file Catalog replay after actual Archive
         run: >

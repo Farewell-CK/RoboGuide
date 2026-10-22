@@ -1,5 +1,20 @@
 # Repository Guidelines
 
+ADR-0154 adds explicit original unpublished-Archive cleanup under wrapper v50 / operations v0.2
+and recovery v0.13. Migration validates v49 history without changing its original embedded
+checkpoints, bytes or budgets. Cleanup has its own nonrenewable intent; actual held source/Archive
+writer descriptors, current kernel/PID/start ticks precede durable tombstone, which precedes the
+exact source SQL receipt. Expired cleanup remains Unknown; a distinct explicitly admitted cleanup
+cannot renew or repeat a copy. Original aborted copy IDs never execute again. Final publication
+refuses abort; partial files and receiving Archive references stay. Missing mandatory journals or
+tombstones refuse recovery. Recent wrappers v45-v49 share the original v45 isolation semantics,
+while their independent storage authorities remain strictly validated. Actual gate is
+check_content_archive_processes.py --abort-unpublished, optionally --upgrade-original with a pinned
+prior Controller binary. Actual upgrade/abort/file/Catalog recovery acceptance passes; see
+acceptance/2026-10-22-original-archive-abort.md. Receiving Archive retirement/GC,
+Raft/online producers and the full remaining P1-P7 requirements still apply. Software writer
+fences do not establish a child exit, Node/device stopping or physical continuity.
+
 ADR-0152/0153 introduce original content Archive command v0.2, shared wrapper v49 and explicit
 Artifact storage v3. Original State-store identity/journal are mandatory even at zero operations;
 accepted loss refuses replacement. CAS v3 retains every known Controller reference authority.

@@ -51,7 +51,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
 
     shutil.copytree(source / "cas", working / "cas", ignore=omit_sockets)
     profile: dict[str, Any] = {
-        "schema": "roboguide.recovery-profile/v0.10",
+        "schema": "roboguide.recovery-profile/v0.13",
         "profile_id": "actual-catalog-original-owner",
         "revision": 1,
         "max_bytes": 512 * 1024**2,
@@ -150,7 +150,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         "original-restore",
     )
     restored_receipt = execute(*restore_arguments)
-    assert restored_receipt["schema"] == "roboguide.restore-receipt/v0.10"
+    assert restored_receipt["schema"] == "roboguide.restore-receipt/v0.13"
     assert execute(*restore_arguments) == restored_receipt
     assert original_heads(restored / "stores/controller/controller.sqlite3") == heads
     old_writer = None
@@ -181,7 +181,9 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         (old_working / "stderr").write_bytes(completed.stderr)
         assert completed.returncode != 0
         message = completed.stderr.decode(errors="replace")
-        assert "unsupported" in message.lower() and ("v29" in message or "v48" in message), message
+        assert "unsupported" in message.lower() and any(
+            version in message for version in ("v29", "v48", "v49", "v50")
+        ), message
         assert original_heads(old_database) == before
         old_writer = {
             "argv": argv,
@@ -227,7 +229,10 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         "old-profile",
         passed=False,
     )
-    assert "recovery v0.10" in refused_profile["stderr"]
+    assert any(
+        message in refused_profile["stderr"]
+        for message in ("recovery v0.10", "owner metadata is invalid")
+    )
     assert not (directory / "old-profile-refused").exists()
     selected = next(
         item for record in active for item in record["dependencies"] if item["kind"] == "lineage"

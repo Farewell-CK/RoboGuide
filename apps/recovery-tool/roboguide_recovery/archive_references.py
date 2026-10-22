@@ -10,11 +10,13 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from . import artifact_layout
+from . import archive_aborts, artifact_layout
 from .snapshot_references import OperationBudget, canonical, digest
 
 SCHEMA = "roboguide.recovery-profile/v0.12"
+SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.13"}
 WRAPPER = "roboguide.controller-checkpoint/v49"
+WRAPPERS = {WRAPPER, "roboguide.controller-checkpoint/v50"}
 MAX_HISTORY_BYTES = 256 * 1024 * 1024
 MAX_CATALOG_BYTES = 64 * 1024 * 1024
 MAX_METADATA = 128 * 1024 * 1024
@@ -81,7 +83,7 @@ def catalog_history(
         ):
             raise ValueError("mandatory original Catalog archive recovery checkpoint is missing")
         return []
-    if profile_schema != SCHEMA:
+    if profile_schema not in SUPPORTED:
         raise ValueError("original Catalog archive requires explicit recovery v0.12")
     head = json.loads(raw)
     if (
@@ -214,7 +216,7 @@ def _intent(value: Any, command: str) -> dict[str, Any]:
     if (
         not isinstance(checkpoint, dict)
         or set(checkpoint) != {"schema", "event_sequence", "checkpoint_json"}
-        or checkpoint["schema"] != WRAPPER
+        or checkpoint["schema"] not in WRAPPERS
         or type(checkpoint["event_sequence"]) is not int
         or not 0 <= checkpoint["event_sequence"] < 2**64
         or not isinstance(checkpoint["checkpoint_json"], str)
@@ -294,12 +296,13 @@ def operations(
         else None
     )
     if current and (
-        marker != "roboguide.archive-operations/v0.1" or "event_archive_operations" not in tables
+        marker not in {"roboguide.archive-operations/v0.1", "roboguide.archive-operations/v0.2"}
+        or "event_archive_operations" not in tables
     ):
         raise ValueError("mandatory original Archive journal is missing")
     if "event_archive_operations" not in tables:
         return []
-    if marker != "roboguide.archive-operations/v0.1":
+    if marker not in {"roboguide.archive-operations/v0.1", "roboguide.archive-operations/v0.2"}:
         raise ValueError("original Archive journal marker changed")
     authority_id = _metadata(connection, "archive_authority_id")
     if (
@@ -317,7 +320,7 @@ def operations(
         total += len(raw.encode())
         if len(result) >= 4096 or total > MAX_HISTORY_BYTES:
             raise ValueError("original Archive history exceeds bounded recovery evidence")
-        if profile_schema != SCHEMA or not current:
+        if profile_schema not in SUPPORTED or not current:
             raise ValueError(
                 "original Archive commands require wrapper v49 and explicit recovery v0.12"
             )
@@ -334,8 +337,6 @@ def operations(
         if intent["request"]["authority_id"] != authority_id:
             raise ValueError("original Archive operation changed its Controller authority")
         result.append((intent, state, receipt))
-    if sum(state == "pending" for _, state, _ in result) > 1:
-        raise ValueError("original Archive pending ownership overlaps")
     return result
 
 
@@ -375,7 +376,7 @@ def validate(
     seen: set[str] = set()
     authorities: dict[str, str] = {}
     bindings: dict[str, set[str]] = {}
-    if profile_schema == SCHEMA:
+    if profile_schema in SUPPORTED:
         for component_id in owners.values():
             directory = root / "stores" / component_id
             owner = artifact_layout.validate_storage(directory, profile_schema)
@@ -404,7 +405,7 @@ def validate(
                 if "controller_checkpoint" in tables
                 else None
             )
-            current = checkpoint is not None and checkpoint[0] == WRAPPER
+            current = checkpoint is not None and checkpoint[0] in WRAPPERS
             if current:
                 authority_id = _metadata(connection, "archive_authority_id")
                 if not isinstance(authority_id, str) or authority_id in authorities:
@@ -414,6 +415,18 @@ def validate(
                 authorities[authority_id] = component["component_id"]
             catalog_history(connection, profile_schema, budget)
             rows = operations(connection, profile_schema, budget, current=current)
+            cleanup = archive_aborts.operations(
+                connection,
+                profile_schema,
+                budget,
+                rows,
+                current=checkpoint is not None and checkpoint[0] == archive_aborts.WRAPPER,
+            )
+            cleanups: dict[str, list[tuple[dict[str, Any], dict[str, Any] | None]]] = {}
+            for cleanup_intent, cleanup_receipt in cleanup:
+                cleanups.setdefault(cleanup_intent["request"]["original_command_id"], []).append(
+                    (cleanup_intent, cleanup_receipt)
+                )
         for intent, state, receipt in rows:
             budget.check()
             request = intent["request"]
@@ -442,8 +455,16 @@ def validate(
                     "Archive commands from independent authorities overlap one destination"
                 )
             seen.add(prefix)
+            aborted = False
+            for cleanup_intent, cleanup_receipt in cleanups.get(request["command_id"], []):
+                aborted = (
+                    archive_aborts.validate_tombstone(
+                        root, prefix, cleanup_intent, cleanup_receipt, files, budget
+                    )
+                    or aborted
+                )
             if state == "pending":
-                for item in intent["inputs"]:
+                for item in [] if aborted else intent["inputs"]:
                     checksum = item["content_digest"][7:]
                     name = f"stores/{source}/objects-v1/sha256/{checksum[:2]}/{checksum}"
                     record = files.get(name)

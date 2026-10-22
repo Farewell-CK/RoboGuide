@@ -14,9 +14,14 @@ from . import archive_references, artifact_layout
 from .snapshot_references import OperationBudget, canonical
 
 SCHEMA = "roboguide.recovery-profile/v0.10"
-SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.11", archive_references.SCHEMA}
+SUPPORTED = {
+    SCHEMA,
+    "roboguide.recovery-profile/v0.11",
+    archive_references.SCHEMA,
+    "roboguide.recovery-profile/v0.13",
+}
 WRAPPER = "roboguide.controller-checkpoint/v48"
-WRAPPERS = {WRAPPER, archive_references.WRAPPER}
+WRAPPERS = {WRAPPER, archive_references.WRAPPER, "roboguide.controller-checkpoint/v50"}
 CODEC = "domain.EventPayload.json/v29"
 MAX_EVIDENCE_BYTES = 64 * 1024 * 1024
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -187,11 +192,22 @@ def _controller(
         if profile_schema not in SUPPORTED:
             return heads, publications
         archived = archive_references.catalog_history(connection, profile_schema, budget)
-        archive_references.operations(
+        original_archives = archive_references.operations(
             connection,
             profile_schema,
             budget,
-            current=checkpoint is not None and checkpoint[0] == archive_references.WRAPPER,
+            current=checkpoint is not None
+            and checkpoint[0]
+            in {archive_references.WRAPPER, "roboguide.controller-checkpoint/v50"},
+        )
+        from . import archive_aborts
+
+        archive_aborts.operations(
+            connection,
+            profile_schema,
+            budget,
+            original_archives,
+            current=checkpoint is not None and checkpoint[0] == archive_aborts.WRAPPER,
         )
         history = ((row["payload_schema"], row["payload_json"]) for row in archived)
         from itertools import chain

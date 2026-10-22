@@ -15,10 +15,15 @@ SCHEMA = "roboguide.recovery-profile/v0.9"
 REFERENCE_SCHEMA = "roboguide.recovery-profile/v0.10"
 MAINTENANCE_SCHEMA = "roboguide.recovery-profile/v0.11"
 ARCHIVE_SCHEMA = "roboguide.recovery-profile/v0.12"
+ARCHIVE_SCHEMAS = {ARCHIVE_SCHEMA, "roboguide.recovery-profile/v0.13"}
 OWNER_FILE = ".retention-owner.json"
 FENCE_FILE = "blobs"
 OBJECTS = "objects-v1"
-MAINTENANCE_SCHEMAS = {MAINTENANCE_SCHEMA, "roboguide.recovery-profile/v0.12"}
+MAINTENANCE_SCHEMAS = {
+    MAINTENANCE_SCHEMA,
+    "roboguide.recovery-profile/v0.12",
+    "roboguide.recovery-profile/v0.13",
+}
 MAX_OWNER_BYTES = 4096
 
 
@@ -85,7 +90,7 @@ def validate_storage(root: Path, profile_schema: str) -> dict[str, Any] | None:
         raise ValueError("original Artifact owner migration is still pending")
     schema = (
         "roboguide.artifact-storage/v3"
-        if profile_schema == ARCHIVE_SCHEMA
+        if profile_schema in ARCHIVE_SCHEMAS
         else "roboguide.artifact-storage/v2"
         if profile_schema in MAINTENANCE_SCHEMAS
         else "roboguide.artifact-storage/v1"
@@ -100,7 +105,7 @@ def validate_storage(root: Path, profile_schema: str) -> dict[str, Any] | None:
         real_directory(journal / "operations")
         if _record(journal / "identity.json", schema=schema) != owner:
             raise ValueError("original Artifact journal identity differs from its actual owner")
-    if profile_schema == ARCHIVE_SCHEMA:
+    if profile_schema in ARCHIVE_SCHEMAS:
         reference_authorities(root, owner)
     return owner
 

@@ -30,6 +30,9 @@ use authorization::{
 #[path = "operator_tests.rs"]
 mod operator_tests;
 
+#[path = "archive_maintenance.rs"]
+mod archive_maintenance;
+
 /// Operator role permitted to acknowledge a crash-loop quarantine.
 const RECOVERY_ADMIN_ROLE: &str = "recovery-admin";
 
@@ -200,6 +203,8 @@ fn authorize_tenant_path(
             | "/v1/execution-attempts"
             | "/v1/scheduling-reservations"
             | "/v1/maintenance/archive"
+            | "/v1/maintenance/archive/abort"
+            | "/v1/maintenance/archive/operations"
             | "/v1/memory/imports"
             | "/v1/memory/import-queries"
             | "/v1/attestation/challenges"
@@ -246,12 +251,13 @@ fn authorize_operator_request(
             | "/v1/belief-policies"
             | "/v1/memory-authorizations"
             | "/v1/artifact-authorizations"
-            | "/v1/resource-quotas",
+            | "/v1/resource-quotas"
+            | "/v1/maintenance/archive/operations",
         ) => 2,
         ("GET", _)
         | ("POST", "/v1/missions/assess-initial-support" | "/v1/missions/validate-plan") => 0,
         ("POST", "/v1/missions") => 1,
-        ("POST", "/v1/maintenance/archive") => 2,
+        ("POST", "/v1/maintenance/archive" | "/v1/maintenance/archive/abort") => 2,
         ("POST", "/v1/authority/recover") => 2,
         ("POST", "/v1/memory/imports") => 2,
         ("POST", "/v1/memory/import-queries") => 2,
@@ -1758,6 +1764,35 @@ where
                     serde_json::json!({"error": error}),
                 ),
             }
+        }
+        ("GET", "/v1/maintenance/archive/operations") => {
+            let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            let selected = parse_query(query)
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect::<BTreeMap<_, _>>();
+            tokio::task::spawn_blocking(move || {
+                archive_maintenance::observe(&selected, &log, &gate)
+            })
+            .await
+            .map_err(|error| format!("original Archive observation worker failed: {error}"))?
+        }
+        ("POST", "/v1/maintenance/archive/abort") => {
+            let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            let shared = controller.clone();
+            let body = request.body.clone();
+            let subject = principal
+                .subject
+                .clone()
+                .unwrap_or_else(|| "trusted-loopback:recovery-admin".into());
+            let scope = tenant.clone();
+            tokio::task::spawn_blocking(move || {
+                archive_maintenance::abort_command(&body, subject, scope, &shared, &log, &gate)
+            })
+            .await
+            .map_err(|error| format!("original Archive cleanup worker failed: {error}"))?
         }
         ("GET", "/v1/maintenance/archive") => {
             let log = event_log.clone();

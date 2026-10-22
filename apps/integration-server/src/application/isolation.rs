@@ -336,8 +336,27 @@ pub(crate) fn flush_unisolated_commands(
 
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
-    if !matches!(
+    // Wrappers v45-v49 add infrastructure/content/quota authority while retaining exactly the
+    // original v45 scoped revision, safety and Memory isolation contract checked by this function.
+    // Their independent SQL/checkpoint journals remain subject to their own strict storage gates.
+    let current_isolation_contract = matches!(
         saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA
+            | PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA
+            | PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA
+            | PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_RESOURCE_COMMIT_SERVER_CHECKPOINT_SCHEMA
+    );
+
+    let isolation_schema = if current_isolation_contract {
+        SERVER_CHECKPOINT_SCHEMA
+    } else {
+        saved.schema.as_str()
+    };
+
+    if !matches!(
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -349,7 +368,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains Group Memory handoff authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -367,7 +386,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains independent Memory use observation authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -381,7 +400,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("ambiguous legacy wrapper contains fork process-exit stop authority; explicit source migration required".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
     ) && saved
         .runtime_revisions
@@ -390,7 +409,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     {
         return Err("legacy wrapper cannot carry runtime generation authority".into());
     }
-    if saved.schema != SERVER_CHECKPOINT_SCHEMA
+    if !current_isolation_contract
         && saved
             .runtime_revisions
             .values()
@@ -403,7 +422,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -444,7 +463,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         );
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -467,7 +486,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper cannot contain metrics-only authorization authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -482,7 +501,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains current Memory use authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -499,7 +518,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains pre-execution Memory authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -524,7 +543,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains complete typed-map content authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -554,7 +573,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains distributed Memory content authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -584,7 +603,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains Group Memory membership authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -608,7 +627,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains Memory reconciliation authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -661,7 +680,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains State policy authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -697,7 +716,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains identity/tenant lifecycle authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -730,7 +749,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains typed stop authority".into());
     }
     if matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -783,7 +802,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("legacy wrapper contains new breaker window authority".into());
     }
     if !matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -817,7 +836,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         return Err("pre-breaker wrapper contains typed failure authority".into());
     }
     if matches!(
-        saved.schema.as_str(),
+        isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA

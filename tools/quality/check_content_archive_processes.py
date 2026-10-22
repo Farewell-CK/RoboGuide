@@ -17,6 +17,7 @@ import urllib.error
 from pathlib import Path
 from typing import Any
 
+from archive_abort_processes import run as run_archive_abort
 from check_artifact_authority_processes import call as http_call
 from check_artifact_authority_processes import grant
 from check_identity_processes import ROOT, client, pki, port, stop
@@ -24,7 +25,12 @@ from check_state_verifier_processes import save
 
 
 def run(
-    directory: Path, skip_build: bool, old_controller: Path | None, old_recovery_ref: str | None
+    directory: Path,
+    skip_build: bool,
+    old_controller: Path | None,
+    old_recovery_ref: str | None,
+    abort_unpublished: bool = False,
+    upgrade_original: bool = False,
 ) -> dict[str, Any]:
     """Retain actual software process, file, SQL and TLS evidence with zero Nodes."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -43,6 +49,8 @@ def run(
         *sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py")),
         ROOT / "Cargo.lock",
         Path(__file__),
+        Path(__file__).with_name("archive_abort_processes.py"),
+        Path(__file__).with_name("check_artifact_authority_processes.py"),
     ]
     frozen = {
         str(path.relative_to(ROOT)): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
@@ -50,6 +58,16 @@ def run(
     }
     save(directory / "source-identity.json", frozen)
     binary_digest = "sha256:" + hashlib.sha256(binary.read_bytes()).hexdigest()
+    schema = subprocess.check_output(
+        [str(binary), "--application-schema"], cwd=ROOT, text=True
+    ).strip()
+    if schema not in {"roboguide.controller-checkpoint/v49", "roboguide.controller-checkpoint/v50"}:
+        raise ValueError("unsupported explicit original Archive process profile")
+    cleanup_authority = schema == "roboguide.controller-checkpoint/v50"
+    if abort_unpublished and not cleanup_authority:
+        raise ValueError("explicit original cleanup requires wrapper v50")
+    if upgrade_original and (not cleanup_authority or old_controller is None):
+        raise ValueError("actual original upgrade requires the explicit previous Controller binary")
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -124,6 +142,9 @@ def run(
         str(source),
     ]
     processes: list[subprocess.Popen[bytes]] = []
+    active_binary = old_controller if upgrade_original else binary
+    assert active_binary is not None
+    original_producer_digest = "sha256:" + hashlib.sha256(active_binary.read_bytes()).hexdigest()
     trace: list[dict[str, Any]] = []
     commands: list[dict[str, Any]] = []
 
@@ -136,7 +157,16 @@ def run(
     ) -> tuple[int, bytes]:
         """Keep actual authenticated statuses and response hashes."""
         encoded = json.dumps(body).encode() if isinstance(body, dict) else body
-        status, raw = http_call(origin, context, method, path, encoded)
+        status, raw = http_call(
+            origin,
+            context,
+            method,
+            path,
+            encoded,
+            timeout_seconds=45
+            if method == "POST" and path.startswith("/v1/maintenance/archive")
+            else 5,
+        )
         item: dict[str, Any] = {
             "origin": origin,
             "caller": "admin" if context is admin else "viewer",
@@ -163,7 +193,7 @@ def run(
         with path.open("wb") as output:
             process = subprocess.Popen(
                 [
-                    arguments[0],
+                    str(active_binary),
                     arguments[1],
                     str(selected_database),
                     arguments[3],
@@ -177,7 +207,7 @@ def run(
                 stderr=output,
             )
         processes.append(process)
-        deadline = time.monotonic() + 20
+        deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise RuntimeError(f"actual Controller exited; inspect {path}")
@@ -297,6 +327,9 @@ def run(
         original = rows()
         assert len(original) == 1 and original[0][2:] == ("pending", None)
         intent = json.loads(original[0][1])
+        assert intent["checkpoint"]["schema"] == (
+            "roboguide.controller-checkpoint/v49" if upgrade_original else schema
+        )
         publication = (
             archive
             / "archives-v1"
@@ -327,6 +360,7 @@ def run(
             ).fetchone() == (0,)
             connection.execute("DROP TRIGGER refuse_archive_floor")
         stop(process)
+        active_binary = binary
         process = launch()
         assert call(operator_origin, admin, "POST", "/v1/maintenance/archive", command)[0] == 200
         compacted = rows()
@@ -349,9 +383,32 @@ def run(
         assert call(artifact_origin, admin, "GET", "/v1/artifact-uploads/" + upload)[0] == 200
         assert call(artifact_origin, admin, "GET", "/v1/artifacts/" + checksum) == (200, payload)
         assert json.loads(call(operator_origin, admin, "GET", "/v1/inventory")[1])["nodes"] == []
+        abort_result = None
+        if abort_unpublished:
+
+            def restart_cleanup_controller() -> None:
+                """Reap the original Controller before acquiring new actual writers."""
+                nonlocal process
+                stop(process)
+                assert process.poll() is not None
+                process = launch()
+
+            abort_result = run_archive_abort(
+                directory,
+                operator_origin,
+                artifact_origin,
+                admin,
+                viewer,
+                call,
+                restart_cleanup_controller,
+                command["command_id"],
+            )
+            compacted = rows()
         stop(process)
         profile: dict[str, Any] = {
-            "schema": "roboguide.recovery-profile/v0.12",
+            "schema": "roboguide.recovery-profile/v0.13"
+            if cleanup_authority
+            else "roboguide.recovery-profile/v0.12",
             "profile_id": "original-content-archive",
             "revision": 1,
             "max_bytes": 32 * 1024 * 1024,
@@ -428,7 +485,11 @@ def run(
             "--command-id",
             "restore-original",
         )
-        assert receipt["schema"] == "roboguide.restore-receipt/v0.12"
+        assert receipt["schema"] == (
+            "roboguide.restore-receipt/v0.13"
+            if cleanup_authority
+            else "roboguide.restore-receipt/v0.12"
+        )
         assert rows(restored / "stores/controller/events.sqlite3") == compacted
         process = launch(
             restored / "stores/controller/events.sqlite3",
@@ -499,6 +560,46 @@ def run(
             ).encode()
         )
         recovery("verify", "--bundle", str(bundle), "--manifest-digest", created["manifest_digest"])
+        if abort_result is not None:
+            selected = next(
+                row
+                for row in saved_manifest["files"]
+                if row["path"].endswith(
+                    "abort-" + hashlib.sha256(b"original-current-cleanup").hexdigest() + ".json"
+                )
+            )
+            tombstone_name = selected["path"]
+            tombstone_bytes = (bundle / tombstone_name).read_bytes()
+            (bundle / tombstone_name).unlink()
+            missing_tombstone = dict(
+                saved_manifest,
+                files=[row for row in saved_manifest["files"] if row["path"] != tombstone_name],
+            )
+            changed_raw = json.dumps(
+                missing_tombstone, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode()
+            (bundle / "manifest.json").write_bytes(changed_raw)
+            recovery(
+                "verify",
+                "--bundle",
+                str(bundle),
+                "--manifest-digest",
+                "sha256:" + hashlib.sha256(changed_raw).hexdigest(),
+                passed=False,
+            )
+            assert (
+                b"lost its durable tombstone"
+                in (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
+            )
+            (bundle / tombstone_name).write_bytes(tombstone_bytes)
+            (bundle / "manifest.json").write_bytes(
+                json.dumps(
+                    saved_manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                ).encode()
+            )
+            recovery(
+                "verify", "--bundle", str(bundle), "--manifest-digest", created["manifest_digest"]
+            )
         old_writer = None
         if old_controller is not None:
             old_root = directory / "old-writer"
@@ -521,7 +622,9 @@ def run(
                 False,
                 {"ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA": "roboguide.artifact-storage/v2"},
             )
-            assert b"v49" in (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
+            assert (
+                schema.encode() in (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
+            )
             old_writer = {
                 "binary_digest": "sha256:"
                 + hashlib.sha256(old_controller.read_bytes()).hexdigest(),
@@ -552,7 +655,9 @@ def run(
                 legacy,
                 profile
                 | {
-                    "schema": "roboguide.recovery-profile/v0.11",
+                    "schema": "roboguide.recovery-profile/v0.12"
+                    if cleanup_authority
+                    else "roboguide.recovery-profile/v0.11",
                     "components": profile["components"][:2],
                 },
             )
@@ -572,9 +677,14 @@ def run(
                 False,
                 {"PYTHONPATH": str(old_root / "apps/recovery-tool")},
             )
-            assert (
-                b"owner metadata is invalid"
-                in (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
+            assert any(
+                message in (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
+                for message in (
+                    b"owner metadata is invalid",
+                    b"Archive journal marker",
+                    b"wrapper v49",
+                    b"original Controller reference authority",
+                )
             )
             old_cli = {
                 "source_commit": old_recovery_ref,
@@ -585,12 +695,22 @@ def run(
             for path in source_paths
         } == frozen
         assert "sha256:" + hashlib.sha256(binary.read_bytes()).hexdigest() == binary_digest
+        if upgrade_original:
+            assert old_controller is not None
+            assert (
+                "sha256:" + hashlib.sha256(old_controller.read_bytes()).hexdigest()
+                == original_producer_digest
+            )
         result = {
             "passed": True,
             "binary_digest": binary_digest,
             "original_owner": intent["request"]["source_owner"],
             "original_authority": intent["request"]["authority_id"],
-            "actual_uploads": 1,
+            "actual_uploads": 2 if abort_result is not None else 1,
+            "original_archive_abort": abort_result,
+            "actual_original_wrapper_upgrade": upgrade_original,
+            "original_producer_binary_digest": original_producer_digest,
+            "original_embedded_checkpoint_schema": intent["checkpoint"]["schema"],
             "actual_catalog_publications": 0,
             "actual_archive_sql_failure": True,
             "exact_retry_copied_files": 0,
@@ -618,13 +738,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--abort-unpublished", action="store_true")
+    parser.add_argument("--upgrade-original", action="store_true")
     parser.add_argument("--old-controller", type=Path)
     parser.add_argument("--old-recovery-ref")
     args = parser.parse_args()
     print(
         json.dumps(
             run(
-                args.output.absolute(), args.skip_build, args.old_controller, args.old_recovery_ref
+                args.output.absolute(),
+                args.skip_build,
+                args.old_controller,
+                args.old_recovery_ref,
+                args.abort_unpublished,
+                args.upgrade_original,
             ),
             indent=2,
         )

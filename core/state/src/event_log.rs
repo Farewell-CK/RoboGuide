@@ -23,8 +23,14 @@ use checkpoint_store::StoredCheckpoint;
 mod application_replication;
 #[path = "archive.rs"]
 mod archive;
+#[path = "archive_abort.rs"]
+mod archive_abort;
 #[path = "archive_operation.rs"]
 mod archive_operation;
+pub use archive_abort::{
+    ArchiveAbortIntent, ArchiveAbortReceipt, ArchiveAbortRequest, ArchiveAbortSink,
+    ArchiveCopierFence, ArchiveLeaseIdentity,
+};
 #[path = "authority_journal.rs"]
 mod authority_journal;
 #[path = "catalog_archive.rs"]

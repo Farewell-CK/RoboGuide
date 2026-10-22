@@ -356,6 +356,9 @@ impl SqliteEventLog {
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
         let existing = if let Some(request) = &request {
             let existing = super::archive_operation::existing(&connection, &request.command_id)?;
+            if super::archive_abort::completed_for(&connection, &request.command_id)? {
+                return Err(SqliteEventLogError::ArchivePolicy("original Archive copy was explicitly aborted and cannot execute or compact again".into()));
+            }
             if let Some((intent, receipt)) = &existing {
                 if &intent.request != request || intent.manifest.end_sequence != end_sequence {
                     return Err(SqliteEventLogError::ArchivePolicy(

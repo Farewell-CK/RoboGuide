@@ -136,14 +136,18 @@ def request(
     path: str,
     body: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    *,
+    timeout_seconds: float = 3,
 ) -> tuple[int, dict[str, Any]]:
     """Use the public HTTPS API and preserve bounded domain rejection responses."""
+    if not 0 < timeout_seconds <= 60:
+        raise ValueError("actual HTTP observation requires an explicit bounded response wait")
     payload = None if body is None else json.dumps(body).encode()
     call = urllib.request.Request(
         origin + path, data=payload, headers=headers or {}, method="GET" if body is None else "POST"
     )
     try:
-        response = urllib.request.urlopen(call, context=context, timeout=3)  # noqa: S310
+        response = urllib.request.urlopen(call, context=context, timeout=timeout_seconds)  # noqa: S310
     except urllib.error.HTTPError as error:
         response = error
     with response:

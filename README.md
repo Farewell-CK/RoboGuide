@@ -1,5 +1,12 @@
 # RoboGuide
 
+未发布 Archive 的显式 abort 正在验证：wrapper v50 / operations v0.2 保留原 copy
+预算与历史，独立 cleanup intent 在真实 source/Archive writer fence 后先持久
+tombstone，再以精确 SQL receipt 退休该 source pin。partial 与接收引用保留；已发布
+归档拒绝 abort。见 [ADR-0154](docs/decisions/0154-original-unpublished-archive-abort.md)
+和 [recovery v0.13](contracts/recovery/bundle-v0.13/README.md)。这只是软件 copier
+隔离，不产生设备停止事实；归档退休/GC、在线及其余完整整改继续实施。
+
 正在接通完整内容归档：显式 Archive command v0.2 在原 SQL writer 内先记录原命令、
 内容和预算，真实复制并验证后才压缩事件。wrapper v49 / Artifact storage v3 保存
 原 Controller reference authority；recovery v0.12 / bundle v0.4 保留完整 Catalog、

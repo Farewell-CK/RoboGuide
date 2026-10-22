@@ -1,6 +1,27 @@
 //! Filesystem artifact store tests.
 
 use super::*;
+
+/// Actual writer observations refer to the held original descriptor, never a replacement lock path.
+#[test]
+fn original_writer_identity_rejects_replaced_named_lease() {
+    use std::os::unix::fs::MetadataExt;
+    let directory = tempfile::tempdir().unwrap();
+    let store =
+        FileSystemArtifactStore::new_with_archive_references(directory.path().join("cas")).unwrap();
+    let actual = store.writer_identity().unwrap();
+    let path = store.root().join(".writer.lock");
+    let metadata = std::fs::metadata(&path).unwrap();
+    assert_eq!(
+        (actual.lease_device, actual.lease_inode),
+        (metadata.dev(), metadata.ino())
+    );
+    assert_eq!(Some(actual.owner_id.as_str()), store.owner_id());
+    assert!(FileSystemArtifactStore::new_with_archive_references(store.root()).is_err());
+    std::fs::rename(&path, store.root().join("original-writer-description")).unwrap();
+    std::fs::File::create(&path).unwrap();
+    assert!(store.writer_identity().is_err());
+}
 use crate::digest::DIGEST_PREFIX;
 use crate::path_validation::create_directory;
 use crate::store::{BLOB_DIRECTORY, STAGING_DIRECTORY};

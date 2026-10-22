@@ -23,7 +23,10 @@ pub use layout::{
     ARTIFACT_REFERENCE_LAYOUT_SCHEMA, RETAINED_BLOB_DIRECTORY,
 };
 pub use readonly::ArtifactReadOnlyStore;
-pub use types::{ArtifactStoreError, ArtifactUpload, FileSystemArtifactStore, StoredArtifact};
+pub use types::{
+    ArtifactStoreError, ArtifactUpload, ArtifactWriterIdentity, FileSystemArtifactStore,
+    StoredArtifact,
+};
 
 #[cfg(test)]
 #[path = "tests.rs"]

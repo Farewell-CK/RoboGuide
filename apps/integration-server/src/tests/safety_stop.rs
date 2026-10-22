@@ -747,6 +747,16 @@ fn previous_wrapper_cannot_contain_process_stop_authority() {
         )
         .unwrap();
         application::validate_isolation_checkpoint_schema(&saved).unwrap();
+        for schema in [
+            PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA,
+            PRE_CATALOG_ARCHIVE_SERVER_CHECKPOINT_SCHEMA,
+            PRE_ARTIFACT_REFERENCE_SERVER_CHECKPOINT_SCHEMA,
+            PRE_QUOTA_POLICY_SERVER_CHECKPOINT_SCHEMA,
+            PRE_RESOURCE_COMMIT_SERVER_CHECKPOINT_SCHEMA,
+        ] {
+            saved.schema = schema.into();
+            application::validate_isolation_checkpoint_schema(&saved).unwrap();
+        }
         saved.schema = PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA.into();
         application::validate_isolation_checkpoint_schema(&saved).unwrap();
         for schema in [

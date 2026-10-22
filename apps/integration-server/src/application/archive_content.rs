@@ -49,7 +49,7 @@ pub(crate) struct ContentArchiveSink {
     /// Current exact request witness; called during effects and before accepting publication proof.
     authorize: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
     /// Original global Archive root lease, retained through the source SQL maintenance Commit.
-    lease: Mutex<Option<File>>,
+    lease: Mutex<Option<(File, bool)>>,
 }
 
 /// Produces a stable full JSON identity without reformatting original nested payload strings.
@@ -207,27 +207,51 @@ impl ContentArchiveSink {
             )))
     }
 
-    /// Acquires the original Archive root writer before effects, or its existing shared lease for query.
+    /// Acquires the original Archive root lease while retaining the original copy-effect budget.
     fn lock_archive(&self, intent: &ArchiveIntent, write: bool) -> Result<(), String> {
+        self.acquire_archive_lock(intent, write, write, &|| self.permit(intent))
+    }
+
+    /// Separates actual exclusive fencing from permission to create missing maintenance metadata.
+    fn acquire_archive_lock(
+        &self,
+        intent: &ArchiveIntent,
+        write: bool,
+        create: bool,
+        permit: &dyn Fn() -> Result<(), String>,
+    ) -> Result<(), String> {
         let mut held = self
             .lease
             .lock()
             .map_err(|_| "Archive original root lease is poisoned")?;
-        if held.is_some() {
+        if let Some((_, exclusive)) = &*held {
+            if write && !exclusive {
+                return Err(
+                    "an original shared observation cannot claim an exclusive copier fence".into(),
+                );
+            }
             return Ok(());
         }
         let root = Path::new(&intent.request.destination);
         let path = root.join(".archive-writer.lock");
         let file = if write {
-            self.permit(intent)?;
-            create_directory(root)?;
+            permit()?;
+            if create {
+                create_directory(root)?;
+            } else {
+                real_directory(root)?;
+            }
             if let Ok(metadata) = fs::symlink_metadata(&path)
                 && !metadata.file_type().is_file()
             {
                 return Err("Archive writer lease must be an actual regular file".into());
             }
             let mut options = OpenOptions::new();
-            options.create(true).truncate(false).read(true).write(true);
+            options
+                .create(create)
+                .truncate(false)
+                .read(true)
+                .write(true);
             #[cfg(target_os = "linux")]
             {
                 use std::os::unix::fs::OpenOptionsExt;
@@ -235,17 +259,19 @@ impl ContentArchiveSink {
             }
             let file = options.open(path).map_err(|error| error.to_string())?;
             file.try_lock().map_err(|error| error.to_string())?;
-            file.sync_all().map_err(|error| error.to_string())?;
-            File::open(root)
-                .and_then(|file| file.sync_all())
-                .map_err(|error| error.to_string())?;
+            if create {
+                file.sync_all().map_err(|error| error.to_string())?;
+                File::open(root)
+                    .and_then(|file| file.sync_all())
+                    .map_err(|error| error.to_string())?;
+            }
             file
         } else {
             let file = open_regular(&path)?;
             file.try_lock_shared().map_err(|error| error.to_string())?;
             file
         };
-        *held = Some(file);
+        *held = Some((file, write));
         Ok(())
     }
 
@@ -548,3 +574,5 @@ impl ArchiveSink for ContentArchiveSink {
         self.confirm(intent).map_err(Into::into)
     }
 }
+
+mod abort;

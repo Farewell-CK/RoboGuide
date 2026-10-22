@@ -13,15 +13,39 @@ pub(super) fn initialize(
     connection: &Connection,
     accepted: bool,
 ) -> Result<(), SqliteEventLogError> {
-    if !accepted {
-        connection.execute_batch("CREATE TABLE IF NOT EXISTS event_archive_operations(command_id TEXT PRIMARY KEY NOT NULL,intent_json TEXT NOT NULL,state TEXT NOT NULL,receipt_json TEXT)")?;
-        connection.execute("INSERT INTO event_log_metadata(key,value) VALUES ('archive_operations_schema',?1) ON CONFLICT(key) DO NOTHING",[STORAGE_SCHEMA])?;
-        let known: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM event_log_metadata WHERE key='archive_authority_id')",
+    let marker: Option<String> = connection
+        .query_row(
+            "SELECT value FROM event_log_metadata WHERE key='archive_operations_schema'",
             [],
             |row| row.get(0),
-        )?;
-        if !known {
+        )
+        .optional()?;
+    if accepted || marker.as_deref() == Some(super::archive_abort::STORAGE_SCHEMA) {
+        require_storage(connection)?;
+        return super::archive_abort::validate_storage(connection);
+    }
+    match marker.as_deref() {
+        Some(STORAGE_SCHEMA) => {
+            require_storage(connection)?;
+            let mut statement = connection
+                .prepare("SELECT command_id FROM event_archive_operations ORDER BY command_id")?;
+            let ids = statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(statement);
+            for id in ids {
+                existing(connection, &id)?;
+            }
+        }
+        None => {
+            let evidence:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('event_archive_operations','event_archive_aborts')) OR EXISTS(SELECT 1 FROM event_log_metadata WHERE key='archive_authority_id')",[],|row|row.get(0))?;
+            if evidence {
+                return Err(SqliteEventLogError::Codec(
+                    "original Archive storage marker is missing; replacement authority refused"
+                        .into(),
+                ));
+            }
+            connection.execute_batch("CREATE TABLE event_archive_operations(command_id TEXT PRIMARY KEY NOT NULL,intent_json TEXT NOT NULL,state TEXT NOT NULL,receipt_json TEXT)")?;
             use std::io::Read as _;
             let mut nonce = [0u8; 32];
             std::fs::File::open("/dev/urandom")
@@ -36,11 +60,19 @@ pub(super) fn initialize(
                 [format!("controller-store:{hex}")],
             )?;
         }
+        _ => {
+            return Err(SqliteEventLogError::Codec(
+                "unsupported original Archive operations authority".into(),
+            ));
+        }
     }
-    require_storage(connection)
+    connection.execute_batch("CREATE TABLE event_archive_aborts(command_id TEXT PRIMARY KEY NOT NULL,original_command_id TEXT NOT NULL,intent_json TEXT NOT NULL,receipt_json TEXT)")?;
+    connection.execute("INSERT INTO event_log_metadata(key,value) VALUES ('archive_operations_schema',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[super::archive_abort::STORAGE_SCHEMA])?;
+    require_storage(connection)?;
+    super::archive_abort::validate_storage(connection)
 }
 
-/// Missing mandatory current-wrapper records refuse instead of bootstrapping replacement authority.
+/// Preserves original v0.1 reads while requiring the complete explicit v0.2 journal when present.
 pub(super) fn require_storage(connection: &Connection) -> Result<(), SqliteEventLogError> {
     let marker: Option<String> = connection
         .query_row(
@@ -49,7 +81,10 @@ pub(super) fn require_storage(connection: &Connection) -> Result<(), SqliteEvent
             |row| row.get(0),
         )
         .optional()?;
-    if marker.as_deref() != Some(STORAGE_SCHEMA) {
+    if !matches!(
+        marker.as_deref(),
+        Some(STORAGE_SCHEMA) | Some(super::archive_abort::STORAGE_SCHEMA)
+    ) {
         return Err(SqliteEventLogError::Codec(
             "mandatory original Archive journal marker is missing or changed".into(),
         ));
@@ -60,6 +95,9 @@ pub(super) fn require_storage(connection: &Connection) -> Result<(), SqliteEvent
         return Err(SqliteEventLogError::Codec(
             "original Archive journal exceeds its retained bounds".into(),
         ));
+    }
+    if marker.as_deref() == Some(super::archive_abort::STORAGE_SCHEMA) {
+        super::archive_abort::require_storage(connection)?;
     }
     Ok(())
 }
@@ -141,7 +179,7 @@ pub struct ArchiveIntent {
 }
 
 /// Reads actual original kernel identity and uptime without introducing wall-clock fallback.
-fn kernel() -> Result<(String, String, u64), SqliteEventLogError> {
+pub(super) fn kernel() -> Result<(String, String, u64), SqliteEventLogError> {
     let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
         .map_err(|error| SqliteEventLogError::ArchivePolicy(error.to_string()))?
         .trim()
@@ -313,6 +351,10 @@ pub(super) fn inputs(
 }
 
 impl ArchiveIntent {
+    /// Observes complete immutable original identity without granting another source read or copy.
+    pub fn digest(&self) -> Result<String, String> {
+        super::archive_abort::identity(self).map_err(|error| error.to_string())
+    }
     /// Validates retained immutable authority before a stored row can support reconciliation or GC.
     pub fn validate(&self) -> Result<(), String> {
         let sha = |value: &str| {
@@ -356,7 +398,11 @@ impl ArchiveIntent {
             || self.time_namespace.is_empty()
             || self.time_namespace.len() > 128
             || !sha(&self.catalog_digest)
-            || self.checkpoint.schema != crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            || !matches!(
+                self.checkpoint.schema.as_str(),
+                "roboguide.controller-checkpoint/v49"
+                    | crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            )
             || self.checkpoint.event_sequence < self.manifest.end_sequence
             || self.manifest.checkpoint_digest.as_deref()
                 != Some(checkpoint_identity(&self.checkpoint).as_str())
@@ -471,8 +517,9 @@ pub(super) fn admit(
             "original Archive intent exceeds bounded storage".into(),
         ));
     }
+    super::archive_abort::validate_storage(connection)?;
     let pending: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM event_archive_operations WHERE state='pending')",
+        "SELECT EXISTS(SELECT 1 FROM event_archive_operations AS original WHERE state='pending' AND NOT EXISTS(SELECT 1 FROM event_archive_aborts AS cleanup WHERE cleanup.original_command_id=original.command_id AND cleanup.receipt_json IS NOT NULL))",
         [],
         |row| row.get(0),
     )?;

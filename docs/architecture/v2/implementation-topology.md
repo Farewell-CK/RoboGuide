@@ -4,6 +4,12 @@
 节点、LocalSystem、能力、操作、State export 和 Memory provider 均由部署配置和正式注册提供。
 未接设备的部署可以拥有零个 Node；系统不能自行生成设备或能力。
 
+ADR-0154 接续原 Archive producer 的未发布 cleanup：新显式 abort 在原 writer 中
+保存自己的原输入和预算，实际 source/Archive 租约 fence 后先持久 tombstone，再
+退休该 source pin；copy 原历史和接收引用不改写。当前开始实现与实际验证，不能
+以缺 publication、超时或新 cleanup 预算推断设备停止或续期原 copy。wrapper v50 /
+operations v0.2 / recovery v0.13 在该实现包接通，现有 v49 历史须精确保留。
+
 ADR-0152/0153 的显式 Archive 路径使用 wrapper v49、Artifact storage v3 与
 recovery v0.12 / bundle v0.4。原 SQL authority 在读取内容前持久原 intent/pin；
 CAS inventory 记录实际原 Controller store identity，冷备份须包含所有已知 consumer。

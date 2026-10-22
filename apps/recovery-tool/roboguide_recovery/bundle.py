@@ -548,7 +548,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                     (partial / "stores" / identifier / name).mkdir(
                         mode=0o700, parents=True, exist_ok=True
                     )
-                if profile["schema"] == archive_references.SCHEMA:
+                if profile["schema"] in archive_references.SUPPORTED:
                     for source_directory in _directories(root / name, budget):
                         (
                             partial / "stores" / identifier / source_directory.relative_to(root)
@@ -579,7 +579,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         manifest: dict[str, Any] = {
             "schema": (
                 "roboguide.recovery-bundle/v0.4"
-                if profile["schema"] == archive_references.SCHEMA
+                if profile["schema"] in archive_references.SUPPORTED
                 else "roboguide.recovery-bundle/v0.3"
                 if profile["schema"] in artifact_snapshots.SUPPORTED
                 else "roboguide.recovery-bundle/v0.2"
@@ -593,7 +593,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             "scope": "declared-stores-only",
             "physical_continuity": "not-established",
         }
-        if profile["schema"] == archive_references.SCHEMA:
+        if profile["schema"] in archive_references.SUPPORTED:
             manifest["directories"] = sorted(
                 path.relative_to(partial).as_posix() for path in _directories(partial, budget)
             )
@@ -750,7 +750,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                     sqlite3.connect((bundle / name).as_uri() + "?mode=ro&immutable=1", uri=True)
                 ) as connection:
                     validate_replica_storage(connection, manifest["profile"]["schema"])
-    if (manifest["profile"]["schema"] == archive_references.SCHEMA) != (
+    if (manifest["profile"]["schema"] in archive_references.SUPPORTED) != (
         manifest["schema"] == "roboguide.recovery-bundle/v0.4"
     ):
         raise ValueError("Archive profile and original directory-aware bundle schema differ")
@@ -809,6 +809,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.10",
                 "roboguide.recovery-profile/v0.11",
                 "roboguide.recovery-profile/v0.12",
+                "roboguide.recovery-profile/v0.13",
             }
             else databases
         )
@@ -924,7 +925,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.12"
+        "roboguide.restore-receipt/v0.13"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.13"
+        else "roboguide.restore-receipt/v0.12"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.12"
         else "roboguide.restore-receipt/v0.11"
         if manifest["profile"]["schema"] in artifact_snapshots.SUPPORTED
@@ -1011,6 +1014,7 @@ def restore(
             "roboguide.recovery-profile/v0.10",
             "roboguide.recovery-profile/v0.11",
             "roboguide.recovery-profile/v0.12",
+            "roboguide.recovery-profile/v0.13",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:

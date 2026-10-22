@@ -104,6 +104,54 @@ impl FileSystemArtifactStore {
         self.owner_id.as_deref()
     }
 
+    /// Observes the actual held original writer descriptor and refuses a replaced path or CAS identity.
+    pub fn writer_identity(&self) -> Result<crate::ArtifactWriterIdentity, ArtifactStoreError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let owner = self.owner_id().ok_or_else(|| {
+                unsafe_path_error(
+                    "observe original Artifact writer",
+                    "retained original owner is unavailable",
+                )
+            })?;
+            let (stored, _) = crate::layout::inspect_retained(&self.root)?;
+            if stored != owner {
+                return Err(unsafe_path_error(
+                    "observe original Artifact writer",
+                    "original owner changed",
+                ));
+            }
+            let actual = self
+                ._writer_lock
+                .file
+                .metadata()
+                .map_err(|error| io_error("observe original writer descriptor", error))?;
+            let named = fs::symlink_metadata(self.root.join(WRITER_LOCK_FILE))
+                .map_err(|error| io_error("observe original writer path", error))?;
+            if !actual.is_file()
+                || !named.file_type().is_file()
+                || (actual.dev(), actual.ino()) != (named.dev(), named.ino())
+                || actual.ino() == 0
+            {
+                return Err(unsafe_path_error(
+                    "observe original Artifact writer",
+                    "original locked writer was replaced",
+                ));
+            }
+            Ok(crate::ArtifactWriterIdentity {
+                owner_id: owner.into(),
+                lease_device: actual.dev(),
+                lease_inode: actual.ino(),
+            })
+        }
+        #[cfg(not(unix))]
+        Err(unsafe_path_error(
+            "observe original Artifact writer",
+            "an actual supported writer-lease profile is required",
+        ))
+    }
+
     /// Reports the explicitly opened format without interpreting storage identity as permission.
     pub fn storage_schema(&self) -> &'static str {
         if self.storage_version == 3 {
