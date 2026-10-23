@@ -1,5 +1,18 @@
 # Repository Guidelines
 
+ADR-0168 adds explicit content SQL v4/layout v0.4 original bounded stream reception. Actual complete
+intent and independent pins precede staging/source reads; one non-Clone worker retains real FD/root
+leases and eight-slot capacity through 64 KiB chunks, full hash/size/fsync/publication and SQL receipt.
+Live permission and original kernel budget are rechecked, including final existing-file verification.
+Failures preserve original Unknown/partial files/pins; same-ID retries only observe, even without the
+source file. Actual worker closure never invents publication. Explicit drained v3 upgrade preserves
+old Log/View/Snapshot/reader rows and actual inode; old binaries refuse v4. Owners are streams.rs,
+stream_writer.rs, content_stream_probe and check_content_stream_processes.py. Native file lease/SIGIO,
+SIGSTOP/SIGKILL/wait, actual SQL failure and historical producer upgrade gates use zero Nodes/devices/
+models/simulators. This backend does not yet connect network Ready/mTLS, original child Prepared
+sources, Root7, same-voter metadata+bytes ACK, stream retirement/GC or recovery. Production v0.4 and
+all remaining P1-P7 remain mandatory.
+
 ADR-0167 replaces address-only member data with ReplicaMember, preserving identical absent-owner
 Node/membership/SnapshotMeta JSON. Complete content targets require each voter owner to match its
 exact committed member data. Existing metadata/direct v4-v6 profiles refuse hidden new bindings

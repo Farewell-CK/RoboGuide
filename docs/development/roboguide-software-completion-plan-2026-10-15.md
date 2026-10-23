@@ -113,6 +113,15 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N1/N3 的 [ADR-0168](../decisions/0168-original-bounded-replica-content-streams.md)
+已接实际 stream 后端：原完整 target/source/kernel intent 与独立 pin 先于源读取，
+唯一有界 worker 执行原权限/预算、chunk、hash/fsync/原子 publication 和原 SQL receipt。
+实际源打开租约/SIGIO、进程 kill/wait、原期限、文件已发布但 SQL 失败、回执丢失与旧
+Log/View/Snapshot/reader 完整历史升级已通过，见[验收](acceptance/2026-10-23-original-content-streams.md)。
+下一项接真实 mTLS Ready/stream、Root7 与原 Controller 已发布/Prepared 源、完整候选和
+同一 current/joint voters metadata+bytes ACK；再完成 routing、恢复/GC/升级及原 N1–N7。
+现有后端 gate 的 target 仅是标明的 retention context，不是实际 election/quorum 证明。
+
 N7 的 [ADR-0165](../decisions/0165-bounded-snapshot-reader-closure.md)将实际 Snapshot
 reader 的 SQL 关闭移到原 root 的单一有界 blocking drainer。原 intent/预算/lease 不变，
 原 receipt 未发布时 Unknown/pin 保留；有界等待与队列状态不授予内容或回收权限。

@@ -361,6 +361,12 @@ preserves legacy absent-field encoding; old profiles refuse hidden bindings. Mat
 real content ACK. Actual mTLS/SQL/CAS adapters and same-member majorities in both joint groups remain
 required; production v0.4 stays disabled.
 
+[ADR-0168](../../decisions/0168-original-bounded-replica-content-streams.md) freezes original
+receive intent/pins, actual source permission/budget, unique worker/FD and bounded chunk/hash/fsync/
+publication/receipt ordering. Ready acknowledges only intent; cancellation/disconnection never
+creates completion. A separate stream journal preserves original copy/reader/producer history.
+Production content remains disabled until actual network, application Commit and recovery wiring pass.
+
 [ADR-0161](../../decisions/0161-controller-inode-writer-and-storage-generation.md) requires both
 the canonical sibling and actual SQL inode leases, retained until the last actual connection closes.
 Native SQLite draining separately fences older live connections. Explicit storage v1 and exact

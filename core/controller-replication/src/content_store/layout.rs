@@ -122,8 +122,10 @@ pub(super) fn create(
     root: &Path,
     profile_identity: &str,
     member: u64,
-    producers: bool,
+    mode: ContentCreateMode,
 ) -> Result<ReplicaContentStore, String> {
+    let streams = matches!(mode, ContentCreateMode::Streams);
+    let producers = !matches!(mode, ContentCreateMode::Reader);
     if !crate::content::hex_digest(profile_identity) {
         return Err("replica content profile identity is invalid".into());
     }
@@ -173,7 +175,9 @@ pub(super) fn create(
     transaction
         .execute(
             "INSERT INTO metadata VALUES ('layout',?1)",
-            [if producers {
+            [if streams {
+                REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA
+            } else if producers {
                 REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA
             } else {
                 REPLICA_CONTENT_LAYOUT_SCHEMA
@@ -194,6 +198,12 @@ pub(super) fn create(
             .execute_batch("PRAGMA user_version=3")
             .map_err(|error| error.to_string())?;
     }
+    if streams {
+        super::streams::initialize(&transaction)?;
+        transaction
+            .execute_batch("PRAGMA user_version=4")
+            .map_err(|error| error.to_string())?;
+    }
     transaction.commit().map_err(|error| error.to_string())?;
     for name in ["content-v1", "staging-v1"] {
         fs::DirBuilder::new()
@@ -203,7 +213,17 @@ pub(super) fn create(
     }
     publish(&root.join("blobs"), &original)?;
     publish(&root.join(HEADER), &original)?;
-    validate_version(&connection, &original, if producers { 3 } else { 2 })?;
+    validate_version(
+        &connection,
+        &original,
+        if streams {
+            4
+        } else if producers {
+            3
+        } else {
+            2
+        },
+    )?;
     Ok(ReplicaContentStore {
         inner: Arc::new(ContentInner {
             snapshot_closes: Arc::new(super::close_queue::SnapshotCloseQueue::default()),
@@ -213,6 +233,8 @@ pub(super) fn create(
             writer,
             database,
             producers,
+            streams,
+            stream_capacity: Arc::new(tokio::sync::Semaphore::new(8)),
         }),
     })
 }
@@ -301,7 +323,14 @@ pub(super) fn open(
     }
     let producers = matches!(
         mode,
-        ContentOpenMode::Producers | ContentOpenMode::ProducerUpgrade
+        ContentOpenMode::Producers
+            | ContentOpenMode::ProducerUpgrade
+            | ContentOpenMode::Streams
+            | ContentOpenMode::StreamUpgrade
+    );
+    let streams = matches!(
+        mode,
+        ContentOpenMode::Streams | ContentOpenMode::StreamUpgrade
     );
     if version == 2 && matches!(mode, ContentOpenMode::ProducerUpgrade) {
         validate_version(&connection, &original, 2)?;
@@ -335,7 +364,36 @@ pub(super) fn open(
             .map_err(|error| error.to_string())?;
         transaction.commit().map_err(|error| error.to_string())?;
     }
-    validate_version(&connection, &original, if producers { 3 } else { 2 })?;
+    if version == 3 && matches!(mode, ContentOpenMode::StreamUpgrade) {
+        validate_version(&connection, &original, 3)?;
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
+            .map_err(|error| {
+                format!("original stream-profile connections are not quiescent: {error}")
+            })?;
+        super::streams::initialize(&transaction)?;
+        transaction
+            .execute(
+                "UPDATE metadata SET value=?1 WHERE key='layout'",
+                [REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute_batch("PRAGMA user_version=4")
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+    }
+    validate_version(
+        &connection,
+        &original,
+        if streams {
+            4
+        } else if producers {
+            3
+        } else {
+            2
+        },
+    )?;
     Ok(ReplicaContentStore {
         inner: Arc::new(ContentInner {
             snapshot_closes: Arc::new(super::close_queue::SnapshotCloseQueue::default()),
@@ -345,6 +403,8 @@ pub(super) fn open(
             writer,
             database,
             producers,
+            streams,
+            stream_capacity: Arc::new(tokio::sync::Semaphore::new(8)),
         }),
     })
 }
@@ -355,7 +415,9 @@ pub(super) fn head(connection: &Connection, name: &str) -> Result<BTreeSet<Strin
         .query_row("SELECT value FROM metadata WHERE key=?", [name], |row| {
             row.get(0)
         })
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| {
+            format!("original content mandatory head {name} is unavailable: {error}")
+        })?;
     if raw.len() > 8 * 1024 * 1024 {
         return Err("original content inventory head exceeds bound".into());
     }
@@ -423,8 +485,14 @@ pub(super) fn validate_version(
         ("content_references".into(), "table".into()),
         ("metadata".into(), "table".into()),
     ];
-    if expected_version == 3 {
+    if expected_version >= 3 {
         expected.insert(2, ("content_producers".into(), "table".into()));
+    }
+    if expected_version == 4 {
+        expected.insert(
+            expected.len() - 1,
+            ("content_streams".into(), "table".into()),
+        );
     }
     if version != expected_version || mode != "delete" || actual != expected {
         return Err("original replica content SQL format/tables/triggers differ".into());
@@ -436,8 +504,11 @@ pub(super) fn validate_version(
         ("content_readers", "reader_id"),
         ("content_objects", "content_key"),
     ];
-    if expected_version == 3 {
+    if expected_version >= 3 {
         tables.push(("content_producers", "operation_id"));
+    }
+    if expected_version == 4 {
+        tables.push(("content_streams", "stream_id"));
     }
     for (table, key) in tables {
         let mut statement = connection
@@ -455,22 +526,24 @@ pub(super) fn validate_version(
             .map_err(|error| error.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
-        if columns
-            != vec![
-                (key.into(), "TEXT".into(), 0, 1),
-                (
-                    (if table == "metadata" {
-                        "value"
-                    } else {
-                        "record"
-                    })
-                    .into(),
-                    "TEXT".into(),
-                    1,
-                    0,
-                ),
-            ]
-        {
+        let mut expected_columns = vec![
+            (key.into(), "TEXT".into(), 0, 1),
+            (
+                (if table == "metadata" {
+                    "value"
+                } else {
+                    "record"
+                })
+                .into(),
+                "TEXT".into(),
+                1,
+                0,
+            ),
+        ];
+        if table == "content_streams" {
+            expected_columns.insert(1, ("request_digest".into(), "TEXT".into(), 1, 0));
+        }
+        if columns != expected_columns {
             return Err("original content SQL columns/keys differ".into());
         }
     }
@@ -494,8 +567,11 @@ pub(super) fn validate_version(
         ("content_keys", "content_objects", "content_key"),
         ("reader_ids", "content_readers", "reader_id"),
     ];
-    if expected_version == 3 {
+    if expected_version >= 3 {
         inventories.push(("producer_ids", "content_producers", "operation_id"));
+    }
+    if expected_version == 4 {
+        inventories.push(("stream_ids", "content_streams", "stream_id"));
     }
     for (name, table, column) in inventories {
         let heads = head(connection, name)?;
@@ -514,8 +590,13 @@ pub(super) fn validate_version(
         }
         if name == "reference_ids" {
             for id in heads {
-                reference_record(connection, &id)?
+                let reference = reference_record(connection, &id)?
                     .ok_or("original content reference row missing")?;
+                if reference.reference.kind == ReplicaContentReferenceKind::Stream
+                    && expected_version != 4
+                {
+                    return Err("old content profile contains hidden stream authority".into());
+                }
             }
         }
     }
@@ -527,6 +608,7 @@ pub(super) fn validate_version(
             1 => 5,
             2 => 6,
             3 => 8,
+            4 => 9,
             _ => return Err("unknown original content storage generation".into()),
         }
     {
@@ -539,7 +621,9 @@ pub(super) fn validate_version(
             })
             .map_err(|error| error.to_string())?;
         if layout
-            != if expected_version == 3 {
+            != if expected_version == 4 {
+                REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA
+            } else if expected_version == 3 {
                 REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA
             } else {
                 REPLICA_CONTENT_LAYOUT_SCHEMA
@@ -550,8 +634,11 @@ pub(super) fn validate_version(
     }
     super::copy::validate_records(connection, original)?;
     super::reader::validate_records(connection, original)?;
-    if expected_version == 3 {
+    if expected_version >= 3 {
         super::producers::validate_records(connection, original)?;
+    }
+    if expected_version == 4 {
+        super::streams::validate_records(connection, original)?;
     }
     Ok(())
 }

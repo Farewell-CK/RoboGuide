@@ -40,11 +40,12 @@ pub use content_application::{
 pub use content_store::{
     ContentProcessEndObservation, REPLICA_CONTENT_LAYOUT_SCHEMA,
     REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA, REPLICA_CONTENT_STORAGE_SCHEMA,
-    ReplicaContentCopyStatus, ReplicaContentIdentity, ReplicaContentProducerKind,
-    ReplicaContentProducerSource, ReplicaContentProducerStatus, ReplicaContentReadLease,
-    ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus,
-    ReplicaContentReceipt, ReplicaContentReference, ReplicaContentReferenceKind,
-    ReplicaContentStore, ReplicaSnapshotCloseStatus,
+    REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA, ReplicaContentCopyStatus, ReplicaContentIdentity,
+    ReplicaContentProducerKind, ReplicaContentProducerSource, ReplicaContentProducerStatus,
+    ReplicaContentReadLease, ReplicaContentReader, ReplicaContentReaderReceipt,
+    ReplicaContentReaderStatus, ReplicaContentReceipt, ReplicaContentReference,
+    ReplicaContentReferenceKind, ReplicaContentStore, ReplicaContentStreamStatus,
+    ReplicaSnapshotCloseStatus,
 };
 pub use member::ReplicaMember;
 pub use snapshot_data::ReplicaSnapshotData;

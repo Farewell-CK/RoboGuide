@@ -356,6 +356,12 @@ target 的 member→store 映射与确切 committed membership 的成员资料�
 member 保留旧缺省编码；旧 profile 拒绝隐藏新绑定。资料匹配不产生真实内容 ACK，
 实际 mTLS/SQL/CAS 适配器和 joint 两组同成员多数仍须完成，生产 v0.4 继续关闭。
 
+[ADR-0168](../../decisions/0168-original-bounded-replica-content-streams.md)固定原接收意图、
+独立 receive pin、实际源权限/预算、唯一 worker/FD、分块/hash/fsync/publication/receipt
+的次序。Ready 仅是原意图回执；取消/断连不补完成。新流 journal 单独版本化，原
+copy/reader/producer 历史保持；实际网络、应用 Commit 与完整恢复接线完成前不启用
+生产内容 profile。
+
 [ADR-0161](../../decisions/0161-controller-inode-writer-and-storage-generation.md)要求实际
 Controller 的 canonical sibling 与 SQL inode 同时排他，并由最后一个真实连接持有到关闭。
 原生 SQLite 排空独立覆盖旧 live writer；显式 storage v1/read-only legacy views 提供

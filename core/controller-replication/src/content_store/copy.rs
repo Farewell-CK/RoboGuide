@@ -244,6 +244,16 @@ pub(super) fn validate_records(
         if digest(&receipt.content)? != key {
             return Err("original content object key changed source identity".into());
         }
+        if receipt.schema == super::streams::RECEIPT_SCHEMA {
+            let version: i64 = connection
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .map_err(|error| error.to_string())?;
+            if version != 4 {
+                return Err("legacy object profile contains a hidden stream receipt".into());
+            }
+            super::streams::validate_object_receipt(connection, &receipt)?;
+            continue;
+        }
         let original = operation(connection, &operation_key(&receipt.command_id)?)?
             .ok_or("original content object lost its copy authority")?;
         if original.receipt.as_ref() != Some(&receipt) {
@@ -282,7 +292,22 @@ pub(super) fn verify_file_with_budget(
     content: &ArtifactContentKey,
     budget: Option<&ContentBudget>,
 ) -> Result<File, String> {
+    verify_file_with_check(path, content, || {
+        if let Some(budget) = budget {
+            budget.check()?;
+        }
+        Ok(())
+    })
+}
+
+/// Checks original live authority before and after every actual bounded verification read.
+pub(super) fn verify_file_with_check(
+    path: &Path,
+    content: &ArtifactContentKey,
+    check: impl Fn() -> Result<(), String>,
+) -> Result<File, String> {
     use std::io::{Seek, SeekFrom};
+    check()?;
     let file = layout::regular(path, false)?;
     if file.metadata().map_err(|error| error.to_string())?.len() != content.byte_size {
         return Err("actual replica content byte count differs".into());
@@ -292,12 +317,11 @@ pub(super) fn verify_file_with_budget(
     let mut total = 0_u64;
     let mut buffer = [0_u8; CHUNK];
     loop {
-        if let Some(budget) = budget {
-            budget.check()?;
-        }
+        check()?;
         let count = observed
             .read(&mut buffer)
             .map_err(|error| error.to_string())?;
+        check()?;
         if count == 0 {
             break;
         }
@@ -317,6 +341,7 @@ pub(super) fn verify_file_with_budget(
     observed
         .seek(SeekFrom::Start(0))
         .map_err(|error| error.to_string())?;
+    check()?;
     Ok(file)
 }
 

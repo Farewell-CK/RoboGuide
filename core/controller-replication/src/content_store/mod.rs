@@ -6,6 +6,7 @@ mod layout;
 mod pins;
 mod producers;
 mod reader;
+mod streams;
 mod time;
 pub use close_queue::ReplicaSnapshotCloseStatus;
 pub use copy::{ReplicaContentCopyStatus, ReplicaContentReceipt};
@@ -15,6 +16,7 @@ pub use producers::{
     ReplicaContentProducerKind, ReplicaContentProducerSource, ReplicaContentProducerStatus,
 };
 pub use reader::{ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus};
+pub use streams::ReplicaContentStreamStatus;
 pub(crate) use time::ContentBudget;
 pub use time::ContentProcessEndObservation;
 #[cfg(test)]
@@ -33,6 +35,8 @@ pub const REPLICA_CONTENT_STORAGE_SCHEMA: &str = "roboguide.replica-content-stor
 pub const REPLICA_CONTENT_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.2";
 /// Independent opt-in original producer journal, fenced from original copy/reader-only writers.
 pub const REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.3";
+/// Explicit original stream receiver generation, never inferred from older root contents.
+pub const REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.4";
 
 /// Explicit storage interpretation; old maintenance entry points never acquire new producer authority.
 pub(super) enum ContentOpenMode {
@@ -44,6 +48,20 @@ pub(super) enum ContentOpenMode {
     Producers,
     /// Explicit fully drained reader v2 to producer v3 transition.
     ProducerUpgrade,
+    /// Already accepted explicit original stream journal.
+    Streams,
+    /// Explicit fully drained producer v3 to stream v4 transition.
+    StreamUpgrade,
+}
+
+/// Fresh root interpretation; old create entry points never gain a stream journal implicitly.
+pub(super) enum ContentCreateMode {
+    /// Original reader/copy-only root.
+    Reader,
+    /// Explicit local producer journal.
+    Producers,
+    /// Explicit local producer plus original stream journal.
+    Streams,
 }
 /// Bound on retained reference IDs; exhaustion never discards original ownership.
 const MAX_REFERENCES: usize = 65_536;
@@ -76,6 +94,8 @@ pub struct ReplicaContentIdentity {
 pub enum ReplicaContentReferenceKind {
     /// Original inbound copy intent precedes any source byte read or staging write.
     Receive,
+    /// Original unique streaming receiver retains its own pin independently of local copy history.
+    Stream,
     /// Accepted log history retains its own original inputs.
     Log,
     /// Exact published/current Raft Snapshot retains its complete original inputs.
@@ -130,6 +150,10 @@ struct ContentInner {
     database: File,
     /// Exact admitted local format; ordinary APIs cannot reinterpret a live connection as another profile.
     producers: bool,
+    /// Exact stream generation admitted by this actual original connection.
+    streams: bool,
+    /// Bounds actual running/queued stream workers; each unique worker retains its own permit.
+    stream_capacity: Arc<tokio::sync::Semaphore>,
 }
 
 impl Drop for ContentInner {
@@ -159,7 +183,7 @@ pub struct ReplicaContentStore {
 impl ReplicaContentStore {
     /// Initializes only a genuinely empty declared root; interrupted/existing authority is not replaced.
     pub fn create(root: &Path, profile_identity: &str, member: u64) -> Result<Self, String> {
-        layout::create(root, profile_identity, member, false)
+        layout::create(root, profile_identity, member, ContentCreateMode::Reader)
     }
 
     /// Requires the complete original root, database and mandatory heads before any observation.
@@ -187,7 +211,7 @@ impl ReplicaContentStore {
         profile_identity: &str,
         member: u64,
     ) -> Result<Self, String> {
-        layout::create(root, profile_identity, member, true)
+        layout::create(root, profile_identity, member, ContentCreateMode::Producers)
     }
 
     /// Opens only the complete original producer profile; missing journals never become empty authority.
@@ -213,9 +237,43 @@ impl ReplicaContentStore {
         )
     }
 
+    /// Creates only a fresh explicitly selected original stream/producer root; existing authority refuses.
+    pub fn create_with_streams(
+        root: &Path,
+        profile_identity: &str,
+        member: u64,
+    ) -> Result<Self, String> {
+        layout::create(root, profile_identity, member, ContentCreateMode::Streams)
+    }
+
+    /// Opens only the full original stream generation, never creating missing journals or heads.
+    pub fn open_with_streams(
+        root: &Path,
+        profile_identity: &str,
+        member: u64,
+    ) -> Result<Self, String> {
+        layout::open(root, profile_identity, member, ContentOpenMode::Streams)
+    }
+
+    /// Explicitly upgrades the drained original producer root without rewriting old evidence.
+    pub fn upgrade_stream_journal(
+        root: &Path,
+        profile_identity: &str,
+        member: u64,
+    ) -> Result<Self, String> {
+        layout::open(
+            root,
+            profile_identity,
+            member,
+            ContentOpenMode::StreamUpgrade,
+        )
+    }
+
     /// Validates only this handle's original admitted SQL generation before any observation or mutation.
     fn validate_connection(&self, connection: &Connection) -> Result<(), String> {
-        if self.inner.producers {
+        if self.inner.streams {
+            layout::validate_version(connection, self.identity(), 4)
+        } else if self.inner.producers {
             layout::validate_version(connection, self.identity(), 3)
         } else {
             layout::validate(connection, self.identity())
@@ -250,7 +308,9 @@ impl ReplicaContentStore {
         }
         if matches!(
             reference.kind,
-            ReplicaContentReferenceKind::Receive | ReplicaContentReferenceKind::Reader
+            ReplicaContentReferenceKind::Receive
+                | ReplicaContentReferenceKind::Reader
+                | ReplicaContentReferenceKind::Stream
         ) {
             return Err(
                 "receive/reader pins require the actual original operation transaction".into(),
@@ -310,6 +370,9 @@ impl ReplicaContentStore {
         release_digest: &str,
     ) -> Result<(), String> {
         validate_reference(reference)?;
+        if reference.kind == ReplicaContentReferenceKind::Stream {
+            return Err("stream release requires its exact original receiver journal".into());
+        }
         if self.inner.producers
             && matches!(
                 reference.kind,

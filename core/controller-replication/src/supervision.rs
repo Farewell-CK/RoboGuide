@@ -102,7 +102,7 @@ fn valid_instance(instance: &str) -> bool {
 }
 
 /// Validates immutable local identity without probing another process or declaring exit.
-fn validate_process(process: &ControllerProcessIdentity) -> Result<(), String> {
+pub(crate) fn validate_process(process: &ControllerProcessIdentity) -> Result<(), String> {
     if !valid_instance(&process.instance_id)
         || !valid_instance(&process.supervisor_instance)
         || !valid_instance(&process.boot_id)

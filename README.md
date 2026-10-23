@@ -1,5 +1,12 @@
 # RoboGuide
 
+[原有界内容流](docs/development/acceptance/2026-10-23-original-content-streams.md)由
+`core/controller-replication/src/content_store/streams.rs` / `stream_writer.rs` 维护。
+显式 SQL v4 在原持久意图/pin 后才读取实际源，完整 hash/fsync 后发布原回执，故障保留
+Unknown；旧 producer/reader 原记录和 inode 经显式排空升级保持。实际进程/SQL 门禁
+通过；网络 mTLS/Ready、原 child/Prepared source、同 voters metadata+bytes ACK 与完整
+恢复/回收继续实施，生产内容 v0.4 尚未启用。
+
 [共识成员内容身份](docs/development/acceptance/2026-10-23-consensus-member-content-identities.md)
 由 `core/controller-replication/src/member.rs` 维护；完整 target 的 store owner 必须匹配
 确切 committed member。旧缺省编码和摘要保持，旧 profile 拒绝隐藏新绑定。实际混合
