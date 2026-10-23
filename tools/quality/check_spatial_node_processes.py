@@ -18,6 +18,7 @@ import tomllib
 import urllib.request
 import uuid
 import zipfile
+from contextlib import closing
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -501,9 +502,12 @@ def run(
         assert manifest["producer_node_id"] == node
         assert manifest["producer_local_system_id"] == "spatial-files"
         assert manifest["source_task_ref"] == {"mission_id": mission, "task_id": "build"}
-        with sqlite3.connect(
-            f"file:{output / 'controller.sqlite3'}?mode=ro", uri=True
-        ) as connection:
+        with (
+            closing(
+                sqlite3.connect(f"file:{output / 'controller.sqlite3'}?mode=ro", uri=True)
+            ) as connection,
+            connection,
+        ):
             original_checkpoint = json.loads(
                 connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()[
                     0
@@ -723,9 +727,12 @@ def run(
                 output / "consumer/registrations-restored.json",
                 exchange(origin, "/v1/inventory")[1],
             )
-        with sqlite3.connect(
-            f"file:{output / 'controller.sqlite3'}?mode=ro", uri=True
-        ) as connection:
+        with (
+            closing(
+                sqlite3.connect(f"file:{output / 'controller.sqlite3'}?mode=ro", uri=True)
+            ) as connection,
+            connection,
+        ):
             checkpoint = json.loads(
                 connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()[
                     0

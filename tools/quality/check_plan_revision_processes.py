@@ -19,6 +19,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -32,9 +33,12 @@ from runtime_mi_process_profile import ProviderFixtureServer
 
 def checkpoint(directory: Path) -> dict[str, Any]:
     """Read the real committed wrapper and original inner authority without editing either."""
-    with sqlite3.connect(
-        f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True
-    ) as connection:
+    with (
+        closing(
+            sqlite3.connect(f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True)
+        ) as connection,
+        connection,
+    ):
         row = connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()
     if row is None:
         raise RuntimeError("actual Controller checkpoint absent")

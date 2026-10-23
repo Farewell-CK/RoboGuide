@@ -14,6 +14,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -275,7 +276,7 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
             f"/v1/artifact-uploads/{retained_id}/finalize",
             finish,
         ) == (201, body)
-        with sqlite3.connect(directory / "events.sqlite3") as sql:
+        with closing(sqlite3.connect(directory / "events.sqlite3")) as sql, sql:
             rows = [json.loads(row[0]) for row in sql.execute("SELECT payload_json FROM events")]
         transitions = [
             row["ArtifactUploadTransition"]["record"]

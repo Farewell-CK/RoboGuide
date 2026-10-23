@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import closing
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -388,7 +389,10 @@ def run(
     assert (directory / "consumer-extra-1/revoke-committed-reply-lost").exists()
     assert scenario.get(f"/v1/missions/{identifier}")["status"] == "Cancelling"
     node_database = directory / "consumer/node-state/execution-journal.sqlite3"
-    with sqlite3.connect(f"file:{node_database}?mode=ro", uri=True) as connection:
+    with (
+        closing(sqlite3.connect(f"file:{node_database}?mode=ro", uri=True)) as connection,
+        connection,
+    ):
         original_budgets = connection.execute(
             "SELECT command_id,budget_json FROM memory_use_commands ORDER BY command_id"
         ).fetchall()
@@ -468,7 +472,10 @@ def run(
         save(directory / "exhausted-query-rejection.json", rejected)
     current = next(iter(scenario.get("/v1/memory/use-leases")["records"].values()))
     assert current["controls"][original["command"]["command_id"]]["receipt"] == original["receipt"]
-    with sqlite3.connect(f"file:{node_database}?mode=ro", uri=True) as connection:
+    with (
+        closing(sqlite3.connect(f"file:{node_database}?mode=ro", uri=True)) as connection,
+        connection,
+    ):
         assert (
             connection.execute(
                 "SELECT command_id,budget_json FROM memory_use_commands ORDER BY command_id"
@@ -489,9 +496,12 @@ def verify_imports(directory: Path) -> dict[str, Any]:
             observed = "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
         assert observed == value["artifact"]["content_digest"]
         assert content.stat().st_size == value["artifact"]["byte_size"]
-        with sqlite3.connect(
-            f"file:{owned / 'backend/memory-use.sqlite3'}?mode=ro", uri=True
-        ) as connection:
+        with (
+            closing(
+                sqlite3.connect(f"file:{owned / 'backend/memory-use.sqlite3'}?mode=ro", uri=True)
+            ) as connection,
+            connection,
+        ):
             effects = connection.execute(
                 "SELECT receipt_json FROM commands WHERE generation=0"
             ).fetchall()
@@ -504,9 +514,14 @@ def verify_imports(directory: Path) -> dict[str, Any]:
         results.append(
             {"provider_id": value["provider_id"], "actual_digest": observed, "revoke_posts": 1}
         )
-    with sqlite3.connect(
-        f"file:{directory / 'consumer/backend/file-jobs.sqlite3'}?mode=ro", uri=True
-    ) as connection:
+    with (
+        closing(
+            sqlite3.connect(
+                f"file:{directory / 'consumer/backend/file-jobs.sqlite3'}?mode=ro", uri=True
+            )
+        ) as connection,
+        connection,
+    ):
         assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
     return {"passed": True, "providers": results, "consumer_jobs": 0}
 
@@ -534,9 +549,12 @@ def finish(
     final = scenario.get(f"/v1/missions/{identifier}")
     assert final["status"] == "Cancelling", final
     save(directory / "final-mission.json", final)
-    with sqlite3.connect(
-        f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True
-    ) as connection:
+    with (
+        closing(
+            sqlite3.connect(f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True)
+        ) as connection,
+        connection,
+    ):
         saved = json.loads(
             connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()[0]
         )

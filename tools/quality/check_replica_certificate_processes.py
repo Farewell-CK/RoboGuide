@@ -13,6 +13,7 @@ import ssl
 import struct
 import subprocess
 import time
+from contextlib import closing
 from functools import partial
 from pathlib import Path
 from typing import Any, BinaryIO, cast
@@ -115,9 +116,12 @@ def replace_bundle(source: Path, target: Path) -> None:
 
 def read_trust(storage: Path) -> dict[str, Any]:
     """Read the original real WAL-aware replica authority without opening a second writer."""
-    with sqlite3.connect(
-        storage.joinpath("replica.sqlite3").as_uri() + "?mode=ro", uri=True
-    ) as database:
+    with (
+        closing(
+            sqlite3.connect(storage.joinpath("replica.sqlite3").as_uri() + "?mode=ro", uri=True)
+        ) as database,
+        database,
+    ):
         row = database.execute(
             "SELECT value FROM replica_meta WHERE key='certificate_trust'"
         ).fetchone()
@@ -128,9 +132,12 @@ def read_trust(storage: Path) -> dict[str, Any]:
 
 def application_identity(storage: Path) -> list[tuple[str, str]]:
     """Observe complete application checkpoint bytes independently of normal timer revisions."""
-    with sqlite3.connect(
-        storage.joinpath("replica.sqlite3").as_uri() + "?mode=ro", uri=True
-    ) as database:
+    with (
+        closing(
+            sqlite3.connect(storage.joinpath("replica.sqlite3").as_uri() + "?mode=ro", uri=True)
+        ) as database,
+        database,
+    ):
         return database.execute(
             "SELECT key,value FROM replica_meta "
             "WHERE key IN ('checkpoint','checkpoint_digest') ORDER BY key"
@@ -152,9 +159,14 @@ def old_leaf_request(
     output: Path, member: int, leader: int, members: dict[str, str], old_bundle: Path
 ) -> dict[str, Any]:
     """Send the retired real private key over actual mTLS, bypassing only client-side refusal."""
-    with sqlite3.connect(
-        (output / f"replica-{member}/replica.sqlite3").as_uri() + "?mode=ro", uri=True
-    ) as database:
+    with (
+        closing(
+            sqlite3.connect(
+                (output / f"replica-{member}/replica.sqlite3").as_uri() + "?mode=ro", uri=True
+            )
+        ) as database,
+        database,
+    ):
         identity = json.loads(
             database.execute("SELECT value FROM replica_meta WHERE key='identity'").fetchone()[0]
         )

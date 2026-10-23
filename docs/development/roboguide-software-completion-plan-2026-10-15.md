@@ -113,6 +113,11 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N7 的[检查器 SQL 生命周期修复](acceptance/2026-10-23-checker-sql-lifetimes.md)在实际
+交接 CI 对应步骤复现原 readonly Connection 未关闭导致的重启排空拒绝；保留原故障，
+23 个 quality modules 的 71 处作用域实际关闭并保留提交/回滚。禁用 GC 的独立 FD 对照、
+原交接/MI 修订/原目标软件进程复测通过，没有放松产品 writer 门禁或宣布完整阶段通过。
+
 N7 的 [ADR-0163 副本传输容量](replica-transport-bounds-v0.1.md)补齐本地 TLS 前连接准入、
 原成员异步收发共享帧池、独立小帧 reserve、原 handler 生命周期与固定标签只读计数。
 容量不改变原 wire/profile/权限，也不把网络取消视为已提交副作用不存在。实际单 worker/

@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import tomllib
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from check_state_verifier_processes import ROOT, address, stop, wait_for
 def logical_digest(database: Path, tables: tuple[str, ...]) -> str:
     """Hash actual ordered authority rows independently of WAL/checkpoint file layout."""
     checksum = hashlib.sha256()
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection, connection:
         for table in tables:
             checksum.update(table.encode() + b"\0")
             columns = len(connection.execute(f"SELECT * FROM {table} LIMIT 0").description or ())
@@ -78,7 +79,10 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
             environment[f"ROBOGUIDE_{plane}_MTLS_ROLE_MAP"] = str(
                 directory / (plane.lower() + "-authorization.json")
             )
-    with sqlite3.connect(f"file:{controller_database}?mode=ro", uri=True) as connection:
+    with (
+        closing(sqlite3.connect(f"file:{controller_database}?mode=ro", uri=True)) as connection,
+        connection,
+    ):
         checkpoint = json.loads(
             connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()[0]
         )
@@ -137,7 +141,10 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
             {"name": name, "returncode": process.returncode, "observed_fence": observed}
         )
 
-    with sqlite3.connect(f"file:{node_database}?mode=ro", uri=True) as connection:
+    with (
+        closing(sqlite3.connect(f"file:{node_database}?mode=ro", uri=True)) as connection,
+        connection,
+    ):
         current_journal = connection.execute("PRAGMA user_version").fetchone()[0]
         assert current_journal in {8, 9, 10}
         assert (
@@ -149,7 +156,7 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
         "journal was written by a newer storage authority",
         f"old-node-v{current_journal - 1}",
     )
-    with sqlite3.connect(node_database) as connection:
+    with closing(sqlite3.connect(node_database)) as connection, connection:
         connection.execute(f"PRAGMA user_version={current_journal - 1}")
     try:
         rejected(
@@ -158,7 +165,7 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
             f"old-node-v{current_journal - 1}-header-reset",
         )
     finally:
-        with sqlite3.connect(node_database) as connection:
+        with closing(sqlite3.connect(node_database)) as connection, connection:
             connection.execute(f"PRAGMA user_version={current_journal}")
     assert logical_digest(node_database, node_tables) == before_node
     consumer_fence = False
@@ -174,7 +181,10 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
             "memory_use_effects",
             "node_journal_storage_schema",
         )
-        with sqlite3.connect(f"file:{consumer_database}?mode=ro", uri=True) as connection:
+        with (
+            closing(sqlite3.connect(f"file:{consumer_database}?mode=ro", uri=True)) as connection,
+            connection,
+        ):
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             assert version == 10
             assert connection.execute("SELECT COUNT(*) FROM memory_use_heads").fetchone()[0] > 0
@@ -193,7 +203,7 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
             "journal was written by a newer storage authority",
             "old-node-v9-use-authority",
         )
-        with sqlite3.connect(consumer_database) as connection:
+        with closing(sqlite3.connect(consumer_database)) as connection, connection:
             connection.execute("PRAGMA user_version=9")
         try:
             rejected(
@@ -202,7 +212,7 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
                 "old-node-v9-use-authority-header-reset",
             )
         finally:
-            with sqlite3.connect(consumer_database) as connection:
+            with closing(sqlite3.connect(consumer_database)) as connection, connection:
                 connection.execute("PRAGMA user_version=10")
         assert logical_digest(consumer_database, use_tables) == original_use
         consumer_fence = True
@@ -287,7 +297,10 @@ def run(directory: Path, old_node: Path, old_controller: Path, output: Path) -> 
     finally:
         stop(process)
     fresh_database = fresh / "controller.sqlite3"
-    with sqlite3.connect(f"file:{fresh_database}?mode=ro", uri=True) as connection:
+    with (
+        closing(sqlite3.connect(f"file:{fresh_database}?mode=ro", uri=True)) as connection,
+        connection,
+    ):
         assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
         fresh_checkpoint = json.loads(
             connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()[0]

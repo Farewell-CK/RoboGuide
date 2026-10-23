@@ -21,6 +21,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -704,9 +705,12 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
             "independently verified software Mission completion",
         )
         assert len(provider.invocations) == 2
-        with sqlite3.connect(
-            f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True
-        ) as connection:
+        with (
+            closing(
+                sqlite3.connect(f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True)
+            ) as connection,
+            connection,
+        ):
             checkpoint = json.loads(
                 connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()[
                     0

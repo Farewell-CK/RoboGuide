@@ -21,6 +21,7 @@ import threading
 import time
 import urllib.request
 from collections.abc import Callable
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -227,7 +228,12 @@ def free_address() -> str:
 
 def checkpoint(directory: Path) -> dict[str, Any]:
     """Read the actual durable Controller snapshot without changing any authority."""
-    with sqlite3.connect(f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True) as db:
+    with (
+        closing(
+            sqlite3.connect(f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True)
+        ) as db,
+        db,
+    ):
         raw = db.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()[0]
     value: dict[str, Any] = json.loads(raw)
     value["integration"] = json.loads(value["integration_json"])
@@ -237,7 +243,7 @@ def checkpoint(directory: Path) -> dict[str, Any]:
 def journal(directory: Path, node: str) -> list[dict[str, Any]]:
     """Read real Node durable workflow history, including cancellation and local handles."""
     path = directory / f"node-{node}-state/execution-journal.sqlite3"
-    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as db, db:
         db.row_factory = sqlite3.Row
         return [
             dict(row)

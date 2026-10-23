@@ -13,7 +13,7 @@ import sys
 import time
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -189,9 +189,14 @@ def quiesce_node_publishers(scenario: GroupScenario, stage: str) -> Iterator[Non
         stable = 0
         deadline = time.monotonic() + 3
         while stable < 3:
-            with sqlite3.connect(
-                f"file:{scenario.directory / 'controller.sqlite3'}?mode=ro", uri=True
-            ) as connection:
+            with (
+                closing(
+                    sqlite3.connect(
+                        f"file:{scenario.directory / 'controller.sqlite3'}?mode=ro", uri=True
+                    )
+                ) as connection,
+                connection,
+            ):
                 sequence = connection.execute(
                     "SELECT coalesce(max(sequence),0) FROM events"
                 ).fetchone()[0]
@@ -218,9 +223,12 @@ def quiesce_node_publishers(scenario: GroupScenario, stage: str) -> Iterator[Non
 
 def checkpoint(directory: Path) -> dict[str, Any]:
     """Read only the actual committed authority wrapper, without editing execution evidence."""
-    with sqlite3.connect(
-        f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True
-    ) as connection:
+    with (
+        closing(
+            sqlite3.connect(f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True)
+        ) as connection,
+        connection,
+    ):
         row = connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()
     assert row is not None
     value: dict[str, Any] = json.loads(row[0])
@@ -352,7 +360,7 @@ def run(scenario: GroupScenario, source_id: str, case: str) -> dict[str, Any]:
     before = checkpoint(scenario.directory)
     if case == "complete":
         with quiesce_node_publishers(scenario, "admission"):
-            with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
+            with closing(sqlite3.connect(scenario.directory / "controller.sqlite3")) as db, db:
                 db.execute("""CREATE TRIGGER fail_handoff_admission BEFORE INSERT ON events
                     WHEN json_extract(NEW.payload_json,'$.MemoryHandoffTransition.phase')='stopping'
                     BEGIN SELECT RAISE(ABORT,'actual handoff admission rollback window'); END""")
@@ -366,7 +374,7 @@ def run(scenario: GroupScenario, source_id: str, case: str) -> dict[str, Any]:
                 json.loads(rolled_back["integration_json"])["control"]["reservations"]
                 == json.loads(before["integration_json"])["control"]["reservations"]
             )
-            with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
+            with closing(sqlite3.connect(scenario.directory / "controller.sqlite3")) as db, db:
                 db.execute("DROP TRIGGER fail_handoff_admission")
             recover_original_writer(scenario, "admission")
             save(
@@ -428,7 +436,12 @@ def run(scenario: GroupScenario, source_id: str, case: str) -> dict[str, Any]:
             "original exchange enters manual hold without target Execute",
         )
         assert scenario.exchange(commit_path, {})[0] == 409
-        with sqlite3.connect(scenario.directory / "consumer/backend/file-jobs.sqlite3") as db:
+        with (
+            closing(
+                sqlite3.connect(scenario.directory / "consumer/backend/file-jobs.sqlite3")
+            ) as db,
+            db,
+        ):
             assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
         after = checkpoint(scenario.directory)
         assert (
@@ -496,18 +509,26 @@ def run(scenario: GroupScenario, source_id: str, case: str) -> dict[str, Any]:
             "independent_bootstrap_digest": bootstrap["artifact"]["content_digest"],
         },
     )
-    with sqlite3.connect(scenario.directory / "consumer/backend/file-jobs.sqlite3") as db:
+    with (
+        closing(sqlite3.connect(scenario.directory / "consumer/backend/file-jobs.sqlite3")) as db,
+        db,
+    ):
         assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
     with quiesce_node_publishers(scenario, "commit"):
-        with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
+        with closing(sqlite3.connect(scenario.directory / "controller.sqlite3")) as db, db:
             db.execute("""CREATE TRIGGER fail_handoff_commit BEFORE INSERT ON events
                 WHEN json_extract(NEW.payload_json,'$.MemoryHandoffTransition.phase')='committed'
                 BEGIN SELECT RAISE(ABORT,'actual handoff commit rollback window'); END""")
         status, failed = scenario.exchange(commit_path, {})
         assert status == 409 and progress()["phase"] == "ready", failed
-        with sqlite3.connect(scenario.directory / "consumer/backend/file-jobs.sqlite3") as db:
+        with (
+            closing(
+                sqlite3.connect(scenario.directory / "consumer/backend/file-jobs.sqlite3")
+            ) as db,
+            db,
+        ):
             assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
-        with sqlite3.connect(scenario.directory / "controller.sqlite3") as db:
+        with closing(sqlite3.connect(scenario.directory / "controller.sqlite3")) as db, db:
             db.execute("DROP TRIGGER fail_handoff_commit")
         recover_original_writer(scenario, "commit")
     save(
@@ -597,7 +618,10 @@ def run(scenario: GroupScenario, source_id: str, case: str) -> dict[str, Any]:
     assert restored["memory_handoffs"] == final["memory_handoffs"]
     assert scenario.get("/v1/missions/" + identifier)["status"] == "Completed"
     for name, count in (("source", 1), ("consumer", 2)):
-        with sqlite3.connect(scenario.directory / name / "backend/file-jobs.sqlite3") as db:
+        with (
+            closing(sqlite3.connect(scenario.directory / name / "backend/file-jobs.sqlite3")) as db,
+            db,
+        ):
             assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == count
     return {
         "passed": True,

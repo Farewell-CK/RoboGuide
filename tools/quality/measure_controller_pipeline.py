@@ -17,6 +17,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +128,7 @@ def inspect_database(path: Path, controller_binary: Path) -> dict[str, Any]:
             timeout=15,
         )
     )
-    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as database:
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as database, database:
         row = database.execute(
             "SELECT schema, checkpoint_json FROM controller_checkpoint"
         ).fetchone()

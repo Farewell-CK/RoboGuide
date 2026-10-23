@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import uuid
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,7 @@ class ActualUseScenario:
 
 def rows(database: Path, query: str) -> list[tuple[Any, ...]]:
     """Inspect only the owned actual SQLite file through a readonly connection."""
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection, connection:
         return connection.execute(query).fetchall()
 
 

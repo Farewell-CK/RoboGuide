@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +76,7 @@ def run(
         "actual original file CPU process running",
     )
     database = scenario.directory / "source/backend/file-jobs.sqlite3"
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection, connection:
         process = connection.execute(
             "SELECT pid,instance_id FROM original_processes WHERE execution_id=?",
             (source_attempt["execution_id"],),
@@ -96,7 +97,10 @@ def run(
         count = 0
         for name in ("source", "consumer"):
             database = scenario.directory / name / "backend/file-jobs.sqlite3"
-            with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+            with (
+                closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection,
+                connection,
+            ):
                 count += int(
                     connection.execute(
                         "SELECT COUNT(*) FROM jobs WHERE execution_id<>?",
@@ -454,7 +458,10 @@ def run(
     if case == "revision-sql":
         with quiesce_node_publishers(scenario, "revision-publication"):
             before = checkpoint(scenario.directory)
-            with sqlite3.connect(scenario.directory / "controller.sqlite3") as connection:
+            with (
+                closing(sqlite3.connect(scenario.directory / "controller.sqlite3")) as connection,
+                connection,
+            ):
                 connection.execute("""CREATE TRIGGER fail_revision_memory BEFORE INSERT ON events
                     WHEN json_type(NEW.payload_json,'$.MemoryManifestPublished') IS NOT NULL
                     BEGIN SELECT RAISE(ABORT,'actual revision child publication rollback'); END""")
@@ -477,13 +484,19 @@ def run(
                 child_path, context=scenario.verifier_context, endpoint=cas
             )
             assert unavailable[0] in (404, 503), unavailable
-            with sqlite3.connect(scenario.directory / "controller.sqlite3") as connection:
+            with (
+                closing(sqlite3.connect(scenario.directory / "controller.sqlite3")) as connection,
+                connection,
+            ):
                 assert connection.execute(
                     "SELECT COUNT(*) FROM events WHERE "
                     "json_extract(payload_json,'$.MemoryManifestPublished.manifest.selector.revision_id')=?",
                     (child["selector"]["revision_id"],),
                 ).fetchone() == (0,)
-            with sqlite3.connect(scenario.directory / "controller.sqlite3") as connection:
+            with (
+                closing(sqlite3.connect(scenario.directory / "controller.sqlite3")) as connection,
+                connection,
+            ):
                 connection.execute("DROP TRIGGER fail_revision_memory")
             if scenario.get("/v1/authority-status")["write_enabled"] is False:
                 recover_original_writer(scenario, "revision-publication")
@@ -637,9 +650,14 @@ def run(
         "independently verified original Mission goal",
     )
     final = checkpoint(scenario.directory)
-    with sqlite3.connect(
-        f"file:{scenario.directory / 'source/backend/memory.sqlite3'}?mode=ro", uri=True
-    ) as connection:
+    with (
+        closing(
+            sqlite3.connect(
+                f"file:{scenario.directory / 'source/backend/memory.sqlite3'}?mode=ro", uri=True
+            )
+        ) as connection,
+        connection,
+    ):
         originals = [
             (row[0], json.loads(row[1])["original_invocation"])
             for row in connection.execute("SELECT import_id,original_json FROM imports")

@@ -19,6 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -324,7 +325,7 @@ def queued_revocation(
                         raise ValueError("queued Controller response is not an object")
                     return response.status, value
 
-                with sqlite3.connect(database, timeout=1) as lock:
+                with closing(sqlite3.connect(database, timeout=1)) as lock, lock:
                     lock.execute("BEGIN IMMEDIATE")
                     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as workers:
                         try:

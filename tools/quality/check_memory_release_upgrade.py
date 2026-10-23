@@ -9,6 +9,7 @@ import os
 import sqlite3
 import subprocess
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,7 @@ from check_state_verifier_processes import ROOT, address, request, save, stop, w
 
 def tables(database: Path) -> tuple[str, ...]:
     """Cover every actual authority table independently of transient SQLite WAL layout."""
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection, connection:
         return tuple(
             row[0]
             for row in connection.execute(
@@ -107,7 +108,10 @@ def run(directory: Path, old_controller: Path, old_node: Path | None = None) -> 
             assert request(origin, "/v1/inventory")[1]["nodes"] == []
         finally:
             stop(process)
-        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+        with (
+            closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection,
+            connection,
+        ):
             assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
             migration_schemas.append(
                 connection.execute("SELECT schema FROM controller_checkpoint").fetchone()[0]

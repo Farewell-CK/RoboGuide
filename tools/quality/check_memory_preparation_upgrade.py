@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import tomllib
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ from check_state_verifier_processes import ROOT, address, request, save, stop, w
 
 def tables(database: Path) -> tuple[str, ...]:
     """Enumerate actual authority tables instead of omitting new preparation/revocation storage."""
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection, connection:
         return tuple(
             row[0]
             for row in connection.execute(
@@ -74,7 +75,7 @@ def run(directory: Path, old_node: Path, old_controller: Path) -> dict[str, Any]
         environment["ROBOGUIDE_ARTIFACT_CLIENT_CA"] = str(directory / "pki/ca.crt")
         environment["ROBOGUIDE_NODE_MTLS_SERVER_CA"] = str(directory / "pki/ca.crt")
         environment["ROBOGUIDE_NODE_MTLS_DOMAIN"] = "localhost"
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
             assert (
                 connection.execute("SELECT version FROM node_journal_storage_schema").fetchone()[0]
@@ -85,7 +86,7 @@ def run(directory: Path, old_node: Path, old_controller: Path) -> dict[str, Any]
             "journal was written by a newer storage authority",
             owner + "-old-node-v8",
         )
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute("PRAGMA user_version=8")
         try:
             rejected(
@@ -94,7 +95,7 @@ def run(directory: Path, old_node: Path, old_controller: Path) -> dict[str, Any]
                 owner + "-old-node-v8-header-reset",
             )
         finally:
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("PRAGMA user_version=9")
         assert logical_digest(database, tables(database)) == before
     database = directory / "controller.sqlite3"
@@ -147,7 +148,7 @@ def run(directory: Path, old_node: Path, old_controller: Path) -> dict[str, Any]
     finally:
         stop(process)
     database = fresh / "controller.sqlite3"
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
     before = logical_digest(database, tables(database))
     rejected(

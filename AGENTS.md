@@ -1,5 +1,13 @@
 # Repository Guidelines
 
+Quality processes own SQLite connections with contextlib.closing plus the original Connection
+transaction context: __exit__ commits/rolls back but does not close. All 71 previously bare scopes
+in 23 maintained quality modules now close before Controller restart/drain. The actual handoff CI
+failure reproduced locally; under disabled cyclic GC the original helper retained 25 SQL FDs after
+12 reads, the fixed helper zero with identical checkpoint digest. Original handoff/revision-mi
+process gates pass without weakening writer/stop/revoke/goal/budget assertions. The evidence is
+2026-10-23-checker-sql-lifetimes.md; no product schema, authority or device facts change.
+
 ADR-0163 bounds actual replica inbound handlers before TLS and shares local asynchronous exchange
 and separate small/large encoded-frame capacities across the original member's clients. Permits
 precede allocation and retain real handler/frame lifetimes; listener-owned JoinSet drops network

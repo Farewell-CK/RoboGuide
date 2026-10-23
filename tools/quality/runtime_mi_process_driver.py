@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ from runtime_mi_process_profile import ProviderFixtureServer
 
 def original_rows(path: Path) -> dict[str, Any]:
     """Read committed original budgets, calls and independent observations."""
-    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection, connection:
         work = connection.execute("SELECT work_id,kernel_json,duration_ms FROM work").fetchall()
         effects = connection.execute(
             "SELECT phase,status,request_json,response_json,nonce FROM effects ORDER BY phase"
@@ -32,8 +33,8 @@ def original_rows(path: Path) -> dict[str, Any]:
 
 def copy_sql(source: Path, target: Path) -> None:
     """Copy an actual committed snapshot without editing, inventing or renewing any original row."""
-    with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as original:
-        with sqlite3.connect(target) as destination:
+    with closing(sqlite3.connect(f"file:{source}?mode=ro", uri=True)) as original, original:
+        with closing(sqlite3.connect(target)) as destination, destination:
             original.backup(destination)
 
 
@@ -242,7 +243,7 @@ api_key_env = "ROBOGUIDE_PROTOCOL_FIXTURE_UNUSED_CREDENTIAL"
         assert not any(
             name in json.dumps(semantic) for name in ('"node_id"', '"session_id"', '"attempt_id"')
         )
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection, connection:
         configured = json.loads(connection.execute("SELECT identity_json FROM work").fetchone()[0])
     evidence = directory / "runtime-mi-after-observation-and-review.json"
     return {

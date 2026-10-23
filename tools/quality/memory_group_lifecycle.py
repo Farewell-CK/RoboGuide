@@ -12,6 +12,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -92,7 +93,10 @@ def run(scenario: GroupScenario) -> dict[str, Any]:
     )
     for name in ("source", "consumer"):
         database = scenario.directory / name / "backend/file-jobs.sqlite3"
-        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+        with (
+            closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection,
+            connection,
+        ):
             assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
     save(scenario.directory / "group-before-authorization.json", waiting)
     group = scenario.get(path)["group_id"]
@@ -266,9 +270,15 @@ def run(scenario: GroupScenario) -> dict[str, Any]:
         for execution, row in restored.items()
     }
     for receiver, name in enumerate(("source", "consumer")):
-        with sqlite3.connect(
-            f"file:{scenario.directory / name / 'backend/file-jobs.sqlite3'}?mode=ro", uri=True
-        ) as connection:
+        with (
+            closing(
+                sqlite3.connect(
+                    f"file:{scenario.directory / name / 'backend/file-jobs.sqlite3'}?mode=ro",
+                    uri=True,
+                )
+            ) as connection,
+            connection,
+        ):
             assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
         assert (
             request(scenario.backends[receiver], "/v1/file-jobs/health")[1]["active_executions"]

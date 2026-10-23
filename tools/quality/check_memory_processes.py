@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -295,7 +296,7 @@ def run(directory: Path, old_node_binary: Path) -> dict[str, Any]:
             "memory-backend",
         )
         identity = wait_for(lambda: request(backend, "/v1/instance")[1], "actual Memory backend")
-        with sqlite3.connect(directory / "backend/memory.sqlite3") as db:
+        with closing(sqlite3.connect(directory / "backend/memory.sqlite3")) as db, db:
             db.execute(
                 "CREATE TRIGGER fail_final_import BEFORE UPDATE OF state ON imports "
                 "BEGIN SELECT RAISE(ABORT,'conformance final import SQL failure'); END"
@@ -352,7 +353,7 @@ def run(directory: Path, old_node_binary: Path) -> dict[str, Any]:
         )
         assert process.poll() is None
         assert (directory / "backend/content" / digest[7:]).read_bytes() == payload
-        with sqlite3.connect(directory / "backend/memory.sqlite3") as db:
+        with closing(sqlite3.connect(directory / "backend/memory.sqlite3")) as db, db:
             assert db.execute("SELECT COUNT(*),state FROM imports").fetchone() == (1, "pending")
         replacement = dict(command, import_id=uuid.uuid4().hex)
         assert request(origin, "/v1/memory/imports", replacement)[0] == 409
@@ -379,7 +380,7 @@ def run(directory: Path, old_node_binary: Path) -> dict[str, Any]:
         assert receipt["receipt"]["provider_instance_id"] == identity["instance_id"]
         assert receipt["current_authority_at_receipt"] is True
         assert process.poll() is None, "Memory query must not complete the actual consumer"
-        with sqlite3.connect(directory / "backend/memory.sqlite3") as db:
+        with closing(sqlite3.connect(directory / "backend/memory.sqlite3")) as db, db:
             assert db.execute("SELECT COUNT(*),state FROM imports").fetchone() == (1, "pending")
         old = subprocess.run(
             [str(old_node_binary), str(legacy_config)],

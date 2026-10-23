@@ -364,14 +364,14 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
             }
             for context in (viewer, foreign):
                 assert call(artifact_origin, context, "POST", path + "/retire", command)[0] == 403
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute(
                     "CREATE TRIGGER upload_retire_fault BEFORE INSERT ON events "
                     "WHEN NEW.payload_schema='domain.EventPayload.json/v31' "
                     "BEGIN SELECT RAISE(ABORT,'actual upload-retirement SQL fault'); END"
                 )
             assert call(artifact_origin, admin, "POST", path + "/retire", command)[0] >= 500
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 assert connection.execute(
                     "SELECT COUNT(*) FROM events "
                     "WHERE payload_schema='domain.EventPayload.json/v31'"
@@ -606,7 +606,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
             if value["path"].endswith("reclamation-v1/journal.sqlite3")
         )
         tampered_sql = tampered / gc_record["path"]
-        with sqlite3.connect(tampered_sql) as connection:
+        with closing(sqlite3.connect(tampered_sql)) as connection, connection:
             connection.execute("DELETE FROM gc_tombstones")
         raw = tampered_sql.read_bytes()
         gc_record.update(content_digest=digest(raw), byte_size=len(raw))

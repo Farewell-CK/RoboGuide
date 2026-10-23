@@ -11,6 +11,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -111,7 +112,10 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
     def original_heads(database: Path) -> dict[tuple[str, str], dict[str, Any]]:
         """Independently read original acquisition/retirement heads through readonly SQL."""
         heads = {}
-        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
+        with (
+            closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection,
+            connection,
+        ):
             for (raw,) in connection.execute(
                 "SELECT payload_json FROM events "
                 "WHERE payload_schema='domain.EventPayload.json/v29' ORDER BY sequence"

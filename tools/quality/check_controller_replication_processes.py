@@ -17,6 +17,7 @@ import subprocess
 import threading
 import time
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -392,9 +393,15 @@ def run(
 
         # Compare original complete evidence prefixes rather than a racing current heartbeat tail.
         await_condition(lambda: status(old_index), "rejoined replica status")
-        with sqlite3.connect(
-            f"file:{directory / f'replica-{new_index + 1}/replica.sqlite3'}?mode=ro", uri=True
-        ) as database:
+        with (
+            closing(
+                sqlite3.connect(
+                    f"file:{directory / f'replica-{new_index + 1}/replica.sqlite3'}?mode=ro",
+                    uri=True,
+                )
+            ) as database,
+            database,
+        ):
             retained = database.execute(
                 "SELECT sequence,data FROM replica_events ORDER BY sequence"
             ).fetchall()
@@ -402,9 +409,15 @@ def run(
         def prefix_converged() -> bool:
             """Compare exact rows, including original source/time and command evidence."""
             for index in range(3):
-                with sqlite3.connect(
-                    f"file:{directory / f'replica-{index + 1}/replica.sqlite3'}?mode=ro", uri=True
-                ) as database:
+                with (
+                    closing(
+                        sqlite3.connect(
+                            f"file:{directory / f'replica-{index + 1}/replica.sqlite3'}?mode=ro",
+                            uri=True,
+                        )
+                    ) as database,
+                    database,
+                ):
                     found = database.execute(
                         "SELECT sequence,data FROM replica_events WHERE sequence<=? "
                         "ORDER BY sequence",
@@ -418,11 +431,15 @@ def run(
         result["rejoined_metadata_prefix_rows"] = len(retained)
         copied = directory / "standalone-copy.sqlite3"
         with (
-            sqlite3.connect(
-                f"file:{directory / f'replica-{new_index + 1}/controller.sqlite3'}?mode=ro",
-                uri=True,
+            closing(
+                sqlite3.connect(
+                    f"file:{directory / f'replica-{new_index + 1}/controller.sqlite3'}?mode=ro",
+                    uri=True,
+                )
             ) as source,
-            sqlite3.connect(copied) as target,
+            source,
+            closing(sqlite3.connect(copied)) as target,
+            target,
         ):
             source.backup(target)
         denied = subprocess.run(

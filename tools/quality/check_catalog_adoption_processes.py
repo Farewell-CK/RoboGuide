@@ -237,14 +237,14 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
                 == 409
             )
             # Real SQL fails after admission/candidate hashing; old Catalog must remain unaccounted.
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute(
                     "CREATE TRIGGER adoption_fault BEFORE INSERT ON events "
                     "WHEN NEW.payload_schema='domain.EventPayload.json/v30' "
                     "BEGIN SELECT RAISE(ABORT,'actual adoption receipt SQL fault'); END"
                 )
             assert call(artifact_origin, admin, "POST", path + "/adopt", command)[0] >= 500
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 assert connection.execute(
                     "SELECT COUNT(*) FROM events WHERE payload_schema IN "
                     "('domain.EventPayload.json/v29','domain.EventPayload.json/v30')"

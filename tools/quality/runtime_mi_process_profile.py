@@ -14,6 +14,7 @@ import sqlite3
 import ssl
 import time
 import uuid
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -135,8 +136,11 @@ class PausedGenerator(ResponsesMissionRepairer):
         """Pause after the actual adapter and SQL receipt for process interruption."""
         if self.snapshot is not None:
             assert not self.snapshot.exists()
-            with sqlite3.connect(f"file:{self.database}?mode=ro", uri=True) as source:
-                with sqlite3.connect(self.snapshot) as target:
+            with (
+                closing(sqlite3.connect(f"file:{self.database}?mode=ro", uri=True)) as source,
+                source,
+            ):
+                with closing(sqlite3.connect(self.snapshot)) as target, target:
                     source.backup(target)
         plan = self.delegate.replan(
             mission_id,
