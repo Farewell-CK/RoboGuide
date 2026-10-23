@@ -601,6 +601,17 @@ async fn run(request: Request) -> Result<Value, String> {
                 return Err("metadata alone published original unavailable bytes".into());
             }
             copy(&cas, &source_content, &candidate, "actual-source-copy")?;
+            source
+                .persist_log_entries(&[Entry {
+                    log_id: LogId::new(
+                        CommittedLeaderId::new(candidate.epoch.term, candidate.epoch.replica_id),
+                        1,
+                    ),
+                    payload: EntryPayload::Normal(ReplicaCommand::ContentApplication {
+                        content_application: Box::new(candidate.clone()),
+                    }),
+                }])
+                .map_err(|error| error.to_string())?;
             let old_snapshot = source
                 .build_snapshot()
                 .await

@@ -6,7 +6,7 @@ use std::os::unix::fs::MetadataExt;
 /// Original member-local clock and actual process evidence, never a distributed time or device claim.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct ContentBudget {
+pub(crate) struct ContentBudget {
     /// Actual original Linux boot identity.
     boot_id: String,
     /// Actual original time namespace device/inode.
@@ -16,7 +16,7 @@ pub(super) struct ContentBudget {
     /// Original receive time in this actual kernel namespace.
     admitted_ms: u64,
     /// Immutable bounded duration, including original queue and I/O time.
-    pub(super) duration_ms: u64,
+    pub(crate) duration_ms: u64,
     /// Original receiver process, independently of a future process's PID.
     pid: u32,
     /// Actual original kernel process start ticks.
@@ -88,7 +88,7 @@ fn sample() -> Result<(String, (u64, u64), u64), String> {
 
 impl ContentBudget {
     /// Admits one original positive receive duration before it can wait for the metadata writer.
-    pub(super) fn issue(duration_ms: u64) -> Result<Self, String> {
+    pub(crate) fn issue(duration_ms: u64) -> Result<Self, String> {
         if !(100..=300_000).contains(&duration_ms) {
             return Err("content receive budget is outside its explicit bound".into());
         }
@@ -109,7 +109,7 @@ impl ContentBudget {
     }
 
     /// Checks retained original shape without fabricating a current process or renewing its deadline.
-    pub(super) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if self.boot_id.len() != 36
             || !self
                 .boot_id
@@ -128,7 +128,7 @@ impl ContentBudget {
     }
 
     /// Refuses effects after the original same-kernel deadline, conservatively including resolution.
-    pub(super) fn check(&self) -> Result<u64, String> {
+    pub(crate) fn check(&self) -> Result<u64, String> {
         self.validate()?;
         let (boot, namespace, now) = sample()?;
         if boot != self.boot_id
@@ -142,7 +142,7 @@ impl ContentBudget {
     }
 
     /// Validates the retained actual decision sample without comparing it with a new clock.
-    pub(super) fn validates_completion(&self, completed_ms: u64) -> bool {
+    pub(crate) fn validates_completion(&self, completed_ms: u64) -> bool {
         self.validate().is_ok()
             && completed_ms >= self.admitted_ms
             && completed_ms

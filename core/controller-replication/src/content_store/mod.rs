@@ -15,6 +15,7 @@ pub use producers::{
     ReplicaContentProducerKind, ReplicaContentProducerSource, ReplicaContentProducerStatus,
 };
 pub use reader::{ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus};
+pub(crate) use time::ContentBudget;
 pub use time::ContentProcessEndObservation;
 #[cfg(test)]
 mod tests;

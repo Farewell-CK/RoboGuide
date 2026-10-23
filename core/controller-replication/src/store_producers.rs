@@ -236,7 +236,9 @@ impl SqliteRaftStore {
                 source,
                 self._writer.clone(),
                 inputs,
-                300_000,
+                self.work_clock
+                    .as_ref()
+                    .map_or(300_000, crate::content_store::ProducerClock::duration_ms),
                 self.work_clock.as_ref(),
             )
             .map(Some)

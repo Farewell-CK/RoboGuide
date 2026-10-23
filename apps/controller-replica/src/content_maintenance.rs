@@ -1,0 +1,88 @@
+//! Explicit local OS-admin content maintenance; no listener, consensus or Controller child starts.
+
+use controller_replication::{ReplicaContentStore, SqliteRaftStore};
+use serde::Deserialize;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+/// Closed original storage declaration; arbitrary explicit members are independent of embodied Nodes.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Member {
+    /// Original existing absolute content root; no root is created by maintenance.
+    content_root: PathBuf,
+    /// Exact original infrastructure cluster/profile identity.
+    profile_identity: String,
+    /// Exact original infrastructure member, never a capability or device inventory.
+    member: u64,
+}
+
+/// Closed local actions; same-ID adoption retries are observations of the original record.
+#[derive(Deserialize)]
+#[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
+enum Request {
+    /// Explicitly upgrade the original drained reader root; parent authority is not upgraded here.
+    UpgradeRoot {
+        /// Original existing member-local storage declaration.
+        member: Member,
+    },
+    /// Adopt only current original v4 Log/View/Snapshot retention under both actual writers.
+    AdoptParent {
+        /// Exact already-upgraded original member-local storage.
+        member: Member,
+        /// Original existing absolute Raft SQL file; another copy cannot lend its original proof.
+        parent_sql: PathBuf,
+        /// Explicit immutable new management operation, independent of historical producer IDs.
+        operation_id: String,
+        /// Original nonrenewing effect duration including queueing, SQL and byte verification.
+        budget_ms: u64,
+    },
+}
+
+/// Runs one explicit closed bounded local command, retaining every original writer inside its scope.
+pub(crate) fn run(path: &Path) -> Result<serde_json::Value, String> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|error| error.to_string())?
+        .take(16 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > 16 * 1024 {
+        return Err("content maintenance request exceeds its fixed bound".into());
+    }
+    let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    match request {
+        Request::UpgradeRoot { member } => {
+            let root = ReplicaContentStore::upgrade_producer_journal(
+                &member.content_root,
+                &member.profile_identity,
+                member.member,
+            )?;
+            Ok(
+                serde_json::json!({"root_identity":root.identity(), "root_upgraded":true, "parent_adopted":false, "historical_budget":"unavailable; original rows retained"}),
+            )
+        }
+        Request::AdoptParent {
+            member,
+            parent_sql,
+            operation_id,
+            budget_ms,
+        } => {
+            if !parent_sql.is_absolute() {
+                return Err(
+                    "content parent maintenance requires an explicit absolute SQL file".into(),
+                );
+            }
+            let result = SqliteRaftStore::adopt_original_content_parent_from_root(
+                &parent_sql,
+                &member.profile_identity,
+                state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA,
+                &member.content_root,
+                member.member,
+                &operation_id,
+                budget_ms,
+            )?;
+            serde_json::to_value(result).map_err(|error| error.to_string())
+        }
+    }
+}

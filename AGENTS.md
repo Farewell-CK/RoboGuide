@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+ADR-0166 adds explicit local `controller-replica --content-maintenance` Root2 upgrade and original
+parent v4 adoption. Actual root/parent writers, native SQL drain and original child wait precede
+admission. A pending format marker and complete first-intent inventory commit before producer/byte
+effects; parent v6 requires the exact adoption Commit/history and actual root producer originals.
+New retention receipts belong only to this adoption. Original business rows, legacy pins, absent
+historical budgets and Unknown remain; same-ID retries only observe. A distinct repair may precede
+v6 Commit but never rewrites the original result. Owners are store_adoption.rs, content_maintenance.rs
+and replica_parent_adoption_processes.py. The actual CLI gate creates zero Nodes/devices/models/
+simulators. Legacy pin retirement, full deployment v3 upgrades, production v0.4, online same-voter
+bytes+metadata ACK, routing/recovery and all remaining N1-N7 still require their own closure.
+
 ADR-0165 moves actual Tokio Snapshot retention-reader closure into one bounded blocking drainer
 per original content root. Unique jobs retain actual root/SQL leases and immutable original intents;
 the existing 4096 retained reader-row bound also bounds pending readers. Queue/Drop/wait completion

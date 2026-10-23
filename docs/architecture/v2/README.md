@@ -345,6 +345,12 @@ member-local journal；Snapshot 不导入此操作权威。新 producer profile 
 已接实际日志、mandatory heads、独立中断对账与有界重型 worker，39 个 owned process
 步骤通过。原部署完整迁移、真实网络多数与其余 N1/N3/N7 仍须分别完成。
 
+[ADR-0166](../../decisions/0166-explicit-original-content-parent-adoption.md)定义显式本地
+parent 接管：原 root 与 SQL writers、原生 drain、完整原数据及新不可续意图先于当前
+Log/View/Snapshot 保留责任的接管。新 storage v6 强制保留接管历史；原业务行、legacy
+pins 和 unavailable 历史不改写。同 ID 只观察，接管不产生旧完成证据、全局引用覆盖或
+网络 quorum，也不启用生产 v0.4。
+
 [ADR-0161](../../decisions/0161-controller-inode-writer-and-storage-generation.md)要求实际
 Controller 的 canonical sibling 与 SQL inode 同时排他，并由最后一个真实连接持有到关闭。
 原生 SQLite 排空独立覆盖旧 live writer；显式 storage v1/read-only legacy views 提供

@@ -5,6 +5,7 @@
 //! Opt-in trusted-loopback consensus supervisor for exactly one owned Controller child.
 
 mod config;
+mod content_maintenance;
 mod metrics;
 mod projection;
 mod supervisor;
@@ -20,6 +21,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let first = arguments
         .next()
         .ok_or("usage: controller-replica [--policy-digest] <config.json>")?;
+    if first == "--content-maintenance" {
+        let path = arguments
+            .next()
+            .ok_or("content maintenance requires an explicit request.json")?;
+        if arguments.next().is_some() {
+            return Err("unexpected content maintenance arguments".into());
+        }
+        let result = content_maintenance::run(std::path::Path::new(&path));
+        match result {
+            Ok(result) => println!("{}", serde_json::json!({"result":result})),
+            Err(error) => {
+                println!("{}", serde_json::json!({"error":error}));
+                return Err(error.into());
+            }
+        }
+        return Ok(());
+    }
     if first == "--admin" {
         let path = arguments.next().ok_or("missing process config.json")?;
         if arguments.next().as_deref() != Some("--leader") {

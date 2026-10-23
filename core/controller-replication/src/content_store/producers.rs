@@ -11,6 +11,17 @@ use std::collections::BTreeSet;
 pub(crate) struct ProducerClock(ContentBudget);
 
 impl ProducerClock {
+    /// Retains an already-issued actual adoption budget without resampling its original clock.
+    pub(crate) fn from_original(budget: &ContentBudget) -> Result<Self, String> {
+        budget.check()?;
+        Ok(Self(budget.clone()))
+    }
+
+    /// Returns only the immutable original duration used by actual producer admissions.
+    pub(crate) fn duration_ms(&self) -> u64 {
+        self.0.duration_ms
+    }
+
     /// Samples one original five-minute work budget before any queue or original parent writer wait.
     pub(crate) fn issue() -> Result<Self, String> {
         ContentBudget::issue(300_000).map(Self)
@@ -384,6 +395,28 @@ pub(super) fn validate_records(
 }
 
 impl ReplicaContentStore {
+    /// Hashes complete retained legacy rows without assigning any of them to a particular parent.
+    pub(crate) fn legacy_producer_inventory_digest(&self) -> Result<String, String> {
+        let guard = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let connection = guard
+            .as_ref()
+            .ok_or("original content connection is closed")?;
+        self.validate_connection(connection)?;
+        let mut originals = Vec::new();
+        for id in layout::head(connection, "legacy_producer_ids")? {
+            originals.push((
+                id.clone(),
+                reference_record(connection, &id)?
+                    .ok_or("original legacy producer row disappeared")?,
+            ));
+        }
+        digest(&originals)
+    }
+
     /// Reports only this actually opened explicit generation, not global reference or deployment coverage.
     pub(crate) fn producer_journal_enabled(&self) -> bool {
         self.inner.producers

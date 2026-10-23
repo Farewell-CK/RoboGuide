@@ -348,6 +348,13 @@ mandatory local heads, independent interruption reconciliation and bounded heavy
 process steps passed. Full original-deployment migration, network quorum and remaining N1/N3/N7
 requirements still need their own implementation and acceptance.
 
+[ADR-0166](../../decisions/0166-explicit-original-content-parent-adoption.md) defines explicit
+local parent adoption. Actual root/SQL writers, native draining, complete original data and a new
+nonrenewing intent precede adoption of current Log/View/Snapshot retention. Storage v6 requires
+complete adoption history; original business rows, legacy pins and unavailable history remain.
+Retries only observe. Adoption establishes neither historical completion, global reference coverage
+nor network quorum, and does not enable production v0.4.
+
 [ADR-0161](../../decisions/0161-controller-inode-writer-and-storage-generation.md) requires both
 the canonical sibling and actual SQL inode leases, retained until the last actual connection closes.
 Native SQLite draining separately fences older live connections. Explicit storage v1 and exact

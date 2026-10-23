@@ -34,10 +34,11 @@ def digest(path: Path) -> str:
 class Processes:
     """Retain original actual PIDs and native wait results even if an assertion later fails."""
 
-    def __init__(self, binary: Path, output: Path) -> None:
+    def __init__(self, binary: Path, output: Path, arguments: tuple[str, ...] = ()) -> None:
         """Bind the exact maintained executable and a new owned evidence directory."""
         self.binary = binary
         self.output = output
+        self.arguments = arguments
         self.owned: list[tuple[subprocess.Popen[bytes], dict[str, Any]]] = []
 
     def start(
@@ -47,7 +48,7 @@ class Processes:
         path = self.output / f"request-{len(self.owned):03d}-{label}.json"
         save(path, request)
         process = subprocess.Popen(
-            [str(binary or self.binary), str(path)],
+            [str(binary or self.binary), *self.arguments, str(path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

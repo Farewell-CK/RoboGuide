@@ -188,9 +188,9 @@ jobs:
           --skip-build --output "${RUNNER_TEMP}/roboguide-artifact-snapshot"
 
       - name: Build complete original State materialization probe
-        run: >
-          cargo build --locked -p state --example replica_state_probe
-          -p controller-replication --example content_snapshot_probe
+        run: |
+          cargo build --locked -p state --example replica_state_probe -p controller-replication --example content_snapshot_probe
+          cargo build --locked -p controller-replica --bin controller-replica
 
       - name: Verify actual original content Archive with zero Nodes
         run: >
@@ -200,6 +200,7 @@ jobs:
           --controller-projection-probe target/debug/examples/projection_probe
           --replica-snapshot-probe target/debug/examples/content_snapshot_probe
           --original-producer-journal
+          --adopt-original-parents --content-maintenance-binary target/debug/controller-replica
           --output "${RUNNER_TEMP}/roboguide-content-archive"
 
       - name: Verify private Archive recipient retirement and actual GC with zero Nodes

@@ -1,5 +1,11 @@
 # RoboGuide
 
+[原内容主库显式接管](docs/development/replica-content-parent-adoption-v0.1.md)由
+`controller-replica --content-maintenance` 与 `core/controller-replication/src/store_adoption.rs`
+负责：实际 writers/native drain、原 child wait 和不可续意图先于当前责任接管。
+pending/v6 日志缺失拒绝；旧业务行、legacy pins 和 Unknown 保留，不补造旧完成证据。
+该入口不启用生产在线内容 quorum，完整迁移/恢复及其余非发布整改继续实施。
+
 [ADR-0162](docs/decisions/0162-explicit-artifact-gc-sql-recovery.md) 增加显式本机 GC SQL
 恢复：完整实际 writer/known consumer、原 digest、不可续意图及 forensic copy 先于
 SQLite 原生 rollback，之后完整核对原记录。实现为

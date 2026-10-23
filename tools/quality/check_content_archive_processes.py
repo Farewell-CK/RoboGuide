@@ -23,6 +23,7 @@ from check_artifact_authority_processes import call as http_call
 from check_artifact_authority_processes import grant
 from check_identity_processes import ROOT, client, pki, port, stop
 from check_state_verifier_processes import save
+from replica_parent_adoption_processes import run as run_parent_adoption
 from replica_producer_processes import run as run_original_producers
 from replica_snapshot_processes import run as run_snapshot_producers
 from replica_state_materialization_processes import run as run_state_materialization
@@ -42,10 +43,23 @@ def run(
     controller_storage_v1: bool = False,
     upgrade_controller_storage: bool = False,
     controller_projection_probe: Path | None = None,
+    adopt_original_parents: bool = False,
+    content_maintenance_binary: Path | None = None,
+    old_parent_snapshot_probe: Path | None = None,
 ) -> dict[str, Any]:
     """Retain actual software process, file, SQL and TLS evidence with zero Nodes."""
     if controller_projection_probe is not None and replica_state_probe is None:
         raise ValueError("actual Controller projection requires the complete original State probe")
+    if adopt_original_parents and (
+        replica_snapshot_probe is None or content_maintenance_binary is None
+    ):
+        raise ValueError("actual parent adoption requires explicit product CLI and Snapshot probe")
+    if (
+        content_maintenance_binary is not None or old_parent_snapshot_probe is not None
+    ) and not adopt_original_parents:
+        raise ValueError(
+            "parent adoption binaries require the explicit actual parent adoption gate"
+        )
     if original_producer_journal and replica_snapshot_probe is None:
         raise ValueError(
             "original producer journal acceptance requires the explicit maintained Snapshot probe"
@@ -75,12 +89,20 @@ def run(
         Path(__file__).with_name("replica_state_materialization_processes.py"),
         Path(__file__).with_name("replica_snapshot_processes.py"),
         Path(__file__).with_name("replica_producer_processes.py"),
+        Path(__file__).with_name("replica_parent_adoption_processes.py"),
         Path(__file__).with_name("check_replica_content_processes.py"),
         Path(__file__).with_name("replica_content_upgrade_processes.py"),
         *sorted((ROOT / "core/controller-replication/src").rglob("*.rs")),
         *sorted((ROOT / "core/controller-replication/examples").glob("*.rs")),
         ROOT / "core/state/examples/replica_state_probe.rs",
     ]
+    if adopt_original_parents:
+        source_paths.extend(
+            [
+                ROOT / "apps/controller-replica/src/main.rs",
+                ROOT / "apps/controller-replica/src/content_maintenance.rs",
+            ]
+        )
     if controller_projection_probe is not None:
         source_paths.extend(
             [
@@ -341,6 +363,7 @@ def run(
         )
         snapshot_producers = None
         producer_journal = None
+        parent_adoption = None
         if replica_snapshot_probe is not None:
             stop(process)
             snapshot_producers = run_snapshot_producers(
@@ -360,6 +383,18 @@ def run(
                     database,
                     source,
                     hashlib.sha256(b"explicit original content producer journal v0.1").hexdigest(),
+                    old_replica_snapshot_probe,
+                )
+            if adopt_original_parents:
+                assert content_maintenance_binary is not None
+                parent_adoption = run_parent_adoption(
+                    directory / "actual-original-parent-adoption",
+                    replica_snapshot_probe,
+                    content_maintenance_binary,
+                    database,
+                    source,
+                    hashlib.sha256(b"explicit original content parent adoption v0.1").hexdigest(),
+                    old_parent_snapshot_probe,
                     old_replica_snapshot_probe,
                 )
             process = launch()
@@ -861,6 +896,7 @@ def run(
             "complete_original_state_materialization": state_materialization,
             "actual_original_snapshot_storage_producers": snapshot_producers,
             "actual_original_producer_journal": producer_journal,
+            "actual_original_parent_adoption": parent_adoption,
             "actual_original_wrapper_upgrade": upgrade_original,
             "actual_controller_storage_v1": controller_storage_v1,
             "actual_original_controller_storage_upgrade": upgrade_controller_storage,
@@ -911,6 +947,9 @@ def main() -> None:
     parser.add_argument("--controller-storage-v1", action="store_true")
     parser.add_argument("--upgrade-controller-storage", action="store_true")
     parser.add_argument("--controller-projection-probe", type=Path)
+    parser.add_argument("--adopt-original-parents", action="store_true")
+    parser.add_argument("--content-maintenance-binary", type=Path)
+    parser.add_argument("--old-parent-snapshot-probe", type=Path)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -935,6 +974,13 @@ def main() -> None:
                 args.upgrade_controller_storage,
                 args.controller_projection_probe.resolve()
                 if args.controller_projection_probe
+                else None,
+                args.adopt_original_parents,
+                args.content_maintenance_binary.resolve()
+                if args.content_maintenance_binary
+                else None,
+                args.old_parent_snapshot_probe.resolve()
+                if args.old_parent_snapshot_probe
                 else None,
             ),
             indent=2,

@@ -3,6 +3,8 @@
 // OpenRaft requires its concrete StorageError at every storage boundary; retain typed upstream failures.
 #![allow(clippy::result_large_err)]
 
+#[path = "store_adoption.rs"]
+mod adoption;
 #[path = "store_apply.rs"]
 mod apply;
 #[path = "store_content.rs"]
@@ -13,6 +15,8 @@ mod producers;
 mod snapshot;
 #[path = "store_work.rs"]
 mod work;
+
+pub use adoption::ReplicaContentParentAdoptionStatus;
 
 use crate::*;
 use openraft::storage::{LogFlushed, RaftLogStorage, RaftStateMachine};
@@ -43,6 +47,10 @@ const CONTENT_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.4";
 const PRODUCER_STORAGE_VERSION: i64 = 5;
 /// Member-local producer-head interpretation, independent of source Snapshot payload metadata.
 const PRODUCER_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.5";
+/// Explicit original-parent adoption requires complete retained member-local command history.
+const ADOPTED_STORAGE_VERSION: i64 = 6;
+/// Parent-local adoption journal interpretation, never imported through a Raft Snapshot.
+const ADOPTED_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.6";
 /// Legacy names retained only as read-only views after the atomic format migration.
 const LEGACY_TABLES: [&str; 5] = [
     "replica_meta",
@@ -361,13 +369,18 @@ fn prepare_storage_format(
     application_schema: &str,
     content_identity: Option<&ReplicaContentIdentity>,
     producers: bool,
+    adoption: bool,
 ) -> Result<(), String> {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
     let marker = schema_object_type(connection, "replica_storage_format")?;
     let target_version = if producers {
-        PRODUCER_STORAGE_VERSION
+        if version == ADOPTED_STORAGE_VERSION {
+            ADOPTED_STORAGE_VERSION
+        } else {
+            PRODUCER_STORAGE_VERSION
+        }
     } else if content_identity.is_some() {
         CONTENT_STORAGE_VERSION
     } else {
@@ -375,7 +388,10 @@ fn prepare_storage_format(
     };
     if (content_identity.is_some() && version != 0 && version != target_version)
         || (content_identity.is_none()
-            && matches!(version, CONTENT_STORAGE_VERSION | PRODUCER_STORAGE_VERSION))
+            && matches!(
+                version,
+                CONTENT_STORAGE_VERSION | PRODUCER_STORAGE_VERSION | ADOPTED_STORAGE_VERSION
+            ))
     {
         return Err("complete-content Replica storage requires explicit original upgrade; metadata-only open/automatic migration refused".into());
     }
@@ -399,7 +415,11 @@ fn prepare_storage_format(
     }
     if matches!(
         version,
-        1 | 2 | REPLICA_STORAGE_VERSION | CONTENT_STORAGE_VERSION | PRODUCER_STORAGE_VERSION
+        1 | 2
+            | REPLICA_STORAGE_VERSION
+            | CONTENT_STORAGE_VERSION
+            | PRODUCER_STORAGE_VERSION
+            | ADOPTED_STORAGE_VERSION
     ) && marker.as_deref() == Some("table")
     {
         if current.iter().any(|kind| kind.as_deref() != Some("table"))
@@ -418,6 +438,8 @@ fn prepare_storage_format(
             "roboguide.replica-storage/v0.1"
         } else if version == 2 {
             "roboguide.replica-storage/v0.2"
+        } else if version == ADOPTED_STORAGE_VERSION {
+            ADOPTED_STORAGE_SCHEMA
         } else if version == PRODUCER_STORAGE_VERSION {
             PRODUCER_STORAGE_SCHEMA
         } else if version == CONTENT_STORAGE_VERSION {
@@ -425,7 +447,11 @@ fn prepare_storage_format(
         } else {
             REPLICA_STORAGE_SCHEMA
         };
-        if stored != (version, expected_schema.to_string()) {
+        if stored != (version, expected_schema.to_string())
+            && !(adoption
+                && version == CONTENT_STORAGE_VERSION
+                && stored == (version, adoption::PENDING_SCHEMA.into()))
+        {
             return Err("Replica storage marker differs".into());
         }
         let identity: Option<(String, String)> =
@@ -564,6 +590,13 @@ fn prepare_storage_format(
         {
             return Err("old Replica storage contains hidden original producer authority".into());
         }
+        adoption::validate_history(
+            connection,
+            version,
+            profile,
+            application_schema,
+            content_identity,
+        )?;
         read_leader_transfer_history(connection)?;
         SqliteRaftStore::validate_controller_supervision(connection)?;
         return Ok(());
@@ -994,7 +1027,7 @@ impl SqliteRaftStore {
     }
     /// Opens a private consensus database and rejects a conflicting stored cluster/schema profile.
     pub fn open(path: &Path, profile: &str, application_schema: &str) -> Result<Self, String> {
-        Self::open_inner(path, profile, application_schema, None)
+        Self::open_inner(path, profile, application_schema, None, false)
     }
 
     /// Opens only an explicit complete-content generation with its exact actual member-local backend.
@@ -1010,7 +1043,7 @@ impl SqliteRaftStore {
         {
             return Err("complete-content Replica requires its actual original profile/current application schema".into());
         }
-        Self::open_inner(path, profile, application_schema, Some(content))
+        Self::open_inner(path, profile, application_schema, Some(content), false)
     }
 
     /// Shares original actual SQLite/root lease setup without lending complete authority to old profiles.
@@ -1019,6 +1052,7 @@ impl SqliteRaftStore {
         profile: &str,
         application_schema: &str,
         content: Option<ReplicaContentStore>,
+        adoption: bool,
     ) -> Result<Self, String> {
         let canonical = if path.exists() {
             path.canonicalize().map_err(|error| error.to_string())?
@@ -1078,18 +1112,47 @@ impl SqliteRaftStore {
         connection
             .busy_timeout(Duration::from_millis(100))
             .map_err(|error| error.to_string())?;
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(|error| error.to_string())?;
+        if adoption && !matches!(version, CONTENT_STORAGE_VERSION | ADOPTED_STORAGE_VERSION) {
+            return Err("explicit original-parent adoption requires existing storage v4 or its original adopted v6".into());
+        }
+        if adoption {
+            adoption::validate_scan_bounds(&connection)?;
+        }
         prepare_storage_format(
             &mut connection,
             profile,
             application_schema,
             content.as_ref().map(ReplicaContentStore::identity),
-            content
-                .as_ref()
-                .is_some_and(ReplicaContentStore::producer_journal_enabled),
+            !(adoption && version == CONTENT_STORAGE_VERSION)
+                && content
+                    .as_ref()
+                    .is_some_and(ReplicaContentStore::producer_journal_enabled),
+            adoption,
         )?;
-        connection
-            .pragma_update(None, "journal_mode", "WAL")
-            .map_err(|error| error.to_string())?;
+        if adoption {
+            let journal: String = connection
+                .query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
+                .map_err(|error| {
+                    format!("original adoption SQL connections are not quiescent: {error}")
+                })?;
+            if journal != "delete" {
+                return Err("original adoption SQL connections are not quiescent".into());
+            }
+            connection
+                .transaction_with_behavior(TransactionBehavior::Exclusive)
+                .map_err(|error| {
+                    format!("original adoption SQL connections are not quiescent: {error}")
+                })?
+                .commit()
+                .map_err(|error| error.to_string())?;
+        } else {
+            connection
+                .pragma_update(None, "journal_mode", "WAL")
+                .map_err(|error| error.to_string())?;
+        }
         connection
             .pragma_update(None, "synchronous", "FULL")
             .map_err(|error| error.to_string())?;
@@ -1110,9 +1173,10 @@ impl SqliteRaftStore {
         {
             return Err("Replica storage generation lacks its exact complete-content view".into());
         }
-        {
+        if !(adoption && version == CONTENT_STORAGE_VERSION) {
             let connection = store.connection.lock().map_err(|error| error.to_string())?;
             store.validate_content_producer_heads(&connection)?;
+            adoption::validate_root_records(&store, &connection)?;
         }
         Ok(store)
     }

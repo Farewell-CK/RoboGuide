@@ -293,6 +293,15 @@ repair 不改写早先不确定性。39 个实际进程步骤与 10 项定向检
 真实 mTLS 同一 voters bytes+metadata ACK、online/路由、reader Drop 等 N7 与 N2–N7
 原所有条件仍须实施，N1/N3 保持开放。
 
+随后 [ADR-0166 原 parent 接管](acceptance/2026-10-23-original-parent-adoption.md)补齐显式
+v4→pending→v6 管理路径：实际 root/parent writers、native drain、原 child wait、新原
+意图/完整目录 precede 当前 Log/View/Snapshot 的新保留责任。49 个实际进程步骤通过，
+包含旧 writer/SQL/hardlink、CAS 缺失、原期限、kill、parent rollback、Commit 后回执
+丢失及只读 retry；实际旧探针与完整 Archive/State/Snapshot 组合另通过。原业务行、
+legacy pins、缺失旧历史和 Unknown 均保留。本项关闭当前 direct-storage v4 的显式接管
+入口；不退休 legacy pins，不替代旧生产 v3 的完整迁移，也不关闭生产在线 v0.4、
+same-voter bytes+metadata ACK、Root3/v6 完整恢复/路由和原全部 N1–N7。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

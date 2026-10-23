@@ -46,6 +46,7 @@ pub use content_store::{
     ReplicaContentStore, ReplicaSnapshotCloseStatus,
 };
 pub use snapshot_data::ReplicaSnapshotData;
+pub use store::ReplicaContentParentAdoptionStatus;
 pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};
 pub use supervision::{ControllerDrainProof, ControllerProcessExit, ControllerProcessIdentity};
 pub use transport::{ReplicaFenceClient, ReplicaServer};

@@ -188,6 +188,26 @@ fn history(connection: &rusqlite::Connection) -> Result<Vec<ControllerProcessRec
 }
 
 impl SqliteRaftStore {
+    /// Requires retained original wait evidence before offline adoption can change parent generation.
+    pub(crate) fn require_adoption_children_closed(
+        connection: &rusqlite::Connection,
+    ) -> Result<(), String> {
+        Self::validate_controller_supervision(connection)?;
+        if read_meta::<bool>(connection, LEGACY_CONTINUITY_KEY)
+            .map_err(|error| error.to_string())?
+            != Some(false)
+            || history(connection)?
+                .iter()
+                .any(|record| record.outcome.is_none())
+        {
+            return Err(
+                "original Controller child continuity/actual wait is unavailable for adoption"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
     /// Refuses application authority when a legacy checkpoint lacks original process continuity.
     pub(crate) fn controller_continuity_known(&self) -> Result<bool, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
