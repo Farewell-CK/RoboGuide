@@ -450,11 +450,9 @@ impl ReplicaNode {
         command_id: String,
         duration_ms: u64,
     ) -> Result<ReplicaContentStreamStatus, String> {
+        self.check_epoch(target.epoch).await?;
         self.network_target_authority(&target)?;
-        if !target
-            .membership
-            .voter_ids()
-            .any(|member| member == self.config.replica_id)
+        if target.epoch.replica_id != self.config.replica_id
             || target.inputs.binary_search(&content).is_err()
             || receiver == self.config.replica_id
         {
@@ -465,6 +463,38 @@ impl ReplicaNode {
         }
         transport::send_content_stream(self, receiver, target, content, command_id, duration_ms)
             .await
+    }
+
+    /// Routes only exact already-committed qualified bytes; this cannot stage a proposed application.
+    pub async fn route_committed_content_to(
+        &self,
+        receiver: u64,
+        target: ContentQuorumTarget,
+        content: ArtifactContentKey,
+        command_id: String,
+        duration_ms: u64,
+    ) -> Result<ReplicaContentStreamStatus, String> {
+        self.network_target_authority(&target)?;
+        if !target
+            .membership
+            .voter_ids()
+            .any(|id| id == self.config.replica_id)
+            || !target.membership.voter_ids().any(|id| id == receiver)
+            || receiver == self.config.replica_id
+            || target.inputs.binary_search(&content).is_err()
+        {
+            return Err("committed content route has another source/receiver/input".into());
+        }
+        self.store.require_committed_content_target(&target)?;
+        crate::transport::send_committed_content_stream(
+            self,
+            receiver,
+            target,
+            content,
+            command_id,
+            duration_ms,
+        )
+        .await
     }
 }
 

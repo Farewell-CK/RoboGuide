@@ -7,6 +7,10 @@
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
 
+[ADR-0175](../../decisions/0175-exact-committed-content-routing.md)将已提交内容 route
+与原 leader proposal staging 分为独立 wire command/API；双方的实际完整 SQL target、
+current epoch/membership 和精确 source member/Root/TLS 逐块约束读取，旧 command 不扩权。
+
 [ADR-0173](../../decisions/0173-unchanged-timer-transaction-elision.md)要求 timer 只有在
 实际 SQL/事件无变化、完整原 checkpoint 精确相同且无 pending 写入时才回滚空事务。
 原 committed outbox 仍按当前授权/完整 delivery fence 发送；零事件变化和外部命令保留

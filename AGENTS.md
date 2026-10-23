@@ -1,5 +1,13 @@
 # Repository Guidelines
 
+ADR-0175 preserves original leader-only proposal PushContent and adds explicit
+PushCommittedContentV1/route_committed_content_to for current voters. Source and receiver each
+check exact committed SQL revision/checkpoint/candidate digest/inputs before Ready and each chunk,
+alongside original epoch/membership/TLS/budgets. The receipt's exact source member/Root/actual leaf
+must match its original stream origin. Old peers refuse the new command. This does not transfer
+Artifact ownership or publish Prepared bytes. The maintained native network checker now actually
+routes follower to leader, hides source bytes for exact original replay and rejects uncommitted targets.
+
 ADR-0173 allows only an actually unchanged internal timer batch to roll back without a new journal
 command. Original BEGIN authority/writer checks stay. Actual SQLite total_changes must match both
 the original BEGIN and last complete checkpoint Commit, with the original transaction's data_version;

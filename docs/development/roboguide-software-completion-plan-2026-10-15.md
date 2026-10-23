@@ -113,6 +113,12 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N3 以 [ADR-0175](../decisions/0175-exact-committed-content-routing.md)将 Root 路由
+收紧为独立 committed command/API：双方实际完整 SQL target、source member/Root/
+TLS、epoch/预算逐块检查，原 leader proposal staging 保持。维护 native gate 新增
+实际 follower→leader、隐藏 source 后原 ID 只读重试及未提交 target 拒绝。后续继续
+原 Controller 的受权内容读取、Prepared takeover 和完整 readiness，不提前标完整 HA。
+
 N7 按 [ADR-0173](../decisions/0173-unchanged-timer-transaction-elision.md)收敛实际空闲
 timer 重复提交的 I/O：完整 checkpoint、实际当前/上次完整提交 SQL 计数、外部连接
 data_version、事件及 pending 写入均不变才回滚。原 side effects/outbox 与显式

@@ -1,5 +1,9 @@
 # RoboGuide V2 current architecture
 
+[ADR-0175](../../decisions/0175-exact-committed-content-routing.md) separates committed routes
+from original leader proposal staging by explicit wire command and API. Both actual committed SQL
+targets, current epoch/membership and the exact source member/Root/TLS constrain each bounded chunk.
+
 [ADR-0173](../../decisions/0173-unchanged-timer-transaction-elision.md) permits an internal timer
 rollback only when actual SQL/events and the exact complete checkpoint remain unchanged, with no
 pending writes. Existing committed outboxes retain current authorization and complete delivery

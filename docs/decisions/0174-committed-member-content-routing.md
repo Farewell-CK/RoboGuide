@@ -4,6 +4,10 @@
 - 日期：2026-10-23
 - 前置：[ADR-0169](0169-consensus-bound-content-stream-transport.md)、[ADR-0172](0172-runnable-owned-controller-content-profile.md)
 
+后续 [ADR-0175](0175-exact-committed-content-routing.md)收紧首版接线：原 leader
+proposal push 保持，新 committed route 使用独立 command/API，逐块核对双方实际
+已提交完整 target；下文描述的是路由职责，不能把任意声明的 target 当成授权。
+
 ## 问题
 
 当前 owner 切换后，新的 Controller 可能需要从另一个仍保有完整 qualified Root

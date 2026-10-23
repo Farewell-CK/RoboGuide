@@ -9,6 +9,8 @@ pending 写入及精确 checkpoint 均不变才回滚空事务。原 outbox 授�
 允许当前 target membership 中任一已认证 voter 提供 qualified Root bytes；原 Artifact
 `source_owner`、Replica source member、Root owner、TLS/epoch、预算和 command 均独立保留。
 这解决副本间 Root 读取，Prepared upload takeover 与 Artifact owner 转移仍单独实施。
+后续 [ADR-0175](docs/decisions/0175-exact-committed-content-routing.md)采用独立 committed
+route 命令，原 leader staging 保持；双方实际完整 SQL target 和精确 source 均逐块复核。
 
 [真实 Controller 内容 Profile](docs/development/acceptance/2026-10-23-runnable-controller-content.md)
 以显式 process v0.2 接通 parent8/Root4、原 PID 日志、mTLS 和同一个实际 Artifact writer。

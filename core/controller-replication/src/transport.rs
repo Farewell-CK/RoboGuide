@@ -18,8 +18,8 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 #[path = "content_transport.rs"]
 mod content_streams;
 pub(crate) use content_streams::{
-    StreamNotice, StreamReceive, receive_owned_stream, send_content_stream,
-    send_content_stream_checked,
+    StreamNotice, StreamReceive, receive_owned_stream, send_committed_content_stream,
+    send_content_stream, send_content_stream_checked,
 };
 
 #[cfg(test)]
@@ -60,6 +60,17 @@ enum Command {
         /// Original immutable receive ID, never an automatic repair ID.
         command_id: String,
         /// Original bounded receiver duration, frozen before its writer wait/queue.
+        budget_ms: u64,
+    },
+    /// Explicit committed-only route; older peers refuse instead of widening proposal staging.
+    PushCommittedContentV1 {
+        /// Exact complete already-applied target on both original members.
+        target: Box<ContentQuorumTarget>,
+        /// Original qualified content, never another Artifact owner alias.
+        content: ArtifactContentKey,
+        /// One original retained route operation.
+        command_id: String,
+        /// Original receiver duration, issued before queue admission.
         budget_ms: u64,
     },
     /// Observes actual loaded TLS credentials and local committed trust without claiming quorum.
@@ -170,6 +181,7 @@ impl Command {
             self,
             Self::Commit { .. }
                 | Self::PushContent { .. }
+                | Self::PushCommittedContentV1 { .. }
                 | Self::AdminRotateCertificate { .. }
                 | Self::AdminAddLearner { .. }
                 | Self::AdminChangeMembership { .. }
@@ -326,7 +338,9 @@ where
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     drop(bytes);
     let received_at = tokio::time::Instant::now();
-    let stream_budget = if let Command::PushContent { budget_ms, .. } = &request.command {
+    let stream_budget = if let Command::PushContent { budget_ms, .. }
+    | Command::PushCommittedContentV1 { budget_ms, .. } = &request.command
+    {
         Some(crate::content_store::ContentBudget::issue(*budget_ms)?)
     } else {
         None
@@ -388,18 +402,39 @@ where
                 );
                 Reply::ContentObservation(node.observe_content_checked(*target, check).await)
             }
+            Command::PushCommittedContentV1 {
+                target,
+                content,
+                command_id,
+                budget_ms: _,
+            } => {
+                if !target.membership.voter_ids().any(|id| id == request.sender) {
+                    return Err("committed route source is not an original voter".into());
+                }
+                node.store.require_committed_content_target(&target)?;
+                drop(frame);
+                return content_streams::receive_content_stream(
+                    &mut stream,
+                    node.clone(),
+                    *target,
+                    content,
+                    command_id,
+                    (request.sender, true),
+                    stream_budget.ok_or("original route receive clock missing")?,
+                    certificate_connection.ok_or("committed route requires actual mTLS")?,
+                )
+                .await;
+            }
             Command::PushContent {
                 target,
                 content,
                 command_id,
                 budget_ms: _,
             } => {
-                if !target
-                    .membership
-                    .voter_ids()
-                    .any(|member| member == request.sender)
-                {
-                    return Err("actual content sender is not a committed target member".into());
+                if request.sender != target.epoch.replica_id {
+                    return Err(
+                        "actual content sender differs from the original target leader".into(),
+                    );
                 }
                 drop(frame);
                 return content_streams::receive_content_stream(
@@ -408,7 +443,7 @@ where
                     *target,
                     content,
                     command_id,
-                    request.sender,
+                    (request.sender, false),
                     stream_budget.ok_or("original receive clock is missing")?,
                     certificate_connection.ok_or("content stream requires actual mTLS")?,
                 )

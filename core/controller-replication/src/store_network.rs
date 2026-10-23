@@ -8,6 +8,35 @@ use std::os::unix::fs::MetadataExt;
 mod tests;
 
 impl SqliteRaftStore {
+    /// Requires the actual committed complete target; membership alone never authorizes routed bytes.
+    pub(crate) fn require_committed_content_target(
+        &self,
+        target: &ContentQuorumTarget,
+    ) -> Result<(), String> {
+        self.read_network_snapshot(|connection| {
+            let revision: u64 = read_meta(connection, "revision")
+                .map_err(|error| error.to_string())?
+                .ok_or("committed content revision is unavailable")?;
+            let checkpoint: state::PersistedCheckpoint = read_meta(connection, "checkpoint")
+                .map_err(|error| error.to_string())?
+                .ok_or("committed content checkpoint is unavailable")?;
+            let content: AcceptedContentState = read_meta(connection, "content_state")
+                .map_err(|error| error.to_string())?
+                .ok_or("committed complete candidate is unavailable")?;
+            if revision != target.revision
+                || state::checkpoint_identity(&checkpoint) != target.checkpoint_digest
+                || content.batch_digest != target.batch_digest
+                || content.identity()? != target.batch_digest
+                || content.inputs != target.inputs
+                || content.batch.checkpoint != checkpoint
+            {
+                return Err(
+                    "actual committed complete content target differs from original route".into(),
+                );
+            }
+            Ok(())
+        })
+    }
     /// Checks current committed source fences without blocking network tasks behind application SQL.
     pub(crate) fn connection_source_fence(&self, member: u64) -> Result<(), String> {
         let check = |connection: &Connection| {

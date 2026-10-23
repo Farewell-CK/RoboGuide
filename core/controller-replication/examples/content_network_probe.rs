@@ -47,6 +47,17 @@ enum Request {
     Commit,
     /// Reads actual current accepted metadata and independently hashes actual complete member bytes.
     Quorum,
+    /// Routes exact already-committed bytes from this actual member; never admits a new proposal.
+    RouteCommitted {
+        /// Exact current full accepted target selected by the actual quorum observation.
+        target: Value,
+        /// Original qualified bytes, with immutable source owner.
+        content: ArtifactContentKey,
+        /// Actual current committed receiving member.
+        receiver: u64,
+        /// Original nonrenewing route operation identity.
+        command_id: String,
+    },
     /// Reopens each exact target only through the actual original observation path.
     Observe {
         /// Explicit original complete target; parsing grants no authority.
@@ -305,6 +316,21 @@ async fn serve(config: Config) -> Result<(), String> {
         let request: Request = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
         let shutdown = matches!(request, Request::Shutdown);
         let result = match request {
+            Request::RouteCommitted {
+                target,
+                content,
+                receiver,
+                command_id,
+            } => node
+                .route_committed_content_to(
+                    receiver,
+                    serde_json::from_value(target).map_err(|error| error.to_string())?,
+                    content,
+                    command_id,
+                    15000,
+                )
+                .await
+                .map(|original| json!({"original":original})),
             Request::Status => {
                 let epoch = node.current_epoch();
                 let quorum = match epoch {

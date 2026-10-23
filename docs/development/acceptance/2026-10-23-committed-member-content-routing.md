@@ -4,6 +4,11 @@
 [ADR-0174](../../decisions/0174-committed-member-content-routing.md)先定义 source
 member 与原 Artifact source owner 的边界，再修改 Replica stream。
 
+首版证据保留于 `cross-owner-route-tests-01.log` 和 `cross-owner-route-native-final/`。
+其中 native 只验证旧整链兼容，不是新 follower 路由的实际进程证据。后续 ADR-0175
+将新路由接到独立 `route_committed_content_to` / wire command 并补实际进程 gate；
+原 `stream_content_to` 恢复 leader proposal 含义，不再扩大旧接口权限。
+
 `ReplicaNode::stream_content_to` 现在接受当前 target membership 中任一实际 voter
 作为 source member。transport 仍要求真实 mTLS、当前 committed target/profile/epoch、
 qualified input、receiver owner、原 command/budget；接收 SQL journal 保存实际

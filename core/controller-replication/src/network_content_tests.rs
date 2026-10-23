@@ -238,6 +238,32 @@ async fn actual_mtls_content_streams_keep_original_receipts_and_independent_rece
         .iter()
         .find(|peer| peer.config.replica_id == source_member)
         .unwrap();
+    assert!(
+        source_node
+            .stream_content_to(
+                node.config.replica_id,
+                target.clone(),
+                key.clone(),
+                "actual-follower-proposal-refused".into(),
+                30000,
+            )
+            .await
+            .is_err()
+    );
+    let mut changed_target = target.clone();
+    changed_target.revision += 1;
+    assert!(
+        source_node
+            .route_committed_content_to(
+                node.config.replica_id,
+                changed_target,
+                key.clone(),
+                "actual-uncommitted-route-refused".into(),
+                30000,
+            )
+            .await
+            .is_err()
+    );
     let leader_root_path = root
         .root()
         .join("content-v1")
@@ -246,7 +272,7 @@ async fn actual_mtls_content_streams_keep_original_receipts_and_independent_rece
     let leader_hidden = leader_root_path.with_extension("actual-cross-owner-route");
     std::fs::rename(&leader_root_path, &leader_hidden).unwrap();
     let routed = source_node
-        .stream_content_to(
+        .route_committed_content_to(
             node.config.replica_id,
             target.clone(),
             key.clone(),
@@ -256,6 +282,7 @@ async fn actual_mtls_content_streams_keep_original_receipts_and_independent_rece
         .await
         .unwrap();
     assert!(routed.receipt.is_some());
+    assert_eq!(routed.original["intent"]["origin"]["member"], source_member);
     root.verify_content(&key).unwrap();
     std::fs::remove_file(&leader_root_path).ok();
     std::fs::rename(leader_hidden, leader_root_path).unwrap();

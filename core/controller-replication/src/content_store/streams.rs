@@ -198,10 +198,12 @@ pub(crate) fn verify_stream_observation(
     content: &ArtifactContentKey,
     command: &str,
     receiver: u64,
+    source: &StreamOrigin,
 ) -> Result<(), String> {
     let original: StreamRecord =
         serde_json::from_value(observed.original.clone()).map_err(|error| error.to_string())?;
-    if !matches!(&original.intent.origin, StreamOrigin::Replica { member, .. }
+    if &original.intent.origin != source
+        || !matches!(source, StreamOrigin::Replica { member, .. }
         if target.membership.voter_ids().any(|voter| voter == *member))
     {
         return Err("actual peer stream observation changed its original source kind".into());

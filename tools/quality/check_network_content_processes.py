@@ -327,6 +327,54 @@ def run(
                     == owners[str(member)]
                 )
                 actual_bytes(Path(configs[member]["content_root"]))
+            route_source = next(member for member in members if member != current)
+            source_key = actual_bytes(Path(configs[route_source]["content_root"]))[0]
+            current_root = Path(configs[current]["content_root"])
+            routed_path = (
+                current_root
+                / "content-v1"
+                / source_key["source_owner"][15:]
+                / source_key["content_digest"][7:]
+            )
+            withheld = routed_path.with_suffix(".actual-route-original")
+            routed_path.rename(withheld)
+            route_request = {
+                "action": "route-committed",
+                "target": first["target"],
+                "content": source_key,
+                "receiver": current,
+                "command_id": "actual-committed-follower-to-leader",
+            }
+            routed = actors[route_source].ask(route_request)["original"]
+            assert routed["receipt"]["content"] == source_key
+            assert routed["original"]["intent"]["origin"]["member"] == route_source
+            assert (
+                routed["original"]["intent"]["origin"]["store_owner"] == owners[str(route_source)]
+            )
+            assert routed_path.read_bytes() == withheld.read_bytes()
+            source_path = (
+                Path(configs[route_source]["content_root"])
+                / "content-v1"
+                / source_key["source_owner"][15:]
+                / source_key["content_digest"][7:]
+            )
+            source_hidden = source_path.with_suffix(".actual-route-replay-source")
+            source_path.rename(source_hidden)
+            assert actors[route_source].ask(route_request)["original"] == routed
+            source_hidden.rename(source_path)
+            routed_path.unlink()
+            withheld.rename(routed_path)
+            changed_route = json.loads(json.dumps(route_request))
+            changed_route["command_id"] = "actual-uncommitted-route-refused"
+            changed_route["target"]["revision"] += 1
+            assert "error" in actors[route_source].ask(changed_route, required=False)
+            result["actual_committed_member_route"] = {
+                "source_member": route_source,
+                "receiver": current,
+                "original": routed,
+                "exact_replay_with_source_hidden": True,
+                "uncommitted_target_refused": True,
+            }
             hidden_inputs = []
             for member in [item for item in members if item != current]:
                 root = Path(configs[member]["content_root"])

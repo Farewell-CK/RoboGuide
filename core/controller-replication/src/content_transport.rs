@@ -167,6 +167,46 @@ pub(crate) async fn send_content_stream_checked(
     clock: ContentBudget,
     caller: StreamPermission,
 ) -> Result<ReplicaContentStreamStatus, String> {
+    send_stream(
+        node, receiver, target, content, command_id, clock, caller, false,
+    )
+    .await
+}
+
+/// Selects explicit committed-only routing while retaining one original immutable operation clock.
+pub(crate) async fn send_committed_content_stream(
+    node: &ReplicaNode,
+    receiver: u64,
+    target: ContentQuorumTarget,
+    content: ArtifactContentKey,
+    command_id: String,
+    duration_ms: u64,
+) -> Result<ReplicaContentStreamStatus, String> {
+    send_stream(
+        node,
+        receiver,
+        target,
+        content,
+        command_id,
+        ContentBudget::issue(duration_ms)?,
+        Arc::new(|| Ok(())),
+        true,
+    )
+    .await
+}
+
+/// Carries one original scope through the shared bounded transport; committed routing is explicit.
+#[allow(clippy::too_many_arguments)]
+async fn send_stream(
+    node: &ReplicaNode,
+    receiver: u64,
+    target: ContentQuorumTarget,
+    content: ArtifactContentKey,
+    command_id: String,
+    clock: ContentBudget,
+    caller: StreamPermission,
+    committed: bool,
+) -> Result<ReplicaContentStreamStatus, String> {
     clock.check()?;
     caller()?;
     let duration_ms = clock.remaining_ms()?.min(15000);
@@ -181,11 +221,20 @@ pub(crate) async fn send_content_stream_checked(
         .nodes()
         .find_map(|(id, member)| (*id == receiver).then_some(member.addr.clone()))
         .ok_or("original receiver is absent from the exact committed membership")?;
-    let command = Command::PushContent {
-        target: Box::new(target.clone()),
-        content: content.clone(),
-        command_id: command_id.clone(),
-        budget_ms: duration_ms,
+    let command = if committed {
+        Command::PushCommittedContentV1 {
+            target: Box::new(target.clone()),
+            content: content.clone(),
+            command_id: command_id.clone(),
+            budget_ms: duration_ms,
+        }
+    } else {
+        Command::PushContent {
+            target: Box::new(target.clone()),
+            content: content.clone(),
+            command_id: command_id.clone(),
+            budget_ms: duration_ms,
+        }
     };
     let request = Request {
         profile: node.profile_identity(),
@@ -203,13 +252,18 @@ pub(crate) async fn send_content_stream_checked(
     let encoded = crate::transport_budget::encode(&request, &node.transport_budget)
         .map_err(|error| error.to_string())?;
     let expected = (target.clone(), content.clone(), command_id.clone());
+    let tls = node
+        .tls
+        .as_ref()
+        .ok_or("content stream requires actual mTLS")?
+        .refreshed()?;
+    let source_origin = StreamOrigin::Replica {
+        member: node.config.replica_id,
+        store_owner: root.identity().store_owner.clone(),
+        peer_leaf: tls.local_certificate_digest.clone(),
+    };
     let operation = async {
         clock.check()?;
-        let tls = node
-            .tls
-            .as_ref()
-            .ok_or("content stream requires actual mTLS")?
-            .refreshed()?;
         let socket = tokio::net::TcpStream::connect(address)
             .await
             .map_err(|error| error.to_string())?;
@@ -230,9 +284,17 @@ pub(crate) async fn send_content_stream_checked(
             local: tls,
         };
         let network = permission(node.clone(), target.clone(), receiver, evidence);
+        let original_node = node.clone();
+        let original_target = target.clone();
         let check: StreamPermission = Arc::new(move || {
             caller()?;
-            network()
+            network()?;
+            if committed {
+                original_node
+                    .store
+                    .require_committed_content_target(&original_target)?;
+            }
+            Ok(())
         });
         check()?;
         clock.check()?;
@@ -335,6 +397,7 @@ pub(crate) async fn send_content_stream_checked(
         &expected.1,
         &expected.2,
         receiver,
+        &source_origin,
     )?;
     Ok(observed)
 }
@@ -377,7 +440,7 @@ pub(super) async fn receive_content_stream<S>(
     target: ContentQuorumTarget,
     content: ArtifactContentKey,
     command_id: String,
-    source_member: u64,
+    source_scope: (u64, bool),
     budget: ContentBudget,
     evidence: crate::tls::VerifiedTlsConnection,
 ) -> Result<(), String>
@@ -385,7 +448,7 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     budget.check()?;
-    let peer = source_member;
+    let (peer, committed) = source_scope;
     let source_owner = target
         .membership
         .nodes()
@@ -402,7 +465,16 @@ where
             .peer_digest()
             .ok_or("actual content peer leaf absent")?,
     };
-    let check = permission(node.clone(), target.clone(), peer, evidence);
+    let network = permission(node.clone(), target.clone(), peer, evidence);
+    let held = node.clone();
+    let original = target.clone();
+    let check: StreamPermission = Arc::new(move || {
+        network()?;
+        if committed {
+            held.store.require_committed_content_target(&original)?;
+        }
+        Ok(())
+    });
     receive_owned_stream(
         stream,
         &node,
