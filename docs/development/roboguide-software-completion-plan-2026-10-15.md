@@ -113,6 +113,14 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N3 的 [ADR-0170](../decisions/0170-scoped-prepared-artifact-sources.md) 已补原 Prepared
+source：完整实际 hash/fsync 后建立原非序列化 guard，原 append/finalize 与 live readers
+共享冻结，撤销不冒充 FD 退出。HTTP 原 Prepared 提交前持有 source，SQL 失败保留原上传。
+实际文件/HTTP/SQL 与独立进程 SIGKILL/reopen、旧 Unknown 不重做通过，见
+[验收](acceptance/2026-10-23-prepared-artifact-sources.md)。这只闭合原源读取能力；下一步
+连接实际 Unix peer PID/原 supervisor process journal、真实 mTLS 与原候选/预算的 child
+入口，再完成内容路由/readiness 和下述完整 N1–N7、P1–P7、F0–F10、R01–R20。
+
 N3 的 [ADR-0169](../decisions/0169-consensus-bound-content-stream-transport.md)已接 core
 显式网络 v0.4/parent7、实际 source writer、mTLS Ready/有界队列/原租约与完整原候选。
 metadata Commit 后实际逐成员读原 committed view 和全部 qualified bytes，同一 current/

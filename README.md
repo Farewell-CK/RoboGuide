@@ -1,5 +1,11 @@
 # RoboGuide
 
+[Prepared 内容作用域](docs/development/acceptance/2026-10-23-prepared-artifact-sources.md)
+由 `core/artifact-store/src/prepared_source.rs` 维护：原 upload 实际 hash/fsync 后可在
+最终 CAS 发布前供内部复制读取；原 guard/reader 独立撤销、退出并保留 writer/freeze。
+真实 HTTP/SQL 回滚及进程 SIGKILL/reopen 验证原预算和 Unknown 不重做，公开 CAS 与
+Memory use 权限保持。完整 owned child ingress、路由/readiness 和原 HA 矩阵继续实施。
+
 [共识绑定的内容传输](docs/development/acceptance/2026-10-23-network-content-transport.md)
 已接 core 的显式 v0.4/parent7：实际原 Artifact writer、mTLS Ready/有界字节流、
 完整原候选与同一 voters 的 metadata+bytes ACK。独立进程用真实原 Controller/CAS

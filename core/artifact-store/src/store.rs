@@ -180,6 +180,7 @@ impl FileSystemArtifactStore {
         upload_id: impl Into<String>,
     ) -> Result<ArtifactUpload, ArtifactStoreError> {
         let upload_id = validate_upload_id(upload_id.into())?;
+        self.require_unfrozen_upload(&upload_id)?;
         let staging_directory = self.root.join(STAGING_DIRECTORY);
         validate_directory_tree(
             &staging_directory,
@@ -221,6 +222,7 @@ impl FileSystemArtifactStore {
             ));
         }
         Ok(ArtifactUpload {
+            prepared_source: std::sync::Weak::new(),
             upload_id,
             staging_path,
             file: Some(file),
@@ -240,6 +242,7 @@ impl FileSystemArtifactStore {
         upload_id: impl Into<String>,
     ) -> Result<ArtifactUpload, ArtifactStoreError> {
         let upload_id = validate_upload_id(upload_id.into())?;
+        self.require_unfrozen_upload(&upload_id)?;
         let staging_directory = self.root.join(STAGING_DIRECTORY);
         validate_directory_tree(
             &staging_directory,
@@ -295,6 +298,7 @@ impl FileSystemArtifactStore {
         file.seek(SeekFrom::End(0))
             .map_err(|error| io_error("position resumed artifact upload", error))?;
         Ok(ArtifactUpload {
+            prepared_source: std::sync::Weak::new(),
             upload_id,
             staging_path,
             file: Some(file),
@@ -486,5 +490,8 @@ fn acquire_writer_lock(root: &Path) -> Result<Arc<ArtifactWriterLease>, Artifact
         )
     })?;
     sync_directory(root, "sync artifact writer lock")?;
-    Ok(Arc::new(ArtifactWriterLease { file }))
+    Ok(Arc::new(ArtifactWriterLease {
+        file,
+        prepared_sources: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+    }))
 }

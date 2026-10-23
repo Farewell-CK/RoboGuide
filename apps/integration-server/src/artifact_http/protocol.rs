@@ -558,6 +558,7 @@ impl HttpError {
 /// Maps Artifact Store failures into stable HTTP statuses without leaking local paths.
 pub(super) fn map_cas_error(error: CasError) -> HttpError {
     match error {
+        CasError::UploadSourceActive { .. } => HttpError::service_unavailable(error.to_string()),
         CasError::InvalidDigest { .. }
         | CasError::InvalidUploadId { .. }
         | CasError::UploadClosed { .. } => HttpError::bad_request(error.to_string()),

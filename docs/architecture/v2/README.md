@@ -7,6 +7,11 @@
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
 
+[ADR-0170](../../decisions/0170-scoped-prepared-artifact-sources.md)为完整内容复制增加原
+Prepared upload 的作用域只读来源：实际 writer/FD/hash/size、写冻结与撤销独立于最终
+CAS publication。guard/readers 保留原 writer，public CAS 仍只见 finalized bytes。
+该内存能力不进入状态或协议，不使 Prepared、Task 或 Memory use 自动完成。
+
 [ADR-0169](../../decisions/0169-consensus-bound-content-stream-transport.md)正在接显式
 网络内容 profile、parent v7 和实际 mTLS Ready/有界 stream。owner 由确切 Raft member
 绑定，原 epoch/证书/预算按块检查，同一 current/joint voters 的完整 bytes+metadata

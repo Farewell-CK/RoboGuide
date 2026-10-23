@@ -12,6 +12,7 @@ mod digest;
 mod layout;
 mod path_validation;
 mod port_adapter;
+mod prepared_source;
 mod readonly;
 mod store;
 mod types;
@@ -22,6 +23,7 @@ pub use layout::{
     ARTIFACT_ARCHIVE_LAYOUT_SCHEMA, ARTIFACT_GC_LAYOUT_SCHEMA, ARTIFACT_LAYOUT_SCHEMA,
     ARTIFACT_OWNER_FILE, ARTIFACT_REFERENCE_LAYOUT_SCHEMA, RETAINED_BLOB_DIRECTORY,
 };
+pub use prepared_source::{ArtifactReplicationSource, PreparedArtifactSourceGuard};
 pub use readonly::ArtifactReadOnlyStore;
 pub use types::{
     ArtifactStoreError, ArtifactUpload, ArtifactWriterIdentity, FileSystemArtifactStore,

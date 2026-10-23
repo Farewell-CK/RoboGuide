@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+ADR-0170 adds scoped actual Prepared Artifact sources before finalized CAS publication. The original
+writer owns at most 128 unended source scopes; a unique nonserialized guard freezes exact upload,
+actual readonly FD identity/hash/size and append. Independent bounded readers retain the writer and
+freeze after revoke until their actual scopes end. SDK finalization must match that frozen source;
+HTTP holds the guard through Prepared Commit and finalization, and SQL failure preserves the original
+upload without leaking a live grant. Public CAS, Memory use, checkpoints and Node contracts retain
+their meaning. Owners are artifact-store/prepared_source.rs, artifact_http/upload_authority.rs and
+check_prepared_source_processes.py. Actual files/HTTP/SQL and SIGKILL/reopen checks create zero Nodes,
+devices/models/simulators. This is a local source capability, not the still-required original child
+ingress, routing/readiness, full online HA or the remaining P1-P7 completion matrix.
+
 ADR-0169 connects explicit core Replica v0.4/parent7 to actual Root4 and consensus-bound owners.
 Actual mTLS/current committed membership and original clocks guard Ready, bounded chunks, unique
 blocking workers and complete original observations. Real source Artifact writer staging precedes

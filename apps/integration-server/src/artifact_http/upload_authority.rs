@@ -275,22 +275,34 @@ fn finalize_staged_upload(
             ));
         }
         run_blocking(|| {
-            in_flight
-                .session
-                .upload
-                .prepare_finalize(&digest, byte_size)
+            if context.store.owner_id().is_some() {
+                in_flight
+                    .session
+                    .upload
+                    .prepared_replication_source(&digest, byte_size)
+                    .map(Some)
+            } else {
+                in_flight
+                    .session
+                    .upload
+                    .prepare_finalize(&digest, byte_size)
+                    .map(|()| None)
+            }
         })
         .map_err(map_cas_error)
     })();
-    if let Err(error) = preparation {
-        if record.phase == ArtifactUploadPhase::Started && error.status == "409 Conflict" {
-            in_flight.session.upload.abort().map_err(map_cas_error)?;
-            release_in_flight(context.uploads, in_flight.accounted_bytes)?;
-        } else {
-            restore_after_append(context.uploads, id, in_flight)?;
+    let _prepared_source = match preparation {
+        Ok(source) => source,
+        Err(error) => {
+            if record.phase == ArtifactUploadPhase::Started && error.status == "409 Conflict" {
+                in_flight.session.upload.abort().map_err(map_cas_error)?;
+                release_in_flight(context.uploads, in_flight.accounted_bytes)?;
+            } else {
+                restore_after_append(context.uploads, id, in_flight)?;
+            }
+            return Err(error);
         }
-        return Err(error);
-    }
+    };
     if record.phase == ArtifactUploadPhase::Started {
         record.phase = ArtifactUploadPhase::Prepared;
         record.content_digest = Some(digest.clone());

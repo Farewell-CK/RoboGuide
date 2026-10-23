@@ -427,3 +427,70 @@ fn actual_stream_wrong_hash_cannot_publish_or_erase_the_original_partial_file() 
     );
     assert!(receiver.verify_content(&key).is_err());
 }
+
+/// Actual Prepared bytes can repair an independent recipient while public source CAS stays absent.
+#[test]
+fn actual_original_prepared_source_stream_preserves_unknown_and_never_publishes_source_cas() {
+    let (_directory, source, receiver, _key, mut bytes) = fixture();
+    bytes.extend(b"actual-unpublished-prepared-input");
+    let key = ArtifactContentKey {
+        source_owner: source.owner_id().unwrap().into(),
+        content_digest: artifact_store::digest_bytes(&bytes),
+        byte_size: bytes.len() as u64,
+    };
+    let mut upload = source
+        .begin_upload("actual-original-unpublished-source")
+        .unwrap();
+    upload.write_chunk(&bytes).unwrap();
+    let target = target(&receiver, &key);
+    assert!(
+        receiver
+            .copy_artifact_stream(
+                &source,
+                target.clone(),
+                &key,
+                "actual-before-source-guard",
+                30000
+            )
+            .is_err()
+    );
+    let unknown = receiver
+        .stream_status("actual-before-source-guard")
+        .unwrap()
+        .unwrap();
+    let guard = upload
+        .prepared_replication_source(&key.content_digest, key.byte_size)
+        .unwrap();
+    assert!(source.open_artifact(&key.content_digest).is_err());
+    assert_eq!(
+        receiver
+            .copy_artifact_stream(
+                &source,
+                target.clone(),
+                &key,
+                "actual-before-source-guard",
+                30000
+            )
+            .unwrap(),
+        unknown
+    );
+    let copied = receiver
+        .copy_artifact_stream(
+            &source,
+            target,
+            &key,
+            "actual-distinct-prepared-copy",
+            30000,
+        )
+        .unwrap();
+    assert!(copied.receipt.is_some());
+    receiver.verify_content(&key).unwrap();
+    assert!(source.open_artifact(&key.content_digest).is_err());
+    assert_eq!(
+        receiver
+            .stream_status("actual-before-source-guard")
+            .unwrap(),
+        Some(unknown)
+    );
+    drop(guard);
+}

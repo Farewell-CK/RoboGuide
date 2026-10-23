@@ -79,7 +79,7 @@ impl ReplicaContentStore {
         };
         receiver.check_before_source_read()?;
         let mut input = source
-            .open_artifact(&content.content_digest)
+            .open_replication_source(&content.content_digest, content.byte_size)
             .map_err(|error| error.to_string())?;
         let mut buffer = [0u8; CHUNK_BYTES];
         let mut offset = 0u64;

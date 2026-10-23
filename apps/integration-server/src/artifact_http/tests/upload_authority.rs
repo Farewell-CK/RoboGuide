@@ -42,7 +42,8 @@ async fn staged(
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn upload_finalization_sql_failure_preserves_original_byte_proof_without_reupload() {
     let directory = tempfile::tempdir().unwrap();
-    let store = FileSystemArtifactStore::new(directory.path().join("cas")).unwrap();
+    let store =
+        FileSystemArtifactStore::new_with_archive_references(directory.path().join("cas")).unwrap();
     let path = directory.path().join("events.sqlite3");
     let log = SqliteEventLog::open(&path).unwrap();
     seed_controller_checkpoint(&log);
@@ -82,7 +83,8 @@ async fn upload_finalization_sql_failure_preserves_original_byte_proof_without_r
     );
     drop(uploads);
     drop(store);
-    let restarted_store = FileSystemArtifactStore::new(directory.path().join("cas")).unwrap();
+    let restarted_store =
+        FileSystemArtifactStore::new_with_archive_references(directory.path().join("cas")).unwrap();
     let restarted_uploads =
         super::super::server::restore_uploads(&restarted_store, &restored).unwrap();
     let response = request_once(
@@ -139,6 +141,70 @@ async fn upload_finalization_sql_failure_preserves_original_byte_proof_without_r
         ),
         Err(state::SqliteEventLogError::ArchivePolicy(_))
     ));
+}
+
+/// Failed Prepared SQL revokes its transient read scope, preserving the exact Started upload for retry.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn prepared_sql_failure_preserves_upload_without_leaking_a_scoped_read_grant() {
+    let directory = tempfile::tempdir().unwrap();
+    let store =
+        FileSystemArtifactStore::new_with_archive_references(directory.path().join("cas")).unwrap();
+    let path = directory.path().join("events.sqlite3");
+    let log = SqliteEventLog::open(&path).unwrap();
+    seed_controller_checkpoint(&log);
+    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let uploads = test_uploads();
+    let bytes = b"original prepared SQL rollback payload";
+    let digest = digest_bytes(bytes);
+    staged(
+        &store,
+        &catalog,
+        &uploads,
+        "original-prepared-failure",
+        bytes,
+    )
+    .await;
+    let original = catalog
+        .upload_record("original-prepared-failure")
+        .unwrap()
+        .unwrap();
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch("CREATE TRIGGER fail_prepared BEFORE INSERT ON events WHEN NEW.payload_json LIKE '%\"ArtifactUploadTransition\"%' AND NEW.payload_json LIKE '%\"phase\":\"prepared\"%' BEGIN SELECT RAISE(ABORT,'actual original Prepared SQL failure'); END;").unwrap();
+    let body = serde_json::json!({"content_digest":digest,"byte_size":bytes.len()}).to_string();
+    let request = raw_request(
+        "POST",
+        "/v1/artifact-uploads/original-prepared-failure/finalize",
+        body.as_bytes(),
+        true,
+    );
+    response_body(
+        &request_once(&store, &catalog, &uploads, request.clone()).await,
+        "500 Internal Server Error",
+    );
+    assert_eq!(
+        catalog.upload_record("original-prepared-failure").unwrap(),
+        Some(original.clone())
+    );
+    assert!(!store.contains(&digest).unwrap());
+    assert!(
+        store
+            .open_replication_source(&digest, bytes.len() as u64)
+            .is_err()
+    );
+    assert_eq!(uploads.lock().unwrap().active_uploads(), 1);
+    assert_eq!(log.len().unwrap(), 1);
+    sql.execute_batch("DROP TRIGGER fail_prepared").unwrap();
+    let response = request_once(&store, &catalog, &uploads, request).await;
+    let completed: serde_json::Value =
+        serde_json::from_slice(&response_body(&response, "201 Created")).unwrap();
+    assert_eq!(
+        completed["receipt"]["admitted_at_ms"],
+        original.admitted_at_ms
+    );
+    assert_eq!(completed["receipt"]["deadline_ms"], original.deadline_ms);
+    assert_eq!(log.len().unwrap(), 3);
+    assert_eq!(uploads.lock().unwrap().active_uploads(), 0);
+    store.verify_artifact(&digest, bytes.len() as u64).unwrap();
 }
 
 /// A declared digest already in CAS never substitutes for this upload's actual complete staged bytes.

@@ -1,5 +1,11 @@
 # RoboGuide V2 current architecture
 
+[ADR-0170](../../decisions/0170-scoped-prepared-artifact-sources.md) adds an original scoped
+Prepared-upload source for complete-content replication. Actual writer/FD/hash/size, append freezing
+and revocation remain distinct from final CAS publication. Guards/readers retain the real writer;
+public CAS lookup still sees only finalized bytes. This in-memory capability grants no Task,
+Memory-use, durable completion or protocol authority.
+
 [ADR-0169](../../decisions/0169-consensus-bound-content-stream-transport.md) connects an explicit
 network content profile, parent v7 and actual mTLS Ready/bounded streams. Exact Raft member data
 binds owners; original epoch, credentials and budgets remain checked per chunk. A complete ACK

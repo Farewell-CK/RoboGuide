@@ -57,6 +57,22 @@ impl ArtifactUpload {
     /// Appends one bounded chunk to the staging file and updates its digest.
     pub fn write_chunk(&mut self, chunk: &[u8]) -> Result<(), ArtifactStoreError> {
         self.ensure_active()?;
+        let writer = self.store._writer_lock.clone();
+        let sources = writer.prepared_sources.lock().map_err(|_| {
+            crate::path_validation::unsafe_path_error(
+                "append artifact upload",
+                "original source registry is unavailable",
+            )
+        })?;
+        if sources
+            .get(&self.upload_id)
+            .and_then(std::sync::Weak::upgrade)
+            .is_some()
+        {
+            return Err(ArtifactStoreError::UploadSourceActive {
+                upload_id: self.upload_id.clone(),
+            });
+        }
         let incoming =
             u64::try_from(chunk.len()).map_err(|_| ArtifactStoreError::SizeMismatch {
                 expected: u64::MAX,
@@ -90,6 +106,14 @@ impl ArtifactUpload {
     ) -> Result<StoredArtifact, ArtifactStoreError> {
         self.ensure_active()?;
         let expected_digest = normalize_digest(expected_digest)?;
+        let writer = self.store._writer_lock.clone();
+        let sources = writer.prepared_sources.lock().map_err(|_| {
+            crate::path_validation::unsafe_path_error(
+                "finalize artifact upload",
+                "original source registry is unavailable",
+            )
+        })?;
+        self.require_prepared_finalize(&sources, &expected_digest, expected_size)?;
         self.store.require_live_content(&expected_digest)?;
         if self.size != expected_size {
             return Err(ArtifactStoreError::SizeMismatch {
@@ -213,6 +237,7 @@ impl ArtifactUpload {
 
     /// Removes the staging file and marks this upload aborted.
     pub fn abort(&mut self) -> Result<(), ArtifactStoreError> {
+        self.revoke_prepared_source();
         if self.state == UploadState::Finalized {
             return Ok(());
         }
@@ -243,6 +268,7 @@ impl ArtifactUpload {
 impl Drop for ArtifactUpload {
     /// Cleans an abandoned staging file without affecting finalized blobs.
     fn drop(&mut self) {
+        self.revoke_prepared_source();
         if self.state == UploadState::Active {
             self.file.take();
             let _ = remove_staging(&self.staging_path);

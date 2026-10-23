@@ -1,11 +1,13 @@
 //! Public filesystem artifact-store handles and errors.
 
 use sha2::Sha256;
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::{Mutex, Weak};
 
 /// Actual retained source-writer file description, observed while its original lease remains held.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +43,9 @@ pub struct FileSystemArtifactStore {
 pub(crate) struct ArtifactWriterLease {
     /// Locked file description shared by all store clones and outstanding uploads.
     pub(crate) file: File,
+    /// Actual live prepared scopes, shared by all clones and bounded before registering new sources.
+    pub(crate) prepared_sources:
+        Mutex<BTreeMap<String, Weak<crate::prepared_source::PreparedSourceState>>>,
 }
 
 impl Drop for ArtifactWriterLease {
@@ -65,6 +70,8 @@ impl Eq for FileSystemArtifactStore {}
 /// upload removes its staging file, while callers can explicitly call
 /// [`ArtifactUpload::abort`] when they want to make that transition visible.
 pub struct ArtifactUpload {
+    /// Original live source/readers freeze this upload until their actual FD scope ends.
+    pub(crate) prepared_source: Weak<crate::prepared_source::PreparedSourceState>,
     /// Caller-supplied identifier used only for the temporary filename.
     pub(crate) upload_id: String,
     /// Temporary path retained until successful finalization or abort.
@@ -106,6 +113,11 @@ pub struct StoredArtifact {
 /// Failures raised by the filesystem artifact store.
 #[derive(Debug)]
 pub enum ArtifactStoreError {
+    /// Original prepared source/readers still retain this uploader's immutable bytes.
+    UploadSourceActive {
+        /// Exact original uploader whose bytes cannot change while those readers remain live.
+        upload_id: String,
+    },
     /// The supplied digest was not a SHA-256 value in accepted form.
     InvalidDigest {
         /// Original digest text supplied by the caller.
@@ -168,6 +180,10 @@ impl Display for ArtifactStoreError {
     /// Formats a stable diagnostic without exposing filesystem-specific paths.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::UploadSourceActive { upload_id } => write!(
+                formatter,
+                "artifact upload {upload_id} has an active source reader"
+            ),
             Self::InvalidDigest { value } => write!(formatter, "invalid SHA-256 digest {value:?}"),
             Self::InvalidUploadId { value } => {
                 write!(formatter, "invalid artifact upload id {value:?}")
