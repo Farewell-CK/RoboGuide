@@ -38,7 +38,9 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
       - name: Run tests
-        run: cargo test --workspace --locked
+        run: |
+          set -o pipefail
+          cargo test --workspace --locked 2>&1 | tee "${RUNNER_TEMP}/roboguide-cargo-test.log"
 
       - name: Check private Rust documentation
         run: cargo doc --locked --workspace --no-deps --document-private-items
@@ -225,6 +227,7 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
           path: |
+            ${{ runner.temp }}/roboguide-cargo-test.log
             /tmp/rg-ci-*/**/*.log
             /tmp/rg-ci-*/**/result.json
             /tmp/rg-ci-*/*.sqlite3
