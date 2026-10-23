@@ -25,9 +25,18 @@ impl SqliteRaftStore {
                 }
             }
         }
+        self.wait_for_content_inputs(pending, clock)
+    }
+
+    /// Shares the original no-parent-lock readiness bound between apply and validated Snapshot inputs.
+    pub(super) fn wait_for_content_inputs(
+        &self,
+        mut pending: BTreeSet<ArtifactContentKey>,
+        clock: &crate::content_store::ProducerClock,
+    ) -> Result<(), StorageError<u64>> {
         if pending.len() > 65_536 {
             return Err(io_error(
-                "original apply inputs exceed the retained Root inventory bound",
+                "original content inputs exceed the retained Root inventory bound",
             ));
         }
         if pending.is_empty() {
@@ -36,7 +45,7 @@ impl SqliteRaftStore {
         let root = self
             .content
             .as_ref()
-            .ok_or_else(|| io_error("original apply content backend is absent"))?;
+            .ok_or_else(|| io_error("original content backend is absent"))?;
         while !pending.is_empty() {
             clock.check().map_err(io_error)?;
             let mut available = Vec::new();

@@ -113,6 +113,10 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-24）
 
+后续每个提交固定一个可独立验收的缺口，先复用已有实现并检查实际调用链，再做相关验证
+和提交。共享合同变化才扩大回归；普通内部复用不另造合同版本。已通过且未受影响的
+大型进程矩阵保留原证据，最终总体门禁仍按原完整条件执行。
+
 N3/P3 的 [ADR-0184–0186 完整静止恢复与重启](acceptance/2026-10-24-replica-content-cold-recovery.md)
 已通过：显式 v0.19、原 parent8/Root4、Root5 新 backing、二次完整恢复、实际三 leader
 追赶/transfer/读字节及原 Unknown 保留。并发活 producer 对账与字节晚到 apply 的两条

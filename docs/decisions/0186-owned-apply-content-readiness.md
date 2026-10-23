@@ -20,6 +20,14 @@ a waiter retains the actual worker's original capacity and lifetime. Empty-input
 wait. Direct old storage APIs keep their original behavior. Original clocks, commits, Unknown and
 physical stop contracts are unchanged; no persistent or wire generation is needed.
 
+The same explicit parent8 rule applies to validated receiving Snapshots: after validating the
+complete original Snapshot and successor, its existing worker waits for exact original inputs
+before admitting Snapshot/view producers or acquiring the parent write transaction. The original
+queue clock is reused; timeout creates neither producer authority nor a completion. Metadata-only
+and direct legacy producer profiles retain their original missing-content refusal. Verification
+must exercise the actual receiving Snapshot with delayed file/SQL publication, parent access while
+waiting, original-clock expiry and absence of premature producer or accepted-view changes.
+
 This closes a readiness race when a real authorized publisher exists. It does not implement missing
 historical-byte routing, repair a lost source, bypass capacity or establish full online HA, SLO,
 hardware identity or physical continuity. Those remain independently required. Acceptance needs

@@ -471,6 +471,102 @@ async fn actual_snapshot_failure_repair_and_replacement_retain_independent_reade
     );
 }
 
+/// Opens actual explicit parent8/Root4 receiving storage without creating network or device facts.
+fn owned_snapshot_target(directory: &tempfile::TempDir) -> (SqliteRaftStore, ReplicaContentStore) {
+    let profile = "e".repeat(64);
+    let content = ReplicaContentStore::create_with_streams(
+        &directory.path().join("owned-target-content"),
+        &profile,
+        2,
+    )
+    .unwrap();
+    let store = SqliteRaftStore::open_with_controller_content(
+        &directory.path().join("owned-target.sqlite3"),
+        &profile,
+        state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA,
+        content.clone(),
+    )
+    .unwrap();
+    (store, content)
+}
+
+/// Actual receiving Snapshot waits without producer/parent authority until independently published bytes.
+#[tokio::test]
+async fn actual_owned_snapshot_waits_for_real_inputs_before_admitting_producers() {
+    let (directory, mut source, content, key, entry) = fixture();
+    copy_fixture(&directory, &content, &key, "source-owned-snapshot-input");
+    source.apply([entry]).await.unwrap();
+    let snapshot = source
+        .build_content_snapshot_for("source-owned-delayed-snapshot")
+        .unwrap();
+    let (target, target_content) = owned_snapshot_target(&directory);
+    let observer = target.clone();
+    let meta = snapshot.meta;
+    let bytes = snapshot.snapshot.into_inner();
+    let (ready, entered) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        ready.send(()).unwrap();
+        target.install_content_snapshot_for("actual-owned-delayed-snapshot", &meta, bytes)
+    });
+    entered.recv().unwrap();
+    std::thread::sleep(Duration::from_millis(80));
+    assert!(!worker.is_finished());
+    assert!(observer.connection.try_lock().is_ok());
+    assert!(observer.parent_producers().unwrap().is_empty());
+    assert_eq!(observer.accepted_view().unwrap().revision, 0);
+    copy_fixture(
+        &directory,
+        &target_content,
+        &key,
+        "independently-published-snapshot-input",
+    );
+    worker.join().unwrap().unwrap();
+    observer.verify_accepted_content().unwrap();
+    let originals = observer.parent_producers().unwrap();
+    assert_eq!(originals.len(), 2);
+    assert!(originals.iter().all(|row| row.disposition == "published"));
+}
+
+/// Original-clock expiry and known byte corruption cannot create receiving Snapshot authority.
+#[tokio::test]
+async fn actual_owned_snapshot_expiry_and_corruption_do_not_create_authority() {
+    let (directory, mut source, content, key, entry) = fixture();
+    copy_fixture(&directory, &content, &key, "source-expiring-snapshot-input");
+    source.apply([entry]).await.unwrap();
+    let snapshot = source
+        .build_content_snapshot_for("source-expiring-snapshot")
+        .unwrap();
+    let (mut target, target_content) = owned_snapshot_target(&directory);
+    let budget = crate::content_store::ContentBudget::issue(200).unwrap();
+    let clock = crate::content_store::ProducerClock::from_original(&budget).unwrap();
+    target.work_clock = Some(clock.clone());
+    let meta = snapshot.meta;
+    let bytes = snapshot.snapshot.into_inner();
+    let error = target
+        .install_snapshot_record(&meta, bytes.clone(), Some("actual-owned-expired-snapshot"))
+        .unwrap_err();
+    assert!(error.to_string().contains("budget expired"));
+    assert!(clock.check().is_err());
+    assert!(target.parent_producers().unwrap().is_empty());
+    assert!(target_content.active_references(&key).unwrap().is_empty());
+    assert_eq!(target.accepted_view().unwrap().revision, 0);
+    copy_fixture(&directory, &target_content, &key, "known-snapshot-input");
+    let path = target_content
+        .root()
+        .join("content-v1")
+        .join(&key.source_owner[15..])
+        .join(&key.content_digest[7..]);
+    std::fs::remove_file(path).unwrap();
+    target.work_clock = Some(crate::content_store::ProducerClock::issue().unwrap());
+    let error = target
+        .install_snapshot_record(&meta, bytes, Some("actual-owned-corrupt-snapshot"))
+        .unwrap_err();
+    assert!(!error.to_string().contains("budget expired"));
+    assert!(target.work_clock.as_ref().unwrap().check().is_ok());
+    assert!(target.parent_producers().unwrap().is_empty());
+    assert_eq!(target.accepted_view().unwrap().revision, 0);
+}
+
 /// Receiving Snapshot authority belongs to actual target writers; missing bytes and old IDs cannot install.
 #[tokio::test]
 async fn actual_snapshot_install_requires_target_bytes_and_its_own_original_journal() {

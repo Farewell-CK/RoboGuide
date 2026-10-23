@@ -37,6 +37,7 @@ inode 全部冻结后才读数据。必要表/head、原操作与独立 pin、�
 | `root-recovery-full-native-04` / `05` | 实际落后成员在 apply 时遇到仍存活 producer，原清理错误造成 apply channel 关闭；ADR-0185 保留原 Unknown / pin，不伪造退出和释放 |
 | `root-recovery-full-native-06` | 已越过前一失败，实际暴露元数据先于并发字节发布的 race；ADR-0186 在原 worker / 原预算内等待真实就绪，且不占用 parent 写锁 |
 | `root-recovery-full-native-07` | 实际 337 → 307 → 311 追赶/transfer 均通过，三个 leader 读取原字节、原 Unknown 不变；三个 supervisor wait 均为 0；独立 SQL/CAS 核验通过 |
+| `root-recovery-retired-cold-native-01` / `root-recovery-retired-full-native-01` | 复用已实际退休原上传引用、保留 Unknown 的源链；完整冷恢复及 337 → 307 → 311 重启/读字节/transfer 通过，原进程全部 wait 为 0 |
 
 成功的 readonly repeat 只验证原恢复结果；实际 runtime 修改了已恢复存储后，原 restore
 不能覆盖、修复或重新复制它。接入 runnable 时只移动原 Controller SQL / Artifact 根，
@@ -60,3 +61,9 @@ joint/fault/升级/回退和原 N1–N7 / F0–F10 / R01–R20 矩阵仍须独�
 全工作区 Clippy、受影响 Rust 私有文档、Python 函数文档、站点 9 项及 strict build 均通过。
 最终收紧的 SQL DELETE-journal/header/主键检查再次验证实际成功 bundle，101 个文件的原
 manifest digest 不变；没有重跑无关的实验或把数据复验当成新的运行连续性证明。
+
+随后将同一原 worker/原预算等待复用于完整校验后的 parent8 接收 Snapshot。实际文件/SQL
+检查验证迟到发布前没有 producer/accepted-view 变化，parent 锁可取得；发布后正常安装，
+原短时钟到期和已知 receipt 的字节损坏均保持接收方无新 authority。相关 Replica 回归
+120 项通过，日志为 `owned-snapshot-readiness-tests-final-01.log`。这不是缺失历史内容路由
+或完整网络 Snapshot/GC 矩阵的通过证明。

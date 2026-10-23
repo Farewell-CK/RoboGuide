@@ -297,6 +297,17 @@ impl SqliteRaftStore {
             let connection = self.connection.lock().map_err(io_error)?;
             self.require_snapshot_successor(&connection, &restored.view)?;
         }
+        if self.controller_content
+            && let Some(clock) = &self.work_clock
+        {
+            let inputs = restored
+                .view
+                .content
+                .as_ref()
+                .map(|content| content.inputs.iter().cloned().collect())
+                .unwrap_or_default();
+            self.wait_for_content_inputs(inputs, clock)?;
+        }
         let mut producer_work = {
             let connection = self.connection.lock().map_err(io_error)?;
             self.admit_snapshot_producer(&connection, &restored, meta, &data, operation_id, true)?
