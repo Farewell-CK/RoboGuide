@@ -39,7 +39,39 @@ def http(origin: str, path: str, method: str = "GET", body: bytes = b"") -> tupl
         connection.close()
 
 
-def run(output: Path, supervisor: Path, controller: Path, storage: Path) -> dict[str, Any]:
+def idle_snapshot(directory: Path) -> dict[str, Any]:
+    """Read original committed SQL and complete raw checkpoint without any application request."""
+    with closing(
+        sqlite3.connect((directory / "controller.sqlite3").as_uri() + "?mode=ro", uri=True)
+    ) as sql:
+        sql.execute("BEGIN")
+        checkpoint = sql.execute(
+            "SELECT event_sequence,schema,checkpoint_json FROM controller_checkpoint "
+            "WHERE singleton=1"
+        ).fetchone()
+        assert checkpoint is not None
+        revision = sql.execute(
+            "SELECT value FROM event_log_metadata WHERE key='journal_committed_revision'"
+        ).fetchone()
+        assert revision is not None
+        local = {
+            "journal_revision": int(revision[0]),
+            "event_sequence": checkpoint[0],
+            "checkpoint_schema": checkpoint[1],
+            "checkpoint_sha256": hashlib.sha256(checkpoint[2].encode()).hexdigest(),
+        }
+    with closing(
+        sqlite3.connect((directory / "replica.sqlite3").as_uri() + "?mode=ro", uri=True)
+    ) as sql:
+        local["parent_revision"] = int(
+            sql.execute("SELECT value FROM replica_v1_meta WHERE key='revision'").fetchone()[0]
+        )
+    return local
+
+
+def run(
+    output: Path, supervisor: Path, controller: Path, storage: Path, idle_timer_check: bool = False
+) -> dict[str, Any]:
     """Retain exact binaries, native waits, complete SQL and independently verified bytes."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     output = output.resolve()
@@ -219,6 +251,22 @@ def run(output: Path, supervisor: Path, controller: Path, storage: Path) -> dict
 
             member, first = current()
             observed("original-controller-healthy", member=member, status=first)
+            if idle_timer_check:
+                directory = Path(configs[member]["storage_directory"])
+                before = idle_snapshot(directory)
+                started = time.monotonic()
+                time.sleep(5)
+                after = idle_snapshot(directory)
+                observed(
+                    "actual-idle-timer",
+                    before=before,
+                    after=after,
+                    actual_seconds=time.monotonic() - started,
+                )
+                assert before == after, (
+                    "idle timer changed original revision/checkpoint without work"
+                )
+                result["actual_idle_timer"] = {"before": before, "after": after}
             origin = configs[member]["artifact_address"]
             payload = os.urandom(128 * 1024 + 29)
             checksum = "sha256:" + hashlib.sha256(payload).hexdigest()
@@ -244,6 +292,8 @@ def run(output: Path, supervisor: Path, controller: Path, storage: Path) -> dict
             assert code == 201, raw
             completed = json.loads(raw)
             assert completed["receipt"]["phase"] == "completed"
+            if idle_timer_check:
+                assert idle_snapshot(directory)["journal_revision"] > before["journal_revision"]
             observed("original-upload-completed", receipt=completed)
             assert http(origin, "/v1/artifacts/" + checksum[7:]) == (200, payload)
             observed("original-http-content-read", actual_digest=checksum)
@@ -360,12 +410,14 @@ def main() -> None:
     parser.add_argument("--supervisor", type=Path, required=True)
     parser.add_argument("--controller", type=Path, required=True)
     parser.add_argument("--storage-probe", type=Path, required=True)
+    parser.add_argument("--idle-timer-check", action="store_true")
     args = parser.parse_args()
     result = run(
         args.output,
         args.supervisor.resolve(strict=True),
         args.controller.resolve(strict=True),
         args.storage_probe.resolve(strict=True),
+        args.idle_timer_check,
     )
     print(json.dumps({"passed": result["passed"], "result": str(args.output / "result.json")}))
 

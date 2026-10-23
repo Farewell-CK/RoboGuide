@@ -1,5 +1,10 @@
 # RoboGuide V2 current architecture
 
+[ADR-0173](../../decisions/0173-unchanged-timer-transaction-elision.md) permits an internal timer
+rollback only when actual SQL/events and the exact complete checkpoint remain unchanged, with no
+pending writes. Existing committed outboxes retain current authorization and complete delivery
+fences; external commands and zero-event changes still keep their original journal/Commit.
+
 [ADR-0172](../../decisions/0172-runnable-owned-controller-content-profile.md) defines explicit
 process v0.2 Controller wiring with the same source SDK writer and original process registration.
 ProcessFence proves process/infrastructure authority; complete content ACK and readiness stay separate.

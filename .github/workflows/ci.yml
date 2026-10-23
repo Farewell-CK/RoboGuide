@@ -141,6 +141,7 @@ jobs:
           --supervisor target/debug/controller-replica
           --controller target/debug/integration-server
           --storage-probe target/debug/examples/content_stream_probe
+          --idle-timer-check
           --output /tmp/rg-ci-runnable-content
 
       - name: Verify actual Prepared source scopes and native restart with zero Nodes

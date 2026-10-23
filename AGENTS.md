@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+ADR-0173 allows only an actually unchanged internal timer batch to roll back without a new journal
+command. Original BEGIN authority/writer checks stay. Actual SQLite total_changes must match both
+the original BEGIN and last complete checkpoint Commit, with the original transaction's data_version;
+before-BEGIN auxiliary writes, external connection commits, rolled-back writes, missing/restarted
+witnesses, events, pending commands and different raw checkpoints retain normal Commit. Actual SQL
+checkpoint/cache equality is independently checked. Committed outboxes still use original current
+permission/full delivery fences and fresh clocks. Ownership is state/timer_transaction.rs and
+application/timer.rs; the zero-Node runnable gate explicitly opts into --idle-timer-check. This changes
+no persistent schema or Node/Memory contract and does not close cross-owner takeover or other P1-P7.
+
 ADR-0172 connects explicit process v0.2 to actual parent8/Root4 and the runnable Controller's shared
 Artifact writer. New contracts and original child/quorum observation budgets are policy-bound;
 legacy process v0.1 keeps its original fence. ProcessFence checks actual PID/TLS/current epoch and

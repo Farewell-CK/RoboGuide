@@ -1,11 +1,16 @@
 # RoboGuide V2 现行架构
 
-核对日期：2026-10-23；当前整改提交基线：`b0d1675`，
-加本包 ADR-0171 的原 owned-child 内容入口，runnable supervisor 与完整在线矩阵继续实施，
+核对日期：2026-10-23；当前整改提交基线：`4a7be84`，
+已含 ADR-0172 真实 runnable 内容接线；完整在线矩阵继续实施，
 位于唯一开发分支 `codex/nonrelease-remediation-closure`。本页同步 main 的 10 月 22 日图册，
 保留其原基线 `495a6d2`；下述新增整改尚未合回 main，不提前记为远端 main 能力。
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
+
+[ADR-0173](../../decisions/0173-unchanged-timer-transaction-elision.md)要求 timer 只有在
+实际 SQL/事件无变化、完整原 checkpoint 精确相同且无 pending 写入时才回滚空事务。
+原 committed outbox 仍按当前授权/完整 delivery fence 发送；零事件变化和外部命令保留
+原 journal/Commit，不缓存 ready 或延长任何 budget。
 
 [ADR-0172](../../decisions/0172-runnable-owned-controller-content-profile.md)定义显式
 process v0.2 的真实 Controller 接线：同一 source SDK writer、原 process 注册、完整

@@ -45,6 +45,8 @@ mod authority_journal;
 #[path = "catalog_archive.rs"]
 mod catalog_archive;
 pub use archive_operation::{ArchiveContent, ArchiveIntent, ArchiveRequest};
+#[path = "timer_transaction.rs"]
+mod timer_transaction;
 #[path = "write_availability.rs"]
 mod write_availability;
 pub use application_replication::{
@@ -279,6 +281,10 @@ pub struct SqliteEventLog {
     next_event_number: Arc<Mutex<u64>>,
     /// Start sequence retained while an application-level event batch is open.
     batch_start_number: Arc<Mutex<Option<u64>>>,
+    /// Same actual SQLite connection's write count immediately after the original BEGIN IMMEDIATE.
+    batch_start_changes: Arc<Mutex<Option<u64>>>,
+    /// Actual connection write/data-version witness from the last complete checkpoint Commit only.
+    committed_sql_witness: Arc<Mutex<Option<(u64, u64)>>>,
     /// Last durable write failure observed by the EventSink boundary.
     last_error: Arc<Mutex<Option<String>>>,
 }
@@ -521,6 +527,8 @@ impl SqliteEventLog {
             },
             next_event_number: Arc::new(Mutex::new(next_event_number)),
             batch_start_number: Arc::new(Mutex::new(None)),
+            batch_start_changes: Arc::new(Mutex::new(None)),
+            committed_sql_witness: Arc::new(Mutex::new(None)),
             last_error: Arc::new(Mutex::new(None)),
         })
     }
@@ -977,6 +985,10 @@ impl SqliteEventLog {
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
         connection.execute_batch("BEGIN IMMEDIATE")?;
+        *self
+            .batch_start_changes
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)? = Some(connection.total_changes());
         *batch_start = Some(*counter);
         Ok(())
     }
@@ -1067,12 +1079,17 @@ impl SqliteEventLog {
         }
         let authority_revision = authority_journal::revision(&connection)?;
         connection.execute("INSERT INTO event_log_metadata(key,value) VALUES ('journal_committed_revision',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [authority_revision.to_string()])?;
+        // Sample before releasing the actual SQLite writer, so a later foreign Commit cannot be adopted.
+        let sql_witness = (
+            connection.total_changes(),
+            connection.query_row("PRAGMA data_version", [], |row| row.get::<_, u64>(0))?,
+        );
         connection.execute_batch("COMMIT")?;
         *self
             .committed_authority_revision
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)? = authority_revision;
-        if let Some(candidate) = self
+        let complete_checkpoint = if let Some(candidate) = self
             .pending_checkpoint_cache
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?
@@ -1082,8 +1099,20 @@ impl SqliteEventLog {
                 .checkpoint_cache
                 .lock()
                 .map_err(|_| SqliteEventLogError::LockPoisoned)? = Some(candidate);
-        }
+            true
+        } else {
+            false
+        };
+        *self
+            .committed_sql_witness
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)? =
+            complete_checkpoint.then_some(sql_witness);
         *batch_start = None;
+        *self
+            .batch_start_changes
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)? = None;
         Ok(())
     }
 
@@ -1108,6 +1137,10 @@ impl SqliteEventLog {
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)? = None;
         *batch_start = None;
+        *self
+            .batch_start_changes
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)? = None;
         let mut counter = self
             .next_event_number
             .lock()

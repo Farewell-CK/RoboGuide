@@ -113,6 +113,14 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N7 按 [ADR-0173](../decisions/0173-unchanged-timer-transaction-elision.md)收敛实际空闲
+timer 重复提交的 I/O：完整 checkpoint、实际当前/上次完整提交 SQL 计数、外部连接
+data_version、事件及 pending 写入均不变才回滚。原 side effects/outbox 与显式
+零事件命令保持原 journal/Commit。旧冻结二进制的真实零 Node 反例、新版本的实际
+空闲/上传/同 inode 重启、文件/CPU stop/revoke/handoff 回归通过，见
+[验收](acceptance/2026-10-23-unchanged-timer-transactions.md)。这是 N3 接管前的性能问题修复，
+不替代其余 P1–P7；接着继续跨 owner/Prepared takeover 和完整 readiness。
+
 N3 的 [ADR-0172](../decisions/0172-runnable-owned-controller-content-profile.md)已接显式
 runnable process v0.2：实际 parent8/Root4、原 PID journal、mTLS 与真实 Controller
 共享源 writer。原 quorum 观察预算进入 policy，ProcessFence 不代替完整内容 ACK；

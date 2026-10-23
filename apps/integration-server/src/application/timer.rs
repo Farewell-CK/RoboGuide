@@ -150,35 +150,41 @@ fn drive_application_timer_synchronous(
             checkpoint.len() as u64,
             None,
         );
-        let save = StageObservation::start(
-            &diagnostics,
-            DiagnosticKind::Timer,
-            DiagnosticStage::Save,
-            None,
-        );
-        let event_sequence = event_log.current_batch_event_sequence()?;
-        let input = format!(
-            "timer:{}:verifier={}",
-            now.as_millis(),
-            verifier_feed.is_some()
-        );
-        let command = control_command_journal_entry(
-            format!("application-timer:{event_sequence}:{}", now.as_millis()),
-            Some("integration.application-timer".to_string()),
-            input.as_bytes(),
-            &checkpoint,
-            event_sequence,
-        );
-        event_log.save_checkpoint_with_command(SERVER_CHECKPOINT_SCHEMA, &checkpoint, command)?;
-        drop(save);
-        let commit = StageObservation::start(
-            &diagnostics,
-            DiagnosticKind::Timer,
-            DiagnosticStage::Commit,
-            None,
-        );
-        event_log.commit_batch()?;
-        drop(commit);
+        if !event_log.rollback_unchanged_timer_batch(SERVER_CHECKPOINT_SCHEMA, &checkpoint)? {
+            let save = StageObservation::start(
+                &diagnostics,
+                DiagnosticKind::Timer,
+                DiagnosticStage::Save,
+                None,
+            );
+            let event_sequence = event_log.current_batch_event_sequence()?;
+            let input = format!(
+                "timer:{}:verifier={}",
+                now.as_millis(),
+                verifier_feed.is_some()
+            );
+            let command = control_command_journal_entry(
+                format!("application-timer:{event_sequence}:{}", now.as_millis()),
+                Some("integration.application-timer".to_string()),
+                input.as_bytes(),
+                &checkpoint,
+                event_sequence,
+            );
+            event_log.save_checkpoint_with_command(
+                SERVER_CHECKPOINT_SCHEMA,
+                &checkpoint,
+                command,
+            )?;
+            drop(save);
+            let commit = StageObservation::start(
+                &diagnostics,
+                DiagnosticKind::Timer,
+                DiagnosticStage::Commit,
+                None,
+            );
+            event_log.commit_batch()?;
+            drop(commit);
+        }
         let mut live = controller
             .lock()
             .map_err(|_| "controller lock is poisoned")?;

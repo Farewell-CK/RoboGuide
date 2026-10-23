@@ -1,5 +1,10 @@
 # RoboGuide
 
+[严格无变化的 timer 事务](docs/development/acceptance/2026-10-23-unchanged-timer-transactions.md)
+减少空闲时重复的完整内容提交：实际 SQL 的当前/上次完整提交计数、外部连接变更、事件、
+pending 写入及精确 checkpoint 均不变才回滚空事务。原 outbox 授权和正常变化的持久化
+保持；旧真实二进制的增长反例、当前空闲/正常上传/重启，以及实际 CPU 停止/撤权/交接回归通过。
+
 [真实 Controller 内容 Profile](docs/development/acceptance/2026-10-23-runnable-controller-content.md)
 以显式 process v0.2 接通 parent8/Root4、原 PID 日志、mTLS 和同一个实际 Artifact writer。
 实际 HTTP 上传、三副本完整字节、原 child SIGKILL/wait 与同 inode 重启读取已有进程证据。

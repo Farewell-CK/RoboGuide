@@ -27,6 +27,37 @@ fn controller(events: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
     }))
 }
 
+/// Complete empty-authority reductions keep their exact checkpoint without new idle journal commands.
+#[test]
+fn unchanged_timer_reduces_without_replicating_identical_empty_authority() {
+    let directory = tempfile::tempdir().unwrap();
+    let events = state::SqliteEventLog::open(directory.path().join("original.sqlite3")).unwrap();
+    let controller = controller(&events);
+    let gate = Arc::new(Mutex::new(()));
+    application::drive_application_timer(
+        &controller,
+        &events,
+        &gate,
+        domain::TimestampMs::new(17),
+        None,
+    )
+    .unwrap();
+    let checkpoint = events.load_checkpoint().unwrap().unwrap();
+    let original = events.control_command_journal().unwrap();
+    for now in [1000, 2000, 3000, 4000, 5000] {
+        application::drive_application_timer(
+            &controller,
+            &events,
+            &gate,
+            domain::TimestampMs::new(now),
+            None,
+        )
+        .unwrap();
+        assert_eq!(events.control_command_journal().unwrap(), original);
+        assert_eq!(events.load_checkpoint().unwrap().unwrap(), checkpoint);
+    }
+}
+
 /// A blocked production timer cannot occupy the sole network worker or commit before the real gate.
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn original_timer_waits_for_real_writer_while_single_network_worker_serves_tcp() {
