@@ -113,6 +113,12 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-24）
 
+共享 wrapper v53 的 [standalone 恢复接线](acceptance/2026-10-24-recovery-profile-propagation.md)
+补齐原 GC/Snapshot/writer inventory 的实际 profile 传递，保留旧 profile 和新
+recovery/Root4 拒绝规则。真实 10 类 GC SQL 故障、Catalog 接管/source GC、
+真实 MI child 与 Archive 冷恢复通过。接续原 Completed 跨 owner 退休与完整
+Replica 恢复，不能以 standalone 验收关闭在线 HA。
+
 N3/P3 的 [ADR-0181 跨 owner Prepared 释放](acceptance/2026-10-24-cross-owner-prepared-release.md)
 已通过：在原完成 SQL 故障、真实 child wait/restart 后，新 writer 的 DELETE 保留
 原 owner origin，仅解除原上传输入；原 Unknown、独立 Root stream/log 和三份实际

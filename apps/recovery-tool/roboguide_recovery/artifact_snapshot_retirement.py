@@ -67,7 +67,7 @@ def validate_receipt(receipt: dict[str, Any], request: dict[str, Any]) -> None:
         raise ValueError("original upgraded Snapshot drain proof changed")
     current_components = validate(receipt["current_profile"])
     original_components = validate(receipt["original_profile"])
-    if receipt["current_profile"]["schema"] != gc.SCHEMA or (
+    if receipt["current_profile"]["schema"] not in gc.PROFILES or (
         digest_profile(receipt["original_profile"]) != request["profile_digest"]
         or digest_profile(receipt["current_profile"]) != fence["current_profile_digest"]
     ):
@@ -83,7 +83,7 @@ def validate_receipt(receipt: dict[str, Any], request: dict[str, Any]) -> None:
     ]
     expected: set[tuple[str, str]] = set()
     for values, schema in (
-        (current_components, gc.SCHEMA),
+        (current_components, receipt["current_profile"]["schema"]),
         (extra, receipt["original_profile"]["schema"]),
     ):
         for value in values:
@@ -110,7 +110,7 @@ def run(
 ) -> dict[str, Any]:
     """Hold original and current writers before releasing the exact original pin."""
     components, original_components = validate(profile), validate(original_profile)
-    if profile["schema"] != gc.SCHEMA or any(
+    if profile["schema"] not in gc.PROFILES or any(
         value["kind"] == "replica" for value in components + original_components
     ):
         raise ValueError("upgraded Snapshot retirement requires explicit standalone recovery v0.16")
@@ -135,9 +135,9 @@ def run(
         acquire_all(components, profile_schema=profile["schema"]),
         acquire_all(extra, profile_schema=original_profile["schema"]),
     ):
-        owner = artifact_layout.validate_storage(root, gc.SCHEMA)
+        owner = artifact_layout.validate_storage(root, profile["schema"])
         assert owner is not None
-        operations = artifact_snapshots.operations(root, budget, profile_schema=gc.SCHEMA)
+        operations = artifact_snapshots.operations(root, budget, profile_schema=profile["schema"])
         chosen = [value for value in operations if value[1]["operation_id"] == operation_id]
         if len(chosen) != 1:
             raise ValueError("original Snapshot operation is absent")
@@ -156,7 +156,7 @@ def run(
         original = original_artifacts[0]
         original_owner = artifact_layout.validate_storage(
             Path(original["root"]),
-            gc.SCHEMA if original["root"] == str(root) else original_profile["schema"],
+            profile["schema"] if original["root"] == str(root) else original_profile["schema"],
         )
         if (
             original_owner is None

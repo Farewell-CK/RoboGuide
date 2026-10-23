@@ -17,11 +17,11 @@ from .profile import acquire_all, layout, real_directory, validate
 from .snapshot_references import canonical, digest, digest_profile
 
 
-def _writers(components: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _writers(components: list[dict[str, Any]], profile_schema: str) -> list[dict[str, Any]]:
     """Independently observe every named original lease already acquired by this actual process."""
     result = []
     for component in components:
-        databases, _, locks = layout(component, profile_schema=journal.SCHEMA)
+        databases, _, locks = layout(component, profile_schema=profile_schema)
         if component["kind"] == "memory":
             locks += [".memory-use.lock", *databases]
         for name in locks:
@@ -42,12 +42,13 @@ def _closure(
     owner: dict[str, Any],
     checksum: str,
     budget: bundle.Budget,
+    profile_schema: str,
 ) -> list[dict[str, Any]]:
     """Freeze WAL-consistent SQL before inspecting the original content authorities."""
     known = artifact_layout.reference_authorities(root, owner)
     archives = {component["root"] for component in components if component["kind"] == "archive"}
     for _, request, receipt in artifact_snapshots.operations(
-        root, budget, profile_schema=journal.SCHEMA
+        root, budget, profile_schema=profile_schema
     ):
         if receipt is None and any(
             value["content_digest"] == checksum for value in request["inputs"]
@@ -82,7 +83,12 @@ def _closure(
             if authority in proofs:
                 raise ValueError("original source Controller authority is declared more than once")
             proof = artifact_source_references.inspect(
-                destination, owner["owner_id"], checksum, budget, archives
+                destination,
+                owner["owner_id"],
+                checksum,
+                budget,
+                archives,
+                profile_schema=profile_schema,
             )
             proofs[authority] = proof | {"component_id": component["component_id"]}
     if set(proofs) != known:
@@ -101,12 +107,12 @@ def run(
     """Persist the original tombstone before unlink; retry never repeats effects."""
     components = validate(profile)
     if (
-        profile["schema"] != journal.SCHEMA
+        profile["schema"] not in journal.PROFILES
         or profile["artifact_replica_sets"]
         or any(value["kind"] == "replica" for value in components)
     ):
         raise ValueError(
-            "source GC requires standalone recovery v0.16; "
+            "source GC requires explicit standalone recovery v0.16 or v0.18; "
             "online Replica authority is not yet supported"
         )
     selected = [
@@ -126,8 +132,8 @@ def run(
         raise ValueError("source GC command/content/retention input is invalid")
     budget = bundle.Budget(profile)
     root = real_directory(Path(selected[0]["root"]))
-    with acquire_all(components, profile_schema=journal.SCHEMA):
-        owner = artifact_layout.validate_storage(root, journal.SCHEMA)
+    with acquire_all(components, profile_schema=profile["schema"]):
+        owner = artifact_layout.validate_storage(root, profile["schema"])
         assert owner is not None
         commands, tombstones = journal.validate(root, owner["owner_id"], budget)
         if command_id in commands:
@@ -152,7 +158,7 @@ def run(
             }
         if len(commands) >= journal.MAX_COMMANDS:
             raise ValueError("original source GC command history is full")
-        closure = _closure(components, root, owner, checksum, budget)
+        closure = _closure(components, root, owner, checksum, budget, profile["schema"])
         path = root / "objects-v1/sha256" / checksum[7:9] / checksum[7:]
         inode = None
         if path.exists() or path.is_symlink():
@@ -181,7 +187,7 @@ def run(
                 "start_ticks": int(
                     Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()[19]
                 ),
-                "writers": _writers(components),
+                "writers": _writers(components, profile["schema"]),
             },
             "content_inode": inode,
             "known_authorities": [value["authority_id"] for value in closure],

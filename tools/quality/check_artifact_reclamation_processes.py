@@ -20,6 +20,12 @@ from check_artifact_authority_processes import grant
 from check_catalog_adoption_processes import call
 from check_identity_processes import client, request
 from check_state_verifier_processes import address, save, stop, wait_for
+from recovery_profile_selection import (
+    declare_controller_storage,
+    restore_schema,
+    standalone_binary_schema,
+    standalone_schema,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "apps/recovery-tool"))
@@ -47,7 +53,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
     )
     if revision_source:
         original_profile = {
-            "schema": "roboguide.recovery-profile/v0.16",
+            "schema": standalone_schema(source / "controller.sqlite3"),
             "profile_id": "actual-mi-source-retention",
             "revision": 1,
             "max_bytes": 512 * 1024**2,
@@ -76,6 +82,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
         }
     else:
         original_profile = json.loads((source / "recovery-profile.json").read_bytes())
+    declare_controller_storage(original_profile)
     components = validate(original_profile)
     original_controller = next(value for value in components if value["kind"] == "controller")
     original_artifact = next(value for value in components if value["kind"] == "artifact")
@@ -92,6 +99,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
         ROOT / "tools/quality/check_identity_processes.py",
         ROOT / "tools/quality/check_state_verifier_processes.py",
         Path(__file__),
+        Path(__file__).with_name("recovery_profile_selection.py"),
         ROOT / "Cargo.lock",
     ]
     source_digests = {str(path.relative_to(ROOT)): digest(path.read_bytes()) for path in pinned}
@@ -126,7 +134,10 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
         )
         save(authorization_path, authorization)
     profile = json.loads(json.dumps(original_profile))
-    profile.update(schema="roboguide.recovery-profile/v0.16", profile_id="source-reclamation")
+    profile.update(
+        schema=standalone_binary_schema(ROOT / "target/debug/integration-server"),
+        profile_id="source-reclamation",
+    )
     for component in profile["components"]:
         if component["kind"] == "controller":
             component["root"] = str(working)
@@ -135,6 +146,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
                 root=str(working / "cas"), storage_schema="roboguide.artifact-storage/v5"
             )
     profile_path = output / "profile.json"
+    declare_controller_storage(profile)
     save(profile_path, profile)
     with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
         checkpoint = json.loads(
@@ -575,7 +587,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
         )
         receipt = recover(*arguments)
         assert (
-            receipt["schema"] == "roboguide.restore-receipt/v0.16"
+            receipt["schema"] == restore_schema(profile["schema"])
             and recover(*arguments) == receipt
         )
         old_profile = json.loads(json.dumps(profile))

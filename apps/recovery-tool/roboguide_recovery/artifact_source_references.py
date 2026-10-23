@@ -17,9 +17,13 @@ from .profile import real_directory
 from .snapshot_references import OperationBudget, canonical, digest
 
 
-def catalog_rows(connection: sqlite3.Connection, budget: OperationBudget) -> list[dict[str, Any]]:
+def catalog_rows(
+    connection: sqlite3.Connection,
+    budget: OperationBudget,
+    profile_schema: str = gc.SCHEMA,
+) -> list[dict[str, Any]]:
     """Keep original archived envelopes and the consistent tail inside fixed bounds."""
-    result = archive_references.catalog_history(connection, gc.SCHEMA, budget)
+    result = archive_references.catalog_history(connection, profile_schema, budget)
     total = sum(len(canonical(row)) for row in result)
     connection.row_factory = sqlite3.Row
     for index, row in enumerate(
@@ -440,9 +444,11 @@ def inspect(
     checksum: str,
     budget: OperationBudget,
     archives: set[str],
+    *,
+    profile_schema: str = gc.SCHEMA,
 ) -> dict[str, Any]:
     """Reject every current original claim and return only exact frozen source-evidence identity."""
-    heads, _ = catalog_references._controller(database, gc.SCHEMA, budget)
+    heads, _ = catalog_references._controller(database, profile_schema, budget)
     for record in heads.values():
         if record["retirement"] is None and any(
             entry["store_owner_id"] == owner and entry["content_digest"] == checksum
@@ -461,7 +467,7 @@ def inspect(
             raise ValueError("source GC requires original Controller wrapper v52")
         checkpoint = json.loads(saved[2])
         _application(checkpoint, checksum)
-        rows = catalog_rows(connection, budget)
+        rows = catalog_rows(connection, budget, profile_schema)
         uploads, retirements = upload_history(rows)
         for upload_id, value in uploads.items():
             if (
@@ -483,8 +489,10 @@ def inspect(
                     raise ValueError(
                         "original independent verifier/goal CAS evidence retains source content"
                     )
-        originals = archive_references.operations(connection, gc.SCHEMA, budget, current=True)
-        cleanups = archive_aborts.operations(connection, gc.SCHEMA, budget, originals, current=True)
+        originals = archive_references.operations(connection, profile_schema, budget, current=True)
+        cleanups = archive_aborts.operations(
+            connection, profile_schema, budget, originals, current=True
+        )
         for intent, state, _ in originals:
             if intent["request"]["destination"] not in archives:
                 raise ValueError(
@@ -586,7 +594,7 @@ def validate_bundle(
             sqlite3.connect(database.as_uri() + "?mode=ro&immutable=1", uri=True)
         ) as connection:
             connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 64 * 1024 * 1024)
-            rows = catalog_rows(connection, budget)
+            rows = catalog_rows(connection, budget, profile_schema)
             uploads, retired = upload_history(rows)
             authority = archive_references._metadata(connection, "archive_authority_id")
         candidates = {owner: value for owner, value in owners.items() if authority in value[1]}

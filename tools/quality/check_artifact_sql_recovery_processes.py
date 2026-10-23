@@ -158,7 +158,9 @@ def _normal(case: Case) -> dict[str, Any]:
             "original-native-sql-restore",
         ]
     )
-    assert receipt["schema"] == "roboguide.restore-receipt/v0.17"
+    assert receipt["schema"] == case.profile["schema"].replace(
+        "recovery-profile", "restore-receipt"
+    )
     assert (
         gc_rows(restored / "stores/artifact/reclamation-v1/journal.sqlite3") == case.original_rows
     )
@@ -384,6 +386,7 @@ def run(output: Path, binary: Path, selections: list[str]) -> dict[str, Any]:
     paths = [
         *sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py")),
         Path(__file__),
+        Path(__file__).with_name("recovery_profile_selection.py"),
         Path(__file__).with_name("artifact_sql_recovery_processes.py"),
         Path(__file__).with_name("check_controller_storage_processes.py"),
     ]

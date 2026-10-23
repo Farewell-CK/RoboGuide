@@ -29,6 +29,8 @@
 
 ## 如何解读证据
 
+[v53 standalone 兼容接线](docs/development/acceptance/2026-10-24-recovery-profile-propagation.md)已通过 GC SQL 的10类实际故障、接管/源回收及 Catalog/child/Archive 冷恢复；原 v0.16 和 parent8/Root4 边界保留。实际软件 Node 只执行文件/CPU 工作，设备、外部模型、模拟器为0。
+
 - **合同已接受**：决策语义确定，不表示全部实现完成。
 - **代码已实现**：存在实际调用链，不等于在用户部署中验证。
 - **离线/进程验收**：确定性、真实文件、SQL、TLS、CPU child 等分别证明其范围内的软件事实。

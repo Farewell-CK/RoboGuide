@@ -18,6 +18,7 @@ from typing import Any
 from check_artifact_authority_processes import call, grant
 from check_controller_storage_processes import Controllers
 from check_resource_quota_processes import ROOT, request, stop
+from recovery_profile_selection import declare_controller_storage, standalone_schema
 
 
 def digest(path: Path) -> str:
@@ -217,6 +218,8 @@ class Case:
         )
         assert status == 200, raw
         self.controllers.finish(child)
+        self.profile["schema"] = standalone_schema(self.database)
+        declare_controller_storage(self.profile)
         self.save_profile()
         self.original_gc = self.command(
             [
@@ -245,7 +248,8 @@ class Case:
             artifact, self.controllers.admin, "GET", "/v1/artifacts/" + self.retained_digest
         ) == (200, self.retained_payload)
         self.controllers.finish(child)
-        self.profile["schema"] = "roboguide.recovery-profile/v0.17"
+        if self.profile["schema"] != "roboguide.recovery-profile/v0.18":
+            self.profile["schema"] = "roboguide.recovery-profile/v0.17"
         self.profile["components"][0]["storage_schema"] = "roboguide.controller-storage/v1"
         self.save_profile()
         self.original_rows = gc_rows(self.gc_database)

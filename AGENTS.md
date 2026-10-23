@@ -1,5 +1,11 @@
 # Repository Guidelines
 
+ADR-0177's explicit standalone recovery v0.18 also threads the actual selected profile through
+source GC, original Snapshot retirement, Controller inspection and writer inventory. v0.16 keeps
+its old wrapper boundary; v0.18 still refuses recovery events and parent8/Root4. The maintained
+recovery_profile_selection.py observes actual wrapper/storage headers for declarations; the CLI
+independently validates complete SQL, bytes, leases and bounds. It grants no recovery/Node authority.
+
 ADR-0181 allows only an exact committed Prepared-to-Abandoned successor to inherit its original
 qualified origin across owners. Complete immutable source/byte/budget evidence and bounded original
 history are checked independently by constructor and receiver. Current source_writer still names
@@ -1579,6 +1585,14 @@ file docs/images/roboguide-v2-overall-architecture.png
 The bootstrap pins Rust and Python toolchains. Python commands use the repository's
 uv-managed environment. New implementation paths must update this file and
 `README.md` when their ownership is established.
+
+For shared Domain enums, checkpoint/codec generations or recovery profiles, compile all workspace
+targets early (the all-targets/all-features Clippy command includes this check). Review exhaustive
+matches, version gates and the complete producer-to-recovery/GC call chain before slow process gates.
+Run the affected unit/contracts/process checks, expanding only for a failure or another shared change.
+Native checks freeze successfully built binaries and source files. Use short fresh roots for Unix
+sockets, and check the required source case, retained lineage and certificate validity before reusing
+historical process evidence. Commit verified functional changes promptly on the authorized branch.
 
 For Mission changes, run:
 

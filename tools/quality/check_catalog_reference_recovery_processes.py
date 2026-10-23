@@ -17,6 +17,7 @@ from typing import Any
 
 from check_identity_processes import ROOT
 from check_state_verifier_processes import address, save
+from recovery_profile_selection import declare_controller_storage, restore_schema, standalone_schema
 
 
 def run(source: Path, directory: Path, old_controller: Path | None = None) -> dict[str, Any]:
@@ -52,7 +53,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
 
     shutil.copytree(source / "cas", working / "cas", ignore=omit_sockets)
     profile: dict[str, Any] = {
-        "schema": "roboguide.recovery-profile/v0.16",
+        "schema": standalone_schema(working / "controller.sqlite3"),
         "profile_id": "actual-catalog-original-owner",
         "revision": 1,
         "max_bytes": 512 * 1024**2,
@@ -80,6 +81,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         ],
     }
     profile_path = directory / "profile.json"
+    declare_controller_storage(profile)
     save(profile_path, profile)
     environment = {
         key: value
@@ -155,7 +157,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         "original-restore",
     )
     restored_receipt = execute(*restore_arguments)
-    assert restored_receipt["schema"] == "roboguide.restore-receipt/v0.16"
+    assert restored_receipt["schema"] == restore_schema(profile["schema"])
     assert execute(*restore_arguments) == restored_receipt
     assert original_heads(restored / "stores/controller/controller.sqlite3") == heads
     old_writer = None
@@ -200,7 +202,7 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         assert completed.returncode != 0
         message = completed.stderr.decode(errors="replace")
         assert "unsupported" in message.lower() and any(
-            version in message for version in ("v29", "v48", "v49", "v50", "v51", "v52")
+            version in message for version in ("v29", "v48", "v49", "v50", "v51", "v52", "v53")
         ), message
         assert original_heads(old_database) == before
         old_writer = {

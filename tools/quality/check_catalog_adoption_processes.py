@@ -21,6 +21,7 @@ from check_artifact_authority_processes import call as transport
 from check_artifact_authority_processes import grant
 from check_identity_processes import client, request
 from check_state_verifier_processes import address, save, stop, wait_for
+from recovery_profile_selection import declare_controller_storage, restore_schema, standalone_schema
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,6 +54,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
         *sorted((ROOT / "core/domain/src").rglob("*.rs")),
         *sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py")),
         Path(__file__),
+        Path(__file__).with_name("recovery_profile_selection.py"),
         ROOT / "Cargo.lock",
     ]
     frozen_source = {
@@ -334,8 +336,8 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
                 for row in originals
                 if "MemoryManifestPublished" in json.loads(row["payload_json"])
             ] == original_publications
-        profile = {
-            "schema": "roboguide.recovery-profile/v0.16",
+        profile: dict[str, Any] = {
+            "schema": standalone_schema(database),
             "profile_id": "legacy-adoption",
             "revision": 1,
             "max_bytes": 32 * 1024 * 1024,
@@ -371,6 +373,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
             ],
         }
         profile_path = output / "recovery-profile.json"
+        declare_controller_storage(profile)
         save(profile_path, profile)
         recovery_environment = environment | {"PYTHONPATH": str(ROOT / "apps/recovery-tool")}
         recovery_commands: list[dict[str, Any]] = []
@@ -417,7 +420,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
             "original-restore",
         )
         receipt = recover(*restore_args)
-        assert receipt["schema"] == "roboguide.restore-receipt/v0.16"
+        assert receipt["schema"] == restore_schema(profile["schema"])
         assert recover(*restore_args) == receipt
         old_profile = output / "old-profile.json"
         old_definition = json.loads(json.dumps(profile))
@@ -435,7 +438,8 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
             "old-profile",
             passed=False,
         )
-        assert "recovery v0.16" in refused["stderr"] and not (output / "old-refused").exists()
+        required = "recovery v0.18" if profile["schema"].endswith("/v0.18") else "recovery v0.16"
+        assert required in refused["stderr"] and not (output / "old-refused").exists()
         old_proof = None
         if old_controller is not None:
             old_sql = output / "old-controller.sqlite3"

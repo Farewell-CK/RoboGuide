@@ -29,6 +29,8 @@ Original content Archive and actual Catalog compaction/restart/cold recovery are
 
 ## Reading the evidence
 
+[v53 standalone compatibility](docs/development/acceptance/2026-10-24-recovery-profile-propagation.md) passed ten actual GC SQL fault cases, adoption/source reclamation and Catalog/child/Archive cold recovery. Original v0.16 and parent8/Root4 fences remain. Actual software Nodes perform file/CPU work, with zero devices, external models or simulators.
+
 - **Accepted contract** fixes semantics, not complete implementation.
 - **Implemented code** establishes an actual path, not validation in your deployment.
 - **Offline/process acceptance** proves the stated deterministic, file, SQL, TLS or owned CPU-child software behavior.

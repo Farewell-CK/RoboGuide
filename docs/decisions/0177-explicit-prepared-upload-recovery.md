@@ -53,6 +53,12 @@ reader ID 或新 upload 的内容证据。首次请求只有实际正常上传�
 wrapper 的无恢复操作历史。它仍拒绝包含新 recovery 事件的 bundle；原 parent8 /
 Root4 的完整在线/静止恢复和未确认操作只读对账是接续必需项，不能由版本号替代。
 
+全部 standalone source GC、原 Snapshot 退休、Controller 检查与 writer inventory
+必须透传实际选择的 profile。v0.18 的 Controller 明确声明实际 legacy 或 v1；
+检查器读取实际 header 仅生成声明，完整 SQL/lease/bytes 仍由 CLI 验证。不能在内层
+换回旧 v0.16，或以放宽旧 profile 接纳 v53 代替接线。旧 intent/receipt/profile
+digest、时间预算和扫描上限保持；显式 v0.18 仍拒绝新 recovery 事件和 parent8/Root4。
+
 实际两存活 voter 已提交元数据而旧固定 5 秒 callback 截断的反例，要求显式 content
 Commit 等待使用首次原 kernel 预算的实际剩余值，包含已花费的排队/复制时间。它仍只
 发送一次 Raft command；超出原剩余预算保持 Unknown，不刷新 deadline，不改变原

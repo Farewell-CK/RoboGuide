@@ -15,6 +15,7 @@ from typing import Any
 
 from check_identity_processes import ROOT
 from check_state_verifier_processes import save
+from recovery_profile_selection import declare_controller_storage, restore_schema, standalone_schema
 
 
 def run(source: Path, directory: Path) -> dict[str, Any]:
@@ -32,7 +33,7 @@ def run(source: Path, directory: Path) -> dict[str, Any]:
         )
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     profile: dict[str, Any] = {
-        "schema": "roboguide.recovery-profile/v0.16",
+        "schema": standalone_schema(source / "controller.sqlite3"),
         "profile_id": "actual-catalog-archive-recovery",
         "revision": 1,
         "max_bytes": 512 * 1024**2,
@@ -68,6 +69,7 @@ def run(source: Path, directory: Path) -> dict[str, Any]:
         ],
     }
     selected = directory / "profile.json"
+    declare_controller_storage(profile)
     save(selected, profile)
     commands: list[dict[str, Any]] = []
     environment = {
@@ -81,6 +83,7 @@ def run(source: Path, directory: Path) -> dict[str, Any]:
         for path in [
             *sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py")),
             Path(__file__),
+            Path(__file__).with_name("recovery_profile_selection.py"),
         ]
     }
     save(directory / "source-identity.json", frozen)
@@ -145,7 +148,7 @@ def run(source: Path, directory: Path) -> dict[str, Any]:
         "--command-id",
         "restore-original-catalog",
     )
-    assert receipt["schema"] == "roboguide.restore-receipt/v0.16"
+    assert receipt["schema"] == restore_schema(profile["schema"])
     assert retained(restored / "stores/controller/controller.sqlite3") == original
     assert retained(source / "controller.sqlite3") == original
     assert (
@@ -189,6 +192,7 @@ def run(source: Path, directory: Path) -> dict[str, Any]:
         for path in [
             *sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py")),
             Path(__file__),
+            Path(__file__).with_name("recovery_profile_selection.py"),
         ]
     } == frozen
     output = {

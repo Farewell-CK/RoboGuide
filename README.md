@@ -1,5 +1,9 @@
 # RoboGuide
 
+Standalone recovery v0.18 preserves the complete selected profile through source GC and Snapshot
+retirement. Native checks select explicit Controller storage declarations from actual headers via
+`tools/quality/recovery_profile_selection.py`; CLI validation remains authoritative.
+
 ADR-0181 keeps the exact original owner when abandoning a Prepared upload after Controller
 failover. It releases only that upload reference; original history and independent Root pins remain.
 The maintained runnable content checker covers this with `--release-after-recovery`.

@@ -52,7 +52,11 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
     profile = raw_profile | {
         "schema": raw_profile["schema"]
         if raw_profile["schema"]
-        in {"roboguide.recovery-profile/v0.15", "roboguide.recovery-profile/v0.16"}
+        in {
+            "roboguide.recovery-profile/v0.15",
+            "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.18",
+        }
         else "roboguide.recovery-profile/v0.14",
         "profile_id": "private-recipient",
     }
