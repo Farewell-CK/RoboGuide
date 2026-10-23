@@ -447,6 +447,9 @@ fn sources(
         let raw: String = row.get(1).map_err(|error| error.to_string())?;
         let entry: Entry<ControllerRaftConfig> =
             serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+        if let EntryPayload::Membership(membership) = &entry.payload {
+            crate::member::require_legacy_membership(membership)?;
+        }
         if entry.log_id.index != index {
             return Err("original parent log position differs from its raw row".into());
         }
@@ -514,10 +517,11 @@ fn sources(
         if data.len() > MAX_SNAPSHOT_BYTES {
             return Err("original adopted Snapshot exceeds retained bounds".into());
         }
-        let meta: SnapshotMeta<u64, BasicNode> =
+        let meta: SnapshotMeta<u64, ReplicaMember> =
             serde_json::from_str(&raw).map_err(|error| error.to_string())?;
         let body: StoreSnapshot =
             serde_json::from_slice(&data).map_err(|error| error.to_string())?;
+        crate::member::require_legacy_membership(body.membership.membership())?;
         if body.profile != profile
             || body.last_applied != meta.last_log_id
             || body.membership != meta.last_membership

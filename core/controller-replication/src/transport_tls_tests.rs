@@ -90,7 +90,7 @@ async fn asynchronous_and_child_clients_pin_exact_server_member() {
         let network = ReplicaNetwork {
             budget: TransportBudget::new(ReplicaTransportLimits::default()).unwrap(),
             target: 1,
-            node: BasicNode::new(address.to_string()),
+            node: ReplicaMember::new(address.to_string()),
             profile: "tls-test".into(),
             sender: 1,
             online: Arc::new(AtomicBool::new(true)),
@@ -146,7 +146,7 @@ async fn unrelated_ca_is_rejected_before_fence_frame() {
     let network = ReplicaNetwork {
         budget: TransportBudget::new(ReplicaTransportLimits::default()).unwrap(),
         target: 1,
-        node: BasicNode::new(address.to_string()),
+        node: ReplicaMember::new(address.to_string()),
         profile: "tls-test".into(),
         sender: 2,
         online: Arc::new(AtomicBool::new(true)),
@@ -294,7 +294,7 @@ async fn queued_actual_tls_member_cannot_observe_commands_after_its_leaf_is_reti
     let network = ReplicaNetwork {
         budget: TransportBudget::new(ReplicaTransportLimits::default()).unwrap(),
         target: leader.config.replica_id,
-        node: BasicNode::new(leader.local_address().to_string()),
+        node: ReplicaMember::new(leader.local_address().to_string()),
         profile: leader.profile_identity(),
         sender: target.config.replica_id,
         online: Arc::new(AtomicBool::new(true)),

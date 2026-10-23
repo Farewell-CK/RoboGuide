@@ -289,7 +289,7 @@ struct StoreSnapshot {
     /// Last quorum-applied log, including blank/membership entries.
     last_applied: Option<LogId<u64>>,
     /// Exact accepted consensus membership.
-    membership: StoredMembership<u64, BasicNode>,
+    membership: StoredMembership<u64, ReplicaMember>,
     /// Exact complete accepted application metadata.
     view: ReplicaView,
     /// Optional v0.3 infrastructure trust; absent in unchanged legacy snapshot bytes.
@@ -1168,6 +1168,15 @@ impl SqliteRaftStore {
         let view = store.accepted_view()?;
         view.validate(application_schema, profile)
             .map_err(|error| error.to_string())?;
+        {
+            let connection = store.connection.lock().map_err(|error| error.to_string())?;
+            if let Some(membership) =
+                read_meta::<StoredMembership<u64, ReplicaMember>>(&connection, "membership")
+                    .map_err(|error| error.to_string())?
+            {
+                crate::member::require_legacy_membership(membership.membership())?;
+            }
+        }
         if store.content.is_none() && view.content.is_some()
             || store.content.is_some() && view.checkpoint.is_some() && view.content.is_none()
         {
@@ -1290,6 +1299,11 @@ impl SqliteRaftStore {
         &self,
         entries: &[Entry<ControllerRaftConfig>],
     ) -> Result<(), StorageError<u64>> {
+        for entry in entries {
+            if let EntryPayload::Membership(membership) = &entry.payload {
+                crate::member::require_legacy_membership(membership).map_err(io_error)?;
+            }
+        }
         if self.has_producer_journal() && self.work_clock.is_none() {
             let (store, _capacity) = self.original_storage_work()?;
             return store.persist_log_entries(entries);
@@ -1828,7 +1842,7 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
     /// Returns only pointers and membership already persisted by quorum apply.
     async fn applied_state(
         &mut self,
-    ) -> Result<(Option<LogId<u64>>, StoredMembership<u64, BasicNode>), StorageError<u64>> {
+    ) -> Result<(Option<LogId<u64>>, StoredMembership<u64, ReplicaMember>), StorageError<u64>> {
         let connection = self.connection.lock().map_err(io_error)?;
         Ok((
             read_meta(&connection, "applied")?,
@@ -1866,7 +1880,7 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
     /// Installs exact accepted metadata and consensus pointers atomically, preserving the last snapshot.
     async fn install_snapshot(
         &mut self,
-        meta: &SnapshotMeta<u64, BasicNode>,
+        meta: &SnapshotMeta<u64, ReplicaMember>,
         snapshot: Box<ReplicaSnapshotData>,
     ) -> Result<(), StorageError<u64>> {
         if self.has_producer_journal() {

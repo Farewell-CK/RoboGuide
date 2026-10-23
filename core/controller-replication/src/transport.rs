@@ -539,7 +539,7 @@ pub(crate) async fn request_leader_transfer(
         .ok_or_else(|| "leader transfer target is not pre-enrolled".to_string())?;
     let network = ReplicaNetwork {
         target,
-        node: BasicNode::new(address.to_string()),
+        node: ReplicaMember::new(address.to_string()),
         profile: node.profile_identity(),
         sender: node.config.replica_id,
         online: node.network_online.clone(),
@@ -604,7 +604,7 @@ fn network_with_budget(
         .ok_or_else(|| "administration leader is not pre-enrolled".to_string())?;
     Ok(ReplicaNetwork {
         target: leader,
-        node: BasicNode::new(address.to_string()),
+        node: ReplicaMember::new(address.to_string()),
         profile: config.profile_identity(),
         sender: config.replica_id,
         online: Arc::new(AtomicBool::new(true)),
@@ -957,7 +957,7 @@ pub(crate) struct ReplicaNetwork {
     /// Exact remote infrastructure identity.
     target: u64,
     /// Upstream-declared member endpoint.
-    node: BasicNode,
+    node: ReplicaMember,
     /// Shared immutable cluster identity.
     profile: String,
     /// Local sending member identity.
@@ -976,7 +976,7 @@ impl RaftNetworkFactory<ControllerRaftConfig> for ReplicaNetworkFactory {
     type Network = ReplicaNetwork;
 
     /// Creates an inert exact-member client without aliasing robot Nodes or opening a socket.
-    async fn new_client(&mut self, target: u64, node: &BasicNode) -> Self::Network {
+    async fn new_client(&mut self, target: u64, node: &ReplicaMember) -> Self::Network {
         ReplicaNetwork {
             target,
             node: node.clone(),
@@ -1090,7 +1090,7 @@ impl RaftNetwork<ControllerRaftConfig> for ReplicaNetwork {
         &mut self,
         rpc: AppendEntriesRequest<ControllerRaftConfig>,
         option: RPCOption,
-    ) -> Result<AppendEntriesResponse<u64>, RPCError<u64, BasicNode, RaftError<u64>>> {
+    ) -> Result<AppendEntriesResponse<u64>, RPCError<u64, ReplicaMember, RaftError<u64>>> {
         match self
             .exchange(Command::Append(rpc), option)
             .await
@@ -1113,7 +1113,7 @@ impl RaftNetwork<ControllerRaftConfig> for ReplicaNetwork {
         &mut self,
         rpc: VoteRequest<u64>,
         option: RPCOption,
-    ) -> Result<VoteResponse<u64>, RPCError<u64, BasicNode, RaftError<u64>>> {
+    ) -> Result<VoteResponse<u64>, RPCError<u64, ReplicaMember, RaftError<u64>>> {
         match self
             .exchange(Command::Vote(rpc), option)
             .await
@@ -1138,7 +1138,7 @@ impl RaftNetwork<ControllerRaftConfig> for ReplicaNetwork {
         option: RPCOption,
     ) -> Result<
         InstallSnapshotResponse<u64>,
-        RPCError<u64, BasicNode, RaftError<u64, InstallSnapshotError>>,
+        RPCError<u64, ReplicaMember, RaftError<u64, InstallSnapshotError>>,
     > {
         match self
             .exchange(Command::Snapshot(rpc), option)

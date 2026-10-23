@@ -351,6 +351,11 @@ Log/View/Snapshot 保留责任的接管。新 storage v6 强制保留接管历�
 pins 和 unavailable 历史不改写。同 ID 只观察，接管不产生旧完成证据、全局引用覆盖或
 网络 quorum，也不启用生产 v0.4。
 
+[ADR-0167](../../decisions/0167-consensus-bound-content-member-identities.md)要求完整内容
+target 的 member→store 映射与确切 committed membership 的成员资料一致。新 typed
+member 保留旧缺省编码；旧 profile 拒绝隐藏新绑定。资料匹配不产生真实内容 ACK，
+实际 mTLS/SQL/CAS 适配器和 joint 两组同成员多数仍须完成，生产 v0.4 继续关闭。
+
 [ADR-0161](../../decisions/0161-controller-inode-writer-and-storage-generation.md)要求实际
 Controller 的 canonical sibling 与 SQL inode 同时排他，并由最后一个真实连接持有到关闭。
 原生 SQLite 排空独立覆盖旧 live writer；显式 storage v1/read-only legacy views 提供

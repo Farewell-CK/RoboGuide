@@ -32,8 +32,14 @@ impl SqliteRaftStore {
         saved
             .map(|(meta, data)| {
                 let body: StoreSnapshot = serde_json::from_slice(&data).map_err(io_error)?;
+                crate::member::require_legacy_membership(body.membership.membership())
+                    .map_err(io_error)?;
+                let meta: SnapshotMeta<u64, ReplicaMember> =
+                    serde_json::from_str(&meta).map_err(io_error)?;
+                crate::member::require_legacy_membership(meta.last_membership.membership())
+                    .map_err(io_error)?;
                 Ok(Snapshot {
-                    meta: serde_json::from_str(&meta).map_err(io_error)?,
+                    meta,
                     snapshot: Box::new(self.snapshot_data(&body, data)?),
                 })
             })
@@ -58,7 +64,7 @@ impl SqliteRaftStore {
     pub fn install_content_snapshot_for(
         &self,
         operation_id: &str,
-        meta: &SnapshotMeta<u64, BasicNode>,
+        meta: &SnapshotMeta<u64, ReplicaMember>,
         data: Vec<u8>,
     ) -> Result<(), StorageError<u64>> {
         if !self.has_producer_journal() {
@@ -75,7 +81,7 @@ impl SqliteRaftStore {
         &self,
         connection: &Connection,
         body: &StoreSnapshot,
-        meta: &SnapshotMeta<u64, BasicNode>,
+        meta: &SnapshotMeta<u64, ReplicaMember>,
         data: &[u8],
         operation_id: Option<&str>,
         install: bool,
@@ -255,7 +261,7 @@ impl SqliteRaftStore {
     /// Installs exact actual metadata with optional original managed producer operation.
     pub(super) fn install_snapshot_record(
         &self,
-        meta: &SnapshotMeta<u64, BasicNode>,
+        meta: &SnapshotMeta<u64, ReplicaMember>,
         data: Vec<u8>,
         operation_id: Option<&str>,
     ) -> Result<(), StorageError<u64>> {
@@ -263,6 +269,10 @@ impl SqliteRaftStore {
             return Err(io_error("replica snapshot exceeds bounds"));
         }
         let restored: StoreSnapshot = serde_json::from_slice(&data).map_err(io_error)?;
+        crate::member::require_legacy_membership(restored.membership.membership())
+            .map_err(io_error)?;
+        crate::member::require_legacy_membership(meta.last_membership.membership())
+            .map_err(io_error)?;
         if restored.profile != self.profile
             || restored.last_applied != meta.last_log_id
             || restored.membership != meta.last_membership
@@ -500,6 +510,8 @@ impl SqliteRaftStore {
             leader_transfer: None,
         };
         let data = serde_json::to_vec(&snapshot).map_err(io_error)?;
+        crate::member::require_legacy_membership(snapshot.membership.membership())
+            .map_err(io_error)?;
         let meta = SnapshotMeta {
             last_log_id: snapshot.last_applied,
             last_membership: snapshot.membership.clone(),

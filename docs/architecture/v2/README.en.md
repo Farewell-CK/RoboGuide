@@ -355,6 +355,12 @@ complete adoption history; original business rows, legacy pins and unavailable h
 Retries only observe. Adoption establishes neither historical completion, global reference coverage
 nor network quorum, and does not enable production v0.4.
 
+[ADR-0167](../../decisions/0167-consensus-bound-content-member-identities.md) requires the complete
+target's member/store map to equal member data in the exact committed membership. Typed member data
+preserves legacy absent-field encoding; old profiles refuse hidden bindings. Matching data grants no
+real content ACK. Actual mTLS/SQL/CAS adapters and same-member majorities in both joint groups remain
+required; production v0.4 stays disabled.
+
 [ADR-0161](../../decisions/0161-controller-inode-writer-and-storage-generation.md) requires both
 the canonical sibling and actual SQL inode leases, retained until the last actual connection closes.
 Native SQLite draining separately fences older live connections. Explicit storage v1 and exact

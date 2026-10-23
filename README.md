@@ -1,5 +1,10 @@
 # RoboGuide
 
+[共识成员内容身份](docs/development/acceptance/2026-10-23-consensus-member-content-identities.md)
+由 `core/controller-replication/src/member.rs` 维护；完整 target 的 store owner 必须匹配
+确切 committed member。旧缺省编码和摘要保持，旧 profile 拒绝隐藏新绑定。实际混合
+mTLS binaries 的原 SQL 前进/回退通过；生产内容 v0.4 与完整在线接线继续实施。
+
 [原内容主库显式接管](docs/development/replica-content-parent-adoption-v0.1.md)由
 `controller-replica --content-maintenance` 与 `core/controller-replication/src/store_adoption.rs`
 负责：实际 writers/native drain、原 child wait 和不可续意图先于当前责任接管。

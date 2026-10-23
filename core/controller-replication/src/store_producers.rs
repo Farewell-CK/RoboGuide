@@ -55,7 +55,7 @@ pub(super) fn view_record_digest(
 
 /// Binds exact actual Snapshot pointers and bytes without borrowing the sender's operational identity.
 pub(super) fn snapshot_record_digest(
-    meta: &SnapshotMeta<u64, BasicNode>,
+    meta: &SnapshotMeta<u64, ReplicaMember>,
     data: &[u8],
 ) -> Result<String, StorageError<u64>> {
     Ok(format!(
@@ -106,7 +106,7 @@ pub(super) fn read_heads(connection: &Connection) -> Result<ProducerHeads, Stora
     match (&heads.snapshot, snapshot) {
         (None, None) => {}
         (Some(head), Some((meta, data))) => {
-            let meta: SnapshotMeta<u64, BasicNode> =
+            let meta: SnapshotMeta<u64, ReplicaMember> =
                 serde_json::from_str(&meta).map_err(io_error)?;
             if snapshot_record_digest(&meta, &data)? != head.record_digest {
                 return Err(io_error(

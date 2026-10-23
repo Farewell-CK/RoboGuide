@@ -8,6 +8,11 @@ impl SqliteRaftStore {
         &self,
         entries: Vec<Entry<ControllerRaftConfig>>,
     ) -> Result<Vec<CommitReceipt>, StorageError<u64>> {
+        for entry in &entries {
+            if let EntryPayload::Membership(membership) = &entry.payload {
+                crate::member::require_legacy_membership(membership).map_err(io_error)?;
+            }
+        }
         let admissions = entries
             .iter()
             .map(|entry| self.retain_view_inputs(entry))

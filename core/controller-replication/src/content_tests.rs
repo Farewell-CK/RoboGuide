@@ -6,7 +6,20 @@ use openraft::{CommittedLeaderId, LogId, Membership};
 /// Builds a labelled contract fixture without creating a Node, transport, store or byte receipt.
 fn target(groups: Vec<BTreeSet<u64>>) -> ContentQuorumTarget {
     let voters: BTreeSet<_> = groups.iter().flatten().copied().collect();
-    let membership = Membership::new(groups, voters.clone());
+    let members = voters
+        .iter()
+        .map(|id| {
+            (
+                *id,
+                ReplicaMember::with_content_store(
+                    format!("127.0.0.1:{}", 32000 + id),
+                    format!("replica-content:{id:064x}"),
+                )
+                .unwrap(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let membership = Membership::new(groups, members);
     ContentQuorumTarget {
         profile_identity: "1".repeat(64),
         epoch: ControllerEpoch {
@@ -160,4 +173,35 @@ fn absent_committed_membership_and_conflicting_source_sizes_are_refused() {
     contradictory.byte_size += 1;
     target.inputs.push(contradictory);
     assert!(target.validate().is_err());
+}
+
+/// A separate declaration cannot replace a committed binding, and old membership lacks that authority.
+#[test]
+fn target_requires_the_exact_content_owner_in_each_committed_voter_record() {
+    let mut target = target(vec![BTreeSet::from([1, 2, 3])]);
+    target
+        .member_stores
+        .insert(2, format!("replica-content:{}", "f".repeat(64)));
+    assert!(
+        target
+            .validate()
+            .unwrap_err()
+            .contains("exact committed member")
+    );
+    let mut missing = target
+        .membership
+        .nodes()
+        .map(|(id, member)| (*id, member.clone()))
+        .collect::<BTreeMap<_, _>>();
+    missing.get_mut(&2).unwrap().content_store_owner = None;
+    target.membership = StoredMembership::new(
+        *target.membership.log_id(),
+        Membership::new(vec![BTreeSet::from([1, 2, 3])], missing),
+    );
+    assert!(
+        target
+            .validate()
+            .unwrap_err()
+            .contains("exact endpoint/store binding")
+    );
 }

@@ -1,5 +1,19 @@
 # Repository Guidelines
 
+ADR-0167 replaces address-only member data with ReplicaMember, preserving identical absent-owner
+Node/membership/SnapshotMeta JSON. Complete content targets require each voter owner to match its
+exact committed member data. Existing metadata/direct v4-v6 profiles refuse hidden new bindings
+before log/apply/Snapshot effects. Production v0.4 remains disabled. Owners are member.rs, content.rs
+and check_replica_member_compatibility_processes.py. Actual mixed mTLS binaries roll forward/back
+over nine native process waits with original SQL inode/identity/member rows retained; full frozen
+Snapshot/producer/adoption/Archive gates preserve old digests. Optional Archive checker binary paths
+freeze every actual dependency. Missing historical binaries remain unavailable. These are zero-Node
+software compatibility proofs, never online content ACK, full HA/upgrade or physical continuity.
+The original parent committed-kill gate now uses an actual Linux CAS file lease/SIGIO and original
+SIGSTOP wait before blocking the root receipt SQL, avoiding the short parent busy-timeout race.
+It retains original CAS mode/bytes and every Unknown/native wait; no product test mode or deadline
+changes. CI retains original failure observations from runner.temp as well as /tmp/rg-ci scopes.
+
 ADR-0166 adds explicit local `controller-replica --content-maintenance` Root2 upgrade and original
 parent v4 adoption. Actual root/parent writers, native SQL drain and original child wait precede
 admission. A pending format marker and complete first-intent inventory commit before producer/byte

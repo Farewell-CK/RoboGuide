@@ -46,8 +46,14 @@ def run(
     adopt_original_parents: bool = False,
     content_maintenance_binary: Path | None = None,
     old_parent_snapshot_probe: Path | None = None,
+    replica_content_probe: Path | None = None,
+    controller_binary: Path | None = None,
 ) -> dict[str, Any]:
     """Retain actual software process, file, SQL and TLS evidence with zero Nodes."""
+    if controller_binary is not None and not skip_build:
+        raise ValueError("explicit frozen Controller binary requires --skip-build")
+    if replica_content_probe is not None and replica_snapshot_probe is None:
+        raise ValueError("explicit content probe requires the actual Snapshot gate")
     if controller_projection_probe is not None and replica_state_probe is None:
         raise ValueError("actual Controller projection requires the complete original State probe")
     if adopt_original_parents and (
@@ -76,7 +82,7 @@ def run(
             check=True,
             timeout=240,
         )
-    binary = ROOT / "target/debug/integration-server"
+    binary = controller_binary or ROOT / "target/debug/integration-server"
     source_paths = [
         *sorted((ROOT / "apps/integration-server/src").rglob("*.rs")),
         *sorted((ROOT / "core/state/src").rglob("*.rs")),
@@ -369,7 +375,7 @@ def run(
             snapshot_producers = run_snapshot_producers(
                 directory / "actual-snapshot-producers",
                 replica_snapshot_probe,
-                ROOT / "target/debug/examples/content_store_probe",
+                replica_content_probe or ROOT / "target/debug/examples/content_store_probe",
                 database,
                 source,
                 hashlib.sha256(b"explicit local Snapshot storage producer gate v0.1").hexdigest(),
@@ -950,6 +956,8 @@ def main() -> None:
     parser.add_argument("--adopt-original-parents", action="store_true")
     parser.add_argument("--content-maintenance-binary", type=Path)
     parser.add_argument("--old-parent-snapshot-probe", type=Path)
+    parser.add_argument("--replica-content-probe", type=Path)
+    parser.add_argument("--controller-binary", type=Path)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -982,6 +990,10 @@ def main() -> None:
                 args.old_parent_snapshot_probe.resolve()
                 if args.old_parent_snapshot_probe
                 else None,
+                args.replica_content_probe.resolve(strict=True)
+                if args.replica_content_probe
+                else None,
+                args.controller_binary.resolve(strict=True) if args.controller_binary else None,
             ),
             indent=2,
         )

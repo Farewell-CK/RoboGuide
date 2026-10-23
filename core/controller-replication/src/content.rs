@@ -4,7 +4,8 @@
 //! receiving storage/transport adapter may supply observations after its SQL and CAS checks.
 
 use crate::ControllerEpoch;
-use openraft::{BasicNode, StoredMembership};
+use crate::ReplicaMember;
+use openraft::StoredMembership;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -68,7 +69,7 @@ pub struct ContentQuorumTarget {
     /// Complete original content/application command identity.
     pub batch_digest: String,
     /// Exact observed consensus membership including its original log identity.
-    pub membership: StoredMembership<u64, BasicNode>,
+    pub membership: StoredMembership<u64, ReplicaMember>,
     /// Consensus-bound actual receiving software stores for every current voter.
     pub member_stores: BTreeMap<u64, String>,
     /// Complete sorted original requirements; equal bytes under another owner remain independent.
@@ -94,7 +95,7 @@ pub struct MemberContentObservation {
     /// Exact original content/application command digest.
     pub batch_digest: String,
     /// Exact observed membership; another accepted configuration cannot lend voters.
-    pub membership: StoredMembership<u64, BasicNode>,
+    pub membership: StoredMembership<u64, ReplicaMember>,
     /// Complete actually verified original content set, never an aggregate caller `ok` flag.
     pub inputs: Vec<ArtifactContentKey>,
 }
@@ -130,6 +131,19 @@ impl ContentQuorumTarget {
         }
         for input in &self.inputs {
             input.validate()?;
+        }
+        for voter in &voters {
+            let member = self
+                .membership
+                .nodes()
+                .find_map(|(id, member)| (id == voter).then_some(member))
+                .ok_or("content target lacks its exact committed voter data")?;
+            member.validate_content_binding()?;
+            if member.content_store_owner.as_ref() != self.member_stores.get(voter) {
+                return Err(
+                    "content target store owner differs from its exact committed member".into(),
+                );
+            }
         }
         if self.inputs.windows(2).any(|keys| {
             keys[0].source_owner == keys[1].source_owner

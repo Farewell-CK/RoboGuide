@@ -10,6 +10,7 @@ mod content_application;
 #[cfg(test)]
 mod content_application_tests;
 mod content_store;
+mod member;
 mod snapshot_data;
 mod store;
 mod supervision;
@@ -19,7 +20,7 @@ mod tls;
 mod transport;
 mod transport_budget;
 
-use openraft::{BasicNode, Raft};
+use openraft::Raft;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
@@ -45,6 +46,7 @@ pub use content_store::{
     ReplicaContentReceipt, ReplicaContentReference, ReplicaContentReferenceKind,
     ReplicaContentStore, ReplicaSnapshotCloseStatus,
 };
+pub use member::ReplicaMember;
 pub use snapshot_data::ReplicaSnapshotData;
 pub use store::ReplicaContentParentAdoptionStatus;
 pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};
@@ -58,7 +60,7 @@ openraft::declare_raft_types!(
         D = ReplicaCommand,
         R = CommitReceipt,
         NodeId = u64,
-        Node = BasicNode,
+        Node = ReplicaMember,
         SnapshotData = ReplicaSnapshotData
 );
 
@@ -568,7 +570,7 @@ impl ReplicaNode {
                 .config
                 .initial_voters()
                 .iter()
-                .map(|id| (*id, BasicNode::new(node.config.members[id].to_string())))
+                .map(|id| (*id, ReplicaMember::new(node.config.members[id].to_string())))
                 .collect::<BTreeMap<_, _>>();
             node.raft
                 .initialize(members)
@@ -681,7 +683,7 @@ impl ReplicaNode {
         {
             return Err("learner admission target is not a pre-enrolled non-voter".into());
         }
-        let node = BasicNode::new(self.config.members[&member_id].to_string());
+        let node = ReplicaMember::new(self.config.members[&member_id].to_string());
         tokio::time::timeout(
             Duration::from_secs(10),
             self.raft.add_learner(member_id, node, true),

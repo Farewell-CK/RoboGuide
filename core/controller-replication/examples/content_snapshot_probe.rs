@@ -57,7 +57,7 @@ enum Operation {
         /// Immutable original receiver storage operation ID.
         operation_id: String,
         /// Actual original published metadata pointers.
-        meta: openraft::SnapshotMeta<u64, openraft::BasicNode>,
+        meta: openraft::SnapshotMeta<u64, ReplicaMember>,
         /// Actual bounded original Snapshot metadata bytes.
         input: PathBuf,
     },

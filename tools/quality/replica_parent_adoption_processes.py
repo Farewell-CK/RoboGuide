@@ -7,16 +7,119 @@ import json
 import os
 import signal
 import sqlite3
+import stat
 import subprocess
 import time
-from contextlib import closing
+from contextlib import closing, nullcontext
 from pathlib import Path
+from types import FrameType, TracebackType
 from typing import Any, cast
 
 from check_replica_content_processes import Processes, digest, save
 
 HISTORY = "content_parent_adoptions"
 COMMIT = "content_parent_adoption_commit"
+
+
+class PayloadReadBarrier:
+    """Own a real Linux write lease that blocks opening this private immutable CAS file."""
+
+    def __init__(self, path: Path) -> None:
+        """Retain only the actual owned path; opening/lease admission happens in the context."""
+        self.path = path
+        self.descriptor: int | None = None
+        self.previous: Any = None
+        self.leased = False
+        self.signals: list[int] = []
+        self.original_mode = stat.S_IMODE(path.stat().st_mode)
+
+    def observe_break(self, signum: int, frame: FrameType | None) -> None:
+        """Record the actual kernel SIGIO for an attempted open of the leased file."""
+        self.signals.append(signum)
+
+    def __enter__(self) -> PayloadReadBarrier:
+        """Acquire the real FD/lease and restore original mode before starting any product child."""
+        try:
+            if not self.original_mode & stat.S_IWUSR:
+                self.path.chmod(self.original_mode | stat.S_IWUSR)
+            try:
+                self.descriptor = os.open(self.path, os.O_RDWR | os.O_NOFOLLOW)
+            finally:
+                self.path.chmod(self.original_mode)
+            self.previous = signal.signal(signal.SIGIO, self.observe_break)
+            fcntl.fcntl(self.descriptor, fcntl.F_SETOWN, os.getpid())
+            fcntl.fcntl(self.descriptor, fcntl.F_SETLEASE, fcntl.F_WRLCK)
+            self.leased = True
+            return self
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Release the actual lease/FD and original signal handler; preserve CAS bytes."""
+        if self.descriptor is not None:
+            try:
+                if self.leased:
+                    fcntl.fcntl(self.descriptor, fcntl.F_SETLEASE, fcntl.F_UNLCK)
+            finally:
+                os.close(self.descriptor)
+                self.descriptor = None
+                self.leased = False
+                if self.previous is not None:
+                    signal.signal(signal.SIGIO, self.previous)
+                    self.previous = None
+
+    def __exit__(
+        self,
+        kind: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the real owned barrier on success/error; propagate every original failure."""
+        self.close()
+
+
+def payload_path(member: dict[str, Any]) -> Path:
+    """Resolve a retained CAS receipt and verify its original device/inode before leasing."""
+    root = Path(member["root"]) / "content"
+    with closing(
+        sqlite3.connect((root / "content.sqlite3").as_uri() + "?mode=ro", uri=True)
+    ) as sql:
+        row = sql.execute(
+            "SELECT record FROM content_objects ORDER BY content_key LIMIT 1"
+        ).fetchone()
+    if row is None:
+        raise ValueError("actual adoption fixture has no original content receipt to lease")
+    receipt = json.loads(row[0])
+    key = receipt["content"]
+    path: Path = (
+        root
+        / "content-v1"
+        / key["source_owner"].removeprefix("artifact-store:")
+        / key["content_digest"].removeprefix("sha256:")
+    )
+    actual = path.stat(follow_symlinks=False)
+    if not stat.S_ISREG(actual.st_mode) or (actual.st_dev, actual.st_ino) != (
+        receipt["file_device"],
+        receipt["file_inode"],
+    ):
+        raise ValueError("original leased CAS file differs from its actual durable receipt")
+    return path
+
+
+def stop_owned_child(child: subprocess.Popen[bytes]) -> int:
+    """Wait the actual owned process stop event before releasing the kernel read barrier."""
+    os.kill(child.pid, signal.SIGSTOP)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        pid, status = os.waitpid(child.pid, os.WUNTRACED | os.WNOHANG)
+        if pid:
+            if os.WIFSTOPPED(status):
+                return os.WSTOPSIG(status)
+            child.returncode = os.waitstatus_to_exitcode(status)
+            raise ValueError(f"original process exited before actual stop: {child.returncode}")
+        time.sleep(0.001)
+    raise ValueError("original process stop observation deadline expired")
 
 
 def declaration(member: dict[str, Any]) -> dict[str, Any]:
@@ -239,8 +342,16 @@ def locked_fault(
     before, pins = business(member), legacy(member)
     root_path = Path(member["root"]) / "content/content.sqlite3"
     parent_path = Path(member["root"]) / "replica.sqlite3"
-    with closing(sqlite3.connect(root_path, timeout=0.1)) as root_sql:
-        root_sql.execute("BEGIN IMMEDIATE")
+    kernel_barrier = (
+        PayloadReadBarrier(payload_path(member)) if kind == "committed-killed" else None
+    )
+    lease_evidence: dict[str, Any] | None = None
+    with (
+        kernel_barrier if kernel_barrier is not None else nullcontext() as barrier,
+        closing(sqlite3.connect(root_path, timeout=0.1)) as root_sql,
+    ):
+        if barrier is None:
+            root_sql.execute("BEGIN IMMEDIATE")
         child = cli.start(request(member, command, budget), f"actual-original-{kind}")
         original = wait_intent(child, member, command)
         save(cli.output / f"original-{kind}.json", original)
@@ -273,63 +384,66 @@ def locked_fault(
                     )
                 parent_sql.rollback()
         elif kind == "committed-killed":
-            with closing(sqlite3.connect(parent_path, timeout=0.1)) as parent_sql:
-                parent_sql.execute("BEGIN IMMEDIATE")
-                root_sql.rollback()
-                deadline = time.monotonic() + 10
-                while time.monotonic() < deadline:
-                    if child.poll() is not None:
-                        raise ValueError(
-                            "actual adoption exited before its committed-receipt fault window"
-                        )
-                    try:
-                        rows = [
-                            row
-                            for row in producers(member)
-                            if row["intent"]["budget"]["pid"] == child.pid
-                        ]
-                    except sqlite3.OperationalError as error:
-                        if error.sqlite_errorcode not in (
-                            sqlite3.SQLITE_BUSY,
-                            sqlite3.SQLITE_LOCKED,
-                        ):
-                            raise
-                        time.sleep(0.001)
-                        continue
-                    if len(rows) == len(original["intent"]["sources"]):
-                        os.kill(child.pid, signal.SIGSTOP)
-                        break
-                    time.sleep(0.001)
-                else:
-                    raise ValueError("actual complete producer-intent fault window expired")
-                if any(row["publication"] is not None for row in producers(member)):
+            assert barrier is not None
+            deadline = time.monotonic() + 10
+            while not barrier.signals:
+                if child.poll() is not None:
+                    _, failure = cli.wait(child)
                     raise ValueError(
-                        "actual original producer already published before its injected wait"
+                        f"original adoption exited before kernel CAS read barrier: {failure}"
                     )
-                root_sql.execute("BEGIN IMMEDIATE")
-                parent_sql.rollback()
-                os.kill(child.pid, signal.SIGCONT)
-                deadline = time.monotonic() + 10
-                while True:
-                    if child.poll() is not None or time.monotonic() >= deadline:
-                        raise ValueError(
-                            "actual new generation did not commit before its receipt fault"
-                        )
-                    try:
-                        if parent(member)[0] == 6:
-                            break
-                    except sqlite3.OperationalError as error:
-                        if error.sqlite_errorcode not in (
-                            sqlite3.SQLITE_BUSY,
-                            sqlite3.SQLITE_LOCKED,
-                        ):
-                            raise
-                    time.sleep(0.001)
-                child.kill()
-                wait, _ = cli.wait(child)
-                if wait != -signal.SIGKILL:
-                    raise ValueError("original committed adoption lacks its exact killed wait")
-                root_sql.rollback()
+                if time.monotonic() >= deadline:
+                    raise ValueError("actual original kernel lease-break observation expired")
+                time.sleep(0.001)
+            blocked_at = time.monotonic()
+            while time.monotonic() - blocked_at < 0.25:
+                if child.poll() is not None or parent(member)[0] != 4:
+                    raise ValueError(
+                        "actual kernel CAS barrier did not retain original pre-Commit work"
+                    )
+                time.sleep(0.01)
+            blocked_seconds = time.monotonic() - blocked_at
+            stopped = stop_owned_child(child)
+            rows = [row for row in producers(member) if row["intent"]["budget"]["pid"] == child.pid]
+            if (
+                stopped != signal.SIGSTOP
+                or len(rows) != len(original["intent"]["sources"])
+                or any(row["publication"] is not None for row in rows)
+                or parent(member)[0] != 4
+            ):
+                raise ValueError(
+                    "actual kernel barrier lacks complete original intents before Commit"
+                )
+            lease_evidence = {
+                "actual_kernel_signals": list(barrier.signals),
+                "actual_stopped_signal": stopped,
+                "actual_blocked_seconds": blocked_seconds,
+                "original_file_mode": barrier.original_mode,
+                "actual_source": str(barrier.path),
+            }
+            root_sql.execute("BEGIN IMMEDIATE")
+            barrier.close()
+            if stat.S_IMODE(barrier.path.stat().st_mode) != barrier.original_mode:
+                raise ValueError("actual kernel barrier changed original CAS file permissions")
+            os.kill(child.pid, signal.SIGCONT)
+            deadline = time.monotonic() + 10
+            while True:
+                if child.poll() is not None or time.monotonic() >= deadline:
+                    raise ValueError(
+                        "actual new generation did not commit before its receipt fault"
+                    )
+                try:
+                    if parent(member)[0] == 6:
+                        break
+                except sqlite3.OperationalError as error:
+                    if error.sqlite_errorcode not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+                        raise
+                time.sleep(0.001)
+            child.kill()
+            wait, _ = cli.wait(child)
+            if wait != -signal.SIGKILL:
+                raise ValueError("original committed adoption lacks its exact killed wait")
+            root_sql.rollback()
         else:
             raise ValueError("unrecognized closed native fault kind")
     if business(member) != before or legacy(member) != pins:
@@ -361,6 +475,7 @@ def locked_fault(
     return {
         "kind": kind,
         "native_wait": wait,
+        "kernel_read_barrier": lease_evidence,
         "original": observed,
         "independent_repair": repair,
         "original_business_identical": True,

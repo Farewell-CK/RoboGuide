@@ -302,6 +302,13 @@ legacy pins、缺失旧历史和 Unknown 均保留。本项关闭当前 direct-s
 入口；不退休 legacy pins，不替代旧生产 v3 的完整迁移，也不关闭生产在线 v0.4、
 same-voter bytes+metadata ACK、Root3/v6 完整恢复/路由和原全部 N1–N7。
 
+[ADR-0167 成员绑定](acceptance/2026-10-23-consensus-member-content-identities.md)要求完整
+target 的 member/store map 等于确切 committed member data；旧 profile 拒绝隐藏
+绑定。原 Node/membership/SnapshotMeta JSON 逐字节一致，实际混合 mTLS binaries 的
+9 次 wait / 6 次前进回退保持原 SQL inode/原身份/原 member rows，并通过全冻结旧
+Snapshot、producer、parent 接管与 Archive 组合。这关闭成员资料的旧编码兼容与 target
+绑定前置；实际新网络 bytes/metadata ACK、生产 v0.4 与原全部 N1–N7 仍须实施。
+
 进度复核基线为 `main@efd3c83`，其
 [完整 CI 已通过](https://github.com/Farewell-CK/RoboGuide/actions/runs/39636037197)。
 上次分支审计时尚未提交的 live-session 工作随后形成 `227fb62`；本轮将其与 main

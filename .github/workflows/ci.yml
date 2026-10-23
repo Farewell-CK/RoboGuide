@@ -74,6 +74,12 @@ jobs:
           uv run --frozen python tools/quality/check_replica_transport_processes.py
           --output "${RUNNER_TEMP}/roboguide-replica-transport"
 
+      - name: Verify actual original member SQL restart compatibility with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_replica_member_compatibility_processes.py
+          --probe target/debug/examples/replica_transport_probe
+          --output /tmp/rg-ci-member-compatibility
+
       - name: Verify actual Controller inode writer generation and complete cold recovery
         run: >
           uv run --frozen python tools/quality/check_controller_storage_processes.py
@@ -199,6 +205,7 @@ jobs:
           --replica-state-probe target/debug/examples/replica_state_probe
           --controller-projection-probe target/debug/examples/projection_probe
           --replica-snapshot-probe target/debug/examples/content_snapshot_probe
+          --replica-content-probe target/debug/examples/content_store_probe
           --original-producer-journal
           --adopt-original-parents --content-maintenance-binary target/debug/controller-replica
           --output "${RUNNER_TEMP}/roboguide-content-archive"
@@ -233,6 +240,10 @@ jobs:
             /tmp/rg-ci-*/**/result.json
             /tmp/rg-ci-*/*.sqlite3
             /tmp/rg-ci-*/**/source-identity.json
+            ${{ runner.temp }}/roboguide-*/**/result.json
+            ${{ runner.temp }}/roboguide-*/**/*.log
+            ${{ runner.temp }}/roboguide-*/**/request-*.json
+            ${{ runner.temp }}/roboguide-*/**/source-identity.json
 
   python:
     name: Python
