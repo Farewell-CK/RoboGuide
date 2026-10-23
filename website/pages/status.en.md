@@ -1,6 +1,6 @@
 # Implementation status and evidence limits
 
-Content baseline: `8c98593` plus ADR-0177–0180, reviewed 2026-10-24; [Reference](reference.md) records the full code baseline. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
+Content baseline: `815ffcd` (ADR-0177–0180), reviewed 2026-10-24; [Reference](reference.md) records the full code baseline. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
 
 | Area | Existing software paths | Remaining or independently validated work |
 | --- | --- | --- |
