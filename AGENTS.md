@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+ADR-0165 moves actual Tokio Snapshot retention-reader closure into one bounded blocking drainer
+per original content root. Unique jobs retain actual root/SQL leases and immutable original intents;
+the existing 4096 retained reader-row bound also bounds pending readers. Queue/Drop/wait completion
+does not release a pin: only the original durable receipt does. SQL failure/lost work stays Unknown;
+ordinary synchronous callers retain their original close contract. snapshot_close_status and the
+bounded wait are observations, never read/GC/quorum authority. Original schema, budget, process and
+retention-only/zero-byte receipt semantics stay. Actual single-worker TCP/SQL contention, cancelled
+wait/root lifetime, independent-root failure and sync compatibility tests cover the path. The real
+Root3 Snapshot/producer/Archive/cold gates use the updated probe and independently check SQL/pins.
+Online same-voter bytes+metadata ACK, production v0.4, upgrades/routing and full N1-N7 remain.
+
 ADR-0164 installs inactive Controller projections on their original SQL inode through the actual
 managed writer and native drain; no SQL rename or WAL/SHM deletion remains. View/schema/profile
 and mandatory complete recovery precede writer admission. The actual installation transaction

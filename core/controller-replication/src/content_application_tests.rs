@@ -237,6 +237,11 @@ async fn actual_snapshot_inputs_and_independent_reader_lifetime_survive_replacem
         assert!(pins.contains(reader));
     }
     drop(first_snapshot);
+    let closure = content
+        .wait_for_snapshot_closures(Duration::from_secs(3))
+        .await
+        .unwrap();
+    assert_eq!(closure.publication_errors_total, 0);
     assert_eq!(
         content
             .active_references(&key)
@@ -248,6 +253,11 @@ async fn actual_snapshot_inputs_and_independent_reader_lifetime_survive_replacem
     );
     drop(extra_reader);
     drop(second_snapshot);
+    let closure = content
+        .wait_for_snapshot_closures(Duration::from_secs(3))
+        .await
+        .unwrap();
+    assert_eq!(closure.publication_errors_total, 0);
     drop(store);
     drop(content);
     let content = ReplicaContentStore::open(&root, &profile, 1).unwrap();

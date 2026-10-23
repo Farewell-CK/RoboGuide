@@ -380,6 +380,10 @@ read-only counterexample is retained; implementation and complete fault validati
 
 ## 9. Remaining architecture work
 
+[ADR-0165](../../decisions/0165-bounded-snapshot-reader-closure.md) moves actual Tokio Snapshot
+reader SQL closure into one bounded drainer per original root. Jobs retain original leases and
+intents; Drop, queuing or an empty queue cannot replace a durable close receipt or erase Unknown pins.
+
 [ADR-0164](../../decisions/0164-owned-controller-projection-installation.md) installs inactive
 Controller projections transactionally on the original SQL inode, after actual inode/sidecar
 ownership and native drain. Original command prefixes and recovery/Unknown history remain.

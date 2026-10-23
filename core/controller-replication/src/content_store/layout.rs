@@ -206,6 +206,7 @@ pub(super) fn create(
     validate_version(&connection, &original, if producers { 3 } else { 2 })?;
     Ok(ReplicaContentStore {
         inner: Arc::new(ContentInner {
+            snapshot_closes: Arc::new(super::close_queue::SnapshotCloseQueue::default()),
             root: root.into(),
             identity: original,
             connection: Mutex::new(Some(connection)),
@@ -337,6 +338,7 @@ pub(super) fn open(
     validate_version(&connection, &original, if producers { 3 } else { 2 })?;
     Ok(ReplicaContentStore {
         inner: Arc::new(ContentInner {
+            snapshot_closes: Arc::new(super::close_queue::SnapshotCloseQueue::default()),
             root: root.into(),
             identity: original,
             connection: Mutex::new(Some(connection)),

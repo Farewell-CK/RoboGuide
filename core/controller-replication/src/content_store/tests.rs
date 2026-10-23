@@ -4,6 +4,346 @@ use super::*;
 use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;
 
+/// Actual SQLite contention during Snapshot Drop must not stop an independent TCP client on one worker.
+#[tokio::test(flavor = "current_thread")]
+async fn actual_snapshot_release_keeps_single_network_worker_runnable() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let directory = tempfile::tempdir().unwrap();
+    let payload = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    let (source, key) = source(&directory.path().join("source"), &payload);
+    let root = directory.path().join("content");
+    let content = ReplicaContentStore::create(&root, &"a".repeat(64), 7).unwrap();
+    content
+        .copy_from_artifact(&source, &key, "actual-copy", &"b".repeat(64), 30_000)
+        .unwrap();
+    let lease = content
+        .retain_reader_scope(
+            "actual-snapshot-scope",
+            std::slice::from_ref(&key),
+            &"c".repeat(64),
+        )
+        .unwrap();
+    let snapshot =
+        crate::ReplicaSnapshotData::retained(b"explicit local metadata fixture".to_vec(), lease);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = [0; 4];
+        stream.read_exact(&mut request).await.unwrap();
+        assert_eq!(&request, b"ping");
+        stream.write_all(b"actual worker reply").await
+    });
+    let (ready, started) = tokio::sync::oneshot::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let database = root.join("content.sqlite3");
+    let writer = std::thread::spawn(move || {
+        let database = Connection::open(database).unwrap();
+        database.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        ready.send(()).unwrap();
+        let _ = held.recv_timeout(std::time::Duration::from_secs(3));
+        database.execute_batch("ROLLBACK").unwrap();
+    });
+    started.await.unwrap();
+    let ready = directory.path().join("client-ready");
+    let go = directory.path().join("client-go");
+    let client = std::process::Command::new("python3")
+        .args([
+            "-c",
+            r#"import json,socket,sys,time
+from pathlib import Path
+Path(sys.argv[2]).write_text('ready')
+deadline=time.monotonic()+5
+while not Path(sys.argv[3]).exists():
+    assert time.monotonic()<deadline, 'original client start signal unavailable'
+    time.sleep(.001)
+started=time.monotonic()
+with socket.create_connection(('127.0.0.1',int(sys.argv[1])),timeout=.3) as connection:
+    connection.sendall(b'ping')
+    reply=b''
+    expected=b'actual worker reply'
+    while len(reply)<len(expected):
+        block=connection.recv(len(expected)-len(reply))
+        assert block, 'actual server closed before full response'
+        reply+=block
+    assert reply==expected
+print(json.dumps({'actual_tcp_seconds':time.monotonic()-started}))
+"#,
+        ])
+        .arg(address.port().to_string())
+        .arg(&ready)
+        .arg(&go)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !ready.exists() {
+        assert!(tokio::time::Instant::now() < deadline);
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    std::fs::write(go, b"start actual request").unwrap();
+    let dropped = std::time::Instant::now();
+    drop(snapshot);
+    let drop_elapsed = dropped.elapsed();
+    let observed = tokio::task::spawn_blocking(move || client.wait_with_output())
+        .await
+        .unwrap()
+        .unwrap();
+    release.send(()).unwrap();
+    writer.join().unwrap();
+    let reply = server.await.unwrap();
+    eprintln!(
+        "actual Snapshot drop elapsed={drop_elapsed:?}; client wait={:?}; stdout={}; stderr={}",
+        observed.status.code(),
+        String::from_utf8_lossy(&observed.stdout),
+        String::from_utf8_lossy(&observed.stderr)
+    );
+    assert!(observed.status.success());
+    reply.unwrap();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let current = content.clone();
+        let input = key.clone();
+        let pins = tokio::task::spawn_blocking(move || current.active_references(&input))
+            .await
+            .unwrap()
+            .unwrap();
+        if !pins
+            .iter()
+            .any(|pin| pin.kind == ReplicaContentReferenceKind::Reader)
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "actual original closure receipt remains unavailable"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+}
+
+/// Cancelling an observation cannot cancel queued actual closures or release their original root leases.
+#[test]
+fn actual_queued_snapshot_work_retains_original_root_after_waiter_cancellation() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let (source, key) = source(
+            &directory.path().join("source"),
+            b"actual scope cancellation bytes",
+        );
+        let root = directory.path().join("content");
+        let profile = "d".repeat(64);
+        let content = ReplicaContentStore::create(&root, &profile, 7).unwrap();
+        content
+            .copy_from_artifact(&source, &key, "original-copy", &"a".repeat(64), 30_000)
+            .unwrap();
+        let identity = content.identity().clone();
+        let first = content
+            .retain_reader_scope(
+                "first-original",
+                std::slice::from_ref(&key),
+                &"b".repeat(64),
+            )
+            .unwrap();
+        let second = content
+            .retain_reader_scope(
+                "second-original",
+                std::slice::from_ref(&key),
+                &"c".repeat(64),
+            )
+            .unwrap();
+        let ids = [
+            format!("first-original:{}", copy::digest(&key).unwrap()),
+            format!("second-original:{}", copy::digest(&key).unwrap()),
+        ];
+        let originals = ids
+            .iter()
+            .map(|id| content.reader_status(id).unwrap().unwrap())
+            .collect::<Vec<_>>();
+        let (ready, started) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            ready.send(()).unwrap();
+            held.recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+        });
+        started.await.unwrap();
+        drop(crate::ReplicaSnapshotData::retained(vec![], first));
+        drop(crate::ReplicaSnapshotData::retained(vec![], second));
+        let observed = content.snapshot_close_status();
+        assert_eq!(observed.pending_readers, 2);
+        assert!(observed.worker_active);
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(20),
+                content.wait_for_snapshot_closures(std::time::Duration::from_secs(2))
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(content.snapshot_close_status().pending_readers, 2);
+        for id in &ids {
+            assert!(
+                content
+                    .reader_status(id)
+                    .unwrap()
+                    .unwrap()
+                    .receipt
+                    .is_none()
+            );
+        }
+        let queue = content.inner.snapshot_closes.clone();
+        drop(content);
+        assert!(ReplicaContentStore::open(&root, &profile, 7).is_err());
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+        while queue.status().worker_active {
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let reopened = ReplicaContentStore::open(&root, &profile, 7).unwrap();
+        assert_eq!(reopened.identity(), &identity);
+        for (id, before) in ids.iter().zip(&originals) {
+            let after = reopened.reader_status(id).unwrap().unwrap();
+            assert_eq!(after.request_digest, before.request_digest);
+            let receipt = after.receipt.unwrap();
+            assert!(receipt.retention_only);
+            assert!(!receipt.complete);
+            assert_eq!(
+                (receipt.file_device, receipt.file_inode, receipt.bytes_read),
+                (0, 0, 0)
+            );
+        }
+        assert!(
+            !reopened
+                .active_references(&key)
+                .unwrap()
+                .iter()
+                .any(|pin| pin.kind == ReplicaContentReferenceKind::Reader)
+        );
+    });
+}
+
+/// An ordinary synchronous caller still obtains the original durable retention-only close on Drop.
+#[test]
+fn actual_snapshot_release_without_tokio_preserves_synchronous_close_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_source, key) = source(
+        &directory.path().join("source"),
+        b"actual synchronous scope bytes",
+    );
+    let content =
+        ReplicaContentStore::create(&directory.path().join("content"), &"d".repeat(64), 7).unwrap();
+    let reader = content
+        .retain_reader_scope(
+            "original-sync-snapshot",
+            std::slice::from_ref(&key),
+            &"a".repeat(64),
+        )
+        .unwrap();
+    let id = format!("original-sync-snapshot:{}", copy::digest(&key).unwrap());
+    let original = content.reader_status(&id).unwrap().unwrap();
+    drop(crate::ReplicaSnapshotData::retained(vec![], reader));
+    let closed = content.reader_status(&id).unwrap().unwrap();
+    assert_eq!(closed.request_digest, original.request_digest);
+    assert!(closed.receipt.as_ref().unwrap().retention_only);
+    assert!(!closed.receipt.unwrap().complete);
+    assert_eq!(content.snapshot_close_status().pending_readers, 0);
+    assert!(
+        !content
+            .active_references(&key)
+            .unwrap()
+            .iter()
+            .any(|pin| pin.kind == ReplicaContentReferenceKind::Reader)
+    );
+}
+
+/// An actual SQL failure retains only its original Unknown pin while independent scope work completes.
+#[tokio::test(flavor = "current_thread")]
+async fn actual_snapshot_close_failure_preserves_unknown_and_independent_peer_receipt() {
+    let directory = tempfile::tempdir().unwrap();
+    let (source, key) = source(
+        &directory.path().join("source"),
+        b"actual independent snapshot scopes",
+    );
+    let root = directory.path().join("content");
+    let content = ReplicaContentStore::create(&root, &"d".repeat(64), 7).unwrap();
+    let peer =
+        ReplicaContentStore::create(&directory.path().join("independent"), &"d".repeat(64), 8)
+            .unwrap();
+    for store in [&content, &peer] {
+        store
+            .copy_from_artifact(&source, &key, "actual-copy", &"a".repeat(64), 30_000)
+            .unwrap();
+    }
+    let first = content
+        .retain_reader_scope(
+            "failed-original",
+            std::slice::from_ref(&key),
+            &"b".repeat(64),
+        )
+        .unwrap();
+    let second = peer
+        .retain_reader_scope(
+            "independent-original",
+            std::slice::from_ref(&key),
+            &"c".repeat(64),
+        )
+        .unwrap();
+    let first_id = format!("failed-original:{}", copy::digest(&key).unwrap());
+    let second_id = format!("independent-original:{}", copy::digest(&key).unwrap());
+    let before = content.reader_status(&first_id).unwrap().unwrap();
+    let lock = Connection::open(root.join("content.sqlite3")).unwrap();
+    lock.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    drop(crate::ReplicaSnapshotData::retained(vec![], first));
+    drop(crate::ReplicaSnapshotData::retained(vec![], second));
+    let observed = content
+        .wait_for_snapshot_closures(std::time::Duration::from_secs(3))
+        .await
+        .unwrap();
+    let independent = peer
+        .wait_for_snapshot_closures(std::time::Duration::from_secs(3))
+        .await
+        .unwrap();
+    lock.execute_batch("ROLLBACK").unwrap();
+    drop(lock);
+    assert_eq!(observed.publication_errors_total, 1);
+    assert_eq!(observed.abandoned_readers_total, 0);
+    assert_eq!(independent.publication_errors_total, 0);
+    assert_eq!(content.reader_status(&first_id).unwrap().unwrap(), before);
+    assert!(
+        peer.reader_status(&second_id)
+            .unwrap()
+            .unwrap()
+            .receipt
+            .is_some()
+    );
+    assert_eq!(
+        content
+            .active_references(&key)
+            .unwrap()
+            .iter()
+            .filter(|pin| pin.kind == ReplicaContentReferenceKind::Reader)
+            .count(),
+        1
+    );
+    assert!(
+        !peer
+            .active_references(&key)
+            .unwrap()
+            .iter()
+            .any(|pin| pin.kind == ReplicaContentReferenceKind::Reader)
+    );
+    assert!(content.retire_ended_reader(&first_id).is_err());
+}
+
 /// Declares one synthetic retention obligation, without claiming that any payload exists.
 fn reference(id: &str, kind: ReplicaContentReferenceKind) -> ReplicaContentReference {
     ReplicaContentReference {

@@ -527,7 +527,12 @@ async fn run(request: Request) -> Result<Value, String> {
                     json!(content.retire_ended_reader(&reader_id)?)
                 }
             };
-            Ok(json!({"effect":effect,"storage":producer_observation(&store,&content)?}))
+            let closure = content
+                .wait_for_snapshot_closures(std::time::Duration::from_secs(10))
+                .await?;
+            Ok(
+                json!({"effect":effect,"storage":producer_observation(&store,&content)?,"scope_closure_work":closure}),
+            )
         }
         Request::Inspect { member } => {
             let (store, content) = open(&member)?;
@@ -673,6 +678,20 @@ async fn run(request: Request) -> Result<Value, String> {
             {
                 return Err("old Snapshot regressed already accepted original authority".into());
             }
+            // Ready describes the two still-owned Snapshot handles, not an unfinished transient close.
+            let source_closure = source_content
+                .wait_for_snapshot_closures(std::time::Duration::from_secs(10))
+                .await?;
+            let target_closure = target_content
+                .wait_for_snapshot_closures(std::time::Duration::from_secs(10))
+                .await?;
+            if source_closure.publication_errors_total != 0
+                || target_closure.publication_errors_total != 0
+                || source_closure.abandoned_readers_total != 0
+                || target_closure.abandoned_readers_total != 0
+            {
+                return Err("actual original transient Snapshot close remains unavailable".into());
+            }
             let a = observation(&first, &source, &source_content)?;
             let b = observation(&second, &target, &target_content)?;
             if a["batch_digest"] != b["batch_digest"]
@@ -698,6 +717,21 @@ async fn run(request: Request) -> Result<Value, String> {
             }
             drop(old_snapshot);
             drop(current_snapshot);
+            let source_closure = source_content
+                .wait_for_snapshot_closures(std::time::Duration::from_secs(10))
+                .await?;
+            let target_closure = target_content
+                .wait_for_snapshot_closures(std::time::Duration::from_secs(10))
+                .await?;
+            if source_closure.publication_errors_total != 0
+                || target_closure.publication_errors_total != 0
+                || source_closure.abandoned_readers_total != 0
+                || target_closure.abandoned_readers_total != 0
+            {
+                return Err(
+                    "actual original Snapshot close publication remains unavailable".into(),
+                );
+            }
             Ok(
                 json!({"closed":true,"first":observation(&first,&source,&source_content)?,"second":observation(&second,&target,&target_content)?}),
             )

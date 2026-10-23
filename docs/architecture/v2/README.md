@@ -374,6 +374,10 @@ journal 增加显式本机 OS 管理恢复边界：完整实际 writers/known co
 
 ## 9. 开放架构问题
 
+[ADR-0165](../../decisions/0165-bounded-snapshot-reader-closure.md)将实际 Tokio Snapshot
+reader 的 SQL 关闭移到原 root 的单一有界后台 drainer。原 lease/intent 随工作存活；
+Drop、排队、等待结束或队列排空不代替原 durable close receipt，Unknown/pin 不消失。
+
 [ADR-0164](../../decisions/0164-owned-controller-projection-installation.md)要求 inactive
 Controller 投影在实际源 SQL inode/sidecar 租约与原生排空后，使用原 inode 的 SQL 事务
 安装，保留原命令前缀及 recovery/Unknown 历史。空/不完整 view 不能清空本地责任；

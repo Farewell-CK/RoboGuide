@@ -1,11 +1,13 @@
 //! Member-owned original-content storage; local byte proof never grants application or quorum authority.
 
+mod close_queue;
 mod copy;
 mod layout;
 mod pins;
 mod producers;
 mod reader;
 mod time;
+pub use close_queue::ReplicaSnapshotCloseStatus;
 pub use copy::{ReplicaContentCopyStatus, ReplicaContentReceipt};
 pub use pins::ReplicaContentReadLease;
 pub(crate) use producers::{ProducerAdmission, ProducerClock, ProducerPermit};
@@ -113,6 +115,8 @@ struct ReferenceRecord {
 
 /// Shared actual root/SQLite writer ownership; every managed reader/clone retains it.
 struct ContentInner {
+    /// Actual original root closure queue, shared by every clone and bounded by retained reader rows.
+    snapshot_closes: Arc<close_queue::SnapshotCloseQueue>,
     /// Actual original root, never a discovered device path.
     root: PathBuf,
     /// Actual immutable owner and physical local backing identities.

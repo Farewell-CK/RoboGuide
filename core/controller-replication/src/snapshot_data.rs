@@ -12,7 +12,7 @@ pub struct ReplicaSnapshotData {
     /// Actual upstream metadata cursor, separate from opaque CAS payloads.
     data: Cursor<Vec<u8>>,
     /// Actual original managed reader scope; absent in unchanged metadata-only profiles.
-    _reader: Option<ReplicaContentReadLease>,
+    reader: Option<ReplicaContentReadLease>,
 }
 
 impl ReplicaSnapshotData {
@@ -20,7 +20,7 @@ impl ReplicaSnapshotData {
     pub fn new(data: Vec<u8>) -> Self {
         Self {
             data: Cursor::new(data),
-            _reader: None,
+            reader: None,
         }
     }
 
@@ -28,13 +28,22 @@ impl ReplicaSnapshotData {
     pub(crate) fn retained(data: Vec<u8>, reader: ReplicaContentReadLease) -> Self {
         Self {
             data: Cursor::new(data),
-            _reader: Some(reader),
+            reader: Some(reader),
         }
     }
 
     /// Consumes only this actual handle; its original reader ends independently of other Snapshots/readers.
-    pub fn into_inner(self) -> Vec<u8> {
-        self.data.into_inner()
+    pub fn into_inner(mut self) -> Vec<u8> {
+        std::mem::take(&mut self.data).into_inner()
+    }
+}
+
+impl Drop for ReplicaSnapshotData {
+    /// Releases this actual Snapshot scope through its original root without blocking a Tokio worker.
+    fn drop(&mut self) {
+        if let Some(reader) = self.reader.take() {
+            reader.close_without_blocking();
+        }
     }
 }
 

@@ -109,45 +109,71 @@ impl ReplicaContentStore {
     }
 }
 
+impl ReplicaContentReadLease {
+    /// Moves only this unique actual Snapshot scope into its original root's bounded SQL drainer.
+    pub(crate) fn close_without_blocking(mut self) {
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let originals = std::mem::take(&mut self.originals);
+            let queue = self.store.inner.snapshot_closes.clone();
+            queue.enqueue(
+                super::close_queue::CloseJob {
+                    originals,
+                    store: self.store.clone(),
+                },
+                runtime,
+            );
+        }
+        // Without Tokio the original synchronous Drop still owns and closes the unchanged originals.
+    }
+}
+
 impl Drop for ReplicaContentReadLease {
-    /// Ends only these actual original scope handles; failed durable closure keeps each original pin.
+    /// Ends only these original scopes; failed durable closure retains each original Unknown/pin.
     fn drop(&mut self) {
-        for original in &self.originals {
-            let close = (|| -> Result<(), String> {
-                let mut guard = self
-                    .store
-                    .inner
-                    .connection
-                    .lock()
-                    .map_err(|error| error.to_string())?;
-                let connection = guard
-                    .as_mut()
-                    .ok_or("original content connection is closed")?;
-                self.store.validate_connection(connection)?;
-                let receipt = ReplicaContentReaderReceipt {
-                    schema: "roboguide.replica-content-reader-receipt/v0.1".into(),
-                    request_digest: super::copy::digest(original)?,
-                    reader_id: original.reader_id.clone(),
-                    content: original.content.clone(),
-                    store_owner: self.store.identity().store_owner.clone(),
-                    file_device: 0,
-                    file_inode: 0,
-                    bytes_read: 0,
-                    observed_digest: artifact_store::digest_bytes(b""),
-                    complete: false,
-                    closed_ms: original.budget.closed_now()?,
-                    retention_only: true,
-                };
-                reader::publish(
-                    connection,
-                    &ReaderRecord {
-                        intent: original.clone(),
-                        receipt: Some(receipt),
-                        process_end: None,
-                    },
-                )
-            })();
-            if close.is_err() { /* Retained original Unknown is intentionally not discarded. */ }
+        close_originals(&self.store, &self.originals);
+    }
+}
+
+/// Publishes only actual original scope closures; errors never discard pins or skip independent peers.
+pub(super) fn close_originals(store: &ReplicaContentStore, originals: &[ReaderIntent]) -> usize {
+    let mut failures = 0;
+    for original in originals {
+        let close = (|| -> Result<(), String> {
+            let mut guard = store
+                .inner
+                .connection
+                .lock()
+                .map_err(|error| error.to_string())?;
+            let connection = guard
+                .as_mut()
+                .ok_or("original content connection is closed")?;
+            store.validate_connection(connection)?;
+            let receipt = ReplicaContentReaderReceipt {
+                schema: "roboguide.replica-content-reader-receipt/v0.1".into(),
+                request_digest: super::copy::digest(original)?,
+                reader_id: original.reader_id.clone(),
+                content: original.content.clone(),
+                store_owner: store.identity().store_owner.clone(),
+                file_device: 0,
+                file_inode: 0,
+                bytes_read: 0,
+                observed_digest: artifact_store::digest_bytes(b""),
+                complete: false,
+                closed_ms: original.budget.closed_now()?,
+                retention_only: true,
+            };
+            reader::publish(
+                connection,
+                &ReaderRecord {
+                    intent: original.clone(),
+                    receipt: Some(receipt),
+                    process_end: None,
+                },
+            )
+        })();
+        if close.is_err() {
+            failures += 1;
         }
     }
+    failures
 }

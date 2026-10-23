@@ -113,6 +113,14 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N7 的 [ADR-0165](../decisions/0165-bounded-snapshot-reader-closure.md)将实际 Snapshot
+reader 的 SQL 关闭移到原 root 的单一有界 blocking drainer。原 intent/预算/lease 不变，
+原 receipt 未发布时 Unknown/pin 保留；有界等待与队列状态不授予内容或回收权限。
+实际单 worker/TCP/SQL contention、取消/租约、独立 root 失败及同步兼容通过；原 Root3
+Snapshot/producer、Archive、完整 State 接管和 cold restore 进程门禁通过。
+见[验收](acceptance/2026-10-23-snapshot-reader-closure.md)。完整在线内容、相同 voters
+bytes+metadata ACK、生产 profile/升级、Node/Mission 路由与原 N1–N7 继续实施。
+
 N7 的 [ADR-0164](../decisions/0164-owned-controller-projection-installation.md)修复原
 supervisor 只锁 sidecar 并 rename 原 SQL 的实际 hardlink 反例。接管使用原 inode 的
 managed writer/原生排空与 SQL 事务，保留命令前缀、recovery/Unknown 和显式 v1；Raft

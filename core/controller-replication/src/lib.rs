@@ -43,7 +43,7 @@ pub use content_store::{
     ReplicaContentProducerSource, ReplicaContentProducerStatus, ReplicaContentReadLease,
     ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus,
     ReplicaContentReceipt, ReplicaContentReference, ReplicaContentReferenceKind,
-    ReplicaContentStore,
+    ReplicaContentStore, ReplicaSnapshotCloseStatus,
 };
 pub use snapshot_data::ReplicaSnapshotData;
 pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};

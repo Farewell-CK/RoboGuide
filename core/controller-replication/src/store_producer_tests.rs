@@ -348,6 +348,11 @@ async fn actual_snapshot_failure_repair_and_replacement_retain_independent_reade
             .is_err()
     );
     drop(reader);
+    let closure = content
+        .wait_for_snapshot_closures(Duration::from_secs(3))
+        .await
+        .unwrap();
+    assert_eq!(closure.publication_errors_total, 0);
     assert_eq!(
         content
             .active_references(&key)
@@ -358,6 +363,11 @@ async fn actual_snapshot_failure_repair_and_replacement_retain_independent_reade
         1
     );
     drop(replacement);
+    let closure = content
+        .wait_for_snapshot_closures(Duration::from_secs(3))
+        .await
+        .unwrap();
+    assert_eq!(closure.publication_errors_total, 0);
     assert_eq!(
         content
             .active_references(&key)
@@ -455,6 +465,10 @@ async fn actual_missing_parent_head_is_not_empty_reference_authority() {
         .build_content_snapshot_for("actual-original-head")
         .unwrap();
     drop(snapshot);
+    content
+        .wait_for_snapshot_closures(Duration::from_secs(3))
+        .await
+        .unwrap();
     let before = store.parent_producers().unwrap();
     let pins = content.active_references(&key).unwrap();
     store
