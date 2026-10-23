@@ -9,7 +9,7 @@
 | Runtime / stop | attempt/generation、durable intent、relations、whole-Group stop、原进程 exit proof | 运行中抢占、耦合多 Role 迁移、hazard/regrasp 与设备 stop |
 | State / verifier | 来源策略、Belief lineage、TTL、原 Task verifier 与 CAS proof | 当前部署的物理来源、冲突与持续效果证明 |
 | Memory / Spatial | 准备/use/revoke/handoff、文件空间算法、provider 局部 GC；原 import Replica、Catalog/lineage、Snapshot/Archive 引用、恢复后原 provider Snapshot 退休、Archive abort/私有接收 GC、源上传退休和 standalone 已知引用闭包离线 GC | Raft/online 全部生产者覆盖、跨主机内容与组合恢复 |
-| Replica / recovery | 证书轮换、原 child drain、V3 transfer、writer/inode fence、已支持静止 bundle、qualified Root HTTP read、Prepared 恢复及跨 owner 上传放弃/退休 | Unknown 对账、parent8/Root4 bundle、完整 readiness/在线恢复、升级回退、在线 GC 与跨主机故障矩阵 |
+| Replica / recovery | 证书轮换、原 child drain、V3 transfer、writer/inode fence、已支持静止 bundle、qualified Root HTTP read、Prepared 恢复、跨 owner 上传放弃/退休及原恢复事实对账 | Root reader 来源绑定、parent8/Root4 bundle、完整 readiness/在线恢复、升级回退、在线 GC 与跨主机故障矩阵 |
 | Federation | Control 内持久 session | 真实跨域 transport、授权、路由与双域恢复 |
 | 运维 | write-disabled、已提交视图、恢复探针、真实短窗口监控检查 | 全 listener/阻塞收敛、完整 runbook、长期 SLO 与总体退出条件 |
 
@@ -28,6 +28,8 @@
 [跨 owner Prepared 释放](docs/development/acceptance/2026-10-24-cross-owner-prepared-release.md)另通过真实故障后 child wait/restart、DELETE 和重复请求检查。原上传输入已释放，原 origin/Unknown 与独立 Root pins/bytes 保留。Completed 退休由下述 ADR-0182 接续；完整在线恢复仍待完成。
 
 ## 如何解读证据
+
+[原恢复事实对账](docs/development/acceptance/2026-10-24-original-recovery-assessment.md)已通过故障、重启和 source 放弃后的实际只读检查：独立 replacement Completed 与原 Unknown 分别保留，缺记录是 unavailable，退休回执另列。它不补完成或重开工作；完整 Root 绑定/恢复仍待完成。
 
 [Completed 跨 owner 退休](docs/development/acceptance/2026-10-24-cross-owner-completed-retirement.md)已通过实际 Root 完整性读取、原 owner receipt、重复请求和独立 SQL/文件复核。原上传引用生命周期已闭合，Root 生产者回收与完整在线 HA 仍独立待完成。
 

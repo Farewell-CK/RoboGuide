@@ -248,6 +248,10 @@ metadata. Actual Root integrity reading precedes retirement, followed by source 
 revalidation before Commit. The new CAS does not take that owner or publish the read bytes;
 only this upload reference is released, retaining original completion and independent consumers.
 
+ADR-0183 assesses original recovery acceptance, current source and replacement separately in one
+writer snapshot. Missing records stay unavailable; independent completion cannot fill the original
+Unknown. Tenant/TLS/quorum and failure checkpoint fences remain, with no repeated copy or budget renewal.
+
 Execution, Spatial, Semantic, Experience and Artifact Memory use immutable manifests. Scope limits semantic
 consumers, Visibility controls discovery/exchange, and Placement records provider-qualified replica evidence.
 `Local + Discoverable` is valid. An Artifact reference or another Task's completed import does not grant use.

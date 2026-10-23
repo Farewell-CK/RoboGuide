@@ -113,6 +113,12 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-24）
 
+N3/P3 的 [ADR-0183 原 recovery 事实对账](acceptance/2026-10-24-original-recovery-assessment.md)
+已通过写禁用、原 SQL 故障、真实重启/source 放弃后的同一 Unknown，以及当前
+replacement Completed/退休/缺失、权限与旧路径检查。该切片闭合本地已提交
+records 的只读组合，不证明原 Root reader 的操作绑定或补造原完成。接续完整
+Root reader 来源/恢复、parent8/Root4 bundle/升级与 online readiness/GC。
+
 N3/P3 的 [ADR-0182 跨 owner Completed 退休](acceptance/2026-10-24-cross-owner-completed-retirement.md)
 已通过实际 fresh quorum/source/Root bytes、原 receipt、重复请求和独立 SQL/文件
 检查。原上传引用的 Prepared 放弃/Completed 退休已分别闭合；独立 Log/View/

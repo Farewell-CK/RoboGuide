@@ -8,6 +8,14 @@ use std::io::Read;
 
 /// Recognizes only the exact bounded metadata-observation route; no payload route uses its exception.
 pub(super) fn observation_keys(path: &str) -> Option<(&str, &str)> {
+    direct_observation_keys(path).or_else(|| {
+        path.strip_suffix("/assessment")
+            .and_then(direct_observation_keys)
+    })
+}
+
+/// Parses only the original exact route; literal command ID assessment remains a normal observation.
+fn direct_observation_keys(path: &str) -> Option<(&str, &str)> {
     let (upload, command) = path
         .strip_prefix("/v1/artifact-uploads/")?
         .split_once("/recoveries/")?;
@@ -90,7 +98,7 @@ pub(super) fn observe(
             .verify_committed_checkpoint(original)
             .map_err(HttpError::service_unavailable)?;
     }
-    catalog.observe_owned_upload(upload, admission.principal)?;
+    let source = catalog.observe_owned_upload(upload, admission.principal)?;
     let record = catalog
         .upload_recoveries
         .lock()
@@ -99,6 +107,72 @@ pub(super) fn observe(
         .filter(|r| r.upload.upload_id == upload)
         .cloned()
         .ok_or_else(|| HttpError::not_found("original recovery unavailable"))?;
+    if path
+        .strip_suffix("/assessment")
+        .and_then(direct_observation_keys)
+        .is_some()
+    {
+        record.upload.validates_successor(&source).map_err(|e| {
+            HttpError::service_unavailable(format!("original source assessment differs: {e}"))
+        })?;
+        let replacement = catalog
+            .upload_records
+            .lock()
+            .map_err(|_| HttpError::service_unavailable("committed replacement cache unavailable"))?
+            .get(&record.replacement_admission.upload_id)
+            .cloned();
+        if let Some(current) = &replacement {
+            current.validate().map_err(HttpError::service_unavailable)?;
+            let mut original = current.clone();
+            original.phase = ArtifactUploadPhase::Started;
+            original.content_digest = None;
+            original.byte_size = None;
+            original.prepared_at_ms = None;
+            original.completed_at_ms = None;
+            if original != record.replacement_admission {
+                return Err(HttpError::service_unavailable(
+                    "replacement assessment changed its original admission",
+                ));
+            }
+        }
+        let (source_retirement, replacement_retirement) = {
+            let retirements = catalog.upload_retirements.lock().map_err(|_| {
+                HttpError::service_unavailable("committed retirement cache unavailable")
+            })?;
+            (
+                retirements.get(&source.upload_id).cloned(),
+                retirements
+                    .get(&record.replacement_admission.upload_id)
+                    .cloned(),
+            )
+        };
+        for (receipt, current) in [
+            (source_retirement.as_ref(), Some(&source)),
+            (replacement_retirement.as_ref(), replacement.as_ref()),
+        ] {
+            if let Some(receipt) = receipt {
+                receipt.validate().map_err(HttpError::service_unavailable)?;
+                if Some(&receipt.upload) != current {
+                    return Err(HttpError::service_unavailable(
+                        "retirement assessment differs from its exact current upload",
+                    ));
+                }
+            }
+        }
+        return Ok(Response::Json(
+            "200 OK",
+            serde_json::json!({
+                "schema":"roboguide.artifact-upload-recovery-assessment/v0.1",
+                "status":if record.completion.is_some(){"completed"}else{"unknown"},
+                "source_record":source,
+                "replacement_record_evidence":if replacement.is_some(){"present"}else{"unavailable"},
+                "replacement_record":replacement,
+                "source_retirement":source_retirement,"replacement_retirement":replacement_retirement,
+                "record":record,"repeat_allowed":false,"committed_local":true,
+                "audit_persisted":audit_persisted,"write_status":status,
+            }),
+        ));
+    }
     Ok(Response::Json(
         "200 OK",
         serde_json::json!({"schema":"roboguide.artifact-upload-recovery-observation/v0.1",

@@ -248,6 +248,10 @@ ADR-0182 的 Completed 退休从当前完整 quorum metadata 定位未退休的�
 及 owner，实际 Root 完整性读取先于退休，提交前再次核对来源与原权限。新 CAS 不
 接管该 owner 或发布所读内容；只解除该上传引用，独立消费者和原 Completed 保留。
 
+ADR-0183 的只读 assessment 在同一 writer snapshot 中分别展示原恢复 acceptance、
+当前 source 和 replacement；缺记录是 unavailable，独立 Completed 不补造原成功。
+原 tenant/TLS/quorum 与故障 checkpoint fence 保持，不重开 copy 或续预算。
+
 Memory 与实时 State 分离。Execution、Spatial、Semantic、Experience、Artifact 使用 immutable manifest；
 Scope 限制语义消费者，Visibility 决定发现/交换，Placement 是 provider-qualified replica evidence。
 `Local + Discoverable` 合法；Artifact ref 或另一个 Task 的 Completed import 不授予当前 Task 使用权。

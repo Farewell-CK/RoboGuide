@@ -1,5 +1,12 @@
 # Repository Guidelines
 
+ADR-0183 adds exact readonly recovery /assessment, joining original acceptance with current source
+and replacement under the same writer. Complete original immutable fields are checked; absent
+replacement is unavailable and independent Completed never fills original Unknown. Current grant,
+tenant/epoch/quorum and restart checkpoint fences remain. Repeats stay forbidden, budgets/history
+unchanged. Original observation and literal command ID assessment stay compatible. This is local
+committed evidence, not a Root reader binding, physical result or full recovery authority.
+
 ADR-0182 resolves an exact current unretired Completed upload and original qualified owner through
 the actual complete-quorum content view. A real internal Root integrity reader verifies complete
 bytes/close before retirement; original writer admission rechecks source and current permissions.

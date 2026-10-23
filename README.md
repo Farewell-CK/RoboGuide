@@ -1,5 +1,8 @@
 # RoboGuide
 
+ADR-0183 adds a readonly recovery assessment combining original acceptance with current source and
+replacement records. Independent completion leaves the original Unknown intact and permits no retry.
+
 ADR-0182 extends Completed upload retirement across owners using actual complete-quorum source
 selection and Root integrity bytes. Original completion and independent content pins remain.
 

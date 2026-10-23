@@ -84,6 +84,141 @@ async fn write_disabled_recovery_observation_preserves_original_cache_and_refuse
     assert_eq!(body["audit_persisted"], false);
     assert_eq!(body["write_status"]["write_enabled"], false);
     assert_eq!(body["status"], "unknown");
+    let assessment_path = format!("{path}/assessment");
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request("GET", &assessment_path, b"", true),
+    )
+    .await;
+    let assessment: serde_json::Value =
+        serde_json::from_slice(&response_body(&raw, "200 OK")).unwrap();
+    assert_eq!(
+        assessment["schema"],
+        "roboguide.artifact-upload-recovery-assessment/v0.1"
+    );
+    assert_eq!(assessment["replacement_record_evidence"], "unavailable");
+    assert!(assessment["replacement_record"].is_null());
+    assert_eq!(assessment["repeat_allowed"], false);
+    let mut completed = original.replacement_admission.clone();
+    completed.phase = domain::ArtifactUploadPhase::Completed;
+    completed.content_digest = original.upload.content_digest.clone();
+    completed.byte_size = original.upload.byte_size;
+    completed.prepared_at_ms = Some(3);
+    completed.completed_at_ms = Some(4);
+    catalog
+        .upload_records
+        .lock()
+        .unwrap()
+        .insert(completed.upload_id.clone(), completed);
+    let mut abandoned = original.upload.clone();
+    abandoned.phase = domain::ArtifactUploadPhase::Abandoned;
+    catalog
+        .upload_records
+        .lock()
+        .unwrap()
+        .insert(abandoned.upload_id.clone(), abandoned);
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request("GET", &assessment_path, b"", true),
+    )
+    .await;
+    let assessment: serde_json::Value =
+        serde_json::from_slice(&response_body(&raw, "200 OK")).unwrap();
+    assert_eq!(
+        assessment["record"],
+        serde_json::to_value(&original).unwrap()
+    );
+    assert_eq!(assessment["status"], "unknown");
+    assert_eq!(assessment["source_record"]["phase"], "abandoned");
+    assert_eq!(assessment["replacement_record"]["phase"], "completed");
+    let replacement = catalog
+        .upload_records
+        .lock()
+        .unwrap()
+        .get("replacement")
+        .cloned()
+        .unwrap();
+    let retirement = domain::ArtifactUploadRetirement {
+        schema: "roboguide.artifact-upload-retirement/v0.1".into(),
+        command_id: "contract-retirement".into(),
+        store_owner_id: original.destination_owner_id.clone(),
+        upload: replacement.clone(),
+        principal_id: replacement.principal_id.clone(),
+        tenant_id: replacement.tenant_id.clone(),
+        certificate_digest: None,
+        canonical_grant_json: "{}".into(),
+        admitted_at_ms: 5,
+        reason: "explicit metadata contract release".into(),
+    };
+    retirement.validate().unwrap();
+    catalog
+        .upload_retirements
+        .lock()
+        .unwrap()
+        .insert(replacement.upload_id.clone(), retirement.clone());
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request("GET", &assessment_path, b"", true),
+    )
+    .await;
+    let assessment: serde_json::Value =
+        serde_json::from_slice(&response_body(&raw, "200 OK")).unwrap();
+    assert_eq!(
+        assessment["replacement_retirement"],
+        serde_json::to_value(&retirement).unwrap()
+    );
+    assert_eq!(assessment["status"], "unknown");
+    let mut foreign_replacement = replacement.clone();
+    foreign_replacement.tenant_id = "other-tenant".into();
+    catalog
+        .upload_records
+        .lock()
+        .unwrap()
+        .insert(replacement.upload_id.clone(), foreign_replacement);
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request("GET", &assessment_path, b"", true),
+    )
+    .await;
+    response_body(&raw, "503 Service Unavailable");
+    catalog
+        .upload_records
+        .lock()
+        .unwrap()
+        .insert(replacement.upload_id.clone(), replacement);
+    let mut literal = original.clone();
+    literal.command_id = "assessment".into();
+    catalog
+        .upload_recoveries
+        .lock()
+        .unwrap()
+        .insert(literal.command_id.clone(), literal);
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request(
+            "GET",
+            "/v1/artifact-uploads/original-upload/recoveries/assessment",
+            b"",
+            true,
+        ),
+    )
+    .await;
+    let literal: serde_json::Value =
+        serde_json::from_slice(&response_body(&raw, "200 OK")).unwrap();
+    assert_eq!(
+        literal["schema"],
+        "roboguide.artifact-upload-recovery-observation/v0.1"
+    );
     assert!(log.events().unwrap().is_empty());
     assert!(log.require_writes_enabled().is_err());
     *catalog.recovery_fence.lock().unwrap() =
@@ -130,6 +265,14 @@ async fn write_disabled_recovery_observation_preserves_original_cache_and_refuse
         &catalog,
         &uploads,
         raw_request("GET", path, b"", true),
+    )
+    .await;
+    response_body(&raw, "403 Forbidden");
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request("GET", &assessment_path, b"", true),
     )
     .await;
     response_body(&raw, "403 Forbidden");

@@ -182,6 +182,15 @@ def verify(
     assert not uncertain["write_status"]["write_enabled"]
     assert uncertain["status"] == "unknown"
     assert uncertain["record"]["completion"] is None
+    code, raw = http(origin, observation_path + "/assessment", "GET", b"")
+    assert code == 200, (code, raw.decode())
+    assessment = json.loads(raw)
+    assert assessment["status"] == "unknown" and not assessment["repeat_allowed"]
+    assert assessment["record"] == uncertain["record"]
+    assert assessment["source_record"] == original
+    assert assessment["replacement_record"]["phase"] == "completed"
+    assert assessment["replacement_record_evidence"] == "present"
+    assert not assessment["audit_persisted"] and assessment["committed_local"]
     assert original_rows(database) == before
     source_history = [
         row["payload"]["ArtifactUploadTransition"]["record"]
@@ -197,6 +206,7 @@ def verify(
         "original_prepared": original,
         "recovered": recovered,
         "unknown": uncertain["record"],
+        "unknown_assessment": assessment,
         "actual_sql_completion_failure": True,
         "original_unchanged": True,
         "retries_read_only": True,
@@ -244,6 +254,14 @@ def release(
     assert code == 200 and original_rows(directory / "controller.sqlite3") == after
     code, raw = http(origin, query, "GET", b"")
     assert code == 200 and json.loads(raw)["record"] == unknown
+    code, raw = http(origin, query + "/assessment", "GET", b"")
+    assert code == 200, (code, raw.decode())
+    assessment = json.loads(raw)
+    assert assessment["status"] == "unknown" and not assessment["repeat_allowed"]
+    assert assessment["source_record"] == abandoned
+    assert assessment["replacement_record"]["phase"] == "completed"
+    assert assessment["record"] == unknown
+    assert original_rows(directory / "controller.sqlite3") == after
     return {
         "original": original,
         "abandoned": abandoned,
@@ -252,6 +270,7 @@ def release(
         "retained_origin": binding,
         "current_inputs": current["inputs"],
         "unknown_unchanged": True,
+        "original_assessment": assessment,
         "repeat_created_no_domain_event": True,
         "cas_deleted": False,
     }
