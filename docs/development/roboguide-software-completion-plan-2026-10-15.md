@@ -113,6 +113,12 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N7 的 [ADR-0163 副本传输容量](replica-transport-bounds-v0.1.md)补齐本地 TLS 前连接准入、
+原成员异步收发共享帧池、独立小帧 reserve、原 handler 生命周期与固定标签只读计数。
+容量不改变原 wire/profile/权限，也不把网络取消视为已提交副作用不存在。实际单 worker/
+mTLS 门禁与原旧基线独立记录；supervisor 原存储接管、其余阻塞路径、同一 voters bytes+
+metadata ACK、完整 online failover 与原 N1–N7 验收继续实施。
+
 本轮连续实施冻结 `main@45a82410867e01241394d1b9116aa53634ce2a06`，只在
 `codex/nonrelease-remediation-closure` 开发。不得为工作包另建分支；阶段提交、推送和
 CI 均使用该分支，全部非发布软件验收完成后再合入 main。原工作树及实验目录保留。

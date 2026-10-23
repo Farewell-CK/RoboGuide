@@ -198,6 +198,10 @@ Local How v0.16 还核对部署声明与实际固定相机光学参数，在有�
 
 RoboGuide 是一套面向异构具身智能体协作的通用分布式具身智能操作系统架构。
 
+[副本传输容量](docs/development/replica-transport-bounds-v0.1.md)在 TLS 前限制实际入站
+handler，异步收发使用原成员共享的小帧/大帧容量；拒绝不排队，取消不否认已提交副作用。
+本地部署容量和只读指标不改变集群/应用权限，也不替代完整在线 HA 或 OS/RSS 强制限额。
+
 [网络 worker 与重复 leader transfer 修复](docs/development/acceptance/2026-10-20-worker-and-transfer-liveness.md)
 让完整 timer/Node/Artifact 同步事务归还异步 worker；transfer 临时停用的 heartbeat/election
 在成功、错误和取消后恢复。旧源码的三项反例与新单 worker 的真实文件/监控/三副本恢复

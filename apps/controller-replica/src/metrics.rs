@@ -1,6 +1,7 @@
 //! Optional loopback-only observations of this supervisor's own fresh atomic status file.
 
 use crate::supervisor::Status;
+use controller_replication::ReplicaTransportSnapshot;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -76,7 +77,7 @@ async fn serve(stream: &mut tokio::net::TcpStream, path: PathBuf) -> Result<(), 
         let status: Status = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
         let age = unix_ms()?.checked_sub(status.observed_unix_ms).ok_or("metrics status clock moved backwards")?;
         if age > 5000 { return Err("replica status is stale".into()); }
-        Ok(format!("# HELP roboguide_replica_status_age_seconds Age of this supervisor's actual atomic status.\n# TYPE roboguide_replica_status_age_seconds gauge\nroboguide_replica_status_age_seconds {}\n# HELP roboguide_replica_quorum_epoch_present Whether this supervisor last confirmed a current majority epoch.\n# TYPE roboguide_replica_quorum_epoch_present gauge\nroboguide_replica_quorum_epoch_present {}\n# HELP roboguide_replica_owned_controller Whether this supervisor currently owns a Controller child.\n# TYPE roboguide_replica_owned_controller gauge\nroboguide_replica_owned_controller {}\n# HELP roboguide_replica_accepted_revision Actual accepted local authority revision.\n# TYPE roboguide_replica_accepted_revision gauge\nroboguide_replica_accepted_revision {}\n", age as f64 / 1000.0, u8::from(status.epoch.is_some()), u8::from(status.child_pid.is_some()), status.revision))
+        Ok(format!("# HELP roboguide_replica_status_age_seconds Age of this supervisor's actual atomic status.\n# TYPE roboguide_replica_status_age_seconds gauge\nroboguide_replica_status_age_seconds {}\n# HELP roboguide_replica_quorum_epoch_present Whether this supervisor last confirmed a current majority epoch.\n# TYPE roboguide_replica_quorum_epoch_present gauge\nroboguide_replica_quorum_epoch_present {}\n# HELP roboguide_replica_owned_controller Whether this supervisor currently owns a Controller child.\n# TYPE roboguide_replica_owned_controller gauge\nroboguide_replica_owned_controller {}\n# HELP roboguide_replica_accepted_revision Actual accepted local authority revision.\n# TYPE roboguide_replica_accepted_revision gauge\nroboguide_replica_accepted_revision {}\n", age as f64 / 1000.0, u8::from(status.epoch.is_some()), u8::from(status.child_pid.is_some()), status.revision) + &transport_metrics(status.transport.as_ref()))
     }.await;
     let (status, body) = match result {
         Ok(body) => ("200 OK", body),
@@ -96,9 +97,91 @@ async fn serve(stream: &mut tokio::net::TcpStream, path: PathBuf) -> Result<(), 
     stream.shutdown().await.map_err(|error| error.to_string())
 }
 
+/// Renders fixed-label actual local transport observations, keeping legacy absence unavailable.
+fn transport_metrics(snapshot: Option<&ReplicaTransportSnapshot>) -> String {
+    use std::fmt::Write as _;
+    let mut output = format!(
+        "# HELP roboguide_replica_transport_observation_present Actual local transport counters are available.\n# TYPE roboguide_replica_transport_observation_present gauge\nroboguide_replica_transport_observation_present {}\n",
+        u8::from(snapshot.is_some())
+    );
+    let Some(snapshot) = snapshot else {
+        return output;
+    };
+    for (name, kind, value) in [
+        ("inbound_active", "gauge", snapshot.inbound_active as u64),
+        ("outbound_active", "gauge", snapshot.outbound_active as u64),
+        (
+            "inbound_limit",
+            "gauge",
+            snapshot.limits.inbound_connections as u64,
+        ),
+        (
+            "outbound_limit",
+            "gauge",
+            snapshot.limits.outbound_connections as u64,
+        ),
+        (
+            "small_frame_active_bytes",
+            "gauge",
+            snapshot.small_frame_active_bytes as u64,
+        ),
+        (
+            "large_frame_active_bytes",
+            "gauge",
+            snapshot.large_frame_active_bytes as u64,
+        ),
+        (
+            "small_frame_limit_bytes",
+            "gauge",
+            u64::from(snapshot.limits.small_frame_bytes),
+        ),
+        (
+            "large_frame_limit_bytes",
+            "gauge",
+            u64::from(snapshot.limits.large_frame_bytes),
+        ),
+        (
+            "inbound_high_water",
+            "gauge",
+            snapshot.inbound_high_water as u64,
+        ),
+        (
+            "inbound_rejected_total",
+            "counter",
+            snapshot.inbound_rejected_total,
+        ),
+        (
+            "outbound_rejected_total",
+            "counter",
+            snapshot.outbound_rejected_total,
+        ),
+        (
+            "frame_rejected_total",
+            "counter",
+            snapshot.frame_rejected_total,
+        ),
+        (
+            "inbound_timeout_total",
+            "counter",
+            snapshot.inbound_timeout_total,
+        ),
+    ] {
+        writeln!(output, "# HELP roboguide_replica_transport_{name} Actual process-local transport observation.\n# TYPE roboguide_replica_transport_{name} {kind}\nroboguide_replica_transport_{name} {value}").expect("String formatting cannot fail");
+    }
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Older status absence does not become successful zero counters or invent a local limit.
+    #[test]
+    fn transport_metrics_keep_legacy_absence_unavailable() {
+        let absent = transport_metrics(None);
+        assert!(absent.contains("roboguide_replica_transport_observation_present 0\n"));
+        assert!(!absent.contains("inbound_active"));
+    }
 
     /// Actual private HTTP observations refuse missing, stale and future status without leaking IDs.
     #[tokio::test]

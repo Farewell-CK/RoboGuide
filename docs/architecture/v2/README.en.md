@@ -380,6 +380,12 @@ read-only counterexample is retained; implementation and complete fault validati
 
 ## 9. Remaining architecture work
 
+[ADR-0163](../../decisions/0163-bounded-replica-transport-admission.md) bounds local replica
+connections before TLS and separates small/large encoded-frame capacity. Actual handlers and
+frames retain their permits; rejection never queues. Deployment limits and observations change
+no cluster, checkpoint or execution authority. Network cancellation cannot disprove committed
+effects or end independently owned storage work. This is not an OS/RSS or complete HA guarantee.
+
 | Area | Reviewed implementation | Still required |
 | --- | --- | --- |
 | Memory / Spatial | Selective import/use/revoke, Group handoff, Active Map/GC, stored-reference recovery checks, file algorithms | All external reference producer lifecycles, typed-map/multi-kind fault combinations, online content consistency |

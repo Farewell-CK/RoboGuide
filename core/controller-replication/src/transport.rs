@@ -1,5 +1,6 @@
 //! Bounded trusted-loopback replica RPC and synchronous child acceptance/delivery fencing.
 
+use crate::transport_budget::{MAX_FRAME_BYTES, TransportBudget};
 use crate::*;
 use openraft::error::{InstallSnapshotError, RPCError, RaftError, RemoteError, Unreachable};
 use openraft::network::{RPCOption, RaftNetwork, RaftNetworkFactory};
@@ -17,9 +18,6 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 #[cfg(test)]
 #[path = "transport_tls_tests.rs"]
 mod tls_tests;
-
-/// Maximum private frame, including escaped authority/history JSON.
-const MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
 
 /// Closed RPC envelope binds the actual target process and homogeneous cluster profile.
 #[derive(Serialize, Deserialize)]
@@ -201,7 +199,7 @@ pub struct ReplicaServer {
 }
 
 impl Drop for ReplicaServer {
-    /// Cancels only this service's listener on shutdown or a failed setup.
+    /// Cancels the accept loop and its owned network handlers, without denying committed effects.
     fn drop(&mut self) {
         self.task.abort();
     }
@@ -214,17 +212,31 @@ impl ReplicaServer {
             .await
             .map_err(|error| error.to_string())?;
         let task = tokio::spawn(async move {
+            let mut handlers = tokio::task::JoinSet::new();
             loop {
-                let Ok((stream, _)) = listener.accept().await else {
+                let accepted = tokio::select! {
+                    completed = handlers.join_next(), if !handlers.is_empty() => {
+                        let _ = completed;
+                        continue;
+                    }
+                    accepted = listener.accept() => accepted,
+                };
+                let Ok((stream, _)) = accepted else {
                     return;
                 };
+                let Ok(permit) = node.transport_budget.inbound() else {
+                    continue;
+                };
                 let node = node.clone();
-                tokio::spawn(async move {
-                    let _ = tokio::time::timeout(
-                        Duration::from_secs(15),
-                        serve_connection(stream, node),
-                    )
-                    .await;
+                handlers.spawn(async move {
+                    let _permit = permit;
+                    let budget = node.transport_budget.clone();
+                    if tokio::time::timeout(Duration::from_secs(15), serve_connection(stream, node))
+                        .await
+                        .is_err()
+                    {
+                        budget.timed_out();
+                    }
                 });
             }
         });
@@ -272,15 +284,17 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     let length = stream.read_u64().await.map_err(|error| error.to_string())?;
-    if length == 0 || length > MAX_FRAME_BYTES as u64 {
-        return Err("replica request frame exceeds bounds".into());
-    }
+    let frame = node
+        .transport_budget
+        .frame(length)
+        .map_err(|error| error.to_string())?;
     let mut bytes = vec![0; length as usize];
     stream
         .read_exact(&mut bytes)
         .await
         .map_err(|error| error.to_string())?;
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    drop(bytes);
     let received_at = tokio::time::Instant::now();
     #[cfg(test)]
     if request.command.requires_member_writer() {
@@ -494,16 +508,15 @@ where
         .map_err(|_| "test target quorum did not precede response loss".to_string())??;
         return Err("test discarded original transfer reply after actual target quorum".into());
     }
-    let encoded = serde_json::to_vec(&reply).map_err(|error| error.to_string())?;
-    if encoded.len() > MAX_FRAME_BYTES {
-        return Err("replica response exceeds bounds".into());
-    }
+    drop(frame);
+    let encoded = crate::transport_budget::encode(&reply, &node.transport_budget)
+        .map_err(|error| error.to_string())?;
     stream
-        .write_u64(encoded.len() as u64)
+        .write_u64(encoded.bytes.len() as u64)
         .await
         .map_err(|error| error.to_string())?;
     stream
-        .write_all(&encoded)
+        .write_all(&encoded.bytes)
         .await
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -532,6 +545,7 @@ pub(crate) async fn request_leader_transfer(
         online: node.network_online.clone(),
         shared_secret: node.config.shared_secret.clone(),
         tls: node.tls.clone(),
+        budget: node.transport_budget.clone(),
     };
     match network
         .exchange(
@@ -559,6 +573,31 @@ fn admin_network(
     leader: u64,
     tls: Option<Arc<crate::tls::TlsMaterial>>,
 ) -> Result<ReplicaNetwork, String> {
+    network_with_budget(
+        config,
+        leader,
+        tls,
+        TransportBudget::new(ReplicaTransportLimits::default())?,
+    )
+}
+
+/// Shares the original owning member's actual capacities across certificate and handoff RPCs too.
+fn node_network(node: &ReplicaNode, target: u64) -> Result<ReplicaNetwork, String> {
+    network_with_budget(
+        &node.config,
+        target,
+        node.tls.clone(),
+        node.transport_budget.clone(),
+    )
+}
+
+/// Constructs an inert exact-member client with an actual original capacity owner, never a new grant.
+fn network_with_budget(
+    config: &ReplicaConfig,
+    leader: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
+    budget: Arc<TransportBudget>,
+) -> Result<ReplicaNetwork, String> {
     let address = *config
         .members
         .get(&leader)
@@ -571,6 +610,7 @@ fn admin_network(
         online: Arc::new(AtomicBool::new(true)),
         shared_secret: config.shared_secret.clone(),
         tls,
+        budget,
     })
 }
 
@@ -651,7 +691,7 @@ pub(crate) async fn certificate_probe(
     digest: &str,
     target_leaf: &str,
 ) -> Result<CertificateProbe, String> {
-    let (reply, actual_leaf) = admin_network(&node.config, member, node.tls.clone())?
+    let (reply, actual_leaf) = node_network(node, member)?
         .exchange_observed(
             Command::CertificateProbe {
                 revision,
@@ -684,7 +724,7 @@ pub(crate) async fn certificate_target(
     digest: &str,
     target_leaf: &str,
 ) -> Result<CertificateObservation, String> {
-    let (reply, actual_leaf) = admin_network(&node.config, target, node.tls.clone())?
+    let (reply, actual_leaf) = node_network(node, target)?
         .exchange_observed(
             Command::CertificateTarget {
                 revision,
@@ -731,7 +771,7 @@ pub(crate) async fn member_epoch(
     node: &ReplicaNode,
     member: u64,
 ) -> Result<Option<ControllerEpoch>, String> {
-    match admin_network(&node.config, member, node.tls.clone())?
+    match node_network(node, member)?
         .exchange(Command::AdminEpoch, RPCOption::new(Duration::from_secs(2)))
         .await
         .map_err(|error| error.to_string())?
@@ -747,7 +787,7 @@ pub(crate) async fn observe_leader_transfer(
     member: u64,
     transfer_id: &str,
 ) -> Result<Option<LeaderTransferRecord>, String> {
-    admin_observe_leader_transfer(&node.config, member, node.tls.clone(), transfer_id).await
+    observe_transfer(node_network(node, member)?, transfer_id).await
 }
 
 /// Reads an original infrastructure operation using an explicitly configured actual member peer.
@@ -757,10 +797,18 @@ pub(crate) async fn admin_observe_leader_transfer(
     tls: Option<Arc<crate::tls::TlsMaterial>>,
     transfer_id: &str,
 ) -> Result<Option<LeaderTransferRecord>, String> {
+    observe_transfer(admin_network(config, member, tls)?, transfer_id).await
+}
+
+/// Reads one immutable operation through the caller's original actual client capacity.
+async fn observe_transfer(
+    network: ReplicaNetwork,
+    transfer_id: &str,
+) -> Result<Option<LeaderTransferRecord>, String> {
     if transfer_id.trim().is_empty() || transfer_id.len() > 128 {
         return Err("original transfer observation identity is invalid".into());
     }
-    match admin_network(config, member, tls)?
+    match network
         .exchange(
             Command::ObserveLeaderTransfer {
                 transfer_id: transfer_id.into(),
@@ -879,6 +927,8 @@ pub(crate) struct ReplicaNetworkFactory {
     shared_secret: Option<String>,
     /// Optional loaded mTLS client profile for cross-host members.
     tls: Option<Arc<crate::tls::TlsMaterial>>,
+    /// Actual shared process-local network and frame capacity.
+    budget: Arc<TransportBudget>,
 }
 
 impl ReplicaNetworkFactory {
@@ -889,6 +939,7 @@ impl ReplicaNetworkFactory {
         online: Arc<AtomicBool>,
         shared_secret: Option<String>,
         tls: Option<Arc<crate::tls::TlsMaterial>>,
+        budget: Arc<TransportBudget>,
     ) -> Self {
         Self {
             profile,
@@ -896,6 +947,7 @@ impl ReplicaNetworkFactory {
             online,
             shared_secret,
             tls,
+            budget,
         }
     }
 }
@@ -916,6 +968,8 @@ pub(crate) struct ReplicaNetwork {
     shared_secret: Option<String>,
     /// Optional loaded mTLS client profile for the remote member.
     tls: Option<Arc<crate::tls::TlsMaterial>>,
+    /// Original node-local asynchronous exchange and frame capacity.
+    budget: Arc<TransportBudget>,
 }
 
 impl RaftNetworkFactory<ControllerRaftConfig> for ReplicaNetworkFactory {
@@ -931,6 +985,7 @@ impl RaftNetworkFactory<ControllerRaftConfig> for ReplicaNetworkFactory {
             online: self.online.clone(),
             shared_secret: self.shared_secret.clone(),
             tls: self.tls.clone(),
+            budget: self.budget.clone(),
         }
     }
 }
@@ -953,6 +1008,7 @@ impl ReplicaNetwork {
         if !self.online.load(Ordering::Relaxed) {
             return Err(std::io::Error::other("test partition is active"));
         }
+        let _exchange = self.budget.outbound()?;
         let request = Request {
             profile: self.profile.clone(),
             target: self.target,
@@ -966,10 +1022,7 @@ impl ReplicaNetwork {
             ),
             command,
         };
-        let encoded = serde_json::to_vec(&request).map_err(std::io::Error::other)?;
-        if encoded.len() > MAX_FRAME_BYTES {
-            return Err(std::io::Error::other("replica frame exceeds bounds"));
-        }
+        let encoded = crate::transport_budget::encode(&request, &self.budget)?;
         let operation = async {
             let stream = tokio::net::TcpStream::connect(&self.node.addr).await?;
             if let Some(tls) = &self.tls {
@@ -994,21 +1047,23 @@ impl ReplicaNetwork {
                         "target has not presented the original staged new certificate",
                     ));
                 }
-                stream.write_u64(encoded.len() as u64).await?;
-                stream.write_all(&encoded).await?;
-                read_reply(&mut stream)
+                stream.write_u64(encoded.bytes.len() as u64).await?;
+                stream.write_all(&encoded.bytes).await?;
+                read_reply(&mut stream, &self.budget)
                     .await
                     .map(|reply| (reply, actual_leaf))
             } else {
                 let mut stream = stream;
-                stream.write_u64(encoded.len() as u64).await?;
-                stream.write_all(&encoded).await?;
+                stream.write_u64(encoded.bytes.len() as u64).await?;
+                stream.write_all(&encoded.bytes).await?;
                 if required_leaf.is_some() {
                     return Err(std::io::Error::other(
                         "certificate evidence requires actual mutual TLS",
                     ));
                 }
-                read_reply(&mut stream).await.map(|reply| (reply, None))
+                read_reply(&mut stream, &self.budget)
+                    .await
+                    .map(|reply| (reply, None))
             }
         };
         tokio::time::timeout(option.hard_ttl(), operation)
@@ -1018,14 +1073,12 @@ impl ReplicaNetwork {
 }
 
 /// Reads one bounded framed reply from an async replica stream.
-async fn read_reply<S>(stream: &mut S) -> Result<Reply, std::io::Error>
+async fn read_reply<S>(stream: &mut S, budget: &TransportBudget) -> Result<Reply, std::io::Error>
 where
     S: tokio::io::AsyncRead + Unpin,
 {
     let length = stream.read_u64().await?;
-    if length == 0 || length > MAX_FRAME_BYTES as u64 {
-        return Err(std::io::Error::other("replica reply exceeds bounds"));
-    }
+    let _frame = budget.frame(length)?;
     let mut bytes = vec![0; length as usize];
     stream.read_exact(&mut bytes).await?;
     serde_json::from_slice(&bytes).map_err(std::io::Error::other)
@@ -1391,11 +1444,30 @@ fn request_auth_digest(
     command: &Command,
 ) -> Option<String> {
     let secret = secret?;
-    let payload = serde_json::to_vec(&(profile, target, sender, command)).ok()?;
     let mut digest = Sha256::new();
     digest.update(secret.as_bytes());
-    digest.update(payload);
+    serde_json::to_writer(
+        &mut AuthHashWriter(&mut digest),
+        &(profile, target, sender, command),
+    )
+    .ok()?;
     Some(format!("{:x}", digest.finalize()))
+}
+
+/// Streams original JSON into its exact original SHA-256 without a second whole-frame allocation.
+struct AuthHashWriter<'a>(&'a mut Sha256);
+
+impl Write for AuthHashWriter<'_> {
+    /// Hashes the same complete serialization bytes formerly retained in an extra Vec.
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    /// Hashing retains no external buffer or I/O to flush.
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 impl state::ApplicationBatchReplicator for ReplicaFenceClient {
@@ -1494,6 +1566,23 @@ mod auth_tests {
     //! Replica envelope authentication regressions.
 
     use super::*;
+
+    /// Streaming preserves exact legacy digest bytes, including escaped and non-ASCII identities.
+    #[test]
+    fn streaming_authentication_matches_the_original_wire_digest() {
+        let command = Command::ObserveLeaderTransfer {
+            transfer_id: "原始\n\"transfer\\".into(),
+        };
+        let secret = "original-secret-".repeat(3);
+        let original_payload = serde_json::to_vec(&("profile", 2_u64, 1_u64, &command)).unwrap();
+        let mut original = Sha256::new();
+        original.update(secret.as_bytes());
+        original.update(original_payload);
+        assert_eq!(
+            request_auth_digest(Some(&secret), "profile", 2, 1, &command),
+            Some(format!("{:x}", original.finalize()))
+        );
+    }
 
     /// Authentication binds the exact command envelope and requires an explicit secret.
     #[test]

@@ -17,6 +17,7 @@ mod supervision;
 mod tests;
 mod tls;
 mod transport;
+mod transport_budget;
 
 use openraft::{BasicNode, Raft};
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,7 @@ pub use snapshot_data::ReplicaSnapshotData;
 pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};
 pub use supervision::{ControllerDrainProof, ControllerProcessExit, ControllerProcessIdentity};
 pub use transport::{ReplicaFenceClient, ReplicaServer};
+pub use transport_budget::{ReplicaTransportLimits, ReplicaTransportSnapshot};
 
 openraft::declare_raft_types!(
     /// Consensus types use infrastructure replica identities independently of embodied Node identities.
@@ -437,6 +439,8 @@ impl ReplicaConfig {
 /// Live consensus service and durable accepted history, independent of any executing Controller child.
 #[derive(Clone)]
 pub struct ReplicaNode {
+    /// Actual local network lifetimes and capacity; never replicated authority.
+    transport_budget: Arc<transport_budget::TransportBudget>,
     /// Actual kernel-generated identity of this infrastructure process incarnation.
     process_instance: String,
     /// Test-only response loss after actual target-side acceptance/election; never a product mode.
@@ -467,7 +471,17 @@ impl ReplicaNode {
         config: ReplicaConfig,
         path: &Path,
     ) -> Result<(Self, ReplicaServer), String> {
+        Self::start_with_transport_limits(config, path, ReplicaTransportLimits::default()).await
+    }
+
+    /// Applies explicit local resource capacities before opening storage or binding any RPC socket.
+    pub async fn start_with_transport_limits(
+        config: ReplicaConfig,
+        path: &Path,
+        limits: ReplicaTransportLimits,
+    ) -> Result<(Self, ReplicaServer), String> {
         config.validate()?;
+        let transport_budget = transport_budget::TransportBudget::new(limits)?;
         let store =
             SqliteRaftStore::open(path, &config.profile_identity(), &config.application_schema)?;
         let tls = if config.rotates_certificates() {
@@ -509,6 +523,7 @@ impl ReplicaNode {
             network_online.clone(),
             config.shared_secret.clone(),
             tls.clone(),
+            transport_budget.clone(),
         );
         let raft = Raft::new(
             config.replica_id,
@@ -520,6 +535,7 @@ impl ReplicaNode {
         .await
         .map_err(|error| error.to_string())?;
         let node = Self {
+            transport_budget,
             process_instance: supervision::new_process_instance()?,
             #[cfg(test)]
             discard_transfer_reply: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -559,6 +575,11 @@ impl ReplicaNode {
                 .map_err(|error| error.to_string())?;
         }
         Ok((node, server))
+    }
+
+    /// Observes actual local transport permits without changing epoch, ownership or permissions.
+    pub fn transport_snapshot(&self) -> ReplicaTransportSnapshot {
+        self.transport_budget.snapshot()
     }
 
     /// Fences application work while retaining infrastructure quorum observations for reconciliation.

@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+ADR-0163 bounds actual replica inbound handlers before TLS and shares local asynchronous exchange
+and separate small/large encoded-frame capacities across the original member's clients. Permits
+precede allocation and retain real handler/frame lifetimes; listener-owned JoinSet drops network
+waits without denying committed effects or ending independent storage workers. Explicit local
+transport_limits and readonly sampled metrics change no cluster/application policy identity,
+wrapper or Node contract. The actual replica_transport_probe/check_replica_transport_processes.py
+gate uses three infrastructure members, real mTLS and one async worker, with zero Controllers,
+Nodes/devices/models/simulators. Limits do not prove RSS/physical enforcement, complete DoS
+resistance or online HA. Full supervisor adoption, content ACK and all original P1-P7 remain.
+
 ADR-0162 adds local OS-admin `recover-artifact-journal` and readonly observation under explicit
 recovery v0.17. Exact original SQL/journal bytes, complete actual writers and known Controller
 consumers precede immutable intent/forensics and native SQLite rollback. HeldWriters retains real

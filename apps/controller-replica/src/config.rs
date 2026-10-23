@@ -60,6 +60,9 @@ pub(super) struct ProcessConfig {
     /// Optional private loopback metrics route; observations do not alter policy identity.
     #[serde(default)]
     pub metrics_address: Option<SocketAddr>,
+    /// Local bounded RPC capacities; observation/resource settings never change policy identity.
+    #[serde(default)]
+    pub transport_limits: controller_replication::ReplicaTransportLimits,
 }
 
 /// Closed one-shot leader handoff command; it never asserts physical continuity.
@@ -102,6 +105,7 @@ impl ProcessConfig {
     /// Rejects broad network/configuration scope before owning files or creating a Controller.
     pub fn validate(&self) -> Result<(), String> {
         self.replica.validate()?;
+        self.transport_limits.validate()?;
         if self
             .controller_environment
             .get("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA")
@@ -210,6 +214,21 @@ mod tests {
     //! Closed resource configuration must remain policy-bound and reject unbounded thread counts.
 
     use super::*;
+
+    /// Local listener capacity remains bounded without changing original homogeneous cluster identity.
+    #[test]
+    fn replica_transport_limits_are_local_bounded_and_preserve_existing_policy_identity() {
+        let mut configuration = profile("1");
+        let policy = configuration.policy_digest().unwrap();
+        let cluster = configuration.replica.profile_identity();
+        configuration.transport_limits.inbound_connections = 9;
+        configuration.transport_limits.large_frame_bytes = 1024 * 1024;
+        configuration.validate().unwrap();
+        assert_eq!(configuration.policy_digest().unwrap(), policy);
+        assert_eq!(configuration.replica.profile_identity(), cluster);
+        configuration.transport_limits.outbound_connections = 0;
+        assert!(configuration.validate().is_err());
+    }
 
     /// Uses an actual compiled file for policy hashing, without starting any process or Node.
     fn profile(workers: &str) -> ProcessConfig {

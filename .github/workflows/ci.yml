@@ -53,6 +53,14 @@ jobs:
       - name: Build the actual Controller connection lifetime probe
         run: cargo build --locked -p state --example controller_storage_probe
 
+      - name: Build the actual single-worker replica listener probe
+        run: cargo build --locked -p controller-replication --example replica_transport_probe
+
+      - name: Verify actual bounded replica TCP and TLS lifetimes with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_replica_transport_processes.py
+          --output "${RUNNER_TEMP}/roboguide-replica-transport"
+
       - name: Verify actual Controller inode writer generation and complete cold recovery
         run: >
           uv run --frozen python tools/quality/check_controller_storage_processes.py

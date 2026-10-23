@@ -25,6 +25,9 @@ pub(super) struct Status {
     pub(super) child_pid: Option<u32>,
     /// Complete application revision already applied at this replica.
     pub(super) revision: u64,
+    /// Actual local transport permits and counters, unavailable in older observation files.
+    #[serde(default)]
+    pub(super) transport: Option<controller_replication::ReplicaTransportSnapshot>,
 }
 
 /// Owns exactly one child and the epoch under which it was originally started.
@@ -238,6 +241,7 @@ fn write_status(
         epoch,
         child_pid: owned.as_ref().and_then(|controller| controller.child.id()),
         revision: node.accepted_revision()?,
+        transport: Some(node.transport_snapshot()),
     };
     let temporary = configuration.storage_directory.join("status.pending.json");
     std::fs::write(
@@ -260,9 +264,10 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
             .storage_directory
             .join("supervisor.writer.lock"),
     )?;
-    let (node, _server) = ReplicaNode::start(
+    let (node, _server) = ReplicaNode::start_with_transport_limits(
         configuration.replica.clone(),
         &configuration.storage_directory.join("replica.sqlite3"),
+        configuration.transport_limits.clone(),
     )
     .await?;
     node.enable_controller_supervision()?;
