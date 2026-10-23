@@ -1,5 +1,11 @@
 # RoboGuide
 
+[原 Controller 内容入口](docs/development/acceptance/2026-10-23-owned-controller-content-ingress.md)
+正在接显式 parent8：实际 Unix peer PID、原 spawn 日志、mTLS 和完整首次命令先于
+Prepared 字节复制与同成员 metadata+bytes ACK。真实文件源使用正常 State 提交端口，
+保留 SQL 回执丢失后的原 Unknown 和独立完整候选对账。它尚未替代 runnable Controller
+composition；内容路由/readiness、完整 HA/恢复/升级与原全部整改继续实施。
+
 [Prepared 内容作用域](docs/development/acceptance/2026-10-23-prepared-artifact-sources.md)
 由 `core/artifact-store/src/prepared_source.rs` 维护：原 upload 实际 hash/fsync 后可在
 最终 CAS 发布前供内部复制读取；原 guard/reader 独立撤销、退出并保留 writer/freeze。

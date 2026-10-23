@@ -1,6 +1,7 @@
 """Check independent Raft/mTLS processes, original Controller bytes and actual native failover.
 
-No Controller child, embodied Node, device, model, simulator or physical continuity is created.
+Optional owned file-contract children exercise State/Unix ingress without a full Controller kernel.
+No embodied Node, device, model, simulator or physical continuity is created.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import selectors
 import signal
 import sqlite3
 import subprocess
+import tempfile
 import time
 from contextlib import ExitStack, closing
 from pathlib import Path
@@ -20,6 +22,7 @@ from typing import Any, BinaryIO
 from check_replica_certificate_processes import create_ca, issue
 from check_replica_content_processes import Processes, digest, save
 from check_state_verifier_processes import address
+from owned_content_source_processes import run_source
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -147,22 +150,41 @@ def actual_bytes(root: Path) -> list[dict[str, Any]]:
 
 
 def run(
-    output: Path, binary: Path, storage: Path, source: Path, members: list[int]
+    output: Path,
+    binary: Path,
+    storage: Path,
+    source: Path | None,
+    members: list[int],
+    owned_source: Path | None = None,
 ) -> dict[str, Any]:
     """Check independent SQL, byte and TLS observations plus actual process waits."""
     if not 3 <= len(members) <= 9 or len(set(members)) != len(members) or min(members) <= 0:
         raise ValueError("declare three to nine distinct positive infrastructure members")
-    assert json.loads((source / "result.json").read_bytes())["passed"] is True
-    assert (
-        json.loads((source / "owned-process-exits.json").read_bytes())["all_owned_processes_reaped"]
-        is True
-    )
+    if owned_source is None:
+        if source is None:
+            raise ValueError("original capture gate requires explicit actual Controller evidence")
+        assert json.loads((source / "result.json").read_bytes())["passed"] is True
+        assert (
+            json.loads((source / "owned-process-exits.json").read_bytes())[
+                "all_owned_processes_reaped"
+            ]
+            is True
+        )
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     output = output.resolve()
     identities = {str(path): digest(path) for path in [binary, storage, Path(__file__)]}
     identities.update(
         {str(path): digest(path) for path in (ROOT / "core/controller-replication").rglob("*.rs")}
     )
+    if owned_source is not None:
+        identities[str(owned_source)] = digest(owned_source)
+        identities.update(
+            {str(path): digest(path) for path in (ROOT / "core/artifact-store").rglob("*.rs")}
+        )
+        identities.update({str(path): digest(path) for path in (ROOT / "core/state").rglob("*.rs")})
+        for name in ("owned_content_source_processes.py", "check_prepared_source_processes.py"):
+            path = Path(__file__).with_name(name)
+            identities[str(path)] = digest(path)
     save(output / "source-identity.json", identities)
     calls = Processes(storage, output)
     actors: dict[int, Actor] = {}
@@ -178,6 +200,7 @@ def run(
     }
     with ExitStack() as scope:
         try:
+            ipc = Path(scope.enter_context(tempfile.TemporaryDirectory(prefix="rg-owned-content-")))
             tls = output / "tls"
             create_ca(tls)
             leaves = {member: issue(tls, f"member-{member}") for member in members}
@@ -193,7 +216,7 @@ def run(
                 owned = output / f"member-{member}"
                 owned.mkdir()
                 bundle = str(leaves[member][0])
-                config = {
+                config: dict[str, Any] = {
                     "replica": {
                         "schema": "roboguide.controller-replica/v0.4",
                         "cluster_id": "actual-original-network-content",
@@ -214,6 +237,10 @@ def run(
                     "parent_sql": str(owned / "replica.sqlite3"),
                     "member_stores": {},
                 }
+                if owned_source is not None:
+                    config["owned_child"] = True
+                    config["child_socket"] = str(ipc / f"member-{member}.sock")
+                    config["replica"]["application_policy_digest"] = digest(owned_source)
                 path = output / f"configuration-{member}.json"
                 save(path, config)
                 profile = json.loads(
@@ -261,15 +288,27 @@ def run(
             for member in members:
                 start(member)
             current = leader()
-            captured = actors[current].ask(
-                {
-                    "action": "capture",
-                    "source_sql": str(source / "controller.sqlite3"),
-                    "source_cas": str(source / "cas"),
-                    "operation_id": "actual-original-source-staging",
+            if owned_source is not None:
+                result["actual_owned_file_source"] = run_source(
+                    actors[current], configs[current], owned_source, output, calls, members
+                )
+                captured = {
+                    "candidate_digest": actors[current].ask({"action": "quorum"})["target"][
+                        "batch_digest"
+                    ]
                 }
-            )
-            assert actors[current].ask({"action": "commit"})["receipt"]["accepted"] is True
+                result["actual_supervised_file_contract_children"] = 2
+            else:
+                assert source is not None
+                captured = actors[current].ask(
+                    {
+                        "action": "capture",
+                        "source_sql": str(source / "controller.sqlite3"),
+                        "source_cas": str(source / "cas"),
+                        "operation_id": "actual-original-source-staging",
+                    }
+                )
+                assert actors[current].ask({"action": "commit"})["receipt"]["accepted"] is True
             first = actors[current].ask({"action": "quorum"})
             assert set(first["complete_members"]) == set(members)
             assert first["target"]["batch_digest"] == captured["candidate_digest"]
@@ -280,7 +319,7 @@ def run(
                 member: sql_identity(Path(configs[member]["parent_sql"])) for member in members
             }
             for member in members:
-                assert originals[member][0] == 7
+                assert originals[member][0] == (8 if owned_source is not None else 7)
                 assert (
                     originals[member][1]["membership"]["membership"]["nodes"][str(member)][
                         "content_store_owner"
@@ -367,15 +406,17 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--probe", type=Path, required=True)
     parser.add_argument("--storage-probe", type=Path, required=True)
-    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--source", type=Path)
+    parser.add_argument("--owned-source-probe", type=Path)
     parser.add_argument("--members", required=True)
     args = parser.parse_args()
     result = run(
         args.output,
         args.probe.resolve(strict=True),
         args.storage_probe.resolve(strict=True),
-        args.source.resolve(strict=True),
+        None if args.source is None else args.source.resolve(strict=True),
         [int(member) for member in args.members.split(",")],
+        None if args.owned_source_probe is None else args.owned_source_probe.resolve(strict=True),
     )
     print(json.dumps({"passed": result["passed"], "result": str(args.output / "result.json")}))
 

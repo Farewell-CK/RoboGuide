@@ -59,6 +59,21 @@ const NETWORK_CONTENT_VERSION: i64 = 7;
 const NETWORK_CONTENT_SCHEMA: &str = "roboguide.replica-storage/v0.7";
 /// Mandatory original local network-generation marker, independently of an empty membership.
 const NETWORK_CONTENT_KEY: &str = "network_content_membership_schema";
+/// Explicit original-child generation; member-only binaries cannot acquire its local journal.
+pub(crate) const CONTROLLER_CONTENT_VERSION: i64 = 8;
+/// Closed original child journal interpretation, independent of Raft/domain codecs.
+pub(crate) const CONTROLLER_CONTENT_SCHEMA: &str = "roboguide.replica-storage/v0.8";
+
+/// Explicit local authority generation, never inferred from an existing file or a new table.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NetworkContentMode {
+    /// Original metadata or local-only content constructor.
+    None,
+    /// Original core network parent7.
+    Member,
+    /// Explicit owned-child parent8.
+    Controller,
+}
 /// Legacy names retained only as read-only views after the atomic format migration.
 const LEGACY_TABLES: [&str; 5] = [
     "replica_meta",
@@ -145,7 +160,11 @@ impl ReplicaView {
     }
 
     /// Validates bounded retained history and exact codecs on reopen and before snapshot installation.
-    fn validate(&self, application_schema: &str, profile: &str) -> Result<(), StorageError<u64>> {
+    pub(crate) fn validate(
+        &self,
+        application_schema: &str,
+        profile: &str,
+    ) -> Result<(), StorageError<u64>> {
         match &self.checkpoint {
             Some(checkpoint)
                 if checkpoint.schema == application_schema
@@ -323,6 +342,8 @@ pub struct SqliteRaftStore {
     content: Option<ReplicaContentStore>,
     /// Exact explicitly admitted network generation, never inferred from a stream-capable root alone.
     network_content: bool,
+    /// Explicit local original-child journal; false never permits application ingress.
+    pub(crate) controller_content: bool,
     /// Actual original queue admission on a managed worker clone; it is never serialized or renewed.
     work_clock: Option<crate::content_store::ProducerClock>,
     /// Bounds actual running plus queued heavy work per original store, retained inside each worker.
@@ -382,13 +403,17 @@ fn prepare_storage_format(
     content_identity: Option<&ReplicaContentIdentity>,
     producers: bool,
     adoption: bool,
-    network_content: bool,
+    network_mode: NetworkContentMode,
 ) -> Result<(), String> {
+    let network_content = network_mode != NetworkContentMode::None;
+    let controller_content = network_mode == NetworkContentMode::Controller;
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
     let marker = schema_object_type(connection, "replica_storage_format")?;
-    let target_version = if network_content {
+    let target_version = if controller_content {
+        CONTROLLER_CONTENT_VERSION
+    } else if network_content {
         NETWORK_CONTENT_VERSION
     } else if producers {
         if version == ADOPTED_STORAGE_VERSION {
@@ -409,6 +434,7 @@ fn prepare_storage_format(
                     | PRODUCER_STORAGE_VERSION
                     | ADOPTED_STORAGE_VERSION
                     | NETWORK_CONTENT_VERSION
+                    | CONTROLLER_CONTENT_VERSION
             ))
     {
         return Err("complete-content Replica storage requires explicit original upgrade; metadata-only open/automatic migration refused".into());
@@ -439,6 +465,7 @@ fn prepare_storage_format(
             | PRODUCER_STORAGE_VERSION
             | ADOPTED_STORAGE_VERSION
             | NETWORK_CONTENT_VERSION
+            | CONTROLLER_CONTENT_VERSION
     ) && marker.as_deref() == Some("table")
     {
         if current.iter().any(|kind| kind.as_deref() != Some("table"))
@@ -457,6 +484,8 @@ fn prepare_storage_format(
             "roboguide.replica-storage/v0.1"
         } else if version == 2 {
             "roboguide.replica-storage/v0.2"
+        } else if version == CONTROLLER_CONTENT_VERSION {
+            CONTROLLER_CONTENT_SCHEMA
         } else if version == NETWORK_CONTENT_VERSION {
             NETWORK_CONTENT_SCHEMA
         } else if version == ADOPTED_STORAGE_VERSION {
@@ -511,7 +540,7 @@ fn prepare_storage_format(
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
-        if object_count != 11 {
+        if object_count != if controller_content { 12 } else { 11 } {
             return Err("Replica storage contains unknown tables/views".into());
         }
         for (legacy_name, storage_name) in LEGACY_TABLES.iter().zip(STORAGE_TABLES) {
@@ -622,6 +651,7 @@ fn prepare_storage_format(
         } else if network_marker.is_some() {
             return Err("old Replica storage contains hidden network content authority".into());
         }
+        crate::controller_ingress::validate_storage(connection, controller_content)?;
         adoption::validate_history(
             connection,
             version,
@@ -725,7 +755,7 @@ fn prepare_storage_format(
              CREATE VIEW replica_log AS SELECT * FROM replica_v1_log;
              CREATE VIEW replica_events AS SELECT * FROM replica_v1_events;
              CREATE VIEW replica_snapshot AS SELECT * FROM replica_v1_snapshot;
-             PRAGMA user_version={target_version};",if network_content{NETWORK_CONTENT_SCHEMA}else if producers{PRODUCER_STORAGE_SCHEMA}else if content_identity.is_some(){CONTENT_STORAGE_SCHEMA}else{REPLICA_STORAGE_SCHEMA}),
+             PRAGMA user_version={target_version};",if controller_content{CONTROLLER_CONTENT_SCHEMA}else if network_content{NETWORK_CONTENT_SCHEMA}else if producers{PRODUCER_STORAGE_SCHEMA}else if content_identity.is_some(){CONTENT_STORAGE_SCHEMA}else{REPLICA_STORAGE_SCHEMA}),
         )
         .map_err(|error| error.to_string())?;
     write_meta(
@@ -778,7 +808,27 @@ fn prepare_storage_format(
         write_meta(&transaction, NETWORK_CONTENT_KEY, &NETWORK_CONTENT_SCHEMA)
             .map_err(|error| error.to_string())?;
     }
+    if controller_content {
+        crate::controller_ingress::initialize_storage(&transaction)?;
+    }
     transaction.commit().map_err(|error| error.to_string())
+}
+
+/// Refuses application effects while an original source transfer remains pending or uncertain.
+pub(crate) fn require_controller_source_unfenced(
+    connection: &Connection,
+    epoch: ControllerEpoch,
+) -> Result<(), String> {
+    if read_leader_transfer_history(connection)?
+        .last()
+        .is_some_and(|record| {
+            record.source_epoch.replica_id == epoch.replica_id
+                && !matches!(record.state.as_str(), "completed" | "rejected")
+        })
+    {
+        return Err("original Controller source is fenced by its pending transfer".into());
+    }
+    Ok(())
 }
 
 /// Allows only explicit operation transitions; terminal outcomes and original identity are immutable.
@@ -994,7 +1044,12 @@ impl SqliteRaftStore {
                 .map_err(|error| error.to_string())?;
             let allowed_network_genesis = self.network_genesis(&transaction)?;
             if logs != 0
-                || authority != if allowed_network_genesis { 4 } else { 0 }
+                || authority
+                    != if allowed_network_genesis {
+                        if self.controller_content { 6 } else { 4 }
+                    } else {
+                        0
+                    }
                 || !read_leader_transfer_history(&transaction)?.is_empty()
             {
                 return Err(
@@ -1064,7 +1119,14 @@ impl SqliteRaftStore {
     }
     /// Opens a private consensus database and rejects a conflicting stored cluster/schema profile.
     pub fn open(path: &Path, profile: &str, application_schema: &str) -> Result<Self, String> {
-        Self::open_inner(path, profile, application_schema, None, false, false)
+        Self::open_inner(
+            path,
+            profile,
+            application_schema,
+            None,
+            false,
+            NetworkContentMode::None,
+        )
     }
 
     /// Opens only an explicit complete-content generation with its exact actual member-local backend.
@@ -1086,7 +1148,7 @@ impl SqliteRaftStore {
             application_schema,
             Some(content),
             false,
-            false,
+            NetworkContentMode::None,
         )
     }
 
@@ -1111,7 +1173,32 @@ impl SqliteRaftStore {
             application_schema,
             Some(content),
             false,
-            true,
+            NetworkContentMode::Member,
+        )
+    }
+
+    /// Opens only explicit parent8 with actual original Root4; parent7 and old writers refuse it.
+    pub fn open_with_controller_content(
+        path: &Path,
+        profile: &str,
+        application_schema: &str,
+        content: ReplicaContentStore,
+    ) -> Result<Self, String> {
+        if !content.streams_enabled()
+            || content.identity().profile_identity != profile
+            || application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+        {
+            return Err(
+                "owned Controller parent requires actual original Root4/profile/schema".into(),
+            );
+        }
+        Self::open_inner(
+            path,
+            profile,
+            application_schema,
+            Some(content),
+            false,
+            NetworkContentMode::Controller,
         )
     }
 
@@ -1122,8 +1209,9 @@ impl SqliteRaftStore {
         application_schema: &str,
         content: Option<ReplicaContentStore>,
         adoption: bool,
-        network_content: bool,
+        network_mode: NetworkContentMode,
     ) -> Result<Self, String> {
+        let network_content = network_mode != NetworkContentMode::None;
         let canonical = if path.exists() {
             path.canonicalize().map_err(|error| error.to_string())?
         } else {
@@ -1202,7 +1290,7 @@ impl SqliteRaftStore {
                     .as_ref()
                     .is_some_and(ReplicaContentStore::producer_journal_enabled),
             adoption,
-            network_content,
+            network_mode,
         )?;
         if adoption {
             let journal: String = connection
@@ -1235,6 +1323,7 @@ impl SqliteRaftStore {
             application_schema: application_schema.into(),
             content,
             network_content,
+            controller_content: network_mode == NetworkContentMode::Controller,
             work_clock: None,
             storage_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
         };

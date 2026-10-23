@@ -1,5 +1,18 @@
 # Repository Guidelines
 
+ADR-0171 adds explicit core parent8 and original owned-child Unix/mTLS content ingress. Kernel peer
+PID, original spawn/boot/start ticks, captured current TLS and original budget gate actual source
+Ready/streams/Commit; every first operation, including empty inputs, has a mandatory local journal.
+Original retries only observe, and exact complete-candidate/current full-quorum reconciliation never
+rewrites Unknown. Independent members stream/observe within original capacities; network TLS reads
+committed trust from original-inode WAL snapshots so application SQL cannot block heartbeat lookup.
+Private stale sockets require original writer/history and actual ConnectionRefused before same-inode
+cleanup; active listeners and unreaped/spawning history refuse replacement. Ownership is
+controller_ingress/{store,wire,client}.rs and owned_content_source_processes.py. The real owned file
+contract uses State SQL/Prepared CAS and actual OS waits; it is explicitly not a complete Controller
+kernel or embodied Node. Runnable composition, content routing/readiness, full recovery/upgrade/GC,
+cross-host/physical evidence and every remaining P1-P7 requirement continue separately.
+
 ADR-0170 adds scoped actual Prepared Artifact sources before finalized CAS publication. The original
 writer owns at most 128 unended source scopes; a unique nonserialized guard freezes exact upload,
 actual readonly FD identity/hash/size and append. Independent bounded readers retain the writer and

@@ -7,7 +7,7 @@ use crate::content_store::{
 
 /// Readiness is a durable receive intent only; duplicate outcomes never create a second writer.
 #[derive(Serialize, Deserialize)]
-pub(super) enum StreamNotice {
+pub(crate) enum StreamNotice {
     /// Exact first admitted durable request, before any source payload is opened.
     Ready {
         /// Immutable complete receiver intent digest, never a quorum or byte receipt.
@@ -15,6 +15,22 @@ pub(super) enum StreamNotice {
     },
     /// Original retained result, including Unknown, without another payload transfer.
     Original(Box<ReplicaContentStreamStatus>),
+}
+
+/// Actual original receive context supplied only by a trusted live member or owned-child adapter.
+pub(crate) struct StreamReceive {
+    /// Complete immutable original metadata/membership/input target.
+    pub(crate) target: ContentQuorumTarget,
+    /// One exact original qualified byte input.
+    pub(crate) content: ArtifactContentKey,
+    /// Original immutable receive identity.
+    pub(crate) command_id: String,
+    /// Actual original receiver kernel budget sampled before queuing.
+    pub(crate) budget: ContentBudget,
+    /// Actual original source identity independently observed by its trusted adapter.
+    pub(crate) origin: StreamOrigin,
+    /// Nonserialized current captured source/epoch/TLS/permission checks.
+    pub(crate) check: StreamPermission,
 }
 
 /// Each bounded message belongs to one unique original receive worker.
@@ -129,6 +145,31 @@ pub(crate) async fn send_content_stream(
     duration_ms: u64,
 ) -> Result<ReplicaContentStreamStatus, String> {
     let clock = ContentBudget::issue(duration_ms)?;
+    send_content_stream_checked(
+        node,
+        receiver,
+        target,
+        content,
+        command_id,
+        clock,
+        Arc::new(|| Ok(())),
+    )
+    .await
+}
+
+/// Carries the original admitted caller clock and live witness through every actual source chunk.
+pub(crate) async fn send_content_stream_checked(
+    node: &ReplicaNode,
+    receiver: u64,
+    target: ContentQuorumTarget,
+    content: ArtifactContentKey,
+    command_id: String,
+    clock: ContentBudget,
+    caller: StreamPermission,
+) -> Result<ReplicaContentStreamStatus, String> {
+    clock.check()?;
+    caller()?;
+    let duration_ms = clock.remaining_ms()?.min(15000);
     let _exchange = node
         .transport_budget
         .outbound()
@@ -188,7 +229,11 @@ pub(crate) async fn send_content_stream(
                 .to_vec(),
             local: tls,
         };
-        let check = permission(node.clone(), target.clone(), receiver, evidence);
+        let network = permission(node.clone(), target.clone(), receiver, evidence);
+        let check: StreamPermission = Arc::new(move || {
+            caller()?;
+            network()
+        });
         check()?;
         clock.check()?;
         stream
@@ -356,6 +401,40 @@ where
             .ok_or("actual content peer leaf absent")?,
     };
     let check = permission(node.clone(), target.clone(), peer, evidence);
+    receive_owned_stream(
+        stream,
+        &node,
+        StreamReceive {
+            target,
+            content,
+            command_id,
+            budget,
+            origin,
+            check,
+        },
+    )
+    .await
+    .map(|_| ())
+}
+
+/// Receives one original stream while unique actual worker/FD/root scopes outlive async cancellation.
+pub(crate) async fn receive_owned_stream<S>(
+    stream: &mut S,
+    node: &ReplicaNode,
+    work: StreamReceive,
+) -> Result<ReplicaContentStreamStatus, String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let StreamReceive {
+        target,
+        content,
+        command_id,
+        budget,
+        origin,
+        check,
+    } = work;
+    budget.check()?;
     check()?;
     let root = node.store.network_content_store()?;
     let capacity = root.stream_work_permit()?;
@@ -397,10 +476,14 @@ where
         let _ = done_send.send(result);
     });
     let notice = ready_receive.await.map_err(|error| error.to_string())?;
+    let existing = match &notice {
+        Ok(StreamNotice::Original(original)) => Some(*original.clone()),
+        _ => None,
+    };
     let transfer = matches!(notice, Ok(StreamNotice::Ready { .. }));
     reply(stream, Reply::ContentStream(notice), &node.transport_budget).await?;
     if !transfer {
-        return Ok(());
+        return existing.ok_or("actual original receive did not admit a worker".into());
     }
     loop {
         let offset = stream.read_u64().await.map_err(|error| error.to_string())?;
@@ -432,8 +515,9 @@ where
     let outcome = done_receive.await.map_err(|error| error.to_string())?;
     reply(
         stream,
-        Reply::ContentStreamFinished(outcome),
+        Reply::ContentStreamFinished(outcome.clone()),
         &node.transport_budget,
     )
-    .await
+    .await?;
+    outcome
 }

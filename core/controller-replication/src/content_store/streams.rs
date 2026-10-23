@@ -201,6 +201,32 @@ pub(crate) fn verify_stream_observation(
 ) -> Result<(), String> {
     let original: StreamRecord =
         serde_json::from_value(observed.original.clone()).map_err(|error| error.to_string())?;
+    if !matches!(&original.intent.origin,StreamOrigin::Replica{member,..}
+        if *member==target.epoch.replica_id)
+    {
+        return Err("actual peer stream observation changed its original source kind".into());
+    }
+    verify_original_stream_observation(
+        observed,
+        target,
+        content,
+        command,
+        receiver,
+        &original.intent.origin,
+    )
+}
+
+/// Checks a trusted adapter's exact original source; Controller and Replica origins cannot substitute.
+pub(crate) fn verify_original_stream_observation(
+    observed: &ReplicaContentStreamStatus,
+    target: &ContentQuorumTarget,
+    content: &ArtifactContentKey,
+    command: &str,
+    receiver: u64,
+    origin: &StreamOrigin,
+) -> Result<(), String> {
+    let original: StreamRecord =
+        serde_json::from_value(observed.original.clone()).map_err(|error| error.to_string())?;
     let intent = &original.intent;
     validate_intent(intent, &intent.receiver)?;
     if observed.schema != "roboguide.replica-content-stream-status/v0.1"
@@ -214,7 +240,7 @@ pub(crate) fn verify_stream_observation(
         || original.request_digest != digest(intent)?
         || observed.request_digest != original.request_digest
         || observed.receipt != original.receipt
-        || !matches!(intent.origin, StreamOrigin::Replica { member, .. } if member == target.epoch.replica_id)
+        || intent.origin != *origin
     {
         return Err("actual peer stream observation changed its original request/receiver".into());
     }

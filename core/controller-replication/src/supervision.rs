@@ -187,7 +187,84 @@ fn history(connection: &rusqlite::Connection) -> Result<Vec<ControllerProcessRec
     Ok(records)
 }
 
+/// Requires exact retained original spawn/PID identity even when its genuine wait is already known.
+pub(crate) fn require_retained_process(
+    connection: &rusqlite::Connection,
+    process: &ControllerProcessIdentity,
+) -> Result<(), String> {
+    if !history(connection)?
+        .iter()
+        .any(|record| record.process.as_ref() == Some(process))
+    {
+        return Err("original Controller ingress lost its exact retained process journal".into());
+    }
+    Ok(())
+}
+
+/// Requires the actual Unix peer to be the still-live original registered child of this supervisor.
+pub(crate) fn require_original_peer(
+    connection: &rusqlite::Connection,
+    supervisor: &str,
+    epoch: ControllerEpoch,
+    instance: &str,
+    peer_pid: u32,
+) -> Result<ControllerProcessIdentity, String> {
+    if read_meta::<bool>(connection, SUPERVISION_KEY).map_err(|error| error.to_string())?
+        != Some(true)
+        || read_meta::<bool>(connection, LEGACY_CONTINUITY_KEY)
+            .map_err(|error| error.to_string())?
+            != Some(false)
+    {
+        return Err("original Controller supervision authority is unavailable".into());
+    }
+    let records = history(connection)?;
+    let original = records
+        .last()
+        .filter(|record| record.outcome.is_none())
+        .and_then(|record| record.process.as_ref())
+        .ok_or("actual original Controller process has no live registered incarnation")?;
+    if original.supervisor_instance != supervisor
+        || original.epoch != epoch
+        || original.instance_id != instance
+        || original.pid != peer_pid
+    {
+        return Err("actual Unix peer differs from the original owned Controller process".into());
+    }
+    let stat = std::fs::read_to_string(format!("/proc/{peer_pid}/stat"))
+        .map_err(|error| format!("actual original Controller process unavailable: {error}"))?;
+    let (_, tail) = stat
+        .rsplit_once(')')
+        .ok_or("actual original Controller stat unavailable")?;
+    let fields = tail.split_whitespace().collect::<Vec<_>>();
+    if fields
+        .first()
+        .is_none_or(|state| matches!(*state, "Z" | "X" | "x"))
+        || fields.get(19).and_then(|value| value.parse::<u64>().ok()) != Some(original.start_ticks)
+        || std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+            .map_err(|error| error.to_string())?
+            .trim()
+            != original.boot_id
+    {
+        return Err("actual original Controller incarnation ended or changed".into());
+    }
+    Ok(original.clone())
+}
+
 impl SqliteRaftStore {
+    /// Allows stale IPC cleanup only with exact retained original wait coverage; socket loss grants none.
+    pub(crate) fn require_original_endpoint_reopen(&self) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        Self::validate_controller_supervision(&connection)?;
+        if history(&connection)?
+            .iter()
+            .any(|record| record.outcome.is_none())
+        {
+            return Err(
+                "original child endpoint cannot replace an unreaped or spawning incarnation".into(),
+            );
+        }
+        Ok(())
+    }
     /// Requires retained original wait evidence before offline adoption can change parent generation.
     pub(crate) fn require_adoption_children_closed(
         connection: &rusqlite::Connection,

@@ -8,10 +8,42 @@ use std::os::unix::fs::MetadataExt;
 mod tests;
 
 impl SqliteRaftStore {
+    /// Reads committed actual network trust without blocking heartbeat TLS behind application SQL work.
+    pub(crate) fn connection_certificate_trust(&self) -> Result<CertificateTrust, String> {
+        if !self.network_content {
+            return self
+                .certificate_trust()?
+                .ok_or("original certificate authority is missing".into());
+        }
+        self.read_network_snapshot(|connection| {
+            let trust: CertificateTrust = read_meta(connection, "certificate_trust")
+                .map_err(|error| error.to_string())?
+                .ok_or("original network certificate authority is missing")?;
+            trust.validate()?;
+            Ok(trust)
+        })
+    }
     /// Reads an actual committed WAL snapshot under original inode leases without parent/root lock inversion.
     pub(crate) fn try_network_authority(
         &self,
     ) -> Result<(CertificateTrust, StoredMembership<u64, ReplicaMember>), String> {
+        self.read_network_snapshot(|transaction| {
+            let trust: CertificateTrust = read_meta(transaction, "certificate_trust")
+                .map_err(|error| error.to_string())?
+                .ok_or("original network certificate authority is missing")?;
+            trust.validate()?;
+            let membership = read_meta(transaction, "membership")
+                .map_err(|error| error.to_string())?
+                .ok_or("original committed network membership is unavailable")?;
+            Ok((trust, membership))
+        })
+    }
+
+    /// Reads one committed original-inode WAL snapshot without acquiring the live parent mutex.
+    pub(crate) fn read_network_snapshot<T>(
+        &self,
+        read: impl FnOnce(&Connection) -> Result<T, String>,
+    ) -> Result<T, String> {
         if !self.network_content {
             return Err("original network trust requires its explicit parent generation".into());
         }
@@ -35,7 +67,12 @@ impl SqliteRaftStore {
         let version: i64 = transaction
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|error| error.to_string())?;
-        if version != NETWORK_CONTENT_VERSION
+        if version
+            != if self.controller_content {
+                CONTROLLER_CONTENT_VERSION
+            } else {
+                NETWORK_CONTENT_VERSION
+            }
             || read_meta::<String>(&transaction, NETWORK_CONTENT_KEY)
                 .map_err(|error| error.to_string())?
                 .as_deref()
@@ -46,19 +83,16 @@ impl SqliteRaftStore {
         {
             return Err("original readonly network generation/profile is unavailable".into());
         }
-        let trust: CertificateTrust = read_meta(&transaction, "certificate_trust")
-            .map_err(|error| error.to_string())?
-            .ok_or("original network certificate authority is missing")?;
-        trust.validate()?;
-        let membership = read_meta(&transaction, "membership")
-            .map_err(|error| error.to_string())?
-            .ok_or("original committed network membership is unavailable")?;
+        if self.controller_content {
+            crate::controller_ingress::require_marker(&transaction)?;
+        }
+        let result = read(&transaction)?;
         transaction.commit().map_err(|error| error.to_string())?;
         let backing = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
         if !backing.is_file() || (backing.dev(), backing.ino()) != identity {
             return Err("original network SQL backing changed during readonly authority".into());
         }
-        Ok((trust, membership))
+        Ok(result)
     }
 
     /// Captures an original complete committed view on an owned bounded worker, retaining actual leases.
@@ -130,6 +164,11 @@ impl SqliteRaftStore {
     pub(super) fn network_genesis(&self, connection: &Connection) -> Result<bool, String> {
         if !self.network_content {
             return Ok(false);
+        }
+        if self.controller_content && !crate::controller_ingress::empty_storage(connection)? {
+            return Err(
+                "original Controller ingress history prevents certificate bootstrap".into(),
+            );
         }
         if read_meta::<String>(connection, NETWORK_CONTENT_KEY)
             .map_err(|error| error.to_string())?

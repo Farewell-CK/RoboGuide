@@ -1,5 +1,9 @@
 # RoboGuide V2 current architecture
 
+[ADR-0171](../../decisions/0171-owned-controller-content-ingress.md) defines same-host owned-child
+Unix peer PID/original spawn journal/mTLS ingress and parent8 command history. Zero-event operations
+still retain first intent; Unknown retries only observe. Production authority requires actual wiring.
+
 [ADR-0170](../../decisions/0170-scoped-prepared-artifact-sources.md) adds an original scoped
 Prepared-upload source for complete-content replication. Actual writer/FD/hash/size, append freezing
 and revocation remain distinct from final CAS publication. Guards/readers retain the real writer;

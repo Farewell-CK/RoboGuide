@@ -137,9 +137,7 @@ impl DynamicIdentity {
     /// Requires the original current complete trust projection on every authority check.
     fn trust(&self) -> Result<CertificateTrust, String> {
         match &self.source {
-            TrustSource::Store(store) => store
-                .certificate_trust()?
-                .ok_or("original certificate authority is missing".into()),
+            TrustSource::Store(store) => store.connection_certificate_trust(),
             TrustSource::Readonly { path, profile } => SqliteRaftStore::readonly_certificate_trust(
                 path,
                 profile,

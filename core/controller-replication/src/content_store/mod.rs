@@ -19,7 +19,7 @@ pub use reader::{ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaConte
 pub use streams::ReplicaContentStreamStatus;
 pub(crate) use streams::{
     CHUNK_BYTES as STREAM_CHUNK_BYTES, StreamAdmission, StreamOrigin, StreamPermission,
-    verify_stream_observation,
+    verify_original_stream_observation, verify_stream_observation,
 };
 pub(crate) use time::ContentBudget;
 pub use time::ContentProcessEndObservation;

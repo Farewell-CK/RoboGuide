@@ -130,49 +130,89 @@ impl ReplicaNode {
         &self,
         candidate: ContentApplicationBatch,
     ) -> Result<CommitReceipt, String> {
-        let target = self.content_target_for(&candidate).await?;
         let clock = crate::content_store::ContentBudget::issue(300000)?;
+        self.commit_content_checked(candidate, clock, Arc::new(|| Ok(())))
+            .await
+            .map(|(receipt, _)| receipt)
+    }
+
+    /// Carries one actual caller budget/witness through source, proposal and the exact full quorum.
+    pub(crate) async fn commit_content_checked(
+        &self,
+        candidate: ContentApplicationBatch,
+        clock: crate::content_store::ContentBudget,
+        permission: crate::content_store::StreamPermission,
+    ) -> Result<(CommitReceipt, BTreeSet<u64>), String> {
+        clock.check()?;
+        permission()?;
+        let target = self.content_target_for(&candidate).await?;
         let root = self.store.network_content_store()?;
         let capacity = root.stream_work_permit()?;
         let node = self.clone();
         let original = target.clone();
         let work_clock = clock.clone();
+        let caller = permission.clone();
         tokio::task::spawn_blocking(move || {
             let _capacity = capacity;
             work_clock.check()?;
             node.network_target_authority(&original)?;
             let held = node.clone();
             let expected = original.clone();
-            let check: crate::content_store::StreamPermission =
-                Arc::new(move || held.network_target_authority(&expected).map(|_| ()));
+            let check: crate::content_store::StreamPermission = Arc::new(move || {
+                caller()?;
+                held.network_target_authority(&expected).map(|_| ())
+            });
             read_target_bytes(&root, &original, &work_clock, &check)
         })
         .await
         .map_err(|error| error.to_string())??;
+        let mut transfers = tokio::task::JoinSet::new();
         for receiver in target
             .membership
             .voter_ids()
             .filter(|member| *member != self.config.replica_id)
         {
-            for input in &target.inputs {
-                clock.check()?;
-                let command = serde_json::to_vec(&(receiver, &target, input))
-                    .map_err(|error| error.to_string())?;
-                let command_id = format!("candidate:{:x}", sha2::Sha256::digest(command));
-                if self
-                    .stream_content_to(receiver, target.clone(), input.clone(), command_id, 15000)
+            let node = self.clone();
+            let target = target.clone();
+            let inputs = target.inputs.clone();
+            let transfer_clock = clock.clone();
+            let caller = permission.clone();
+            transfers.spawn(async move {
+                for input in inputs {
+                    let command = serde_json::to_vec(&(receiver, &target, &input))
+                        .map_err(|error| error.to_string())?;
+                    let command_id = format!("candidate:{:x}", sha2::Sha256::digest(command));
+                    if let Err(error) = crate::transport::send_content_stream_checked(
+                        &node,
+                        receiver,
+                        target.clone(),
+                        input,
+                        command_id,
+                        transfer_clock.clone(),
+                        caller.clone(),
+                    )
                     .await
-                    .is_err()
-                {
-                    break;
+                    {
+                        eprintln!("original content stream to member {receiver} refused: {error}");
+                        return Err(error);
+                    }
                 }
-            }
+                Ok::<(), String>(())
+            });
+        }
+        while let Some(result) = transfers.join_next().await {
+            let _outcome = result.map_err(|error| error.to_string())?;
+            clock.check()?;
+            permission()?;
         }
         clock.check()?;
+        permission()?;
         self.check_epoch(target.epoch).await?;
         self.network_target_authority(&target)?;
+        clock.check()?;
+        permission()?;
         let committed = tokio::time::timeout(
-            Duration::from_secs(5),
+            Duration::from_millis(clock.remaining_ms()?.min(5000)),
             self.raft.client_write(ReplicaCommand::ContentApplication {
                 content_application: Box::new(candidate),
             }),
@@ -187,9 +227,13 @@ impl ReplicaNode {
                 .unwrap_or("original complete metadata was rejected".into()));
         }
         clock.check()?;
-        self.content_quorum(target).await?;
+        permission()?;
+        let complete = self
+            .content_quorum_checked(target, permission.clone(), clock.clone())
+            .await?;
         clock.check()?;
-        Ok(committed.data)
+        permission()?;
+        Ok((committed.data, complete))
     }
     /// Independently reads this actual committed metadata and all actual bytes on an owned worker.
     pub async fn observe_content_target(
@@ -268,16 +312,52 @@ impl ReplicaNode {
         &self,
         target: ContentQuorumTarget,
     ) -> Result<BTreeSet<u64>, String> {
+        self.content_quorum_checked(
+            target,
+            Arc::new(|| Ok(())),
+            crate::content_store::ContentBudget::issue(15000)?,
+        )
+        .await
+    }
+
+    /// Observes independent actual members concurrently inside the original caller clock and witness.
+    async fn content_quorum_checked(
+        &self,
+        target: ContentQuorumTarget,
+        permission: crate::content_store::StreamPermission,
+        clock: crate::content_store::ContentBudget,
+    ) -> Result<BTreeSet<u64>, String> {
+        clock.check()?;
+        permission()?;
         self.check_epoch(target.epoch).await?;
         self.network_target_authority(&target)?;
         let mut observed = Vec::new();
         let mut unavailable = Vec::new();
+        let mut observations = tokio::task::JoinSet::new();
         for member in target.membership.voter_ids() {
-            let result = if member == self.config.replica_id {
-                self.observe_content_target(target.clone()).await
-            } else {
-                transport::observe_content_target(self, member, target.clone()).await
-            };
+            let node = self.clone();
+            let target = target.clone();
+            let caller = permission.clone();
+            let original_clock = clock.clone();
+            observations.spawn(async move {
+                let result = async {
+                    original_clock.check()?;
+                    caller()?;
+                    let observed = if member == node.config.replica_id {
+                        node.observe_content_checked(target, caller.clone()).await
+                    } else {
+                        transport::observe_content_target(&node, member, target).await
+                    };
+                    original_clock.check()?;
+                    caller()?;
+                    observed
+                }
+                .await;
+                (member, result)
+            });
+        }
+        while let Some(result) = observations.join_next().await {
+            let (member, result) = result.map_err(|error| error.to_string())?;
             match result {
                 Ok(actual) => observed.push(actual),
                 Err(error) => {
@@ -287,6 +367,8 @@ impl ReplicaNode {
         }
         self.check_epoch(target.epoch).await?;
         self.network_target_authority(&target)?;
+        clock.check()?;
+        permission()?;
         target
             .complete_members(&observed)
             .map_err(|error| format!("{error}; actual unavailable members: {unavailable:?}"))

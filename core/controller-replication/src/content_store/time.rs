@@ -87,6 +87,14 @@ fn sample() -> Result<(String, (u64, u64), u64), String> {
 }
 
 impl ContentBudget {
+    /// Returns only original remaining effect time; descendants never obtain a fresh full duration.
+    pub(crate) fn remaining_ms(&self) -> Result<u64, String> {
+        let now = self.check()?;
+        self.duration_ms
+            .checked_sub(now.saturating_sub(self.admitted_ms).saturating_add(10))
+            .filter(|remaining| *remaining >= 100)
+            .ok_or("original content budget has no bounded receive duration remaining".into())
+    }
     /// Admits one original positive receive duration before it can wait for the metadata writer.
     pub(crate) fn issue(duration_ms: u64) -> Result<Self, String> {
         if !(100..=300_000).contains(&duration_ms) {

@@ -17,7 +17,10 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 #[path = "content_transport.rs"]
 mod content_streams;
-pub(crate) use content_streams::send_content_stream;
+pub(crate) use content_streams::{
+    StreamNotice, StreamReceive, receive_owned_stream, send_content_stream,
+    send_content_stream_checked,
+};
 
 #[cfg(test)]
 #[path = "transport_tls_tests.rs"]
@@ -178,7 +181,7 @@ impl Command {
 
 /// Closed response preserves upstream Raft errors separately from child acceptance.
 #[derive(Serialize, Deserialize)]
-enum Reply {
+pub(crate) enum Reply {
     /// Actual authenticated member observation; its standalone serialized data never grants a quorum.
     ContentObservation(Result<MemberContentObservation, String>),
     /// Original receive readiness or immutable existing outcome; never an application ACK.

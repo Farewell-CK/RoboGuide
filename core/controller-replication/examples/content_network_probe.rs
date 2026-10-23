@@ -20,6 +20,12 @@ struct Config {
     parent_sql: PathBuf,
     /// Declared original member roots, independently matched with the actual local opened root.
     member_stores: BTreeMap<u64, String>,
+    /// Explicit new original-child generation; old invocations retain parent7 and no child authority.
+    #[serde(default)]
+    owned_child: bool,
+    /// Actual private endpoint, required only by explicit parent8.
+    #[serde(default)]
+    child_socket: Option<PathBuf>,
 }
 
 /// Closed trusted local process operations; no arbitrary SQL, shell or fabricated execution is accepted.
@@ -46,8 +52,110 @@ enum Request {
         /// Explicit original complete target; parsing grants no authority.
         target: Value,
     },
+    /// Spawns one actual owned source contract process after durable original pre-spawn intent.
+    SpawnOwned {
+        /// Explicit maintained actual source executable, independently frozen by the checker.
+        binary: PathBuf,
+        /// Exact actual child configuration file retained before spawn.
+        configuration: PathBuf,
+        /// Actual owned source CAS directory.
+        source_cas: PathBuf,
+        /// Actual owned source SQL file.
+        source_sql: PathBuf,
+        /// Explicit original complete source/metadata operation duration.
+        budget_ms: u64,
+    },
+    /// Sends one closed source command to the actual original owned process.
+    OwnedCommand {
+        /// Maintained child protocol request; never shell or arbitrary SQL.
+        request: Value,
+    },
+    /// Actually kills and reaps the original owned software process.
+    StopOwned,
     /// Stops only this owned infrastructure service; no device stopping is inferred.
     Shutdown,
+}
+
+/// Actual original source Child handle; only its own wait can produce its durable process exit.
+struct OwnedSource {
+    /// Actual owned process handle; taken only by its original stop/wait path.
+    child: Option<std::process::Child>,
+    /// Independently registered original identity.
+    process: ControllerProcessIdentity,
+    /// Original supervisor incarnation and actual writer retained through native wait publication.
+    node: ReplicaNode,
+}
+
+impl OwnedSource {
+    /// Reaps this exact actual child and publishes only its original OS outcome.
+    fn stop(&mut self) -> Result<Value, String> {
+        use std::os::unix::process::ExitStatusExt;
+        let Some(mut child) = self.child.take() else {
+            return Err("original source already reaped".into());
+        };
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_none()
+        {
+            child.kill().map_err(|error| error.to_string())?;
+        }
+        let result = child.wait().map_err(|error| error.to_string())?;
+        let outcome = ControllerProcessExit {
+            process: self.process.clone(),
+            exit_code: result.code(),
+            signal: result.signal(),
+        };
+        self.node.record_controller_exit(outcome.clone())?;
+        Ok(json!({"original_exit":outcome}))
+    }
+
+    /// Reads one bounded response belonging to this actual original PID.
+    fn receive(&mut self) -> Result<Value, String> {
+        let child = self.child.as_mut().ok_or("actual original source ended")?;
+        let output = child.stdout.as_mut().ok_or("actual source output absent")?;
+        let mut raw = Vec::new();
+        std::io::BufReader::new(output)
+            .take(16 * 1024 * 1024 + 1)
+            .read_until(b'\n', &mut raw)
+            .map_err(|error| error.to_string())?;
+        if raw.is_empty() || raw.len() > 16 * 1024 * 1024 {
+            return Err("actual source response ended or exceeded bound".into());
+        }
+        let value: Value = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
+        if value["pid"] != self.process.pid {
+            return Err("actual source response PID differs".into());
+        }
+        Ok(value)
+    }
+
+    /// Sends exactly one actual original child request and never repeats an uncertain command.
+    fn ask(&mut self, request: Value) -> Result<Value, String> {
+        let child = self.child.as_mut().ok_or("actual original source ended")?;
+        let input = child
+            .stdin
+            .as_mut()
+            .ok_or("actual original source input absent")?;
+        let bytes = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
+        if bytes.len() > 1024 * 1024 {
+            return Err("actual source request exceeds bound".into());
+        }
+        input.write_all(&bytes).map_err(|error| error.to_string())?;
+        input.write_all(b"\n").map_err(|error| error.to_string())?;
+        input.flush().map_err(|error| error.to_string())?;
+        self.receive()
+    }
+}
+
+impl Drop for OwnedSource {
+    /// Cleanup retains actual native wait evidence and never fabricates physical stopping.
+    fn drop(&mut self) {
+        if self.child.is_some()
+            && let Err(error) = self.stop()
+        {
+            eprintln!("actual original source cleanup failed: {error}");
+        }
+    }
 }
 
 /// Emits bounded structured observations and the actual process identity; stdout grants no authority.
@@ -144,16 +252,42 @@ async fn serve(config: Config) -> Result<(), String> {
         &config.replica.profile_identity(),
         config.replica.replica_id,
     )?;
-    let (node, _server) = ReplicaNode::start_with_content(
-        config.replica,
-        &config.parent_sql,
-        root.clone(),
-        config.member_stores,
-        ReplicaTransportLimits::default(),
-    )
-    .await?;
+    let (node, _server) = if config.owned_child {
+        ReplicaNode::start_with_controller_content(
+            config.replica.clone(),
+            &config.parent_sql,
+            root.clone(),
+            config.member_stores,
+            ReplicaTransportLimits::default(),
+        )
+        .await?
+    } else {
+        ReplicaNode::start_with_content(
+            config.replica.clone(),
+            &config.parent_sql,
+            root.clone(),
+            config.member_stores,
+            ReplicaTransportLimits::default(),
+        )
+        .await?
+    };
+    let _ingress = if config.owned_child {
+        node.enable_controller_supervision()?;
+        Some(
+            node.serve_controller_ingress(
+                config
+                    .child_socket
+                    .as_deref()
+                    .ok_or("explicit original-child socket absent")?,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
     emit(json!({"ready":true,"pid":std::process::id(),"identity":root.identity()}))?;
     let mut pending = None;
+    let mut owned: Option<OwnedSource> = None;
     let input = std::io::stdin();
     let mut input = input.lock();
     loop {
@@ -184,6 +318,9 @@ async fn serve(config: Config) -> Result<(), String> {
                 source_cas,
                 operation_id,
             } => {
+                if config.owned_child {
+                    return Err("owned-child probe requires its actual source process".into());
+                }
                 let current = node.clone();
                 let prepared = tokio::task::spawn_blocking(move || {
                     capture(
@@ -232,6 +369,74 @@ async fn serve(config: Config) -> Result<(), String> {
                     .await
                     .map(|actual| json!({"observation":actual})),
             },
+            Request::SpawnOwned {
+                binary,
+                configuration,
+                source_cas,
+                source_sql,
+                budget_ms,
+            } => {
+                if !config.owned_child || owned.is_some() {
+                    Err("actual original source slot unavailable".into())
+                } else {
+                    let epoch = node.current_epoch().ok_or("actual leader absent")?;
+                    let instance = node.begin_controller_process(epoch).await?;
+                    let client = ControllerContentClientConfig {
+                        socket: config
+                            .child_socket
+                            .clone()
+                            .ok_or("original socket absent")?,
+                        profile: node.profile_identity(),
+                        epoch,
+                        instance: instance.clone(),
+                        tls: config
+                            .replica
+                            .tls
+                            .clone()
+                            .ok_or("actual original TLS absent")?,
+                        trust_database: config.parent_sql.clone(),
+                        budget_ms,
+                    };
+                    let data =
+                        json!({"client":client,"source_cas":source_cas,"source_sql":source_sql});
+                    std::fs::write(
+                        &configuration,
+                        serde_json::to_vec(&data).map_err(|error| error.to_string())?,
+                    )
+                    .map_err(|error| error.to_string())?;
+                    let mut child = std::process::Command::new(binary)
+                        .arg(&configuration)
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::inherit())
+                        .spawn()
+                        .map_err(|error| error.to_string())?;
+                    let process =
+                        match node.register_controller_process(epoch, instance, child.id()) {
+                            Ok(process) => process,
+                            Err(error) => {
+                                let _ = child.kill();
+                                let _ = child.wait();
+                                return Err(error);
+                            }
+                        };
+                    owned = Some(OwnedSource {
+                        child: Some(child),
+                        process: process.clone(),
+                        node: node.clone(),
+                    });
+                    let ready = owned.as_mut().ok_or("actual source absent")?.receive()?;
+                    Ok(json!({"process":process,"configuration":configuration,"child_ready":ready}))
+                }
+            }
+            Request::OwnedCommand { request } => owned
+                .as_mut()
+                .ok_or("actual original source absent")?
+                .ask(request),
+            Request::StopOwned => {
+                let mut original = owned.take().ok_or("actual original source absent")?;
+                original.stop()
+            }
             Request::Shutdown => Ok(json!({"shutdown_requested":true})),
         };
         emit(match result {
@@ -241,6 +446,9 @@ async fn serve(config: Config) -> Result<(), String> {
         if shutdown {
             break;
         }
+    }
+    if let Some(mut original) = owned.take() {
+        let _ = original.stop()?;
     }
     node.shutdown().await?;
     Ok(())

@@ -22,6 +22,37 @@ fn original() -> (tempfile::TempDir, ReplicaContentStore, SqliteRaftStore) {
     (directory, root, store)
 }
 
+/// Actual handshake trust reads committed WAL while the original writer holds a different pending value.
+#[test]
+fn actual_network_tls_trust_does_not_wait_for_or_read_pending_application_sql() {
+    let (_directory, _root, store) = original();
+    store
+        .initialize_certificate_trust(&BTreeMap::from([
+            (31, format!("sha256:{}", "a".repeat(64))),
+            (37, format!("sha256:{}", "b".repeat(64))),
+            (43, format!("sha256:{}", "c".repeat(64))),
+        ]))
+        .unwrap();
+    let expected = store.certificate_trust().unwrap().unwrap();
+    let mut guard = store.connection.lock().unwrap();
+    let transaction = guard.transaction().unwrap();
+    transaction
+        .execute(
+            "DELETE FROM replica_v1_meta WHERE key='certificate_trust'",
+            [],
+        )
+        .unwrap();
+    let held = store.clone();
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    let worker =
+        std::thread::spawn(move || send.send(held.connection_certificate_trust()).unwrap());
+    let result = receive.recv_timeout(Duration::from_secs(2));
+    transaction.rollback().unwrap();
+    drop(guard);
+    worker.join().unwrap();
+    assert_eq!(result.unwrap().unwrap(), expected);
+}
+
 /// Empty new authority fences old writers and requires its original marker before any operation.
 #[test]
 fn actual_network_parent_requires_explicit_generation_and_original_empty_marker() {

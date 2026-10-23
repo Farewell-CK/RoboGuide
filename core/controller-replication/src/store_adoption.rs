@@ -665,7 +665,7 @@ impl SqliteRaftStore {
             application_schema,
             Some(content),
             true,
-            false,
+            NetworkContentMode::None,
         )?;
         require_path(path, store._writer.identity()?)?;
         let version: i64;

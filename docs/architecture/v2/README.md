@@ -1,11 +1,15 @@
 # RoboGuide V2 现行架构
 
-核对日期：2026-10-23；当前整改提交基线：`b372d95`，
-加本包 ADR-0169 的实际网络内容接线，runnable supervisor 与完整在线矩阵继续实施，
+核对日期：2026-10-23；当前整改提交基线：`b0d1675`，
+加本包 ADR-0171 的原 owned-child 内容入口，runnable supervisor 与完整在线矩阵继续实施，
 位于唯一开发分支 `codex/nonrelease-remediation-closure`。本页同步 main 的 10 月 22 日图册，
 保留其原基线 `495a6d2`；下述新增整改尚未合回 main，不提前记为远端 main 能力。
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
+
+[ADR-0171](../../decisions/0171-owned-controller-content-ingress.md)定义同主机原 Controller 子进程
+的 Unix peer PID/原 spawn journal/mTLS 内容入口及 parent8 原命令日志。零事件也须先
+记录意图，旧 Unknown 只读对账；实际接线验收前，旧生产入口继续拒绝新内容权威。
 
 [ADR-0170](../../decisions/0170-scoped-prepared-artifact-sources.md)为完整内容复制增加原
 Prepared upload 的作用域只读来源：实际 writer/FD/hash/size、写冻结与撤销独立于最终

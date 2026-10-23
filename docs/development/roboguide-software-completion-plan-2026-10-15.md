@@ -113,6 +113,16 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N3 的 [ADR-0171](../decisions/0171-owned-controller-content-ingress.md)正在接原 owned
+child ingress：显式 parent8 在每个原命令（含空输入）前保存完整候选/process/TLS/
+target/预算，真实 Unix peer PID 匹配原 spawn/PID/boot/start ticks。独立成员有界
+并行传输与完整观察，原 ID 只对账，完整原候选的只读确认不改写第一次 Unknown。
+实际软件文件源已走通 State/Prepared/Completed、SQL receipt failure、实际原 wait
+和重启；同时修复 network TLS 等待 application mutex 和 SIGKILL 残留 IPC 的问题，
+见[验收记录](acceptance/2026-10-23-owned-controller-content-ingress.md)。完整 runnable
+Controller 接线、内容路由/readiness、全 joint/catchup/Snapshot/旧升级/回退/recovery/
+GC/业务目标矩阵继续实施；本包不是完整 N3 或 SoftwareComplete。
+
 N3 的 [ADR-0170](../decisions/0170-scoped-prepared-artifact-sources.md) 已补原 Prepared
 source：完整实际 hash/fsync 后建立原非序列化 guard，原 append/finalize 与 live readers
 共享冻结，撤销不冒充 FD 退出。HTTP 原 Prepared 提交前持有 source，SQL 失败保留原上传。

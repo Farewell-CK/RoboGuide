@@ -124,6 +124,16 @@ jobs:
           cargo build --locked -p controller-replication
           --example content_store_probe --example content_stream_probe
           --example content_network_probe --example prepared_source_probe
+          --example owned_content_source_probe
+
+      - name: Verify actual original owned Unix and State content commits with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_network_content_processes.py
+          --probe target/debug/examples/content_network_probe
+          --storage-probe target/debug/examples/content_stream_probe
+          --owned-source-probe target/debug/examples/owned_content_source_probe
+          --members 211,227,239
+          --output /tmp/rg-ci-owned-content
 
       - name: Verify actual Prepared source scopes and native restart with zero Nodes
         run: >

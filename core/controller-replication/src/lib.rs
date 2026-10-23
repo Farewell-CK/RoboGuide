@@ -10,6 +10,7 @@ mod content_application;
 #[cfg(test)]
 mod content_application_tests;
 mod content_store;
+mod controller_ingress;
 mod member;
 mod network_content;
 mod snapshot_data;
@@ -47,6 +48,10 @@ pub use content_store::{
     ReplicaContentReaderStatus, ReplicaContentReceipt, ReplicaContentReference,
     ReplicaContentReferenceKind, ReplicaContentStore, ReplicaContentStreamStatus,
     ReplicaSnapshotCloseStatus,
+};
+pub use controller_ingress::{
+    ControllerContentClient, ControllerContentClientConfig, ControllerIngressServer,
+    ControllerIngressStatus,
 };
 pub use member::ReplicaMember;
 pub use snapshot_data::ReplicaSnapshotData;
@@ -494,7 +499,7 @@ impl ReplicaNode {
         path: &Path,
         limits: ReplicaTransportLimits,
     ) -> Result<(Self, ReplicaServer), String> {
-        Self::start_inner(config, path, limits, None).await
+        Self::start_inner(config, path, limits, None, false).await
     }
 
     /// Starts only explicit v0.4 with actual held Root4 and declared original bootstrap roots.
@@ -506,7 +511,18 @@ impl ReplicaNode {
         bootstrap_owners: BTreeMap<u64, String>,
         limits: ReplicaTransportLimits,
     ) -> Result<(Self, ReplicaServer), String> {
-        Self::start_inner(config, path, limits, Some((root, bootstrap_owners))).await
+        Self::start_inner(config, path, limits, Some((root, bootstrap_owners)), false).await
+    }
+
+    /// Starts explicit parent8 original-child authority beside unchanged core v0.4 network semantics.
+    pub async fn start_with_controller_content(
+        config: ReplicaConfig,
+        path: &Path,
+        root: ReplicaContentStore,
+        bootstrap_owners: BTreeMap<u64, String>,
+        limits: ReplicaTransportLimits,
+    ) -> Result<(Self, ReplicaServer), String> {
+        Self::start_inner(config, path, limits, Some((root, bootstrap_owners)), true).await
     }
 
     /// Retains old startup while admitting network content only through the explicit owned constructor.
@@ -515,6 +531,7 @@ impl ReplicaNode {
         path: &Path,
         limits: ReplicaTransportLimits,
         content: Option<(ReplicaContentStore, BTreeMap<u64, String>)>,
+        controller_content: bool,
     ) -> Result<(Self, ReplicaServer), String> {
         config.validate()?;
         if config.streams_content() != content.is_some() {
@@ -536,7 +553,11 @@ impl ReplicaNode {
                 ReplicaMember::with_content_store(config.members[id], owner.clone())?;
             }
             (
-                SqliteRaftStore::open_with_network_content(
+                (if controller_content {
+                    SqliteRaftStore::open_with_controller_content
+                } else {
+                    SqliteRaftStore::open_with_network_content
+                })(
                     path,
                     &config.profile_identity(),
                     &config.application_schema,
