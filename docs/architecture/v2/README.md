@@ -353,6 +353,12 @@ Controller 的 canonical sibling 与 SQL inode 同时排他，并由最后一个
 升级、独立只读 observer 和完整冷恢复通过，见[验收](../../development/acceptance/2026-10-23-controller-inode-and-generation.md)。
 完整部署 adoption、supervisor replacement 与在线内容多数仍分别必需。
 
+[ADR-0162](../../decisions/0162-explicit-artifact-gc-sql-recovery.md)为真实 hot rollback
+journal 增加显式本机 OS 管理恢复边界：完整实际 writers/known consumers、原 digest、
+不可续 intent 与 forensic copy 先于 writable SQLite，之后重验全部原 GC 记录。
+同 evidence directory 只观察，新 repair 独立 ID；forensic 文件不是应用/内容/GC 权威。
+实际只读拒绝反例已保留，维护命令与完整故障验收实施中。
+
 ## 8. 已冻结不变量
 
 - Proposal、Commit、Bind、dispatch、Node receipt、本地结果、Task satisfaction 与 release 分别有权威。

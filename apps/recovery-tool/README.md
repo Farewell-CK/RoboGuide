@@ -1,5 +1,32 @@
 # RoboGuide recovery tool
 
+[Profile v0.17](../../contracts/recovery/bundle-v0.17/README.md) adds the explicit actual Controller
+storage generation and its SQL-inode writer lease, preserving the full v0.16 contract. Each Controller
+declares `roboguide.controller-storage/legacy` or `roboguide.controller-storage/v1`. The latter retains
+raw original events behind an exact read-only legacy view and fences old startup even at zero events.
+It is selected explicitly with `ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA=1`; legacy is not a durable
+downgrade fence. Restore keeps original identities/budgets and starts no service.
+
+An actual hot rollback journal requires explicit OS-admin maintenance, outside all active original
+writers. Pin the actual source SQL/journal digests and select a new evidence directory outside every
+declared source root:
+
+```bash
+PYTHONPATH=apps/recovery-tool python -m roboguide_recovery recover-artifact-journal \
+  --profile /absolute/complete-v0.17-profile.json --artifact source-artifact \
+  --sql-digest sha256:ACTUAL_SQL_DIGEST --journal-digest sha256:ACTUAL_JOURNAL_DIGEST \
+  --evidence-directory /absolute/new-recovery-evidence --reason 'Original uncommitted SQL rollback'
+PYTHONPATH=apps/recovery-tool python -m roboguide_recovery observe-artifact-journal-recovery \
+  --evidence-directory /absolute/new-recovery-evidence
+```
+
+Complete actual writers and known consumers, pinned inputs, original intent and forensic copies
+precede writable SQLite. Only native `READONLY_ROLLBACK` is admitted; missing committed history is
+never rebuilt. Existing-directory retries only observe, preserving old Unknown and original budgets.
+Forensic evidence grants no application/content/GC authority; declare it as a `files` component with
+an Artifact writer dependency when it must be included in a complete cold bundle. See ADR-0162 and
+the maintained `check_artifact_sql_recovery_processes.py` actual fault matrix.
+
 `retire-provider-snapshot --profile <current> --original-profile <original> --provider <component-id>
 --operation-id <original-operation> --original-intent-digest <sha256>` closes an original unpublished
 provider Snapshot after relocation/profile changes. Current profile v0.16 and the unchanged original
@@ -24,8 +51,8 @@ writers for an unpublished old-profile Snapshot; `reconcile-artifact-snapshot-re
 publishes the exact retained pending receipt. Neither operation copies or deletes payloads.
 Cold recovery retains all original Unknown/history and permits absent already released bytes.
 See the [actual acceptance](../../docs/development/acceptance/2026-10-23-source-artifact-reclamation.md).
-Hot rollback journals currently refuse readonly startup/backup; explicit native rollback maintenance,
-Raft/online and the complete P1-P7 matrix remain required work.
+Hot rollback journals continue to refuse readonly startup/backup. The separate v0.17 explicit native
+maintenance path preserves original history; Raft/online and the complete P1-P7 matrix remain required.
 
 [Profile v0.13](../../contracts/recovery/bundle-v0.13/README.md) preserves original wrapper v49
 copy intents while validating v50 / operations v0.2 unpublished-Archive cleanup. Actual source/

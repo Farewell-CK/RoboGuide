@@ -1,5 +1,12 @@
 # RoboGuide
 
+[ADR-0162](docs/decisions/0162-explicit-artifact-gc-sql-recovery.md) 增加显式本机 GC SQL
+恢复：完整实际 writer/known consumer、原 digest、不可续意图及 forensic copy 先于
+SQLite 原生 rollback，之后完整核对原记录。实现为
+`apps/recovery-tool/roboguide_recovery/artifact_sql_recovery.py`；实际完整故障检查为
+`tools/quality/check_artifact_sql_recovery_processes.py`。同证据目录只观察，未知旧操作
+不会重做。该管理证据不授予应用、内容、GC 或设备权限，Artifact v5/原 SQL 合同保持。
+
 [ADR-0161](docs/decisions/0161-controller-inode-writer-and-storage-generation.md) 将实际 Controller
 的路径和 SQL inode 双租约绑定到最后一个真实连接，原生 SQLite 排空独立覆盖旧连接。
 显式 `ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA=1` 提供持久旧 writer fence，兼容 legacy

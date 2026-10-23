@@ -239,6 +239,13 @@ N7 的 Controller hardlink 反例已在 `b6fe5ff` 实际双进程、同 SQL inod
 不宣布持久 fence；完整部署 adoption、supervisor replacement/旧 child 日志迁移、
 在线内容、hot journal 与全部原 N1–N7 完成条件继续保留。
 
+[GC SQL 显式维护](acceptance/2026-10-23-artifact-sql-recovery.md)按 ADR-0162 接通
+完整实际 writer/known consumer、原 digest/intent/forensic copy 先于原生 SQLite
+rollback 与完整后验核对。实际非空原 GC/内容、10 项故障、Unknown/新 repair 并存、
+只读零 effect retry、完整 v0.17 cold 与既有文件链路通过。缺历史仍拒绝且不重建。
+本项关闭上述 hot journal 本地维护，仍不关闭 online 原内容、supervisor 原替换/
+迁移、其它 listener/I/O 与全部原 P1–P7。
+
 ADR-0159 的 direct-storage v4/private Commit v3 已保存完整原 candidate、可独立重算
 的 digest、原 event→owner 与完整 State projection；log/current-view/Snapshot/实际
 SnapshotData reader 有独立 pins。缺实际 bytes 拒绝 build/install；替换只释放旧

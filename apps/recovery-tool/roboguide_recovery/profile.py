@@ -405,123 +405,191 @@ def layout(
     return [database], list(component["trees"]), [lock, database] if kind == "node" else [lock]
 
 
+class HeldWriters:
+    """Retain actual source descriptors only inside their acquiring context, never from JSON."""
+
+    def __init__(self, descriptors: dict[Path, int]) -> None:
+        """Keep the already acquired original files; this capability is never serialized."""
+        self._descriptors = dict(descriptors)
+        self._active = True
+
+    def verify(self, path: Path) -> dict[str, int]:
+        """Require the original live descriptor, current named inode and actual exclusive flock."""
+        if not self._active or path not in self._descriptors:
+            raise ValueError("original writer is not owned by this actual lease context")
+        descriptor = self._descriptors[path]
+        actual, named = os.fstat(descriptor), path.lstat()
+        if not stat.S_ISREG(named.st_mode) or (actual.st_dev, actual.st_ino) != (
+            named.st_dev,
+            named.st_ino,
+        ):
+            raise ValueError("original writer descriptor/path identity changed")
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return {"device": actual.st_dev, "inode": actual.st_ino}
+
+    def evidence(self) -> list[dict[str, Any]]:
+        """Observe the actual still-held descriptors without granting authority."""
+        return [{"path": str(path), **self.verify(path)} for path in sorted(self._descriptors)]
+
+    def verify_components(self, components: list[dict[str, Any]], profile_schema: str) -> None:
+        """Refuse a different component set or a released/changed original writer before reads."""
+        if set(_writer_paths(components, profile_schema)) != set(self._descriptors):
+            raise ValueError("original complete writer coverage changed")
+        self.evidence()
+
+    def invalidate(self) -> None:
+        """End this capability before the actual files are unlocked and closed."""
+        self._active = False
+
+
+def _writer_paths(components: list[dict[str, Any]], profile_schema: str) -> list[Path]:
+    """Derive the same maintained actual writer files for ordinary and explicit maintenance use."""
+    paths: list[Path] = []
+    for component in components:
+        root = real_directory(Path(component["root"]))
+        databases, _, locks = layout(component, profile_schema=profile_schema)
+        paths.extend(root / name for name in locks)
+        if (
+            component["kind"] == "controller"
+            and profile_schema == "roboguide.recovery-profile/v0.17"
+        ):
+            paths.append(root / component["database"])
+        if component["kind"] == "memory" and profile_schema in {
+            "roboguide.recovery-profile/v0.4",
+            "roboguide.recovery-profile/v0.5",
+            "roboguide.recovery-profile/v0.6",
+            "roboguide.recovery-profile/v0.7",
+            "roboguide.recovery-profile/v0.8",
+            "roboguide.recovery-profile/v0.9",
+            "roboguide.recovery-profile/v0.10",
+            "roboguide.recovery-profile/v0.11",
+            "roboguide.recovery-profile/v0.12",
+            "roboguide.recovery-profile/v0.13",
+            "roboguide.recovery-profile/v0.14",
+            "roboguide.recovery-profile/v0.15",
+            "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
+        }:
+            paths.extend(root / name for name in [".memory-use.lock", *databases])
+        if component["kind"] == "replica" and profile_schema in {
+            "roboguide.recovery-profile/v0.5",
+            "roboguide.recovery-profile/v0.6",
+            "roboguide.recovery-profile/v0.7",
+            "roboguide.recovery-profile/v0.8",
+            "roboguide.recovery-profile/v0.9",
+            "roboguide.recovery-profile/v0.10",
+            "roboguide.recovery-profile/v0.11",
+            "roboguide.recovery-profile/v0.12",
+            "roboguide.recovery-profile/v0.13",
+            "roboguide.recovery-profile/v0.14",
+            "roboguide.recovery-profile/v0.15",
+            "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
+        }:
+            paths.append(root / component["database"])
+    return sorted(paths)
+
+
 @contextmanager
-def acquire_all(
-    components: list[dict[str, Any]], *, profile_schema: str = "roboguide.recovery-profile/v0.1"
-) -> Iterator[None]:
-    """Hold every real process lease before scanning any data; active or unknown owners refuse."""
+def acquire_writers(
+    components: list[dict[str, Any]], *, profile_schema: str
+) -> Iterator[HeldWriters]:
+    """Acquire every actual source writer before any optional storage-level maintenance read."""
     with ExitStack() as stack:
-        paths: list[Path] = []
-        for component in components:
-            root = real_directory(Path(component["root"]))
-            databases, _, locks = layout(component, profile_schema=profile_schema)
-            paths.extend(root / name for name in locks)
-            if (
-                component["kind"] == "controller"
-                and profile_schema == "roboguide.recovery-profile/v0.17"
-            ):
-                paths.append(root / component["database"])
-            if component["kind"] == "memory" and profile_schema in {
-                "roboguide.recovery-profile/v0.4",
-                "roboguide.recovery-profile/v0.5",
-                "roboguide.recovery-profile/v0.6",
-                "roboguide.recovery-profile/v0.7",
-                "roboguide.recovery-profile/v0.8",
-                "roboguide.recovery-profile/v0.9",
-                "roboguide.recovery-profile/v0.10",
-                "roboguide.recovery-profile/v0.11",
-                "roboguide.recovery-profile/v0.12",
-                "roboguide.recovery-profile/v0.13",
-                "roboguide.recovery-profile/v0.14",
-                "roboguide.recovery-profile/v0.15",
-                "roboguide.recovery-profile/v0.16",
-                "roboguide.recovery-profile/v0.17",
-            }:
-                paths.extend(root / name for name in [".memory-use.lock", *databases])
-            if component["kind"] == "replica" and profile_schema in {
-                "roboguide.recovery-profile/v0.5",
-                "roboguide.recovery-profile/v0.6",
-                "roboguide.recovery-profile/v0.7",
-                "roboguide.recovery-profile/v0.8",
-                "roboguide.recovery-profile/v0.9",
-                "roboguide.recovery-profile/v0.10",
-                "roboguide.recovery-profile/v0.11",
-                "roboguide.recovery-profile/v0.12",
-                "roboguide.recovery-profile/v0.13",
-                "roboguide.recovery-profile/v0.14",
-                "roboguide.recovery-profile/v0.15",
-                "roboguide.recovery-profile/v0.16",
-                "roboguide.recovery-profile/v0.17",
-            }:
-                paths.append(root / component["database"])
-        for path in sorted(paths):
+        descriptors: dict[Path, int] = {}
+        for path in _writer_paths(components, profile_schema):
             real_directory(path.parent)
             descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
             stack.callback(os.close, descriptor)
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                raise ValueError("original recovery writer lease is not a regular file")
+            actual, named = os.fstat(descriptor), path.lstat()
+            if not stat.S_ISREG(actual.st_mode) or (actual.st_dev, actual.st_ino) != (
+                named.st_dev,
+                named.st_ino,
+            ):
+                raise ValueError("original recovery writer lease is not its named regular file")
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
                 raise ValueError("original service writer is still active: " + str(path)) from error
             stack.callback(fcntl.flock, descriptor, fcntl.LOCK_UN)
-        for component in components:
-            if component["kind"] == "controller":
-                from .controller_storage import validate as validate_controller
+            descriptors[path] = descriptor
+        held = HeldWriters(descriptors)
+        try:
+            yield held
+        finally:
+            held.invalidate()
 
-                path = Path(component["root"]) / component["database"]
-                with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
-                    validate_controller(connection, profile_schema, component.get("storage_schema"))
-            if component["kind"] == "artifact":
-                from .artifact_layout import validate_storage
 
-                original = validate_storage(Path(component["root"]), profile_schema)
-                if profile_schema in {
-                    "roboguide.recovery-profile/v0.16",
-                    "roboguide.recovery-profile/v0.17",
-                } and (original is None or original["schema"] != component["storage_schema"]):
-                    raise ValueError(
-                        "declared Artifact storage format differs from its actual owner"
-                    )
-            if component["kind"] == "memory":
-                path = Path(component["root"]) / "memory.sqlite3"
+def validate_held_storage(
+    components: list[dict[str, Any]],
+    profile_schema: str,
+    held: HeldWriters,
+    *,
+    deferred_gc_root: Path | None = None,
+) -> None:
+    """Validate all original components; only an actual held target may defer its GC SQL read."""
+    held.verify_components(components, profile_schema)
+    for component in components:
+        if component["kind"] == "controller":
+            from .controller_storage import validate as validate_controller
+
+            path = Path(component["root"]) / component["database"]
+            with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+                validate_controller(connection, profile_schema, component.get("storage_schema"))
+        if component["kind"] == "artifact":
+            from .artifact_layout import validate_storage
+
+            root = Path(component["root"])
+            original = validate_storage(
+                root, profile_schema, deferred_gc=held if root == deferred_gc_root else None
+            )
+            if profile_schema in {
+                "roboguide.recovery-profile/v0.16",
+                "roboguide.recovery-profile/v0.17",
+            } and (original is None or original["schema"] != component["storage_schema"]):
+                raise ValueError("declared Artifact storage format differs from its actual owner")
+        if component["kind"] == "memory":
+            path = Path(component["root"]) / "memory.sqlite3"
+            with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+                validate_memory_storage(connection, profile_schema)
+        if component["kind"] == "replica":
+            path = Path(component["root"]) / component["database"]
+            with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+                validate_replica_storage(connection, profile_schema)
+        if component["kind"] == "runtime-mi":
+            path = Path(component["root"]) / component["database"]
+            try:
                 with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
-                    validate_memory_storage(connection, profile_schema)
-            if component["kind"] == "replica":
-                path = Path(component["root"]) / component["database"]
-                with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
-                    validate_replica_storage(connection, profile_schema)
-            if component["kind"] == "runtime-mi":
-                path = Path(component["root"]) / component["database"]
-                try:
-                    with closing(
-                        sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
-                    ) as connection:
-                        marker = connection.execute(
-                            "SELECT schema,instance_id FROM format"
-                        ).fetchall()
-                        columns = {
-                            row[1] for row in connection.execute("PRAGMA table_info(effects)")
-                        }
-                    if (
-                        len(marker) != 1
-                        or marker[0][0] != "roboguide.runtime-mi-work/v0.1"
-                        or re.fullmatch(r"[a-f0-9]{32}", str(marker[0][1])) is None
-                        or not {"nonce", "request_digest", "kernel_json", "finished_kernel_json"}
-                        <= columns
-                    ):
-                        raise ValueError("runtime MI original writer/nonce marker is unavailable")
-                except sqlite3.Error as error:
-                    raise ValueError("runtime MI original storage schema is unavailable") from error
-            if component["kind"] == "node":
-                path = Path(component["root"]) / component["database"]
-                with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
-                    if connection.execute("PRAGMA user_version").fetchone() != (13,):
-                        raise ValueError("Node backup requires the actual v13 writer-lease fence")
-                    if connection.execute(
-                        "SELECT version FROM node_journal_storage_schema"
-                    ).fetchone() != (13,):
-                        raise ValueError("Node writer-lease storage marker is unavailable")
+                    marker = connection.execute("SELECT schema,instance_id FROM format").fetchall()
+                    columns = {row[1] for row in connection.execute("PRAGMA table_info(effects)")}
+                if (
+                    len(marker) != 1
+                    or marker[0][0] != "roboguide.runtime-mi-work/v0.1"
+                    or re.fullmatch(r"[a-f0-9]{32}", str(marker[0][1])) is None
+                    or not {"nonce", "request_digest", "kernel_json", "finished_kernel_json"}
+                    <= columns
+                ):
+                    raise ValueError("runtime MI original writer/nonce marker is unavailable")
+            except sqlite3.Error as error:
+                raise ValueError("runtime MI original storage schema is unavailable") from error
+        if component["kind"] == "node":
+            path = Path(component["root"]) / component["database"]
+            with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+                if connection.execute("PRAGMA user_version").fetchone() != (13,):
+                    raise ValueError("Node backup requires the actual v13 writer-lease fence")
+                if connection.execute(
+                    "SELECT version FROM node_journal_storage_schema"
+                ).fetchone() != (13,):
+                    raise ValueError("Node writer-lease storage marker is unavailable")
+
+
+@contextmanager
+def acquire_all(
+    components: list[dict[str, Any]], *, profile_schema: str = "roboguide.recovery-profile/v0.1"
+) -> Iterator[None]:
+    """Hold and validate the same complete actual original writers before any normal data scan."""
+    with acquire_writers(components, profile_schema=profile_schema) as held:
+        validate_held_storage(components, profile_schema, held)
         yield
 
 

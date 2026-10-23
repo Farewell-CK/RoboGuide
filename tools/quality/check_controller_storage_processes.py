@@ -91,7 +91,14 @@ class Controllers:
         self.children: list[tuple[subprocess.Popen[bytes], dict[str, Any]]] = []
 
     def launch(
-        self, binary: Path, database: Path, label: str, storage: str | None, healthy: bool
+        self,
+        binary: Path,
+        database: Path,
+        label: str,
+        storage: str | None,
+        healthy: bool,
+        *,
+        artifact_root: Path | None = None,
     ) -> tuple[subprocess.Popen[bytes], str]:
         """Start exact software with a distinct CAS; refusal requires an actual process exit."""
         operator_port = port()
@@ -102,7 +109,7 @@ class Controllers:
             str(database),
             f"127.0.0.1:{operator_port}",
             f"127.0.0.1:{port()}",
-            str(self.output / (label + "-cas")),
+            str(artifact_root if artifact_root is not None else self.output / (label + "-cas")),
         ]
         environment = dict(self.environment)
         if storage is not None:

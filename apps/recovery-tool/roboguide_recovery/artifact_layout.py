@@ -9,7 +9,7 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from .profile import real_directory
+from .profile import HeldWriters, real_directory
 
 SCHEMA = "roboguide.recovery-profile/v0.9"
 REFERENCE_SCHEMA = "roboguide.recovery-profile/v0.10"
@@ -85,7 +85,9 @@ def _record(
     return dict(value)
 
 
-def validate_storage(root: Path, profile_schema: str) -> dict[str, Any] | None:
+def validate_storage(
+    root: Path, profile_schema: str, *, deferred_gc: HeldWriters | None = None
+) -> dict[str, Any] | None:
     """Require explicit complete retained format while keeping old profile semantics closed."""
     real_directory(root)
     pending = root / ".retention-intent.json"
@@ -136,7 +138,10 @@ def validate_storage(root: Path, profile_schema: str) -> dict[str, Any] | None:
 
         if _record(root / "reclamation-v1/identity.json", schema=owner["schema"]) != owner:
             raise ValueError("original reclamation journal owner differs")
-        validate_gc(root, owner["owner_id"])
+        if deferred_gc is None:
+            validate_gc(root, owner["owner_id"])
+        else:
+            deferred_gc.verify(root / ".writer.lock")
     return owner
 
 

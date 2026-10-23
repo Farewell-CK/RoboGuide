@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+ADR-0162 adds local OS-admin `recover-artifact-journal` and readonly observation under explicit
+recovery v0.17. Exact original SQL/journal bytes, complete actual writers and known Controller
+consumers precede immutable intent/forensics and native SQLite rollback. HeldWriters retains real
+descriptors; only the selected actual target can defer its GC read, with full validation afterward.
+Same evidence-directory retries only observe; new repair has a fresh original ID/budget and retains
+old Unknown. Forensic files grant no application/content/GC authority and may be explicitly bundled
+as existing files components. Missing history is never rebuilt. Owners are recovery/profile.py,
+artifact_sql_recovery.py and the actual zero-Node artifact_sql_recovery_processes.py /
+check_artifact_sql_recovery_processes.py gates. Artifact v5/GC SQL v0.1/wrapper/Node contracts stay.
+Online content, remaining producers, supervisor adoption and all original P1-P7 remain mandatory.
+
 ADR-0161 binds every runnable Controller's canonical sibling and actual SQL inode leases to the
 last actual managed connection. Native DELETE/exclusive draining separately excludes older live
 connections. Explicit `ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA=1` preserves raw events behind an exact

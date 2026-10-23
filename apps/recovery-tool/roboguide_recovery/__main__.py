@@ -9,6 +9,8 @@ from pathlib import Path
 from .archive_reclamation import run as maintain_archive
 from .artifact_reclamation import run as reclaim_artifact
 from .artifact_snapshot_retirement import run as retire_artifact_snapshot
+from .artifact_sql_recovery import observe as observe_sql_recovery
+from .artifact_sql_recovery import run as recover_artifact_sql
 from .bundle import abort_snapshots, backup, reconcile_snapshots, restore, verify
 from .profile import MAX_PROFILE_BYTES
 from .provider_snapshot_retirement import run as retire_provider_snapshot
@@ -68,6 +70,15 @@ def main() -> None:
     provider_retirement.add_argument("--provider", required=True)
     provider_retirement.add_argument("--operation-id", required=True)
     provider_retirement.add_argument("--original-intent-digest", required=True)
+    sql_recovery = subcommands.add_parser("recover-artifact-journal")
+    sql_recovery.add_argument("--profile", type=Path, required=True)
+    sql_recovery.add_argument("--artifact", required=True)
+    sql_recovery.add_argument("--sql-digest", required=True)
+    sql_recovery.add_argument("--journal-digest", required=True)
+    sql_recovery.add_argument("--evidence-directory", type=Path, required=True)
+    sql_recovery.add_argument("--reason", required=True)
+    sql_observation = subcommands.add_parser("observe-artifact-journal-recovery")
+    sql_observation.add_argument("--evidence-directory", type=Path, required=True)
     args = parser.parse_args()
     if args.operation in {
         "backup",
@@ -79,12 +90,22 @@ def main() -> None:
         "retire-artifact-snapshot",
         "reconcile-artifact-snapshot-retirement",
         "retire-provider-snapshot",
+        "recover-artifact-journal",
     }:
         raw = args.profile.read_bytes()
         if len(raw) > MAX_PROFILE_BYTES:
             parser.error("recovery profile exceeds its byte bound")
         profile = json.loads(raw)
-        if args.operation == "retire-provider-snapshot":
+        if args.operation == "recover-artifact-journal":
+            result = recover_artifact_sql(
+                profile,
+                args.artifact,
+                args.sql_digest,
+                args.journal_digest,
+                args.evidence_directory.absolute(),
+                args.reason,
+            )
+        elif args.operation == "retire-provider-snapshot":
             original_raw = args.original_profile.read_bytes()
             if len(original_raw) > MAX_PROFILE_BYTES:
                 parser.error("original recovery profile exceeds its byte bound")
@@ -137,6 +158,8 @@ def main() -> None:
             result = reconcile_snapshots(profile, args.bundle, args.manifest_digest)
         else:
             result = abort_snapshots(profile, args.destination, args.command_id)
+    elif args.operation == "observe-artifact-journal-recovery":
+        result = observe_sql_recovery(args.evidence_directory.absolute())
     elif args.operation == "restore":
         result = restore(args.bundle, args.manifest_digest, args.destination, args.command_id)
     else:

@@ -58,6 +58,11 @@ jobs:
           uv run --frozen python tools/quality/check_controller_storage_processes.py
           --output "${RUNNER_TEMP}/roboguide-controller-storage"
 
+      - name: Verify actual original GC SQL interruption and complete cold recovery
+        run: >
+          uv run --frozen python tools/quality/check_artifact_sql_recovery_processes.py
+          --output "${RUNNER_TEMP}/roboguide-artifact-sql-recovery"
+
       - name: Inspect the real deployment with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_deployment_profile_processes.py

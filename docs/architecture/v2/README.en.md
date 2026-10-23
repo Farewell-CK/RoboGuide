@@ -358,6 +358,13 @@ three original upload events/Archive across migration, an independent read-only 
 cold recovery passed; see the [acceptance](../../development/acceptance/2026-10-23-controller-inode-and-generation.md).
 Complete deployment adoption, supervisor replacement and online content quorums remain mandatory.
 
+[ADR-0162](../../decisions/0162-explicit-artifact-gc-sql-recovery.md) adds explicit local OS
+administration for an actual hot rollback journal. Complete actual writer/known-consumer coverage,
+pinned source digests, nonrenewable intent and forensic copies precede writable SQLite; every
+original GC record is validated afterward. The same evidence directory only observes; a new repair
+has an independent ID. Forensic evidence grants no application/content/GC authority. The actual
+read-only counterexample is retained; implementation and complete fault validation remain in progress.
+
 ## 8. Frozen invariants
 
 - Proposal, Commit, Bind, dispatch, receipt, local outcome, satisfaction and release retain separate gates.
