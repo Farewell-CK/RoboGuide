@@ -21,6 +21,7 @@ ARCHIVE_SCHEMAS = {
     "roboguide.recovery-profile/v0.14",
     "roboguide.recovery-profile/v0.15",
     "roboguide.recovery-profile/v0.16",
+    "roboguide.recovery-profile/v0.17",
 }
 OWNER_FILE = ".retention-owner.json"
 FENCE_FILE = "blobs"
@@ -32,6 +33,7 @@ MAINTENANCE_SCHEMAS = {
     "roboguide.recovery-profile/v0.14",
     "roboguide.recovery-profile/v0.15",
     "roboguide.recovery-profile/v0.16",
+    "roboguide.recovery-profile/v0.17",
 }
 MAX_OWNER_BYTES = 4096
 
@@ -109,7 +111,8 @@ def validate_storage(root: Path, profile_schema: str) -> dict[str, Any] | None:
         raise ValueError("original Artifact owner migration is still pending")
     schema = (
         frozenset({"roboguide.artifact-storage/v3", "roboguide.artifact-storage/v5"})
-        if profile_schema == "roboguide.recovery-profile/v0.16"
+        if profile_schema
+        in {"roboguide.recovery-profile/v0.16", "roboguide.recovery-profile/v0.17"}
         else "roboguide.artifact-storage/v3"
         if profile_schema in ARCHIVE_SCHEMAS
         else "roboguide.artifact-storage/v2"
@@ -230,7 +233,8 @@ def validate_bundle(
         ):
             raise ValueError("Artifact bundle lacks its mandatory original maintenance journal")
     owner = validate_storage(root / "stores" / component_id, profile_schema)
-    if profile_schema == "roboguide.recovery-profile/v0.16" and (
-        owner is None or owner["schema"] != component["storage_schema"]
-    ):
+    if profile_schema in {
+        "roboguide.recovery-profile/v0.16",
+        "roboguide.recovery-profile/v0.17",
+    } and (owner is None or owner["schema"] != component["storage_schema"]):
         raise ValueError("original Artifact bundle format differs from the explicit declaration")

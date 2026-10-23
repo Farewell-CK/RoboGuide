@@ -52,6 +52,7 @@ mod covariance_intersection;
 mod decision_policy;
 mod decision_state;
 mod event_log;
+pub use event_log::ControllerStorageFormat;
 mod memory;
 mod node;
 mod spatial_memory;

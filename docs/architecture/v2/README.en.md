@@ -348,6 +348,16 @@ mandatory local heads, independent interruption reconciliation and bounded heavy
 process steps passed. Full original-deployment migration, network quorum and remaining N1/N3/N7
 requirements still need their own implementation and acceptance.
 
+[ADR-0161](../../decisions/0161-controller-inode-writer-and-storage-generation.md) requires both
+the canonical sibling and actual SQL inode leases, retained until the last actual connection closes.
+Native SQLite draining separately fences older live connections. Explicit storage v1 and exact
+read-only legacy views fence older writers; the compatibility legacy profile gains no persistent
+generation claim. Recovery v0.17 declares the format and preserves the complete original data.
+The actual two-process counterexample is retained. Historical binary checks, 15 Controller starts,
+three original upload events/Archive across migration, an independent read-only observer and full
+cold recovery passed; see the [acceptance](../../development/acceptance/2026-10-23-controller-inode-and-generation.md).
+Complete deployment adoption, supervisor replacement and online content quorums remain mandatory.
+
 ## 8. Frozen invariants
 
 - Proposal, Commit, Bind, dispatch, receipt, local outcome, satisfaction and release retain separate gates.

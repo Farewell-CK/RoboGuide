@@ -1008,14 +1008,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     };
-    let _event_log_writer_lock = acquire_event_log_writer_lock(Path::new(&event_path))?;
     let checkpoint_policy = match std::env::var("ROBOGUIDE_CHECKPOINT_STORAGE").as_deref() {
         Ok("full") | Err(std::env::VarError::NotPresent) => state::CheckpointStoragePolicy::Full,
         Ok("incremental") => state::CheckpointStoragePolicy::Incremental,
         _ => return Err("ROBOGUIDE_CHECKPOINT_STORAGE must be full or incremental".into()),
     };
-    let mut event_log =
-        state::SqliteEventLog::open_with_checkpoint_policy(&event_path, checkpoint_policy)?;
+    let mut event_log = open_controller_event_log(Path::new(&event_path), checkpoint_policy)?;
     let mut availability_nonce = [0_u8; 16];
     ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut availability_nonce)
         .map_err(|_| "Controller process identity entropy unavailable")?;

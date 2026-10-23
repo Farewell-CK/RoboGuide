@@ -82,6 +82,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.14",
         "roboguide.recovery-profile/v0.15",
         "roboguide.recovery-profile/v0.16",
+        "roboguide.recovery-profile/v0.17",
     }:
         expected.add("artifact_replica_sets")
     if set(profile) != expected or profile["schema"] not in {
@@ -101,6 +102,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         "roboguide.recovery-profile/v0.14",
         "roboguide.recovery-profile/v0.15",
         "roboguide.recovery-profile/v0.16",
+        "roboguide.recovery-profile/v0.17",
     }:
         raise ValueError("recovery profile is not closed or versioned")
     if (
@@ -132,7 +134,8 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
         }
         if (
             isinstance(item, dict)
-            and profile["schema"] == "roboguide.recovery-profile/v0.16"
+            and profile["schema"]
+            in {"roboguide.recovery-profile/v0.16", "roboguide.recovery-profile/v0.17"}
             and item.get("kind") == "artifact"
         ):
             fields.add("storage_schema")
@@ -143,6 +146,16 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
                 raise ValueError(
                     "recovery v0.16 requires an explicit original Artifact storage format"
                 )
+        if (
+            isinstance(item, dict)
+            and profile["schema"] == "roboguide.recovery-profile/v0.17"
+            and item.get("kind") == "controller"
+        ):
+            from .controller_storage import LEGACY, STORAGE
+
+            fields.add("storage_schema")
+            if item.get("storage_schema") not in {LEGACY, STORAGE}:
+                raise ValueError("recovery v0.17 requires an explicit Controller storage format")
         if not isinstance(item, dict) or set(item) != fields:
             raise ValueError("recovery storage component is not closed")
         identifier = item["component_id"]
@@ -161,6 +174,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.14",
             "roboguide.recovery-profile/v0.15",
             "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
         }:
             raise ValueError("original Archive storage requires explicit recovery v0.12")
         if item["kind"] == "replica" and profile["schema"] not in {
@@ -179,6 +193,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.14",
             "roboguide.recovery-profile/v0.15",
             "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
         }:
             raise ValueError("replica supervisor leases require explicit recovery profile v0.2")
         if item["kind"] == "runtime-mi" and profile["schema"] not in {
@@ -196,6 +211,7 @@ def validate(profile: dict[str, Any]) -> list[dict[str, Any]]:
             "roboguide.recovery-profile/v0.14",
             "roboguide.recovery-profile/v0.15",
             "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
         }:
             raise ValueError("runtime MI leases require explicit recovery profile v0.3")
         if (
@@ -308,6 +324,7 @@ def layout(
             "roboguide.recovery-profile/v0.14",
             "roboguide.recovery-profile/v0.15",
             "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
         }:
             raise ValueError("original Archive writer requires explicit recovery v0.12")
         return [], ["archives-v1"], [".archive-writer.lock"]
@@ -335,6 +352,7 @@ def layout(
                 "roboguide.recovery-profile/v0.14",
                 "roboguide.recovery-profile/v0.15",
                 "roboguide.recovery-profile/v0.16",
+                "roboguide.recovery-profile/v0.17",
             }
             else "blobs"
         )
@@ -351,6 +369,7 @@ def layout(
                     "roboguide.recovery-profile/v0.14",
                     "roboguide.recovery-profile/v0.15",
                     "roboguide.recovery-profile/v0.16",
+                    "roboguide.recovery-profile/v0.17",
                 }
                 else []
             )
@@ -363,12 +382,14 @@ def layout(
                     "roboguide.recovery-profile/v0.14",
                     "roboguide.recovery-profile/v0.15",
                     "roboguide.recovery-profile/v0.16",
+                    "roboguide.recovery-profile/v0.17",
                 }
                 else []
             )
             + (
                 ["reclamation-v1"]
-                if profile_schema == "roboguide.recovery-profile/v0.16"
+                if profile_schema
+                in {"roboguide.recovery-profile/v0.16", "roboguide.recovery-profile/v0.17"}
                 and component.get("storage_schema") == "roboguide.artifact-storage/v5"
                 else []
             ),
@@ -395,6 +416,11 @@ def acquire_all(
             root = real_directory(Path(component["root"]))
             databases, _, locks = layout(component, profile_schema=profile_schema)
             paths.extend(root / name for name in locks)
+            if (
+                component["kind"] == "controller"
+                and profile_schema == "roboguide.recovery-profile/v0.17"
+            ):
+                paths.append(root / component["database"])
             if component["kind"] == "memory" and profile_schema in {
                 "roboguide.recovery-profile/v0.4",
                 "roboguide.recovery-profile/v0.5",
@@ -409,6 +435,7 @@ def acquire_all(
                 "roboguide.recovery-profile/v0.14",
                 "roboguide.recovery-profile/v0.15",
                 "roboguide.recovery-profile/v0.16",
+                "roboguide.recovery-profile/v0.17",
             }:
                 paths.extend(root / name for name in [".memory-use.lock", *databases])
             if component["kind"] == "replica" and profile_schema in {
@@ -424,6 +451,7 @@ def acquire_all(
                 "roboguide.recovery-profile/v0.14",
                 "roboguide.recovery-profile/v0.15",
                 "roboguide.recovery-profile/v0.16",
+                "roboguide.recovery-profile/v0.17",
             }:
                 paths.append(root / component["database"])
         for path in sorted(paths):
@@ -438,13 +466,20 @@ def acquire_all(
                 raise ValueError("original service writer is still active: " + str(path)) from error
             stack.callback(fcntl.flock, descriptor, fcntl.LOCK_UN)
         for component in components:
+            if component["kind"] == "controller":
+                from .controller_storage import validate as validate_controller
+
+                path = Path(component["root"]) / component["database"]
+                with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+                    validate_controller(connection, profile_schema, component.get("storage_schema"))
             if component["kind"] == "artifact":
                 from .artifact_layout import validate_storage
 
                 original = validate_storage(Path(component["root"]), profile_schema)
-                if profile_schema == "roboguide.recovery-profile/v0.16" and (
-                    original is None or original["schema"] != component["storage_schema"]
-                ):
+                if profile_schema in {
+                    "roboguide.recovery-profile/v0.16",
+                    "roboguide.recovery-profile/v0.17",
+                } and (original is None or original["schema"] != component["storage_schema"]):
                     raise ValueError(
                         "declared Artifact storage format differs from its actual owner"
                     )
@@ -507,6 +542,7 @@ def validate_memory_storage(connection: sqlite3.Connection, profile_schema: str)
         "roboguide.recovery-profile/v0.14",
         "roboguide.recovery-profile/v0.15",
         "roboguide.recovery-profile/v0.16",
+        "roboguide.recovery-profile/v0.17",
     }:
         snapshot = profile_schema in {
             "roboguide.recovery-profile/v0.8",
@@ -518,6 +554,7 @@ def validate_memory_storage(connection: sqlite3.Connection, profile_schema: str)
             "roboguide.recovery-profile/v0.14",
             "roboguide.recovery-profile/v0.15",
             "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
         }
         expected_version = 4 if snapshot else 3
         message = f"Memory recovery requires its actual v{expected_version} composite writer marker"
@@ -581,6 +618,7 @@ def validate_replica_storage(connection: sqlite3.Connection, profile_schema: str
         "roboguide.recovery-profile/v0.14": 3,
         "roboguide.recovery-profile/v0.15": 3,
         "roboguide.recovery-profile/v0.16": 3,
+        "roboguide.recovery-profile/v0.17": 3,
     }.get(profile_schema)
     if expected_version is None:
         if version != 0:

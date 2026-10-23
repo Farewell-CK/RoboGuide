@@ -589,11 +589,18 @@ async fn control_http_reader_rejects_truncated_body() {
 fn event_log_writer_lock_is_process_exclusive() {
     let directory = tempfile::tempdir().expect("temporary directory exists");
     let event_path = directory.path().join("controller.sqlite3");
-    let first = acquire_event_log_writer_lock(&event_path).expect("first writer acquires");
+    let open = || {
+        state::SqliteEventLog::open_controller_with_checkpoint_policy(
+            &event_path,
+            state::CheckpointStoragePolicy::Full,
+            state::ControllerStorageFormat::Legacy,
+        )
+    };
+    let first = open().expect("first writer acquires");
 
-    assert!(acquire_event_log_writer_lock(&event_path).is_err());
+    assert!(open().is_err());
     drop(first);
-    acquire_event_log_writer_lock(&event_path).expect("released writer lock is reacquired");
+    open().expect("released writer lock is reacquired");
 }
 
 /// The versioned placement fixture decodes into typed Control constraints.

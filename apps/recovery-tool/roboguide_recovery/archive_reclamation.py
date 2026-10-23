@@ -365,6 +365,7 @@ def run(
             retirement.SCHEMA,
             "roboguide.recovery-profile/v0.15",
             "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
         }
         or IDENTIFIER.fullmatch(command_id) is None
         or not reason.strip()

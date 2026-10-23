@@ -568,7 +568,10 @@ impl SqliteEventLog {
         }
         transaction.execute_batch("CREATE TABLE IF NOT EXISTS event_archive_manifests (start_sequence INTEGER PRIMARY KEY, end_sequence INTEGER UNIQUE NOT NULL, manifest_json TEXT NOT NULL)")?;
         transaction.execute(
-            "DELETE FROM events WHERE sequence > ?1 AND sequence <= ?2",
+            &format!(
+                "DELETE FROM {} WHERE sequence > ?1 AND sequence <= ?2",
+                self.events_table
+            ),
             params![floor, end_sequence],
         )?;
         transaction.execute(

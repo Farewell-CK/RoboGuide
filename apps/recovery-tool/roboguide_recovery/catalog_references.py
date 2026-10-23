@@ -22,6 +22,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.14",
     "roboguide.recovery-profile/v0.15",
     "roboguide.recovery-profile/v0.16",
+    "roboguide.recovery-profile/v0.17",
 }
 WRAPPER = "roboguide.controller-checkpoint/v48"
 WRAPPERS = {
@@ -168,12 +169,13 @@ def _controller(
     with closing(
         sqlite3.connect(database.as_uri() + "?mode=ro&immutable=1", uri=True)
     ) as connection:
+        from .controller_storage import table_names
+        from .controller_storage import validate as validate_controller
+
+        validate_controller(connection, profile_schema)
         connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_EVIDENCE_BYTES)
         connection.set_progress_handler(progress, 1000)
-        tables = {
-            row[0]
-            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
+        tables = table_names(connection)
         checkpoint = (
             connection.execute(
                 "SELECT schema FROM controller_checkpoint WHERE singleton=1"
@@ -191,7 +193,8 @@ def _controller(
         if (
             checkpoint is not None
             and checkpoint[0] == "roboguide.controller-checkpoint/v52"
-            and profile_schema != "roboguide.recovery-profile/v0.16"
+            and profile_schema
+            not in {"roboguide.recovery-profile/v0.16", "roboguide.recovery-profile/v0.17"}
         ):
             raise ValueError("upload-retention wrapper requires explicit recovery v0.16")
         if "events" not in tables:

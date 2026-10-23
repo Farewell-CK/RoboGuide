@@ -99,7 +99,7 @@ def run(
     assert call(operator, viewer, "POST", "/v1/maintenance/archive/abort", expired)[0] == 403
     assert call(operator, admin, "POST", "/v1/maintenance/archive/abort", expired)[0] == 503
     assert call(operator, admin, "POST", "/v1/maintenance/archive/abort", expired)[0] == 503
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection, connection:
         expired_row = connection.execute(
             "SELECT intent_json,receipt_json FROM event_archive_aborts WHERE command_id=?",
             (expired["command_id"],),
@@ -112,7 +112,7 @@ def run(
         )
     cleanup = expired | {"command_id": "original-current-cleanup", "budget_ms": 30_000}
     assert call(operator, admin, "POST", "/v1/maintenance/archive/abort", cleanup)[0] == 503
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection, connection:
         pending = connection.execute(
             "SELECT intent_json,receipt_json FROM event_archive_aborts WHERE command_id=?",
             (cleanup["command_id"],),

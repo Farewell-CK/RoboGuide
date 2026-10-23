@@ -14,6 +14,7 @@ import sys
 import tarfile
 import time
 import urllib.error
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,8 @@ def run(
     replica_snapshot_probe: Path | None = None,
     original_producer_journal: bool = False,
     old_replica_snapshot_probe: Path | None = None,
+    controller_storage_v1: bool = False,
+    upgrade_controller_storage: bool = False,
 ) -> dict[str, Any]:
     """Retain actual software process, file, SQL and TLS evidence with zero Nodes."""
     if original_producer_journal and replica_snapshot_probe is None:
@@ -100,11 +103,15 @@ def run(
         raise ValueError("explicit original cleanup requires wrapper v50")
     if upgrade_original and (not cleanup_authority or old_controller is None):
         raise ValueError("actual original upgrade requires the explicit previous Controller binary")
+    if upgrade_controller_storage and (not controller_storage_v1 or old_controller is None):
+        raise ValueError("original storage upgrade requires explicit v1 and the actual old binary")
     environment = {
         key: value
         for key, value in os.environ.items()
         if not key.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
     }
+    if controller_storage_v1:
+        environment["ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA"] = "1"
     certificates = directory / "pki"
     leaves = pki(certificates)
     admin = client(certificates, "admin")
@@ -174,9 +181,12 @@ def run(
         str(source),
     ]
     processes: list[subprocess.Popen[bytes]] = []
-    active_binary = old_controller if upgrade_original else binary
+    active_binary = old_controller if upgrade_original or upgrade_controller_storage else binary
     assert active_binary is not None
     original_producer_digest = "sha256:" + hashlib.sha256(active_binary.read_bytes()).hexdigest()
+    original_producer_schema = subprocess.check_output(
+        [str(active_binary), "--application-schema"], cwd=ROOT, text=True
+    ).strip()
     trace: list[dict[str, Any]] = []
     commands: list[dict[str, Any]] = []
 
@@ -285,7 +295,9 @@ def run(
 
     def rows(selected_database: Path = database) -> list[tuple[Any, ...]]:
         """Read original SQL intent/state/receipt independently after production requests."""
-        with sqlite3.connect(selected_database.as_uri() + "?mode=ro", uri=True) as connection:
+        with closing(
+            sqlite3.connect(selected_database.as_uri() + "?mode=ro", uri=True)
+        ) as connection:
             return connection.execute(
                 "SELECT command_id,intent_json,state,receipt_json FROM event_archive_operations "
                 "ORDER BY command_id"
@@ -370,7 +382,7 @@ def run(
             "budget_ms": 60_000,
         }
         assert call(operator_origin, viewer, "POST", "/v1/maintenance/archive", command)[0] == 403
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             before = connection.execute(
                 "SELECT sequence,payload_schema,payload_json FROM events ORDER BY sequence"
             ).fetchall()
@@ -383,9 +395,7 @@ def run(
         original = rows()
         assert len(original) == 1 and original[0][2:] == ("pending", None)
         intent = json.loads(original[0][1])
-        assert intent["checkpoint"]["schema"] == (
-            "roboguide.controller-checkpoint/v49" if upgrade_original else schema
-        )
+        assert intent["checkpoint"]["schema"] == original_producer_schema
         publication = (
             archive
             / "archives-v1"
@@ -404,7 +414,7 @@ def run(
             for path in publication.rglob("*")
             if path.is_file()
         }
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             assert (
                 connection.execute(
                     "SELECT sequence,payload_schema,payload_json FROM events ORDER BY sequence"
@@ -418,6 +428,16 @@ def run(
         stop(process)
         active_binary = binary
         process = launch()
+        if upgrade_controller_storage:
+            with closing(sqlite3.connect(database)) as connection:
+                assert (
+                    connection.execute(
+                        "SELECT sequence,payload_schema,payload_json FROM events ORDER BY sequence"
+                    ).fetchall()
+                    == before
+                )
+            assert rows() == original
+            save(directory / "original-event-rows.json", before)
         assert call(operator_origin, admin, "POST", "/v1/maintenance/archive", command)[0] == 200
         compacted = rows()
         assert compacted[0][1] == original[0][1] and compacted[0][2] == "compacted"
@@ -520,12 +540,35 @@ def run(
                 },
             ],
         }
+        if controller_storage_v1:
+            profile["schema"] = "roboguide.recovery-profile/v0.17"
+            for component in profile["components"]:
+                if component["kind"] == "controller":
+                    component["storage_schema"] = "roboguide.controller-storage/v1"
         if schema == "roboguide.controller-checkpoint/v52":
             for component in profile["components"]:
                 if component["kind"] == "artifact":
                     component["storage_schema"] = "roboguide.artifact-storage/v3"
         profile_path = directory / "profile.json"
         save(profile_path, profile)
+        if controller_storage_v1:
+            previous = json.loads(json.dumps(profile))
+            previous["schema"] = "roboguide.recovery-profile/v0.16"
+            for component in previous["components"]:
+                if component["kind"] == "controller":
+                    component.pop("storage_schema")
+            previous_path = directory / "previous-controller-profile.json"
+            save(previous_path, previous)
+            recovery(
+                "backup",
+                "--profile",
+                str(previous_path),
+                "--destination",
+                str(directory / "previous-controller-profile-refused"),
+                "--command-id",
+                "previous-controller-profile",
+                passed=False,
+            )
         # Source Catalog evidence, Archive destination and known consumers are all mandatory.
         for label, components in (
             ("missing-archive", profile["components"][:2]),
@@ -568,7 +611,9 @@ def run(
             "restore-original",
         )
         assert receipt["schema"] == (
-            "roboguide.restore-receipt/v0.16"
+            "roboguide.restore-receipt/v0.17"
+            if controller_storage_v1
+            else "roboguide.restore-receipt/v0.16"
             if schema == "roboguide.controller-checkpoint/v52"
             else "roboguide.restore-receipt/v0.15"
             if schema == "roboguide.controller-checkpoint/v51"
@@ -692,8 +737,8 @@ def run(
             old_root.mkdir()
             old_database = old_root / "events.sqlite3"
             with (
-                sqlite3.connect(database) as original_sql,
-                sqlite3.connect(old_database) as copied_sql,
+                closing(sqlite3.connect(database)) as original_sql,
+                closing(sqlite3.connect(old_database)) as copied_sql,
             ):
                 original_sql.backup(copied_sql)
             execute(
@@ -708,9 +753,10 @@ def run(
                 False,
                 {"ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA": "roboguide.artifact-storage/v2"},
             )
+            old_error = (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
             assert (
-                schema.encode() in (directory / f"command-{len(commands) - 1}.stderr").read_bytes()
-            )
+                b"views may not be indexed" if controller_storage_v1 else schema.encode()
+            ) in old_error
             old_writer = {
                 "binary_digest": "sha256:"
                 + hashlib.sha256(old_controller.read_bytes()).hexdigest(),
@@ -743,6 +789,8 @@ def run(
             save(
                 legacy,
                 profile
+                if controller_storage_v1
+                else profile
                 | {
                     "schema": "roboguide.recovery-profile/v0.12"
                     if cleanup_authority
@@ -773,6 +821,7 @@ def run(
                     b"Archive journal marker",
                     b"wrapper v49",
                     b"original Controller reference authority",
+                    b"recovery profile is not closed or versioned",
                 )
             )
             old_cli = {
@@ -784,7 +833,7 @@ def run(
             for path in source_paths
         } == frozen
         assert "sha256:" + hashlib.sha256(binary.read_bytes()).hexdigest() == binary_digest
-        if upgrade_original:
+        if upgrade_original or upgrade_controller_storage:
             assert old_controller is not None
             assert (
                 "sha256:" + hashlib.sha256(old_controller.read_bytes()).hexdigest()
@@ -801,6 +850,15 @@ def run(
             "actual_original_snapshot_storage_producers": snapshot_producers,
             "actual_original_producer_journal": producer_journal,
             "actual_original_wrapper_upgrade": upgrade_original,
+            "actual_controller_storage_v1": controller_storage_v1,
+            "actual_original_controller_storage_upgrade": upgrade_controller_storage,
+            "original_event_rows_verified_after_storage_upgrade": len(before)
+            if upgrade_controller_storage
+            else None,
+            "controller_processes": [
+                {"pid": child.pid, "arguments": child.args, "native_wait": child.poll()}
+                for child in processes
+            ],
             "original_producer_binary_digest": original_producer_digest,
             "original_embedded_checkpoint_schema": intent["checkpoint"]["schema"],
             "actual_catalog_publications": 0,
@@ -838,6 +896,8 @@ def main() -> None:
     parser.add_argument("--replica-snapshot-probe", type=Path)
     parser.add_argument("--original-producer-journal", action="store_true")
     parser.add_argument("--old-replica-snapshot-probe", type=Path)
+    parser.add_argument("--controller-storage-v1", action="store_true")
+    parser.add_argument("--upgrade-controller-storage", action="store_true")
     args = parser.parse_args()
     print(
         json.dumps(
@@ -858,6 +918,8 @@ def main() -> None:
                 args.old_replica_snapshot_probe.resolve()
                 if args.old_replica_snapshot_probe is not None
                 else None,
+                args.controller_storage_v1,
+                args.upgrade_controller_storage,
             ),
             indent=2,
         )

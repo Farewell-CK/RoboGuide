@@ -345,6 +345,14 @@ member-local journal；Snapshot 不导入此操作权威。新 producer profile 
 已接实际日志、mandatory heads、独立中断对账与有界重型 worker，39 个 owned process
 步骤通过。原部署完整迁移、真实网络多数与其余 N1/N3/N7 仍须分别完成。
 
+[ADR-0161](../../decisions/0161-controller-inode-writer-and-storage-generation.md)要求实际
+Controller 的 canonical sibling 与 SQL inode 同时排他，并由最后一个真实连接持有到关闭。
+原生 SQLite 排空独立覆盖旧 live writer；显式 storage v1/read-only legacy views 提供
+持久旧 writer fence，兼容 legacy profile 不获取该代际声明。Recovery v0.17 须显式声明
+存储格式并保留完整原数据。实际旧 binary、15 次启动、原三条上传事件/Archive 的代际
+升级、独立只读 observer 和完整冷恢复通过，见[验收](../../development/acceptance/2026-10-23-controller-inode-and-generation.md)。
+完整部署 adoption、supervisor replacement 与在线内容多数仍分别必需。
+
 ## 8. 已冻结不变量
 
 - Proposal、Commit、Bind、dispatch、Node receipt、本地结果、Task satisfaction 与 release 分别有权威。

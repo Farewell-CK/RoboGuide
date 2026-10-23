@@ -9,7 +9,7 @@ from typing import Any
 from .snapshot_references import canonical, digest
 
 SCHEMA = "roboguide.recovery-profile/v0.15"
-SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.16"}
+SUPPORTED = {SCHEMA, "roboguide.recovery-profile/v0.16", "roboguide.recovery-profile/v0.17"}
 WRAPPER = "roboguide.controller-checkpoint/v51"
 WRAPPERS = {WRAPPER, "roboguide.controller-checkpoint/v52"}
 CODEC = "domain.EventPayload.json/v30"

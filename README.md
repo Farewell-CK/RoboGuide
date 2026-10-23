@@ -1,5 +1,13 @@
 # RoboGuide
 
+[ADR-0161](docs/decisions/0161-controller-inode-writer-and-storage-generation.md) 将实际 Controller
+的路径和 SQL inode 双租约绑定到最后一个真实连接，原生 SQLite 排空独立覆盖旧连接。
+显式 `ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA=1` 提供持久旧 writer fence，兼容 legacy
+profile 不获取该代际声明。实现归属 `core/state/src/controller_storage.rs` 与
+`apps/recovery-tool/roboguide_recovery/controller_storage.py`；实际完整门禁为
+`tools/quality/check_controller_storage_processes.py`，恢复选择显式 v0.17。原数据、预算、
+wrapper v52 和 Node 合同保留；不由本项推断在线 HA、设备连续性或全部整改完成。
+
 [原内容生产者与中断对账](docs/development/acceptance/2026-10-23-original-content-producer-journal.md)
 以显式 content SQL v3/parent storage v5 接通 Log/View/Snapshot 原日志、实际作用域、
 独立原进程观察与 mandatory heads；39 个实际进程步骤通过。旧缺失历史仍 unavailable。

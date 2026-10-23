@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+ADR-0161 binds every runnable Controller's canonical sibling and actual SQL inode leases to the
+last actual managed connection. Native DELETE/exclusive draining separately excludes older live
+connections. Explicit `ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA=1` preserves raw events behind an exact
+read-only legacy view, with mandatory generation/table validation and an old-startup index fence;
+default legacy retains only the dual-lease/drain contract. Recovery v0.17 declares Controller and
+Artifact formats and holds the actual Controller SQL inode. Wrapper v52/Node contracts stay.
+Owners are core/state/controller_storage.rs, the managed EventLog, application/persistence.rs and
+recovery/controller_storage.py. check_controller_storage_processes.py uses actual owned TLS/SQL/
+old binary/clone/empty/cold Archive cases, never devices or online quorum. All remaining P1-P7,
+legacy deployment adoption, other N7 I/O and hot-journal maintenance remain required.
+
 ADR-0160 adds explicit content SQL v3/layout v0.3 and parent Raft storage v5/schema v0.5.
 Actual Log/View/Snapshot intent and complete pins precede effects; original SQL inode/process/budget,
 publication, actual scope close, independent observation and process absence remain separate.

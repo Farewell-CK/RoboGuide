@@ -22,6 +22,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.14",
     "roboguide.recovery-profile/v0.15",
     "roboguide.recovery-profile/v0.16",
+    "roboguide.recovery-profile/v0.17",
 }
 MAX_OPERATIONS = 4096
 MAX_INPUTS = 16_384
@@ -250,7 +251,8 @@ def operations(
                 from .artifact_snapshot_retirement import validate_receipt
 
                 if (
-                    profile_schema != "roboguide.recovery-profile/v0.16"
+                    profile_schema
+                    not in {"roboguide.recovery-profile/v0.16", "roboguide.recovery-profile/v0.17"}
                     or owner["schema"] != "roboguide.artifact-storage/v5"
                 ):
                     raise ValueError(

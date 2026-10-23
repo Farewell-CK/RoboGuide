@@ -13,6 +13,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -315,7 +316,7 @@ def run(output: Path, skip_build: bool, binary_path: Path | None) -> dict[str, A
         assert inventory[0] == 200 and inventory[1]["nodes"] == []
         stop(process)
         process = None
-        with sqlite3.connect(database, timeout=2) as connection:
+        with closing(sqlite3.connect(database, timeout=2)) as connection:
             schema_row = connection.execute(
                 "SELECT schema, checkpoint_json FROM controller_checkpoint WHERE singleton=1"
             ).fetchone()

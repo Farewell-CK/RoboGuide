@@ -748,6 +748,15 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
         if row["kind"] == "sqlite":
             if _identity(bundle / name, budget) != row["sqlite"]:
                 raise ValueError("complete recovery SQLite identity differs: " + name)
+            if component["kind"] == "controller":
+                from .controller_storage import validate as validate_controller
+
+                with closing(
+                    sqlite3.connect((bundle / name).as_uri() + "?mode=ro&immutable=1", uri=True)
+                ) as connection:
+                    validate_controller(
+                        connection, manifest["profile"]["schema"], component.get("storage_schema")
+                    )
             if component["kind"] == "memory" and selected == "memory.sqlite3":
                 with closing(
                     sqlite3.connect((bundle / name).as_uri() + "?mode=ro&immutable=1", uri=True)
@@ -824,6 +833,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.14",
                 "roboguide.recovery-profile/v0.15",
                 "roboguide.recovery-profile/v0.16",
+                "roboguide.recovery-profile/v0.17",
             }
             else databases
         )
@@ -939,7 +949,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.16"
+        "roboguide.restore-receipt/v0.17"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.17"
+        else "roboguide.restore-receipt/v0.16"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.16"
         else "roboguide.restore-receipt/v0.15"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.15"
@@ -1038,6 +1050,7 @@ def restore(
             "roboguide.recovery-profile/v0.14",
             "roboguide.recovery-profile/v0.15",
             "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:

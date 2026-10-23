@@ -64,7 +64,7 @@ pub(crate) use outcomes::{
     apply_pending_cancellations, apply_runtime_outcomes, close_terminal_mission_coordination,
 };
 pub(crate) use persistence::{
-    acquire_event_log_writer_lock, server_checkpoint_json, validate_replication_checkpoint,
+    open_controller_event_log, server_checkpoint_json, validate_replication_checkpoint,
 };
 pub(crate) use physical_entity_registry::load_physical_entity_registry_file;
 #[cfg(test)]

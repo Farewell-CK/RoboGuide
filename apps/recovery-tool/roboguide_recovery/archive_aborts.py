@@ -174,6 +174,7 @@ def operations(
             "roboguide.recovery-profile/v0.14",
             "roboguide.recovery-profile/v0.15",
             "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
         }
         or "event_archive_aborts" not in tables
     ):
@@ -189,6 +190,7 @@ def operations(
             "roboguide.recovery-profile/v0.14",
             "roboguide.recovery-profile/v0.15",
             "roboguide.recovery-profile/v0.16",
+            "roboguide.recovery-profile/v0.17",
         }
         or not current
         or "event_archive_aborts" not in tables

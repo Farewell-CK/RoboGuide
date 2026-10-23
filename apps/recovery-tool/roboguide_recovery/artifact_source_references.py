@@ -550,7 +550,7 @@ def validate_bundle(
     profile_schema: str,
 ) -> None:
     """Check live upload/proof bytes and original tombstone conflicts on cold restore."""
-    if profile_schema != gc.SCHEMA:
+    if profile_schema not in {gc.SCHEMA, "roboguide.recovery-profile/v0.17"}:
         return
     from . import artifact_layout
 

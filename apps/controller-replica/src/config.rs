@@ -22,6 +22,7 @@ const ALLOWED_ENVIRONMENT: &[&str] = &[
     "ROBOGUIDE_FACT_BATCH_LIMIT",
     "ROBOGUIDE_FACT_BATCH_WAIT_MS",
     "ROBOGUIDE_CHECKPOINT_STORAGE",
+    "ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA",
     "ROBOGUIDE_MAX_ADMITTED_MISSIONS",
     "ROBOGUIDE_MAX_ADMITTED_ROLE_SLOTS",
 ];
@@ -101,6 +102,13 @@ impl ProcessConfig {
     /// Rejects broad network/configuration scope before owning files or creating a Controller.
     pub fn validate(&self) -> Result<(), String> {
         self.replica.validate()?;
+        if self
+            .controller_environment
+            .get("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA")
+            .is_some_and(|value| !matches!(value.as_str(), "legacy" | "1"))
+        {
+            return Err("Controller storage format must be explicitly legacy or 1".into());
+        }
         if self
             .controller_environment
             .get("ROBOGUIDE_OPERATOR_CONNECTION_LIMIT")
@@ -265,6 +273,23 @@ mod tests {
             assert!(candidate.validate().is_err());
             candidate.replica.application_policy_digest = candidate.policy_digest().unwrap();
             assert_eq!(candidate.validate().is_ok(), value != "unknown");
+        }
+    }
+
+    /// Storage generation is closed and cannot change beneath the original child policy digest.
+    #[test]
+    fn controller_storage_format_is_closed_and_policy_bound() {
+        for value in ["legacy", "1", "0", "2", "unknown", ""] {
+            let mut candidate = profile("1");
+            candidate
+                .controller_environment
+                .insert("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA".into(), value.into());
+            assert!(candidate.validate().is_err());
+            candidate.replica.application_policy_digest = candidate.policy_digest().unwrap();
+            assert_eq!(
+                candidate.validate().is_ok(),
+                matches!(value, "legacy" | "1")
+            );
         }
     }
 }

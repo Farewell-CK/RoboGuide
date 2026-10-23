@@ -16,6 +16,9 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+#[path = "controller_storage.rs"]
+mod controller_storage;
+pub use controller_storage::ControllerStorageFormat;
 #[path = "checkpoint_store.rs"]
 mod checkpoint_store;
 use checkpoint_store::StoredCheckpoint;
@@ -269,7 +272,9 @@ pub struct SqliteEventLog {
     /// Candidate cache installed only after the existing SQLite transaction commits.
     pending_checkpoint_cache: Arc<Mutex<Option<StoredCheckpoint>>>,
     /// Serialized access to one SQLite connection.
-    connection: Arc<Mutex<Connection>>,
+    connection: Arc<Mutex<controller_storage::ManagedConnection>>,
+    /// Actual private mutation target; the legacy events view remains read-only in v1.
+    events_table: &'static str,
     /// Process-local event counter used for deterministic event identities.
     next_event_number: Arc<Mutex<u64>>,
     /// Start sequence retained while an application-level event batch is open.
@@ -369,10 +374,54 @@ impl SqliteEventLog {
         path: impl AsRef<Path>,
         checkpoint_policy: CheckpointStoragePolicy,
     ) -> Result<Self, SqliteEventLogError> {
-        let connection = Connection::open(path)?;
-        connection.pragma_update(None, "journal_mode", "WAL")?;
+        Self::open_inner(path.as_ref(), checkpoint_policy, None)
+    }
+
+    /// Opens the runnable Controller with actual path/inode leases retained by every SQL clone.
+    /// Explicit v1 upgrades only after native old-connection drain; legacy does not gain a durable fence.
+    pub fn open_controller_with_checkpoint_policy(
+        path: impl AsRef<Path>,
+        checkpoint_policy: CheckpointStoragePolicy,
+        format: ControllerStorageFormat,
+    ) -> Result<Self, SqliteEventLogError> {
+        Self::open_inner(path.as_ref(), checkpoint_policy, Some(format))
+    }
+
+    /// Initializes only the selected storage profile, then binds leases to the actual shared connection.
+    fn open_inner(
+        path: &Path,
+        checkpoint_policy: CheckpointStoragePolicy,
+        format: Option<ControllerStorageFormat>,
+    ) -> Result<Self, SqliteEventLogError> {
+        let writer = format
+            .map(|_| controller_storage::ControllerWriter::acquire(path))
+            .transpose()?;
+        let actual_path = writer.as_ref().map_or(path, |writer| writer.path());
+        let mut connection = Connection::open(actual_path)?;
+        if writer.is_some() {
+            connection.busy_timeout(std::time::Duration::from_millis(250))?;
+        }
+        let fenced = controller_storage::is_fenced(&connection)?;
+        if fenced && format != Some(ControllerStorageFormat::V1) {
+            return Err(SqliteEventLogError::Codec(
+                "Controller storage v1 requires the actual managed v1 writer".into(),
+            ));
+        }
+        if fenced {
+            controller_storage::validate(&connection)?;
+        }
+        if let Some(writer) = &writer {
+            writer.verify()?;
+            if !fenced {
+                controller_storage::drain(&mut connection)?;
+            }
+            writer.verify()?;
+        }
         connection.pragma_update(None, "synchronous", "FULL")?;
-        connection.execute_batch(
+        if fenced {
+            controller_storage::validate(&connection)?;
+        } else {
+            connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS events (
                 sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id TEXT UNIQUE NOT NULL,
@@ -412,16 +461,27 @@ impl SqliteEventLog {
                 method TEXT NOT NULL, path TEXT NOT NULL, decision TEXT NOT NULL
             );",
         )?;
-        checkpoint_store::initialize(&connection)?;
+            checkpoint_store::initialize(&connection)?;
+            migrate_event_schema(&connection)?;
+        }
         let checkpoint_cache = checkpoint_store::read(&connection)?;
-        migrate_event_schema(&connection)?;
-        connection.execute_batch(
+        if !fenced {
+            connection.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_artifact_reference_selector ON events (
                 json_extract(payload_json, '$.ArtifactCatalogReferenceTransition.record.selector.memory_id'),
                 json_extract(payload_json, '$.ArtifactCatalogReferenceTransition.record.selector.revision_id'),
                 sequence
              ) WHERE payload_schema = 'domain.EventPayload.json/v29';",
         )?;
+            if format == Some(ControllerStorageFormat::V1) {
+                controller_storage::upgrade(&mut connection)?;
+            }
+        }
+        if let Some(writer) = &writer {
+            writer.verify()?;
+        }
+        connection.pragma_update(None, "journal_mode", "WAL")?;
+        connection.busy_timeout(std::time::Duration::from_secs(5))?;
         let metadata_event_number = connection
             .query_row(
                 "SELECT value FROM event_log_metadata WHERE key = 'next_event_number'",
@@ -451,7 +511,14 @@ impl SqliteEventLog {
             checkpoint_cache: Arc::new(Mutex::new(checkpoint_cache)),
             committed_authority_revision: Arc::new(Mutex::new(committed_authority_revision)),
             pending_checkpoint_cache: Arc::new(Mutex::new(None)),
-            connection: Arc::new(Mutex::new(connection)),
+            connection: Arc::new(Mutex::new(controller_storage::ManagedConnection::new(
+                connection, writer,
+            ))),
+            events_table: if format == Some(ControllerStorageFormat::V1) {
+                "controller_v1_events"
+            } else {
+                "events"
+            },
             next_event_number: Arc::new(Mutex::new(next_event_number)),
             batch_start_number: Arc::new(Mutex::new(None)),
             last_error: Arc::new(Mutex::new(None)),
@@ -1381,9 +1448,9 @@ impl SqliteEventLog {
         let payload_schema = payload_schema_for_payload(record.payload());
         let insert = |connection: &Connection| {
             connection.execute(
-                "INSERT INTO events
+                &format!("INSERT INTO {}
                  (sequence, event_id, timestamp_ms, correlation_id, causation_id, payload_schema, payload_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", self.events_table),
                 params![
                     sequence,
                     record.event_id().as_str(),

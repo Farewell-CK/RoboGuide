@@ -299,12 +299,12 @@ impl SqliteEventLog {
             transaction.execute("INSERT INTO event_log_metadata(key,value) VALUES ('journal_committed_revision',?1)", [command.authority_revision.to_string()])?;
         }
         authority_journal::validate(&transaction, Some(checkpoint))?;
-        transaction.execute("DELETE FROM events", [])?;
+        transaction.execute(&format!("DELETE FROM {}", self.events_table), [])?;
         transaction.execute("DELETE FROM controller_checkpoint_deltas", [])?;
         transaction.execute("DELETE FROM controller_checkpoint_head", [])?;
         for event in events {
-            transaction.execute("INSERT INTO events(sequence,event_id,timestamp_ms,correlation_id,causation_id,payload_schema,payload_json)
-                VALUES (?1,?2,?3,?4,?5,?6,?7)", params![event.sequence,event.event_id,event.timestamp_ms,event.correlation_id,
+            transaction.execute(&format!("INSERT INTO {}(sequence,event_id,timestamp_ms,correlation_id,causation_id,payload_schema,payload_json)
+                VALUES (?1,?2,?3,?4,?5,?6,?7)", self.events_table), params![event.sequence,event.event_id,event.timestamp_ms,event.correlation_id,
                 event.causation_id,event.payload_schema,event.payload_json])?;
         }
         transaction.execute("INSERT INTO controller_checkpoint(singleton,event_sequence,schema,checkpoint_json) VALUES (1,?1,?2,?3)

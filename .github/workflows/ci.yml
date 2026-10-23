@@ -50,6 +50,14 @@ jobs:
       - name: Build the actual Controller composition
         run: cargo build --locked -p integration-server -p roboguide-node
 
+      - name: Build the actual Controller connection lifetime probe
+        run: cargo build --locked -p state --example controller_storage_probe
+
+      - name: Verify actual Controller inode writer generation and complete cold recovery
+        run: >
+          uv run --frozen python tools/quality/check_controller_storage_processes.py
+          --output "${RUNNER_TEMP}/roboguide-controller-storage"
+
       - name: Inspect the real deployment with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_deployment_profile_processes.py

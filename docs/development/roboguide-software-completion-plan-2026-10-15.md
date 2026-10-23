@@ -228,9 +228,16 @@ inactive 单事务导入保留原 ID、zero-operation/copy/abort/Catalog/manifes
 静止 metadata 捕获与安装；v0.4 网络、Raft storage/Snapshot 与内容多数接线继续为
 N1/N3 必需。见[完整 State 投影验收](acceptance/2026-10-23-complete-original-state-projection.md)。
 
-N7 另须覆盖 Controller 的 SQL inode 与 writer 代际：当前 Integration Server 的
-canonical sibling lease 覆盖相对路径/symlink，不覆盖不同 hardlink 名字；需要实际
-不同 CAS/旧 live writer 的故障门禁。metadata probe 的独立 inode 锁不计为产品修复。
+N7 的 Controller hardlink 反例已在 `b6fe5ff` 实际双进程、同 SQL inode/不同 CAS
+复现。现按 [ADR-0161](../decisions/0161-controller-inode-writer-and-storage-generation.md)
+将所有 runnable Controller 的 path/inode 双租约绑定到最后一个真实 SQLite 连接。
+原生旧连接排空与持久 generation fence 分开；显式 storage v1 才取得旧 writer fence，
+兼容 legacy profile 不声明该能力。新 recovery v0.17 显式声明实际 Controller 格式，
+保留完整原 v0.16 内容门禁；不包含新 Raft content roots。实际旧 binary、clone/独立
+只读 observer、原三条上传事件/Archive 的完整代际升级与 cold 组合通过，见
+[验收](acceptance/2026-10-23-controller-inode-and-generation.md)。当前兼容 legacy
+不宣布持久 fence；完整部署 adoption、supervisor replacement/旧 child 日志迁移、
+在线内容、hot journal 与全部原 N1–N7 完成条件继续保留。
 
 ADR-0159 的 direct-storage v4/private Commit v3 已保存完整原 candidate、可独立重算
 的 digest、原 event→owner 与完整 State projection；log/current-view/Snapshot/实际

@@ -20,6 +20,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.14",
     "roboguide.recovery-profile/v0.15",
     "roboguide.recovery-profile/v0.16",
+    "roboguide.recovery-profile/v0.17",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -57,9 +58,9 @@ PROTECTED = {
 
 def _tables(connection: sqlite3.Connection) -> set[str]:
     """Observe exact original authority tables without creating or repairing any missing journal."""
-    return {
-        row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    }
+    from .controller_storage import table_names
+
+    return table_names(connection)
 
 
 def _metadata(connection: sqlite3.Connection, key: str) -> str | None:

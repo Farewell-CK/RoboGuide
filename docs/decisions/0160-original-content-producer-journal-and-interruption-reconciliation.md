@@ -85,5 +85,9 @@ binary、partial/restart、Snapshot replacement + independent reader 都必须�
 
 沿用唯一开发分支、真实软件文件/SQL/TLS/owned process gate，0 设备/模型/模拟器。
 source process 或 storage evidence 不产生 Node/Task/device stopping、在线 quorum 或
-物理连续性。mTLS same-voter ACK、完整 online Archive/GC/recovery v0.17、原部署升级
+物理连续性。mTLS same-voter ACK、完整 online Archive/GC/recovery、原部署升级
 和 N2/N4–N7 仍全部必需；单个内部小步不关闭 N1/N3 或 SoftwareComplete。
+
+ADR-0161 后的 recovery v0.17 只增加 Controller storage generation，保留完整 v0.16
+合同；它不包含新 content producer roots。完整 online content recovery 将另行显式
+版本化（预留 v0.18），不能把同一数字或已有 cold receipt 重分类成已完成在线接线。
