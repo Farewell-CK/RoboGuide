@@ -600,6 +600,25 @@ async fn controlled_leader_transfer_moves_to_caught_up_voter() {
     let leader_index = leader(&nodes).await;
     let old_epoch = nodes[leader_index].0.current_epoch().unwrap();
     let target = (1..=3).find(|id| *id != old_epoch.replica_id).unwrap();
+    // Majority leadership does not imply this particular target has acknowledged the current tail.
+    // Wait for the actual replication observation before the one original effect request.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let metrics = nodes[leader_index].0.raft.metrics().borrow().clone();
+            if nodes[leader_index].0.current_epoch() == Some(old_epoch)
+                && metrics
+                    .replication
+                    .as_ref()
+                    .and_then(|members| members.get(&target))
+                    .is_some_and(|position| position.map(|log| log.index) >= metrics.last_log_index)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the exact selected target acknowledges the current original leader log");
     let receipt = nodes[leader_index]
         .0
         .request_leader_transfer(target, "transfer-test-1")

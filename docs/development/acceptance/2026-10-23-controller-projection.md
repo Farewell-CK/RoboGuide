@@ -67,3 +67,11 @@ Clippy/all-targets/all-features、私有 Rustdoc、Ruff/format/函数文档和�
 本包没有完成生产内容 profile v0.4、同一 current/joint voters bytes+metadata ACK、
 Node/Mission leader routing、旧 child/原 journal 显式迁移或完整在线恢复。Snapshot reader
 Drop/其余阻塞路径、N2–N7 及全部原软件矩阵继续必需，尚未宣告 SoftwareComplete。
+
+后续自动 [CI #199](https://github.com/Farewell-CK/RoboGuide/actions/runs/39899121728)
+在 Rust test 阶段失败；原 job log 已保留为 `p7/ci-199-rust.log`，72 通过/1 失败。
+`controlled_leader_transfer_moves_to_caught_up_voter` 在刚确认多数派 leader 后，未观察
+所选 follower 的 catch-up 就发起交接，实际生产门禁正确拒绝。测试 setup 改为先等待
+这个确切目标的实际 replication acknowledgement，再发送一次原请求；未改生产门禁、
+预算、断言、retry 或目标选择。单项与原已提交 replication 73 tests 通过。工作树中新加
+且尚未提交的 Snapshot 阻塞反例属于下一工作包，不计入该 73 项；CI 没有 skip。
