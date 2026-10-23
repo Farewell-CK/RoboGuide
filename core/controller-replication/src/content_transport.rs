@@ -370,12 +370,14 @@ where
 }
 
 /// Admits before Ready, then moves actual root/FD/capacity into one independent blocking receiver.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn receive_content_stream<S>(
     stream: &mut S,
     node: ReplicaNode,
     target: ContentQuorumTarget,
     content: ArtifactContentKey,
     command_id: String,
+    source_member: u64,
     budget: ContentBudget,
     evidence: crate::tls::VerifiedTlsConnection,
 ) -> Result<(), String>
@@ -383,7 +385,7 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     budget.check()?;
-    let peer = target.epoch.replica_id;
+    let peer = source_member;
     let source_owner = target
         .membership
         .nodes()
@@ -392,7 +394,7 @@ where
                 .then_some(member.content_store_owner.clone())
                 .flatten()
         })
-        .ok_or("actual original sending leader has no committed root")?;
+        .ok_or("actual original sending member has no committed root")?;
     let origin = StreamOrigin::Replica {
         member: peer,
         store_owner: source_owner,

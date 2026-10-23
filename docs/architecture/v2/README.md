@@ -12,6 +12,11 @@
 原 committed outbox 仍按当前授权/完整 delivery fence 发送；零事件变化和外部命令保留
 原 journal/Commit，不缓存 ready 或延长任何 budget。
 
+[ADR-0174](../../decisions/0174-committed-member-content-routing.md)允许已提交 current/joint
+membership 的任一 voter 路由 qualified Root bytes；Replica source member/Root owner、
+原 Artifact source owner、实际 mTLS/epoch/budget 分开核对。它不等于 Prepared takeover、
+Artifact owner 转移或完整 content quorum。
+
 [ADR-0172](../../decisions/0172-runnable-owned-controller-content-profile.md)定义显式
 process v0.2 的真实 Controller 接线：同一 source SDK writer、原 process 注册、完整
 就绪后 materialize/spawn。ProcessFence 只证明原进程和 infrastructure quorum，完整

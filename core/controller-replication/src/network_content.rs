@@ -450,14 +450,17 @@ impl ReplicaNode {
         command_id: String,
         duration_ms: u64,
     ) -> Result<ReplicaContentStreamStatus, String> {
-        self.check_epoch(target.epoch).await?;
         self.network_target_authority(&target)?;
-        if target.epoch.replica_id != self.config.replica_id
+        if !target
+            .membership
+            .voter_ids()
+            .any(|member| member == self.config.replica_id)
             || target.inputs.binary_search(&content).is_err()
             || receiver == self.config.replica_id
         {
             return Err(
-                "original source/receiver/qualified input differs from its stream target".into(),
+                "original committed source/receiver/qualified input differs from its stream target"
+                    .into(),
             );
         }
         transport::send_content_stream(self, receiver, target, content, command_id, duration_ms)

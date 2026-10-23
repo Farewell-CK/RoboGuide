@@ -10,6 +10,13 @@ permission/full delivery fences and fresh clocks. Ownership is state/timer_trans
 application/timer.rs; the zero-Node runnable gate explicitly opts into --idle-timer-check. This changes
 no persistent schema or Node/Memory contract and does not close cross-owner takeover or other P1-P7.
 
+ADR-0174 permits any current/joint committed Replica voter to route a qualified Root byte to another
+voter over the original mTLS/content target. Stream origin records actual source member and its
+replica-content Root owner; this never rewrites the original Artifact `source_owner`, creates an
+Artifact owner/use grant, or lets metadata-only members satisfy content quorum. The old leader-source
+path remains compatible. This closes only member-local Root routing; Prepared upload takeover,
+Artifact publication and remaining P1-P7 remain mandatory.
+
 ADR-0172 connects explicit process v0.2 to actual parent8/Root4 and the runnable Controller's shared
 Artifact writer. New contracts and original child/quorum observation budgets are policy-bound;
 legacy process v0.1 keeps its original fence. ProcessFence checks actual PID/TLS/current epoch and

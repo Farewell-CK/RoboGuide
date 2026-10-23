@@ -232,6 +232,33 @@ async fn actual_mtls_content_streams_keep_original_receipts_and_independent_rece
             .accepted
     );
     assert_eq!(node.content_quorum(target.clone()).await.unwrap().len(), 3);
+    let source_member = outcomes[0].0;
+    let source_node = cluster
+        .nodes
+        .iter()
+        .find(|peer| peer.config.replica_id == source_member)
+        .unwrap();
+    let leader_root_path = root
+        .root()
+        .join("content-v1")
+        .join(&key.source_owner[15..])
+        .join(&key.content_digest[7..]);
+    let leader_hidden = leader_root_path.with_extension("actual-cross-owner-route");
+    std::fs::rename(&leader_root_path, &leader_hidden).unwrap();
+    let routed = source_node
+        .stream_content_to(
+            node.config.replica_id,
+            target.clone(),
+            key.clone(),
+            "actual-cross-owner-root-route".into(),
+            30000,
+        )
+        .await
+        .unwrap();
+    assert!(routed.receipt.is_some());
+    root.verify_content(&key).unwrap();
+    std::fs::remove_file(&leader_root_path).ok();
+    std::fs::rename(leader_hidden, leader_root_path).unwrap();
     let mut hidden_peers = Vec::new();
     for (receiver, _) in &outcomes {
         let peer = cluster

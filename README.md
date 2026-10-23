@@ -5,6 +5,11 @@
 pending 写入及精确 checkpoint 均不变才回滚空事务。原 outbox 授权和正常变化的持久化
 保持；旧真实二进制的增长反例、当前空闲/正常上传/重启，以及实际 CPU 停止/撤权/交接回归通过。
 
+[已提交成员内容路由](docs/development/acceptance/2026-10-23-committed-member-content-routing.md)
+允许当前 target membership 中任一已认证 voter 提供 qualified Root bytes；原 Artifact
+`source_owner`、Replica source member、Root owner、TLS/epoch、预算和 command 均独立保留。
+这解决副本间 Root 读取，Prepared upload takeover 与 Artifact owner 转移仍单独实施。
+
 [真实 Controller 内容 Profile](docs/development/acceptance/2026-10-23-runnable-controller-content.md)
 以显式 process v0.2 接通 parent8/Root4、原 PID 日志、mTLS 和同一个实际 Artifact writer。
 实际 HTTP 上传、三副本完整字节、原 child SIGKILL/wait 与同 inode 重启读取已有进程证据。

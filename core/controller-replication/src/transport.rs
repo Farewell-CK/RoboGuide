@@ -394,10 +394,12 @@ where
                 command_id,
                 budget_ms: _,
             } => {
-                if request.sender != target.epoch.replica_id {
-                    return Err(
-                        "actual content sender differs from the original target leader".into(),
-                    );
+                if !target
+                    .membership
+                    .voter_ids()
+                    .any(|member| member == request.sender)
+                {
+                    return Err("actual content sender is not a committed target member".into());
                 }
                 drop(frame);
                 return content_streams::receive_content_stream(
@@ -406,6 +408,7 @@ where
                     *target,
                     content,
                     command_id,
+                    request.sender,
                     stream_budget.ok_or("original receive clock is missing")?,
                     certificate_connection.ok_or("content stream requires actual mTLS")?,
                 )

@@ -121,6 +121,13 @@ data_version、事件及 pending 写入均不变才回滚。原 side effects/out
 [验收](acceptance/2026-10-23-unchanged-timer-transactions.md)。这是 N3 接管前的性能问题修复，
 不替代其余 P1–P7；接着继续跨 owner/Prepared takeover 和完整 readiness。
 
+N3 的 [ADR-0174](../decisions/0174-committed-member-content-routing.md)已接通 Replica
+Root 跨成员读取：current/joint voter 中任一实际 source member 可在 target/epoch/
+qualified owner/TLS/budget 约束下路由完整 bytes，原 Artifact `source_owner` 不被
+替换。实际测试隐藏 leader Root 后由另一个 voter 路由恢复，metadata-only majority
+仍拒绝。下一项继续 Prepared upload takeover/Artifact owner finalization、完整
+readiness 和 online HA；本项不关闭其它 N1–N7/P1–P7。
+
 N3 的 [ADR-0172](../decisions/0172-runnable-owned-controller-content-profile.md)已接显式
 runnable process v0.2：实际 parent8/Root4、原 PID journal、mTLS 与真实 Controller
 共享源 writer。原 quorum 观察预算进入 policy，ProcessFence 不代替完整内容 ACK；
