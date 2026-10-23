@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import socket
 import sqlite3
@@ -36,11 +37,34 @@ def save(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
+_endpoint_ports: set[int] = set()
+_endpoint_writer = threading.Lock()
+
+
 def address() -> str:
-    """Choose an unused loopback port without touching an existing service."""
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return f"127.0.0.1:{listener.getsockname()[1]}"
+    """Select a distinct free Linux listener outside the actual kernel client-port range."""
+    low, high = map(int, Path("/proc/sys/net/ipv4/ip_local_port_range").read_text().split())
+    if not 1 <= low <= high <= 65535:
+        raise ValueError("actual kernel ephemeral port range is invalid")
+    before = max(0, low - 1024)
+    after_start = max(1024, high + 1)
+    available = before + max(0, 65536 - after_start)
+    if not available:
+        raise ValueError("actual kernel leaves no unprivileged non-ephemeral listener ports")
+    with _endpoint_writer:
+        for _ in range(512):
+            choice = secrets.randbelow(available)
+            port = 1024 + choice if choice < before else after_start + choice - before
+            if port in _endpoint_ports:
+                continue
+            with socket.socket() as listener:
+                try:
+                    listener.bind(("127.0.0.1", port))
+                except OSError:
+                    continue
+                _endpoint_ports.add(port)
+                return f"127.0.0.1:{port}"
+    raise RuntimeError("no distinct free non-ephemeral listener found within the original bound")
 
 
 def request(

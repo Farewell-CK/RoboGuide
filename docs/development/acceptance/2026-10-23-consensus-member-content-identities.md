@@ -79,3 +79,26 @@ wait -9，原 parent/producer 的 Unknown 均保留。早先远端失败继续�
 0 models、0 simulators。它不证明新内容网络 ACK、Root3/v6 的完整冷恢复、旧生产 v3
 升级、Node/Mission 路由、物理连续性或长期 SLO。其余 N1–N7 继续实施，不据此宣布
 SoftwareComplete。
+
+## 后续 CI 原端口冲突
+
+`f632efb` 的 CI 39914437998 在 Catalog 文件组合的 Controller startup 失败；
+原 artifact 12484686351 的 `controller.log` 明确报告 Operator listener
+`Address already in use (os error 98)`，并非新的内容流或 parent 门禁通过。原日志、
+ZIP 和解包文件保留于 `p7/ci-f632efb-*`。
+
+维护 checker 的 `address()` 先读实际 Linux `ip_local_port_range`，在其外随机选择
+实际可绑定的非特权 loopback 端口，并在同一检查进程内锁定不可重选集合。这样其后
+真实健康请求的内核临时 source port 不会占用预选 listener。仍不承诺排除外部服务
+之后抢占的竞态；产品 bind 失败继续如实失败。Controller 提前退出现在立即报告
+实际 returncode 和原日志路径，不重启子进程，不重试 mutation 或放宽启动期限。
+
+`p7/ci-f632efb-endpoints-01.json` 四线程选择的 256 个端口均在实际范围
+32768–60999 外，独立同时 bind 全部成功。原相同两软件 Node、单 async worker 的
+`/tmp/rg-ci-endpoints-20261023-01/result.json` 通过：真实两个 CPU hash、一个 import、
+两个独立 verifier、原 SQL 完成故障/readonly 对账/重启/精确 Catalog 退休保持。
+完整 strict mypy 358 files 与两维护模块 Ruff/format/函数文档通过。
+
+首轮本地长目录 `ci-f632efb-catalog-non-ephemeral-01` 因实际 Unix socket path too
+long 失败，原日志保留且不计为通过；正式重跑采用原短路径规范。两软件 Nodes 是明确
+配置的真实文件进程，设备/外部模型/模拟器为零。本项只修检查器端口选择和失败报告。

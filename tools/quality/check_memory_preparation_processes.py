@@ -396,7 +396,18 @@ def run(
                     "BEGIN SELECT RAISE(ABORT,'original import completion crash window'); END"
                 )
         controller = start(controller_command, "controller")
-        wait_for(lambda: exchange("/healthz")[0] == 200, "actual Controller startup")
+
+        def controller_ready() -> bool:
+            """Observe startup and report an actual child exit without retrying the process."""
+            assert controller is not None
+            exited = controller.poll()
+            if exited is not None:
+                raise RuntimeError(
+                    f"actual Controller exited {exited}; see {directory / 'controller.log'}"
+                )
+            return exchange("/healthz")[0] == 200
+
+        wait_for(controller_ready, "actual Controller startup")
         for index, name in enumerate(("enrolment-first", "enrolment-next")):
             status, response = exchange(
                 "/v1/node-identities/commands",
