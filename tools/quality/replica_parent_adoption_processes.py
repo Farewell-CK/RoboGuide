@@ -10,7 +10,7 @@ import sqlite3
 import stat
 import subprocess
 import time
-from contextlib import closing, nullcontext
+from contextlib import closing
 from pathlib import Path
 from types import FrameType, TracebackType
 from typing import Any, cast
@@ -342,31 +342,62 @@ def locked_fault(
     before, pins = business(member), legacy(member)
     root_path = Path(member["root"]) / "content/content.sqlite3"
     parent_path = Path(member["root"]) / "replica.sqlite3"
-    kernel_barrier = (
-        PayloadReadBarrier(payload_path(member)) if kind == "committed-killed" else None
-    )
     lease_evidence: dict[str, Any] | None = None
     with (
-        kernel_barrier if kernel_barrier is not None else nullcontext() as barrier,
+        PayloadReadBarrier(payload_path(member)) as barrier,
         closing(sqlite3.connect(root_path, timeout=0.1)) as root_sql,
     ):
-        if barrier is None:
-            root_sql.execute("BEGIN IMMEDIATE")
         child = cli.start(request(member, command, budget), f"actual-original-{kind}")
         original = wait_intent(child, member, command)
         save(cli.output / f"original-{kind}.json", original)
+        deadline = time.monotonic() + 10
+        while not barrier.signals:
+            if child.poll() is not None:
+                _, failure = cli.wait(child)
+                raise ValueError(
+                    f"original adoption exited before its actual CAS barrier: {failure}"
+                )
+            if time.monotonic() >= deadline:
+                raise ValueError("actual original kernel lease-break observation expired")
+            time.sleep(0.001)
+        blocked_at = time.monotonic()
+        if kind == "committed-killed":
+            while time.monotonic() - blocked_at < 0.25:
+                if child.poll() is not None or parent(member)[0] != 4:
+                    raise ValueError("actual CAS barrier lost original pre-Commit work")
+                time.sleep(0.01)
+        stopped = stop_owned_child(child)
+        rows = [row for row in producers(member) if row["intent"]["budget"]["pid"] == child.pid]
+        if (
+            stopped != signal.SIGSTOP
+            or len(rows) != len(original["intent"]["sources"])
+            or any(row["publication"] is not None for row in rows)
+            or parent(member)[0] != 4
+        ):
+            raise ValueError("actual kernel barrier lacks complete original intents before Commit")
+        lease_evidence = {
+            "actual_kernel_signals": list(barrier.signals),
+            "actual_stopped_signal": stopped,
+            "actual_blocked_seconds": time.monotonic() - blocked_at,
+            "original_file_mode": barrier.original_mode,
+            "actual_source": str(barrier.path),
+        }
         if kind == "killed":
+            barrier.close()
             child.kill()
             wait, _ = cli.wait(child)
             if wait != -signal.SIGKILL:
                 raise ValueError("original adoption lacks its actual killed wait result")
-            root_sql.rollback()
         elif kind == "expiry":
-            os.kill(child.pid, signal.SIGSTOP)
-            root_sql.rollback()
-            deadline = time.monotonic() + budget / 1000 + 0.1
-            while time.monotonic() < deadline:
-                time.sleep(max(0.0, min(0.02, deadline - time.monotonic())))
+            barrier.close()
+            original_budget = original["intent"]["budget"]
+            deadline = time.monotonic() + budget / 1000 + 1
+            while int(float(Path("/proc/uptime").read_text().split()[0]) * 1000) <= (
+                original_budget["admitted_ms"] + original_budget["duration_ms"] + 20
+            ):
+                if time.monotonic() >= deadline:
+                    raise ValueError("actual original kernel deadline did not elapse")
+                time.sleep(0.02)
             os.kill(child.pid, signal.SIGCONT)
             wait, failure = cli.wait(child)
             if wait == 0 or "budget expired" not in failure.get("error", ""):
@@ -376,7 +407,8 @@ def locked_fault(
         elif kind == "parent-sql":
             with closing(sqlite3.connect(parent_path, timeout=0.1)) as parent_sql:
                 parent_sql.execute("BEGIN IMMEDIATE")
-                root_sql.rollback()
+                barrier.close()
+                os.kill(child.pid, signal.SIGCONT)
                 wait, failure = cli.wait(child)
                 if wait == 0 or "locked" not in failure.get("error", ""):
                     raise ValueError(
@@ -384,43 +416,6 @@ def locked_fault(
                     )
                 parent_sql.rollback()
         elif kind == "committed-killed":
-            assert barrier is not None
-            deadline = time.monotonic() + 10
-            while not barrier.signals:
-                if child.poll() is not None:
-                    _, failure = cli.wait(child)
-                    raise ValueError(
-                        f"original adoption exited before kernel CAS read barrier: {failure}"
-                    )
-                if time.monotonic() >= deadline:
-                    raise ValueError("actual original kernel lease-break observation expired")
-                time.sleep(0.001)
-            blocked_at = time.monotonic()
-            while time.monotonic() - blocked_at < 0.25:
-                if child.poll() is not None or parent(member)[0] != 4:
-                    raise ValueError(
-                        "actual kernel CAS barrier did not retain original pre-Commit work"
-                    )
-                time.sleep(0.01)
-            blocked_seconds = time.monotonic() - blocked_at
-            stopped = stop_owned_child(child)
-            rows = [row for row in producers(member) if row["intent"]["budget"]["pid"] == child.pid]
-            if (
-                stopped != signal.SIGSTOP
-                or len(rows) != len(original["intent"]["sources"])
-                or any(row["publication"] is not None for row in rows)
-                or parent(member)[0] != 4
-            ):
-                raise ValueError(
-                    "actual kernel barrier lacks complete original intents before Commit"
-                )
-            lease_evidence = {
-                "actual_kernel_signals": list(barrier.signals),
-                "actual_stopped_signal": stopped,
-                "actual_blocked_seconds": blocked_seconds,
-                "original_file_mode": barrier.original_mode,
-                "actual_source": str(barrier.path),
-            }
             root_sql.execute("BEGIN IMMEDIATE")
             barrier.close()
             if stat.S_IMODE(barrier.path.stat().st_mode) != barrier.original_mode:

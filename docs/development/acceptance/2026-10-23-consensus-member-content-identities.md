@@ -102,3 +102,25 @@ ZIP 和解包文件保留于 `p7/ci-f632efb-*`。
 首轮本地长目录 `ci-f632efb-catalog-non-ephemeral-01` 因实际 Unix socket path too
 long 失败，原日志保留且不计为通过；正式重跑采用原短路径规范。两软件 Nodes 是明确
 配置的真实文件进程，设备/外部模型/模拟器为零。本项只修检查器端口选择和失败报告。
+
+## 原期限故障的实际停止确认
+
+`700d802` 的 CI 39921056448 已通过前述 Catalog startup，Python 与 Documentation
+成功；Rust 在更后的原 Archive/parent adoption expiry 用例失败。原 log 保留为
+`p7/ci-700d802-rust.log`，原错误是 database is locked，未达到期望的 budget expired；
+该 CI 继续记录为失败，不据此宣布总门禁通过。
+
+原 expiry 注入持有 root SQL 写锁后观察 parent intent，发送 SIGSTOP 但没有等待
+实际 stop 事件；child 可先撞上 native busy timeout，得到另一个真实拒绝。现在各
+故障都先通过实际 CAS write lease/SIGIO 确认 payload open 被内核阻断，再取得原
+child 的实际 SIGSTOP wait，并核对全部原 producer intents 与 parent v4。只有
+committed-killed 之后持有 root SQL；parent-sql 只在已确认停止后锁 parent。expiry
+解除 file lease 后继续保持实际 stopped，读取原 intent 的 admitted_ms/duration_ms
+及实际 /proc/uptime，原预算到期才 CONT。产品无新增测试模式或延长预算，仍严格
+要求原 budget expired，真实 Unknown/业务 raw rows/legacy pins 条件保持。
+
+`p7/content-stream-legacy-archive-fault-waits/result.json` 及全部 State、Snapshot、
+original producer 和 parent adoption 子结果通过；实际旧 v5 binary 拒绝与原 v4
+source 仍独立运行。采用显式冻结 ADR-0168 Snapshot/content/CLI binaries，原 digest
+保留于各 result；helper Ruff/format/函数文档与组合 strict mypy 360 files 通过。
+这些是原实际软件门禁，没有设备、模型或模拟器。
