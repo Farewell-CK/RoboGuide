@@ -9,7 +9,7 @@
 | Runtime / stop | attempt/generation、durable intent、relations、whole-Group stop、原进程 exit proof | 运行中抢占、耦合多 Role 迁移、hazard/regrasp 与设备 stop |
 | State / verifier | 来源策略、Belief lineage、TTL、原 Task verifier 与 CAS proof | 当前部署的物理来源、冲突与持续效果证明 |
 | Memory / Spatial | 准备/use/revoke/handoff、文件空间算法、provider 局部 GC；原 import Replica、Catalog/lineage、Snapshot/Archive 引用、恢复后原 provider Snapshot 退休、Archive abort/私有接收 GC、源上传退休和 standalone 已知引用闭包离线 GC | Raft/online 全部生产者覆盖、跨主机内容与组合恢复 |
-| Replica / recovery | 证书轮换、原 child drain、V3 transfer、writer/inode fence、已支持静止 bundle、qualified Root HTTP read、Prepared 显式恢复 | 跨 owner 上传释放、Unknown 对账、parent8/Root4 bundle、完整 readiness/在线恢复、升级回退与跨主机故障矩阵 |
+| Replica / recovery | 证书轮换、原 child drain、V3 transfer、writer/inode fence、已支持静止 bundle、qualified Root HTTP read、Prepared 恢复及跨 owner 上传放弃/退休 | Unknown 对账、parent8/Root4 bundle、完整 readiness/在线恢复、升级回退、在线 GC 与跨主机故障矩阵 |
 | Federation | Control 内持久 session | 真实跨域 transport、授权、路由与双域恢复 |
 | 运维 | write-disabled、已提交视图、恢复探针、真实短窗口监控检查 | 全 listener/阻塞收敛、完整 runbook、长期 SLO 与总体退出条件 |
 
@@ -25,9 +25,11 @@
 
 [Prepared 恢复与重复校验优化](docs/development/acceptance/2026-10-24-prepared-recovery-and-runtime-latency.md)已通过实际三副本/Controller/SQL/CAS 故障检查，未创建设备。原 Prepared 与 Unknown 保留，新 owner 通过独立正常上传取得 Completed；最新权限和完整多数派 checkpoint 保护故障后的只读观察。最终恢复约 77 秒，仍需优化；短窗口结果不计长期 SLO。显式 v0.18 仅支持原 standalone 存储合同，不覆盖 parent8/Root4 或新增恢复事件。
 
-[跨 owner Prepared 释放](docs/development/acceptance/2026-10-24-cross-owner-prepared-release.md)另通过真实故障后 child wait/restart、DELETE 和重复请求检查。原上传输入已释放，原 origin/Unknown 与独立 Root pins/bytes 保留。Completed 上传退休和完整在线恢复仍待完成。
+[跨 owner Prepared 释放](docs/development/acceptance/2026-10-24-cross-owner-prepared-release.md)另通过真实故障后 child wait/restart、DELETE 和重复请求检查。原上传输入已释放，原 origin/Unknown 与独立 Root pins/bytes 保留。Completed 退休由下述 ADR-0182 接续；完整在线恢复仍待完成。
 
 ## 如何解读证据
+
+[Completed 跨 owner 退休](docs/development/acceptance/2026-10-24-cross-owner-completed-retirement.md)已通过实际 Root 完整性读取、原 owner receipt、重复请求和独立 SQL/文件复核。原上传引用生命周期已闭合，Root 生产者回收与完整在线 HA 仍独立待完成。
 
 [v53 standalone 兼容接线](docs/development/acceptance/2026-10-24-recovery-profile-propagation.md)已通过 GC SQL 的10类实际故障、接管/源回收及 Catalog/child/Archive 冷恢复；原 v0.16 和 parent8/Root4 边界保留。实际软件 Node 只执行文件/CPU 工作，设备、外部模型、模拟器为0。
 

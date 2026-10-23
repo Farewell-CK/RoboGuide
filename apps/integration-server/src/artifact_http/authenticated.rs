@@ -120,15 +120,26 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
                     || receipt.certificate_digest != self.principal.certificate_digest
                     || (self.principal.grant.role != ArtifactRole::Admin
                         && self.principal.subject != receipt.upload.principal_id)
-                    || self
-                        .catalog
-                        .retained_store
-                        .as_ref()
-                        .and_then(|store| store.owner_id())
-                        != Some(receipt.store_owner_id.as_str())
                 {
                     return Err(
                         "upload retirement differs from its actual current tenant/owner".into(),
+                    );
+                }
+                let owner = if let Some(client) = &self.catalog.replica_content {
+                    client
+                        .completed_upload_source(&receipt.upload)?
+                        .source_owner
+                } else {
+                    self.catalog
+                        .retained_store
+                        .as_ref()
+                        .and_then(|store| store.owner_id())
+                        .ok_or("actual upload retirement owner unavailable")?
+                        .to_string()
+                };
+                if owner != receipt.store_owner_id {
+                    return Err(
+                        "upload retirement differs from its exact original qualified source".into(),
                     );
                 }
             }

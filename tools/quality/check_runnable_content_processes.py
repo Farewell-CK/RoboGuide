@@ -21,6 +21,7 @@ from check_replica_certificate_processes import create_ca, issue
 from check_replica_content_processes import Processes, digest, save
 from check_state_verifier_processes import address
 from runnable_prepared_recovery import release as release_prepared
+from runnable_prepared_recovery import retire_completed
 from runnable_prepared_recovery import stage as stage_prepared
 from runnable_prepared_recovery import verify as verify_prepared
 
@@ -531,6 +532,26 @@ def run(
                             proof=result["actual_prepared_release"],
                             original_wait=reaped[0],
                             actual_restarted_controller=restored_status,
+                            original_root_bytes_retained=True,
+                        )
+                        result["actual_completed_retirement"] = retire_completed(
+                            recovery_http,
+                            next_origin,
+                            directory,
+                            completed["receipt"],
+                            source_writer["owner"],
+                            next_owner,
+                        )
+                        completed_key = {
+                            "source_owner": source_writer["owner"],
+                            "content_digest": checksum,
+                            "byte_size": len(payload),
+                        }
+                        for config in configs.values():
+                            assert completed_key in actual_bytes(Path(config["content"]["root"]))
+                        observed(
+                            "actual-cross-owner-completed-retirement",
+                            proof=result["actual_completed_retirement"],
                             original_root_bytes_retained=True,
                         )
             assert all(digest(Path(path)) == expected for path, expected in identities.items())

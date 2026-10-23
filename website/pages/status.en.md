@@ -9,7 +9,7 @@ Content baseline: `815ffcd` (ADR-0177–0180), reviewed 2026-10-24; [Reference](
 | Runtime / stop | Attempts/generations, durable intents, relations, whole-Group stop and original-process exit proof | Running preemption, coupled Role migration, hazard/regrasp and device stopping |
 | State / verifier | Source policies, Belief lineage, TTL, original Task verifiers and CAS proof | Actual deployment sources, conflicts and continuous physical effects |
 | Memory / Spatial | Preparation/use/revoke/handoff, file algorithms, provider-local GC; original import Replica, Catalog/lineage, Snapshot/Archive references, relocated provider Snapshot retirement, Archive abort/private recipient GC, source upload retirement and offline GC over supported standalone reference closure | Complete Raft/online producer coverage, cross-host content and composed recovery |
-| Replica / recovery | Certificate rotation, original child drain, V3 transfer, inode/writer fences, supported quiescent bundles, qualified Root HTTP reads and explicit Prepared recovery | Cross-owner upload release, Unknown reconciliation, parent8/Root4 bundles, complete readiness/online recovery, upgrade/rollback and cross-host faults |
+| Replica / recovery | Certificate rotation, original child drain, V3 transfer, inode/writer fences, supported quiescent bundles, qualified Root reads, Prepared recovery and cross-owner upload abandonment/retirement | Unknown reconciliation, parent8/Root4 bundles, complete readiness/online recovery, upgrade/rollback, online GC and cross-host faults |
 | Federation | Durable Control sessions | Actual cross-domain transport, authorization, routing and dual-domain recovery |
 | Operations | Write-disabled, committed views, recovery probes and short real monitoring checks | Remaining listener/blocking paths, complete runbooks, long-term SLO and overall exit criteria |
 
@@ -25,9 +25,11 @@ Original content Archive and actual Catalog compaction/restart/cold recovery are
 
 [Prepared recovery and repeated-validation optimization](docs/development/acceptance/2026-10-24-prepared-recovery-and-runtime-latency.md) passed actual three-replica/Controller/SQL/CAS fault checks with zero devices. Original Prepared and Unknown evidence remains; an independent normal upload establishes the new owner's Completed result. Current permissions and a fresh complete-quorum checkpoint protect failure observations. Final recovery took about 77 seconds and still needs optimization; short observations do not establish long-term SLO. Explicit recovery v0.18 supports the original standalone storage contracts, excluding parent8/Root4 and new recovery events.
 
-[Cross-owner Prepared release](docs/development/acceptance/2026-10-24-cross-owner-prepared-release.md) also passed actual post-fault child wait/restart, DELETE and replay checks. The upload input is released while original origins, Unknown and independent Root pins/bytes remain. Completed upload retirement and complete online recovery remain required.
+[Cross-owner Prepared release](docs/development/acceptance/2026-10-24-cross-owner-prepared-release.md) also passed actual post-fault child wait/restart, DELETE and replay checks. The upload input is released while original origins, Unknown and independent Root pins/bytes remain. Completed retirement is covered by ADR-0182 below; complete online recovery remains required.
 
 ## Reading the evidence
+
+[Cross-owner Completed retirement](docs/development/acceptance/2026-10-24-cross-owner-completed-retirement.md) passed actual Root integrity reading, original-owner receipts, replay and independent SQL/file checks. The original upload reference lifecycle is closed; Root producer reclamation and complete online HA remain independently required.
 
 [v53 standalone compatibility](docs/development/acceptance/2026-10-24-recovery-profile-propagation.md) passed ten actual GC SQL fault cases, adoption/source reclamation and Catalog/child/Archive cold recovery. Original v0.16 and parent8/Root4 fences remain. Actual software Nodes perform file/CPU work, with zero devices, external models or simulators.
 

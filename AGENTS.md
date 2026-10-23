@@ -1,5 +1,13 @@
 # Repository Guidelines
 
+ADR-0182 resolves an exact current unretired Completed upload and original qualified owner through
+the actual complete-quorum content view. A real internal Root integrity reader verifies complete
+bytes/close before retirement; original writer admission rechecks source and current permissions.
+The source receipt keeps A while the actual current writer remains B. Only that upload input is
+released; original completion, other consumers and Root pins/bytes remain. Standalone retains its
+actual CAS check. Owners are content_uploads.rs and artifact_http/upload_retirement.rs; no Node or
+persistent contract changes are implied. Synthetic metadata checks do not prove actual quorum.
+
 ADR-0177's explicit standalone recovery v0.18 also threads the actual selected profile through
 source GC, original Snapshot retirement, Controller inspection and writer inventory. v0.16 keeps
 its old wrapper boundary; v0.18 still refuses recovery events and parent8/Root4. The maintained

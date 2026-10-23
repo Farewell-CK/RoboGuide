@@ -66,3 +66,53 @@ pub(crate) fn abandoned_origin(
     }
     Ok(Some(origin))
 }
+
+/// Resolves only an exact current unretired upload; equal hashes and other consumers cannot lend it rights.
+pub(crate) fn retained_upload(
+    view: &ReplicaView,
+    original: &ArtifactUploadRecord,
+) -> Result<ArtifactContentKey, String> {
+    original.validate()?;
+    let content = view
+        .content
+        .as_ref()
+        .ok_or("complete original upload view unavailable")?;
+    let Some((record, Some(key))) = current_upload(view, &original.upload_id)? else {
+        return Err("complete original upload source unavailable".into());
+    };
+    if record != *original
+        || record.phase != ArtifactUploadPhase::Completed
+        || Some(&key.content_digest) != record.content_digest.as_ref()
+        || Some(key.byte_size) != record.byte_size
+        || content.inputs.binary_search(&key).is_err()
+    {
+        return Err("retirement differs from its exact current Completed source".into());
+    }
+    for row in content
+        .recovery
+        .catalog_archive_events
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .chain(&view.events)
+    {
+        if let EventPayload::ArtifactUploadRetired { receipt } =
+            serde_json::from_str(&row.payload_json).map_err(|e| e.to_string())?
+            && receipt.upload.upload_id == original.upload_id
+        {
+            return Err("original upload is already retired".into());
+        }
+    }
+    key.validate()?;
+    Ok(key)
+}
+
+impl ControllerContentClient {
+    /// Obtains fresh complete-quorum metadata for the exact original Completed upload, not a caller key.
+    pub fn completed_upload_source(
+        &self,
+        original: &ArtifactUploadRecord,
+    ) -> Result<ArtifactContentKey, String> {
+        retained_upload(&self.view()?, original)
+    }
+}

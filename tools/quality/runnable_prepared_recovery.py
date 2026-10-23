@@ -255,3 +255,59 @@ def release(
         "repeat_created_no_domain_event": True,
         "cas_deleted": False,
     }
+
+
+def retire_completed(
+    http: Http,
+    origin: str,
+    directory: Path,
+    original: dict[str, Any],
+    source_owner: str,
+    destination_owner: str,
+) -> dict[str, Any]:
+    """Retire the actual foreign Completed source through Root bytes without copying its CAS."""
+    checksum = original["content_digest"]
+    blob = directory / "artifacts/objects-v1/sha256" / checksum[7:9] / checksum[7:]
+    assert not blob.exists() and source_owner != destination_owner
+    path = f"/v1/artifact-uploads/{original['upload_id']}/retire"
+    command = {
+        "schema": "roboguide.artifact-upload-retirement-command/v0.1",
+        "command_id": "actual-foreign-completed-retirement",
+        "original_upload_digest": "sha256:"
+        + hashlib.sha256(canonical(original).encode()).hexdigest(),
+        "reason": "Release original upload while independent Root producers retain bytes",
+    }
+    before = original_rows(directory / "controller.sqlite3")
+    code, raw = http(origin, path, "POST", canonical(command).encode())
+    assert code == 200, (code, raw.decode())
+    receipt = json.loads(raw)["receipt"]
+    assert receipt["upload"] == original and receipt["store_owner_id"] == source_owner
+    after = original_rows(directory / "controller.sqlite3")
+    assert len(after) == len(before) + 1 and after[:-1] == before
+    assert after[-1]["payload"] == {"ArtifactUploadRetired": {"receipt": receipt}}
+    code, raw = http(origin, path, "POST", canonical(command).encode())
+    assert code == 200 and json.loads(raw)["receipt"] == receipt
+    assert json.loads(raw)["replayed"] and original_rows(directory / "controller.sqlite3") == after
+    assert not blob.exists()
+    with closing(
+        sqlite3.connect((directory / "replica.sqlite3").as_uri() + "?mode=ro", uri=True)
+    ) as sql:
+        current = json.loads(
+            sql.execute("SELECT value FROM replica_v1_meta WHERE key='content_state'").fetchone()[0]
+        )["candidate"]
+    key = {
+        "source_owner": source_owner,
+        "content_digest": checksum,
+        "byte_size": original["byte_size"],
+    }
+    assert current["source_writer"]["owner"] == destination_owner
+    assert key not in current["inputs"] and key in current["origins"].values()
+    return {
+        "receipt": receipt,
+        "original_completed_unchanged": True,
+        "actual_source_owner": source_owner,
+        "actual_writer_owner": destination_owner,
+        "target_cas_absent": True,
+        "original_input_released": True,
+        "repeat_created_no_domain_event": True,
+    }

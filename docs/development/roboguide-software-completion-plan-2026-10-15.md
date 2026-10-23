@@ -113,17 +113,23 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-24）
 
+N3/P3 的 [ADR-0182 跨 owner Completed 退休](acceptance/2026-10-24-cross-owner-completed-retirement.md)
+已通过实际 fresh quorum/source/Root bytes、原 receipt、重复请求和独立 SQL/文件
+检查。原上传引用的 Prepared 放弃/Completed 退休已分别闭合；独立 Log/View/
+Snapshot/reader 仍保留责任。接续原 Unknown 只读对账、parent8/Root4 完整恢复与
+升级、online readiness/GC；不能把上传引用释放计为全部 Root/HA 完成。
+
 共享 wrapper v53 的 [standalone 恢复接线](acceptance/2026-10-24-recovery-profile-propagation.md)
 补齐原 GC/Snapshot/writer inventory 的实际 profile 传递，保留旧 profile 和新
 recovery/Root4 拒绝规则。真实 10 类 GC SQL 故障、Catalog 接管/source GC、
-真实 MI child 与 Archive 冷恢复通过。接续原 Completed 跨 owner 退休与完整
-Replica 恢复，不能以 standalone 验收关闭在线 HA。
+真实 MI child 与 Archive 冷恢复通过。Completed 退休由上述 ADR-0182 接续；完整
+Replica 恢复仍必需，不能以 standalone 验收关闭在线 HA。
 
 N3/P3 的 [ADR-0181 跨 owner Prepared 释放](acceptance/2026-10-24-cross-owner-prepared-release.md)
 已通过：在原完成 SQL 故障、真实 child wait/restart 后，新 writer 的 DELETE 保留
 原 owner origin，仅解除原上传输入；原 Unknown、独立 Root stream/log 和三份实际
-bytes 保留。相关全工作区编译和一次扩展进程链通过。接续先做 Completed 跨 owner
-退休，再做原 Unknown 只读对账和 parent8/Root4 完整恢复；其余必需矩阵保持。
+bytes 保留。相关全工作区编译和一次扩展进程链通过。Completed 退休由上述 ADR-0182
+接续；原 Unknown 只读对账和 parent8/Root4 完整恢复及其余必需矩阵保持。
 
 N3/P3 与 N7/P7 的 [ADR-0177–0180 实施验收](acceptance/2026-10-24-prepared-recovery-and-runtime-latency.md)
 已通过：原 Prepared 保留、新 owner 独立正常上传、原 Root reader SQL close、一次性

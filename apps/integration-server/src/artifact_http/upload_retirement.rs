@@ -89,24 +89,38 @@ pub(super) fn retire(
             ));
         }
     }
-    let store = catalog.retained_store.as_ref().ok_or_else(|| {
-        HttpError::conflict("upload retirement requires its actual retained Artifact owner")
-    })?;
     if upload.phase != domain::ArtifactUploadPhase::Completed {
         return Err(HttpError::conflict(
             "only original Completed upload ownership can be retired",
         ));
     }
-    store
-        .verify_artifact(
-            upload.content_digest.as_deref().unwrap_or(""),
-            upload.byte_size.unwrap_or(u64::MAX),
-        )
-        .map_err(|error| HttpError::conflict(error.to_string()))?;
+    let owner = if let Some(client) = &catalog.replica_content {
+        let key = client
+            .completed_upload_source(&upload)
+            .map_err(HttpError::conflict)?;
+        client
+            .verify_retained_content(&key)
+            .map_err(HttpError::conflict)?;
+        key.source_owner
+    } else {
+        let store = catalog.retained_store.as_ref().ok_or_else(|| {
+            HttpError::conflict("upload retirement requires its actual retained Artifact owner")
+        })?;
+        store
+            .verify_artifact(
+                upload.content_digest.as_deref().unwrap_or(""),
+                upload.byte_size.unwrap_or(u64::MAX),
+            )
+            .map_err(|error| HttpError::conflict(error.to_string()))?;
+        store
+            .owner_id()
+            .ok_or_else(|| HttpError::conflict("actual Artifact owner is unavailable"))?
+            .to_string()
+    };
     let receipt = domain::ArtifactUploadRetirement {
         schema:"roboguide.artifact-upload-retirement/v0.1".into(),
         command_id: command.command_id,
-        store_owner_id: store.owner_id().ok_or_else(|| HttpError::conflict("actual Artifact owner is unavailable"))?.into(),
+        store_owner_id: owner,
         upload,
         principal_id:admission.principal.subject.clone(),tenant_id:admission.principal.tenant_id.clone(),
         certificate_digest:admission.principal.certificate_digest.clone(),

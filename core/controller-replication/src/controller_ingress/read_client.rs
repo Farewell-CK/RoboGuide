@@ -58,7 +58,7 @@ impl ControllerContentClient {
         self.open_content_read(ReadPurpose::Published { digest }, context_digest)
     }
 
-    /// Verifies actual complete retained bytes for startup only, without publishing CAS or granting use.
+    /// Verifies actual complete retained bytes for internal integrity, without publishing CAS or granting use.
     pub fn verify_retained_content(&self, content: &ArtifactContentKey) -> Result<(), String> {
         let context = format!(
             "{:x}",

@@ -1,5 +1,8 @@
 # RoboGuide
 
+ADR-0182 extends Completed upload retirement across owners using actual complete-quorum source
+selection and Root integrity bytes. Original completion and independent content pins remain.
+
 Standalone recovery v0.18 preserves the complete selected profile through source GC and Snapshot
 retirement. Native checks select explicit Controller storage declarations from actual headers via
 `tools/quality/recovery_profile_selection.py`; CLI validation remains authoritative.

@@ -243,6 +243,11 @@ checking its complete immutable successor. The current writer never impersonates
 DELETE releases only that upload's active reference; original history and independent Root,
 reader and Archive pins remain. It cannot complete the original upload or prove device stopping.
 
+ADR-0182 resolves an unretired exact Completed upload and owner from current complete-quorum
+metadata. Actual Root integrity reading precedes retirement, followed by source and permission
+revalidation before Commit. The new CAS does not take that owner or publish the read bytes;
+only this upload reference is released, retaining original completion and independent consumers.
+
 Execution, Spatial, Semantic, Experience and Artifact Memory use immutable manifests. Scope limits semantic
 consumers, Visibility controls discovery/exchange, and Placement records provider-qualified replica evidence.
 `Local + Discoverable` is valid. An Artifact reference or another Task's completed import does not grant use.

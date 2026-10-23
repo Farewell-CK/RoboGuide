@@ -669,3 +669,75 @@ fn published_root_reads_require_completed_or_published_original_content() {
             .contains("ambiguous")
     );
 }
+
+/// Metadata counterexamples never grant quorum: retirement needs the exact unretired original upload.
+#[test]
+fn completed_retirement_cannot_borrow_equal_hash_owner_or_retired_catalog_retention() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_log, cas, key) = original(directory.path());
+    let batch = candidate(
+        &directory.path().join("source.sqlite3"),
+        &cas,
+        &ReplicaView::default(),
+        &"d".repeat(64),
+    );
+    let mut view = ReplicaView {
+        content: Some(batch.accepted_state().unwrap()),
+        events: batch.batch.events.clone(),
+        ..ReplicaView::default()
+    };
+    let EventPayload::ArtifactUploadTransition { record } =
+        serde_json::from_str(&view.events.last().unwrap().payload_json).unwrap()
+    else {
+        panic!("expected original Completed");
+    };
+    assert_eq!(
+        crate::content_uploads::retained_upload(&view, &record).unwrap(),
+        key
+    );
+    let mut changed = record.clone();
+    changed.deadline_ms += 1;
+    assert!(crate::content_uploads::retained_upload(&view, &changed).is_err());
+    let mut other = view.clone();
+    other.content.as_mut().unwrap().candidate.inputs[0].source_owner =
+        format!("artifact-store:{}", "f".repeat(64));
+    assert!(crate::content_uploads::retained_upload(&other, &record).is_err());
+    let mut prepared = view.clone();
+    prepared.events.pop();
+    assert!(crate::content_uploads::retained_upload(&prepared, &record).is_err());
+    let mut archived = view.clone();
+    archived
+        .content
+        .as_mut()
+        .unwrap()
+        .candidate
+        .recovery
+        .catalog_archive_events = Some(std::mem::take(&mut archived.events));
+    assert_eq!(
+        crate::content_uploads::retained_upload(&archived, &record).unwrap(),
+        key
+    );
+    let receipt = ArtifactUploadRetirement {
+        schema: "roboguide.artifact-upload-retirement/v0.1".into(),
+        command_id: "contract-retirement".into(),
+        store_owner_id: key.source_owner.clone(),
+        upload: record.clone(),
+        principal_id: record.principal_id.clone(),
+        tenant_id: record.tenant_id.clone(),
+        certificate_digest: None,
+        canonical_grant_json: "{}".into(),
+        admitted_at_ms: 4,
+        reason: "explicit contract release".into(),
+    };
+    receipt.validate().unwrap();
+    let mut row = view.events.last().unwrap().clone();
+    row.event_id = "contract-retirement".into();
+    row.sequence += 1;
+    row.timestamp_ms = 4;
+    row.payload_schema = "domain.EventPayload.json/v31".into();
+    row.payload_json =
+        serde_json::to_string(&EventPayload::ArtifactUploadRetired { receipt }).unwrap();
+    view.events.push(row);
+    assert!(view.content.as_ref().unwrap().inputs.contains(&key));
+    assert!(crate::content_uploads::retained_upload(&view, &record).is_err());
+}
