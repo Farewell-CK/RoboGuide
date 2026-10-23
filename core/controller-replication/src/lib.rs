@@ -11,6 +11,7 @@ mod content_application;
 #[cfg(test)]
 mod content_application_tests;
 mod content_store;
+mod content_uploads;
 mod controller_ingress;
 mod member;
 mod network_content;

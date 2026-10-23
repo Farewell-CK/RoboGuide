@@ -144,6 +144,7 @@ jobs:
           --idle-timer-check
           --owner-failover
           --prepared-recovery
+          --release-after-recovery
           --output /tmp/rg-ci-runnable-content
 
       - name: Verify actual Prepared source scopes and native restart with zero Nodes

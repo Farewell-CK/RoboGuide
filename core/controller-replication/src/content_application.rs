@@ -408,11 +408,13 @@ impl ContentApplicationBatch {
                 && origins
                     .insert(
                         row.event_id.clone(),
-                        ArtifactContentKey {
-                            source_owner: source_writer.owner.clone(),
-                            content_digest,
-                            byte_size,
-                        },
+                        crate::content_uploads::abandoned_origin(previous, &payload)?.unwrap_or(
+                            ArtifactContentKey {
+                                source_owner: source_writer.owner.clone(),
+                                content_digest,
+                                byte_size,
+                            },
+                        ),
                     )
                     .is_some()
             {
@@ -493,16 +495,23 @@ impl ContentApplicationBatch {
             return Err("new candidate changed original historical event ownership".into());
         }
         let existing_origins = previous.content.as_ref().map(|content| &content.origins);
-        let new_ids = self
-            .batch
-            .events
-            .iter()
-            .map(|row| row.event_id.as_str())
-            .collect::<BTreeSet<_>>();
+        let mut new_origins = BTreeMap::new();
+        for row in &self.batch.events {
+            let payload: EventPayload =
+                serde_json::from_str(&row.payload_json).map_err(|e| e.to_string())?;
+            if let Some((content_digest, byte_size)) = bare_content(&payload) {
+                let origin = crate::content_uploads::abandoned_origin(previous, &payload)?
+                    .unwrap_or(ArtifactContentKey {
+                        source_owner: self.source_writer.owner.clone(),
+                        content_digest,
+                        byte_size,
+                    });
+                new_origins.insert(row.event_id.clone(), origin);
+            }
+        }
         if self.origins.iter().any(|(id, origin)| {
             existing_origins.is_none_or(|original| !original.contains_key(id))
-                && (!new_ids.contains(id.as_str())
-                    || origin.source_owner != self.source_writer.owner)
+                && new_origins.get(id) != Some(origin)
         }) {
             return Err(
                 "new bare-content origin was not produced by the actual original source writer"

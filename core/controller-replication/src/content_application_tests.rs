@@ -27,6 +27,19 @@ pub(crate) fn original_payload(
     artifact_store::FileSystemArtifactStore,
     ArtifactContentKey,
 ) {
+    original_upload(root, payload, true)
+}
+
+/// Creates actual CAS/SQL fixtures with an explicit logical Prepared or Completed outcome.
+fn original_upload(
+    root: &Path,
+    payload: &[u8],
+    completed: bool,
+) -> (
+    state::SqliteEventLog,
+    artifact_store::FileSystemArtifactStore,
+    ArtifactContentKey,
+) {
     let cas = artifact_store::FileSystemArtifactStore::new_with_archive_references(
         root.join("source-cas"),
     )
@@ -76,17 +89,148 @@ pub(crate) fn original_payload(
             record: record.clone(),
         },
     );
-    record.phase = ArtifactUploadPhase::Completed;
-    record.completed_at_ms = Some(3);
-    writer.append(
-        TimestampMs::new(3),
-        &CorrelationId::new("actual-original-upload").unwrap(),
-        None,
-        EventPayload::ArtifactUploadTransition { record },
+    if completed {
+        record.phase = ArtifactUploadPhase::Completed;
+        record.completed_at_ms = Some(3);
+        writer.append(
+            TimestampMs::new(3),
+            &CorrelationId::new("actual-original-upload").unwrap(),
+            None,
+            EventPayload::ArtifactUploadTransition { record },
+        );
+    }
+    save(
+        &log,
+        "original-initial-command",
+        "{\"original\":1}",
+        if completed { 3 } else { 2 },
     );
-    save(&log, "original-initial-command", "{\"original\":1}", 3);
     log.commit_batch().unwrap();
     (log, cas, key)
+}
+
+/// Real direct storage checks inherited origin and owned Snapshot pins; it claims no network quorum.
+#[tokio::test]
+async fn cross_owner_prepared_release_retains_origin_and_independent_root_pins() {
+    let directory = tempfile::tempdir().unwrap();
+    let (log, cas, key) =
+        original_upload(directory.path(), b"original Prepared release bytes", false);
+    let profile = "a".repeat(64);
+    let root = ReplicaContentStore::create(&directory.path().join("root"), &profile, 1).unwrap();
+    let mut store = SqliteRaftStore::open_with_content(
+        &directory.path().join("replica.sqlite3"),
+        &profile,
+        state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA,
+        root.clone(),
+    )
+    .unwrap();
+    let first = candidate(
+        &directory.path().join("source.sqlite3"),
+        &cas,
+        &ReplicaView::default(),
+        &profile,
+    );
+    assert!(apply(&mut store, first.clone(), 1).await.accepted);
+    root.copy_from_artifact(
+        &cas,
+        &key,
+        "original-copy",
+        &first.identity().unwrap(),
+        30000,
+    )
+    .unwrap();
+    let held_snapshot = store.build_snapshot().await.unwrap();
+    let previous = store.accepted_view().unwrap();
+    let EventPayload::ArtifactUploadTransition { mut record } =
+        serde_json::from_str(&previous.events.last().unwrap().payload_json).unwrap()
+    else {
+        panic!("fixture expected original Prepared");
+    };
+    record.phase = ArtifactUploadPhase::Abandoned;
+    log.begin_batch().unwrap();
+    log.clone().append(
+        TimestampMs::new(4),
+        &CorrelationId::new("explicit-original-release").unwrap(),
+        None,
+        EventPayload::ArtifactUploadTransition {
+            record: record.clone(),
+        },
+    );
+    save(&log, "explicit-original-release", "{\"original\":2}", 3);
+    log.commit_batch().unwrap();
+    let destination = artifact_store::FileSystemArtifactStore::new_with_archive_references(
+        directory.path().join("destination"),
+    )
+    .unwrap();
+    let release = candidate(
+        &directory.path().join("source.sqlite3"),
+        &destination,
+        &previous,
+        &profile,
+    );
+    assert_ne!(release.source_writer.owner, key.source_owner);
+    assert_eq!(
+        release.origins.get(&release.batch.events[0].event_id),
+        Some(&key)
+    );
+    assert!(release.inputs.is_empty());
+    let mut archived = previous.clone();
+    archived
+        .content
+        .as_mut()
+        .unwrap()
+        .candidate
+        .recovery
+        .catalog_archive_events = Some(std::mem::take(&mut archived.events));
+    assert_eq!(
+        crate::content_uploads::abandoned_origin(
+            &archived,
+            &EventPayload::ArtifactUploadTransition {
+                record: record.clone()
+            },
+        )
+        .unwrap(),
+        Some(key.clone()),
+    );
+    let mut relabelled = release.clone();
+    relabelled
+        .origins
+        .get_mut(&release.batch.events[0].event_id)
+        .unwrap()
+        .source_owner = destination.owner_id().unwrap().into();
+    assert!(relabelled.validate_against(&previous, &profile).is_err());
+    let mut changed = release.clone();
+    record.deadline_ms += 1;
+    changed.batch.events[0].payload_json =
+        serde_json::to_string(&EventPayload::ArtifactUploadTransition {
+            record: record.clone(),
+        })
+        .unwrap();
+    assert!(changed.validate_against(&previous, &profile).is_err());
+    record.deadline_ms -= 1;
+    record.phase = ArtifactUploadPhase::Completed;
+    record.completed_at_ms = Some(4);
+    changed.batch.events[0].payload_json =
+        serde_json::to_string(&EventPayload::ArtifactUploadTransition { record }).unwrap();
+    assert!(changed.validate_against(&previous, &profile).is_err());
+    assert!(apply(&mut store, release, 2).await.accepted);
+    let view = store.accepted_view().unwrap();
+    assert!(view.content.as_ref().unwrap().inputs.is_empty());
+    assert!(
+        root.active_references(&key)
+            .unwrap()
+            .iter()
+            .any(|pin| pin.kind == ReplicaContentReferenceKind::Snapshot)
+    );
+    root.verify_content(&key).unwrap();
+    drop(held_snapshot);
+    assert!(
+        view.content
+            .as_ref()
+            .unwrap()
+            .published_content(&view.events, &key.content_digest)
+            .is_err()
+    );
 }
 
 /// Writes one original exact authority command and checkpoint inside the already-open actual SQL batch.

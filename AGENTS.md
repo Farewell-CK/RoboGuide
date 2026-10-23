@@ -1,5 +1,13 @@
 # Repository Guidelines
 
+ADR-0181 allows only an exact committed Prepared-to-Abandoned successor to inherit its original
+qualified origin across owners. Complete immutable source/byte/budget evidence and bounded original
+history are checked independently by constructor and receiver. Current source_writer still names
+the actual writer; foreign completion stays refused. DELETE releases only that upload's input;
+original history, Root Log/Snapshot/reader pins, Unknown and bytes remain independent. Owners are
+content_uploads.rs and the existing upload authority. The runnable gate adds --release-after-recovery
+after the actual failed child is reaped/restarted. No persistent/Node contract or device fact is added.
+
 ADR-0177 adds explicit original-uploader Prepared recovery under event codec v32 / wrapper v53.
 The durable one-shot intent freezes the unchanged source upload/qualified owner, actual new CAS
 writer inode, current original Controller, original kernel budget, actual grant and one reader ID

@@ -25,6 +25,8 @@ Original content Archive and actual Catalog compaction/restart/cold recovery are
 
 [Prepared recovery and repeated-validation optimization](docs/development/acceptance/2026-10-24-prepared-recovery-and-runtime-latency.md) passed actual three-replica/Controller/SQL/CAS fault checks with zero devices. Original Prepared and Unknown evidence remains; an independent normal upload establishes the new owner's Completed result. Current permissions and a fresh complete-quorum checkpoint protect failure observations. Final recovery took about 77 seconds and still needs optimization; short observations do not establish long-term SLO. Explicit recovery v0.18 supports the original standalone storage contracts, excluding parent8/Root4 and new recovery events.
 
+[Cross-owner Prepared release](docs/development/acceptance/2026-10-24-cross-owner-prepared-release.md) also passed actual post-fault child wait/restart, DELETE and replay checks. The upload input is released while original origins, Unknown and independent Root pins/bytes remain. Completed upload retirement and complete online recovery remain required.
+
 ## Reading the evidence
 
 - **Accepted contract** fixes semantics, not complete implementation.

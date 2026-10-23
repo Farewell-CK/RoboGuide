@@ -113,6 +113,12 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-24）
 
+N3/P3 的 [ADR-0181 跨 owner Prepared 释放](acceptance/2026-10-24-cross-owner-prepared-release.md)
+已通过：在原完成 SQL 故障、真实 child wait/restart 后，新 writer 的 DELETE 保留
+原 owner origin，仅解除原上传输入；原 Unknown、独立 Root stream/log 和三份实际
+bytes 保留。相关全工作区编译和一次扩展进程链通过。接续先做 Completed 跨 owner
+退休，再做原 Unknown 只读对账和 parent8/Root4 完整恢复；其余必需矩阵保持。
+
 N3/P3 与 N7/P7 的 [ADR-0177–0180 实施验收](acceptance/2026-10-24-prepared-recovery-and-runtime-latency.md)
 已通过：原 Prepared 保留、新 owner 独立正常上传、原 Root reader SQL close、一次性
 原预算、完成 SQL 故障后的 Unknown/只读重试，以及 fresh complete-quorum checkpoint
@@ -121,7 +127,7 @@ N3/P3 与 N7/P7 的 [ADR-0177–0180 实施验收](acceptance/2026-10-24-prepare
 完整恢复仍约 77 秒；短窗口观察不计长期 SLO。wrapper v53/codec v32、显式 v0.18
 standalone 冷恢复已有检查；v0.18 仍拒绝新恢复事件和 parent8/Root4。
 
-下一包先处理跨 owner 原上传引用的显式释放/退休；随后完成 Unknown 只读对账、
+跨 owner Prepared 释放由上述 ADR-0181 接续；随后完成 Completed 退休、Unknown 只读对账、
 parent8/Root4 恢复/升级、完整 readiness/在线 HA，再依原 P1–P7 推进其它功能。
 采用单一缺口→相关验证→提交的节奏，避免重复运行不受改动影响的全量进程矩阵。
 原全部 N1–N7/P1–P7/F0–F10/R01–R20 和最终总体检查仍必需。

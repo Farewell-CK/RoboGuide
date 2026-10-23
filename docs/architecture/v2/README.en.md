@@ -238,6 +238,11 @@ invalidation enters stop/hold; absent evidence creates neither a positive nor ne
 
 ### Memory catalog and current use
 
+ADR-0181 inherits only the exact committed Prepared origin for cross-owner abandonment,
+checking its complete immutable successor. The current writer never impersonates the source.
+DELETE releases only that upload's active reference; original history and independent Root,
+reader and Archive pins remain. It cannot complete the original upload or prove device stopping.
+
 Execution, Spatial, Semantic, Experience and Artifact Memory use immutable manifests. Scope limits semantic
 consumers, Visibility controls discovery/exchange, and Placement records provider-qualified replica evidence.
 `Local + Discoverable` is valid. An Artifact reference or another Task's completed import does not grant use.

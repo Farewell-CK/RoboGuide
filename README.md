@@ -1,5 +1,9 @@
 # RoboGuide
 
+ADR-0181 keeps the exact original owner when abandoning a Prepared upload after Controller
+failover. It releases only that upload reference; original history and independent Root pins remain.
+The maintained runnable content checker covers this with `--release-after-recovery`.
+
 [Prepared 的显式恢复](docs/decisions/0177-explicit-prepared-upload-recovery.md)保留原上传与
 source owner；原 uploader 的独立持久意图、原 kernel 预算和唯一 reader 先于复制。
 新 CAS owner 经正常新上传和实际 Root close 才能记录恢复完成，重复命令只查询。

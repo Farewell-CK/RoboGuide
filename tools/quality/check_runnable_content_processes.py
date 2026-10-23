@@ -20,6 +20,7 @@ from check_network_content_processes import actual_bytes
 from check_replica_certificate_processes import create_ca, issue
 from check_replica_content_processes import Processes, digest, save
 from check_state_verifier_processes import address
+from runnable_prepared_recovery import release as release_prepared
 from runnable_prepared_recovery import stage as stage_prepared
 from runnable_prepared_recovery import verify as verify_prepared
 
@@ -91,6 +92,7 @@ def run(
     idle_timer_check: bool = False,
     owner_failover: bool = False,
     prepared_recovery: bool = False,
+    release_after_recovery: bool = False,
 ) -> dict[str, Any]:
     """Retain exact binaries, native waits, complete SQL and independently verified bytes."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -489,6 +491,48 @@ def run(
                     observed(
                         "actual-prepared-owner-recovery", proof=result["actual_prepared_recovery"]
                     )
+                    if release_after_recovery:
+                        failed_pid = next_status["child_pid"]
+                        os.kill(failed_pid, signal.SIGKILL)
+                        restored_member, restored_status = current(failed_pid)
+                        assert restored_member == next_member
+                        assert restored_status["epoch"] == next_status["epoch"]
+                        directory = Path(configs[next_member]["storage_directory"])
+                        with closing(
+                            sqlite3.connect(
+                                (directory / "replica.sqlite3").as_uri() + "?mode=ro", uri=True
+                            )
+                        ) as sql:
+                            processes = json.loads(
+                                sql.execute(
+                                    "SELECT value FROM replica_v1_meta "
+                                    "WHERE key='controller_processes_v1'"
+                                ).fetchone()[0]
+                            )
+                        reaped = [
+                            row
+                            for row in processes
+                            if row["process"] and row["process"]["pid"] == failed_pid
+                        ]
+                        assert len(reaped) == 1 and reaped[0]["outcome"]["signal"] == 9
+                        result["actual_prepared_release"] = release_prepared(
+                            recovery_http,
+                            next_origin,
+                            directory,
+                            prepared_case[0],
+                            source_writer["owner"],
+                            next_owner,
+                            result["actual_prepared_recovery"]["unknown"],
+                        )
+                        for config in configs.values():
+                            assert prepared_key in actual_bytes(Path(config["content"]["root"]))
+                        observed(
+                            "actual-cross-owner-prepared-release",
+                            proof=result["actual_prepared_release"],
+                            original_wait=reaped[0],
+                            actual_restarted_controller=restored_status,
+                            original_root_bytes_retained=True,
+                        )
             assert all(digest(Path(path)) == expected for path, expected in identities.items())
             result.update(
                 passed=True,
@@ -538,7 +582,10 @@ def main() -> None:
     parser.add_argument("--idle-timer-check", action="store_true")
     parser.add_argument("--owner-failover", action="store_true")
     parser.add_argument("--prepared-recovery", action="store_true")
+    parser.add_argument("--release-after-recovery", action="store_true")
     args = parser.parse_args()
+    if args.release_after_recovery and not args.prepared_recovery:
+        parser.error("--release-after-recovery requires --prepared-recovery")
     result = run(
         args.output,
         args.supervisor.resolve(strict=True),
@@ -547,6 +594,7 @@ def main() -> None:
         args.idle_timer_check,
         args.owner_failover,
         args.prepared_recovery,
+        args.release_after_recovery,
     )
     print(json.dumps({"passed": result["passed"], "result": str(args.output / "result.json")}))
 

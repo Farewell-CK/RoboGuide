@@ -201,3 +201,57 @@ def verify(
         "original_unchanged": True,
         "retries_read_only": True,
     }
+
+
+def release(
+    http: Http,
+    origin: str,
+    directory: Path,
+    original: dict[str, Any],
+    source_owner: str,
+    destination_owner: str,
+    unknown: dict[str, Any],
+) -> dict[str, Any]:
+    """Release the original upload after restart, retaining origins and Unknown history."""
+    assert source_owner != destination_owner
+    path = f"/v1/artifact-uploads/{original['upload_id']}"
+    query = path + "/recoveries/" + unknown["command_id"]
+    code, raw = http(origin, query, "GET", b"")
+    assert code == 200 and json.loads(raw)["record"] == unknown, (code, raw.decode())
+    before = original_rows(directory / "controller.sqlite3")
+    code, raw = http(origin, path, "DELETE", b"")
+    assert code == 200 and json.loads(raw)["cas_deleted"] is False, (code, raw.decode())
+    after = original_rows(directory / "controller.sqlite3")
+    assert len(after) == len(before) + 1 and after[:-1] == before
+    abandoned = {**original, "phase": "abandoned"}
+    assert after[-1]["payload"] == {"ArtifactUploadTransition": {"record": abandoned}}
+    with closing(
+        sqlite3.connect((directory / "replica.sqlite3").as_uri() + "?mode=ro", uri=True)
+    ) as sql:
+        current = json.loads(
+            sql.execute("SELECT value FROM replica_v1_meta WHERE key='content_state'").fetchone()[0]
+        )["candidate"]
+    assert current["source_writer"]["owner"] == destination_owner
+    original_key = {
+        "source_owner": source_owner,
+        "content_digest": original["content_digest"],
+        "byte_size": original["byte_size"],
+    }
+    assert original_key not in current["inputs"]
+    binding = current["origins"][current["batch"]["events"][-1]["event_id"]]
+    assert binding == original_key
+    code, raw = http(origin, path, "DELETE", b"")
+    assert code == 200 and original_rows(directory / "controller.sqlite3") == after
+    code, raw = http(origin, query, "GET", b"")
+    assert code == 200 and json.loads(raw)["record"] == unknown
+    return {
+        "original": original,
+        "abandoned": abandoned,
+        "source_owner": source_owner,
+        "destination_owner": destination_owner,
+        "retained_origin": binding,
+        "current_inputs": current["inputs"],
+        "unknown_unchanged": True,
+        "repeat_created_no_domain_event": True,
+        "cas_deleted": False,
+    }

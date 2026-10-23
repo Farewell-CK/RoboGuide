@@ -25,6 +25,8 @@
 
 [Prepared 恢复与重复校验优化](docs/development/acceptance/2026-10-24-prepared-recovery-and-runtime-latency.md)已通过实际三副本/Controller/SQL/CAS 故障检查，未创建设备。原 Prepared 与 Unknown 保留，新 owner 通过独立正常上传取得 Completed；最新权限和完整多数派 checkpoint 保护故障后的只读观察。最终恢复约 77 秒，仍需优化；短窗口结果不计长期 SLO。显式 v0.18 仅支持原 standalone 存储合同，不覆盖 parent8/Root4 或新增恢复事件。
 
+[跨 owner Prepared 释放](docs/development/acceptance/2026-10-24-cross-owner-prepared-release.md)另通过真实故障后 child wait/restart、DELETE 和重复请求检查。原上传输入已释放，原 origin/Unknown 与独立 Root pins/bytes 保留。Completed 上传退休和完整在线恢复仍待完成。
+
 ## 如何解读证据
 
 - **合同已接受**：决策语义确定，不表示全部实现完成。
