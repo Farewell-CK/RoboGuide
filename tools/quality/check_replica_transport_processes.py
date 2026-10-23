@@ -237,6 +237,10 @@ def frame_pressure(replicas: ActualReplicas) -> dict[str, Any]:
         with replicas.connect(member) as refused:
             refused.sendall(struct.pack(">Q", 1024 * 1024))
             assert require_closed(refused)
+        wait_for(
+            lambda: replicas.budget(member)["frame_rejected_total"] > previous,
+            "actual rejected-frame counter publication",
+        )
         latencies = []
         for _ in range(5):
             started = time.monotonic()
@@ -272,6 +276,10 @@ def framing_and_identity(replicas: ActualReplicas, member: int) -> dict[str, Any
     wait_for(lambda: replicas.budget(member)["small_frame_active_bytes"] == 0, "small EOF release")
     assert "Rejected" in replicas.exchange(member, "AdminEpoch", profile="incorrect-profile")
     assert "Rejected" in replicas.exchange(member, "AdminEpoch", claimed_sender=3)
+    wait_for(
+        lambda: replicas.budget(member)["frame_rejected_total"] >= before + 2,
+        "actual malformed-frame counter publication",
+    )
     result = replicas.budget(member)
     assert result["frame_rejected_total"] >= before + 2
     save(replicas.output / "framing-and-identity.json", result)

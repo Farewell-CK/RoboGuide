@@ -61,6 +61,15 @@ JSON/摘要兼容检查。资源测试覆盖实际 permit 生命周期、small r
 启动核对。`7221fb1` 的 Documentation 成功，
 不能据此写为该提交的完整 CI 成功。后续继续获取原日志、核对当前分支的实际 CI。
 
+后续 `90edd74` 的完整 CI / Documentation 均成功。`61cd1c2` 的 Documentation 成功，
+[完整 CI](https://github.com/Farewell-CK/RoboGuide/actions/runs/39903639675)在实际 transport
+步骤失败；原日志保留为 `p7/ci-61cd1c2-rust.log`。客户端已收到拒绝 EOF，checker 随即读取
+50 ms 周期发布的旧 observation，拒绝计数尚未增加。现在在原有 EOF 和计数断言之间，
+有界等待实际计数发布；非法长度计数也采用同一观察规则。没有重复发送请求、延长产品
+deadline 或放宽容量/身份/多数派断言。冻结原探针的完整实际三成员 gate
+`p7/ci-61cd1c2-transport-counter-01/result.json` 通过，含四次实际进程 wait 与原 SQL 重启；
+原失败仍保留。它修正的是检查器的异步采样竞态，不是一次新的网络/物理能力声明。
+
 ## 保留门禁
 
 本地容量不是 RSS/OS 强制配额，也没有解决所有 CPU/同步 I/O、listener DoS、跨主机
