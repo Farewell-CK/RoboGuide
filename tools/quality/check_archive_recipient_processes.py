@@ -26,7 +26,7 @@ def save(path: Path, value: object) -> None:
     path.write_bytes(canonical(value))
 
 
-def run(output: Path, old_controller: Path) -> dict[str, Any]:
+def run(output: Path, writer_controller: Path) -> dict[str, Any]:
     """Own a fresh actual producer before retiring only its explicitly disposable recipient."""
     output.mkdir(parents=True, exist_ok=False)
     source = output / "producer"
@@ -195,7 +195,7 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
     for item in inputs:
         checksum = item["content_digest"][7:]
         assert not (target / "objects-v1/sha256" / checksum[:2] / checksum).exists()
-    # The exact previous v3 binary must refuse this sealed owner before opening content.
+    # The supplied actual writer must refuse this sealed owner before opening content.
     addresses = []
     for _ in range(3):
         with socket.socket() as listener:
@@ -204,9 +204,23 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
     old_environment = environment | {
         "ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA": "roboguide.artifact-storage/v3"
     }
+    controller = next(value for value in profile["components"] if value["kind"] == "controller")
+    database = Path(controller["root"]) / controller["database"]
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as sql:
+        source_schema = sql.execute(
+            "SELECT schema FROM controller_checkpoint WHERE singleton=1"
+        ).fetchone()[0]
+    writer_schema = subprocess.check_output(
+        [str(writer_controller), "--application-schema"], text=True, timeout=5
+    ).strip()
+    prefix = "roboguide.controller-checkpoint/v"
+    assert isinstance(source_schema, str) and source_schema.startswith(prefix)
+    assert writer_schema.startswith(prefix)
+    older = int(writer_schema.removeprefix(prefix)) < int(source_schema.removeprefix(prefix))
+    (output / "writer-application-schema.txt").write_text(writer_schema + "\n")
     old = subprocess.run(
         [
-            str(old_controller),
+            str(writer_controller),
             addresses[0],
             str(output / "old.sqlite3"),
             addresses[1],
@@ -223,6 +237,7 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
     assert old.returncode != 0 and any(
         word in old.stderr.decode(errors="replace").lower()
         for word in (
+            "artifact directory component",
             "owner",
             "unsupported",
             "schema",
@@ -288,10 +303,13 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
         "old-refused",
         passed=False,
     )
-    assert (
-        any(version in refused["stderr"] for version in ("recovery v0.14", "recovery v0.15"))
-        and not (output / "old-refused").exists()
+    required = (
+        ("recovery v0.18",)
+        if profile["schema"] == "roboguide.recovery-profile/v0.18"
+        else ("recovery v0.14", "recovery v0.15")
     )
+    assert any(version in refused["stderr"] for version in required), refused["stderr"]
+    assert not (output / "old-refused").exists()
     damaged = output / "missing-tombstone"
     shutil.copytree(backed, damaged)
     manifest = json.loads((damaged / "manifest.json").read_bytes())
@@ -326,8 +344,13 @@ def run(output: Path, old_controller: Path) -> dict[str, Any]:
         "exact_retries_unlink_count": 0,
         "original_tombstone_unchanged": True,
         "pre_retirement_owner_headers": frozen,
-        "actual_old_controller_exit_code": old.returncode,
-        "actual_old_controller_digest": digest(old_controller.read_bytes()),
+        "actual_writer_controller_exit_code": old.returncode,
+        "actual_writer_controller_digest": digest(writer_controller.read_bytes()),
+        "actual_writer_controller_schema": writer_schema,
+        "actual_producer_controller_schema": source_schema,
+        "actual_older_controller_proof": older,
+        "actual_old_controller_exit_code": old.returncode if older else None,
+        "actual_old_controller_digest": digest(writer_controller.read_bytes()) if older else None,
         "actual_retired_cold_backup_verify_restore_retry": True,
         "missing_tombstone_refused_after_manifest_repin": True,
         "source_consumed_for_owned_retention_test": True,
@@ -340,9 +363,9 @@ def main() -> None:
     """Require explicit owned actual source and an immutable new acceptance output directory."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--old-controller", type=Path, required=True)
+    parser.add_argument("--writer-controller", "--old-controller", type=Path, required=True)
     args = parser.parse_args()
-    print(json.dumps(run(args.output.absolute(), args.old_controller), sort_keys=True))
+    print(json.dumps(run(args.output.absolute(), args.writer_controller), sort_keys=True))
 
 
 if __name__ == "__main__":

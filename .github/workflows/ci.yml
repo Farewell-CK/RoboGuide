@@ -262,7 +262,7 @@ jobs:
         run: >
           uv run --frozen python tools/quality/check_archive_recipient_processes.py
           --output "${RUNNER_TEMP}/roboguide-archive-recipient"
-          --old-controller "${GITHUB_WORKSPACE}/target/debug/integration-server"
+          --writer-controller "${GITHUB_WORKSPACE}/target/debug/integration-server"
 
       - name: Verify original file Catalog replay after actual Archive
         run: >

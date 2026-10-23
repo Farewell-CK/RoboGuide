@@ -52,3 +52,19 @@ Unix socket 使用短根目录。已验证功能及时提交，重复全量矩�
 本包只修复已承诺的 standalone 兼容性。Completed 跨 owner 退休、Unknown 只读
 对账、parent8/Root4 完整恢复与升级、在线 readiness，以及全部原非发布计划仍
 必需，尚非 SoftwareComplete。远端 CI 按最终提交另行确认。
+
+## 私有接收方检查接续
+
+CI 40013334284 已通过原 GC/SQL 节点，随后在私有 Archive recipient 的旧 profile
+拒绝断言失败：检查器只接受 v0.14/v0.15 错误，当前 v53 正确要求显式 v0.18。
+断言现按实际选择的 profile 核对，继续要求目标未发布，产品 fence 未放宽。
+
+另核对发现该 CI 曾把当前 binary 传给名为 old-controller 的参数。维护入口现为
+`--writer-controller`（保留旧参数别名），分别记录实际 producer/writer schema、
+hash 和 `actual_older_controller_proof`；当前 writer 的拒绝不计旧 binary 证据。
+`recovery-profile-private-recipient-native-02` 使用真实 v49 binary
+`099e3f8a559be67b8c2cebdc4296e404920c4af837e7a38dc7a7c7814a363f89`，
+older proof 为 true；`recovery-profile-private-recipient-current-native-01` 使用当前
+v53，older proof 为 false、old-controller 字段为 null。两条完整实际退休/GC/
+故障/冷恢复均通过，零 Nodes/设备/模型/模拟器。初次 v47 尝试的不同目录格式
+拒绝记录保留，不计整条 gate 通过。完整维护范围 mypy 366 files 通过。
