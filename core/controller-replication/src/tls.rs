@@ -35,6 +35,7 @@ pub(crate) struct TlsMaterial {
 }
 
 /// Exact connection evidence; file replacement cannot replace the certificates actually presented.
+#[derive(Clone)]
 pub(crate) struct VerifiedTlsConnection {
     /// Actual served credential and its original current authority source.
     pub(crate) local: TlsMaterial,
@@ -43,6 +44,32 @@ pub(crate) struct VerifiedTlsConnection {
 }
 
 impl VerifiedTlsConnection {
+    /// Rechecks actual captured chains with an independently read current trust, avoiding SQL lock inversion.
+    pub(crate) fn authorize_with_trust(
+        &self,
+        sender: u64,
+        local_member: u64,
+        trust: &CertificateTrust,
+    ) -> Result<(), String> {
+        let now = rustls::pki_types::UnixTime::now();
+        let peer = self
+            .peer_chain
+            .first()
+            .ok_or("actual stream peer certificate is missing")?;
+        self.local
+            .client_verifier
+            .verify_client_cert(peer, &self.peer_chain[1..], now)
+            .map_err(|error| format!("original stream peer certificate expired: {error}"))?;
+        self.local.verify_server_at(&self.local.local_chain, now)?;
+        if !trust.admits(
+            sender,
+            &self.peer_digest().ok_or("actual stream peer leaf absent")?,
+        ) || !trust.admits(local_member, &self.local.local_certificate_digest)
+        {
+            return Err("original stream credentials no longer have current permission".into());
+        }
+        Ok(())
+    }
     /// Hashes only the actual TLS peer leaf, never a request field or later credential file.
     pub(crate) fn peer_digest(&self) -> Option<String> {
         use sha2::{Digest as _, Sha256};

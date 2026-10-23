@@ -11,6 +11,7 @@ mod content_application;
 mod content_application_tests;
 mod content_store;
 mod member;
+mod network_content;
 mod snapshot_data;
 mod store;
 mod supervision;
@@ -332,9 +333,14 @@ pub struct ReplicaConfig {
 }
 
 impl ReplicaConfig {
+    /// Names only the explicit network content generation; legacy configuration retains its old meaning.
+    pub fn streams_content(&self) -> bool {
+        self.schema == "roboguide.controller-replica/v0.4"
+    }
+
     /// New trust authority is never hidden inside legacy single-pin deployment profiles.
     pub fn rotates_certificates(&self) -> bool {
-        self.schema == "roboguide.controller-replica/v0.3"
+        self.schema == "roboguide.controller-replica/v0.3" || self.streams_content()
     }
     /// Returns the startup voter set while preserving the v0.1 three-member compatibility profile.
     pub fn initial_voters(&self) -> BTreeSet<u64> {
@@ -376,6 +382,8 @@ impl ReplicaConfig {
                 .any(|address| !address.ip().is_loopback())
                 && self.tls.is_none())
             || self.application_schema.trim().is_empty()
+            || (self.streams_content()
+                && self.application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA)
             || self.application_policy_digest.trim().is_empty()
             || self
                 .shared_secret
@@ -443,6 +451,8 @@ impl ReplicaConfig {
 /// Live consensus service and durable accepted history, independent of any executing Controller child.
 #[derive(Clone)]
 pub struct ReplicaNode {
+    /// Explicit initial/pre-enrolled root declarations; existing committed member data stays authoritative.
+    content_bootstrap: Option<Arc<BTreeMap<u64, String>>>,
     /// Actual local network lifetimes and capacity; never replicated authority.
     transport_budget: Arc<transport_budget::TransportBudget>,
     /// Actual kernel-generated identity of this infrastructure process incarnation.
@@ -484,10 +494,66 @@ impl ReplicaNode {
         path: &Path,
         limits: ReplicaTransportLimits,
     ) -> Result<(Self, ReplicaServer), String> {
+        Self::start_inner(config, path, limits, None).await
+    }
+
+    /// Starts only explicit v0.4 with actual held Root4 and declared original bootstrap roots.
+    /// This core constructor does not establish the runnable supervisor's child/source contract.
+    pub async fn start_with_content(
+        config: ReplicaConfig,
+        path: &Path,
+        root: ReplicaContentStore,
+        bootstrap_owners: BTreeMap<u64, String>,
+        limits: ReplicaTransportLimits,
+    ) -> Result<(Self, ReplicaServer), String> {
+        Self::start_inner(config, path, limits, Some((root, bootstrap_owners))).await
+    }
+
+    /// Retains old startup while admitting network content only through the explicit owned constructor.
+    async fn start_inner(
+        config: ReplicaConfig,
+        path: &Path,
+        limits: ReplicaTransportLimits,
+        content: Option<(ReplicaContentStore, BTreeMap<u64, String>)>,
+    ) -> Result<(Self, ReplicaServer), String> {
         config.validate()?;
+        if config.streams_content() != content.is_some() {
+            return Err(
+                "network content startup requires its explicit original Root4 constructor".into(),
+            );
+        }
         let transport_budget = transport_budget::TransportBudget::new(limits)?;
-        let store =
-            SqliteRaftStore::open(path, &config.profile_identity(), &config.application_schema)?;
+        let (store, content_bootstrap) = if let Some((root, owners)) = content {
+            if owners.keys().copied().collect::<BTreeSet<_>>()
+                != config.members.keys().copied().collect()
+                || owners.values().collect::<BTreeSet<_>>().len() != owners.len()
+                || owners.get(&config.replica_id) != Some(&root.identity().store_owner)
+                || root.identity().member != config.replica_id
+            {
+                return Err("network bootstrap lacks exact distinct actual member roots".into());
+            }
+            for (id, owner) in &owners {
+                ReplicaMember::with_content_store(config.members[id], owner.clone())?;
+            }
+            (
+                SqliteRaftStore::open_with_network_content(
+                    path,
+                    &config.profile_identity(),
+                    &config.application_schema,
+                    root,
+                )?,
+                Some(Arc::new(owners)),
+            )
+        } else {
+            (
+                SqliteRaftStore::open(
+                    path,
+                    &config.profile_identity(),
+                    &config.application_schema,
+                )?,
+                None,
+            )
+        };
         let tls = if config.rotates_certificates() {
             let configuration = config.tls.as_ref().ok_or("rotation requires TLS")?;
             store.initialize_certificate_trust(&configuration.peer_certificate_digests)?;
@@ -539,6 +605,7 @@ impl ReplicaNode {
         .await
         .map_err(|error| error.to_string())?;
         let node = Self {
+            content_bootstrap,
             transport_budget,
             process_instance: supervision::new_process_instance()?,
             #[cfg(test)]
@@ -571,8 +638,8 @@ impl ReplicaNode {
                 .config
                 .initial_voters()
                 .iter()
-                .map(|id| (*id, ReplicaMember::new(node.config.members[id].to_string())))
-                .collect::<BTreeMap<_, _>>();
+                .map(|id| node.configured_member(*id).map(|member| (*id, member)))
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
             node.raft
                 .initialize(members)
                 .await
@@ -581,12 +648,31 @@ impl ReplicaNode {
         Ok((node, server))
     }
 
+    /// Supplies declared original member data for first bootstrap/new learner, never rewriting existing data.
+    fn configured_member(&self, member: u64) -> Result<ReplicaMember, String> {
+        let address = self
+            .config
+            .members
+            .get(&member)
+            .ok_or("member is not pre-enrolled")?;
+        match &self.content_bootstrap {
+            None => Ok(ReplicaMember::new(address)),
+            Some(owners) => ReplicaMember::with_content_store(
+                address,
+                owners
+                    .get(&member)
+                    .ok_or("original member root declaration missing")?
+                    .clone(),
+            ),
+        }
+    }
+
     /// Observes actual local transport permits without changing epoch, ownership or permissions.
     pub fn transport_snapshot(&self) -> ReplicaTransportSnapshot {
         self.transport_budget.snapshot()
     }
 
-    /// Fences application work while retaining infrastructure quorum observations for reconciliation.
+    /// Confirms infrastructure epoch/quorum and the original transfer fence; content child ingress is separate.
     pub async fn check_epoch(&self, epoch: ControllerEpoch) -> Result<(), String> {
         self.check_source_transfer_fence()?;
         self.check_consensus_epoch(epoch).await?;
@@ -649,6 +735,11 @@ impl ReplicaNode {
         epoch: ControllerEpoch,
         batch: state::ApplicationCommitBatch,
     ) -> Result<CommitReceipt, String> {
+        if self.config.streams_content() {
+            return Err(
+                "network content profile requires its complete original content candidate".into(),
+            );
+        }
         self.check_epoch(epoch).await?;
         batch.validate().map_err(|error| error.to_string())?;
         let reply =
@@ -684,7 +775,20 @@ impl ReplicaNode {
         {
             return Err("learner admission target is not a pre-enrolled non-voter".into());
         }
-        let node = ReplicaMember::new(self.config.members[&member_id].to_string());
+        let node = self.configured_member(member_id)?;
+        if self.config.streams_content()
+            && self
+                .raft
+                .metrics()
+                .borrow()
+                .membership_config
+                .nodes()
+                .any(|(id, original)| *id == member_id && original != &node)
+        {
+            return Err(
+                "existing member binding requires explicit original reconfiguration".into(),
+            );
+        }
         tokio::time::timeout(
             Duration::from_secs(10),
             self.raft.add_learner(member_id, node, true),

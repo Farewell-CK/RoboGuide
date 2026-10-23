@@ -1,5 +1,19 @@
 # Repository Guidelines
 
+ADR-0169 connects explicit core Replica v0.4/parent7 to actual Root4 and consensus-bound owners.
+Actual mTLS/current committed membership and original clocks guard Ready, bounded chunks, unique
+blocking workers and complete original observations. Real source Artifact writer staging precedes
+metadata Commit; full ACK independently requires the same complete-byte/metadata voters in every
+current/joint group. Parent7 has a mandatory empty-generation marker and refuses implicit upgrades.
+Readonly authority uses an actual original-inode-checked WAL snapshot, avoiding parent/root mutex
+inversion. Actual same-process services and separate native processes exercise full bytes, original
+Controller/CAS capture, SIGKILL failover and exact inode/candidate reopen with zero embodied Nodes,
+devices/models/simulators. Owners are store_network.rs, network_content.rs, content_transport.rs,
+content_network_probe and check_network_content_processes.py. Runnable supervisor still refuses v0.4
+until original child/Prepared source, routing/readiness and recovery/upgrade contracts are connected.
+Native current-majority proof does not close the full joint/fault/catchup/GC matrix, production HA,
+cross-host/physical continuity or any remaining P1-P7 requirement.
+
 ADR-0168 adds explicit content SQL v4/layout v0.4 original bounded stream reception. Actual complete
 intent and independent pins precede staging/source reads; one non-Clone worker retains real FD/root
 leases and eight-slot capacity through 64 KiB chunks, full hash/size/fsync/publication and SQL receipt.

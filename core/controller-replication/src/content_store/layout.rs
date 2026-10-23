@@ -235,6 +235,7 @@ pub(super) fn create(
             producers,
             streams,
             stream_capacity: Arc::new(tokio::sync::Semaphore::new(8)),
+            stream_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
         }),
     })
 }
@@ -405,6 +406,7 @@ pub(super) fn open(
             producers,
             streams,
             stream_capacity: Arc::new(tokio::sync::Semaphore::new(8)),
+            stream_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
         }),
     })
 }

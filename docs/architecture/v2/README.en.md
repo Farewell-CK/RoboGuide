@@ -1,7 +1,14 @@
 # RoboGuide V2 current architecture
 
-Reviewed: 2026-10-23. Current remediation baseline: `6e7f7d21cf57e7b84329ab468440aa1813fa65cc`
-plus ADR-0159 direct storage/Snapshot integration; online integration remains in progress,
+[ADR-0169](../../decisions/0169-consensus-bound-content-stream-transport.md) connects an explicit
+network content profile, parent v7 and actual mTLS Ready/bounded streams. Exact Raft member data
+binds owners; original epoch, credentials and budgets remain checked per chunk. A complete ACK
+requires the same complete byte/metadata members in every current/joint voting set. The runnable
+supervisor remains fenced until its original child and Prepared-source contracts are connected;
+all remaining upgrade/recovery/routing and original remediation gates remain independent.
+
+Reviewed: 2026-10-23. Committed remediation baseline: `b372d95`
+plus ADR-0169 actual network content integration; runnable supervisor and full online gates remain in progress,
 on the single development branch `codex/nonrelease-remediation-closure`. The atlas retains its
 October 22 source baseline `495a6d2`. These later remediation changes have not merged back to main;
 they are not claims about the current remote main branch.

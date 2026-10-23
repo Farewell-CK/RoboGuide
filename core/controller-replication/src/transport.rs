@@ -15,6 +15,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
+#[path = "content_transport.rs"]
+mod content_streams;
+pub(crate) use content_streams::send_content_stream;
+
 #[cfg(test)]
 #[path = "transport_tls_tests.rs"]
 mod tls_tests;
@@ -39,6 +43,22 @@ struct Request {
 /// Private consensus and durability operations never carry an embodied Node selector.
 #[derive(Serialize, Deserialize)]
 enum Command {
+    /// Independently observes actual complete committed metadata and bytes; never executes an application.
+    ObserveContent {
+        /// Exact original epoch/membership/application/qualified-input observation target.
+        target: Box<ContentQuorumTarget>,
+    },
+    /// Exact original network byte receive; actual TLS/current membership supplies permission.
+    PushContent {
+        /// Exact original current metadata/membership/qualified input target.
+        target: Box<ContentQuorumTarget>,
+        /// One complete original input from the target.
+        content: ArtifactContentKey,
+        /// Original immutable receive ID, never an automatic repair ID.
+        command_id: String,
+        /// Original bounded receiver duration, frozen before its writer wait/queue.
+        budget_ms: u64,
+    },
     /// Observes actual loaded TLS credentials and local committed trust without claiming quorum.
     CertificateObserve,
     /// Reads quorum-current committed certificate authority, without modifying lifecycle.
@@ -146,6 +166,7 @@ impl Command {
         matches!(
             self,
             Self::Commit { .. }
+                | Self::PushContent { .. }
                 | Self::AdminRotateCertificate { .. }
                 | Self::AdminAddLearner { .. }
                 | Self::AdminChangeMembership { .. }
@@ -158,6 +179,12 @@ impl Command {
 /// Closed response preserves upstream Raft errors separately from child acceptance.
 #[derive(Serialize, Deserialize)]
 enum Reply {
+    /// Actual authenticated member observation; its standalone serialized data never grants a quorum.
+    ContentObservation(Result<MemberContentObservation, String>),
+    /// Original receive readiness or immutable existing outcome; never an application ACK.
+    ContentStream(Result<content_streams::StreamNotice, String>),
+    /// Actual full-byte stream receipt, distinct from complete metadata/content majority.
+    ContentStreamFinished(Result<ReplicaContentStreamStatus, String>),
     /// Exact original committed trust, separate from application state.
     CertificateTrust(Result<CertificateTrust, String>),
     /// Immutable accepted rotation result, including original actual confirmations.
@@ -296,6 +323,11 @@ where
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     drop(bytes);
     let received_at = tokio::time::Instant::now();
+    let stream_budget = if let Command::PushContent { budget_ms, .. } = &request.command {
+        Some(crate::content_store::ContentBudget::issue(*budget_ms)?)
+    } else {
+        None
+    };
     #[cfg(test)]
     if request.command.requires_member_writer() {
         node.framed_member_mutations.fetch_add(1, Ordering::SeqCst);
@@ -341,6 +373,41 @@ where
         Reply::Rejected("replica profile/member identity mismatch".into())
     } else {
         match request.command {
+            Command::ObserveContent { target } => {
+                if request.sender != target.epoch.replica_id {
+                    return Err("content observation requires its actual original leader".into());
+                }
+                let check = content_streams::permission(
+                    node.clone(),
+                    *target.clone(),
+                    request.sender,
+                    certificate_connection.ok_or("content observation requires actual mTLS")?,
+                );
+                Reply::ContentObservation(node.observe_content_checked(*target, check).await)
+            }
+            Command::PushContent {
+                target,
+                content,
+                command_id,
+                budget_ms: _,
+            } => {
+                if request.sender != target.epoch.replica_id {
+                    return Err(
+                        "actual content sender differs from the original target leader".into(),
+                    );
+                }
+                drop(frame);
+                return content_streams::receive_content_stream(
+                    &mut stream,
+                    node.clone(),
+                    *target,
+                    content,
+                    command_id,
+                    stream_budget.ok_or("original receive clock is missing")?,
+                    certificate_connection.ok_or("content stream requires actual mTLS")?,
+                )
+                .await;
+            }
             Command::CertificateObserve => {
                 Reply::CertificateTarget(node.current_certificate_trust().and_then(|trust| {
                     node.confirm_certificate_target(
@@ -411,13 +478,20 @@ where
                     Reply::Snapshot(node.raft.install_snapshot(rpc).await)
                 }
             }
-            Command::Fence(epoch) => Reply::Fence(node.check_epoch(epoch).await),
+            Command::Fence(epoch) => Reply::Fence(if node.config.streams_content() {
+                Err("network content application authority requires its original child ingress contract".into())
+            } else {
+                node.check_epoch(epoch).await
+            }),
             Command::Commit { epoch, batch } => Reply::Commit(node.commit(epoch, batch).await),
             Command::AcceptedIdentity { epoch } => {
-                let result = node
-                    .check_epoch(epoch)
-                    .await
-                    .and_then(|()| node.accepted_application_identity());
+                let result = if node.config.streams_content() {
+                    Err("network content acceptance observation requires its complete original child contract".into())
+                } else {
+                    node.check_epoch(epoch)
+                        .await
+                        .and_then(|()| node.accepted_application_identity())
+                };
                 Reply::AcceptedIdentity(result)
             }
             Command::TransferLeadership {
@@ -842,6 +916,51 @@ pub(crate) async fn admin_membership(
     }
 }
 
+/// Obtains one actual exact-member mTLS observation and rechecks current original leaf permission.
+pub(crate) async fn observe_content_target(
+    source: &ReplicaNode,
+    member: u64,
+    target: ContentQuorumTarget,
+) -> Result<MemberContentObservation, String> {
+    let data = target
+        .membership
+        .nodes()
+        .find_map(|(id, data)| (*id == member).then_some(data.clone()))
+        .ok_or("content observation member lacks its exact committed data")?;
+    let network = ReplicaNetwork {
+        target: member,
+        node: data,
+        profile: source.profile_identity(),
+        sender: source.config.replica_id,
+        online: source.network_online.clone(),
+        shared_secret: source.config.shared_secret.clone(),
+        tls: source.tls.clone(),
+        budget: source.transport_budget.clone(),
+    };
+    let (response, leaf) = network
+        .exchange_observed(
+            Command::ObserveContent {
+                target: Box::new(target.clone()),
+            },
+            RPCOption::new(Duration::from_secs(15)),
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    let trust = source.network_target_authority(&target)?;
+    if !leaf
+        .as_ref()
+        .is_some_and(|actual| trust.admits(member, actual))
+    {
+        return Err("actual observation peer lost its current exact leaf permission".into());
+    }
+    match response {
+        Reply::ContentObservation(result) => result,
+        Reply::Rejected(error) => Err(error),
+        _ => Err("actual content observation response has another interpretation".into()),
+    }
+}
+
 /// Sends one authenticated learner admission command to the current leader.
 pub(crate) async fn admin_add_learner(
     config: &ReplicaConfig,
@@ -1049,9 +1168,12 @@ impl ReplicaNetwork {
                 }
                 stream.write_u64(encoded.bytes.len() as u64).await?;
                 stream.write_all(&encoded.bytes).await?;
-                read_reply(&mut stream, &self.budget)
-                    .await
-                    .map(|reply| (reply, actual_leaf))
+                let reply = read_reply(&mut stream, &self.budget).await?;
+                if self.node.content_store_owner.is_some() {
+                    tls.authenticate_peer(self.target, stream.get_ref().1.peer_certificates())
+                        .map_err(std::io::Error::other)?;
+                }
+                Ok((reply, actual_leaf))
             } else {
                 let mut stream = stream;
                 stream.write_u64(encoded.bytes.len() as u64).await?;

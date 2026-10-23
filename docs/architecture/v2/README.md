@@ -1,11 +1,17 @@
 # RoboGuide V2 现行架构
 
-核对日期：2026-10-23；当前整改代码基线：`6e7f7d21cf57e7b84329ab468440aa1813fa65cc`
-加本包 ADR-0159 的 direct storage/Snapshot 接线，在线接线仍实施中，
+核对日期：2026-10-23；当前整改提交基线：`b372d95`，
+加本包 ADR-0169 的实际网络内容接线，runnable supervisor 与完整在线矩阵继续实施，
 位于唯一开发分支 `codex/nonrelease-remediation-closure`。本页同步 main 的 10 月 22 日图册，
 保留其原基线 `495a6d2`；下述新增整改尚未合回 main，不提前记为远端 main 能力。
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
+
+[ADR-0169](../../decisions/0169-consensus-bound-content-stream-transport.md)正在接显式
+网络内容 profile、parent v7 和实际 mTLS Ready/有界 stream。owner 由确切 Raft member
+绑定，原 epoch/证书/预算按块检查，同一 current/joint voters 的完整 bytes+metadata
+才允许完整 ACK。core 私有接线不提升尚未接全原 child/Prepared source 的 supervisor；
+旧生产 profile、完整升级/恢复/路由和原其余整改条件保持各自验收。
 
 [图册与代码入口](current-architecture.md)提供总体、执行、部署、评估四张 Mermaid 图；
 [架构手册](architecture-handbook.md)提供读者路径；

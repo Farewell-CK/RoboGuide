@@ -17,6 +17,10 @@ pub use producers::{
 };
 pub use reader::{ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus};
 pub use streams::ReplicaContentStreamStatus;
+pub(crate) use streams::{
+    CHUNK_BYTES as STREAM_CHUNK_BYTES, StreamAdmission, StreamOrigin, StreamPermission,
+    verify_stream_observation,
+};
 pub(crate) use time::ContentBudget;
 pub use time::ContentProcessEndObservation;
 #[cfg(test)]
@@ -154,6 +158,8 @@ struct ContentInner {
     streams: bool,
     /// Bounds actual running/queued stream workers; each unique worker retains its own permit.
     stream_capacity: Arc<tokio::sync::Semaphore>,
+    /// Bounds actual running/queued transport jobs before their owned blocking worker is spawned.
+    stream_jobs: Arc<tokio::sync::Semaphore>,
 }
 
 impl Drop for ContentInner {
@@ -181,6 +187,22 @@ pub struct ReplicaContentStore {
 }
 
 impl ReplicaContentStore {
+    /// Reserves original real transport work before queuing; the owned worker must retain this permit.
+    pub(crate) fn stream_work_permit(&self) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
+        if !self.inner.streams {
+            return Err("network stream work requires its original Root4".into());
+        }
+        self.inner
+            .stream_jobs
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| "original content transport work capacity is exhausted".into())
+    }
+    /// Observes only this original opened generation; it is no network or source-read permission.
+    pub(crate) fn streams_enabled(&self) -> bool {
+        self.inner.streams
+    }
+
     /// Initializes only a genuinely empty declared root; interrupted/existing authority is not replaced.
     pub fn create(root: &Path, profile_identity: &str, member: u64) -> Result<Self, String> {
         layout::create(root, profile_identity, member, ContentCreateMode::Reader)

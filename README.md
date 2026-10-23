@@ -1,5 +1,12 @@
 # RoboGuide
 
+[共识绑定的内容传输](docs/development/acceptance/2026-10-23-network-content-transport.md)
+已接 core 的显式 v0.4/parent7：实际原 Artifact writer、mTLS Ready/有界字节流、
+完整原候选与同一 voters 的 metadata+bytes ACK。独立进程用真实原 Controller/CAS
+验证 leader SIGKILL 后多数读取及原 inode 重开。实现归属 `network_content.rs`、
+`content_transport.rs` 与 `store_network.rs`；原 child/Prepared source、完整 joint/
+catchup/恢复/升级/路由继续接线，runnable supervisor 的新内容模式仍封住。
+
 [原有界内容流](docs/development/acceptance/2026-10-23-original-content-streams.md)由
 `core/controller-replication/src/content_store/streams.rs` / `stream_writer.rs` 维护。
 显式 SQL v4 在原持久意图/pin 后才读取实际源，完整 hash/fsync 后发布原回执，故障保留

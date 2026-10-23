@@ -10,7 +10,8 @@ impl SqliteRaftStore {
     ) -> Result<Vec<CommitReceipt>, StorageError<u64>> {
         for entry in &entries {
             if let EntryPayload::Membership(membership) = &entry.payload {
-                crate::member::require_legacy_membership(membership).map_err(io_error)?;
+                self.validate_content_membership(membership)
+                    .map_err(io_error)?;
             }
         }
         let admissions = entries

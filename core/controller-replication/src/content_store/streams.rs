@@ -23,6 +23,28 @@ impl ReplicaContentStore {
         duration_ms: u64,
     ) -> Result<ReplicaContentStreamStatus, String> {
         let budget = ContentBudget::issue(duration_ms)?;
+        self.copy_artifact_stream_at_budget(
+            source,
+            target,
+            content,
+            command,
+            budget,
+            Arc::new(|| Ok(())),
+        )
+    }
+
+    /// Retains an actual pre-queue clock and trusted live adapter permission during local source staging.
+    pub(crate) fn copy_artifact_stream_at_budget(
+        &self,
+        source: &artifact_store::FileSystemArtifactStore,
+        target: ContentQuorumTarget,
+        content: &ArtifactContentKey,
+        command: &str,
+        budget: ContentBudget,
+        source_permission: StreamPermission,
+    ) -> Result<ReplicaContentStreamStatus, String> {
+        budget.check()?;
+        source_permission()?;
         let actual = source
             .writer_identity()
             .map_err(|error| error.to_string())?;
@@ -34,6 +56,7 @@ impl ReplicaContentStore {
         let expected = writer.clone();
         let held = source.clone();
         let permission: StreamPermission = Arc::new(move || {
+            source_permission()?;
             let current = held.writer_identity().map_err(|error| error.to_string())?;
             if (current.owner_id, current.lease_device, current.lease_inode)
                 != (expected.owner.clone(), expected.device, expected.inode)
@@ -168,6 +191,54 @@ pub struct ReplicaContentStreamStatus {
     pub receipt: Option<ReplicaContentReceipt>,
 }
 
+/// Checks an actual authenticated peer's complete original observation against this exact request.
+pub(crate) fn verify_stream_observation(
+    observed: &ReplicaContentStreamStatus,
+    target: &ContentQuorumTarget,
+    content: &ArtifactContentKey,
+    command: &str,
+    receiver: u64,
+) -> Result<(), String> {
+    let original: StreamRecord =
+        serde_json::from_value(observed.original.clone()).map_err(|error| error.to_string())?;
+    let intent = &original.intent;
+    validate_intent(intent, &intent.receiver)?;
+    if observed.schema != "roboguide.replica-content-stream-status/v0.1"
+        || observed.command_id != command
+        || intent.command_id != command
+        || intent.target != *target
+        || intent.content != *content
+        || intent.receiver.member != receiver
+        || intent.receiver.root_inode == 0
+        || intent.receiver.database_inode == 0
+        || original.request_digest != digest(intent)?
+        || observed.request_digest != original.request_digest
+        || observed.receipt != original.receipt
+        || !matches!(intent.origin, StreamOrigin::Replica { member, .. } if member == target.epoch.replica_id)
+    {
+        return Err("actual peer stream observation changed its original request/receiver".into());
+    }
+    if let Some(receipt) = &original.receipt
+        && (receipt.schema != RECEIPT_SCHEMA
+            || receipt.request_digest != original.request_digest
+            || receipt.command_id != command
+            || receipt.content != *content
+            || receipt.member != receiver
+            || receipt.store_owner != intent.receiver.store_owner
+            || receipt.profile_identity != target.profile_identity
+            || receipt.file_inode == 0
+            || !intent.budget.validates_completion(receipt.completed_ms)
+            || original
+                .worker_closed_ms
+                .is_none_or(|closed| closed < receipt.completed_ms))
+    {
+        return Err(
+            "actual peer stream receipt differs from its original byte/budget evidence".into(),
+        );
+    }
+    Ok(())
+}
+
 /// Initializes only the explicit fresh/upgrading v4 journal in its original SQL transaction.
 pub(super) fn initialize(connection: &Connection) -> Result<(), String> {
     connection.execute_batch("CREATE TABLE content_streams(stream_id TEXT PRIMARY KEY,request_digest TEXT NOT NULL,record TEXT NOT NULL)").map_err(|error| error.to_string())?;
@@ -247,7 +318,10 @@ fn validate_intent(intent: &StreamIntent, identity: &ReplicaContentIdentity) -> 
         || intent.command_id.chars().any(char::is_control)
         || intent.content.byte_size > MAX_STREAM_BYTES
         || intent.target.profile_identity != identity.profile_identity
-        || intent.target.member_stores.get(&identity.member) != Some(&identity.store_owner)
+        || !intent.target.membership.nodes().any(|(member, data)| {
+            *member == identity.member
+                && data.content_store_owner.as_ref() == Some(&identity.store_owner)
+        })
         || intent.target.inputs.binary_search(&intent.content).is_err()
     {
         return Err("original stream target/receiver/qualified input differs".into());

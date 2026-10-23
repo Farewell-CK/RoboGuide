@@ -297,6 +297,25 @@ impl ReplicaContentStore {
         authority_digest: &str,
         duration_ms: u64,
     ) -> Result<ReplicaContentReader, String> {
+        self.open_reader_checked(
+            content,
+            reader_id,
+            authority_digest,
+            duration_ms,
+            Arc::new(|| Ok(())),
+        )
+    }
+
+    /// Retains trusted actual adapter permission during each bounded verification read before exposure.
+    pub(crate) fn open_reader_checked(
+        &self,
+        content: &ArtifactContentKey,
+        reader_id: &str,
+        authority_digest: &str,
+        duration_ms: u64,
+        permission: StreamPermission,
+    ) -> Result<ReplicaContentReader, String> {
+        permission()?;
         content.validate()?;
         if reader_id.is_empty()
             || reader_id.len() > 128
@@ -375,13 +394,17 @@ impl ReplicaContentStore {
             transaction.commit().map_err(|error| error.to_string())?;
         }
         self.verify_content_metadata(content)?;
-        let file = copy::verify_file_with_budget(
+        let file = copy::verify_file_with_check(
             &copy::object_path(self.root(), content),
             content,
-            Some(&intent.budget),
+            || {
+                intent.budget.check()?;
+                permission()
+            },
         )?;
         let actual = file.metadata().map_err(|error| error.to_string())?;
         intent.budget.check()?;
+        permission()?;
         Ok(ReplicaContentReader {
             store: self.clone(),
             intent,

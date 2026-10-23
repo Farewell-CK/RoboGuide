@@ -123,6 +123,7 @@ jobs:
         run: >
           cargo build --locked -p controller-replication
           --example content_store_probe --example content_stream_probe
+          --example content_network_probe
 
       - name: Verify original bounded content streams with zero Nodes
         run: >
@@ -149,6 +150,14 @@ jobs:
           uv run --frozen python tools/quality/check_memory_preparation_processes.py
           --output /tmp/rg-ci-catalog-retirement --process-workers --artifact-retention
           --async-workers 1
+
+      - name: Verify actual network content ACK and native process failover with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_network_content_processes.py
+          --probe target/debug/examples/content_network_probe
+          --storage-probe target/debug/examples/content_stream_probe
+          --source /tmp/rg-ci-catalog-retirement --members 137,149,163
+          --output "${RUNNER_TEMP}/roboguide-network-content"
 
       - name: Verify original child lineage through stopped Group handoff
         run: >

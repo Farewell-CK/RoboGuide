@@ -15,11 +15,22 @@ pub(crate) fn original(
     artifact_store::FileSystemArtifactStore,
     ArtifactContentKey,
 ) {
+    original_payload(root, b"actual original online-content storage test bytes")
+}
+
+/// Publishes the caller's real bounded software bytes while retaining the original upload/SQL contract.
+pub(crate) fn original_payload(
+    root: &Path,
+    payload: &[u8],
+) -> (
+    state::SqliteEventLog,
+    artifact_store::FileSystemArtifactStore,
+    ArtifactContentKey,
+) {
     let cas = artifact_store::FileSystemArtifactStore::new_with_archive_references(
         root.join("source-cas"),
     )
     .unwrap();
-    let payload = b"actual original online-content storage test bytes";
     let digest = artifact_store::digest_bytes(payload);
     let mut upload = cas.begin_upload("actual-original-upload").unwrap();
     upload.write_chunk(payload).unwrap();

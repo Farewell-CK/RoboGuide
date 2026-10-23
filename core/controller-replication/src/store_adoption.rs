@@ -659,7 +659,14 @@ impl SqliteRaftStore {
         if !actual.is_file() {
             return Err("original parent adoption requires an existing regular SQL file".into());
         }
-        let mut store = Self::open_inner(path, profile, application_schema, Some(content), true)?;
+        let mut store = Self::open_inner(
+            path,
+            profile,
+            application_schema,
+            Some(content),
+            true,
+            false,
+        )?;
         require_path(path, store._writer.identity()?)?;
         let version: i64;
         let mut originals;

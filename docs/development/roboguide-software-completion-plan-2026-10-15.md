@@ -113,6 +113,15 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N3 的 [ADR-0169](../decisions/0169-consensus-bound-content-stream-transport.md)已接 core
+显式网络 v0.4/parent7、实际 source writer、mTLS Ready/有界队列/原租约与完整原候选。
+metadata Commit 后实际逐成员读原 committed view 和全部 qualified bytes，同一 current/
+joint voting group 各自严格多数才返回完整 ACK。真实三服务与三个独立进程、原实际
+Controller/CAS、SIGKILL failover 和 inode/原候选重开通过，见[验收](acceptance/2026-10-23-network-content-transport.md)。
+下一步接 runnable supervisor 原 child/Prepared source/幂等对账、内容读取路由与完整
+readiness，再完成完整 joint/catchup/Snapshot/旧升级/回退/recovery/GC/业务故障矩阵。
+原 P1–P7、F0–F10 与 R01–R20 继续必需，尚不标完整 N1/N3 或 SoftwareComplete。
+
 N1/N3 的 [ADR-0168](../decisions/0168-original-bounded-replica-content-streams.md)
 已接实际 stream 后端：原完整 target/source/kernel intent 与独立 pin 先于源读取，
 唯一有界 worker 执行原权限/预算、chunk、hash/fsync/原子 publication 和原 SQL receipt。

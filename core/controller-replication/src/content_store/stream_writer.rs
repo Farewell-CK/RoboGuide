@@ -181,6 +181,10 @@ impl ReplicaContentStore {
 }
 
 impl StreamWriter {
+    /// Returns only this already durable original admission identity for the subsequent Ready notice.
+    pub(crate) fn original_digest(&self) -> &str {
+        &self.request_digest
+    }
     /// Checks the exact original worker before its adapter opens/reads another source payload chunk.
     pub(crate) fn check_before_source_read(&mut self) -> Result<(), String> {
         let result = self.check();

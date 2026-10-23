@@ -644,6 +644,27 @@ async fn controlled_leader_transfer_moves_to_caught_up_voter() {
     }
 }
 
+/// Waits for the actual selected pair before an original transfer, without retrying its mutation.
+async fn selected_transfer_target(source: &ReplicaNode, target: u64) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let metrics = source.raft.metrics().borrow().clone();
+            if source.current_epoch().is_some()
+                && metrics
+                    .replication
+                    .as_ref()
+                    .and_then(|members| members.get(&target))
+                    .is_some_and(|position| position.map(|log| log.index) >= metrics.last_log_index)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the original source and selected target have actual current replication evidence");
+}
+
 /// A former source must serve idle heartbeats again after leadership explicitly returns to it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn repeated_transfer_back_to_original_source_preserves_idle_quorum() {
@@ -662,11 +683,13 @@ async fn repeated_transfer_back_to_original_source_preserves_idle_quorum() {
     }
     let source = leader(&nodes).await;
     let target = (source + 1) % nodes.len();
+    selected_transfer_target(&nodes[source].0, nodes[target].0.config.replica_id).await;
     nodes[source]
         .0
         .request_leader_transfer(nodes[target].0.config.replica_id, "round-trip-first")
         .await
         .unwrap();
+    selected_transfer_target(&nodes[target].0, nodes[source].0.config.replica_id).await;
     nodes[target]
         .0
         .request_leader_transfer(

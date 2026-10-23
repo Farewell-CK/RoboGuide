@@ -9,6 +9,8 @@ mod adoption;
 mod apply;
 #[path = "store_content.rs"]
 mod content;
+#[path = "store_network.rs"]
+mod network;
 #[path = "store_producers.rs"]
 mod producers;
 #[path = "store_snapshot.rs"]
@@ -51,6 +53,12 @@ const PRODUCER_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.5";
 const ADOPTED_STORAGE_VERSION: i64 = 6;
 /// Parent-local adoption journal interpretation, never imported through a Raft Snapshot.
 const ADOPTED_STORAGE_SCHEMA: &str = "roboguide.replica-storage/v0.6";
+/// Explicit network/member-bound generation; old direct storage cannot acquire it implicitly.
+const NETWORK_CONTENT_VERSION: i64 = 7;
+/// Closed parent interpretation for actual consensus-bound streaming roots.
+const NETWORK_CONTENT_SCHEMA: &str = "roboguide.replica-storage/v0.7";
+/// Mandatory original local network-generation marker, independently of an empty membership.
+const NETWORK_CONTENT_KEY: &str = "network_content_membership_schema";
 /// Legacy names retained only as read-only views after the atomic format migration.
 const LEGACY_TABLES: [&str; 5] = [
     "replica_meta",
@@ -313,6 +321,8 @@ pub struct SqliteRaftStore {
     application_schema: String,
     /// Actual member-local original content ownership; absent for unchanged metadata-only stores.
     content: Option<ReplicaContentStore>,
+    /// Exact explicitly admitted network generation, never inferred from a stream-capable root alone.
+    network_content: bool,
     /// Actual original queue admission on a managed worker clone; it is never serialized or renewed.
     work_clock: Option<crate::content_store::ProducerClock>,
     /// Bounds actual running plus queued heavy work per original store, retained inside each worker.
@@ -321,6 +331,8 @@ pub struct SqliteRaftStore {
 
 /// Explicit application lease, independent of descriptors briefly inherited by child processes.
 pub(crate) struct ReplicaWriterLease {
+    /// Actual canonical SQL path, independently inode-checked by original readonly observers.
+    path: std::path::PathBuf,
     /// Shared open-file description locked while at least one application Store owns it.
     file: File,
     /// Open description for the actual SQLite inode, closing the hard-link alias gap.
@@ -370,12 +382,15 @@ fn prepare_storage_format(
     content_identity: Option<&ReplicaContentIdentity>,
     producers: bool,
     adoption: bool,
+    network_content: bool,
 ) -> Result<(), String> {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
     let marker = schema_object_type(connection, "replica_storage_format")?;
-    let target_version = if producers {
+    let target_version = if network_content {
+        NETWORK_CONTENT_VERSION
+    } else if producers {
         if version == ADOPTED_STORAGE_VERSION {
             ADOPTED_STORAGE_VERSION
         } else {
@@ -390,7 +405,10 @@ fn prepare_storage_format(
         || (content_identity.is_none()
             && matches!(
                 version,
-                CONTENT_STORAGE_VERSION | PRODUCER_STORAGE_VERSION | ADOPTED_STORAGE_VERSION
+                CONTENT_STORAGE_VERSION
+                    | PRODUCER_STORAGE_VERSION
+                    | ADOPTED_STORAGE_VERSION
+                    | NETWORK_CONTENT_VERSION
             ))
     {
         return Err("complete-content Replica storage requires explicit original upgrade; metadata-only open/automatic migration refused".into());
@@ -420,6 +438,7 @@ fn prepare_storage_format(
             | CONTENT_STORAGE_VERSION
             | PRODUCER_STORAGE_VERSION
             | ADOPTED_STORAGE_VERSION
+            | NETWORK_CONTENT_VERSION
     ) && marker.as_deref() == Some("table")
     {
         if current.iter().any(|kind| kind.as_deref() != Some("table"))
@@ -438,6 +457,8 @@ fn prepare_storage_format(
             "roboguide.replica-storage/v0.1"
         } else if version == 2 {
             "roboguide.replica-storage/v0.2"
+        } else if version == NETWORK_CONTENT_VERSION {
+            NETWORK_CONTENT_SCHEMA
         } else if version == ADOPTED_STORAGE_VERSION {
             ADOPTED_STORAGE_SCHEMA
         } else if version == PRODUCER_STORAGE_VERSION {
@@ -590,6 +611,17 @@ fn prepare_storage_format(
         {
             return Err("old Replica storage contains hidden original producer authority".into());
         }
+        let network_marker: Option<String> =
+            read_meta(connection, NETWORK_CONTENT_KEY).map_err(|error| error.to_string())?;
+        if network_content {
+            if network_marker.as_deref() != Some(NETWORK_CONTENT_SCHEMA) {
+                return Err(
+                    "mandatory original network content marker is missing or changed".into(),
+                );
+            }
+        } else if network_marker.is_some() {
+            return Err("old Replica storage contains hidden network content authority".into());
+        }
         adoption::validate_history(
             connection,
             version,
@@ -693,7 +725,7 @@ fn prepare_storage_format(
              CREATE VIEW replica_log AS SELECT * FROM replica_v1_log;
              CREATE VIEW replica_events AS SELECT * FROM replica_v1_events;
              CREATE VIEW replica_snapshot AS SELECT * FROM replica_v1_snapshot;
-             PRAGMA user_version={target_version};",if producers{PRODUCER_STORAGE_SCHEMA}else if content_identity.is_some(){CONTENT_STORAGE_SCHEMA}else{REPLICA_STORAGE_SCHEMA}),
+             PRAGMA user_version={target_version};",if network_content{NETWORK_CONTENT_SCHEMA}else if producers{PRODUCER_STORAGE_SCHEMA}else if content_identity.is_some(){CONTENT_STORAGE_SCHEMA}else{REPLICA_STORAGE_SCHEMA}),
         )
         .map_err(|error| error.to_string())?;
     write_meta(
@@ -741,6 +773,10 @@ fn prepare_storage_format(
             &producers::ProducerHeads::default(),
         )
         .map_err(|error| error.to_string())?;
+    }
+    if network_content {
+        write_meta(&transaction, NETWORK_CONTENT_KEY, &NETWORK_CONTENT_SCHEMA)
+            .map_err(|error| error.to_string())?;
     }
     transaction.commit().map_err(|error| error.to_string())
 }
@@ -956,8 +992,9 @@ impl SqliteRaftStore {
                     |row| row.get(0),
                 )
                 .map_err(|error| error.to_string())?;
+            let allowed_network_genesis = self.network_genesis(&transaction)?;
             if logs != 0
-                || authority != 0
+                || authority != if allowed_network_genesis { 4 } else { 0 }
                 || !read_leader_transfer_history(&transaction)?.is_empty()
             {
                 return Err(
@@ -1027,7 +1064,7 @@ impl SqliteRaftStore {
     }
     /// Opens a private consensus database and rejects a conflicting stored cluster/schema profile.
     pub fn open(path: &Path, profile: &str, application_schema: &str) -> Result<Self, String> {
-        Self::open_inner(path, profile, application_schema, None, false)
+        Self::open_inner(path, profile, application_schema, None, false, false)
     }
 
     /// Opens only an explicit complete-content generation with its exact actual member-local backend.
@@ -1043,7 +1080,39 @@ impl SqliteRaftStore {
         {
             return Err("complete-content Replica requires its actual original profile/current application schema".into());
         }
-        Self::open_inner(path, profile, application_schema, Some(content), false)
+        Self::open_inner(
+            path,
+            profile,
+            application_schema,
+            Some(content),
+            false,
+            false,
+        )
+    }
+
+    /// Opens only an explicit original network parent and actual Root4, refusing all legacy conversion.
+    pub fn open_with_network_content(
+        path: &Path,
+        profile: &str,
+        application_schema: &str,
+        content: ReplicaContentStore,
+    ) -> Result<Self, String> {
+        if !content.streams_enabled()
+            || content.identity().profile_identity != profile
+            || application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+        {
+            return Err(
+                "network content parent requires its actual original Root4/profile/schema".into(),
+            );
+        }
+        Self::open_inner(
+            path,
+            profile,
+            application_schema,
+            Some(content),
+            false,
+            true,
+        )
     }
 
     /// Shares original actual SQLite/root lease setup without lending complete authority to old profiles.
@@ -1053,6 +1122,7 @@ impl SqliteRaftStore {
         application_schema: &str,
         content: Option<ReplicaContentStore>,
         adoption: bool,
+        network_content: bool,
     ) -> Result<Self, String> {
         let canonical = if path.exists() {
             path.canonicalize().map_err(|error| error.to_string())?
@@ -1105,6 +1175,7 @@ impl SqliteRaftStore {
             .try_lock()
             .map_err(|error| format!("replica database inode already owned: {error}"))?;
         let writer = ReplicaWriterLease {
+            path: canonical.clone(),
             file: writer,
             database,
         };
@@ -1131,6 +1202,7 @@ impl SqliteRaftStore {
                     .as_ref()
                     .is_some_and(ReplicaContentStore::producer_journal_enabled),
             adoption,
+            network_content,
         )?;
         if adoption {
             let journal: String = connection
@@ -1162,6 +1234,7 @@ impl SqliteRaftStore {
             profile: profile.into(),
             application_schema: application_schema.into(),
             content,
+            network_content,
             work_clock: None,
             storage_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
         };
@@ -1174,7 +1247,7 @@ impl SqliteRaftStore {
                 read_meta::<StoredMembership<u64, ReplicaMember>>(&connection, "membership")
                     .map_err(|error| error.to_string())?
             {
-                crate::member::require_legacy_membership(membership.membership())?;
+                store.validate_content_membership(membership.membership())?;
             }
         }
         if store.content.is_none() && view.content.is_some()
@@ -1301,7 +1374,8 @@ impl SqliteRaftStore {
     ) -> Result<(), StorageError<u64>> {
         for entry in entries {
             if let EntryPayload::Membership(membership) = &entry.payload {
-                crate::member::require_legacy_membership(membership).map_err(io_error)?;
+                self.validate_content_membership(membership)
+                    .map_err(io_error)?;
             }
         }
         if self.has_producer_journal() && self.work_clock.is_none() {

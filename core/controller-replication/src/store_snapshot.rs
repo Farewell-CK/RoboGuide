@@ -32,11 +32,11 @@ impl SqliteRaftStore {
         saved
             .map(|(meta, data)| {
                 let body: StoreSnapshot = serde_json::from_slice(&data).map_err(io_error)?;
-                crate::member::require_legacy_membership(body.membership.membership())
+                self.validate_content_membership(body.membership.membership())
                     .map_err(io_error)?;
                 let meta: SnapshotMeta<u64, ReplicaMember> =
                     serde_json::from_str(&meta).map_err(io_error)?;
-                crate::member::require_legacy_membership(meta.last_membership.membership())
+                self.validate_content_membership(meta.last_membership.membership())
                     .map_err(io_error)?;
                 Ok(Snapshot {
                     meta,
@@ -269,9 +269,9 @@ impl SqliteRaftStore {
             return Err(io_error("replica snapshot exceeds bounds"));
         }
         let restored: StoreSnapshot = serde_json::from_slice(&data).map_err(io_error)?;
-        crate::member::require_legacy_membership(restored.membership.membership())
+        self.validate_content_membership(restored.membership.membership())
             .map_err(io_error)?;
-        crate::member::require_legacy_membership(meta.last_membership.membership())
+        self.validate_content_membership(meta.last_membership.membership())
             .map_err(io_error)?;
         if restored.profile != self.profile
             || restored.last_applied != meta.last_log_id
@@ -510,7 +510,7 @@ impl SqliteRaftStore {
             leader_transfer: None,
         };
         let data = serde_json::to_vec(&snapshot).map_err(io_error)?;
-        crate::member::require_legacy_membership(snapshot.membership.membership())
+        self.validate_content_membership(snapshot.membership.membership())
             .map_err(io_error)?;
         let meta = SnapshotMeta {
             last_log_id: snapshot.last_applied,
