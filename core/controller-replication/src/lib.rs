@@ -52,8 +52,8 @@ pub use content_store::{
     ReplicaSnapshotCloseStatus,
 };
 pub use controller_ingress::{
-    ControllerContentClient, ControllerContentClientConfig, ControllerIngressServer,
-    ControllerIngressStatus,
+    ControllerContentClient, ControllerContentClientConfig, ControllerContentRead,
+    ControllerIngressServer, ControllerIngressStatus,
 };
 pub use member::ReplicaMember;
 pub use snapshot_data::ReplicaSnapshotData;

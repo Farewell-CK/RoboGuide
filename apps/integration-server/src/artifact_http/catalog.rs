@@ -205,6 +205,8 @@ impl MemoryPublicationIdentity {
 /// Shared catalog and evidence-log authority used by the artifact listener.
 #[derive(Clone)]
 pub struct ArtifactCatalog {
+    /// Explicit original child reader; legacy/standalone Catalogs never infer this capability.
+    pub(super) replica_content: Option<controller_replication::ControllerContentClient>,
     /// Explicit actual CAS owner; legacy catalogs never acquire new authority by inference.
     pub(super) retained_store: Option<FileSystemArtifactStore>,
     /// Committed original Catalog/lineage retention, independent of semantic access policies.
@@ -430,10 +432,21 @@ impl ArtifactCatalog {
     }
 
     /// Replays real owner-bound references without attributing existing unaccounted publications.
+    #[cfg(test)]
     pub fn replay_with_store(
         event_log: &SqliteEventLog,
         write_gate: Arc<Mutex<()>>,
         store: Option<FileSystemArtifactStore>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::replay_with_replica(event_log, write_gate, store, None)
+    }
+
+    /// Preserves original cross-owner dependencies while verifying their exact retained Root bytes.
+    pub fn replay_with_replica(
+        event_log: &SqliteEventLog,
+        write_gate: Arc<Mutex<()>>,
+        store: Option<FileSystemArtifactStore>,
+        replica_content: Option<controller_replication::ControllerContentClient>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut projection = MapCatalogProjection::new();
         let mut memory_projection = MemoryCatalogProjection::new();
@@ -491,16 +504,24 @@ impl ArtifactCatalog {
                 }
                 for dependency in &record.dependencies {
                     if Some(dependency.store_owner_id.as_str()) != actual.owner_id() {
-                        return Err(
-                            "original Catalog reference belongs to another actual Artifact owner"
-                                .into(),
-                        );
+                        replica_content
+                            .as_ref()
+                            .ok_or("original Catalog dependency has no qualified read authority")?
+                            .verify_retained_content(
+                                &controller_replication::ArtifactContentKey {
+                                    source_owner: dependency.store_owner_id.clone(),
+                                    content_digest: dependency.content_digest.clone(),
+                                    byte_size: dependency.byte_size,
+                                },
+                            )?;
+                    } else {
+                        actual.verify_artifact(&dependency.content_digest, dependency.byte_size)?;
                     }
-                    actual.verify_artifact(&dependency.content_digest, dependency.byte_size)?;
                 }
             }
         }
         Ok(Self {
+            replica_content,
             retained_store: store.filter(|store| store.owner_id().is_some()),
             retention: Arc::new(Mutex::new(retention)),
             upload_records: Arc::new(Mutex::new(upload_records)),

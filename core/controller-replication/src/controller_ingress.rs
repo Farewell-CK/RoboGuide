@@ -8,6 +8,8 @@ use sha2::{Digest as _, Sha256};
 
 #[path = "controller_ingress/client.rs"]
 mod client;
+#[path = "controller_ingress/content_read.rs"]
+mod content_read;
 #[path = "controller_ingress/store.rs"]
 mod journal;
 #[cfg(test)]
@@ -16,7 +18,7 @@ mod tests;
 #[path = "controller_ingress/wire.rs"]
 mod wire;
 
-pub use client::{ControllerContentClient, ControllerContentClientConfig};
+pub use client::{ControllerContentClient, ControllerContentClientConfig, ControllerContentRead};
 pub use wire::ControllerIngressServer;
 
 /// Mandatory original journal marker, including a fresh zero-operation parent.

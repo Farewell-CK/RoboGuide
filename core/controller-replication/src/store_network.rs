@@ -8,6 +8,37 @@ use std::os::unix::fs::MetadataExt;
 mod tests;
 
 impl SqliteRaftStore {
+    /// Rechecks actual current retention/publication without renewing an original read on unrelated commits.
+    pub(crate) fn require_current_content_read(
+        &self,
+        original: &ContentQuorumTarget,
+        key: &ArtifactContentKey,
+        published: bool,
+    ) -> Result<(), String> {
+        self.read_network_snapshot(|connection| {
+            let current = read_view(connection).map_err(|error| error.to_string())?;
+            let content = current
+                .content
+                .as_ref()
+                .ok_or("current qualified content metadata unavailable")?;
+            if current.revision < original.revision
+                || content.profile_identity != original.profile_identity
+                || content.inputs.binary_search(key).is_err()
+                || content.identity()? != content.batch_digest
+                || current.checkpoint.as_ref() != Some(&content.batch.checkpoint)
+            {
+                return Err(
+                    "original qualified read is no longer retained by current complete metadata"
+                        .into(),
+                );
+            }
+            if published && content.published_content(&current.events, &key.content_digest)? != *key
+            {
+                return Err("original published content changed its qualified namespace".into());
+            }
+            Ok(())
+        })
+    }
     /// Requires the actual committed complete target; membership alone never authorizes routed bytes.
     pub(crate) fn require_committed_content_target(
         &self,

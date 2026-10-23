@@ -7,6 +7,10 @@ use std::io::{Read, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
+#[path = "read_client.rs"]
+mod read_client;
+pub use read_client::ControllerContentRead;
+
 /// Explicit startup-owned child transport; the actual PID/UID are never supplied through configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

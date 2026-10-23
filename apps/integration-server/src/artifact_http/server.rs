@@ -460,17 +460,30 @@ where
                     import_id.as_deref(),
                 )
             })?;
-            stream_artifact(stream, store, &digest, &mut || {
-                run_blocking(|| {
-                    authorize_blob_read(
-                        catalog,
-                        memory_admission,
-                        &principal,
-                        &digest,
-                        import_id.as_deref(),
-                    )
-                })
-            })
+            let context_digest =
+                format!("{:x}", Sha256::digest(serde_json::to_vec(&serde_json::json!({
+                "principal":principal.subject,"tenant":principal.tenant_id,
+                "certificate":principal.certificate_digest,"registry":principal.registry_id,
+                "revision":principal.registry_revision,"import_id":import_id,"digest":digest,
+            })).map_err(|error| HttpError::internal(error.to_string()))?));
+            stream_artifact(
+                stream,
+                store,
+                &digest,
+                &mut || {
+                    run_blocking(|| {
+                        authorize_blob_read(
+                            catalog,
+                            memory_admission,
+                            &principal,
+                            &digest,
+                            import_id.as_deref(),
+                        )
+                    })
+                },
+                catalog.replica_content.as_ref(),
+                &context_digest,
+            )
             .await?;
             return Ok(());
         }
@@ -1080,29 +1093,45 @@ pub(super) async fn stream_artifact(
     store: &FileSystemArtifactStore,
     digest: &str,
     authorize: &mut impl FnMut() -> Result<(), HttpError>,
+    replica: Option<&controller_replication::ControllerContentClient>,
+    context_digest: &str,
 ) -> Result<(), HttpError> {
     authorize()?;
-    let (file, metadata) = run_blocking(|| {
-        let file = store.open_artifact(digest).map_err(map_cas_error)?;
+    let (mut file, size): (Box<dyn std::io::Read + Send>, u64) = run_blocking(|| {
+        let file = match store.open_artifact(digest) {
+            Ok(file) => file,
+            Err(CasError::ArtifactNotFound { .. }) if replica.is_some() => {
+                let reader = replica
+                    .ok_or_else(|| {
+                        HttpError::service_unavailable("qualified source is unavailable")
+                    })?
+                    .open_published_content(digest, context_digest)
+                    .map_err(HttpError::service_unavailable)?;
+                let size = reader.content().byte_size;
+                return Ok((Box::new(reader) as Box<dyn std::io::Read + Send>, size));
+            }
+            Err(error) => return Err(map_cas_error(error)),
+        };
         let metadata = file
             .metadata()
             .map_err(|error| HttpError::internal(format!("stat artifact: {error}")))?;
-        Ok::<_, HttpError>((file, metadata))
+        Ok::<_, HttpError>((
+            Box::new(file) as Box<dyn std::io::Read + Send>,
+            metadata.len(),
+        ))
     })?;
-    let mut file = tokio::fs::File::from_std(file);
     let header = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        metadata.len()
+        size
     );
     stream
         .write_all(header.as_bytes())
         .await
         .map_err(|error| HttpError::internal(error.to_string()))?;
-    let mut buffer = vec![0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 64 * 1024];
     loop {
-        let count = file
-            .read(&mut buffer)
-            .await
+        authorize()?;
+        let count = run_blocking(|| std::io::Read::read(&mut file, &mut buffer))
             .map_err(|error| HttpError::internal(error.to_string()))?;
         if count == 0 {
             break;

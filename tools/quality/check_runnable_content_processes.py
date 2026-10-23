@@ -70,7 +70,12 @@ def idle_snapshot(directory: Path) -> dict[str, Any]:
 
 
 def run(
-    output: Path, supervisor: Path, controller: Path, storage: Path, idle_timer_check: bool = False
+    output: Path,
+    supervisor: Path,
+    controller: Path,
+    storage: Path,
+    idle_timer_check: bool = False,
+    owner_failover: bool = False,
 ) -> dict[str, Any]:
     """Retain exact binaries, native waits, complete SQL and independently verified bytes."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -225,6 +230,12 @@ def run(
                 deadline = time.monotonic() + 60
                 while time.monotonic() < deadline:
                     for process, record in owned:
+                        if record.get("planned_shutdown"):
+                            if process.poll() != 0:
+                                raise ValueError(
+                                    "original planned source supervisor did not exit cleanly"
+                                )
+                            continue
                         if process.poll() is not None:
                             raise ValueError(
                                 f"actual supervisor exited: {record['member']}:{process.poll()}"
@@ -364,6 +375,67 @@ def run(
                     ).fetchone()[0]
                 )
             assert current_content["candidate"]["source_writer"] == source_writer
+            if owner_failover:
+                original_process, original_record = next(
+                    (process, record) for process, record in owned if record["member"] == member
+                )
+                os.killpg(original_process.pid, signal.SIGINT)
+                original_record["returncode"] = original_process.wait(timeout=20)
+                assert original_record["returncode"] == 0
+                original_record["planned_shutdown"] = True
+                next_member, next_status = current()
+                assert (
+                    next_member != member and next_status["epoch"]["term"] > first["epoch"]["term"]
+                )
+                next_origin = configs[next_member]["artifact_address"]
+                next_cas = Path(configs[next_member]["storage_directory"]) / "artifacts"
+                next_blob = next_cas / "objects-v1" / "sha256" / checksum[7:9] / checksum[7:]
+                assert not next_blob.exists()
+                store_code, store_raw = http(next_origin, "/v1/artifact-store")
+                assert store_code == 200
+                next_owner = json.loads(store_raw)["owner_id"]
+                assert next_owner != source_writer["owner"]
+                assert http(next_origin, "/v1/artifacts/" + checksum[7:]) == (200, payload)
+                assert not next_blob.exists()
+                with closing(
+                    sqlite3.connect(
+                        (Path(configs[next_member]["content"]["root"]) / "content.sqlite3").as_uri()
+                        + "?mode=ro",
+                        uri=True,
+                    )
+                ) as sql:
+                    rows = sql.execute("SELECT record FROM content_readers LIMIT 4097").fetchall()
+                assert len(rows) <= 4096
+                original_reads = [
+                    json.loads(row[0])
+                    for row in rows
+                    if json.loads(row[0])["intent"]["reader_id"].startswith("child-read:")
+                ]
+                assert len(original_reads) == 1
+                original_read = original_reads[0]
+                assert original_read["intent"]["content"]["source_owner"] == source_writer["owner"]
+                assert original_read["receipt"]["complete"]
+                assert original_read["receipt"]["observed_digest"] == checksum
+                assert original_read["receipt"]["bytes_read"] == len(payload)
+                observed(
+                    "actual-cross-owner-http-read",
+                    source_member=member,
+                    next_member=next_member,
+                    source_owner=source_writer["owner"],
+                    actual_local_owner=next_owner,
+                    status=next_status,
+                    copied_to_local_cas=False,
+                )
+                result["actual_cross_owner_read"] = {
+                    "source_member": member,
+                    "target_member": next_member,
+                    "source_owner": source_writer["owner"],
+                    "target_local_owner": next_owner,
+                    "target_status": next_status,
+                    "copied_to_local_cas": False,
+                    "actual_source_supervisor_wait": original_record["returncode"],
+                    "actual_root_reader": original_read,
+                }
             assert all(digest(Path(path)) == expected for path, expected in identities.items())
             result.update(
                 passed=True,
@@ -411,6 +483,7 @@ def main() -> None:
     parser.add_argument("--controller", type=Path, required=True)
     parser.add_argument("--storage-probe", type=Path, required=True)
     parser.add_argument("--idle-timer-check", action="store_true")
+    parser.add_argument("--owner-failover", action="store_true")
     args = parser.parse_args()
     result = run(
         args.output,
@@ -418,6 +491,7 @@ def main() -> None:
         args.controller.resolve(strict=True),
         args.storage_probe.resolve(strict=True),
         args.idle_timer_check,
+        args.owner_failover,
     )
     print(json.dumps({"passed": result["passed"], "result": str(args.output / "result.json")}))
 

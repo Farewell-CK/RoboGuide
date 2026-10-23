@@ -1,5 +1,18 @@
 # Repository Guidelines
 
+ADR-0176 adds ReadContentV1 on the original PID/mTLS owned-child channel. Published reads require
+unambiguous current published/Completed qualified origins; Prepared-only inputs remain private.
+RetainedIntegrity verifies exact current dependencies without publishing CAS or granting semantic
+use. Actual reader intent/pin precedes payload; process/leaf/target/purpose/context digest bind the
+original reader authority. Current epoch/membership, original budget and actual retained/published
+origin are checked per bounded chunk; unrelated application commits do not renew or abort the read.
+Original FD/worker/Root/capacity survive waiter cancellation, and missing close proof remains Unknown.
+Artifact HTTP keeps its real per-chunk ACL/scope/import/use checks and only falls back on missing local
+CAS, preserving both owners; Catalog startup verifies foreign dependencies through integrity scope.
+Owners are controller_ingress/content_read.rs/read_client.rs and artifact_http. The actual zero-Node
+runnable gate opts into --owner-failover; this is content read continuity, not Prepared finalization,
+device continuity or complete HA/P1-P7.
+
 ADR-0175 preserves original leader-only proposal PushContent and adds explicit
 PushCommittedContentV1/route_committed_content_to for current voters. Source and receiver each
 check exact committed SQL revision/checkpoint/candidate digest/inputs before Ready and each chunk,

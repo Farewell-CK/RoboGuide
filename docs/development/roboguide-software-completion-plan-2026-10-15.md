@@ -113,6 +113,12 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N3 的 [ADR-0176](../decisions/0176-owned-controller-qualified-content-reads.md)接通原
+owned child 的 qualified Root read、公开内容/启动完整性用途及 HTTP fallback。实际
+三个 supervisor/真实 Controller 切换已返回原 owner 的完整 HTTP bytes，且新 owner
+本地 CAS 保持空缺。原 reader/回执核对和相关回归收尾后，继续 Prepared 原上传接管、
+完整 readiness/在线 HA、其余 N1–N7/P1–P7；本项只证明软件内容读取连续性。
+
 N3 以 [ADR-0175](../decisions/0175-exact-committed-content-routing.md)将 Root 路由
 收紧为独立 committed command/API：双方实际完整 SQL target、source member/Root/
 TLS、epoch/预算逐块检查，原 leader proposal staging 保持。维护 native gate 新增

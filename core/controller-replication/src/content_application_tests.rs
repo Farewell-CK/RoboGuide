@@ -475,3 +475,53 @@ fn original_complete_content_input_and_history_bindings_cannot_be_relabelled() {
     omitted.origins.pop_first();
     assert!(omitted.validate_against(&previous, &profile).is_err());
 }
+
+/// Actual Completed history allows the original key; pure Prepared and ambiguous-owner DTOs refuse.
+#[test]
+fn published_root_reads_require_completed_or_published_original_content() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_log, cas, key) = original(directory.path());
+    let candidate = candidate(
+        &directory.path().join("source.sqlite3"),
+        &cas,
+        &ReplicaView::default(),
+        &"d".repeat(64),
+    );
+    assert_eq!(
+        candidate
+            .published_content(&candidate.batch.events, &key.content_digest)
+            .unwrap(),
+        key
+    );
+    let prepared_events = &candidate.batch.events[..2];
+    assert!(
+        candidate
+            .published_content(prepared_events, &key.content_digest)
+            .is_err()
+    );
+    let mut ambiguous = candidate.clone();
+    let mut completed = ambiguous.batch.events[2].clone();
+    completed.event_id = "synthetic-other-owner-same-bytes".into();
+    let mut payload: EventPayload = serde_json::from_str(&completed.payload_json).unwrap();
+    let EventPayload::ArtifactUploadTransition { record } = &mut payload else {
+        panic!("fixture expected actual upload");
+    };
+    record.upload_id = "synthetic-distinct-completed-upload".into();
+    completed.payload_json = serde_json::to_string(&payload).unwrap();
+    let other = ArtifactContentKey {
+        source_owner: format!("artifact-store:{}", "f".repeat(64)),
+        ..key.clone()
+    };
+    ambiguous
+        .origins
+        .insert(completed.event_id.clone(), other.clone());
+    ambiguous.inputs.push(other);
+    ambiguous.inputs.sort();
+    ambiguous.batch.events.push(completed);
+    assert!(
+        ambiguous
+            .published_content(&ambiguous.batch.events, &key.content_digest)
+            .unwrap_err()
+            .contains("ambiguous")
+    );
+}

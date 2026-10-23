@@ -1036,10 +1036,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let diagnostic_writer = diagnostics::DiagnosticWriter::configured();
     let diagnostic_handle = observability::MetricsObserver::handle(diagnostic_writer.handle());
     let event_log = event_log.with_diagnostics(diagnostic_handle.clone());
-    let artifact_catalog = artifact_http::ArtifactCatalog::replay_with_store(
+    let artifact_catalog = artifact_http::ArtifactCatalog::replay_with_replica(
         &event_log,
         event_write_gate.clone(),
         Some(artifact_store.clone()),
+        replica_fence
+            .as_ref()
+            .and_then(|replica| replica.content_reader()),
     )
     .map_err(|error| format!("spatial catalog startup replay failed: {error}"))?;
     let artifact_listener = tokio::net::TcpListener::bind(artifact_address).await?;

@@ -7,6 +7,10 @@
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
 
+[ADR-0176](../../decisions/0176-owned-controller-qualified-content-reads.md)定义原 child
+从 qualified Root 读取的有界只读通道。公开已发布内容与 startup integrity 分开，原
+Artifact owner 不改写；HTTP 的实际 ACL/scope/use 每块仍检查，Prepared 不变成公开 CAS。
+
 [ADR-0175](../../decisions/0175-exact-committed-content-routing.md)将已提交内容 route
 与原 leader proposal staging 分为独立 wire command/API；双方的实际完整 SQL target、
 current epoch/membership 和精确 source member/Root/TLS 逐块约束读取，旧 command 不扩权。

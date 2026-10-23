@@ -19,6 +19,13 @@ pub struct ApplicationReplicaClient {
 }
 
 impl ApplicationReplicaClient {
+    /// Returns only the explicitly selected original content client; legacy deployments gain no read port.
+    pub fn content_reader(&self) -> Option<ControllerContentClient> {
+        match &self.selected {
+            SelectedClient::Content(client) => Some(client.as_ref().clone()),
+            SelectedClient::Legacy(_) => None,
+        }
+    }
     /// Parses one closed content config or the original legacy environment, never silently combining them.
     pub fn from_environment(
         source: artifact_store::FileSystemArtifactStore,

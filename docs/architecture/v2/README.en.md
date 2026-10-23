@@ -1,5 +1,9 @@
 # RoboGuide V2 current architecture
 
+[ADR-0176](../../decisions/0176-owned-controller-qualified-content-reads.md) defines bounded
+owned-child reads of qualified Root bytes with separate published/integrity purposes. Original
+Artifact owners remain intact; actual HTTP ACL/scope/use checks still precede every returned chunk.
+
 [ADR-0175](../../decisions/0175-exact-committed-content-routing.md) separates committed routes
 from original leader proposal staging by explicit wire command and API. Both actual committed SQL
 targets, current epoch/membership and the exact source member/Root/TLS constrain each bounded chunk.

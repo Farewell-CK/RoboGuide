@@ -337,6 +337,30 @@ async fn actual_mtls_content_streams_keep_original_receipts_and_independent_rece
             .await
             .is_err()
     );
+    source.begin_batch().unwrap();
+    source
+        .save_checkpoint(
+            state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA,
+            r#"{"original":2}"#,
+        )
+        .unwrap();
+    source.commit_batch().unwrap();
+    let mut next = crate::content_application_tests::candidate(
+        &cluster.directory.path().join("source.sqlite3"),
+        &cas,
+        &node.accepted_view().unwrap(),
+        &node.profile_identity(),
+    );
+    next.epoch = node.current_epoch().unwrap();
+    assert!(node.commit_content(next).await.unwrap().accepted);
+    assert!(
+        node.store
+            .require_committed_content_target(&target)
+            .is_err()
+    );
+    node.store
+        .require_current_content_read(&target, &key, true)
+        .unwrap();
     let old_child = ReplicaFenceClient::new_with_tls(
         node.local_address(),
         node.profile_identity(),

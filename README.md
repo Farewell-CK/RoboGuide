@@ -1,5 +1,10 @@
 # RoboGuide
 
+[原 Controller qualified 读取](docs/decisions/0176-owned-controller-qualified-content-reads.md)
+已接原 PID/mTLS 有界 Root reader 和 HTTP 缺失 CAS fallback；真实 leader 切换后读取原
+owner 内容，新 Controller 不写本地 CAS、不改 owner。纯 Prepared 与含糊来源拒绝，
+HTTP 每块保留实际 ACL/scope/use；完整 Prepared 接管和其它非发布整改继续实施。
+
 [严格无变化的 timer 事务](docs/development/acceptance/2026-10-23-unchanged-timer-transactions.md)
 减少空闲时重复的完整内容提交：实际 SQL 的当前/上次完整提交计数、外部连接变更、事件、
 pending 写入及精确 checkpoint 均不变才回滚空事务。原 outbox 授权和正常变化的持久化

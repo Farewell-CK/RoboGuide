@@ -27,6 +27,15 @@ pub(super) struct ChildRequest {
 /// External enum tagging preserves exact nested u64 member maps without compatibility normalization.
 #[derive(Serialize, Deserialize)]
 pub(super) enum ChildCommand {
+    /// Explicit readonly original Root stream; current HTTP or integrity purpose stays separate.
+    ReadContentV1 {
+        /// Stable original one-shot reader; duplicates never reopen bytes.
+        reader_id: String,
+        /// Closed purpose with original qualified input or published lookup.
+        purpose: super::content_read::ReadPurpose,
+        /// Digest of the actual application request context, never permission by itself.
+        context_digest: String,
+    },
     /// Original process/TLS/epoch and actual infrastructure quorum only, without a content-ready claim.
     ProcessFence,
     /// Current original-child authority and complete accepted content fence.
@@ -50,6 +59,10 @@ pub(super) enum ChildCommand {
 /// Private responses preserve the difference between first intent and complete application acceptance.
 #[derive(Serialize, Deserialize)]
 pub(super) enum ChildReply {
+    /// Actual durable reader admission/open proof, not a new Artifact owner/publication.
+    ReadReady(Box<super::content_read::ReadHead>),
+    /// Actual original reader closure; failed/absent evidence remains unavailable.
+    ReadClosed(Result<crate::content_store::ReplicaContentReaderReceipt, String>),
     /// Actual original process under a current complete quorum fence.
     Fence(ControllerProcessIdentity),
     /// Exact current committed original semantic/content projection.
@@ -129,7 +142,7 @@ pub(super) async fn write<S: tokio::io::AsyncWrite + Unpin>(
 }
 
 /// Checks the actual current original process/TLS witness on an owned worker before returning it.
-async fn peer_process(
+pub(super) async fn peer_process(
     node: &ReplicaNode,
     peer: ControllerPeer,
 ) -> Result<ControllerProcessIdentity, String> {
@@ -138,7 +151,7 @@ async fn peer_process(
 }
 
 /// Holds actual captured original source checks, original budget and optional complete target through I/O.
-fn permission(
+pub(super) fn permission(
     node: ReplicaNode,
     peer: ControllerPeer,
     clock: ContentBudget,
@@ -370,6 +383,22 @@ async fn handle(stream: tokio::net::UnixStream, node: ReplicaNode, pid: u32) -> 
             let clock = ContentBudget::issue(request.budget_ms)?;
             peer_process(&node, peer.clone()).await?;
             match request.command {
+                ChildCommand::ReadContentV1 {
+                    reader_id,
+                    purpose,
+                    context_digest,
+                } => {
+                    super::content_read::serve(
+                        &mut stream,
+                        &node,
+                        peer,
+                        reader_id,
+                        purpose,
+                        context_digest,
+                        clock,
+                    )
+                    .await
+                }
                 ChildCommand::ProcessFence => {
                     node.check_epoch(peer.epoch).await?;
                     let process = peer_process(&node, peer).await?;

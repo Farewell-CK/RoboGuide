@@ -262,6 +262,102 @@ pub(crate) fn required_inputs(
 }
 
 impl ContentApplicationBatch {
+    /// Selects only currently published retained bytes; replicated Prepared inputs remain private.
+    pub(crate) fn published_content(
+        &self,
+        events: &[state::PersistedEvent],
+        digest: &str,
+    ) -> Result<ArtifactContentKey, String> {
+        let mut rows = self
+            .recovery
+            .catalog_archive_events
+            .clone()
+            .unwrap_or_default();
+        rows.extend_from_slice(events);
+        if rows.len() > 32768 {
+            return Err("published content scan exceeds original bound".into());
+        }
+        let mut uploads = BTreeMap::new();
+        let mut retired = BTreeSet::new();
+        let mut published = BTreeMap::new();
+        let mut references = state::ArtifactRetentionProjection::default();
+        let mut eligible = BTreeSet::new();
+        for row in rows {
+            let payload: EventPayload =
+                serde_json::from_str(&row.payload_json).map_err(|error| error.to_string())?;
+            let origin = self.origins.get(&row.event_id).cloned();
+            references.observe_publication(&event(&row, payload.clone())?)?;
+            match payload {
+                EventPayload::ArtifactUploadTransition { record } => {
+                    uploads.insert(record.upload_id.clone(), (record, origin));
+                }
+                EventPayload::ArtifactUploadRetired { receipt } => {
+                    retired.insert(receipt.upload.upload_id);
+                }
+                EventPayload::MemoryManifestPublished { manifest } => {
+                    published.insert(manifest.selector().clone(), origin);
+                }
+                EventPayload::MapArtifactPublished { manifest } => {
+                    if let Ok(generic) = domain::map_memory_manifest(&manifest) {
+                        published.insert(generic.selector().clone(), origin);
+                    } else if let Some(origin) = origin {
+                        eligible.insert(origin);
+                    }
+                }
+                EventPayload::ArtifactCatalogReferenceTransition { record } => {
+                    references.apply(&record)?
+                }
+                EventPayload::ArtifactCatalogLegacyAdopted { receipt } => {
+                    references.apply_adoption(&receipt)?
+                }
+                EventPayload::SemanticVerifierEvidenceAdmitted { .. }
+                | EventPayload::MissionGoalEvidenceAdmitted { .. } => {
+                    if let Some(origin) = origin {
+                        eligible.insert(origin);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (id, (record, origin)) in uploads {
+            if record.phase == ArtifactUploadPhase::Completed
+                && !retired.contains(&id)
+                && let Some(origin) = origin
+            {
+                eligible.insert(origin);
+            }
+        }
+        for (selector, origin) in published {
+            if !references.is_retired(&selector)
+                && let Some(origin) = origin
+            {
+                eligible.insert(origin);
+            }
+        }
+        for record in references
+            .records()
+            .filter(|record| record.retirement.is_none())
+        {
+            for dep in &record.dependencies {
+                eligible.insert(ArtifactContentKey {
+                    source_owner: dep.store_owner_id.clone(),
+                    content_digest: dep.content_digest.clone(),
+                    byte_size: dep.byte_size,
+                });
+            }
+        }
+        let found = eligible
+            .into_iter()
+            .filter(|key| key.content_digest == digest && self.inputs.binary_search(key).is_ok())
+            .collect::<Vec<_>>();
+        if found.len() != 1 {
+            return Err(
+                "published qualified content is unavailable or has ambiguous original owners"
+                    .into(),
+            );
+        }
+        Ok(found[0].clone())
+    }
     /// Constructs immutable current-writer bindings only for new original rows; history is never relabelled.
     /// This actual-file-store constructor grants no availability, semantic use or quorum receipt.
     pub fn from_source(
