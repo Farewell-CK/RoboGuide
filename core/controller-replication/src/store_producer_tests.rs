@@ -84,6 +84,98 @@ fn fixture() -> (
     (directory, store, content, key, entry)
 }
 
+/// A live actual scope keeps its exact original Unknown and pins until the managed permit really closes.
+#[test]
+fn actual_live_producer_reconciliation_preserves_unknown_until_original_scope_closes() {
+    let (_directory, store, content, key, entry) = fixture();
+    let Some(crate::content_store::ProducerAdmission::New(permit)) =
+        store.retain_log_inputs(&entry).unwrap()
+    else {
+        panic!("actual first producer did not admit its original scope");
+    };
+    let original = store.parent_producers().unwrap().pop().unwrap();
+    assert_eq!(original.disposition, "unknown");
+    assert!(original.original["worker_closed_ms"].is_null());
+    for _ in 0..3 {
+        assert_eq!(
+            store.reconcile_content_producers().unwrap(),
+            vec![original.clone()]
+        );
+        assert_eq!(store.parent_producers().unwrap(), vec![original.clone()]);
+        assert_eq!(content.active_references(&key).unwrap().len(), 1);
+    }
+    assert!(
+        store
+            .persist_log_entries(std::slice::from_ref(&entry))
+            .unwrap_err()
+            .to_string()
+            .contains("cannot execute again")
+    );
+    assert_eq!(store.parent_producers().unwrap(), vec![original.clone()]);
+    drop(permit);
+    let closed = store.reconcile_content_producers().unwrap().pop().unwrap();
+    assert_eq!(closed.disposition, "retired-unknown");
+    assert_eq!(closed.original["intent"], original.original["intent"]);
+    assert!(closed.original["publication"].is_null());
+    assert!(closed.original["worker_closed_ms"].is_number());
+    assert!(closed.original["resolution"]["process_end"].is_null());
+    assert!(content.active_references(&key).unwrap().is_empty());
+}
+
+/// Actual late byte/SQL publication unblocks the original budget without acquiring parent authority.
+#[test]
+fn actual_apply_input_wait_preserves_parent_access_until_real_bytes_publish() {
+    let (directory, store, content, key, entry) = fixture();
+    let clock = crate::content_store::ProducerClock::issue().unwrap();
+    let original_clock = clock.clone();
+    let worker_store = store.clone();
+    let (ready, entered) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        ready.send(()).unwrap();
+        let outcome = worker_store.wait_for_apply_inputs(&[entry], &original_clock);
+        (outcome, started.elapsed())
+    });
+    entered.recv().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    assert!(!worker.is_finished());
+    assert!(
+        store.connection.try_lock().is_ok(),
+        "input wait took the parent writer"
+    );
+    assert!(store.parent_producers().unwrap().is_empty());
+    copy_fixture(&directory, &content, &key, "actual-delayed-apply-bytes");
+    let (outcome, elapsed) = worker.join().unwrap();
+    outcome.unwrap();
+    assert!(elapsed >= std::time::Duration::from_millis(80));
+    assert_eq!(store.accepted_view().unwrap().revision, 0);
+    clock.check().unwrap();
+}
+
+/// Missing receipt expires under its original clock; known corrupt bytes fail without waiting for expiry.
+#[test]
+fn actual_apply_input_wait_does_not_renew_expired_budget_or_accept_corrupt_bytes() {
+    let (directory, store, content, key, entry) = fixture();
+    let original = crate::content_store::ContentBudget::issue(200).unwrap();
+    let clock = crate::content_store::ProducerClock::from_original(&original).unwrap();
+    let error = store
+        .wait_for_apply_inputs(std::slice::from_ref(&entry), &clock)
+        .unwrap_err();
+    assert!(error.to_string().contains("budget expired"));
+    assert!(store.parent_producers().unwrap().is_empty());
+    copy_fixture(&directory, &content, &key, "actual-corrupt-apply-bytes");
+    let path = content
+        .root()
+        .join("content-v1")
+        .join(&key.source_owner[15..])
+        .join(&key.content_digest[7..]);
+    std::fs::remove_file(path).unwrap();
+    let clock = crate::content_store::ProducerClock::issue().unwrap();
+    let error = store.wait_for_apply_inputs(&[entry], &clock).unwrap_err();
+    assert!(!error.to_string().contains("budget expired"));
+    assert_eq!(store.accepted_view().unwrap().revision, 0);
+}
+
 /// A real parent trigger failure leaves original intent/pins/close evidence; no retry creates another effect.
 #[test]
 fn actual_log_sql_failure_keeps_original_unknown_and_retires_only_after_actual_scope_and_source() {

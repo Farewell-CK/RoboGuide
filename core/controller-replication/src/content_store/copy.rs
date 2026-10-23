@@ -248,7 +248,7 @@ pub(super) fn validate_records(
             let version: i64 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .map_err(|error| error.to_string())?;
-            if version != 4 {
+            if !matches!(version, 4 | 5) {
                 return Err("legacy object profile contains a hidden stream receipt".into());
             }
             super::streams::validate_object_receipt(connection, &receipt)?;

@@ -138,6 +138,14 @@ flowchart TB
 ```
 
 Replica 复制接受的应用元数据；成员本地 transfer / spawn / PID / wait 历史另行保留。
+ADR-0184 已实现并通过 parent8/Root4 静止恢复及实际三 leader 软件验收：原逻辑身份和操作
+历史不改写，显式 Root5 binding 单独记录恢复后的实际 inode，旧入口拒绝新绑定。恢复包必须
+同时覆盖原 parent、Root、活动引用及精确字节；Unknown 不因复制而完成。
+
+ADR-0185 的 producer 对账保留实际仍存活且没有 scope-close 证据的原 Unknown：不退休、
+不释放引用、不伪造 process-end，也不续原 effect 预算。独立 parent 观察和实际 scope 关闭
+仍是后续清理的条件；该存储并发规则不提供设备停止证明。
+
 恢复只处理显式 profile 声明的完整存储和内容，不启动服务、不续原预算。图中 SQL/CAS 的存在
 不证明在线内容复制、跨域 HA 或设备连续性。Control tenant quota 是逻辑承诺核算；Local Memory
 进程的 CPU/address-space `rlimit` 回执是另一种证据，不表示 GPU、OS 或硬实时隔离已普遍实现。
@@ -191,3 +199,5 @@ Harness 不绕过 RoboGuide 直接调用 simulator skill。本地导航/操作 C
 标记区同步同一内容，网站检查会拒绝漂移。改动权威、依赖方向、生命周期或公开合同仍须 ADR，
 并同步本页代码依据与核对基线。旧 [V2 PNG](../../images/roboguide-v2-overall-architecture.png)
 和 DOCX 作为历史概念快照保留，不再充当当前实现图。
+
+ADR-0186 在显式 parent8 的原 apply worker 内、取得 parent 写锁前，按原预算等待确切输入的实际 receipt/字节就绪。等待不复制内容、不授予权限、不续预算；已知 receipt 的字节损坏仍立即失败，缺失历史内容的路由仍须独立接通。

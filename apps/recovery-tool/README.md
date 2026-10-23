@@ -1,5 +1,11 @@
 # RoboGuide recovery tool
 
+[Profile v0.19](../../contracts/recovery/bundle-v0.19/README.md) adds complete declared parent8/Root4
+cold data recovery, original recovery/reader joins and explicit Root5 backing bindings. Original
+operation rows, logical owners and clocks remain unchanged. Existing v0.18 retains its parent3 and
+codec32 refusal. Actual second cold restore and three-leader software acceptance passed; a verified bundle never
+starts a service or establishes current permission, online HA or physical continuity.
+
 [Profile v0.17](../../contracts/recovery/bundle-v0.17/README.md) adds the explicit actual Controller
 storage generation and its SQL-inode writer lease, preserving the full v0.16 contract. Each Controller
 declares `roboguide.controller-storage/legacy` or `roboguide.controller-storage/v1`. The latter retains

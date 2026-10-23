@@ -26,6 +26,8 @@ pub(crate) struct StreamWriter {
     intent: StreamIntent,
     /// Exact immutable first admission digest, checked against actual original SQL before I/O.
     request_digest: String,
+    /// Actual physical backing frozen for this new worker; logical receiver keeps original provenance.
+    backing: (u64, u64, u64, u64),
     /// Live source authorization retained by the actual worker, never by a JSON receipt alone.
     permission: StreamPermission,
     /// Actual owned original staging descriptor, closed before actual scope-end publication.
@@ -141,6 +143,7 @@ impl ReplicaContentStore {
             transaction.commit().map_err(|error| error.to_string())?;
         }
         let mut worker = Box::new(StreamWriter {
+            backing: super::super::restore::stream_backing(&self.inner)?,
             store: self.clone(),
             intent,
             request_digest,
@@ -206,17 +209,9 @@ impl StreamWriter {
             std::fs::symlink_metadata(self.store.root()).map_err(|error| error.to_string())?;
         let database = std::fs::symlink_metadata(self.store.root().join("content.sqlite3"))
             .map_err(|error| error.to_string())?;
-        if (root.dev(), root.ino())
-            != (
-                self.intent.receiver.root_device,
-                self.intent.receiver.root_inode,
-            )
+        if (root.dev(), root.ino()) != (self.backing.0, self.backing.1)
             || !database.is_file()
-            || (database.dev(), database.ino())
-                != (
-                    self.intent.receiver.database_device,
-                    self.intent.receiver.database_inode,
-                )
+            || (database.dev(), database.ino()) != (self.backing.2, self.backing.3)
         {
             return Err("original stream root/SQL backing identity changed".into());
         }

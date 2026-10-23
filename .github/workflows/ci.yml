@@ -147,6 +147,13 @@ jobs:
           --release-after-recovery
           --output /tmp/rg-ci-runnable-content
 
+      - name: Verify complete actual Replica content cold recovery and three restored leaders
+        run: >
+          uv run --frozen python tools/quality/check_replica_content_recovery_processes.py
+          --source /tmp/rg-ci-runnable-content
+          --supervisor target/debug/controller-replica
+          --output "${RUNNER_TEMP}/roboguide-content-cold-recovery"
+
       - name: Verify actual Prepared source scopes and native restart with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_prepared_source_processes.py

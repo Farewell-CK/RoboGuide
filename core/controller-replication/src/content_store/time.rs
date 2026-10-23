@@ -203,6 +203,14 @@ impl ContentBudget {
 
     /// Independently observes actual original process absence; elapsed time is never exit proof.
     pub(super) fn observe_process_end(&self) -> Result<ContentProcessEndObservation, String> {
+        self.try_observe_process_end()?
+            .ok_or("original content process incarnation is still present".into())
+    }
+
+    /// Distinguishes an actually live original incarnation from absence and unavailable evidence.
+    pub(super) fn try_observe_process_end(
+        &self,
+    ) -> Result<Option<ContentProcessEndObservation>, String> {
         self.validate()?;
         let observer = Self::issue(300_000)?;
         let (reason, replacement_start_ticks) = if observer.boot_id != self.boot_id {
@@ -216,19 +224,17 @@ impl ContentBudget {
             match process_ticks(self.pid)? {
                 None => ("original-process-absent", None),
                 Some(ticks) if ticks != self.start_ticks => ("pid-reused", Some(ticks)),
-                Some(_) => {
-                    return Err("original content process incarnation is still present".into());
-                }
+                Some(_) => return Ok(None),
             }
         };
-        Ok(ContentProcessEndObservation {
+        Ok(Some(ContentProcessEndObservation {
             original_boot_id: self.boot_id.clone(),
             original_pid: self.pid,
             original_start_ticks: self.start_ticks,
             observer,
             reason: reason.into(),
             replacement_start_ticks,
-        })
+        }))
     }
 
     /// Validates immutable retained negative evidence, without turning it into an OS wait receipt.

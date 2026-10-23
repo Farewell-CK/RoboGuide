@@ -739,6 +739,17 @@ impl ReplicaNode {
         self.transport_budget.snapshot()
     }
 
+    /// Observes one bounded actual Raft fatal error; this cannot grant readiness or recovery authority.
+    pub fn infrastructure_error(&self) -> Option<String> {
+        self.raft
+            .metrics()
+            .borrow()
+            .running_state
+            .as_ref()
+            .err()
+            .map(|error| error.to_string().chars().take(2048).collect())
+    }
+
     /// Confirms infrastructure epoch/quorum and the original transfer fence; content child ingress is separate.
     pub async fn check_epoch(&self, epoch: ControllerEpoch) -> Result<(), String> {
         self.check_source_transfer_fence()?;

@@ -19,6 +19,7 @@ from . import (
     artifact_layout,
     artifact_snapshots,
     catalog_references,
+    replica_content_bundle,
     snapshot_references,
 )
 from .profile import (
@@ -186,6 +187,13 @@ def _check_cas_path(
     if component["kind"] == "memory" and len(parts) == 2 and parts[0] == "content":
         if re.fullmatch(r"[0-9a-f]{64}", parts[1]) is not None and checksum != "sha256:" + parts[1]:
             raise ValueError("Memory CAS path differs from actual content digest")
+    if component["kind"] == "replica-content" and parts[0] == "content-v1":
+        if (
+            len(parts) != 3
+            or re.fullmatch(r"[0-9a-f]{64}", parts[1]) is None
+            or parts[2] != checksum[7:]
+        ):
+            raise ValueError("Replica qualified CAS path differs from actual content digest")
 
 
 def _identity(path: Path, budget: Budget) -> dict[str, Any]:
@@ -480,6 +488,11 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
     with acquire_all(components, profile_schema=profile["schema"]):
         budget.check()
         validate_replica_sets(profile, components)
+        replica_sources = (
+            replica_content_bundle.capture_sources(components, budget)
+            if profile["schema"] == "roboguide.recovery-profile/v0.19"
+            else None
+        )
         snapshot_operations = (
             snapshot_references.prepare(profile, components, destination, command_id, budget)
             if snapshot_references.supports(profile["schema"])
@@ -572,6 +585,9 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                         }
                     )
         record_map = {str(row["path"]): row for row in records}
+        replica_content_bundle.validate_bundle(
+            partial, components, record_map, budget, profile["schema"], replica_sources
+        )
         for component in components:
             if component["kind"] == "artifact":
                 artifact_layout.validate_bundle(partial, component, record_map, profile["schema"])
@@ -605,6 +621,8 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             manifest["directories"] = sorted(
                 path.relative_to(partial).as_posix() for path in _directories(partial, budget)
             )
+        if replica_sources is not None:
+            manifest["replica_content_sources"] = replica_sources
         if snapshot_references.supports(profile["schema"]):
             manifest["snapshot_operations"] = snapshot_operations
             snapshot_references.validate_bundle(partial, manifest, budget)
@@ -658,6 +676,11 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "scope",
                 "physical_continuity",
             }
+            | (
+                {"replica_content_sources"}
+                if manifest.get("profile", {}).get("schema") == "roboguide.recovery-profile/v0.19"
+                else set()
+            )
             | (
                 {"snapshot_operations"}
                 if manifest.get("schema")
@@ -774,6 +797,14 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
     if manifest["schema"] == "roboguide.recovery-bundle/v0.4":
         _validate_directories(bundle, manifest, budget)
     record_map = {str(row["path"]): row for row in files}
+    replica_content_bundle.validate_bundle(
+        bundle,
+        components,
+        record_map,
+        budget,
+        manifest["profile"]["schema"],
+        manifest.get("replica_content_sources"),
+    )
     if (snapshot_references.supports(manifest["profile"]["schema"])) != (
         manifest["schema"]
         in {
@@ -835,6 +866,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.16",
                 "roboguide.recovery-profile/v0.17",
                 "roboguide.recovery-profile/v0.18",
+                "roboguide.recovery-profile/v0.19",
             }
             else databases
         )
@@ -950,7 +982,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.18"
+        "roboguide.restore-receipt/v0.19"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.19"
+        else "roboguide.restore-receipt/v0.18"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.18"
         else "roboguide.restore-receipt/v0.17"
         if manifest["profile"]["schema"]
@@ -1005,7 +1039,18 @@ def restore(
             or previous.get("artifact_replica_placements", []) != replica_placements
         ):
             raise ValueError("original restore command/source identity conflicts")
+        adjusted = replica_content_bundle.validate_restored(
+            bundle,
+            destination,
+            manifest,
+            expected_digest,
+            command_id,
+            previous.get("replica_content_bindings", []),
+            budget,
+        )
         for row in manifest["files"]:
+            if row["path"] in adjusted:
+                continue
             if _hash(destination / row["path"], budget) != (
                 row["content_digest"],
                 row["byte_size"],
@@ -1056,6 +1101,7 @@ def restore(
             "roboguide.recovery-profile/v0.16",
             "roboguide.recovery-profile/v0.17",
             "roboguide.recovery-profile/v0.18",
+            "roboguide.recovery-profile/v0.19",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:
@@ -1071,6 +1117,9 @@ def restore(
             row["byte_size"],
         ):
             raise ValueError("original CAS content changed before declared replica restoration")
+    replica_bindings = replica_content_bundle.bind_restored(
+        partial, manifest, expected_digest, command_id, budget
+    )
     receipt = {
         "schema": receipt_schema,
         "command_id": command_id,
@@ -1088,6 +1137,13 @@ def restore(
     }
     if "artifact_replica_sets" in manifest["profile"]:
         receipt["artifact_replica_placements"] = replica_placements
+    if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.19":
+        receipt["original_authority_bytes_preserved"] = False
+        receipt["original_operational_rows_preserved"] = True
+        receipt["replica_content_bindings"] = replica_bindings
+        replica_content_bundle.validate_restored(
+            bundle, partial, manifest, expected_digest, command_id, replica_bindings, budget
+        )
     with (partial / "restore-receipt.json").open("xb") as handle:
         handle.write(canonical(receipt))
         handle.flush()

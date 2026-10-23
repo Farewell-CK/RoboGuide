@@ -22,6 +22,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.16",
     "roboguide.recovery-profile/v0.17",
     "roboguide.recovery-profile/v0.18",
+    "roboguide.recovery-profile/v0.19",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -391,6 +392,7 @@ def validate(
             owners[owner["owner_id"]] = item["component_id"]
     seen: set[str] = set()
     authorities: dict[str, str] = {}
+    replica_profiles: dict[str, str] = {}
     bindings: dict[str, set[str]] = {}
     if profile_schema in SUPPORTED:
         for component_id in owners.values():
@@ -424,7 +426,26 @@ def validate(
             current = checkpoint is not None and checkpoint[0] in WRAPPERS
             if current:
                 authority_id = _metadata(connection, "archive_authority_id")
-                if not isinstance(authority_id, str) or authority_id in authorities:
+                if profile_schema == "roboguide.recovery-profile/v0.19" and isinstance(
+                    authority_id, str
+                ):
+                    from .replica_content_bundle import projection_authority
+
+                    actual_profile = projection_authority(
+                        root, component, components, authority_id, budget
+                    )
+                    if (
+                        authority_id in replica_profiles
+                        and replica_profiles[authority_id] != actual_profile
+                    ):
+                        raise ValueError(
+                            "repeated Controller authority belongs to another Replica profile"
+                        )
+                    replica_profiles[authority_id] = actual_profile
+                if not isinstance(authority_id, str) or (
+                    authority_id in authorities
+                    and profile_schema != "roboguide.recovery-profile/v0.19"
+                ):
                     raise ValueError(
                         "original Controller reference authority is absent or repeated"
                     )

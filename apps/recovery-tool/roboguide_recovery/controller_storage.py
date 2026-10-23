@@ -73,7 +73,11 @@ def validate(
 ) -> None:
     """Require an explicit compatible profile; neither a declaration nor a view grants authority."""
     actual = actual_format(connection)
-    if actual == STORAGE and profile_schema not in {PROFILE, "roboguide.recovery-profile/v0.18"}:
+    if actual == STORAGE and profile_schema not in {
+        PROFILE,
+        "roboguide.recovery-profile/v0.18",
+        "roboguide.recovery-profile/v0.19",
+    }:
         raise ValueError("Controller storage v1 requires explicit recovery v0.17")
     if expected is not None and actual != expected:
         raise ValueError("declared Controller storage format differs from actual original SQL")

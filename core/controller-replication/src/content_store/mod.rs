@@ -6,6 +6,7 @@ mod layout;
 mod pins;
 mod producers;
 mod reader;
+mod restore;
 mod streams;
 mod time;
 mod validation;
@@ -42,6 +43,8 @@ pub const REPLICA_CONTENT_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layou
 pub const REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.3";
 /// Explicit original stream receiver generation, never inferred from older root contents.
 pub const REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.4";
+/// Explicit relocated backing; original logical identities and all operational rows stay unchanged.
+pub const REPLICA_CONTENT_RESTORE_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.5";
 
 /// Explicit storage interpretation; old maintenance entry points never acquire new producer authority.
 pub(super) enum ContentOpenMode {
@@ -159,6 +162,8 @@ struct ContentInner {
     producers: bool,
     /// Exact stream generation admitted by this actual original connection.
     streams: bool,
+    /// Exact explicitly configured current restoration binding; absent on original physical roots.
+    restore_binding: Option<String>,
     /// Bounds actual running/queued stream workers; each unique worker retains its own permit.
     stream_capacity: Arc<tokio::sync::Semaphore>,
     /// Bounds actual running/queued transport jobs before their owned blocking worker is spawned.
@@ -190,6 +195,31 @@ pub struct ReplicaContentStore {
 }
 
 impl ReplicaContentStore {
+    /// Checks actual retained bytes only; absence creates no use/readiness grant or new operation.
+    pub(crate) fn retained_content_is_available(
+        &self,
+        content: &ArtifactContentKey,
+    ) -> Result<bool, String> {
+        content.validate()?;
+        let guard = self.inner.connection.lock().map_err(|e| e.to_string())?;
+        let connection = guard
+            .as_ref()
+            .ok_or("original content connection is closed")?;
+        self.validate_connection(connection)?;
+        let exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM content_objects WHERE content_key=?1)",
+                [copy::digest(content)?],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        drop(guard);
+        if exists {
+            self.verify_content(content)?;
+        }
+        Ok(exists)
+    }
+
     /// Reserves original real transport work before queuing; the owned worker must retain this permit.
     pub(crate) fn stream_work_permit(&self) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
         if !self.inner.streams {
@@ -278,6 +308,22 @@ impl ReplicaContentStore {
         member: u64,
     ) -> Result<Self, String> {
         layout::open(root, profile_identity, member, ContentOpenMode::Streams)
+    }
+
+    /// Opens only explicitly restored Root5 backing, preserving every original receiver identity.
+    pub fn open_restored_streams(
+        root: &Path,
+        profile_identity: &str,
+        member: u64,
+        binding_digest: &str,
+    ) -> Result<Self, String> {
+        layout::open_bound(
+            root,
+            profile_identity,
+            member,
+            ContentOpenMode::Streams,
+            Some(binding_digest),
+        )
     }
 
     /// Explicitly upgrades the drained original producer root without rewriting old evidence.

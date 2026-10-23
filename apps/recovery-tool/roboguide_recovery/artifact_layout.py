@@ -23,6 +23,7 @@ ARCHIVE_SCHEMAS = {
     "roboguide.recovery-profile/v0.16",
     "roboguide.recovery-profile/v0.17",
     "roboguide.recovery-profile/v0.18",
+    "roboguide.recovery-profile/v0.19",
 }
 OWNER_FILE = ".retention-owner.json"
 FENCE_FILE = "blobs"
@@ -36,6 +37,7 @@ MAINTENANCE_SCHEMAS = {
     "roboguide.recovery-profile/v0.16",
     "roboguide.recovery-profile/v0.17",
     "roboguide.recovery-profile/v0.18",
+    "roboguide.recovery-profile/v0.19",
 }
 MAX_OWNER_BYTES = 4096
 
@@ -47,6 +49,10 @@ def supports(profile_schema: str) -> bool:
 
 def metadata_files(component: dict[str, Any], profile_schema: str) -> list[str]:
     """Select only the explicit format's mandatory original identity and old-layout fence."""
+    if component["kind"] == "replica-content":
+        from .replica_content import metadata_files as root_metadata
+
+        return root_metadata(component)
     return (
         [OWNER_FILE, FENCE_FILE]
         if component["kind"] == "artifact" and supports(profile_schema)
@@ -120,6 +126,7 @@ def validate_storage(
             "roboguide.recovery-profile/v0.16",
             "roboguide.recovery-profile/v0.17",
             "roboguide.recovery-profile/v0.18",
+            "roboguide.recovery-profile/v0.19",
         }
         else "roboguide.artifact-storage/v3"
         if profile_schema in ARCHIVE_SCHEMAS
@@ -248,5 +255,6 @@ def validate_bundle(
         "roboguide.recovery-profile/v0.16",
         "roboguide.recovery-profile/v0.17",
         "roboguide.recovery-profile/v0.18",
+        "roboguide.recovery-profile/v0.19",
     } and (owner is None or owner["schema"] != component["storage_schema"]):
         raise ValueError("original Artifact bundle format differs from the explicit declaration")

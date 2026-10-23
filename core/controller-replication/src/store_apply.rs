@@ -3,11 +3,70 @@
 use super::*;
 
 impl SqliteRaftStore {
+    /// Waits only for real publication within the already-issued original worker clock, without locks.
+    pub(super) fn wait_for_apply_inputs(
+        &self,
+        entries: &[Entry<ControllerRaftConfig>],
+        clock: &crate::content_store::ProducerClock,
+    ) -> Result<(), StorageError<u64>> {
+        let mut pending = BTreeSet::new();
+        for entry in entries {
+            if let EntryPayload::Normal(ReplicaCommand::ContentApplication {
+                content_application,
+            }) = &entry.payload
+            {
+                for key in &content_application.inputs {
+                    pending.insert(key.clone());
+                    if pending.len() > 65_536 {
+                        return Err(io_error(
+                            "original apply inputs exceed the retained Root inventory bound",
+                        ));
+                    }
+                }
+            }
+        }
+        if pending.len() > 65_536 {
+            return Err(io_error(
+                "original apply inputs exceed the retained Root inventory bound",
+            ));
+        }
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let root = self
+            .content
+            .as_ref()
+            .ok_or_else(|| io_error("original apply content backend is absent"))?;
+        while !pending.is_empty() {
+            clock.check().map_err(io_error)?;
+            let mut available = Vec::new();
+            for key in &pending {
+                clock.check().map_err(io_error)?;
+                if root.retained_content_is_available(key).map_err(io_error)? {
+                    available.push(key.clone());
+                }
+            }
+            clock.check().map_err(io_error)?;
+            for key in available {
+                pending.remove(&key);
+            }
+            if !pending.is_empty() {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+        Ok(())
+    }
+
     /// Applies actual original entries inside one parent transaction; caller retains managed queue ownership.
     pub(super) fn apply_entries(
         &self,
         entries: Vec<Entry<ControllerRaftConfig>>,
     ) -> Result<Vec<CommitReceipt>, StorageError<u64>> {
+        if self.controller_content
+            && let Some(clock) = &self.work_clock
+        {
+            self.wait_for_apply_inputs(&entries, clock)?;
+        }
         for entry in &entries {
             if let EntryPayload::Membership(membership) = &entry.payload {
                 self.validate_content_membership(membership)

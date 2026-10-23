@@ -1,5 +1,11 @@
 # RoboGuide
 
+[ADR-0184](docs/decisions/0184-explicit-replica-content-cold-restore.md) 已接通显式
+[完整 Replica 内容恢复 v0.19](contracts/recovery/bundle-v0.19/README.md)。原逻辑身份、操作、
+Unknown 和预算不改写；新 Root5 binding 单独固定恢复后的实际 Root/SQL/parent inode。
+原 v0.18 的拒绝边界保留。实际二次恢复、三 leader 追赶/读取和原 Unknown 检查通过，见
+[验收记录](docs/development/acceptance/2026-10-24-replica-content-cold-recovery.md)；其余非发布矩阵继续实施。
+
 ADR-0183 adds a readonly recovery assessment combining original acceptance with current source and
 replacement records. Independent completion leaves the original Unknown intact and permits no retry.
 

@@ -2055,9 +2055,16 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
     {
         let entries = entries.into_iter().collect::<Vec<_>>();
         if self.has_producer_journal() {
-            return self
+            let result = self
                 .run_storage_work(move |store| store.apply_entries(entries))
                 .await;
+            if let Err(error) = &result {
+                let bounded: String = error.to_string().chars().take(2048).collect();
+                eprintln!(
+                    "original Replica application storage failed before OpenRaft channel closure: {bounded}"
+                );
+            }
+            return result;
         }
         self.apply_entries(entries)
     }

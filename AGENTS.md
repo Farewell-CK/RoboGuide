@@ -1,5 +1,24 @@
 # Repository Guidelines
 
+ADR-0184 adds explicit complete parent8/Root4 recovery v0.19 and restored Root5 backing history.
+All paired original writers/inodes, current membership owners, mandatory operation/reference heads,
+exact qualified bytes and original recovery closes are checked before publication. Source logical
+identities, operation rows, Unknown and clocks remain unchanged. Explicit process v0.3 pins the new
+binding; old open refuses. Historical parent producer provenance maps only through the complete
+pinned chain to the actual current parent descriptor. New stream workers freeze actual restored
+backing, separately from original receiver provenance. Restore never starts services or renews old
+permissions. Owners are content_store/restore.rs, recovery replica_content{,_bundle}.py and
+check_replica_content_recovery_processes.py. Actual second restore/three-leader acceptance passed; no Node/device,
+online catchup, physical continuity, SLO or SoftwareComplete claim follows from a bundle.
+
+ADR-0185 separates actual live incarnation from unavailable or negative process evidence. Producer
+reconciliation leaves the complete original Unknown unchanged while its actual process is still
+live and no publication/scope close exists. No observation, release, receipt or renewed budget is
+written. Actual scope Drop still gates subsequent parent-based cleanup. Explicit reader/copy end
+APIs retain their live-process refusal. The held-permit regression uses real SQL and kernel evidence;
+ADR-0186 separately waits for actual receipt/bytes under the original apply budget before the
+parent writer. Delayed publication, expiry, corruption and the actual cold-restart matrix pass. No persistent/Node generation or device authority is added.
+
 ADR-0183 adds exact readonly recovery /assessment, joining original acceptance with current source
 and replacement under the same writer. Complete original immutable fields are checked; absent
 replacement is unavailable and independent Completed never fills original Unknown. Current grant,

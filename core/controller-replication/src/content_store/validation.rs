@@ -41,7 +41,14 @@ impl Witness {
 /// Validates only the one connection retained by this actual inner owner; callers hold its mutex.
 pub(super) fn validate(inner: &ContentInner, connection: &Connection) -> Result<(), String> {
     layout::within_budget(connection)?;
-    let version = if inner.streams {
+    let restored_head = inner
+        .restore_binding
+        .as_deref()
+        .map(|digest| super::restore::validate_backing(&inner.root, &inner.identity, digest))
+        .transpose()?;
+    let version = if inner.restore_binding.is_some() {
+        5
+    } else if inner.streams {
         4
     } else if inner.producers {
         3
@@ -54,7 +61,13 @@ pub(super) fn validate(inner: &ContentInner, connection: &Connection) -> Result<
         .map_err(|_| "original Root validation witness unavailable")?;
     if !connection.is_autocommit() {
         *witness = None;
-        return layout::validate_version(connection, &inner.identity, version);
+        layout::validate_version(connection, &inner.identity, version)?;
+        if let Some(expected) = restored_head
+            && super::restore::validate_sql(connection, &inner.identity)? != expected
+        {
+            return Err("current transactional restored file/SQL binding differs".into());
+        }
+        return Ok(());
     }
     let before = Witness::sample(connection)?;
     if witness.as_ref() == Some(&before) {
@@ -65,6 +78,11 @@ pub(super) fn validate(inner: &ContentInner, connection: &Connection) -> Result<
         .unchecked_transaction()
         .map_err(|e| e.to_string())?;
     layout::validate_version(&transaction, &inner.identity, version)?;
+    if let Some(expected) = restored_head
+        && super::restore::validate_sql(&transaction, &inner.identity)? != expected
+    {
+        return Err("current restored file/SQL binding differs".into());
+    }
     transaction.commit().map_err(|e| e.to_string())?;
     let after = Witness::sample(connection)?;
     if before != after {

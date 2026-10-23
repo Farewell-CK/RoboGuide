@@ -1,5 +1,7 @@
 # Implementation status and evidence limits
 
+
+[Complete Replica cold data recovery and native restart](docs/development/acceptance/2026-10-24-replica-content-cold-recovery.md) passed explicit v0.19, a second restore and three leaders' catchup/transfer/original-byte reads. Original intents/receipts, budgets and Unknown remain; zero Nodes/devices are added. Full online Archive/Snapshot/GC, absent historical-content routing, joint/upgrade/rollback and all other non-release matrices remain required.
 Content baseline: `815ffcd` (ADR-0177–0180), reviewed 2026-10-24; [Reference](reference.md) records the full code baseline. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
 
 | Area | Existing software paths | Remaining or independently validated work |

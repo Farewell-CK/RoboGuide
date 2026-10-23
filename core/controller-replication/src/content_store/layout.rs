@@ -235,6 +235,7 @@ pub(super) fn create(
             database,
             producers,
             streams,
+            restore_binding: None,
             stream_capacity: Arc::new(tokio::sync::Semaphore::new(8)),
             stream_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
         }),
@@ -247,6 +248,17 @@ pub(super) fn open(
     profile_identity: &str,
     member: u64,
     mode: ContentOpenMode,
+) -> Result<ReplicaContentStore, String> {
+    open_bound(root, profile_identity, member, mode, None)
+}
+
+/// Separately admits explicitly restored physical backing; original open never borrows that contract.
+pub(super) fn open_bound(
+    root: &Path,
+    profile_identity: &str,
+    member: u64,
+    mode: ContentOpenMode,
+    restore_binding: Option<&str>,
 ) -> Result<ReplicaContentStore, String> {
     directory(root)?;
     let writer = locked(regular(&root.join(".writer.lock"), true)?)?;
@@ -261,10 +273,11 @@ pub(super) fn open(
             .store_owner
             .strip_prefix("replica-content:")
             .is_none_or(|value| !crate::content::hex_digest(value))
-        || original.root_device != root_info.dev()
-        || original.root_inode != root_info.ino()
-        || original.database_device != database_info.dev()
-        || original.database_inode != database_info.ino()
+        || (restore_binding.is_none()
+            && (original.root_device != root_info.dev()
+                || original.root_inode != root_info.ino()
+                || original.database_device != database_info.dev()
+                || original.database_inode != database_info.ino()))
         || database_info.len() > MAX_DATABASE_BYTES
         || identity(&root.join(CREATION))? != original
         || identity(&root.join("blobs"))? != original
@@ -273,6 +286,9 @@ pub(super) fn open(
             "original replica content identity/profile/member/backing inode conflicts".into(),
         );
     }
+    let restored_head = restore_binding
+        .map(|digest| super::restore::validate_backing(root, &original, digest))
+        .transpose()?;
     for name in ["content-v1", "staging-v1"] {
         directory(&root.join(name))?;
     }
@@ -388,7 +404,9 @@ pub(super) fn open(
     validate_version(
         &connection,
         &original,
-        if streams {
+        if restore_binding.is_some() {
+            5
+        } else if streams {
             4
         } else if producers {
             3
@@ -396,6 +414,11 @@ pub(super) fn open(
             2
         },
     )?;
+    if let Some(expected) = restored_head
+        && super::restore::validate_sql(&connection, &original)? != expected
+    {
+        return Err("actual restored binding differs from original SQL head".into());
+    }
     Ok(ReplicaContentStore {
         inner: Arc::new(ContentInner {
             validation_witness: Mutex::new(None),
@@ -407,6 +430,7 @@ pub(super) fn open(
             database,
             producers,
             streams,
+            restore_binding: restore_binding.map(str::to_owned),
             stream_capacity: Arc::new(tokio::sync::Semaphore::new(8)),
             stream_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
         }),
@@ -484,7 +508,7 @@ pub(super) fn validate_version(
     if expected_version >= 3 {
         expected.insert(2, ("content_producers".into(), "table".into()));
     }
-    if expected_version == 4 {
+    if expected_version >= 4 {
         expected.insert(
             expected.len() - 1,
             ("content_streams".into(), "table".into()),
@@ -503,7 +527,7 @@ pub(super) fn validate_version(
     if expected_version >= 3 {
         tables.push(("content_producers", "operation_id"));
     }
-    if expected_version == 4 {
+    if expected_version >= 4 {
         tables.push(("content_streams", "stream_id"));
     }
     for (table, key) in tables {
@@ -566,7 +590,7 @@ pub(super) fn validate_version(
     if expected_version >= 3 {
         inventories.push(("producer_ids", "content_producers", "operation_id"));
     }
-    if expected_version == 4 {
+    if expected_version >= 4 {
         inventories.push(("stream_ids", "content_streams", "stream_id"));
     }
     for (name, table, column) in inventories {
@@ -589,7 +613,7 @@ pub(super) fn validate_version(
                 let reference = reference_record(connection, &id)?
                     .ok_or("original content reference row missing")?;
                 if reference.reference.kind == ReplicaContentReferenceKind::Stream
-                    && expected_version != 4
+                    && expected_version < 4
                 {
                     return Err("old content profile contains hidden stream authority".into());
                 }
@@ -605,6 +629,7 @@ pub(super) fn validate_version(
             2 => 6,
             3 => 8,
             4 => 9,
+            5 => 10,
             _ => return Err("unknown original content storage generation".into()),
         }
     {
@@ -617,7 +642,9 @@ pub(super) fn validate_version(
             })
             .map_err(|error| error.to_string())?;
         if layout
-            != if expected_version == 4 {
+            != if expected_version == 5 {
+                REPLICA_CONTENT_RESTORE_LAYOUT_SCHEMA
+            } else if expected_version == 4 {
                 REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA
             } else if expected_version == 3 {
                 REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA
@@ -633,8 +660,11 @@ pub(super) fn validate_version(
     if expected_version >= 3 {
         super::producers::validate_records(connection, original)?;
     }
-    if expected_version == 4 {
+    if expected_version >= 4 {
         super::streams::validate_records(connection, original)?;
+    }
+    if expected_version == 5 {
+        super::restore::validate_sql(connection, original)?;
     }
     Ok(())
 }

@@ -440,10 +440,11 @@ impl ReplicaContentStore {
             .as_ref()
             .ok_or("original content connection is closed")?;
         self.validate_connection(connection)?;
+        let parents = super::restore::parent_sources(&self.inner, connection, actual)?;
         let mut result = Vec::new();
         for id in layout::head(connection, "producer_ids")? {
             let original = record(connection, &id)?.ok_or("original producer head lost its row")?;
-            if (original.intent.sql_device, original.intent.sql_inode) == actual {
+            if parents.contains(&(original.intent.sql_device, original.intent.sql_inode)) {
                 result.push(status(&original)?);
             }
         }
@@ -479,7 +480,12 @@ impl ReplicaContentStore {
         let id = digest(&operation_id)?;
         let mut original =
             record(&transaction, &id)?.ok_or("original producer operation is unavailable")?;
-        if (original.intent.sql_device, original.intent.sql_inode) != actual {
+        if !super::restore::matches_parent(
+            &self.inner,
+            &transaction,
+            actual,
+            (original.intent.sql_device, original.intent.sql_inode),
+        )? {
             return Err(
                 "original producer reconciliation belongs to another actual SQL source".into(),
             );
@@ -490,6 +496,17 @@ impl ReplicaContentStore {
         if still_referenced && original.observation.is_some() {
             return status(&original);
         }
+        let process_end = if !still_referenced
+            && original.publication.is_none()
+            && original.worker_closed_ms.is_none()
+        {
+            match original.intent.budget.try_observe_process_end()? {
+                Some(end) => Some(end),
+                None => return status(&original),
+            }
+        } else {
+            None
+        };
         if original.observation.is_none() {
             original.observation = Some(ParentObservation {
                 observer: observer.clone(),
@@ -498,12 +515,6 @@ impl ReplicaContentStore {
             });
         }
         if !still_referenced {
-            let process_end =
-                if original.publication.is_none() && original.worker_closed_ms.is_none() {
-                    Some(original.intent.budget.observe_process_end()?)
-                } else {
-                    None
-                };
             original.resolution = Some(Resolution {
                 observer,
                 proof_digest: proof_digest.into(),

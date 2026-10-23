@@ -565,6 +565,7 @@ def validate_bundle(
         gc.SCHEMA,
         "roboguide.recovery-profile/v0.17",
         "roboguide.recovery-profile/v0.18",
+        "roboguide.recovery-profile/v0.19",
     }:
         return
     from . import artifact_layout
@@ -600,6 +601,9 @@ def validate_bundle(
         candidates = {owner: value for owner, value in owners.items() if authority in value[1]}
         required = []
         for key, upload in uploads.items():
+            if profile_schema == "roboguide.recovery-profile/v0.19":
+                # Root's exact committed origins own replicated uploads; local projections may lag.
+                continue
             if upload["phase"] not in {"prepared", "completed"}:
                 continue
             released = retired.get(key)

@@ -5,6 +5,16 @@ Reviewed: 2026-10-22. Code baseline: `495a6d274f6f930016d97ec5514124876e539cfe`.
 call chains and composition roots. They introduce no new authority or change to [V2 semantics](README.md).
 Accepted ADRs govern subsequent evolution.
 
+ADR-0184 implements parent8/Root4 cold data recovery with actual second-restore and three-leader software acceptance. Original logical identities and operation history remain unchanged; an explicit Root5
+binding separately records the actual restored inodes. Old entry points refuse the new binding.
+The bundle must cover the paired parent, Root, active references and exact qualified bytes.
+Copying data never completes an original Unknown operation or renews its budget.
+
+ADR-0185 keeps a producer's original Unknown unchanged while its actual incarnation remains live
+and no scope-close proof exists. It neither retires/releases pins nor invents process-end evidence
+or renews effect budgets. Independent parent observation and actual scope closure still gate later
+cleanup. This storage concurrency rule provides no device-stop proof.
+
 ## System overview
 
 Solid arrows show commands, facts or responsibility collaboration; dotted arrows show read-only inputs.
@@ -199,3 +209,5 @@ and the site tour contain the same content; publication checks reject drift. Aut
 lifecycle or public-contract changes still require an ADR and an updated code baseline/evidence map.
 The old [V2 PNG](../../images/roboguide-v2-overall-architecture.png) and DOCX remain historical conceptual
 snapshots, not current implementation diagrams.
+
+ADR-0186 waits for exact actual input receipts/bytes within parent8's original apply-worker budget, before acquiring the parent writer. Waiting neither copies content nor grants permission or renews budgets. Corrupt bytes behind a known receipt still fail immediately; absent historical-content routing remains a separate required implementation.

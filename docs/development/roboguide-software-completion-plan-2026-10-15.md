@@ -113,6 +113,13 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-24）
 
+N3/P3 的 [ADR-0184–0186 完整静止恢复与重启](acceptance/2026-10-24-replica-content-cold-recovery.md)
+已通过：显式 v0.19、原 parent8/Root4、Root5 新 backing、二次完整恢复、实际三 leader
+追赶/transfer/读字节及原 Unknown 保留。并发活 producer 对账与字节晚到 apply 的两条
+实际故障已修复，原权限和预算未续期。接下来接完整 online Archive/Snapshot/GC、
+历史缺失内容的路由、joint/fault/升级回退组合，再按原 N1–N7 队列完成 typed-map、资源、
+执行协调和双域 transport；本项不关闭总体 SoftwareComplete。
+
 N3/P3 的 [ADR-0183 原 recovery 事实对账](acceptance/2026-10-24-original-recovery-assessment.md)
 已通过写禁用、原 SQL 故障、真实重启/source 放弃后的同一 Unknown，以及当前
 replacement Completed/退休/缺失、权限与旧路径检查。该切片闭合本地已提交

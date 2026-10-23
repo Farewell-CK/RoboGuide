@@ -84,6 +84,9 @@ pub(super) struct ContentProcessConfig {
     pub child_budget_ms: u64,
     /// Original declared failure-detection observation window, never renewed within a check.
     pub quorum_observation_ms: u64,
+    /// Exact explicit Root5 backing receipt; absent for original Root4 process v0.2.
+    #[serde(default)]
+    pub restore_binding_digest: Option<String>,
 }
 
 /// Closed one-shot leader handoff command; it never asserts physical continuity.
@@ -199,7 +202,21 @@ impl ProcessConfig {
                         owner.clone(),
                     )?;
                 }
-                "roboguide.controller-replica-process/v0.2"
+                if let Some(digest) = &content.restore_binding_digest {
+                    if digest.strip_prefix("sha256:").is_none_or(|value| {
+                        value.len() != 64
+                            || !value
+                                .bytes()
+                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                    }) {
+                        return Err(
+                            "restored Root5 requires its exact explicit binding digest".into()
+                        );
+                    }
+                    "roboguide.controller-replica-process/v0.3"
+                } else {
+                    "roboguide.controller-replica-process/v0.2"
+                }
             }
         };
         if self
@@ -335,6 +352,7 @@ mod tests {
             socket: "/declared/child.sock".into(),
             child_budget_ms: 45000,
             quorum_observation_ms: 5000,
+            restore_binding_digest: None,
         });
         configuration.controller_environment.extend([
             ("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA".into(), "1".into()),
@@ -381,6 +399,30 @@ mod tests {
                 "{child}/{window} bypassed bounds"
             );
         }
+    }
+
+    /// Root5 requires explicit process v0.3 while preserving the original application policy.
+    #[test]
+    fn restored_root_is_explicit_without_replacing_original_application_policy() {
+        let mut configuration = owned_profile();
+        let policy = configuration.policy_digest().unwrap();
+        let cluster = configuration.replica.profile_identity();
+        configuration
+            .content
+            .as_mut()
+            .unwrap()
+            .restore_binding_digest = Some(format!("sha256:{}", "a".repeat(64)));
+        assert!(configuration.validate().is_err());
+        configuration.schema = "roboguide.controller-replica-process/v0.3".into();
+        configuration.validate().unwrap();
+        assert_eq!(configuration.policy_digest().unwrap(), policy);
+        assert_eq!(configuration.replica.profile_identity(), cluster);
+        configuration
+            .content
+            .as_mut()
+            .unwrap()
+            .restore_binding_digest = Some("caller-passed".into());
+        assert!(configuration.validate().is_err());
     }
 
     /// The actual child accepts only 0/1; invalid declarations refuse before repeated child spawns.
