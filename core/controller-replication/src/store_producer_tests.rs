@@ -567,7 +567,78 @@ async fn actual_blocked_worker_keeps_original_scope_after_waiter_cancellation() 
     store.verify_accepted_content().unwrap();
 }
 
-/// Actual store capacity bounds queue admission before new intent/effects and releases only owned permits.
+/// Real blocked SQL cannot occupy the sole network worker or lose its queue/lease on waiter cancellation.
+#[tokio::test(flavor = "current_thread")]
+async fn actual_consensus_sql_workers_retain_capacity_and_leases_after_cancel() {
+    let (directory, store, content, _key, _entry) = fixture();
+    let capacity = store.consensus_jobs.clone();
+    let writer = Arc::downgrade(&store._writer);
+    let parent_connection = store.connection.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let _actual_writer = parent_connection.lock().unwrap();
+        ready_tx.send(()).unwrap();
+        release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    });
+    ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let mut waiters = Vec::new();
+    for _ in 0..16 {
+        let mut worker = store.clone();
+        waiters.push(tokio::spawn(async move { worker.get_log_state().await }));
+    }
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while capacity.available_permits() != 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let mut refused = store.clone();
+    assert!(
+        refused
+            .get_log_state()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("capacity is exhausted")
+    );
+    drop(refused);
+    for waiter in waiters {
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+    }
+    drop(store);
+    drop(content);
+    for _ in 0..5 {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        assert_eq!(capacity.available_permits(), 0);
+    }
+    let descriptor = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(directory.path().join("managed-parent.sqlite3"))
+        .unwrap();
+    assert!(descriptor.try_lock().is_err());
+    assert!(writer.upgrade().is_some());
+    release_tx.send(()).unwrap();
+    holder.join().unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while capacity.available_permits() != 16 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        writer.strong_count(),
+        0,
+        "actual worker did not release original parent lease"
+    );
+    descriptor.try_lock().unwrap();
+}
+
+/// Heavy producer admission remains independently bounded and does not consume consensus SQL slots.
 #[test]
 fn actual_original_storage_queue_is_bounded_before_new_intent() {
     let (_directory, store, _content, _key, _entry) = fixture();

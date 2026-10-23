@@ -169,7 +169,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let digest_only = first == "--policy-digest";
-    let path = if digest_only {
+    let profile_only = first == "--profile-identity";
+    let path = if digest_only || profile_only {
         arguments.next().ok_or("missing config.json")?
     } else {
         first
@@ -180,6 +181,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let configuration: config::ProcessConfig = serde_json::from_slice(&std::fs::read(&path)?)?;
     if digest_only {
         println!("{}", configuration.policy_digest()?);
+        return Ok(());
+    }
+    if profile_only {
+        configuration.replica.validate()?;
+        println!("{}", configuration.replica.profile_identity());
         return Ok(());
     }
     configuration.validate()?;

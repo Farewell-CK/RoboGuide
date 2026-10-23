@@ -236,7 +236,40 @@ impl ControllerContentClient {
 
     /// Requires this actual original process and current complete metadata/content quorum.
     pub fn check(&self) -> Result<ControllerProcessIdentity, String> {
-        let mut exchange = self.connect(ChildCommand::Fence)?;
+        self.process_reply(ChildCommand::Fence)
+    }
+
+    /// Checks only actual original process/TLS/epoch/quorum; this never announces complete content ready.
+    pub fn check_process(&self) -> Result<ControllerProcessIdentity, String> {
+        self.process_reply(ChildCommand::ProcessFence)
+    }
+
+    /// Waits only for original PID registration under one startup clock, without any command effects.
+    pub fn wait_for_registration(&self) -> Result<(), String> {
+        let original = ContentBudget::issue(self.config.budget_ms)?;
+        loop {
+            original.check()?;
+            match self.check_process() {
+                Ok(_) => {
+                    original.check()?;
+                    return Ok(());
+                }
+                Err(error)
+                    if error.contains(
+                        "actual original Controller process has no live registered incarnation",
+                    ) =>
+                {
+                    original.check()?;
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    /// Verifies one actual original returned process identity under the selected readonly fence scope.
+    fn process_reply(&self, command: ChildCommand) -> Result<ControllerProcessIdentity, String> {
+        let mut exchange = self.connect(command)?;
         match self.read(&mut exchange)? {
             ChildReply::Fence(process) => {
                 crate::supervision::validate_process(&process)?;
@@ -517,7 +550,7 @@ impl ControllerContentClient {
             let record: IngressRecord = serde_json::from_value(observed.original.clone())
                 .map_err(|error| error.to_string())?;
             if record.receipt.is_some() {
-                self.check()?;
+                self.check_process()?;
                 return Ok(());
             }
         }
@@ -556,7 +589,7 @@ impl state::ApplicationBatchReplicator for ControllerContentClient {
     }
     /// Requires actual owned-process and complete content/quorum authority before SQL mutations.
     fn assert_write_authority(&self) -> Result<(), String> {
-        self.check().map(|_| ())
+        self.check_process().map(|_| ())
     }
     /// Legacy metadata-only confirmation cannot bypass the complete original source contract.
     fn confirm_batch(&self, _batch: state::ApplicationCommitBatch) -> Result<(), String> {

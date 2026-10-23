@@ -285,14 +285,6 @@ impl SqliteRaftStore {
         Ok(())
     }
 
-    /// Refuses application authority when a legacy checkpoint lacks original process continuity.
-    pub(crate) fn controller_continuity_known(&self) -> Result<bool, String> {
-        let connection = self.connection.lock().map_err(|error| error.to_string())?;
-        Ok(read_meta::<bool>(&connection, LEGACY_CONTINUITY_KEY)
-            .map_err(|error| error.to_string())?
-            == Some(false))
-    }
-
     /// Validates the complete process journal during format reopen, before granting writer authority.
     pub(crate) fn validate_controller_supervision(
         connection: &rusqlite::Connection,

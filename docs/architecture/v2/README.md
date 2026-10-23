@@ -7,6 +7,11 @@
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
 
+[ADR-0172](../../decisions/0172-runnable-owned-controller-content-profile.md)定义显式
+process v0.2 的真实 Controller 接线：同一 source SDK writer、原 process 注册、完整
+就绪后 materialize/spawn。ProcessFence 只证明原进程和 infrastructure quorum，完整
+内容 ACK、读取权限与 readiness 继续分别检查；新 profile 不冒充完整 HA。
+
 [ADR-0171](../../decisions/0171-owned-controller-content-ingress.md)定义同主机原 Controller 子进程
 的 Unix peer PID/原 spawn journal/mTLS 内容入口及 parent8 原命令日志。零事件也须先
 记录意图，旧 Unknown 只读对账；实际接线验收前，旧生产入口继续拒绝新内容权威。

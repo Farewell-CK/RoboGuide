@@ -73,15 +73,6 @@ async fn start_controller(
     command
         .env_clear()
         .envs(&configuration.controller_environment)
-        .env(
-            "ROBOGUIDE_REPLICA_ENDPOINT",
-            node.local_address().to_string(),
-        )
-        .env("ROBOGUIDE_REPLICA_PROFILE", node.profile_identity())
-        .env(
-            "ROBOGUIDE_REPLICA_EPOCH",
-            serde_json::to_string(&epoch).map_err(|error| error.to_string())?,
-        )
         .arg(configuration.grpc_address.to_string())
         .arg(directory.join("controller.sqlite3"))
         .arg(configuration.http_address.to_string())
@@ -103,28 +94,58 @@ async fn start_controller(
         .stdout(output)
         .stderr(error_output)
         .kill_on_drop(true);
-    if let Some(secret) = &configuration.replica.shared_secret {
-        command.env("ROBOGUIDE_REPLICA_SHARED_SECRET", secret);
-    }
-    if let Some(tls) = &configuration.replica.tls {
-        command
-            .env("ROBOGUIDE_REPLICA_TLS_CA", &tls.ca_cert_path)
-            .env("ROBOGUIDE_REPLICA_TLS_CERT", &tls.cert_path)
-            .env("ROBOGUIDE_REPLICA_TLS_KEY", &tls.key_path)
-            .env("ROBOGUIDE_REPLICA_TLS_SERVER_NAME", &tls.server_name)
-            .env(
-                "ROBOGUIDE_REPLICA_TLS_PEER_DIGESTS",
-                serde_json::to_string(&tls.peer_certificate_digests)
-                    .map_err(|error| error.to_string())?,
-            );
-    }
-    if configuration.replica.rotates_certificates() {
-        command.env(
-            "ROBOGUIDE_REPLICA_TRUST_DATABASE",
-            configuration.storage_directory.join("replica.sqlite3"),
-        );
-    }
     let original = node.begin_controller_process(epoch).await?;
+    if let Some(content) = &configuration.content {
+        let client = controller_replication::ControllerContentClientConfig {
+            socket: content.socket.clone(),
+            profile: node.profile_identity(),
+            epoch,
+            instance: original.clone(),
+            tls: configuration
+                .replica
+                .tls
+                .clone()
+                .ok_or("original content child requires actual TLS")?,
+            trust_database: directory.join("replica.sqlite3"),
+            budget_ms: content.child_budget_ms,
+        };
+        command.env(
+            "ROBOGUIDE_REPLICA_CONTENT_CONFIG",
+            serde_json::to_string(&client).map_err(|error| error.to_string())?,
+        );
+    } else {
+        command
+            .env(
+                "ROBOGUIDE_REPLICA_ENDPOINT",
+                node.local_address().to_string(),
+            )
+            .env("ROBOGUIDE_REPLICA_PROFILE", node.profile_identity())
+            .env(
+                "ROBOGUIDE_REPLICA_EPOCH",
+                serde_json::to_string(&epoch).map_err(|error| error.to_string())?,
+            );
+        if let Some(secret) = &configuration.replica.shared_secret {
+            command.env("ROBOGUIDE_REPLICA_SHARED_SECRET", secret);
+        }
+        if let Some(tls) = &configuration.replica.tls {
+            command
+                .env("ROBOGUIDE_REPLICA_TLS_CA", &tls.ca_cert_path)
+                .env("ROBOGUIDE_REPLICA_TLS_CERT", &tls.cert_path)
+                .env("ROBOGUIDE_REPLICA_TLS_KEY", &tls.key_path)
+                .env("ROBOGUIDE_REPLICA_TLS_SERVER_NAME", &tls.server_name)
+                .env(
+                    "ROBOGUIDE_REPLICA_TLS_PEER_DIGESTS",
+                    serde_json::to_string(&tls.peer_certificate_digests)
+                        .map_err(|error| error.to_string())?,
+                );
+        }
+        if configuration.replica.rotates_certificates() {
+            command.env(
+                "ROBOGUIDE_REPLICA_TRUST_DATABASE",
+                configuration.storage_directory.join("replica.sqlite3"),
+            );
+        }
+    }
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     let process = match node.register_controller_process(
         epoch,
@@ -187,48 +208,97 @@ async fn stop_controller(
 }
 
 /// Publishes bounded local status atomically; it is not an authority or failover API.
-fn write_status(
+async fn write_status(
     configuration: &ProcessConfig,
     node: &ReplicaNode,
     epoch: Option<ControllerEpoch>,
     owned: &Option<OwnedController>,
 ) -> Result<(), String> {
-    let status = Status {
-        observed_unix_ms: crate::metrics::unix_ms()?,
-        profile: node.profile_identity(),
-        epoch,
-        child_pid: owned.as_ref().and_then(|controller| controller.child.id()),
-        revision: node.accepted_revision()?,
-        transport: Some(node.transport_snapshot()),
-    };
-    let temporary = configuration.storage_directory.join("status.pending.json");
-    std::fs::write(
-        &temporary,
-        serde_json::to_vec(&status).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    std::fs::rename(
-        temporary,
-        configuration.storage_directory.join("status.json"),
-    )
-    .map_err(|error| error.to_string())
+    let node = node.clone();
+    let directory = configuration.storage_directory.clone();
+    let child_pid = owned.as_ref().and_then(|controller| controller.child.id());
+    tokio::task::spawn_blocking(move || {
+        let status = Status {
+            observed_unix_ms: crate::metrics::unix_ms()?,
+            profile: node.profile_identity(),
+            epoch,
+            child_pid,
+            revision: node.accepted_revision()?,
+            transport: Some(node.transport_snapshot()),
+        };
+        let temporary = directory.join("status.pending.json");
+        std::fs::write(
+            &temporary,
+            serde_json::to_vec(&status).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        std::fs::rename(temporary, directory.join("status.json")).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Runs consensus continuously while only current quorum leadership retains one owned child.
 pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
-    std::fs::create_dir_all(&configuration.storage_directory).map_err(|error| error.to_string())?;
+    if configuration.content.is_some() {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+        if !configuration.storage_directory.exists() {
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&configuration.storage_directory)
+                .map_err(|error| error.to_string())?;
+        }
+        let actual = std::fs::symlink_metadata(&configuration.storage_directory)
+            .map_err(|error| error.to_string())?;
+        if !actual.is_dir()
+            || actual.mode() & 0o077 != 0
+            || configuration
+                .storage_directory
+                .canonicalize()
+                .map_err(|error| error.to_string())?
+                != configuration.storage_directory
+        {
+            return Err("original content supervisor requires an actual canonical private storage directory".into());
+        }
+    } else {
+        std::fs::create_dir_all(&configuration.storage_directory)
+            .map_err(|error| error.to_string())?;
+    }
     let _lease = writer_lease(
         &configuration
             .storage_directory
             .join("supervisor.writer.lock"),
     )?;
-    let (node, _server) = ReplicaNode::start_with_transport_limits(
-        configuration.replica.clone(),
-        &configuration.storage_directory.join("replica.sqlite3"),
-        configuration.transport_limits.clone(),
-    )
-    .await?;
+    let (node, _server) = if let Some(content) = &configuration.content {
+        let root = controller_replication::ReplicaContentStore::open_with_streams(
+            &content.root,
+            &configuration.replica.profile_identity(),
+            configuration.replica.replica_id,
+        )?;
+        ReplicaNode::start_with_controller_content_window(
+            configuration.replica.clone(),
+            &configuration.storage_directory.join("replica.sqlite3"),
+            root,
+            content.bootstrap_owners.clone(),
+            configuration.transport_limits.clone(),
+            content.quorum_observation_ms,
+        )
+        .await?
+    } else {
+        ReplicaNode::start_with_transport_limits(
+            configuration.replica.clone(),
+            &configuration.storage_directory.join("replica.sqlite3"),
+            configuration.transport_limits.clone(),
+        )
+        .await?
+    };
     node.enable_controller_supervision()?;
+    let _content_ingress = if let Some(content) = &configuration.content {
+        Some(node.serve_controller_ingress(&content.socket).await?)
+    } else {
+        None
+    };
     let mut owned = None;
     let metrics_task = crate::metrics::start(
         configuration.metrics_address,
@@ -293,6 +363,17 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     && let Some(epoch) = current
                 {
                     configuration.validate()?;
+                    if configuration.content.is_some()&&node.accepted_revision()?>0 {
+                        let ready=match node.accepted_content_target().await {
+                            Ok(target)=>node.content_quorum(target).await,
+                            Err(error)=>Err(error),
+                        };
+                        if let Err(error)=ready{
+                            eprintln!("original complete content not ready before Controller spawn: {error}");
+                            write_status(&configuration,&node,None,&owned).await?;
+                            continue;
+                        }
+                    }
                     let projected_node = node.clone();
                     let directory = configuration.storage_directory.clone();
                     let format = match configuration.controller_environment.get("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA").map(String::as_str) {
@@ -314,7 +395,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                         owned = Some(start_controller(&configuration, &node, epoch).await?);
                     }
                 }
-                write_status(&configuration, &node, current, &owned)?;
+                write_status(&configuration, &node, current, &owned).await?;
             }
         }
     };

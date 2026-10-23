@@ -27,6 +27,8 @@ pub(super) struct ChildRequest {
 /// External enum tagging preserves exact nested u64 member maps without compatibility normalization.
 #[derive(Serialize, Deserialize)]
 pub(super) enum ChildCommand {
+    /// Original process/TLS/epoch and actual infrastructure quorum only, without a content-ready claim.
+    ProcessFence,
     /// Current original-child authority and complete accepted content fence.
     Fence,
     /// Complete original previous view for constructing a semantic candidate under the real source writer.
@@ -368,6 +370,11 @@ async fn handle(stream: tokio::net::UnixStream, node: ReplicaNode, pid: u32) -> 
             let clock = ContentBudget::issue(request.budget_ms)?;
             peer_process(&node, peer.clone()).await?;
             match request.command {
+                ChildCommand::ProcessFence => {
+                    node.check_epoch(peer.epoch).await?;
+                    let process = peer_process(&node, peer).await?;
+                    write(&mut stream, &ChildReply::Fence(process), &node).await
+                }
                 ChildCommand::Fence => {
                     fence(&node, &peer).await?;
                     let process = peer_process(&node, peer).await?;

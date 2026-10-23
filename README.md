@@ -1,9 +1,15 @@
 # RoboGuide
 
+[真实 Controller 内容 Profile](docs/development/acceptance/2026-10-23-runnable-controller-content.md)
+以显式 process v0.2 接通 parent8/Root4、原 PID 日志、mTLS 和同一个实际 Artifact writer。
+实际 HTTP 上传、三副本完整字节、原 child SIGKILL/wait 与同 inode 重启读取已有进程证据。
+配置中的 quorum 观察窗口进入原 policy，旧 profile 保持；提交仍要求同成员 metadata+bytes。
+跨 owner 路由、Prepared 接管、完整 readiness/HA/升级/恢复/GC 和其余非发布整改继续实施。
+
 [原 Controller 内容入口](docs/development/acceptance/2026-10-23-owned-controller-content-ingress.md)
 正在接显式 parent8：实际 Unix peer PID、原 spawn 日志、mTLS 和完整首次命令先于
 Prepared 字节复制与同成员 metadata+bytes ACK。真实文件源使用正常 State 提交端口，
-保留 SQL 回执丢失后的原 Unknown 和独立完整候选对账。它尚未替代 runnable Controller
+保留 SQL 回执丢失后的原 Unknown 和独立完整候选对账。ADR-0172 已接 runnable Controller
 composition；内容路由/readiness、完整 HA/恢复/升级与原全部整改继续实施。
 
 [Prepared 内容作用域](docs/development/acceptance/2026-10-23-prepared-artifact-sources.md)

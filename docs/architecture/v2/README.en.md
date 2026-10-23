@@ -1,5 +1,9 @@
 # RoboGuide V2 current architecture
 
+[ADR-0172](../../decisions/0172-runnable-owned-controller-content-profile.md) defines explicit
+process v0.2 Controller wiring with the same source SDK writer and original process registration.
+ProcessFence proves process/infrastructure authority; complete content ACK and readiness stay separate.
+
 [ADR-0171](../../decisions/0171-owned-controller-content-ingress.md) defines same-host owned-child
 Unix peer PID/original spawn journal/mTLS ingress and parent8 command history. Zero-event operations
 still retain first intent; Unknown retries only observe. Production authority requires actual wiring.

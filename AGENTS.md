@@ -1,5 +1,17 @@
 # Repository Guidelines
 
+ADR-0172 connects explicit process v0.2 to actual parent8/Root4 and the runnable Controller's shared
+Artifact writer. New contracts and original child/quorum observation budgets are policy-bound;
+legacy process v0.1 keeps its original fence. ProcessFence checks actual PID/TLS/current epoch and
+infrastructure quorum without claiming complete content readiness. Complete Commit/delivery checks
+retain exact metadata/full-byte majorities. Original registration waits are readonly and bounded.
+Consensus SQL and serialized supervisor status use owned blocking scopes; sixteen small consensus
+jobs remain independent of eight heavy producer jobs, and cancelled waits retain actual leases and
+capacity. The actual zero-Node gate is check_runnable_content_processes.py: current-owner HTTP upload,
+all-three original bytes and SIGKILL/reap/same-inode child restart. Cross-owner routing, Prepared
+takeover, full readiness/HA/upgrade/recovery/GC and all other P1-P7 requirements remain mandatory;
+neither an infrastructure observation window nor software OS wait proves device stopping.
+
 ADR-0171 adds explicit core parent8 and original owned-child Unix/mTLS content ingress. Kernel peer
 PID, original spawn/boot/start ticks, captured current TLS and original budget gate actual source
 Ready/streams/Commit; every first operation, including empty inputs, has a mandatory local journal.
@@ -10,7 +22,7 @@ Private stale sockets require original writer/history and actual ConnectionRefus
 cleanup; active listeners and unreaped/spawning history refuse replacement. Ownership is
 controller_ingress/{store,wire,client}.rs and owned_content_source_processes.py. The real owned file
 contract uses State SQL/Prepared CAS and actual OS waits; it is explicitly not a complete Controller
-kernel or embodied Node. Runnable composition, content routing/readiness, full recovery/upgrade/GC,
+kernel or embodied Node. ADR-0172 supplies runnable composition; content routing/readiness, full recovery/upgrade/GC,
 cross-host/physical evidence and every remaining P1-P7 requirement continue separately.
 
 ADR-0170 adds scoped actual Prepared Artifact sources before finalized CAS publication. The original
@@ -33,8 +45,8 @@ Readonly authority uses an actual original-inode-checked WAL snapshot, avoiding 
 inversion. Actual same-process services and separate native processes exercise full bytes, original
 Controller/CAS capture, SIGKILL failover and exact inode/candidate reopen with zero embodied Nodes,
 devices/models/simulators. Owners are store_network.rs, network_content.rs, content_transport.rs,
-content_network_probe and check_network_content_processes.py. Runnable supervisor still refuses v0.4
-until original child/Prepared source, routing/readiness and recovery/upgrade contracts are connected.
+content_network_probe and check_network_content_processes.py. Runnable v0.4 requires explicit ADR-0172
+process v0.2; routing/readiness and recovery/upgrade contracts remain separate required work.
 Native current-majority proof does not close the full joint/fault/catchup/GC matrix, production HA,
 cross-host/physical continuity or any remaining P1-P7 requirement.
 

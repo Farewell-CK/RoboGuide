@@ -581,6 +581,66 @@ async fn three_members_quorum_loss_crash_rejoin_and_epoch_fencing() {
     }
 }
 
+/// Actual readonly probes retry within one window, while minority and changed epoch remain fenced.
+#[tokio::test(flavor = "current_thread")]
+async fn explicit_quorum_observation_recovers_transient_loss_and_bounds_real_minority() {
+    let directory = tempfile::tempdir().unwrap();
+    let endpoints = members();
+    let mut nodes = Vec::new();
+    for id in 1..=3 {
+        let (mut node, server) = ReplicaNode::start(
+            configuration(id, &endpoints),
+            &directory.path().join(format!("{id}.sqlite3")),
+        )
+        .await
+        .unwrap();
+        // This test selects the isolated observation algorithm, not the owned-content profile.
+        node.quorum_observation_ms = Some(1200);
+        nodes.push((node, server));
+    }
+    let index = leader(&nodes).await;
+    let epoch = nodes[index].0.current_epoch().unwrap();
+    let peers = nodes
+        .iter()
+        .enumerate()
+        .filter(|(other, _)| *other != index)
+        .map(|(_, (node, _))| node.network_online.clone())
+        .collect::<Vec<_>>();
+    for peer in &peers {
+        peer.store(false, Ordering::SeqCst);
+    }
+    let recovering = peers.clone();
+    let restore = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(650)).await;
+        for peer in recovering {
+            peer.store(true, Ordering::SeqCst);
+        }
+    });
+    let started = tokio::time::Instant::now();
+    nodes[index].0.check_epoch(epoch).await.unwrap();
+    assert!(started.elapsed() >= Duration::from_millis(500));
+    restore.await.unwrap();
+    let before = nodes[index].0.accepted_view().unwrap().revision;
+    for peer in &peers {
+        peer.store(false, Ordering::SeqCst);
+    }
+    let started = tokio::time::Instant::now();
+    assert!(nodes[index].0.check_epoch(epoch).await.is_err());
+    assert!(started.elapsed() < Duration::from_millis(1800));
+    assert_eq!(nodes[index].0.accepted_view().unwrap().revision, before);
+    for peer in &peers {
+        peer.store(true, Ordering::SeqCst);
+    }
+    let wrong = ControllerEpoch {
+        term: epoch.term + 1,
+        ..epoch
+    };
+    assert!(nodes[index].0.check_epoch(wrong).await.is_err());
+    for (node, _) in &nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
 /// A target-side election request moves leadership without replaying or forcing an application write.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn controlled_leader_transfer_moves_to_caught_up_voter() {
@@ -1455,7 +1515,12 @@ async fn legacy_application_checkpoint_keeps_unknown_controller_continuity() {
     sql.execute_batch("DROP TABLE replica_storage_format; CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=2),schema TEXT NOT NULL); INSERT INTO replica_storage_format VALUES (2,'roboguide.replica-storage/v0.2'); PRAGMA user_version=2; DELETE FROM replica_v1_meta WHERE key IN ('controller_supervision_v1','controller_processes_v1','legacy_controller_continuity_unknown');").unwrap();
     drop(sql);
     let restored = SqliteRaftStore::open(&path, "same", "test/checkpoint-v1").unwrap();
-    assert!(!restored.controller_continuity_known().unwrap());
+    assert!(
+        restored
+            .connection_source_fence(1)
+            .unwrap_err()
+            .contains("legacy Controller process continuity")
+    );
     assert!(restored.enable_controller_supervision().is_err());
     assert!(
         restored

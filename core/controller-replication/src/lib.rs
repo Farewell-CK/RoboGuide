@@ -4,6 +4,7 @@
 
 //! Quorum durability for one Controller authority; replicas never match, bind or execute work.
 
+mod application_client;
 mod certificates;
 mod content;
 mod content_application;
@@ -30,6 +31,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use application_client::ApplicationReplicaClient;
 pub use certificates::{
     CertificateAction, CertificateMutation, CertificateObservation, CertificateProbe,
     CertificateReceipt, CertificateRequest, CertificateTrust, MemberCertificates, ReplicaCommand,
@@ -482,6 +484,8 @@ pub struct ReplicaNode {
     store: SqliteRaftStore,
     /// Optional loaded mutual-TLS material shared by the listener and Raft clients.
     pub(crate) tls: Option<Arc<tls::TlsMaterial>>,
+    /// Explicit owned-profile observation window; legacy constructors retain one original query.
+    quorum_observation_ms: Option<u64>,
 }
 
 impl ReplicaNode {
@@ -499,7 +503,7 @@ impl ReplicaNode {
         path: &Path,
         limits: ReplicaTransportLimits,
     ) -> Result<(Self, ReplicaServer), String> {
-        Self::start_inner(config, path, limits, None, false).await
+        Self::start_inner(config, path, limits, None, false, None).await
     }
 
     /// Starts only explicit v0.4 with actual held Root4 and declared original bootstrap roots.
@@ -511,7 +515,15 @@ impl ReplicaNode {
         bootstrap_owners: BTreeMap<u64, String>,
         limits: ReplicaTransportLimits,
     ) -> Result<(Self, ReplicaServer), String> {
-        Self::start_inner(config, path, limits, Some((root, bootstrap_owners)), false).await
+        Self::start_inner(
+            config,
+            path,
+            limits,
+            Some((root, bootstrap_owners)),
+            false,
+            None,
+        )
+        .await
     }
 
     /// Starts explicit parent8 original-child authority beside unchanged core v0.4 network semantics.
@@ -522,7 +534,38 @@ impl ReplicaNode {
         bootstrap_owners: BTreeMap<u64, String>,
         limits: ReplicaTransportLimits,
     ) -> Result<(Self, ReplicaServer), String> {
-        Self::start_inner(config, path, limits, Some((root, bootstrap_owners)), true).await
+        Self::start_inner(
+            config,
+            path,
+            limits,
+            Some((root, bootstrap_owners)),
+            true,
+            None,
+        )
+        .await
+    }
+
+    /// Starts an explicit owned profile with its immutable bounded quorum observation declaration.
+    pub async fn start_with_controller_content_window(
+        config: ReplicaConfig,
+        path: &Path,
+        root: ReplicaContentStore,
+        bootstrap_owners: BTreeMap<u64, String>,
+        limits: ReplicaTransportLimits,
+        quorum_observation_ms: u64,
+    ) -> Result<(Self, ReplicaServer), String> {
+        if !(100..=30000).contains(&quorum_observation_ms) {
+            return Err("owned quorum observation window must be 100..30000 ms".into());
+        }
+        Self::start_inner(
+            config,
+            path,
+            limits,
+            Some((root, bootstrap_owners)),
+            true,
+            Some(quorum_observation_ms),
+        )
+        .await
     }
 
     /// Retains old startup while admitting network content only through the explicit owned constructor.
@@ -532,6 +575,7 @@ impl ReplicaNode {
         limits: ReplicaTransportLimits,
         content: Option<(ReplicaContentStore, BTreeMap<u64, String>)>,
         controller_content: bool,
+        quorum_observation_ms: Option<u64>,
     ) -> Result<(Self, ReplicaServer), String> {
         config.validate()?;
         if config.streams_content() != content.is_some() {
@@ -640,6 +684,7 @@ impl ReplicaNode {
             raft,
             store,
             tls,
+            quorum_observation_ms,
         };
         let server = ReplicaServer::bind(node.clone()).await?;
         if node.config.replica_id
@@ -702,22 +747,7 @@ impl ReplicaNode {
 
     /// Refuses source application authority as soon as its durable original handoff is pending.
     fn check_source_transfer_fence(&self) -> Result<(), String> {
-        if !self.store.controller_continuity_known()? {
-            return Err(
-                "legacy Controller process continuity requires independent migration evidence"
-                    .into(),
-            );
-        }
-        if self.store.leader_transfer_record()?.is_some_and(|record| {
-            record.source_epoch.replica_id == self.config.replica_id
-                && !matches!(record.state.as_str(), "completed" | "rejected")
-        }) {
-            return Err(
-                "original source Controller is fenced pending leader transfer reconciliation"
-                    .into(),
-            );
-        }
-        Ok(())
+        self.store.connection_source_fence(self.config.replica_id)
     }
 
     /// Confirms actual infrastructure quorum without granting application or source-child authority.
@@ -728,6 +758,38 @@ impl ReplicaNode {
         }
         if self.current_epoch() != Some(epoch) {
             return Err("Controller epoch is no longer current".into());
+        }
+        if let Some(window) = self.quorum_observation_ms {
+            let deadline = tokio::time::Instant::now() + Duration::from_millis(window);
+            loop {
+                if self.current_epoch() != Some(epoch) {
+                    return Err("Controller epoch changed during quorum observation".into());
+                }
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    return Err("original owned quorum observation window expired".into());
+                }
+                match tokio::time::timeout(remaining, self.raft.ensure_linearizable()).await {
+                    Ok(Ok(_)) => {
+                        if self.current_epoch() == Some(epoch) {
+                            return Ok(());
+                        }
+                        return Err("Controller epoch changed during actual quorum proof".into());
+                    }
+                    Err(_) => return Err("original owned quorum observation window expired".into()),
+                    Ok(Err(_)) => {
+                        if self.current_epoch() != Some(epoch) {
+                            return Err("Controller epoch lost during quorum observation".into());
+                        }
+                        tokio::time::sleep(
+                            Duration::from_millis(20).min(
+                                deadline.saturating_duration_since(tokio::time::Instant::now()),
+                            ),
+                        )
+                        .await;
+                    }
+                }
+            }
         }
         tokio::time::timeout(Duration::from_secs(2), self.raft.ensure_linearizable())
             .await

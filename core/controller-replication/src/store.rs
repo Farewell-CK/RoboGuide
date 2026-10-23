@@ -348,6 +348,8 @@ pub struct SqliteRaftStore {
     work_clock: Option<crate::content_store::ProducerClock>,
     /// Bounds actual running plus queued heavy work per original store, retained inside each worker.
     storage_jobs: Arc<tokio::sync::Semaphore>,
+    /// Bounds actual small consensus SQL jobs separately from eight heavy producer jobs.
+    consensus_jobs: Arc<tokio::sync::Semaphore>,
 }
 
 /// Explicit application lease, independent of descriptors briefly inherited by child processes.
@@ -1326,6 +1328,7 @@ impl SqliteRaftStore {
             controller_content: network_mode == NetworkContentMode::Controller,
             work_clock: None,
             storage_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
+            consensus_jobs: Arc::new(tokio::sync::Semaphore::new(16)),
         };
         let view = store.accepted_view()?;
         view.validate(application_schema, profile)
@@ -1834,7 +1837,8 @@ impl RaftLogReader<ControllerRaftConfig> for SqliteRaftStore {
         if start > end || start > i64::MAX as u64 {
             return Ok(Vec::new());
         }
-        let connection = self.connection.lock().map_err(io_error)?;
+        self.run_consensus_work(move|store|{
+        let connection = store.connection.lock().map_err(io_error)?;
         let mut statement = connection.prepare("SELECT data FROM replica_v1_log WHERE log_index>=?1 AND log_index<=?2 ORDER BY log_index").map_err(io_error)?;
         let rows = statement
             .query_map(params![start, end.min(i64::MAX as u64)], |row| {
@@ -1843,6 +1847,7 @@ impl RaftLogReader<ControllerRaftConfig> for SqliteRaftStore {
             .map_err(io_error)?;
         rows.map(|row| serde_json::from_str(&row.map_err(io_error)?).map_err(io_error))
             .collect()
+        }).await
     }
 }
 
@@ -1851,25 +1856,28 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
 
     /// Exposes the exact last-present/purged pointers independently of applied state.
     async fn get_log_state(&mut self) -> Result<LogState<ControllerRaftConfig>, StorageError<u64>> {
-        let connection = self.connection.lock().map_err(io_error)?;
-        let purged: Option<LogId<u64>> = read_meta(&connection, "purged")?;
-        let last: Option<String> = connection
-            .query_row(
-                "SELECT data FROM replica_v1_log ORDER BY log_index DESC LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(io_error)?;
-        let last = last
-            .map(|entry| {
-                serde_json::from_str::<Entry<ControllerRaftConfig>>(&entry).map_err(io_error)
+        self.run_consensus_work(move |store| {
+            let connection = store.connection.lock().map_err(io_error)?;
+            let purged: Option<LogId<u64>> = read_meta(&connection, "purged")?;
+            let last: Option<String> = connection
+                .query_row(
+                    "SELECT data FROM replica_v1_log ORDER BY log_index DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(io_error)?;
+            let last = last
+                .map(|entry| {
+                    serde_json::from_str::<Entry<ControllerRaftConfig>>(&entry).map_err(io_error)
+                })
+                .transpose()?;
+            Ok(LogState {
+                last_purged_log_id: purged,
+                last_log_id: last.map(|entry| entry.log_id).or(purged),
             })
-            .transpose()?;
-        Ok(LogState {
-            last_purged_log_id: purged,
-            last_log_id: last.map(|entry| entry.log_id).or(purged),
         })
+        .await
     }
 
     /// Shares the same serialized persistent log reader.
@@ -1879,14 +1887,21 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
 
     /// Persists each vote under SQLite FULL before returning to the consensus protocol.
     async fn save_vote(&mut self, vote: &Vote<u64>) -> Result<(), StorageError<u64>> {
-        let connection = self.connection.lock().map_err(io_error)?;
-        write_meta(&connection, "vote", vote)
+        let vote = *vote;
+        self.run_consensus_work(move |store| {
+            let connection = store.connection.lock().map_err(io_error)?;
+            write_meta(&connection, "vote", &vote)
+        })
+        .await
     }
 
     /// Returns only the durable vote; malformed values fail closed.
     async fn read_vote(&mut self) -> Result<Option<Vote<u64>>, StorageError<u64>> {
-        let connection = self.connection.lock().map_err(io_error)?;
-        read_meta(&connection, "vote")
+        self.run_consensus_work(move |store| {
+            let connection = store.connection.lock().map_err(io_error)?;
+            read_meta(&connection, "vote")
+        })
+        .await
     }
 
     /// Persists the exact committed log pointer independently of application projections.
@@ -1894,22 +1909,28 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
         &mut self,
         committed: Option<LogId<u64>>,
     ) -> Result<(), StorageError<u64>> {
-        let connection = self.connection.lock().map_err(io_error)?;
-        match committed {
-            Some(committed) => write_meta(&connection, "committed", &committed),
-            None => {
-                connection
-                    .execute("DELETE FROM replica_v1_meta WHERE key='committed'", [])
-                    .map_err(io_error)?;
-                Ok(())
+        self.run_consensus_work(move |store| {
+            let connection = store.connection.lock().map_err(io_error)?;
+            match committed {
+                Some(committed) => write_meta(&connection, "committed", &committed),
+                None => {
+                    connection
+                        .execute("DELETE FROM replica_v1_meta WHERE key='committed'", [])
+                        .map_err(io_error)?;
+                    Ok(())
+                }
             }
-        }
+        })
+        .await
     }
 
     /// Reads the last durable consensus commitment.
     async fn read_committed(&mut self) -> Result<Option<LogId<u64>>, StorageError<u64>> {
-        let connection = self.connection.lock().map_err(io_error)?;
-        read_meta(&connection, "committed")
+        self.run_consensus_work(move |store| {
+            let connection = store.connection.lock().map_err(io_error)?;
+            read_meta(&connection, "committed")
+        })
+        .await
     }
 
     /// Appends ordered logs atomically and reports flush only after the durable Commit.
@@ -1949,53 +1970,63 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
 
     /// Removes only the suffix specified by the upstream consensus engine.
     async fn truncate(&mut self, log_id: LogId<u64>) -> Result<(), StorageError<u64>> {
-        let connection = self.connection.lock().map_err(io_error)?;
-        let pins = self.removed_log_pins(&connection, log_id.index, true)?;
-        connection
-            .execute(
-                "DELETE FROM replica_v1_log WHERE log_index>=?1",
-                [log_id.index],
-            )
-            .map_err(io_error)?;
-        let proof = format!(
-            "{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&("original-log-suffix-removed", log_id)).map_err(io_error)?
-            )
-        );
-        self.release_content(&pins, &proof)?;
-        if self.has_producer_journal() {
-            self.reconcile_content_producers_locked(&connection)
+        self.run_consensus_work(move |store| {
+            let connection = store.connection.lock().map_err(io_error)?;
+            let pins = store.removed_log_pins(&connection, log_id.index, true)?;
+            connection
+                .execute(
+                    "DELETE FROM replica_v1_log WHERE log_index>=?1",
+                    [log_id.index],
+                )
                 .map_err(io_error)?;
-        }
-        Ok(())
+            let proof = format!(
+                "{:x}",
+                Sha256::digest(
+                    serde_json::to_vec(&("original-log-suffix-removed", log_id))
+                        .map_err(io_error)?
+                )
+            );
+            store.release_content(&pins, &proof)?;
+            if store.has_producer_journal() {
+                store
+                    .reconcile_content_producers_locked(&connection)
+                    .map_err(io_error)?;
+            }
+            Ok(())
+        })
+        .await
     }
 
     /// Deletes a compacted prefix and advances its durable pointer in one transaction.
     async fn purge(&mut self, log_id: LogId<u64>) -> Result<(), StorageError<u64>> {
-        let mut connection = self.connection.lock().map_err(io_error)?;
-        let pins = self.removed_log_pins(&connection, log_id.index, false)?;
-        let transaction = connection.transaction().map_err(io_error)?;
-        transaction
-            .execute(
-                "DELETE FROM replica_v1_log WHERE log_index<=?1",
-                [log_id.index],
-            )
-            .map_err(io_error)?;
-        write_meta(&transaction, "purged", &log_id)?;
-        transaction.commit().map_err(io_error)?;
-        let proof = format!(
-            "{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&("original-log-prefix-purged", log_id)).map_err(io_error)?
-            )
-        );
-        self.release_content(&pins, &proof)?;
-        if self.has_producer_journal() {
-            self.reconcile_content_producers_locked(&connection)
+        self.run_consensus_work(move |store| {
+            let mut connection = store.connection.lock().map_err(io_error)?;
+            let pins = store.removed_log_pins(&connection, log_id.index, false)?;
+            let transaction = connection.transaction().map_err(io_error)?;
+            transaction
+                .execute(
+                    "DELETE FROM replica_v1_log WHERE log_index<=?1",
+                    [log_id.index],
+                )
                 .map_err(io_error)?;
-        }
-        Ok(())
+            write_meta(&transaction, "purged", &log_id)?;
+            transaction.commit().map_err(io_error)?;
+            let proof = format!(
+                "{:x}",
+                Sha256::digest(
+                    serde_json::to_vec(&("original-log-prefix-purged", log_id))
+                        .map_err(io_error)?
+                )
+            );
+            store.release_content(&pins, &proof)?;
+            if store.has_producer_journal() {
+                store
+                    .reconcile_content_producers_locked(&connection)
+                    .map_err(io_error)?;
+            }
+            Ok(())
+        })
+        .await
     }
 }
 
@@ -2006,11 +2037,14 @@ impl RaftStateMachine<ControllerRaftConfig> for SqliteRaftStore {
     async fn applied_state(
         &mut self,
     ) -> Result<(Option<LogId<u64>>, StoredMembership<u64, ReplicaMember>), StorageError<u64>> {
-        let connection = self.connection.lock().map_err(io_error)?;
-        Ok((
-            read_meta(&connection, "applied")?,
-            read_meta(&connection, "membership")?.unwrap_or_default(),
-        ))
+        self.run_consensus_work(move |store| {
+            let connection = store.connection.lock().map_err(io_error)?;
+            Ok((
+                read_meta(&connection, "applied")?,
+                read_meta(&connection, "membership")?.unwrap_or_default(),
+            ))
+        })
+        .await
     }
 
     /// Persists consensus apply and exact accepted history before returning any application receipt.

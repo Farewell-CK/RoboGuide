@@ -51,7 +51,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: Build the actual Controller composition
-        run: cargo build --locked -p integration-server -p roboguide-node
+        run: cargo build --locked -p integration-server -p controller-replica -p roboguide-node
 
       - name: Build the actual Controller connection lifetime probe
         run: cargo build --locked -p state --example controller_storage_probe
@@ -134,6 +134,14 @@ jobs:
           --owned-source-probe target/debug/examples/owned_content_source_probe
           --members 211,227,239
           --output /tmp/rg-ci-owned-content
+
+      - name: Verify actual runnable Controller content and original child restart with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_runnable_content_processes.py
+          --supervisor target/debug/controller-replica
+          --controller target/debug/integration-server
+          --storage-probe target/debug/examples/content_stream_probe
+          --output /tmp/rg-ci-runnable-content
 
       - name: Verify actual Prepared source scopes and native restart with zero Nodes
         run: >

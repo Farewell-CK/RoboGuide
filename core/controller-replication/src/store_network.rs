@@ -8,6 +8,39 @@ use std::os::unix::fs::MetadataExt;
 mod tests;
 
 impl SqliteRaftStore {
+    /// Checks current committed source fences without blocking network tasks behind application SQL.
+    pub(crate) fn connection_source_fence(&self, member: u64) -> Result<(), String> {
+        let check = |connection: &Connection| {
+            if read_meta::<bool>(connection, crate::supervision::LEGACY_CONTINUITY_KEY)
+                .map_err(|error| error.to_string())?
+                != Some(false)
+            {
+                return Err(
+                    "legacy Controller process continuity requires independent migration evidence"
+                        .into(),
+                );
+            }
+            if read_leader_transfer_history(connection)?
+                .last()
+                .is_some_and(|record| {
+                    record.source_epoch.replica_id == member
+                        && !matches!(record.state.as_str(), "completed" | "rejected")
+                })
+            {
+                return Err(
+                    "original source Controller is fenced pending leader transfer reconciliation"
+                        .into(),
+                );
+            }
+            Ok(())
+        };
+        if self.network_content {
+            self.read_network_snapshot(check)
+        } else {
+            let connection = self.connection.lock().map_err(|error| error.to_string())?;
+            check(&connection)
+        }
+    }
     /// Reads committed actual network trust without blocking heartbeat TLS behind application SQL work.
     pub(crate) fn connection_certificate_trust(&self) -> Result<CertificateTrust, String> {
         if !self.network_content {

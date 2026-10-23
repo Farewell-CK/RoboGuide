@@ -63,6 +63,27 @@ pub(super) struct ProcessConfig {
     /// Local bounded RPC capacities; observation/resource settings never change policy identity.
     #[serde(default)]
     pub transport_limits: controller_replication::ReplicaTransportLimits,
+    /// Explicit original child/content contract; unavailable to unchanged process v0.1.
+    #[serde(default)]
+    pub content: Option<ContentProcessConfig>,
+}
+
+/// Explicit original byte root and owned-child transport, independent of Nodes or device inventory.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ContentProcessConfig {
+    /// Closed process/content interpretation.
+    pub schema: String,
+    /// Actual existing original member Root4; startup never silently creates or upgrades it.
+    pub root: PathBuf,
+    /// Complete initial actual root owners; committed member data stays authoritative after bootstrap.
+    pub bootstrap_owners: BTreeMap<u64, String>,
+    /// Actual same-host private original-child endpoint.
+    pub socket: PathBuf,
+    /// Explicit complete-operation budget, fixed in original child configuration and every first intent.
+    pub child_budget_ms: u64,
+    /// Original declared failure-detection observation window, never renewed within a check.
+    pub quorum_observation_ms: u64,
 }
 
 /// Closed one-shot leader handoff command; it never asserts physical continuity.
@@ -91,13 +112,26 @@ impl ProcessConfig {
             }
             Ok(format!("{:x}", digest.finalize()))
         };
-        let identity = serde_json::json!({
+        let mut identity = serde_json::json!({
             "schema":APPLICATION_SCHEMA,
             "controller_binary":file_digest(&self.controller_binary)?,
             "actor_placement": self.actor_placement_path.as_deref().map(file_digest).transpose()?,
             "physical_entity_registry":self.physical_entity_registry_path.as_deref().map(file_digest).transpose()?,
             "environment":self.controller_environment,
         });
+        if let Some(content) = &self.content {
+            identity
+                .as_object_mut()
+                .ok_or("original policy object unavailable")?
+                .insert(
+                    "owned_content".into(),
+                    serde_json::json!({
+                        "schema":content.schema,"parent":"roboguide.replica-storage/v0.8",
+                        "child_budget_ms":content.child_budget_ms,
+                        "quorum_observation_ms":content.quorum_observation_ms,
+                    }),
+                );
+        }
         let bytes = serde_json::to_vec(&identity).map_err(|error| error.to_string())?;
         Ok(format!("{:x}", Sha256::digest(bytes)))
     }
@@ -106,6 +140,68 @@ impl ProcessConfig {
     pub fn validate(&self) -> Result<(), String> {
         self.replica.validate()?;
         self.transport_limits.validate()?;
+        if self
+            .controller_environment
+            .get("ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN")
+            .is_some_and(|value| !matches!(value.as_str(), "0" | "1"))
+        {
+            return Err(
+                "local recovery administrator flag must be 0 or 1 before child spawn".into(),
+            );
+        }
+        let process_schema = match &self.content {
+            None => {
+                if self.replica.streams_content() {
+                    return Err(
+                        "network content requires explicit process v0.2 content configuration"
+                            .into(),
+                    );
+                }
+                "roboguide.controller-replica-process/v0.1"
+            }
+            Some(content) => {
+                if !self.replica.streams_content()
+                    || content.schema != "roboguide.controller-content-process/v0.1"
+                    || !content.root.is_absolute()
+                    || !content.socket.is_absolute()
+                    || content.socket.as_os_str().len() > 103
+                    || !(100..=300000).contains(&content.child_budget_ms)
+                    || !(100..=30000).contains(&content.quorum_observation_ms)
+                    || content.quorum_observation_ms > content.child_budget_ms
+                    || content
+                        .bootstrap_owners
+                        .keys()
+                        .copied()
+                        .collect::<BTreeSet<_>>()
+                        != self.replica.members.keys().copied().collect()
+                    || content
+                        .bootstrap_owners
+                        .values()
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        != content.bootstrap_owners.len()
+                    || self
+                        .controller_environment
+                        .get("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA")
+                        .map(String::as_str)
+                        != Some("1")
+                    || self
+                        .controller_environment
+                        .get("ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA")
+                        .map(String::as_str)
+                        != Some("roboguide.artifact-storage/v3")
+                {
+                    return Err("original content process requires explicit Root4/parent8/SQL1/Artifact3 and bounded child transport".into());
+                }
+                for owner in content.bootstrap_owners.values() {
+                    controller_replication::ReplicaMember::with_content_store(
+                        "127.0.0.1:1",
+                        owner.clone(),
+                    )?;
+                }
+                "roboguide.controller-replica-process/v0.2"
+            }
+        };
         if self
             .controller_environment
             .get("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA")
@@ -137,7 +233,7 @@ impl ProcessConfig {
                 "Controller async worker count must be an explicit integer in 1..64".into(),
             );
         }
-        if self.schema != "roboguide.controller-replica-process/v0.1"
+        if self.schema != process_schema
             || self.replica.application_schema != APPLICATION_SCHEMA
             || !self.controller_binary.is_absolute()
             || !self.storage_directory.is_absolute()
@@ -214,6 +310,93 @@ mod tests {
     //! Closed resource configuration must remain policy-bound and reject unbounded thread counts.
 
     use super::*;
+
+    /// Declares configuration-only identities; no TLS handshake, Root, Node or child is created here.
+    fn owned_profile() -> ProcessConfig {
+        let mut configuration = profile("1");
+        configuration.schema = "roboguide.controller-replica-process/v0.2".into();
+        configuration.replica.schema = "roboguide.controller-replica/v0.4".into();
+        configuration.replica.initial_voters = Some([1, 2, 3].into());
+        configuration.replica.tls = Some(controller_replication::ReplicaTlsConfig {
+            ca_cert_path: "/declared/ca.pem".into(),
+            cert_path: "/declared/member.pem".into(),
+            key_path: "/declared/member.pem".into(),
+            server_name: "localhost".into(),
+            peer_certificate_digests: (1..=3)
+                .map(|id| (id, format!("sha256:{id:064x}")))
+                .collect(),
+        });
+        configuration.content = Some(ContentProcessConfig {
+            schema: "roboguide.controller-content-process/v0.1".into(),
+            root: "/declared/root".into(),
+            bootstrap_owners: (1..=3)
+                .map(|id| (id, format!("replica-content:{id:064x}")))
+                .collect(),
+            socket: "/declared/child.sock".into(),
+            child_budget_ms: 45000,
+            quorum_observation_ms: 5000,
+        });
+        configuration.controller_environment.extend([
+            ("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA".into(), "1".into()),
+            (
+                "ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA".into(),
+                "roboguide.artifact-storage/v3".into(),
+            ),
+        ]);
+        configuration.replica.application_policy_digest = configuration.policy_digest().unwrap();
+        configuration
+    }
+
+    /// Explicit content semantics and observation budgets cannot be hidden in an older or frozen policy.
+    #[test]
+    fn owned_content_is_explicit_and_original_observation_budget_is_policy_bound() {
+        let mut configuration = owned_profile();
+        configuration.validate().unwrap();
+        let original = configuration.policy_digest().unwrap();
+        configuration.content.as_mut().unwrap().root = "/another/member/root".into();
+        configuration.content.as_mut().unwrap().socket = "/another/child.sock".into();
+        assert_eq!(configuration.policy_digest().unwrap(), original);
+        configuration
+            .content
+            .as_mut()
+            .unwrap()
+            .quorum_observation_ms = 6000;
+        assert!(configuration.validate().is_err());
+        configuration.replica.application_policy_digest = configuration.policy_digest().unwrap();
+        configuration.validate().unwrap();
+        configuration.schema = "roboguide.controller-replica-process/v0.1".into();
+        assert!(configuration.validate().is_err());
+        configuration = owned_profile();
+        configuration.content = None;
+        assert!(configuration.validate().is_err());
+        for (child, window) in [(45000, 99), (45000, 30001), (100, 101), (99, 100)] {
+            let mut configuration = owned_profile();
+            let content = configuration.content.as_mut().unwrap();
+            content.child_budget_ms = child;
+            content.quorum_observation_ms = window;
+            configuration.replica.application_policy_digest =
+                configuration.policy_digest().unwrap();
+            assert!(
+                configuration.validate().is_err(),
+                "{child}/{window} bypassed bounds"
+            );
+        }
+    }
+
+    /// The actual child accepts only 0/1; invalid declarations refuse before repeated child spawns.
+    #[test]
+    fn recovery_administrator_flag_is_validated_before_spawn() {
+        for value in ["0", "1", "true", "false", "", "2"] {
+            let mut configuration = profile("1");
+            configuration.controller_environment.insert(
+                "ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN".into(),
+                value.into(),
+            );
+            configuration.replica.application_policy_digest =
+                configuration.policy_digest().unwrap();
+            assert_eq!(configuration.validate().is_ok(), matches!(value, "0" | "1"));
+        }
+    }
 
     /// Local listener capacity remains bounded without changing original homogeneous cluster identity.
     #[test]

@@ -113,6 +113,14 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N3 的 [ADR-0172](../decisions/0172-runnable-owned-controller-content-profile.md)已接显式
+runnable process v0.2：实际 parent8/Root4、原 PID journal、mTLS 与真实 Controller
+共享源 writer。原 quorum 观察预算进入 policy，ProcessFence 不代替完整内容 ACK；
+实际 HTTP 上传/下载、三副本完整 bytes 与原 child SIGKILL/wait/同 inode 重启见
+[本包验收](acceptance/2026-10-23-runnable-controller-content.md)。接下来继续跨 owner
+读取与原 Prepared 接管、完整 readiness，再做 joint/catchup/Snapshot/升级/回退/
+recovery/GC/业务目标矩阵及全部 N1–N7、P1–P7、F0–F10、R01–R20，尚不标 SoftwareComplete。
+
 N3 的 [ADR-0171](../decisions/0171-owned-controller-content-ingress.md)正在接原 owned
 child ingress：显式 parent8 在每个原命令（含空输入）前保存完整候选/process/TLS/
 target/预算，真实 Unix peer PID 匹配原 spawn/PID/boot/start ticks。独立成员有界

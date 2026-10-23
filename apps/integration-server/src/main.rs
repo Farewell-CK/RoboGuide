@@ -1014,6 +1014,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err("ROBOGUIDE_CHECKPOINT_STORAGE must be full or incremental".into()),
     };
     let mut event_log = open_controller_event_log(Path::new(&event_path), checkpoint_policy)?;
+    let artifact_store = configured_artifact_store(Path::new(&artifact_root))?;
+    let replica_fence =
+        controller_replication::ApplicationReplicaClient::from_environment(artifact_store.clone())?
+            .map(Arc::new);
     let mut availability_nonce = [0_u8; 16];
     ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut availability_nonce)
         .map_err(|_| "Controller process identity entropy unavailable")?;
@@ -1022,8 +1026,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     event_log = event_log.with_write_failure_fence(&availability_process)?;
-    let replica_fence =
-        controller_replication::ReplicaFenceClient::from_environment()?.map(Arc::new);
     if let Some(fence) = &replica_fence {
         event_log = event_log.with_replicator(fence.clone());
     }
@@ -1034,7 +1036,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let diagnostic_writer = diagnostics::DiagnosticWriter::configured();
     let diagnostic_handle = observability::MetricsObserver::handle(diagnostic_writer.handle());
     let event_log = event_log.with_diagnostics(diagnostic_handle.clone());
-    let artifact_store = configured_artifact_store(Path::new(&artifact_root))?;
     let artifact_catalog = artifact_http::ArtifactCatalog::replay_with_store(
         &event_log,
         event_write_gate.clone(),
@@ -1453,7 +1454,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             loop {
                 timer.tick().await;
                 let probe = fence.clone();
-                let result = tokio::task::spawn_blocking(move || probe.check()).await;
+                let result = tokio::task::spawn_blocking(move || probe.check_process()).await;
                 let failure = match result {
                     Ok(Ok(())) => None,
                     Ok(Err(error)) => Some(error),
