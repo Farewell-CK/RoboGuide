@@ -117,6 +117,17 @@ pub struct AcceptedApplicationIdentity {
 }
 
 impl ReplicaView {
+    /// Checks exact declared schema/profile and retained data before a composition opens a target writer.
+    /// Passing validation does not establish a quorum, ownership or current content availability.
+    pub fn validate_for_materialization(
+        &self,
+        application_schema: &str,
+        profile: &str,
+    ) -> Result<(), String> {
+        self.validate(application_schema, profile)
+            .map_err(|error| error.to_string())
+    }
+
     /// Validates bounded retained history and exact codecs on reopen and before snapshot installation.
     fn validate(&self, application_schema: &str, profile: &str) -> Result<(), StorageError<u64>> {
         match &self.checkpoint {

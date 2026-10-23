@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - codex/nonrelease-remediation-closure
   pull_request:
   workflow_dispatch:
 
@@ -52,6 +53,16 @@ jobs:
 
       - name: Build the actual Controller connection lifetime probe
         run: cargo build --locked -p state --example controller_storage_probe
+
+      - name: Build the actual inactive Controller projection probes
+        run: |
+          cargo build --locked -p controller-replica --example projection_probe
+          cargo build --locked -p state --example replica_state_probe
+
+      - name: Verify actual Controller original SQL installation and hardlink refusal
+        run: >
+          uv run --frozen python tools/quality/check_controller_projection_processes.py
+          --output "${RUNNER_TEMP}/roboguide-controller-projection"
 
       - name: Build the actual single-worker replica listener probe
         run: cargo build --locked -p controller-replication --example replica_transport_probe
@@ -184,6 +195,7 @@ jobs:
           uv run --frozen python tools/quality/check_content_archive_processes.py
           --skip-build --abort-unpublished
           --replica-state-probe target/debug/examples/replica_state_probe
+          --controller-projection-probe target/debug/examples/projection_probe
           --replica-snapshot-probe target/debug/examples/content_snapshot_probe
           --original-producer-journal
           --output "${RUNNER_TEMP}/roboguide-content-archive"

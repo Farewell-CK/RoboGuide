@@ -41,8 +41,11 @@ def run(
     old_replica_snapshot_probe: Path | None = None,
     controller_storage_v1: bool = False,
     upgrade_controller_storage: bool = False,
+    controller_projection_probe: Path | None = None,
 ) -> dict[str, Any]:
     """Retain actual software process, file, SQL and TLS evidence with zero Nodes."""
+    if controller_projection_probe is not None and replica_state_probe is None:
+        raise ValueError("actual Controller projection requires the complete original State probe")
     if original_producer_journal and replica_snapshot_probe is None:
         raise ValueError(
             "original producer journal acceptance requires the explicit maintained Snapshot probe"
@@ -78,6 +81,13 @@ def run(
         *sorted((ROOT / "core/controller-replication/examples").glob("*.rs")),
         ROOT / "core/state/examples/replica_state_probe.rs",
     ]
+    if controller_projection_probe is not None:
+        source_paths.extend(
+            [
+                ROOT / "apps/controller-replica/src/projection.rs",
+                ROOT / "apps/controller-replica/examples/projection_probe.rs",
+            ]
+        )
     frozen = {
         str(path.relative_to(ROOT)): "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
         for path in source_paths
@@ -498,6 +508,8 @@ def run(
                 upload,
                 checksum,
                 payload,
+                controller_projection_probe,
+                "1" if controller_storage_v1 or upgrade_controller_storage else "legacy",
             )
         profile: dict[str, Any] = {
             "schema": "roboguide.recovery-profile/v0.16"
@@ -898,6 +910,7 @@ def main() -> None:
     parser.add_argument("--old-replica-snapshot-probe", type=Path)
     parser.add_argument("--controller-storage-v1", action="store_true")
     parser.add_argument("--upgrade-controller-storage", action="store_true")
+    parser.add_argument("--controller-projection-probe", type=Path)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -920,6 +933,9 @@ def main() -> None:
                 else None,
                 args.controller_storage_v1,
                 args.upgrade_controller_storage,
+                args.controller_projection_probe.resolve()
+                if args.controller_projection_probe
+                else None,
             ),
             indent=2,
         )

@@ -380,6 +380,12 @@ read-only counterexample is retained; implementation and complete fault validati
 
 ## 9. Remaining architecture work
 
+[ADR-0164](../../decisions/0164-owned-controller-projection-installation.md) installs inactive
+Controller projections transactionally on the original SQL inode, after actual inode/sidecar
+ownership and native drain. Original command prefixes and recovery/Unknown history remain.
+Empty or incomplete views cannot erase local responsibility. Installation grants no epoch,
+child, content or execution authority; online content and upgrade acceptance remain separate.
+
 [ADR-0163](../../decisions/0163-bounded-replica-transport-admission.md) bounds local replica
 connections before TLS and separates small/large encoded-frame capacity. Actual handlers and
 frames retain their permits; rejection never queues. Deployment limits and observations change

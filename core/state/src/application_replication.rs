@@ -237,13 +237,7 @@ impl SqliteEventLog {
         self.ensure_no_open_batch()?;
         if let Some(recovery) = recovery {
             recovery.validate_for(events, checkpoint)?;
-        } else if matches!(
-            checkpoint.schema.as_str(),
-            crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
-                | "roboguide.controller-checkpoint/v49"
-                | "roboguide.controller-checkpoint/v50"
-                | "roboguide.controller-checkpoint/v51"
-        ) {
+        } else if crate::checkpoint_requires_complete_recovery(&checkpoint.schema) {
             return Err(SqliteEventLogError::Codec(
                 "modern replica materialization requires its original complete recovery projection"
                     .into(),
@@ -283,6 +277,29 @@ impl SqliteEventLog {
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let previous = checkpoint_store::read(&transaction)?;
+        authority_journal::validate(
+            &transaction,
+            previous.as_ref().map(|stored| stored.snapshot.as_ref()),
+        )?;
+        let original_commands = authority_journal::since(&transaction, 0)?;
+        if !commands.starts_with(&original_commands)
+            || previous
+                .as_ref()
+                .is_some_and(|stored| stored.snapshot.event_sequence > checkpoint.event_sequence)
+            || original_commands.last().is_some_and(|old| {
+                commands
+                    .last()
+                    .is_some_and(|new| new.authority_revision == old.authority_revision)
+                    && previous
+                        .as_ref()
+                        .is_some_and(|stored| *stored.snapshot != *checkpoint)
+            })
+        {
+            return Err(SqliteEventLogError::Codec(
+                "replica installation cannot discard original commands or regress/fork their checkpoint".into(),
+            ));
+        }
         if let Some(recovery) = recovery {
             super::replica_recovery::install(&transaction, recovery)?;
         }

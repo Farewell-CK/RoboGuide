@@ -1,8 +1,9 @@
 //! Single-owned-child lifecycle and conservative atomic accepted-view materialization.
 
 use crate::config::ProcessConfig;
+use crate::projection::materialize;
 use controller_replication::{
-    ControllerEpoch, ControllerProcessExit, ControllerProcessIdentity, ReplicaNode, ReplicaView,
+    ControllerEpoch, ControllerProcessExit, ControllerProcessIdentity, ReplicaNode,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -53,49 +54,6 @@ fn writer_lease(path: &Path) -> Result<File, String> {
         .try_lock()
         .map_err(|error| format!("replica-owned path is already in use: {error}"))?;
     Ok(lease)
-}
-
-/// Replaces only the inactive owned projection after fully validating and flushing a fresh database.
-fn materialize(directory: &Path, view: &ReplicaView) -> Result<(), String> {
-    let _lease = writer_lease(&directory.join("controller.sqlite3.writer.lock"))?;
-    let temporary = directory.join("controller.materializing.sqlite3");
-    for suffix in ["", "-wal", "-shm"] {
-        let path = directory.join(format!("controller.materializing.sqlite3{suffix}"));
-        if path.exists() {
-            std::fs::remove_file(path).map_err(|error| error.to_string())?;
-        }
-    }
-    {
-        let log = state::SqliteEventLog::open(&temporary).map_err(|error| error.to_string())?;
-        if let Some(checkpoint) = &view.checkpoint {
-            log.install_replica_authority(
-                &view.events,
-                checkpoint,
-                view.history_anchor
-                    .as_ref()
-                    .map(|anchor| anchor.base_sequence),
-                &view.commands,
-            )
-            .map_err(|error| error.to_string())?;
-        } else if !view.events.is_empty() {
-            return Err("replica materialization lacks its accepted checkpoint".into());
-        }
-    }
-    File::open(&temporary)
-        .and_then(|file| file.sync_all())
-        .map_err(|error| error.to_string())?;
-    for suffix in ["-wal", "-shm"] {
-        let path = directory.join(format!("controller.sqlite3{suffix}"));
-        if path.exists() {
-            std::fs::remove_file(path).map_err(|error| error.to_string())?;
-        }
-    }
-    std::fs::rename(&temporary, directory.join("controller.sqlite3"))
-        .map_err(|error| error.to_string())?;
-    File::open(directory)
-        .and_then(|file| file.sync_all())
-        .map_err(|error| error.to_string())?;
-    Ok(())
 }
 
 /// Starts only the validated binary with an immutable parent fence and explicit cleared policy environment.
@@ -335,7 +293,20 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     && let Some(epoch) = current
                 {
                     configuration.validate()?;
-                    materialize(&configuration.storage_directory, &node.accepted_view()?)?;
+                    let projected_node = node.clone();
+                    let directory = configuration.storage_directory.clone();
+                    let format = match configuration.controller_environment.get("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA").map(String::as_str) {
+                        None | Some("legacy") => state::ControllerStorageFormat::Legacy,
+                        Some("1") => state::ControllerStorageFormat::V1,
+                        _ => return Err("unsupported original Controller storage declaration".into()),
+                    };
+                    let schema = configuration.replica.application_schema.clone();
+                    let profile = node.profile_identity();
+                    tokio::task::spawn_blocking(move || {
+                        let view = projected_node.accepted_view()?;
+                        materialize(&directory, &view, format, &schema, &profile)
+                    })
+                        .await.map_err(|error| error.to_string())??;
                     if node.check_epoch(epoch).await.is_ok() {
                         if let Some(result) = ready_shutdown(shutdown_signal.as_mut()).await {
                             break result.map_err(|error| error.to_string());

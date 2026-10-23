@@ -36,6 +36,8 @@ def run(
     upload: str,
     checksum: str,
     payload: bytes,
+    projection_probe: Path | None = None,
+    projection_storage: str = "legacy",
 ) -> dict[str, Any]:
     """Keep original raw State/Catalog/Archive and bytes across an owned metadata relocation."""
     if not probe.is_file():
@@ -47,8 +49,28 @@ def run(
     data = json.loads(capture.read_bytes())
     if not data["recovery"]["archive_operations"] or not data["recovery"]["archive_manifests"]:
         raise ValueError("actual Archive source lacks its original complete retained publication")
-    target = evidence / "materialized.sqlite3"
-    restored = execute([str(probe), "import", str(capture), str(target)], True, None)
+    projection_commands = None
+    if projection_probe is None:
+        target = evidence / "materialized.sqlite3"
+        restored = execute([str(probe), "import", str(capture), str(target)], True, None)
+    else:
+        target_directory = evidence / "owned-controller"
+        target_directory.mkdir()
+        target = target_directory / "controller.sqlite3"
+        command = [
+            str(projection_probe),
+            "--complete-original",
+            str(target_directory),
+            str(capture),
+            projection_storage,
+        ]
+        projection_commands = [execute(command, True, None), execute(command, True, None)]
+        installed = evidence / "actual-installed-original.json"
+        restored = execute([str(probe), "export", str(target), str(installed)], True, None)
+        if json.loads(installed.read_bytes()) != data:
+            raise ValueError(
+                "actual supervisor installation changed original complete recovery data"
+            )
     if {key: value for key, value in restored.items() if key != "pid"} != {
         key: value for key, value in original.items() if key != "pid"
     }:
@@ -102,6 +124,8 @@ def run(
         "models": 0,
         "simulators": 0,
         "passed": True,
+        "actual_supervisor_projection": projection_commands,
+        "projection_storage": projection_storage if projection_probe is not None else None,
     }
     save(evidence / "result.json", result)
     return result

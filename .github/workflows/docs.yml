@@ -4,7 +4,7 @@ on:
   pull_request:
     paths: ['website/**', 'docs/**', 'README.md', 'contracts/**', 'config/mission.toml', 'core/**', '.github/workflows/docs.yml']
   push:
-    branches: [main]
+    branches: [main, codex/nonrelease-remediation-closure]
     paths: ['website/**', 'docs/**', 'README.md', 'contracts/**', 'config/mission.toml', 'core/**', '.github/workflows/docs.yml']
   workflow_dispatch:
 

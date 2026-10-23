@@ -1,5 +1,18 @@
 # Repository Guidelines
 
+ADR-0164 installs inactive Controller projections on their original SQL inode through the actual
+managed writer and native drain; no SQL rename or WAL/SHM deletion remains. View/schema/profile
+and mandatory complete recovery precede writer admission. The actual installation transaction
+retains original command prefixes and recovery.follows history, including unresolved copy/abort
+intents. Empty views cannot erase existing authority; v1 stays explicit. Raft view capture and
+installation run in one owned blocking task, then the original epoch is rechecked before spawning.
+projection_probe exercises the actual composition; check_controller_projection_processes.py uses
+real authenticated quota commands, SQL/hardlink holders, native rollback and Controller restarts
+with zero Nodes/devices. The content Archive gate can opt into --controller-projection-probe for
+actual nonempty original history/CAS checks. This does not enable production v0.4, online content
+ACK, old-child migration or SoftwareComplete. CI/docs build the same development branch on push;
+the documentation workflow produces only its existing preview artifact, with no deployment.
+
 Quality processes own SQLite connections with contextlib.closing plus the original Connection
 transaction context: __exit__ commits/rolls back but does not close. All 71 previously bare scopes
 in 23 maintained quality modules now close before Controller restart/drain. The actual handoff CI

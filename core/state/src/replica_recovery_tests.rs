@@ -178,6 +178,48 @@ fn metadata_only_modern_import_refuses_without_creating_replacement_journal() {
     assert!(target.archive_authority_id().is_err());
 }
 
+/// A valid stale projection cannot erase a later original Unknown copy while reinstalling the same head.
+#[test]
+fn actual_reinstallation_preserves_newer_original_unknown_and_rolls_back_on_stale_input() {
+    let (directory, log, cas) = source();
+    let original = log.replica_recovery_projection().unwrap();
+    let (events, commands) = rows(&log);
+    let checkpoint = log.load_checkpoint().unwrap().unwrap();
+    let intent = pending(&log, &cas, &directory.path().join("original-pending-copy"));
+    let before = log.replica_recovery_projection().unwrap();
+    let error = log
+        .install_replica_authority_with_recovery(&events, &checkpoint, &commands, &original)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("lost an original copy intent"), "{error}");
+    assert_eq!(log.replica_recovery_projection().unwrap(), before);
+    assert_eq!(
+        log.archive_operation(&intent.request.command_id).unwrap(),
+        Some((intent, None))
+    );
+    assert_eq!(rows(&log), (events.clone(), commands.clone()));
+    log.install_replica_authority_with_recovery(&events, &checkpoint, &commands, &before)
+        .unwrap();
+    assert_eq!(log.replica_recovery_projection().unwrap(), before);
+}
+
+/// Actual SQL rollback retains complete old command authority when incoming data omits its prefix.
+#[test]
+fn actual_reinstallation_cannot_remove_original_authority_commands() {
+    let (_directory, log, _cas) = source();
+    let original = log.replica_recovery_projection().unwrap();
+    let (events, commands) = rows(&log);
+    let checkpoint = log.load_checkpoint().unwrap().unwrap();
+    let error = log
+        .install_replica_authority_with_recovery(&events, &checkpoint, &[], &original)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("discard original commands"), "{error}");
+    assert_eq!(rows(&log), (events, commands));
+    assert_eq!(log.load_checkpoint().unwrap(), Some(checkpoint));
+    assert_eq!(log.replica_recovery_projection().unwrap(), original);
+}
+
 /// Missing mandatory identity/table and a broken original tail cannot become accepted restored authority.
 #[test]
 fn incomplete_original_auxiliary_authority_and_metadata_tail_are_refused() {

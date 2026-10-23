@@ -6,6 +6,7 @@
 
 mod config;
 mod metrics;
+mod projection;
 mod supervisor;
 
 use controller_replication::ReplicaAdminClient;

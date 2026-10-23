@@ -326,6 +326,31 @@ pub(super) fn install(
             "replica recovery cannot replace another original Archive authority".into(),
         ));
     }
+    if previous.is_some() {
+        original.follows(&export(connection)?)?;
+    } else {
+        for key in METADATA {
+            if connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM event_log_metadata WHERE key=?1)",
+                [key],
+                |row| row.get::<_, bool>(0),
+            )? {
+                return Err(SqliteEventLogError::Codec(
+                    "replica recovery cannot replace incomplete original metadata".into(),
+                ));
+            }
+        }
+        if exists(connection, "event_archive_operations")?
+            || exists(connection, "event_archive_aborts")?
+            || exists(connection, "catalog_archive_events")?
+            || exists(connection, "event_archive_manifests")?
+        {
+            return Err(SqliteEventLogError::Codec(
+                "replica recovery cannot infer absent original authority from retained tables"
+                    .into(),
+            ));
+        }
+    }
     connection.execute_batch("CREATE TABLE IF NOT EXISTS event_archive_operations(command_id TEXT PRIMARY KEY NOT NULL,intent_json TEXT NOT NULL,state TEXT NOT NULL,receipt_json TEXT); CREATE TABLE IF NOT EXISTS event_archive_aborts(command_id TEXT PRIMARY KEY NOT NULL,original_command_id TEXT NOT NULL,intent_json TEXT NOT NULL,receipt_json TEXT); DELETE FROM event_archive_aborts; DELETE FROM event_archive_operations;")?;
     for name in METADATA {
         connection.execute("DELETE FROM event_log_metadata WHERE key=?1", [name])?;

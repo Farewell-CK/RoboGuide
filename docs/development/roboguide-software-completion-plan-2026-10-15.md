@@ -113,6 +113,14 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-23）
 
+N7 的 [ADR-0164](../decisions/0164-owned-controller-projection-installation.md)修复原
+supervisor 只锁 sidecar 并 rename 原 SQL 的实际 hardlink 反例。接管使用原 inode 的
+managed writer/原生排空与 SQL 事务，保留命令前缀、recovery/Unknown 和显式 v1；Raft
+view 读取/安装移到原 owned blocking task。实际认证命令/持锁/回滚/旧投影拒绝/重启及
+含 copy/abort 的原 Archive/CAS 链路通过，见[验收](acceptance/2026-10-23-controller-projection.md)。
+Source Snapshot reader Drop、完整生产 v0.4/同一 voters 内容 ACK、旧 child/完整升级、
+路由与原 N1–N7 继续必需；该局部安装不提升 metadata profile 或宣告完整 HA。
+
 N7 的[检查器 SQL 生命周期修复](acceptance/2026-10-23-checker-sql-lifetimes.md)在实际
 交接 CI 对应步骤复现原 readonly Connection 未关闭导致的重启排空拒绝；保留原故障，
 23 个 quality modules 的 71 处作用域实际关闭并保留提交/回滚。禁用 GC 的独立 FD 对照、

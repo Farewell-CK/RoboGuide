@@ -7,6 +7,17 @@
 /// Current composition authority wrapper, shared by Controller, replica supervisor and storage fences.
 pub const CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v52";
 
+/// Returns whether metadata-only inactive installation would lose mandatory original recovery authority.
+pub fn checkpoint_requires_complete_recovery(schema: &str) -> bool {
+    matches!(
+        schema,
+        CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            | "roboguide.controller-checkpoint/v49"
+            | "roboguide.controller-checkpoint/v50"
+            | "roboguide.controller-checkpoint/v51"
+    )
+}
+
 /// Returns whether a supported Controller wrapper requires an exact durable command journal head.
 pub fn checkpoint_requires_authority_journal(schema: &str) -> bool {
     matches!(

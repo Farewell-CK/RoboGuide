@@ -374,6 +374,11 @@ journal 增加显式本机 OS 管理恢复边界：完整实际 writers/known co
 
 ## 9. 开放架构问题
 
+[ADR-0164](../../decisions/0164-owned-controller-projection-installation.md)要求 inactive
+Controller 投影在实际源 SQL inode/sidecar 租约与原生排空后，使用原 inode 的 SQL 事务
+安装，保留原命令前缀及 recovery/Unknown 历史。空/不完整 view 不能清空本地责任；
+本地投影不授予 epoch、child、内容或执行权限，完整在线内容与升级仍独立验收。
+
 [ADR-0163](../../decisions/0163-bounded-replica-transport-admission.md)规定副本进程的本地
 连接与编码帧准入：TLS 前非阻塞连接 permit，独立小帧/大帧容量，实际 handler 与帧生命周期
 持有原 permit，拒绝不排队。部署容量和只读指标不改变集群、Checkpoint 或执行权威；网络
