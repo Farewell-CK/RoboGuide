@@ -111,13 +111,27 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 每阶段通过对应验收后才进入依赖阶段。类型、文档、占位返回值、内部直调和通用测试通过
 不能独立关闭功能。阶段记录必须包含当前源码/配置 identity、复现命令、调用链、结果和剩余项。
 
-## 当前执行队列（2026-10-23）
+## 当前执行队列（2026-10-24）
+
+N3/P3 与 N7/P7 的 [ADR-0177–0180 实施验收](acceptance/2026-10-24-prepared-recovery-and-runtime-latency.md)
+已通过：原 Prepared 保留、新 owner 独立正常上传、原 Root reader SQL close、一次性
+原预算、完成 SQL 故障后的 Unknown/只读重试，以及 fresh complete-quorum checkpoint
+保护的故障观察。Root 同连接结构 witness 与审计单行 witness 降低重复工作，不能
+缓存动态授权或跳过真实审计。最终实际三个 supervisor 均 wait 0，创建零 Node/设备。
+完整恢复仍约 77 秒；短窗口观察不计长期 SLO。wrapper v53/codec v32、显式 v0.18
+standalone 冷恢复已有检查；v0.18 仍拒绝新恢复事件和 parent8/Root4。
+
+下一包先处理跨 owner 原上传引用的显式释放/退休；随后完成 Unknown 只读对账、
+parent8/Root4 恢复/升级、完整 readiness/在线 HA，再依原 P1–P7 推进其它功能。
+采用单一缺口→相关验证→提交的节奏，避免重复运行不受改动影响的全量进程矩阵。
+原全部 N1–N7/P1–P7/F0–F10/R01–R20 和最终总体检查仍必需。
 
 N3 的 [ADR-0176](../decisions/0176-owned-controller-qualified-content-reads.md)接通原
 owned child 的 qualified Root read、公开内容/启动完整性用途及 HTTP fallback。实际
 三个 supervisor/真实 Controller 切换已返回原 owner 的完整 HTTP bytes，且新 owner
-本地 CAS 保持空缺。原 reader/回执核对和相关回归收尾后，继续 Prepared 原上传接管、
-完整 readiness/在线 HA、其余 N1–N7/P1–P7；本项只证明软件内容读取连续性。
+本地 CAS 保持空缺。原 reader/回执核对和相关回归已通过；Prepared 显式恢复由
+上述 ADR-0177 接续。完整 readiness/在线 HA 和其余 N1–N7/P1–P7 仍必需；本项
+只证明软件内容读取连续性。
 
 N3 以 [ADR-0175](../decisions/0175-exact-committed-content-routing.md)将 Root 路由
 收紧为独立 committed command/API：双方实际完整 SQL target、source member/Root/

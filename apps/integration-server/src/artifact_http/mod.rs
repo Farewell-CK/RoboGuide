@@ -58,6 +58,7 @@ mod retention;
 pub use retention::ArtifactPublicationSource;
 mod server;
 mod upload_authority;
+mod upload_recovery;
 mod upload_registry;
 mod upload_retirement;
 pub(crate) use access::map_authorization_manifest;

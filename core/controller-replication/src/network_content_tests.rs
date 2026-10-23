@@ -359,7 +359,7 @@ async fn actual_mtls_content_streams_keep_original_receipts_and_independent_rece
             .is_err()
     );
     node.store
-        .require_current_content_read(&target, &key, true)
+        .require_current_content_read(&target, &key, true, None)
         .unwrap();
     let old_child = ReplicaFenceClient::new_with_tls(
         node.local_address(),

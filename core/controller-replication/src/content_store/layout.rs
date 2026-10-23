@@ -226,6 +226,7 @@ pub(super) fn create(
     )?;
     Ok(ReplicaContentStore {
         inner: Arc::new(ContentInner {
+            validation_witness: Mutex::new(None),
             snapshot_closes: Arc::new(super::close_queue::SnapshotCloseQueue::default()),
             root: root.into(),
             identity: original,
@@ -397,6 +398,7 @@ pub(super) fn open(
     )?;
     Ok(ReplicaContentStore {
         inner: Arc::new(ContentInner {
+            validation_witness: Mutex::new(None),
             snapshot_closes: Arc::new(super::close_queue::SnapshotCloseQueue::default()),
             root: root.into(),
             identity: original,
@@ -447,14 +449,6 @@ pub(super) fn write_head(
     }
     connection.execute("INSERT INTO metadata(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![name,raw]).map_err(|error|error.to_string())?;
     Ok(())
-}
-
-/// Checks exact SQL format/identity and complete mandatory rows before a pin can change.
-pub(super) fn validate(
-    connection: &Connection,
-    original: &ReplicaContentIdentity,
-) -> Result<(), String> {
-    validate_version(connection, original, 2)
 }
 
 /// Checks exact prior/current generation before an explicit original-writer-drained SQL transition.

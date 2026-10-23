@@ -130,12 +130,14 @@ def run(
         "roboguide.controller-checkpoint/v50",
         "roboguide.controller-checkpoint/v51",
         "roboguide.controller-checkpoint/v52",
+        "roboguide.controller-checkpoint/v53",
     }:
         raise ValueError("unsupported explicit original Archive process profile")
     cleanup_authority = schema in {
         "roboguide.controller-checkpoint/v50",
         "roboguide.controller-checkpoint/v51",
         "roboguide.controller-checkpoint/v52",
+        "roboguide.controller-checkpoint/v53",
     }
     if abort_unpublished and not cleanup_authority:
         raise ValueError("explicit original cleanup requires wrapper v50")
@@ -553,8 +555,11 @@ def run(
                 "1" if controller_storage_v1 or upgrade_controller_storage else "legacy",
             )
         profile: dict[str, Any] = {
-            "schema": "roboguide.recovery-profile/v0.16"
-            if schema == "roboguide.controller-checkpoint/v52"
+            "schema": "roboguide.recovery-profile/v0.18"
+            if schema == "roboguide.controller-checkpoint/v53"
+            else "roboguide.recovery-profile/v0.16"
+            if schema
+            in {"roboguide.controller-checkpoint/v52", "roboguide.controller-checkpoint/v53"}
             else "roboguide.recovery-profile/v0.15"
             if schema == "roboguide.controller-checkpoint/v51"
             else "roboguide.recovery-profile/v0.13"
@@ -594,14 +599,22 @@ def run(
             ],
         }
         if controller_storage_v1:
-            profile["schema"] = "roboguide.recovery-profile/v0.17"
+            profile["schema"] = (
+                "roboguide.recovery-profile/v0.18"
+                if schema == "roboguide.controller-checkpoint/v53"
+                else "roboguide.recovery-profile/v0.17"
+            )
             for component in profile["components"]:
                 if component["kind"] == "controller":
                     component["storage_schema"] = "roboguide.controller-storage/v1"
-        if schema == "roboguide.controller-checkpoint/v52":
+        if schema in {"roboguide.controller-checkpoint/v52", "roboguide.controller-checkpoint/v53"}:
             for component in profile["components"]:
                 if component["kind"] == "artifact":
                     component["storage_schema"] = "roboguide.artifact-storage/v3"
+        if profile["schema"] == "roboguide.recovery-profile/v0.18":
+            for component in profile["components"]:
+                if component["kind"] == "controller":
+                    component.setdefault("storage_schema", "roboguide.controller-storage/legacy")
         profile_path = directory / "profile.json"
         save(profile_path, profile)
         if controller_storage_v1:
@@ -664,10 +677,13 @@ def run(
             "restore-original",
         )
         assert receipt["schema"] == (
-            "roboguide.restore-receipt/v0.17"
+            "roboguide.restore-receipt/v0.18"
+            if schema == "roboguide.controller-checkpoint/v53"
+            else "roboguide.restore-receipt/v0.17"
             if controller_storage_v1
             else "roboguide.restore-receipt/v0.16"
-            if schema == "roboguide.controller-checkpoint/v52"
+            if schema
+            in {"roboguide.controller-checkpoint/v52", "roboguide.controller-checkpoint/v53"}
             else "roboguide.restore-receipt/v0.15"
             if schema == "roboguide.controller-checkpoint/v51"
             else "roboguide.restore-receipt/v0.13"

@@ -129,6 +129,8 @@ const EVENT_PAYLOAD_SCHEMA_V29: &str = "domain.EventPayload.json/v29";
 const EVENT_PAYLOAD_SCHEMA_V30: &str = "domain.EventPayload.json/v30";
 /// Explicit independent completed-upload retirement authority, never a changed upload phase.
 const EVENT_PAYLOAD_SCHEMA_V31: &str = "domain.EventPayload.json/v31";
+/// Independent original Prepared upload recovery authority.
+const EVENT_PAYLOAD_SCHEMA_V32: &str = "domain.EventPayload.json/v32";
 /// Codec including independent original-revoke observation evidence.
 const EVENT_PAYLOAD_SCHEMA_V26: &str = "domain.EventPayload.json/v26";
 /// Complete provider-qualified typed-map byte-import evidence.
@@ -284,7 +286,7 @@ pub struct SqliteEventLog {
     /// Same actual SQLite connection's write count immediately after the original BEGIN IMMEDIATE.
     batch_start_changes: Arc<Mutex<Option<u64>>>,
     /// Actual connection write/data-version witness from the last complete checkpoint Commit only.
-    committed_sql_witness: Arc<Mutex<Option<(u64, u64)>>>,
+    committed_sql_witness: Arc<Mutex<Option<timer_transaction::SqlWitness>>>,
     /// Last durable write failure observed by the EventSink boundary.
     last_error: Arc<Mutex<Option<String>>>,
 }
@@ -923,7 +925,24 @@ impl SqliteEventLog {
             .connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
-        connection.execute("INSERT INTO service_access_audit(service,principal,method,path,decision) VALUES (?1,?2,?3,?4,?5)", params![service,principal,method,path,decision])?;
+        let mut witness = self
+            .committed_sql_witness
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        let before = timer_transaction::SqlWitness::observe(&connection)?;
+        let original = connection.is_autocommit() && witness.as_ref() == Some(&before);
+        let changed = connection.execute("INSERT INTO service_access_audit(service,principal,method,path,decision) VALUES (?1,?2,?3,?4,?5)", params![service,principal,method,path,decision])?;
+        let after = timer_transaction::SqlWitness::observe(&connection)?;
+        let mut expected = before.clone();
+        expected.changes = after.changes;
+        if original
+            && changed == 1
+            && before.changes.checked_add(1) == Some(after.changes)
+            && connection.is_autocommit()
+            && expected == after
+        {
+            *witness = Some(after);
+        }
         Ok(())
     }
 
@@ -1080,10 +1099,7 @@ impl SqliteEventLog {
         let authority_revision = authority_journal::revision(&connection)?;
         connection.execute("INSERT INTO event_log_metadata(key,value) VALUES ('journal_committed_revision',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [authority_revision.to_string()])?;
         // Sample before releasing the actual SQLite writer, so a later foreign Commit cannot be adopted.
-        let sql_witness = (
-            connection.total_changes(),
-            connection.query_row("PRAGMA data_version", [], |row| row.get::<_, u64>(0))?,
-        );
+        let sql_witness = timer_transaction::SqlWitness::observe(&connection)?;
         connection.execute_batch("COMMIT")?;
         *self
             .committed_authority_revision
@@ -1293,6 +1309,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V29 => Ok(29),
         EVENT_PAYLOAD_SCHEMA_V30 => Ok(30),
         EVENT_PAYLOAD_SCHEMA_V31 => Ok(31),
+        EVENT_PAYLOAD_SCHEMA_V32 => Ok(32),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -1306,6 +1323,10 @@ fn validate_payload_schema(
 ) -> Result<(), SqliteEventLogError> {
     let version = payload_schema_version(schema)?;
     let minimum_version = match payload {
+        EventPayload::ArtifactUploadRecoveryTransition { record } => {
+            record.validate().map_err(SqliteEventLogError::Codec)?;
+            32
+        }
         EventPayload::ArtifactUploadRetired { receipt } => {
             receipt.validate().map_err(SqliteEventLogError::Codec)?;
             31
@@ -1520,6 +1541,7 @@ impl SqliteEventLog {
 /// Selects the newest codec marker only for payloads introduced by that codec.
 fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
     match payload {
+        EventPayload::ArtifactUploadRecoveryTransition { .. } => EVENT_PAYLOAD_SCHEMA_V32,
         EventPayload::ArtifactCatalogLegacyAdopted { .. } => EVENT_PAYLOAD_SCHEMA_V30,
         EventPayload::ArtifactUploadRetired { .. } => EVENT_PAYLOAD_SCHEMA_V31,
         EventPayload::ArtifactCatalogReferenceTransition { .. } => EVENT_PAYLOAD_SCHEMA_V29,

@@ -231,6 +231,7 @@ pub(super) fn inputs(
     let mut publications = BTreeMap::new();
     let mut uploads = BTreeMap::new();
     let mut retired_uploads = BTreeMap::new();
+    let mut recoveries = BTreeMap::new();
     let mut blobs = BTreeMap::new();
     let mut add = |digest: String, size: u64| -> Result<(), SqliteEventLogError> {
         if let Some(old) = blobs.insert(digest, size)
@@ -263,6 +264,11 @@ pub(super) fn inputs(
         match payload {
             EventPayload::ArtifactUploadTransition { record } => {
                 uploads.insert(record.upload_id.clone(), record);
+            }
+            EventPayload::ArtifactUploadRecoveryTransition { record } => {
+                crate::validate_upload_recovery(&uploads, &recoveries, &record)
+                    .map_err(SqliteEventLogError::Codec)?;
+                recoveries.insert(record.command_id.clone(), *record);
             }
             EventPayload::ArtifactUploadRetired { receipt } => {
                 crate::validate_upload_retirement(&uploads, &retired_uploads, &receipt)
@@ -433,6 +439,7 @@ impl ArchiveIntent {
                 "roboguide.controller-checkpoint/v49"
                     | "roboguide.controller-checkpoint/v50"
                     | "roboguide.controller-checkpoint/v51"
+                    | "roboguide.controller-checkpoint/v52"
                     | crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
             )
             || self.checkpoint.event_sequence < self.manifest.end_sequence

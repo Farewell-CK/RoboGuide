@@ -14,6 +14,7 @@ impl SqliteRaftStore {
         original: &ContentQuorumTarget,
         key: &ArtifactContentKey,
         published: bool,
+        recovery: Option<&domain::ArtifactUploadRecovery>,
     ) -> Result<(), String> {
         self.read_network_snapshot(|connection| {
             let current = read_view(connection).map_err(|error| error.to_string())?;
@@ -31,6 +32,15 @@ impl SqliteRaftStore {
                     "original qualified read is no longer retained by current complete metadata"
                         .into(),
                 );
+            }
+            if let Some(original) = recovery {
+                let (_, budget) = crate::controller_ingress::recovery::evidence(original)?;
+                budget.check()?;
+                if crate::controller_ingress::recovery::pending(&current, &original.command_id)?
+                    != *original
+                {
+                    return Err("original recovery permission changed during payload read".into());
+                }
             }
             if published && content.published_content(&current.events, &key.content_digest)? != *key
             {

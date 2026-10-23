@@ -335,23 +335,38 @@ where
     let mut head = read_request_head(stream).await?;
     let method = head.method.clone();
     let path = head.path.clone();
-    let principal = run_blocking(|| {
+    let (principal, audit_persisted) = run_blocking(|| {
         let principal = memory_admission
             .refresh_artifact_principal(&principal)
             .map_err(HttpError::forbidden)?;
         let authorization = principal.authorize_head(&head, catalog);
-        catalog.audit_access(
-            &principal.subject,
-            &method,
-            &path,
-            if authorization.is_ok() {
-                "route_allowed"
-            } else {
-                "route_denied"
-            },
-        )?;
+        let observation =
+            method == "GET" && super::upload_recovery::observation_keys(&path).is_some();
+        let unavailable = !catalog
+            .event_log
+            .write_status()
+            .map_err(|e| HttpError::service_unavailable(e.to_string()))?
+            .write_enabled
+            || catalog
+                .recovery_fence
+                .lock()
+                .map_err(|_| HttpError::service_unavailable("catalog status unavailable"))?
+                .is_some();
+        let audit_persisted = !(observation && unavailable);
+        if audit_persisted {
+            catalog.audit_access(
+                &principal.subject,
+                &method,
+                &path,
+                if authorization.is_ok() {
+                    "route_allowed"
+                } else {
+                    "route_denied"
+                },
+            )?;
+        }
         authorization?;
-        Ok::<_, HttpError>(principal)
+        Ok::<_, HttpError>((principal, audit_persisted))
     })?;
     let import_id = head.memory_import_id.clone();
     let authenticated = super::authenticated::AuthenticatedAdmission {
@@ -541,6 +556,11 @@ where
             }
             get_memory(catalog, path)
         })?,
+        ("GET", path) if super::upload_recovery::observation_keys(path).is_some() => {
+            run_blocking(|| {
+                super::upload_recovery::observe(catalog, &authenticated, path, audit_persisted)
+            })?
+        }
         ("GET", path) if path.starts_with("/v1/artifact-uploads/") => run_blocking(|| {
             let id = path.trim_start_matches("/v1/artifact-uploads/");
             memory_admission
@@ -555,9 +575,31 @@ where
                 .received_bytes(id)
                 .or(record.byte_size)
                 .unwrap_or(0);
+            let (recoveries, recovery_commands, recovery_count) = {
+                let rows = catalog
+                    .upload_recoveries
+                    .lock()
+                    .map_err(|_| HttpError::service_unavailable("recovery evidence unavailable"))?;
+                let selected = rows
+                    .values()
+                    .filter(|r| r.upload.upload_id == id)
+                    .collect::<Vec<_>>();
+                (
+                    selected
+                        .iter()
+                        .take(16)
+                        .map(|r| (*r).clone())
+                        .collect::<Vec<_>>(),
+                    selected
+                        .iter()
+                        .map(|r| r.command_id.clone())
+                        .collect::<Vec<_>>(),
+                    selected.len(),
+                )
+            };
             Ok(Response::Json(
                 "200 OK",
-                serde_json::json!({"schema_version":"roboguide.artifact-upload-observation/v0.1","record":record,"received_bytes":received_bytes,"retirement":catalog.upload_retirement(id)?}),
+                serde_json::json!({"schema_version":"roboguide.artifact-upload-observation/v0.1","record":record,"received_bytes":received_bytes,"retirement":catalog.upload_retirement(id)?,"recoveries":recoveries,"recovery_commands":recovery_commands,"recovery_history_complete":recovery_count <= 16,"recovery_count":recovery_count}),
             ))
         })?,
         (method, path)
@@ -574,6 +616,15 @@ where
                 &principal,
             )
             .await?
+        }
+        ("POST", path)
+            if path.starts_with("/v1/artifact-uploads/") && path.ends_with("/recover") =>
+        {
+            let request = head.read_json(stream).await?;
+            principal.authorize_body(&request)?;
+            run_blocking(|| {
+                super::upload_recovery::recover(catalog, uploads, &authenticated, &request)
+            })?
         }
         ("POST", path)
             if path.starts_with("/v1/artifact-uploads/") && path.ends_with("/retire") =>

@@ -373,7 +373,10 @@ def _revision_goal(
 
 def _application(checkpoint: dict[str, Any], checksum: str) -> None:
     """Retain outstanding original preparation, revoke, handoff and revision readers."""
-    if checkpoint.get("schema") != gc.WRAPPER or checkpoint.get("replication_profile") is not None:
+    if (
+        checkpoint.get("schema") not in gc.WRAPPERS
+        or checkpoint.get("replication_profile") is not None
+    ):
         raise ValueError("source GC requires its exact standalone current Controller authority")
     required = {"memory_preparation", "memory_use", "memory_imports", "memory_handoffs"}
     if not required <= checkpoint.keys():
@@ -454,7 +457,7 @@ def inspect(
             "SELECT schema,event_sequence,checkpoint_json "
             "FROM controller_checkpoint WHERE singleton=1"
         ).fetchone()
-        if saved is None or saved[0] != gc.WRAPPER:
+        if saved is None or saved[0] not in gc.WRAPPERS:
             raise ValueError("source GC requires original Controller wrapper v52")
         checkpoint = json.loads(saved[2])
         _application(checkpoint, checksum)
@@ -550,7 +553,11 @@ def validate_bundle(
     profile_schema: str,
 ) -> None:
     """Check live upload/proof bytes and original tombstone conflicts on cold restore."""
-    if profile_schema not in {gc.SCHEMA, "roboguide.recovery-profile/v0.17"}:
+    if profile_schema not in {
+        gc.SCHEMA,
+        "roboguide.recovery-profile/v0.17",
+        "roboguide.recovery-profile/v0.18",
+    }:
         return
     from . import artifact_layout
 

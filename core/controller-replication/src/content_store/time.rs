@@ -87,6 +87,20 @@ fn sample() -> Result<(String, (u64, u64), u64), String> {
 }
 
 impl ContentBudget {
+    /// Binds retained local budget to the independently registered original software process.
+    pub(crate) fn require_process(
+        &self,
+        process: &crate::ControllerProcessIdentity,
+    ) -> Result<(), String> {
+        self.validate()?;
+        if self.pid != process.pid
+            || self.boot_id != process.boot_id
+            || self.start_ticks != process.start_ticks
+        {
+            return Err("original recovery clock belongs to another process".into());
+        }
+        Ok(())
+    }
     /// Returns only original remaining effect time; descendants never obtain a fresh full duration.
     pub(crate) fn remaining_ms(&self) -> Result<u64, String> {
         let now = self.check()?;

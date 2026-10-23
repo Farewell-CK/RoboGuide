@@ -51,6 +51,7 @@ pub(super) fn requires_catalog_history(payload: &EventPayload) -> bool {
         payload,
         EventPayload::ArtifactCatalogReferenceTransition { .. }
             | EventPayload::ArtifactUploadRetired { .. }
+            | EventPayload::ArtifactUploadRecoveryTransition { .. }
             | EventPayload::ArtifactCatalogLegacyAdopted { .. }
             | EventPayload::SemanticVerifierEvidenceAdmitted { .. }
             | EventPayload::MissionGoalEvidenceAdmitted { .. }

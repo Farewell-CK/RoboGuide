@@ -2,6 +2,166 @@
 
 use super::*;
 
+/// A labelled cache-only contract fixture supplies no actual process, content or quorum authority.
+fn recovery_cache_fixture(catalog: &ArtifactCatalog) -> domain::ArtifactUploadRecovery {
+    let caller = ArtifactPrincipal::local();
+    let original = domain::ArtifactUploadRecord {
+        upload_id: "original-upload".into(),
+        principal_id: caller.subject,
+        tenant_id: caller.tenant_id,
+        original_certificate: "loopback-fixture".into(),
+        admitted_at_ms: 1,
+        deadline_ms: 1000,
+        phase: domain::ArtifactUploadPhase::Prepared,
+        content_digest: Some(digest_bytes(b"metadata-only-cache-contract")),
+        byte_size: Some(28),
+        prepared_at_ms: Some(2),
+        completed_at_ms: None,
+    };
+    let replacement = domain::ArtifactUploadRecord {
+        upload_id: "replacement".into(),
+        phase: domain::ArtifactUploadPhase::Started,
+        content_digest: None,
+        byte_size: None,
+        prepared_at_ms: None,
+        completed_at_ms: None,
+        ..original.clone()
+    };
+    let record = domain::ArtifactUploadRecovery {
+        schema: "roboguide.artifact-upload-recovery/v0.1".into(),
+        command_id: "original-command".into(),
+        budget_ms: 1000,
+        reader_id: "cache-contract-reader".into(),
+        upload: original.clone(),
+        replacement_admission: replacement,
+        source_owner_id: format!("artifact-store:{}", "a".repeat(64)),
+        destination_owner_id: format!("artifact-store:{}", "b".repeat(64)),
+        destination_device: 1,
+        destination_inode: 2,
+        controller_process_json: "{}".into(),
+        kernel_budget_json: "{}".into(),
+        canonical_grant_json: "{}".into(),
+        completion: None,
+    };
+    catalog
+        .upload_records
+        .lock()
+        .unwrap()
+        .insert(original.upload_id.clone(), original);
+    catalog
+        .upload_recoveries
+        .lock()
+        .unwrap()
+        .insert(record.command_id.clone(), record.clone());
+    record
+}
+
+/// Actual HTTP observation survives a write latch without adding SQL or exposing content/mutations.
+#[tokio::test]
+async fn write_disabled_recovery_observation_preserves_original_cache_and_refuses_other_routes() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = FileSystemArtifactStore::new(directory.path().join("cas")).unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3"))
+        .unwrap()
+        .with_write_failure_fence("actual-cache-observer")
+        .unwrap();
+    seed_controller_checkpoint(&log);
+    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let original = recovery_cache_fixture(&catalog);
+    log.disable_writes("explicit software SQL-fault contract", false)
+        .unwrap();
+    let uploads = test_uploads();
+    let path = "/v1/artifact-uploads/original-upload/recoveries/original-command";
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request("GET", path, b"", true),
+    )
+    .await;
+    let body: serde_json::Value = serde_json::from_slice(&response_body(&raw, "200 OK")).unwrap();
+    assert_eq!(body["record"], serde_json::to_value(&original).unwrap());
+    assert_eq!(body["audit_persisted"], false);
+    assert_eq!(body["write_status"]["write_enabled"], false);
+    assert_eq!(body["status"], "unknown");
+    assert!(log.events().unwrap().is_empty());
+    assert!(log.require_writes_enabled().is_err());
+    *catalog.recovery_fence.lock().unwrap() =
+        Some("actual cache outcome uncertainty fixture".into());
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request("GET", path, b"", true),
+    )
+    .await;
+    response_body(&raw, "503 Service Unavailable");
+    *catalog.recovery_fence.lock().unwrap() = None;
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request(
+            "GET",
+            "/v1/artifacts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            b"",
+            true,
+        ),
+    )
+    .await;
+    response_body(&raw, "503 Service Unavailable");
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request("POST", path, b"{}", true),
+    )
+    .await;
+    response_body(&raw, "503 Service Unavailable");
+    let mut foreign = original.upload.clone();
+    foreign.tenant_id = "another-tenant".into();
+    catalog
+        .upload_records
+        .lock()
+        .unwrap()
+        .insert(foreign.upload_id.clone(), foreign);
+    let raw = request_once(
+        &store,
+        &catalog,
+        &uploads,
+        raw_request("GET", path, b"", true),
+    )
+    .await;
+    response_body(&raw, "403 Forbidden");
+    assert_eq!(
+        catalog
+            .upload_recoveries
+            .lock()
+            .unwrap()
+            .get(&original.command_id),
+        Some(&original)
+    );
+    let restart_log = SqliteEventLog::open(directory.path().join("restart.sqlite3"))
+        .unwrap()
+        .with_write_failure_fence("actual-restart-cache-observer")
+        .unwrap();
+    seed_controller_checkpoint(&restart_log);
+    let restart_catalog =
+        ArtifactCatalog::replay_with_gate(&restart_log, Arc::new(Mutex::new(()))).unwrap();
+    recovery_cache_fixture(&restart_catalog);
+    restart_log
+        .disable_writes("actual unresolved replica authority fixture", true)
+        .unwrap();
+    let raw = request_once(
+        &store,
+        &restart_catalog,
+        &uploads,
+        raw_request("GET", path, b"", true),
+    )
+    .await;
+    response_body(&raw, "503 Service Unavailable");
+}
+
 /// Admits and streams actual bytes through HTTP, leaving finalization to the fault-window caller.
 async fn staged(
     store: &FileSystemArtifactStore,

@@ -1,6 +1,6 @@
 # 实现状态与证据边界
 
-内容核对基线：`ab6ab4679e71fff26cefdacada33fe41a6fbf10b` 加本包 ADR-0158（2026-10-23）。下表依据代码与既有验收档案；原始存量详见[10 月 22 日核对](docs/development/roboguide-branch-audit-2026-10-22.md)。
+内容核对基线：`8c98593` 加本包 ADR-0177–0180（2026-10-24）；[版本参考](reference.md)记录完整代码基线。下表依据代码与既有验收档案；原始存量详见[10 月 22 日核对](docs/development/roboguide-branch-audit-2026-10-22.md)。
 
 | 方面 | 已有软件路径 | 仍需完成或独立验证 |
 | --- | --- | --- |
@@ -9,7 +9,7 @@
 | Runtime / stop | attempt/generation、durable intent、relations、whole-Group stop、原进程 exit proof | 运行中抢占、耦合多 Role 迁移、hazard/regrasp 与设备 stop |
 | State / verifier | 来源策略、Belief lineage、TTL、原 Task verifier 与 CAS proof | 当前部署的物理来源、冲突与持续效果证明 |
 | Memory / Spatial | 准备/use/revoke/handoff、文件空间算法、provider 局部 GC；原 import Replica、Catalog/lineage、Snapshot/Archive 引用、恢复后原 provider Snapshot 退休、Archive abort/私有接收 GC、源上传退休和 standalone 已知引用闭包离线 GC | Raft/online 全部生产者覆盖、跨主机内容与组合恢复 |
-| Replica / recovery | 证书轮换、原 child drain、V3 transfer、writer/inode fence、静止完整 bundle | binary/profile 升级回退、在线内容恢复与跨主机故障矩阵 |
+| Replica / recovery | 证书轮换、原 child drain、V3 transfer、writer/inode fence、已支持静止 bundle、qualified Root HTTP read、Prepared 显式恢复 | 跨 owner 上传释放、Unknown 对账、parent8/Root4 bundle、完整 readiness/在线恢复、升级回退与跨主机故障矩阵 |
 | Federation | Control 内持久 session | 真实跨域 transport、授权、路由与双域恢复 |
 | 运维 | write-disabled、已提交视图、恢复探针、真实短窗口监控检查 | 全 listener/阻塞收敛、完整 runbook、长期 SLO 与总体退出条件 |
 
@@ -22,6 +22,8 @@
 [旧 Catalog 显式接管](docs/development/acceptance/2026-10-22-original-catalog-adoption.md)固定原 publication raw envelope、实际 owner/bytes 和 typed parent；当前 admin/TLS 另记 receipt。历史 publisher/tenant 仍 unavailable，不授予额外 read/use/import 权限。wrapper v51/recovery v0.15 拒绝丢失原 receipt。
 
 [源 Artifact 离线回收](docs/development/acceptance/2026-10-23-source-artifact-reclamation.md)使用 wrapper v52/storage v5/recovery v0.16：原上传、Catalog/child、Memory/MI、Snapshot/Archive 与验证引用分别核对；原 tombstone 先于 unlink。实际 MI policy 撤销、独立原目标、parent/child 释放、文件/SQL 故障和冷恢复通过。该入口拒绝 Replica/online 权威，不能代替多数派内容 ACK。
+
+[Prepared 恢复与重复校验优化](docs/development/acceptance/2026-10-24-prepared-recovery-and-runtime-latency.md)已通过实际三副本/Controller/SQL/CAS 故障检查，未创建设备。原 Prepared 与 Unknown 保留，新 owner 通过独立正常上传取得 Completed；最新权限和完整多数派 checkpoint 保护故障后的只读观察。最终恢复约 77 秒，仍需优化；短窗口结果不计长期 SLO。显式 v0.18 仅支持原 standalone 存储合同，不覆盖 parent8/Root4 或新增恢复事件。
 
 ## 如何解读证据
 

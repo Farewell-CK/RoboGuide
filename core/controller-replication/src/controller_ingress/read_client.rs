@@ -22,11 +22,32 @@ pub struct ControllerContentRead {
     returned: u64,
     /// Actual full terminal receipt was validated; closing a socket alone never sets this.
     complete: bool,
+    /// Actual validated original close receipt, absent until the complete original stream closes.
+    receipt: Option<crate::content_store::ReplicaContentReaderReceipt>,
     /// Any prior read error irreversibly fences this original stream.
     failed: bool,
 }
 
 impl ControllerContentClient {
+    /// Opens only the exact committed original recovery, independent of public content availability.
+    pub fn open_upload_recovery(
+        &self,
+        record: &domain::ArtifactUploadRecovery,
+    ) -> Result<ControllerContentRead, String> {
+        self.check_upload_recovery(record)?;
+        let reader = self.open_content_read_named(
+            ReadPurpose::PreparedRecovery {
+                command_id: record.command_id.clone(),
+            },
+            &domain::artifact_adoption_digest(record)?[7..],
+            Some(&record.reader_id),
+        )?;
+        if reader.content() != &crate::controller_ingress::recovery::source_key(record)? {
+            return Err("recovery read changed its exact original source key".into());
+        }
+        Ok(reader)
+    }
+
     /// Opens one current published qualified source; the composition still enforces real ACL/use per chunk.
     pub fn open_published_content(
         &self,
@@ -62,10 +83,23 @@ impl ControllerContentClient {
         purpose: ReadPurpose,
         context_digest: &str,
     ) -> Result<ControllerContentRead, String> {
+        self.open_content_read_named(purpose, context_digest, None)
+    }
+
+    /// Opens only the original recovery reader ID, or admits a fresh ordinary integrity/public reader.
+    fn open_content_read_named(
+        &self,
+        purpose: ReadPurpose,
+        context_digest: &str,
+        original_reader: Option<&str>,
+    ) -> Result<ControllerContentRead, String> {
         if !crate::content::hex_digest(context_digest) {
             return Err("invalid original read context digest".into());
         }
-        let reader_id = format!("child-read:{}", crate::supervision::new_process_instance()?);
+        let reader_id = match original_reader {
+            Some(id) => id.to_string(),
+            None => format!("child-read:{}", crate::supervision::new_process_instance()?),
+        };
         let mut exchange = self.connect(ChildCommand::ReadContentV1 {
             reader_id: reader_id.clone(),
             purpose: purpose.clone(),
@@ -81,6 +115,7 @@ impl ControllerContentClient {
         head.content.validate()?;
         let expected = match &purpose {
             ReadPurpose::Published { digest } => head.content.content_digest == *digest,
+            ReadPurpose::PreparedRecovery { .. } => true,
             ReadPurpose::RetainedIntegrity { content } => head.content == *content,
         };
         let binding = serde_json::json!({"process":head.process,
@@ -113,12 +148,26 @@ impl ControllerContentClient {
             hasher: Sha256::new(),
             returned: 0,
             complete: false,
+            receipt: None,
             failed: false,
         })
     }
 }
 
 impl ControllerContentRead {
+    /// Returns only the independently validated actual original close and its durable admission binding.
+    pub fn completed_recovery_reader(&self) -> Result<(String, String), String> {
+        let receipt = self
+            .receipt
+            .as_ref()
+            .ok_or("actual original reader has not closed completely")?;
+        let value = serde_json::to_value(receipt).map_err(|e| e.to_string())?;
+        Ok((
+            serde_json::to_string(&value).map_err(|e| e.to_string())?,
+            self.head.authority_digest.clone(),
+        ))
+    }
+
     /// Returns the exact original qualified identity; it grants no new availability or use permission.
     pub fn content(&self) -> &ArtifactContentKey {
         &self.head.content
@@ -176,6 +225,7 @@ impl ControllerContentRead {
         {
             return Err("actual qualified read receipt/returned bytes differ from original".into());
         }
+        self.receipt = Some(receipt);
         self.complete = true;
         self.pending.clear();
         self.offset = 0;

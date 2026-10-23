@@ -9,8 +9,35 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from roboguide_recovery.bundle import backup, canonical, digest, restore, verify
+from roboguide_recovery.bundle import Budget, backup, canonical, digest, restore, verify
 from test_retained_artifacts import retained as retained
+
+
+def test_prepared_wrapper_requires_explicit_profile_and_refuses_unverified_history(
+    catalog: tuple[Path, Path, dict[str, Any], dict[str, Any]],
+) -> None:
+    """Do not publish a bundle by ignoring new original recovery authority or an old profile."""
+    from contextlib import closing
+
+    from roboguide_recovery import catalog_references
+
+    _, database, profile, _ = catalog
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute(
+            "UPDATE controller_checkpoint SET schema='roboguide.controller-checkpoint/v53'"
+        )
+        connection.commit()
+    budget = Budget(profile)
+    with pytest.raises(ValueError, match="explicit recovery v0.18"):
+        catalog_references._controller(database, profile["schema"], budget)
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute(
+            "INSERT INTO events(payload_schema,payload_json) VALUES(?,?)",
+            ("domain.EventPayload.json/v32", '{"ArtifactUploadRecoveryTransition":{}}'),
+        )
+        connection.commit()
+    with pytest.raises(ValueError, match="parent8/Root4"):
+        catalog_references._controller(database, "roboguide.recovery-profile/v0.18", budget)
 
 
 @pytest.fixture

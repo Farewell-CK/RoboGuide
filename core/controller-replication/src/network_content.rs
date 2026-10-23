@@ -212,7 +212,7 @@ impl ReplicaNode {
         clock.check()?;
         permission()?;
         let committed = tokio::time::timeout(
-            Duration::from_millis(clock.remaining_ms()?.min(5000)),
+            Duration::from_millis(clock.remaining_ms()?),
             self.raft.client_write(ReplicaCommand::ContentApplication {
                 content_application: Box::new(candidate),
             }),

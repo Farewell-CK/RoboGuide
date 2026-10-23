@@ -224,13 +224,28 @@ async fn begin<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     }
     clock.check()?;
     node.check_epoch(peer.epoch).await?;
+    let view = node.store.network_view().await?;
+    let held = node.clone();
+    let original = process.clone();
+    let (candidate, recovery_clocks) = blocking(node, move |_| {
+        let clocks = super::recovery::validate_new_candidate(&held, &candidate, &original, &view)?;
+        Ok((candidate, clocks))
+    })
+    .await?;
     let target = node.content_target_for(&candidate).await?;
-    let check = permission(
+    let original_check = permission(
         node.clone(),
         peer.clone(),
         clock.clone(),
         Some(target.clone()),
     );
+    let check: StreamPermission = std::sync::Arc::new(move || {
+        original_check()?;
+        for clock in &recovery_clocks {
+            clock.check()?;
+        }
+        Ok(())
+    });
     let intent = IngressIntent {
         schema: JOURNAL_SCHEMA.into(),
         command_id: command.clone(),

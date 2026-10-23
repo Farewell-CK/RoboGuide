@@ -19,7 +19,7 @@ struct FinalizeContext<'a> {
 }
 
 /// Reads fresh Controller wall time; no peer or manifest timestamp can renew an upload budget.
-fn now_ms() -> Result<u64, HttpError> {
+pub(super) fn now_ms() -> Result<u64, HttpError> {
     u64::try_from(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

@@ -1,5 +1,40 @@
 # Repository Guidelines
 
+ADR-0177 adds explicit original-uploader Prepared recovery under event codec v32 / wrapper v53.
+The durable one-shot intent freezes the unchanged source upload/qualified owner, actual new CAS
+writer inode, current original Controller, original kernel budget, actual grant and one reader ID
+before any copy. PreparedRecovery reads require that committed intent and the exact original
+process/source/reader/budget per chunk. Normal replacement Started/Prepared/actual CAS/Completed and
+independently matched original Root SQL close precede recovery completion. Both qualified owners
+remain retained; original Prepared and Unknown never change. Duplicate commands observe only.
+Owners are domain/artifact_upload_recovery.rs, state/upload_recovery.rs,
+controller_ingress/recovery.rs and artifact_http/upload_recovery.rs. Explicit cold recovery v0.18
+preserves declared v0.17 storage contracts and admits wrapper v53; it refuses new recovery events
+until complete parent8/Root4 recovery support exists. The maintained zero-Node runnable checker adds
+--prepared-recovery; no recovery record establishes device stopping or overall SoftwareComplete.
+
+ADR-0178 reuses full Root structural validation only on the same actual private connection with
+unchanged total_changes/data_version/schema_version/user_version/journal mode and current bounded
+footprint. Original own writes/rollback, external commits, DDL/format changes, transactions and
+reopen invalidate it. Failed scans never publish a witness; validation-time changes refuse. The
+witness is process-local under ContentInner and cannot cache current permissions, bytes, epoch,
+quorum, budgets, PID or reader/worker lifetime. Owners are content_store/validation.rs and layout;
+there is no new persistent or Node contract. Actual SQL corruption and readonly reuse are separate
+from complete process acceptance; no cache or short timing observation proves SoftwareComplete.
+
+ADR-0179 advances an unchanged timer witness only across one actually committed audit INSERT:
+exact prior total/data/schema/user/journal witness, one affected row, exactly one total change and
+unchanged external/header evidence. Trigger effects, prior own writes, DDL and foreign commits
+cannot borrow it. The audit stays durable; no authority journal or failure latch is skipped.
+ADR-0180 adds an exact original-uploader GET recovery observation. Actual current grant/TLS,
+principal/tenant/epoch/quorum and the original committed caches still gate it. Only this metadata
+route may report audit_persisted=false under known local SQL write-disabled failure, with local
+write status and committed_local=true. Restart/Catalog uncertainty additionally requires a fresh
+complete quorum view matching the exact local committed checkpoint; absent/mismatched proof refuses
+until startup replay. The restart requirement stays. It returns metadata only and cannot copy,
+clear failure or renew a budget. Writable POST/other Artifact paths stay fenced. Owners are State timer_transaction/event_log
+and artifact_http/upload_recovery. No persistent/Node contract or physical claim is added.
+
 ADR-0176 adds ReadContentV1 on the original PID/mTLS owned-child channel. Published reads require
 unambiguous current published/Completed qualified origins; Prepared-only inputs remain private.
 RetainedIntegrity verifies exact current dependencies without publishing CAS or granting semantic

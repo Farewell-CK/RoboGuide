@@ -213,7 +213,10 @@ def _validate_intent(value: dict[str, Any]) -> None:
     ):
         raise ValueError("original SQL recovery intent identity or original files differ")
     components = validate(value["profile"])
-    if value["profile"]["schema"] != "roboguide.recovery-profile/v0.17" or not any(
+    if value["profile"]["schema"] not in {
+        "roboguide.recovery-profile/v0.17",
+        "roboguide.recovery-profile/v0.18",
+    } or not any(
         row["component_id"] == value["component_id"]
         and row["kind"] == "artifact"
         and row["storage_schema"] == gc.STORAGE
@@ -361,7 +364,8 @@ def run(
         return observation | {"replayed": True}
     components = validate(profile)
     if (
-        profile["schema"] != "roboguide.recovery-profile/v0.17"
+        profile["schema"]
+        not in {"roboguide.recovery-profile/v0.17", "roboguide.recovery-profile/v0.18"}
         or profile["artifact_replica_sets"]
         or any(value["kind"] == "replica" for value in components)
         or gc.CHECKSUM.fullmatch(expected_sql) is None

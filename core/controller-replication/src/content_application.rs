@@ -123,6 +123,7 @@ pub(crate) fn required_inputs(
     let mut uploads = BTreeMap::new();
     let mut upload_origins = BTreeMap::new();
     let mut retired_uploads = BTreeMap::new();
+    let mut recoveries = BTreeMap::new();
     let mut required = BTreeSet::new();
     for row in rows {
         state::validate_persisted_event(&row).map_err(|error| error.to_string())?;
@@ -154,6 +155,25 @@ pub(crate) fn required_inputs(
                     upload_origins.insert(record.upload_id.clone(), origin);
                 }
                 uploads.insert(record.upload_id.clone(), record);
+            }
+            EventPayload::ArtifactUploadRecoveryTransition { record } => {
+                state::validate_upload_recovery(&uploads, &recoveries, &record)?;
+                crate::controller_ingress::recovery::evidence(&record)?;
+                if upload_origins.get(&record.upload.upload_id).is_none_or(
+                    |key: &ArtifactContentKey| key.source_owner != record.source_owner_id,
+                ) {
+                    return Err("recovery changed its exact original qualified source".into());
+                }
+                if let Some(done) = &record.completion
+                    && upload_origins.get(&done.replacement.upload_id).is_none_or(
+                        |key: &ArtifactContentKey| key.source_owner != record.destination_owner_id,
+                    )
+                {
+                    return Err(
+                        "recovery changed its independent completed replacement owner".into(),
+                    );
+                }
+                recoveries.insert(record.command_id.clone(), *record);
             }
             EventPayload::ArtifactUploadRetired { receipt } => {
                 state::validate_upload_retirement(&uploads, &retired_uploads, &receipt)?;

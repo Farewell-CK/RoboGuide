@@ -5,6 +5,11 @@ use crate::*;
 /// A serializable-in-spirit event payload before a transport is selected.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EventPayload {
+    /// Independent original Prepared recovery; completion never changes the source upload.
+    ArtifactUploadRecoveryTransition {
+        /// Exact original intent and optional actual replacement evidence.
+        record: Box<crate::ArtifactUploadRecovery>,
+    },
     /// Releases only one original completed upload claim without rewriting completion or deleting bytes.
     ArtifactUploadRetired {
         /// Complete original byte/source proof and current authenticated retirement command.

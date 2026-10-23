@@ -17,6 +17,7 @@ from .snapshot_references import OperationBudget, canonical, digest
 SCHEMA = "roboguide.recovery-profile/v0.16"
 STORAGE = "roboguide.artifact-storage/v5"
 WRAPPER = "roboguide.controller-checkpoint/v52"
+WRAPPERS = {WRAPPER, "roboguide.controller-checkpoint/v53"}
 SQL_SCHEMA = "roboguide.artifact-gc-sql/v0.1"
 DATABASE = "reclamation-v1/journal.sqlite3"
 MAX_RECORD = 512 * 1024

@@ -458,6 +458,12 @@ Controller 投影在实际源 SQL inode/sidecar 租约与原生排空后，使�
 [存量复核](../../development/roboguide-branch-audit-2026-10-22.md)是其冻结代码时点的证据。
 两者均不宣告当前 SoftwareComplete。后续分支只在合并并重新核对后升级为本页的主线事实。
 
+[ADR-0177](../../decisions/0177-explicit-prepared-upload-recovery.md)规定 Prepared 的显式恢复：原 uploader 的独立持久意图先于新读取/上传，原 qualified source 与新 CAS owner 分开，真实 reader close 和正常新上传 Completed 才能记录恢复完成。原 Prepared/Unknown/引用不改写，同命令仅查询，kernel 预算不续期；wrapper v53 / codec v32 拒绝旧 writer。实际组合仍按阶段验收。
+
+[ADR-0178](../../decisions/0178-original-root-validation-witness.md)允许同一原 Root 连接复用完整结构校验：原自身/外部变更计数、schema/user version、journal 均未变化且实际 footprint 合格才复用。自身写入、rollback、外部修改、DDL、活动 transaction 或重启不复用；实际 bytes/权限/预算/epoch/quorum 与原 handle 生命周期逐次检查保持。
+
+[ADR-0179](../../decisions/0179-audit-only-timer-witness.md)仅以原 SQL 单行 INSERT 的精确计数核对延续审计后的 timer witness，审计继续真实持久化；其它 SQL/trigger/外部变化仍失效。[ADR-0180](../../decisions/0180-write-disabled-upload-recovery-observation.md)提供原 uploader 的 metadata-only 故障观察，保留当前 TLS/tenant/epoch/quorum，写禁用时明确报告本地 committed cache 与未持久化的新审计；不复制、不清故障或补结果。
+
 ## 10. 版本关系
 
 V2 取代 [V1.1](../v1.1/README.md)。本次按当前代码整理叙述，不另立 V3，也不回写历史实验或验收。

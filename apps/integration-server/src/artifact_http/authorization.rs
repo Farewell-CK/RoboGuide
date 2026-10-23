@@ -221,6 +221,8 @@ impl ArtifactPrincipal {
                     || path.ends_with("/replicas")
                     || (resource.split('/').count() == 3
                         && resource.split('/').nth(1) == Some("revisions")))
+        } else if let Some((upload, _)) = super::upload_recovery::observation_keys(path) {
+            read && catalog.observe_owned_upload(upload, self).is_ok()
         } else if let Some(upload) = path.strip_prefix("/v1/artifact-uploads/") {
             let id = upload.split('/').next().unwrap_or_default();
             catalog

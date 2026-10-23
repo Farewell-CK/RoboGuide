@@ -21,6 +21,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.15",
     "roboguide.recovery-profile/v0.16",
     "roboguide.recovery-profile/v0.17",
+    "roboguide.recovery-profile/v0.18",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -28,6 +29,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v50",
     "roboguide.controller-checkpoint/v51",
     "roboguide.controller-checkpoint/v52",
+    "roboguide.controller-checkpoint/v53",
 }
 MAX_HISTORY_BYTES = 256 * 1024 * 1024
 MAX_CATALOG_BYTES = 64 * 1024 * 1024
@@ -440,6 +442,7 @@ def validate(
                     archive_aborts.WRAPPER,
                     "roboguide.controller-checkpoint/v51",
                     "roboguide.controller-checkpoint/v52",
+                    "roboguide.controller-checkpoint/v53",
                 },
             )
             cleanups: dict[str, list[tuple[dict[str, Any], dict[str, Any] | None]]] = {}

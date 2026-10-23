@@ -6,6 +6,34 @@ use super::*;
 #[path = "timer_transaction_tests.rs"]
 mod tests;
 
+/// Exact process-local SQL evidence; no serialized flag can recreate this completed-writer witness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SqlWitness {
+    /// Original connection writes include statements later rolled back.
+    pub(super) changes: u64,
+    /// External commits remain independent of original local writes.
+    data_version: u64,
+    /// Own DDL cannot borrow the prior authority snapshot.
+    schema_version: u64,
+    /// Explicit storage generation remains independently sampled.
+    user_version: u64,
+    /// Journal locking cannot change under an unchanged witness.
+    journal_mode: String,
+}
+
+impl SqlWitness {
+    /// Samples original actual counters/headers; callers retain the actual connection and writer.
+    pub(super) fn observe(connection: &Connection) -> Result<Self, SqliteEventLogError> {
+        Ok(Self {
+            changes: connection.total_changes(),
+            data_version: connection.query_row("PRAGMA data_version", [], |r| r.get(0))?,
+            schema_version: connection.query_row("PRAGMA schema_version", [], |r| r.get(0))?,
+            user_version: connection.query_row("PRAGMA user_version", [], |r| r.get(0))?,
+            journal_mode: connection.query_row("PRAGMA journal_mode", [], |r| r.get(0))?,
+        })
+    }
+}
+
 impl SqliteEventLog {
     /// Rolls back only an untouched real batch with the exact original committed checkpoint.
     /// Callers retain the original application writer; external commands must keep their journals.
@@ -51,18 +79,18 @@ impl SqliteEventLog {
             .connection
             .lock()
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
-        let committed = *self
+        let committed = self
             .committed_sql_witness
             .lock()
-            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
-        let Some((committed_changes, data_version)) = committed else {
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?
+            .clone();
+        let Some(committed) = committed else {
             return Ok(false);
         };
         if *sequence != start
             || connection.total_changes() != original_changes
-            || original_changes != committed_changes
-            || connection.query_row("PRAGMA data_version", [], |row| row.get::<_, u64>(0))?
-                != data_version
+            || original_changes != committed.changes
+            || SqlWitness::observe(&connection)? != committed
             || self
                 .pending_checkpoint_cache
                 .lock()

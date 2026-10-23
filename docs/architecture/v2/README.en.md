@@ -468,6 +468,12 @@ acceptance requirements. The [inventory review](../../development/roboguide-bran
 snapshot. Neither announces SoftwareComplete. Branch implementations become mainline claims only after merge
 and a fresh review.
 
+[ADR-0177](../../decisions/0177-explicit-prepared-upload-recovery.md) defines explicit Prepared recovery. A separately durable original-uploader intent precedes reading or a replacement upload. Original qualified content and the new CAS owner remain distinct; actual reader closure and a normal replacement Completed receipt precede recovery completion. Original Prepared/Unknown/references remain intact, retries only observe, and the original kernel budget never renews. Wrapper v53 / codec v32 fence prior writers; process acceptance remains separate.
+
+[ADR-0178](../../decisions/0178-original-root-validation-witness.md) permits reuse of a full structural validation only on the same original Root connection with unchanged local/external change counters, schema/user versions and journal mode, within the actual footprint bound. Writes, rollback, external changes, DDL, active transactions and restart invalidate reuse. Actual bytes, permissions, budgets, epochs, quorum and original handle lifetimes remain independently checked.
+
+[ADR-0179](../../decisions/0179-audit-only-timer-witness.md) carries the timer witness across one precisely accounted durable audit INSERT; other SQL, trigger effects and external changes still invalidate it. [ADR-0180](../../decisions/0180-write-disabled-upload-recovery-observation.md) exposes only the original uploader metadata under current TLS/tenant/epoch/quorum. Write-disabled observations explicitly report committed local cache and unavailable new durable audit; they never copy, clear failures or invent outcomes.
+
 ## 10. Version relationship
 
 V2 supersedes [V1.1](../v1.1/README.md). This alignment is not a new V3 or a rewrite of historical experiments.

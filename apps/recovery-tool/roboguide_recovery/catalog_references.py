@@ -23,6 +23,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.15",
     "roboguide.recovery-profile/v0.16",
     "roboguide.recovery-profile/v0.17",
+    "roboguide.recovery-profile/v0.18",
 }
 WRAPPER = "roboguide.controller-checkpoint/v48"
 WRAPPERS = {
@@ -31,6 +32,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v50",
     "roboguide.controller-checkpoint/v51",
     "roboguide.controller-checkpoint/v52",
+    "roboguide.controller-checkpoint/v53",
 }
 CODEC = "domain.EventPayload.json/v29"
 MAX_EVIDENCE_BYTES = 64 * 1024 * 1024
@@ -186,6 +188,13 @@ def _controller(
         current = checkpoint is not None and checkpoint[0] in WRAPPERS
         if (
             checkpoint is not None
+            and checkpoint[0] == "roboguide.controller-checkpoint/v53"
+            and profile_schema != "roboguide.recovery-profile/v0.18"
+        ):
+            raise ValueError("Prepared recovery wrapper requires explicit recovery v0.18")
+
+        if (
+            checkpoint is not None
             and checkpoint[0] in catalog_adoptions.WRAPPERS
             and profile_schema not in catalog_adoptions.SUPPORTED
         ):
@@ -194,7 +203,11 @@ def _controller(
             checkpoint is not None
             and checkpoint[0] == "roboguide.controller-checkpoint/v52"
             and profile_schema
-            not in {"roboguide.recovery-profile/v0.16", "roboguide.recovery-profile/v0.17"}
+            not in {
+                "roboguide.recovery-profile/v0.16",
+                "roboguide.recovery-profile/v0.17",
+                "roboguide.recovery-profile/v0.18",
+            }
         ):
             raise ValueError("upload-retention wrapper requires explicit recovery v0.16")
         if "events" not in tables:
@@ -206,6 +219,16 @@ def _controller(
             if current or profile_schema in SUPPORTED:
                 raise ValueError("mandatory Catalog reference event columns are missing")
             return heads, publications
+        if (
+            connection.execute(
+                "SELECT 1 FROM events WHERE payload_schema='domain.EventPayload.json/v32' LIMIT 1"
+            ).fetchone()
+            is not None
+        ):
+            raise ValueError(
+                "Prepared recovery requires complete parent8/Root4 recovery support; "
+                "this cold profile cannot verify it"
+            )
         has_reference_codec = (
             connection.execute(
                 "SELECT 1 FROM events WHERE payload_schema=? LIMIT 1", (CODEC,)
@@ -219,6 +242,8 @@ def _controller(
         if profile_schema not in SUPPORTED:
             return heads, publications
         archived = archive_references.catalog_history(connection, profile_schema, budget)
+        if any(row.get("payload_schema") == "domain.EventPayload.json/v32" for row in archived):
+            raise ValueError("protected Prepared recovery needs complete parent8/Root4 recovery")
         original_archives = archive_references.operations(
             connection,
             profile_schema,
@@ -230,6 +255,7 @@ def _controller(
                 "roboguide.controller-checkpoint/v50",
                 "roboguide.controller-checkpoint/v51",
                 "roboguide.controller-checkpoint/v52",
+                "roboguide.controller-checkpoint/v53",
             },
         )
         from . import archive_aborts
@@ -245,6 +271,7 @@ def _controller(
                 archive_aborts.WRAPPER,
                 "roboguide.controller-checkpoint/v51",
                 "roboguide.controller-checkpoint/v52",
+                "roboguide.controller-checkpoint/v53",
             },
         )
         history = iter(archived)

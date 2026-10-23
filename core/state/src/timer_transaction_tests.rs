@@ -2,6 +2,150 @@
 
 use super::*;
 
+/// Durable audit-only requests preserve the exact authority snapshot without new authority commands.
+#[test]
+fn actual_durable_audit_does_not_force_an_unchanged_authority_commit() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("audit.sqlite3")).unwrap();
+    let raw = "{\"original\":true}";
+    log.begin_batch().unwrap();
+    save(&log, "original-command", raw);
+    let original = log.control_command_journal().unwrap();
+    for _ in 0..4 {
+        log.record_service_access(
+            "artifact",
+            "original-principal",
+            "GET",
+            "/original",
+            "allowed",
+        )
+        .unwrap();
+        log.begin_batch().unwrap();
+        assert!(
+            log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+                .unwrap()
+        );
+    }
+    assert_eq!(log.control_command_journal().unwrap(), original);
+    assert_eq!(
+        log.connection
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM service_access_audit", [], |r| r
+                .get::<_, u64>(0))
+            .unwrap(),
+        4
+    );
+}
+
+/// Same-connection DDL does not increment total_changes but still invalidates the authority witness.
+#[test]
+fn audit_cannot_conceal_same_connection_schema_changes() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("schema.sqlite3")).unwrap();
+    let raw = "{\"original\":true}";
+    log.begin_batch().unwrap();
+    save(&log, "original-command", raw);
+    log.connection
+        .lock()
+        .unwrap()
+        .execute_batch("CREATE TABLE unaccounted_schema(original TEXT)")
+        .unwrap();
+    log.record_service_access(
+        "artifact",
+        "original-principal",
+        "GET",
+        "/original",
+        "allowed",
+    )
+    .unwrap();
+    log.begin_batch().unwrap();
+    assert!(
+        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+            .unwrap()
+    );
+    log.rollback_batch().unwrap();
+}
+
+/// Trigger effects cannot borrow the audit-only exception, even after the trigger was fully committed.
+#[test]
+fn audit_trigger_extra_authority_write_invalidates_unchanged_witness() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("trigger.sqlite3")).unwrap();
+    log.connection.lock().unwrap().execute_batch("CREATE TRIGGER actual_audit_side_effect AFTER INSERT ON service_access_audit BEGIN INSERT OR REPLACE INTO event_log_metadata(key,value) VALUES('unaccounted-effect','original'); END").unwrap();
+    let raw = "{\"original\":true}";
+    log.begin_batch().unwrap();
+    save(&log, "original-command", raw);
+    log.record_service_access(
+        "artifact",
+        "original-principal",
+        "GET",
+        "/original",
+        "allowed",
+    )
+    .unwrap();
+    log.begin_batch().unwrap();
+    assert!(
+        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+            .unwrap()
+    );
+    log.rollback_batch().unwrap();
+}
+
+/// An audit INSERT never conceals either a previous own mutation or an external committed change.
+#[test]
+fn audit_does_not_hide_prior_unaccounted_or_external_changes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("original.sqlite3");
+    let log = SqliteEventLog::open(&path).unwrap();
+    let raw = "{\"original\":true}";
+    log.begin_batch().unwrap();
+    save(&log, "original-command", raw);
+    log.connection
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO event_log_metadata(key,value) VALUES('unaccounted-own','change')",
+            [],
+        )
+        .unwrap();
+    log.record_service_access(
+        "artifact",
+        "original-principal",
+        "GET",
+        "/original",
+        "allowed",
+    )
+    .unwrap();
+    log.begin_batch().unwrap();
+    assert!(
+        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+            .unwrap()
+    );
+    save(&log, "record-original-change", raw);
+    let external = Connection::open(&path).unwrap();
+    external
+        .execute(
+            "INSERT INTO event_log_metadata(key,value) VALUES('unaccounted-external','change')",
+            [],
+        )
+        .unwrap();
+    log.record_service_access(
+        "artifact",
+        "original-principal",
+        "GET",
+        "/original",
+        "allowed",
+    )
+    .unwrap();
+    log.begin_batch().unwrap();
+    assert!(
+        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+            .unwrap()
+    );
+    log.rollback_batch().unwrap();
+}
+
 /// Isolated port records original calls without representing an infrastructure deployment.
 #[derive(Default)]
 struct CountedPort {

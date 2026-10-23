@@ -342,6 +342,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     let current_isolation_contract = matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_UPLOAD_RECOVERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_UPLOAD_RETIREMENT_SERVER_CHECKPOINT_SCHEMA
             | PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_ARCHIVE_ABORT_SERVER_CHECKPOINT_SCHEMA

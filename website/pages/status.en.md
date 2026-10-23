@@ -1,6 +1,6 @@
 # Implementation status and evidence limits
 
-Content baseline: `ab6ab4679e71fff26cefdacada33fe41a6fbf10b` plus this ADR-0158 implementation, reviewed 2026-10-23. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
+Content baseline: `8c98593` plus ADR-0177–0180, reviewed 2026-10-24; [Reference](reference.md) records the full code baseline. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
 
 | Area | Existing software paths | Remaining or independently validated work |
 | --- | --- | --- |
@@ -9,7 +9,7 @@ Content baseline: `ab6ab4679e71fff26cefdacada33fe41a6fbf10b` plus this ADR-0158 
 | Runtime / stop | Attempts/generations, durable intents, relations, whole-Group stop and original-process exit proof | Running preemption, coupled Role migration, hazard/regrasp and device stopping |
 | State / verifier | Source policies, Belief lineage, TTL, original Task verifiers and CAS proof | Actual deployment sources, conflicts and continuous physical effects |
 | Memory / Spatial | Preparation/use/revoke/handoff, file algorithms, provider-local GC; original import Replica, Catalog/lineage, Snapshot/Archive references, relocated provider Snapshot retirement, Archive abort/private recipient GC, source upload retirement and offline GC over supported standalone reference closure | Complete Raft/online producer coverage, cross-host content and composed recovery |
-| Replica / recovery | Certificate rotation, original child drain, V3 transfer, inode/writer fences and quiescent bundles | Binary/profile upgrade/rollback, online content recovery and cross-host fault matrix |
+| Replica / recovery | Certificate rotation, original child drain, V3 transfer, inode/writer fences, supported quiescent bundles, qualified Root HTTP reads and explicit Prepared recovery | Cross-owner upload release, Unknown reconciliation, parent8/Root4 bundles, complete readiness/online recovery, upgrade/rollback and cross-host faults |
 | Federation | Durable Control sessions | Actual cross-domain transport, authorization, routing and dual-domain recovery |
 | Operations | Write-disabled, committed views, recovery probes and short real monitoring checks | Remaining listener/blocking paths, complete runbooks, long-term SLO and overall exit criteria |
 
@@ -22,6 +22,8 @@ Original content Archive and actual Catalog compaction/restart/cold recovery are
 [Explicit legacy Catalog adoption](docs/development/acceptance/2026-10-22-original-catalog-adoption.md) binds the original raw publication envelope, actual owner/bytes and typed parent, retaining current admin/TLS evidence separately. Historical publisher/tenant remain unavailable; no extra read/use/import permission is added. Wrapper v51/recovery v0.15 refuses missing original receipts.
 
 [Offline source Artifact reclamation](docs/development/acceptance/2026-10-23-source-artifact-reclamation.md) uses wrapper v52/storage v5/recovery v0.16. Uploads, Catalog/child, Memory/MI, Snapshot/Archive and verifier claims are checked independently before the original tombstone and unlink. Actual MI policy revocation, independent original-goal evidence, parent/child release, file/SQL faults and cold restore pass. This entry refuses Replica/online authority and supplies no majority content ACK.
+
+[Prepared recovery and repeated-validation optimization](docs/development/acceptance/2026-10-24-prepared-recovery-and-runtime-latency.md) passed actual three-replica/Controller/SQL/CAS fault checks with zero devices. Original Prepared and Unknown evidence remains; an independent normal upload establishes the new owner's Completed result. Current permissions and a fresh complete-quorum checkpoint protect failure observations. Final recovery took about 77 seconds and still needs optimization; short observations do not establish long-term SLO. Explicit recovery v0.18 supports the original standalone storage contracts, excluding parent8/Root4 and new recovery events.
 
 ## Reading the evidence
 

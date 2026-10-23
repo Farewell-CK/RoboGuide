@@ -1,6 +1,51 @@
 //! Actual storage/lease counterexamples; labelled pin DTOs confer no content or deployment facts.
 
 use super::*;
+
+/// An actual complete close receipt cannot be substituted or lent another recovery admission binding.
+#[test]
+fn recovery_completion_requires_original_root_sql_receipt_and_authority() {
+    let directory = tempfile::tempdir().unwrap();
+    let profile = "a".repeat(64);
+    let store =
+        ReplicaContentStore::create_with_streams(&directory.path().join("root"), &profile, 1)
+            .unwrap();
+    let source_directory = directory.path().join("source");
+    std::fs::create_dir(&source_directory).unwrap();
+    let (_log, source, key) = crate::content_application_tests::original(&source_directory);
+    store
+        .copy_from_artifact(
+            &source,
+            &key,
+            "actual-recovery-source",
+            "a".repeat(64).as_str(),
+            30000,
+        )
+        .unwrap();
+    let authority = "b".repeat(64);
+    let mut reader = store
+        .open_reader(&key, "actual-recovery-reader", &authority, 30000)
+        .unwrap();
+    std::io::copy(&mut reader, &mut std::io::sink()).unwrap();
+    let receipt = reader.finish().unwrap();
+    store.require_reader_receipt(&receipt, &authority).unwrap();
+    assert!(
+        store
+            .require_reader_receipt(&receipt, &"c".repeat(64))
+            .is_err()
+    );
+    let mut forged = receipt.clone();
+    forged.file_inode += 1;
+    assert!(store.require_reader_receipt(&forged, &authority).is_err());
+    assert_eq!(
+        store
+            .reader_status(&receipt.reader_id)
+            .unwrap()
+            .unwrap()
+            .receipt,
+        Some(receipt)
+    );
+}
 use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;
 

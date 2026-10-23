@@ -1,5 +1,17 @@
 # RoboGuide
 
+[Prepared 的显式恢复](docs/decisions/0177-explicit-prepared-upload-recovery.md)保留原上传与
+source owner；原 uploader 的独立持久意图、原 kernel 预算和唯一 reader 先于复制。
+新 CAS owner 经正常新上传和实际 Root close 才能记录恢复完成，重复命令只查询。
+codec v32 / wrapper v53 拒绝旧 writer；离线 v0.18 对尚未支持的 parent8/Root4 恢复
+事件拒绝备份。完整在线/静止恢复组合及其他非发布整改继续实施。
+
+[Root 校验复用](docs/decisions/0178-original-root-validation-witness.md)检查同一实际连接的
+SQL/header witness，所有数据、权限、原预算与实际 handle 检查保持；
+[审计与无变化 timer](docs/decisions/0179-audit-only-timer-witness.md)按实际单行写入核对，
+保留持久化审计。[故障观察](docs/decisions/0180-write-disabled-upload-recovery-observation.md)
+仅在精确 metadata GET 中报告原 committed cache 和新审计不可持久化，不清故障或补造结果。
+
 [原 Controller qualified 读取](docs/decisions/0176-owned-controller-qualified-content-reads.md)
 已接原 PID/mTLS 有界 Root reader 和 HTTP 缺失 CAS fallback；真实 leader 切换后读取原
 owner 内容，新 Controller 不写本地 CAS、不改 owner。纯 Prepared 与含糊来源拒绝，

@@ -92,6 +92,27 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
             .revalidate_artifact_principal(self.principal)?;
         self.authority.admit_artifact_payload(payload)?;
         match payload {
+            EventPayload::ArtifactUploadRecoveryTransition { record } => {
+                record.validate()?;
+                if record.upload.principal_id != self.principal.subject
+                    || record.upload.tenant_id != self.principal.tenant_id
+                    || record.replacement_admission.original_certificate
+                        != self
+                            .principal
+                            .certificate_digest
+                            .clone()
+                            .unwrap_or_else(|| self.principal.subject.clone())
+                {
+                    return Err(
+                        "recovery differs from its actual original uploader/tenant/leaf".into(),
+                    );
+                }
+                self.catalog
+                    .replica_content
+                    .as_ref()
+                    .ok_or("explicit recovery client absent")?
+                    .check_upload_recovery(record)?;
+            }
             EventPayload::ArtifactUploadRetired { receipt } => {
                 receipt.validate()?;
                 if receipt.principal_id != self.principal.subject
@@ -131,11 +152,27 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
                     None,
                 )?;
             }
-            EventPayload::ArtifactUploadTransition { record }
+            EventPayload::ArtifactUploadTransition { record } => {
                 if record.principal_id != self.principal.subject
-                    || record.tenant_id != self.principal.tenant_id =>
-            {
-                return Err("upload transition crosses original authenticated owner".into());
+                    || record.tenant_id != self.principal.tenant_id
+                {
+                    return Err("upload transition crosses original authenticated owner".into());
+                }
+                let recoveries = self
+                    .catalog
+                    .upload_recoveries
+                    .lock()
+                    .map_err(|_| "recovery evidence unavailable")?;
+                if let Some(original) = recoveries
+                    .values()
+                    .find(|r| r.replacement_admission.upload_id == record.upload_id)
+                {
+                    self.catalog
+                        .replica_content
+                        .as_ref()
+                        .ok_or("explicit recovery client absent")?
+                        .check_upload_recovery(original)?;
+                }
             }
             EventPayload::MemoryManifestPublished { manifest } => {
                 self.catalog.require_live_publication(manifest.selector())?;

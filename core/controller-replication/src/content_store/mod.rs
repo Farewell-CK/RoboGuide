@@ -8,6 +8,7 @@ mod producers;
 mod reader;
 mod streams;
 mod time;
+mod validation;
 pub use close_queue::ReplicaSnapshotCloseStatus;
 pub use copy::{ReplicaContentCopyStatus, ReplicaContentReceipt};
 pub use pins::ReplicaContentReadLease;
@@ -140,6 +141,8 @@ struct ReferenceRecord {
 
 /// Shared actual root/SQLite writer ownership; every managed reader/clone retains it.
 struct ContentInner {
+    /// Full validation belongs only to this one original private connection and never survives reopen.
+    validation_witness: Mutex<Option<validation::Witness>>,
     /// Actual original root closure queue, shared by every clone and bounded by retained reader rows.
     snapshot_closes: Arc<close_queue::SnapshotCloseQueue>,
     /// Actual original root, never a discovered device path.
@@ -293,13 +296,7 @@ impl ReplicaContentStore {
 
     /// Validates only this handle's original admitted SQL generation before any observation or mutation.
     fn validate_connection(&self, connection: &Connection) -> Result<(), String> {
-        if self.inner.streams {
-            layout::validate_version(connection, self.identity(), 4)
-        } else if self.inner.producers {
-            layout::validate_version(connection, self.identity(), 3)
-        } else {
-            layout::validate(connection, self.identity())
-        }
+        validation::validate(&self.inner, connection)
     }
 
     /// Reports only the actual opened software store; no availability or device fact is created.

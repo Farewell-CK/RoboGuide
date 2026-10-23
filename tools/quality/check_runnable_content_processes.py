@@ -20,14 +20,23 @@ from check_network_content_processes import actual_bytes
 from check_replica_certificate_processes import create_ca, issue
 from check_replica_content_processes import Processes, digest, save
 from check_state_verifier_processes import address
+from runnable_prepared_recovery import stage as stage_prepared
+from runnable_prepared_recovery import verify as verify_prepared
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def http(origin: str, path: str, method: str = "GET", body: bytes = b"") -> tuple[int, bytes]:
+def http(
+    origin: str,
+    path: str,
+    method: str = "GET",
+    body: bytes = b"",
+    *,
+    timeout_seconds: float = 60,
+) -> tuple[int, bytes]:
     """Send one actual local HTTP request; mutation errors never automatically re-execute it."""
     host, port = origin.rsplit(":", 1)
-    connection = http_client.HTTPConnection(host, int(port), timeout=60)
+    connection = http_client.HTTPConnection(host, int(port), timeout=timeout_seconds)
     try:
         connection.request(method, path, body, {"Content-Type": "application/json"})
         response = connection.getresponse()
@@ -37,6 +46,11 @@ def http(origin: str, path: str, method: str = "GET", body: bytes = b"") -> tupl
         return response.status, raw
     finally:
         connection.close()
+
+
+def recovery_http(origin: str, path: str, method: str, body: bytes) -> tuple[int, bytes]:
+    """Wait once for the declared 120-second budget and bounded response time."""
+    return http(origin, path, method, body, timeout_seconds=135)
 
 
 def idle_snapshot(directory: Path) -> dict[str, Any]:
@@ -76,12 +90,20 @@ def run(
     storage: Path,
     idle_timer_check: bool = False,
     owner_failover: bool = False,
+    prepared_recovery: bool = False,
 ) -> dict[str, Any]:
     """Retain exact binaries, native waits, complete SQL and independently verified bytes."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     output = output.resolve()
-    paths = [supervisor, controller, storage, Path(__file__)]
+    paths = [
+        supervisor,
+        controller,
+        storage,
+        Path(__file__),
+        Path(__file__).with_name("runnable_prepared_recovery.py"),
+    ]
     for owner in (
+        "core/domain",
         "core/controller-replication",
         "core/artifact-store",
         "core/state",
@@ -375,6 +397,24 @@ def run(
                     ).fetchone()[0]
                 )
             assert current_content["candidate"]["source_writer"] == source_writer
+            prepared_case = None
+            if prepared_recovery:
+                assert owner_failover, "Prepared recovery requires actual owner failover"
+                prepared_case = stage_prepared(
+                    http, origin, Path(configs[member]["storage_directory"])
+                )
+                prepared_key = {
+                    "source_owner": source_writer["owner"],
+                    "content_digest": prepared_case[0]["content_digest"],
+                    "byte_size": prepared_case[0]["byte_size"],
+                }
+                for config in configs.values():
+                    assert prepared_key in actual_bytes(Path(config["content"]["root"]))
+                observed(
+                    "actual-source-remains-prepared",
+                    record=prepared_case[0],
+                    independently_verified_member_bytes=sorted(configs),
+                )
             if owner_failover:
                 original_process, original_record = next(
                     (process, record) for process, record in owned if record["member"] == member
@@ -436,6 +476,19 @@ def run(
                     "actual_source_supervisor_wait": original_record["returncode"],
                     "actual_root_reader": original_read,
                 }
+                if prepared_case is not None:
+                    result["actual_prepared_recovery"] = verify_prepared(
+                        recovery_http,
+                        next_origin,
+                        Path(configs[next_member]["storage_directory"]),
+                        prepared_case[0],
+                        prepared_case[1],
+                        source_writer["owner"],
+                        next_owner,
+                    )
+                    observed(
+                        "actual-prepared-owner-recovery", proof=result["actual_prepared_recovery"]
+                    )
             assert all(digest(Path(path)) == expected for path, expected in identities.items())
             result.update(
                 passed=True,
@@ -484,6 +537,7 @@ def main() -> None:
     parser.add_argument("--storage-probe", type=Path, required=True)
     parser.add_argument("--idle-timer-check", action="store_true")
     parser.add_argument("--owner-failover", action="store_true")
+    parser.add_argument("--prepared-recovery", action="store_true")
     args = parser.parse_args()
     result = run(
         args.output,
@@ -492,6 +546,7 @@ def main() -> None:
         args.storage_probe.resolve(strict=True),
         args.idle_timer_check,
         args.owner_failover,
+        args.prepared_recovery,
     )
     print(json.dumps({"passed": result["passed"], "result": str(args.output / "result.json")}))
 

@@ -8,6 +8,11 @@ use tokio::io::AsyncWriteExt;
 /// Explicit infrastructure read purpose; serialized labels never grant semantic use.
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) enum ReadPurpose {
+    /// A committed independent recovery intent grants only its original bounded payload copy.
+    PreparedRecovery {
+        /// Exact original recovery command, never an implicit upload retry.
+        command_id: String,
+    },
     /// Existing public ACL/import/use checks still gate every HTTP chunk.
     Published {
         /// Exact public content digest; the parent resolves one unambiguous original qualified owner.
@@ -67,7 +72,24 @@ pub(super) async fn serve<S: tokio::io::AsyncWrite + Unpin>(
     let process = peer_process(node, peer.clone()).await?;
     let target = node.accepted_content_target().await?;
     let view = node.store.network_view().await?;
+    let recovery = if let ReadPurpose::PreparedRecovery { command_id } = &purpose {
+        let original = super::recovery::pending(&view, command_id)?;
+        let (owner, budget) = super::recovery::evidence(&original)?;
+        budget.check()?;
+        if original.reader_id != reader_id
+            || owner != process
+            || context_digest != domain::artifact_adoption_digest(&original)?[7..]
+        {
+            return Err("Prepared read differs from original recovery process/context".into());
+        }
+        Some(original)
+    } else {
+        None
+    };
     let content = match &purpose {
+        ReadPurpose::PreparedRecovery { .. } => {
+            super::recovery::source_key(recovery.as_ref().ok_or("original recovery absent")?)?
+        }
         ReadPurpose::Published { digest } => {
             let digest =
                 artifact_store::normalize_digest(digest).map_err(|error| error.to_string())?;
@@ -109,8 +131,12 @@ pub(super) async fn serve<S: tokio::io::AsyncWrite + Unpin>(
     let original_key = content.clone();
     let check: StreamPermission = Arc::new(move || {
         original_permission()?;
-        held.store
-            .require_current_content_read(&expected, &original_key, published)
+        held.store.require_current_content_read(
+            &expected,
+            &original_key,
+            published,
+            recovery.as_ref(),
+        )
     });
     check()?;
     let root = node.store.network_content_store()?;

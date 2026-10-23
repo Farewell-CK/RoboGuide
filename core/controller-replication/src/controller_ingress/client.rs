@@ -41,13 +41,13 @@ fn default_budget() -> u64 {
 #[derive(Clone)]
 pub struct ControllerContentClient {
     /// Complete immutable original connection/source identity declaration.
-    config: ControllerContentClientConfig,
+    pub(super) config: ControllerContentClientConfig,
     /// Actual original parent SQL inode, preventing path replacement from changing local trust.
     parent_identity: (u64, u64),
     /// Actual loaded current-trust credentials.
     tls: Arc<crate::tls::TlsMaterial>,
     /// Actual original managed application Artifact writer, including live Prepared sources.
-    source: artifact_store::FileSystemArtifactStore,
+    pub(super) source: artifact_store::FileSystemArtifactStore,
     /// Actual independent local connection/frame resource admission.
     budget: Arc<TransportBudget>,
 }

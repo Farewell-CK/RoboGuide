@@ -436,6 +436,27 @@ impl ReplicaContentStore {
             .transpose()
     }
 
+    /// Independently verifies actual original reader outcome and authority before recovery publication.
+    pub(crate) fn require_reader_receipt(
+        &self,
+        receipt: &ReplicaContentReaderReceipt,
+        authority: &str,
+    ) -> Result<(), String> {
+        let guard = self.inner.connection.lock().map_err(|e| e.to_string())?;
+        let connection = guard
+            .as_ref()
+            .ok_or("original content connection is closed")?;
+        self.validate_connection(connection)?;
+        let original = record(connection, &key(&receipt.reader_id)?)?
+            .ok_or("original recovery reader absent")?;
+        if original.receipt.as_ref() != Some(receipt)
+            || original.intent.authority_digest != authority
+        {
+            return Err("recovery reader differs from its actual original Root SQL receipt".into());
+        }
+        Ok(())
+    }
+
     /// Retires only an unresolved original reader after independently observing its process is gone.
     /// This creates no read-completion, OS-wait, semantic-use or device-stop receipt.
     pub fn retire_ended_reader(

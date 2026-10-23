@@ -12,6 +12,8 @@ mod client;
 mod content_read;
 #[path = "controller_ingress/store.rs"]
 mod journal;
+#[path = "controller_ingress/recovery.rs"]
+pub(crate) mod recovery;
 #[cfg(test)]
 #[path = "controller_ingress/tests.rs"]
 mod tests;
