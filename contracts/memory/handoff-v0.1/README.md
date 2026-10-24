@@ -20,7 +20,8 @@ commit 后原投递失败进入 manual 时保留原 commit 回执和接收证明
 parent 与 child 均为实际已校验内容的 immutable manifest，新 child 只改变 selector、Group
 scope 与创建时间，保留原 owner/provider/生产 provenance。父级关系完整存于 handoff 记录与
 codec v27 事件。普通 Artifact alias 不获此例外；每块 CAS Read 仍验证实际证书、原 import
-和独立目标权限。typed-map 不变 generic alias，沿完整 typed preparation/地图合同消费。
+和独立目标权限。Spatial typed-map handoff 使用 v0.2 合同并另带完整原始 map manifest，
+不能把 generic projection 当作完整地图来源；v0.1 只接受非 Spatial generic child。
 
 Node Group 导出只从其原 journal 的活跃 operation context 调用配置固定的 discover/export；
 Controller 再检查实际当前成员/provider/session。它不代表设备已定位、物理交接或全量复制。

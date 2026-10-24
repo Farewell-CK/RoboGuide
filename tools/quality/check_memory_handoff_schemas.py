@@ -27,7 +27,8 @@ def run(directory: Path) -> dict[str, Any]:
             resources.append((value["$id"], draft.create_resource(value)))
     registry = referencing.Registry().with_resources(resources)
     paths = {
-        "handoff": "memory/handoff-v0.1/request.schema.json",
+        "handoff_v0_1": "memory/handoff-v0.1/request.schema.json",
+        "handoff_v0_2": "memory/handoff-v0.2/request.schema.json",
         "mission": "mission/v0.9/mission-plan.schema.json",
         "config": "node/v0.15/node-config.schema.json",
     }
@@ -41,7 +42,20 @@ def run(directory: Path) -> dict[str, Any]:
         jsonschema.Draft202012Validator.check_schema(schema)
         validators[kind] = jsonschema.Draft202012Validator(schema, registry=registry)
     command = json.loads((directory / "handoff-command.json").read_bytes())
-    validators["handoff"].validate(command)
+    handoff_schema = {
+        "roboguide.memory-handoff/v0.1": "handoff_v0_1",
+        "roboguide.memory-handoff/v0.2": "handoff_v0_2",
+    }.get(command.get("schema_version"))
+    if handoff_schema is None:
+        raise AssertionError("handoff command has an unsupported schema version")
+    validators[handoff_schema].validate(command)
+    if command["schema_version"] == "roboguide.memory-handoff/v0.2":
+        typed_map = command.get("typed_map")
+        assert typed_map is not None, "v0.2 handoff must retain its typed-map source"
+        assert command["child"]["kind"] == "spatial"
+        assert typed_map["schema"] == "roboguide.map-manifest/v0.2"
+    else:
+        assert "typed_map" not in command
     for name in ("source", "target"):
         validators["mission"].validate(
             json.loads((directory / f"handoff-{name}-mission.json").read_bytes())
@@ -86,11 +100,13 @@ def run(directory: Path) -> dict[str, Any]:
     for name, value in mutations:
         changed = copy.deepcopy(command)
         changed[name] = value
-        assert list(validators["handoff"].iter_errors(changed)), name
+        assert list(validators[handoff_schema].iter_errors(changed)), name
         rejected.append(name)
     result = {
         "passed": True,
         "jsonschema": importlib.metadata.version("jsonschema"),
+        "handoff_schema": command["schema_version"],
+        "typed_map_retained": "typed_map" in command,
         "positive_availability_observations": observations,
         "positive_use_receipts": use_receipts,
         "structural_rejections": rejected,
