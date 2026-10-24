@@ -62,5 +62,14 @@ warning 字段，帮助区分接收完成与来源实际收到 ACK；它不赋�
 
 维护命令仍是 `check_network_content_processes.py --learner-joint` 与
 `--snapshot-catchup`；各 case 独立固定自己的源/二进制，不把较早构建冒充较晚构建。
+
+远端 `14ccdad` 的 Python、Rust 测试/Clippy/私有文档与双语文档工作流通过；CI 的原
+Artifact SQL 恢复门禁在第五个 case 启动时报 `AddrInUse`，原日志与 artifact 保留于
+`membership-ci-14cc-failed.log` 和 `ci-14cc-native-failure/`。启动检查此前逐次申请并释放
+三个端口，允许同一进程重复选中端口；现改为同时保留整个端口集合后再启动，不自动重试
+失败的 Controller。该改动消除集合内重复，不能从端口占用日志反推唯一历史起因。
+`ci14cc-ports-native-01/` 使用上述原 frozen Controller 完成全部 10 种实际恢复 case，
+进程退出为 0；checker 的 Ruff、格式与 strict mypy 通过。原远端失败没有被覆盖。
+
 这不关闭完整 A1/A2：原归档源、全 producer/partial staging、故障组合与滚动升级/回退
 继续按唯一整改队列完成。跨主机故障域、设备停止/物理连续性和长期 SLO 仍无本项证明。

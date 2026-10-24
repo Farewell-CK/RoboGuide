@@ -8,18 +8,19 @@ import json
 import os
 import selectors
 import shutil
+import socket
 import sqlite3
 import ssl
 import subprocess
 import sys
 import time
 import urllib.error
-from contextlib import closing
+from contextlib import ExitStack, closing
 from pathlib import Path
 from typing import Any
 
 from check_content_archive_processes import run as run_archive
-from check_resource_quota_processes import ROOT, make_certificates, port, request, stop
+from check_resource_quota_processes import ROOT, make_certificates, request, stop
 
 
 def digest(path: Path) -> str:
@@ -101,14 +102,22 @@ class Controllers:
         artifact_root: Path | None = None,
     ) -> tuple[subprocess.Popen[bytes], str]:
         """Start exact software with a distinct CAS; refusal requires an actual process exit."""
-        operator_port = port()
+        # Keep the entire route set bound during selection: separate bind/close calls can
+        # return the same ephemeral port for two listeners in the same actual child.
+        with ExitStack() as reservations:
+            ports = []
+            for _ in range(3):
+                listener = reservations.enter_context(closing(socket.socket()))
+                listener.bind(("127.0.0.1", 0))
+                ports.append(listener.getsockname()[1])
+            grpc_port, operator_port, artifact_port = ports
         origin = f"https://127.0.0.1:{operator_port}"
         arguments = [
             str(binary),
-            f"127.0.0.1:{port()}",
+            f"127.0.0.1:{grpc_port}",
             str(database),
             f"127.0.0.1:{operator_port}",
-            f"127.0.0.1:{port()}",
+            f"127.0.0.1:{artifact_port}",
             str(artifact_root if artifact_root is not None else self.output / (label + "-cas")),
         ]
         environment = dict(self.environment)
