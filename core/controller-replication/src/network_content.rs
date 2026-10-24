@@ -143,6 +143,22 @@ impl ReplicaNode {
         clock: crate::content_store::ContentBudget,
         permission: crate::content_store::StreamPermission,
     ) -> Result<(CommitReceipt, BTreeSet<u64>), String> {
+        let node = self.clone();
+        let original_clock = clock.clone();
+        self.run_content_transition(clock, async move {
+            node.commit_content_serialized(candidate, original_clock, permission)
+                .await
+        })
+        .await
+    }
+
+    /// Holds the owned transition through actual Raft completion even after its caller stops waiting.
+    async fn commit_content_serialized(
+        &self,
+        candidate: ContentApplicationBatch,
+        clock: crate::content_store::ContentBudget,
+        permission: crate::content_store::StreamPermission,
+    ) -> Result<(CommitReceipt, BTreeSet<u64>), String> {
         clock.check()?;
         permission()?;
         let target = self.content_target_for(&candidate).await?;
@@ -211,15 +227,13 @@ impl ReplicaNode {
         self.network_target_authority(&target)?;
         clock.check()?;
         permission()?;
-        let committed = tokio::time::timeout(
-            Duration::from_millis(clock.remaining_ms()?),
-            self.raft.client_write(ReplicaCommand::ContentApplication {
+        let committed = self
+            .raft
+            .client_write(ReplicaCommand::ContentApplication {
                 content_application: Box::new(candidate),
-            }),
-        )
-        .await
-        .map_err(|_| "original complete metadata Commit is uncertain".to_string())?
-        .map_err(|error| error.to_string())?;
+            })
+            .await
+            .map_err(|error| error.to_string())?;
         if !committed.data.accepted {
             return Err(committed
                 .data
@@ -321,7 +335,7 @@ impl ReplicaNode {
     }
 
     /// Observes independent actual members concurrently inside the original caller clock and witness.
-    async fn content_quorum_checked(
+    pub(crate) async fn content_quorum_checked(
         &self,
         target: ContentQuorumTarget,
         permission: crate::content_store::StreamPermission,
@@ -389,7 +403,17 @@ impl ReplicaNode {
             || metrics.membership_config.as_ref() != &target.membership
             || committed != target.membership
         {
-            return Err("original network epoch or exact committed membership changed".into());
+            return Err(format!(
+                "original network epoch or exact committed membership changed: actual term={} leader={:?} membership={:?} committed={:?}; expected term={} leader={} membership={:?}; actual replication={:?}",
+                metrics.current_term,
+                metrics.current_leader,
+                metrics.membership_config.log_id(),
+                committed.log_id(),
+                target.epoch.term,
+                target.epoch.replica_id,
+                target.membership.log_id(),
+                metrics.replication,
+            ));
         }
         self.store
             .validate_content_membership(target.membership.membership())?;

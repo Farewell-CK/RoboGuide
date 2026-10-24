@@ -436,6 +436,7 @@ dependencies = [
  "testkit",
  "tokio",
  "tokio-rustls",
+ "tracing",
 ]
 
 [[package]]

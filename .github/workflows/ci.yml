@@ -209,6 +209,8 @@ jobs:
           --output "${RUNNER_TEMP}/roboguide-network-content"
 
       - name: Verify purged Snapshot content prerequisites and Root6 recovery with zero Nodes
+        env:
+          ROBOGUIDE_REPLICA_PROBE_WARNINGS: "1"
         run: >
           uv run --frozen python tools/quality/check_network_content_processes.py
           --probe target/debug/examples/content_network_probe
@@ -216,6 +218,17 @@ jobs:
           --source /tmp/rg-ci-catalog-retirement --members 173,181,191
           --snapshot-catchup
           --output "${RUNNER_TEMP}/roboguide-network-snapshot-content"
+
+      - name: Verify complete-content learner admission before actual joint consensus with zero Nodes
+        env:
+          ROBOGUIDE_REPLICA_PROBE_WARNINGS: "1"
+        run: >
+          uv run --frozen python tools/quality/check_network_content_processes.py
+          --probe target/debug/examples/content_network_probe
+          --storage-probe target/debug/examples/content_stream_probe
+          --source /tmp/rg-ci-catalog-retirement --members 197,199,223
+          --learner-joint
+          --output "${RUNNER_TEMP}/roboguide-network-voter-content"
 
       - name: Verify original child lineage through stopped Group handoff
         run: >

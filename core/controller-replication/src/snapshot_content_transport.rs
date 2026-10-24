@@ -5,6 +5,130 @@ use crate::content_store::{
     ContentBudget, StreamOrigin, StreamPermission, snapshot_receive_operation,
 };
 
+/// Actual upstream preparation outcome; a higher vote is not a completed Snapshot receipt.
+pub(super) enum Preparation {
+    /// Original content prerequisites, or the unchanged metadata-only transport.
+    Ready {
+        /// Exact original prepared metadata prerequisite, absent for legacy profiles.
+        header: Option<Box<SnapshotContentHeader>>,
+        /// One original source clock, retained through all metadata chunks without renewal.
+        clock: Option<Box<ContentBudget>>,
+    },
+    /// Actual authenticated Append reply for OpenRaft's original vote handling.
+    Superseded(openraft::Vote<u64>),
+}
+
+/// Keeps the original upstream vote live through normal Append while bounded content work waits.
+pub(super) async fn prepare_with_heartbeats(
+    network: &ReplicaNetwork,
+    vote: openraft::Vote<u64>,
+    meta: &openraft::SnapshotMeta<u64, ReplicaMember>,
+) -> Result<Preparation, String> {
+    let Some(source) = network
+        .source
+        .as_ref()
+        .and_then(|source| source.get())
+        .and_then(std::sync::Weak::upgrade)
+    else {
+        return Ok(Preparation::Ready {
+            header: None,
+            clock: None,
+        });
+    };
+    if !source.config.streams_content()
+        || !source
+            .store
+            .network_content_store()?
+            .snapshot_receives_enabled()
+    {
+        return Ok(Preparation::Ready {
+            header: None,
+            clock: None,
+        });
+    }
+    let clock = ContentBudget::issue(15000)?;
+    if let Some(higher) = heartbeat(network, &source, vote, meta, &clock).await? {
+        return Ok(Preparation::Superseded(higher));
+    }
+    let prepared = before_send(network, meta, clock.clone());
+    tokio::pin!(prepared);
+    loop {
+        tokio::select! {
+            ready = &mut prepared => return ready.map(|header| Preparation::Ready {
+                header: header.map(Box::new), clock: Some(Box::new(clock)),
+            }),
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                if let Some(higher) = heartbeat(network, &source, vote, meta, &clock).await? {
+                    return Ok(Preparation::Superseded(higher));
+                }
+            }
+        }
+    }
+}
+
+/// Continues ordinary vote heartbeats until metadata completion, supersession or original expiry.
+pub(super) async fn keep_alive(
+    network: &ReplicaNetwork,
+    vote: openraft::Vote<u64>,
+    meta: &openraft::SnapshotMeta<u64, ReplicaMember>,
+    clock: &ContentBudget,
+) -> Result<openraft::Vote<u64>, String> {
+    let source = network
+        .source
+        .as_ref()
+        .and_then(|source| source.get())
+        .and_then(std::sync::Weak::upgrade)
+        .ok_or("original Snapshot source process is unavailable")?;
+    loop {
+        clock.check()?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        if let Some(higher) = heartbeat(network, &source, vote, meta, clock).await? {
+            return Ok(higher);
+        }
+    }
+}
+
+/// Sends an exact empty Append; prefix conflict never becomes log, byte or quorum acceptance.
+async fn heartbeat(
+    network: &ReplicaNetwork,
+    source: &ReplicaNode,
+    vote: openraft::Vote<u64>,
+    meta: &openraft::SnapshotMeta<u64, ReplicaMember>,
+    clock: &ContentBudget,
+) -> Result<Option<openraft::Vote<u64>>, String> {
+    clock.check()?;
+    if !vote.committed
+        || source.current_epoch()
+            != Some(ControllerEpoch {
+                term: vote.leader_id.term,
+                replica_id: vote.leader_id.node_id,
+            })
+    {
+        return Err("original Snapshot heartbeat source vote changed".into());
+    }
+    source.store.require_network_snapshot_source(meta)?;
+    clock.check()?;
+    let response = network
+        .exchange(
+            Command::Append(AppendEntriesRequest {
+                vote,
+                prev_log_id: meta.last_log_id,
+                entries: Vec::new(),
+                leader_commit: meta.last_log_id,
+            }),
+            RPCOption::new(Duration::from_millis(clock.remaining_ms()?.min(500))),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    clock.check()?;
+    match response {
+        Reply::Append(Ok(AppendEntriesResponse::HigherVote(actual))) => Ok(Some(actual)),
+        Reply::Append(Ok(_)) => Ok(None),
+        Reply::Append(Err(error)) => Err(error.to_string()),
+        _ => Err("original Snapshot heartbeat response was rejected".into()),
+    }
+}
+
 impl ReplicaNode {
     /// Publishes an actual content Snapshot and purges only its original applied cut under one bounded admin issue.
     pub async fn compact_content_snapshot(
@@ -200,9 +324,10 @@ where
 }
 
 /// Negotiates and completes original byte prerequisites before sending the first upstream metadata chunk.
-pub(super) async fn before_send(
+async fn before_send(
     network: &ReplicaNetwork,
     meta: &openraft::SnapshotMeta<u64, ReplicaMember>,
+    clock: ContentBudget,
 ) -> Result<Option<SnapshotContentHeader>, String> {
     let Some(source) = network
         .source
@@ -220,7 +345,6 @@ pub(super) async fn before_send(
     {
         return Ok(None);
     }
-    let clock = ContentBudget::issue(15000)?;
     let observed = network
         .exchange(
             Command::SnapshotContentContractV1,

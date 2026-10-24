@@ -203,6 +203,28 @@ outcomes. This review starts no Habitat, model or device.
 
 ## Maintenance
 
+ADR-0193 sends normal Raft Append heartbeats carrying the original vote/committed Snapshot cut
+while explicit content prerequisites wait. OpenRaft alone handles terms and election timers;
+prefix conflict proves no catch-up, and actual higher votes return upstream. The first heartbeat
+and preparation share one budget, preserving Unknown without creating Node/device evidence.
+Heartbeats cover metadata delivery too. Explicit network-content chunks may wait up to 10 seconds,
+clamped by one original 15-second source transfer budget. This covers the actual Root7 install/ACK
+gap beyond the upstream 200ms default; retries never renew storage workers or original outcomes.
+
+ADR-0192 adds readonly complete-content admission before network-content voter changes enter joint
+consensus. After original learner enrollment/catch-up it checks the current target, actual new-voter
+mTLS/Root/metadata/bytes and complete old/new majorities. Failure does not request joint consensus;
+empty application bootstrap retains the original metadata rules. Later failure/timeout/uncertainty
+remains governed by the original Raft, complete-content and child fences.
+Actual complete-content commits and voter changes share an owned process-local transition gate.
+Caller cancellation/expiry does not release a queued Raft operation's gate before its actual result.
+Queueing, observation and pre-effect checks retain the original budget; pending outcomes fence
+overlap without renewing that budget or creating distributed authority.
+Administration retains its caller epoch; direct calls freeze an epoch before queueing. Actual
+admission rechecks that same value and rejects stale epochs before learner/joint effects.
+The actual member writer and captured TLS witness follow owned work after network cancellation;
+pre-effect checks retain original member/chain/leaf validity under current committed trust.
+
 ADR-0191 moves historical catch-up into one bounded independently owned task per original Root.
 The durable Raft Append ACK no longer waits for that task. Original sender, Log prefix, budget and
 actual blocking-job admission guards remain; overlapping heartbeats create no duplicate task.

@@ -3,10 +3,12 @@
 use controller_replication::*;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
+
+mod probe_warnings;
 
 /// Explicit actual existing roots and infrastructure profile; no missing root is implicitly created.
 #[derive(Deserialize)]
@@ -29,12 +31,27 @@ struct Config {
     /// Explicit durable Snapshot receiving generation; the original Root4 mode remains unchanged.
     #[serde(default)]
     snapshot_receives: bool,
+    /// Explicit Root7 native acceptance; older configurations keep their original storage meaning.
+    #[serde(default)]
+    reclamation: bool,
 }
 
 /// Closed trusted local process operations; no arbitrary SQL, shell or fabricated execution is accepted.
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
+    /// Enrolls only the declared actual infrastructure member as a non-voter through the core API.
+    AddLearner {
+        /// Existing configured real software replica, independent of embodied Nodes.
+        member: u64,
+    },
+    /// Requests actual joint consensus after core admission; responses never imply device continuity.
+    ChangeVoters {
+        /// Complete desired infrastructure voter set, confined to the original profile.
+        voters: BTreeSet<u64>,
+        /// Explicit removed-member retention policy.
+        retain_removed_as_learners: bool,
+    },
     /// Publishes an actual full Snapshot and purges only its original applied cut through the maintained API.
     CompactSnapshot,
     /// Observes actual current role and quorum without mutation.
@@ -90,6 +107,11 @@ enum Request {
     StopOwned,
     /// Stops only this owned infrastructure service; no device stopping is inferred.
     Shutdown,
+}
+
+/// Uses the real authenticated product administration client and this original member's trust SQL.
+fn administration(config: &ReplicaConfig, parent_sql: &Path) -> Result<ReplicaAdminClient, String> {
+    ReplicaAdminClient::with_trust_database(config.clone(), config.replica_id, parent_sql)
 }
 
 /// Actual original source Child handle; only its own wait can produce its durable process exit.
@@ -263,7 +285,14 @@ fn capture(
 
 /// Serves actual Raft/mTLS while owned local stdin requests drive only maintained core interfaces.
 async fn serve(config: Config) -> Result<(), String> {
-    let root = if config.snapshot_receives {
+    let root = if config.reclamation {
+        ReplicaContentStore::open_with_reclamation(
+            &config.content_root,
+            &config.replica.profile_identity(),
+            config.replica.replica_id,
+            None,
+        )
+    } else if config.snapshot_receives {
         ReplicaContentStore::open_with_snapshot_receives(
             &config.content_root,
             &config.replica.profile_identity(),
@@ -330,6 +359,17 @@ async fn serve(config: Config) -> Result<(), String> {
         let request: Request = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
         let shutdown = matches!(request, Request::Shutdown);
         let result = match request {
+            Request::AddLearner { member } => administration(&config.replica, &config.parent_sql)?
+                .add_learner(member)
+                .await
+                .map(|()| json!({"member":member})),
+            Request::ChangeVoters {
+                voters,
+                retain_removed_as_learners,
+            } => administration(&config.replica, &config.parent_sql)?
+                .change_membership(voters.clone(), retain_removed_as_learners)
+                .await
+                .map(|()| json!({"voters":voters})),
             Request::CompactSnapshot => node.compact_content_snapshot(15000).await,
             Request::RouteCommitted {
                 target,
@@ -501,6 +541,7 @@ async fn serve(config: Config) -> Result<(), String> {
 /// Runs only an explicit bounded profile inspection or owned infrastructure service.
 #[tokio::main(worker_threads = 1)]
 async fn main() -> Result<(), String> {
+    probe_warnings::enable()?;
     let mut arguments = std::env::args().skip(1);
     let mode = arguments
         .next()

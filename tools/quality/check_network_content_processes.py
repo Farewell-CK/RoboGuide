@@ -22,7 +22,9 @@ from typing import Any, BinaryIO
 from check_replica_certificate_processes import create_ca, issue
 from check_replica_content_processes import Processes, digest, save
 from check_state_verifier_processes import address
+from network_content_membership_processes import hold_snapshot_read, run_learner_joint
 from owned_content_source_processes import run_source
+from replica_parent_adoption_processes import PayloadReadBarrier
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -158,16 +160,19 @@ def run(
     owned_source: Path | None = None,
     historical_log_catchup: bool = False,
     snapshot_catchup: bool = False,
+    learner_joint: bool = False,
 ) -> dict[str, Any]:
     """Check independent SQL, byte and TLS observations plus actual process waits."""
     if not 3 <= len(members) <= 9 or len(set(members)) != len(members) or min(members) <= 0:
         raise ValueError("declare three to nine distinct positive infrastructure members")
-    if (historical_log_catchup or snapshot_catchup) and owned_source is not None:
+    if (historical_log_catchup or snapshot_catchup or learner_joint) and owned_source is not None:
         raise ValueError(
             "historical Log gate requires its actual complete frozen Controller source"
         )
-    if historical_log_catchup and snapshot_catchup:
-        raise ValueError("run retained Log and purged Snapshot gates independently")
+    if sum((historical_log_catchup, snapshot_catchup, learner_joint)) > 1:
+        raise ValueError(
+            "run retained Log, purged Snapshot and voter admission gates independently"
+        )
     if owned_source is None:
         if source is None:
             raise ValueError("original capture gate requires explicit actual Controller evidence")
@@ -184,6 +189,10 @@ def run(
     identities.update(
         {str(path): digest(path) for path in (ROOT / "core/controller-replication").rglob("*.rs")}
     )
+    membership_gate = Path(__file__).with_name("network_content_membership_processes.py")
+    identities[str(membership_gate)] = digest(membership_gate)
+    barrier_source = Path(__file__).with_name("replica_parent_adoption_processes.py")
+    identities[str(barrier_source)] = digest(barrier_source)
     if owned_source is not None:
         identities[str(owned_source)] = digest(owned_source)
         identities.update(
@@ -230,7 +239,7 @@ def run(
                         "cluster_id": "actual-original-network-content",
                         "replica_id": member,
                         "members": endpoints,
-                        "initial_voters": members,
+                        "initial_voters": members[:-1] if learner_joint else members,
                         "application_schema": schema,
                         "application_policy_digest": "actual-original-data-contract",
                         "tls": {
@@ -251,6 +260,8 @@ def run(
                     config["replica"]["application_policy_digest"] = digest(owned_source)
                 if snapshot_catchup:
                     config["snapshot_receives"] = True
+                if learner_joint:
+                    config["reclamation"] = True
                 path = output / f"configuration-{member}.json"
                 save(path, config)
                 profile = json.loads(
@@ -264,6 +275,7 @@ def run(
                             "root": config["content_root"],
                             "profile": profile,
                             "member": member,
+                            "reclamation": learner_joint,
                         },
                     },
                     "actual-original-root",
@@ -336,7 +348,17 @@ def run(
                 ready_status = actors[current].ask({"action": "status"})["readiness"]
                 assert ready_status["metadata_ready"] is True
                 assert ready_status["content_ready"] is True
-                assert len(ready_status["complete_content_members"]) > len(members) // 2
+                assert (
+                    len(ready_status["complete_content_members"])
+                    > len(configs[current]["replica"]["initial_voters"]) // 2
+                )
+            if learner_joint:
+                result["actual_learner_joint"] = run_learner_joint(
+                    actors, configs, members, current
+                )
+                assert all(digest(Path(path)) == expected for path, expected in identities.items())
+                result["passed"] = True
+                return result
             if missed is not None:
                 root = Path(configs[missed]["content_root"])
                 with closing(
@@ -357,7 +379,27 @@ def run(
                         )
                     ) as sql:
                         assert sql.execute("SELECT COUNT(*) FROM replica_v1_log").fetchone()[0] == 0
-                start(missed)
+                if snapshot_catchup:
+                    assert compact is not None
+                    target = actors[current].ask({"action": "quorum"})["target"]
+                    first_key = target["inputs"][0]
+                    source_root = Path(configs[current]["content_root"])
+                    payload = (
+                        source_root
+                        / "content-v1"
+                        / first_key["source_owner"][15:]
+                        / first_key["content_digest"][7:]
+                    )
+                    assert "sha256:" + digest(payload) == first_key["content_digest"]
+                    with PayloadReadBarrier(payload) as barrier:
+                        start(missed)
+                        result["actual_snapshot_heartbeat_hold"] = hold_snapshot_read(
+                            barrier,
+                            Path(configs[missed]["parent_sql"]),
+                            compact["original_epoch"],
+                        )
+                else:
+                    start(missed)
                 deadline = time.monotonic() + 60
                 while time.monotonic() < deadline:
                     _, state = sql_identity(Path(configs[missed]["parent_sql"]))
@@ -593,6 +635,7 @@ def main() -> None:
     parser.add_argument("--members", required=True)
     parser.add_argument("--historical-log-catchup", action="store_true")
     parser.add_argument("--snapshot-catchup", action="store_true")
+    parser.add_argument("--learner-joint", action="store_true")
     args = parser.parse_args()
     result = run(
         args.output,
@@ -603,6 +646,7 @@ def main() -> None:
         None if args.owned_source_probe is None else args.owned_source_probe.resolve(strict=True),
         args.historical_log_catchup,
         args.snapshot_catchup,
+        args.learner_joint,
     )
     print(json.dumps({"passed": result["passed"], "result": str(args.output / "result.json")}))
 

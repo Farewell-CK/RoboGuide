@@ -194,6 +194,25 @@ Harness 不绕过 RoboGuide 直接调用 simulator skill。本地导航/操作 C
 
 ## 如何维护
 
+ADR-0193 在显式 Snapshot 内容前置条件等待期间发送原 vote/原 committed cut 的普通 Raft
+Append 心跳。OpenRaft 自己处理任期与选举计时；prefix conflict 不算追平，实际 higher vote
+返回上游处理。首个心跳与后续准备沿用同一预算，原 Unknown 不改写，不创建 Node/设备事实。
+该心跳覆盖元数据投递；显式 network-content 的单 chunk 等待为 10 秒，仍受首次发出前
+固定的全程 15 秒预算约束。真实 Root7 安装超过上游默认 200ms 的接收/应答缺口独立保留，
+重试不续期，超时/取消后的实际 storage worker 仍保留原生命周期。
+
+ADR-0192 为显式 network-content profile 的 voter 切换增加只读完整内容准入：原 learner
+加入/追平后、进入 joint consensus 前，核对原 current target、新 voter 实际 mTLS/Root/
+metadata/字节，以及新旧完整内容多数派。失败不请求 joint 变更；空应用 bootstrap 保留原
+元数据规则。后续故障、超时及不确定结果仍由原 Raft/完整内容/child 门禁处理。
+原内容 Commit 与 voter 切换共用实际进程内串行门禁；独立持有的任务在调用方取消/超时后
+仍等待已入队 Raft 的实际结果，防止校验与 joint 提交之间被并发内容 Commit 穿透。
+排队、观察和新效果前检查沿用原预算；未决结果保留门禁，不续期、不产生分布式权限。
+管理请求保留调用者原 epoch，本地调用也在排队前固定 epoch；实际准入复核同一值，
+旧 epoch 请求在 learner/joint 效果前拒绝，不从排队后的新观察借用任期。
+实际 member writer 与原 TLS witness 随独立任务持有；网络等待取消不释放未决 writer，
+效果前仍检查原连接的当前成员、链/leaf 有效性，不借新证书授权旧请求。
+
 ADR-0191 将历史内容追赶放入每个原 Root 唯一、有界且独立持有的任务；已持久化的 Raft
 Append ACK 不再等待该任务。原 sender、Log prefix、预算与实际 blocking job 的 admission
 guard 不变，重叠 heartbeat 不创建重复任务；完整 byte/apply/应用 Commit/readiness 门禁保留。

@@ -128,6 +128,62 @@ async fn asynchronous_and_child_clients_pin_exact_server_member() {
     );
 }
 
+/// Actual legacy static-mTLS administration must not acquire or require later rotation authority.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_mtls_administration_preserves_absent_rotation_authority() {
+    let directory = tempfile::tempdir().unwrap();
+    let profiles = profiles(directory.path());
+    let listeners = (0..3)
+        .map(|_| std::net::TcpListener::bind("127.0.0.1:0").unwrap())
+        .collect::<Vec<_>>();
+    let members: BTreeMap<_, _> = listeners
+        .iter()
+        .enumerate()
+        .map(|(index, listener)| (index as u64 + 1, listener.local_addr().unwrap()))
+        .collect();
+    let mut nodes = Vec::new();
+    for (index, (profile, listener)) in profiles.into_iter().zip(listeners).enumerate() {
+        let config = ReplicaConfig {
+            schema: "roboguide.controller-replica/v0.2".into(),
+            cluster_id: "actual-legacy-tls-administration".into(),
+            replica_id: index as u64 + 1,
+            members: members.clone(),
+            initial_voters: Some(members.keys().copied().collect()),
+            application_schema: "test/checkpoint-v1".into(),
+            application_policy_digest: "actual-original-legacy-policy".into(),
+            shared_secret: None,
+            tls: Some(profile),
+        };
+        drop(listener);
+        nodes.push(
+            ReplicaNode::start(
+                config,
+                &directory
+                    .path()
+                    .join(format!("legacy-member-{index}.sqlite3")),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    let source = &nodes[crate::tests::leader(&nodes).await].0;
+    assert!(source.store.certificate_trust().unwrap().is_none());
+    let client =
+        ReplicaAdminClient::new(source.config.as_ref().clone(), source.config.replica_id).unwrap();
+    let result = client
+        .change_membership(members.keys().copied().collect(), true)
+        .await;
+    let after = source.store.certificate_trust().unwrap();
+    for (node, _) in &nodes {
+        node.shutdown().await.unwrap();
+    }
+    assert!(
+        after.is_none(),
+        "legacy administration invented rotation authority"
+    );
+    result.unwrap();
+}
+
 /// A leaf from an unrelated CA cannot forge a successful child fence even if DNS and pin match.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unrelated_ca_is_rejected_before_fence_frame() {

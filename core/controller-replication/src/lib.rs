@@ -15,6 +15,7 @@ mod content_uploads;
 mod controller_ingress;
 mod member;
 mod network_content;
+mod network_membership;
 mod snapshot_data;
 mod store;
 mod supervision;
@@ -505,6 +506,8 @@ pub struct ReplicaNode {
     discard_transfer_reply: Arc<std::sync::atomic::AtomicBool>,
     /// Prevents overlapping temporary heartbeat/election suspension for one original source.
     leader_transfer_writer: Arc<tokio::sync::Mutex<()>>,
+    /// Owned complete-content transitions retain admission until their actual Raft result.
+    content_transition: Arc<tokio::sync::Semaphore>,
     /// Test-only actual framed-ingress ordinal, never an authority or success receipt.
     #[cfg(test)]
     framed_member_mutations: Arc<std::sync::atomic::AtomicU64>,
@@ -686,6 +689,13 @@ impl ReplicaNode {
                 election_timeout_max: 3_000,
                 max_payload_entries: 1,
                 snapshot_max_chunk_size: 1024 * 1024,
+                install_snapshot_timeout: if config.streams_content()
+                    && store.network_content_store()?.snapshot_receives_enabled()
+                {
+                    10_000
+                } else {
+                    200
+                },
                 snapshot_policy: openraft::SnapshotPolicy::LogsSinceLast(128),
                 max_in_snapshot_log_to_keep: 64,
                 ..Default::default()
@@ -721,6 +731,7 @@ impl ReplicaNode {
             #[cfg(test)]
             discard_transfer_reply: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             leader_transfer_writer: Arc::new(tokio::sync::Mutex::new(())),
+            content_transition: Arc::new(tokio::sync::Semaphore::new(1)),
             #[cfg(test)]
             framed_member_mutations: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             member_writer: Arc::new(tokio::sync::Mutex::new(())),
@@ -955,6 +966,18 @@ impl ReplicaNode {
         let epoch = self
             .current_epoch()
             .ok_or_else(|| "learner admission requires the current leader".to_string())?;
+        self.add_learner_at_epoch(epoch, member_id, Arc::new(|| Ok(())))
+            .await
+    }
+
+    /// Retains the actual original caller epoch before learner effects, including queued administration.
+    pub(crate) async fn add_learner_at_epoch(
+        &self,
+        epoch: ControllerEpoch,
+        member_id: u64,
+        permission: crate::content_store::StreamPermission,
+    ) -> Result<(), String> {
+        permission()?;
         self.check_epoch(epoch).await?;
         if member_id == self.config.replica_id
             || !self.config.members.contains_key(&member_id)
@@ -982,6 +1005,7 @@ impl ReplicaNode {
                 "existing member binding requires explicit original reconfiguration".into(),
             );
         }
+        permission()?;
         tokio::time::timeout(
             Duration::from_secs(10),
             self.raft.add_learner(member_id, node, true),
@@ -989,6 +1013,7 @@ impl ReplicaNode {
         .await
         .map_err(|_| "learner catch-up timed out".to_string())?
         .map_err(|error| error.to_string())?;
+        permission()?;
         self.check_epoch(epoch).await
     }
 
@@ -998,6 +1023,26 @@ impl ReplicaNode {
         voters: BTreeSet<u64>,
         retain_removed_as_learners: bool,
     ) -> Result<(), String> {
+        let epoch = self
+            .current_epoch()
+            .ok_or_else(|| "membership change requires the current leader".to_string())?;
+        self.change_membership_at_epoch(
+            epoch,
+            voters,
+            retain_removed_as_learners,
+            Arc::new(|| Ok(())),
+        )
+        .await
+    }
+
+    /// Carries one original caller epoch through actual admission without adopting a newer queued term.
+    pub(crate) async fn change_membership_at_epoch(
+        &self,
+        epoch: ControllerEpoch,
+        voters: BTreeSet<u64>,
+        retain_removed_as_learners: bool,
+        permission: crate::content_store::StreamPermission,
+    ) -> Result<(), String> {
         if voters.is_empty()
             || voters.len() > self.config.members.len()
             || voters
@@ -1006,9 +1051,12 @@ impl ReplicaNode {
         {
             return Err("membership change contains an unknown or empty voter set".into());
         }
-        let epoch = self
-            .current_epoch()
-            .ok_or_else(|| "membership change requires the current leader".to_string())?;
+        if self.config.streams_content() {
+            return self
+                .change_content_membership(epoch, voters, retain_removed_as_learners, permission)
+                .await;
+        }
+        permission()?;
         self.check_epoch(epoch).await?;
         let current_voters = self
             .raft
@@ -1018,8 +1066,10 @@ impl ReplicaNode {
             .voter_ids()
             .collect::<BTreeSet<_>>();
         for member_id in voters.iter().filter(|id| !current_voters.contains(id)) {
-            self.add_learner(*member_id).await?;
+            self.add_learner_at_epoch(epoch, *member_id, permission.clone())
+                .await?;
         }
+        permission()?;
         tokio::time::timeout(
             Duration::from_secs(10),
             self.raft
@@ -1028,6 +1078,7 @@ impl ReplicaNode {
         .await
         .map_err(|_| "membership joint consensus timed out".to_string())?
         .map_err(|error| error.to_string())?;
+        permission()?;
         self.check_epoch(epoch).await
     }
 

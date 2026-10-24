@@ -50,6 +50,20 @@ impl SqliteRaftStore {
         })
     }
     /// Requires the actual committed complete target; membership alone never authorizes routed bytes.
+    pub(crate) async fn check_committed_content_target(
+        &self,
+        target: ContentQuorumTarget,
+    ) -> Result<(), String> {
+        self.run_storage_work(move |store| {
+            store
+                .require_committed_content_target(&target)
+                .map_err(io_error)
+        })
+        .await
+        .map_err(|error| error.to_string())
+    }
+
+    /// Reads the exact committed candidate on the owning worker without changing original authority.
     pub(crate) fn require_committed_content_target(
         &self,
         target: &ContentQuorumTarget,

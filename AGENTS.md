@@ -1,5 +1,23 @@
 # Repository Guidelines
 
+ADR-0193 retains normal original-vote/committed-Snapshot-cut Append heartbeats through actual
+content preparation and metadata delivery. Actual higher votes return upstream without claiming
+Snapshot completion; prefix conflict grants no catch-up. Explicit Root6/Root7 source chunks have
+a bounded 10-second wait under the original 15-second transfer clock. Old generations retain their
+original metadata behavior; actual blocking work/Unknown stay after cancellation. The maintained
+Snapshot process gate uses a real kernel file lease and durable vote observations beyond election
+timeout, creating zero Node/device facts.
+
+ADR-0192 admits network-content voter changes only after the actual old complete quorum and every
+new voter's exact mTLS/Root/metadata/bytes satisfy the frozen accepted target and proposed majority.
+Content Commit and member transitions share an owned local gate through actual Raft completion;
+caller cancellation/expiry never releases pending effects. Original clocks, source/trust checks and
+Unknown remain. Empty application bootstrap and metadata-only profiles retain their meaning.
+Original caller epoch, actual member writer and captured TLS witness follow queued owned work;
+stale epochs refuse before effects, and original chain/leaf permission is rechecked under current trust.
+Owners are network_membership.rs and network_content_membership_processes.py; the native gate is
+check_network_content_processes.py --learner-joint. No Node/device or physical fact follows.
+
 ADR-0191 returns actual durable metadata Append ACK before the separate retained-content task.
 One original Root admission guard follows the owned task and every actual blocking job through
 cancellation. Original sender/Log/clock/current checks and Unknown stay; complete byte/apply/

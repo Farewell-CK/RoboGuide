@@ -369,6 +369,51 @@ impl ReplicaServer {
     }
 }
 
+/// Retains the actual member writer and original connection through owned administration effects.
+fn member_command_permission(
+    node: ReplicaNode,
+    sender: u64,
+    connection: Option<crate::tls::VerifiedTlsConnection>,
+    writer: Option<Arc<tokio::sync::OwnedMutexGuard<()>>>,
+) -> crate::content_store::StreamPermission {
+    Arc::new(move || {
+        let _writer = writer
+            .as_ref()
+            .ok_or("original member command writer is absent")?;
+        let network = if node.config.streams_content() {
+            Some(node.store.try_network_authority()?)
+        } else {
+            None
+        };
+        let admitted_member = network.as_ref().map_or_else(
+            || node.member_allowed(sender),
+            |(_, membership)| membership.nodes().any(|(id, _)| *id == sender),
+        );
+        if !admitted_member {
+            return Err("original administration caller is no longer a current member".into());
+        }
+        if node.tls.is_some() {
+            let connection = connection
+                .as_ref()
+                .ok_or("original administration TLS witness is absent")?;
+            if let Some((trust, _)) = network {
+                connection.authorize_with_trust(sender, node.config.replica_id, &trust)?;
+            } else if node.config.rotates_certificates() {
+                connection.authorize_with_trust(
+                    sender,
+                    node.config.replica_id,
+                    &node.store.connection_certificate_trust()?,
+                )?;
+            } else if !connection.authorize(sender, node.config.replica_id)? {
+                return Err(
+                    "original legacy administration credentials are no longer admitted".into(),
+                );
+            }
+        }
+        Ok(())
+    })
+}
+
 /// Dispatches one bounded request; the existing OpenRaft engine alone interprets consensus messages.
 async fn serve_connection(stream: tokio::net::TcpStream, node: ReplicaNode) -> Result<(), String> {
     if let Some(tls) = &node.tls {
@@ -443,7 +488,7 @@ where
         node.framed_member_mutations.fetch_add(1, Ordering::SeqCst);
     }
     let _member_writer = if request.command.requires_member_writer() {
-        Some(node.member_writer.lock().await)
+        Some(Arc::new(node.member_writer.clone().lock_owned().await))
     } else {
         None
     };
@@ -832,29 +877,50 @@ where
                     .voter_ids()
                     .collect(),
             ),
-            Command::AdminAddLearner { epoch, member_id } => {
-                Reply::Admin(node.add_learner(member_id).await.and_then(|()| {
+            Command::AdminAddLearner { epoch, member_id } => Reply::Admin(
+                node.add_learner_at_epoch(
+                    epoch,
+                    member_id,
+                    member_command_permission(
+                        node.clone(),
+                        request.sender,
+                        certificate_connection.clone(),
+                        _member_writer.clone(),
+                    ),
+                )
+                .await
+                .and_then(|()| {
                     if node.current_epoch() == Some(epoch) {
                         Ok(())
                     } else {
                         Err("leader epoch changed during learner admission".into())
                     }
-                }))
-            }
+                }),
+            ),
             Command::AdminChangeMembership {
                 epoch,
                 voters,
                 retain_removed_as_learners,
             } => Reply::Admin(
-                node.change_membership(voters, retain_removed_as_learners)
-                    .await
-                    .and_then(|()| {
-                        if node.current_epoch() == Some(epoch) {
-                            Ok(())
-                        } else {
-                            Err("leader epoch changed during membership change".into())
-                        }
-                    }),
+                node.change_membership_at_epoch(
+                    epoch,
+                    voters,
+                    retain_removed_as_learners,
+                    member_command_permission(
+                        node.clone(),
+                        request.sender,
+                        certificate_connection.clone(),
+                        _member_writer.clone(),
+                    ),
+                )
+                .await
+                .and_then(|()| {
+                    if node.current_epoch() == Some(epoch) {
+                        Ok(())
+                    } else {
+                        Err("leader epoch changed during membership change".into())
+                    }
+                }),
             ),
             Command::AdminRequestTransfer {
                 epoch,
@@ -1382,6 +1448,7 @@ impl ReplicaNetworkFactory {
 }
 
 /// One exact remote member of the upstream consensus engine.
+#[derive(Clone)]
 pub(crate) struct ReplicaNetwork {
     /// Exact header admitted before the first chunk on this actual upstream Snapshot transfer.
     snapshot_header: Option<SnapshotContentHeader>,
@@ -1538,12 +1605,45 @@ impl RaftNetwork<ControllerRaftConfig> for ReplicaNetwork {
     > {
         use openraft::network::snapshot_transport::{Chunked, SnapshotTransport};
         let mut cancel = Box::pin(cancel);
-        self.snapshot_header = tokio::select! {
+        let preparation = tokio::select! {
             closed=&mut cancel=>return Err(closed.into()),
-            prepared=snapshot_content::before_send(self,&snapshot.meta)=>prepared
+            prepared=snapshot_content::prepare_with_heartbeats(self,vote,&snapshot.meta)=>prepared
                 .map_err(|error|Unreachable::new(&std::io::Error::other(error)))?,
         };
-        Chunked::send_snapshot(self, vote, snapshot, cancel, option).await
+        let (header, clock) = match preparation {
+            snapshot_content::Preparation::Ready { header, clock } => (header, clock),
+            snapshot_content::Preparation::Superseded(actual) => {
+                return Ok(openraft::raft::SnapshotResponse::new(actual));
+            }
+        };
+        self.snapshot_header = header.map(|header| *header);
+        let Some(clock) = clock else {
+            return Chunked::send_snapshot(self, vote, snapshot, cancel, option).await;
+        };
+        let heartbeat = self.clone();
+        let meta = snapshot.meta.clone();
+        tokio::time::timeout(
+            Duration::from_millis(
+                clock
+                    .remaining_ms()
+                    .map_err(|error| Unreachable::new(&std::io::Error::other(error)))?,
+            ),
+            async {
+                tokio::select! {
+                    result=Chunked::send_snapshot(self,vote,snapshot,cancel,option)=>result,
+                    superseded=snapshot_content::keep_alive(&heartbeat,vote,&meta,&clock)=>{
+                        superseded.map(openraft::raft::SnapshotResponse::new)
+                            .map_err(|error| Unreachable::new(&std::io::Error::other(error)).into())
+                    }
+                }
+            },
+        )
+        .await
+        .map_err(|_| {
+            Unreachable::new(&std::io::Error::other(
+                "original Snapshot transfer budget expired; outcome remains uncertain",
+            ))
+        })?
     }
     /// Forwards exact append RPCs; failures remain network/remote errors to OpenRaft.
     async fn append_entries(

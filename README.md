@@ -1,5 +1,11 @@
 # RoboGuide
 
+[完整内容 voter 准入](docs/decisions/0192-complete-content-voter-admission.md)在 joint consensus
+前核对原完整 quorum、新 voter 实际字节与新多数派。内容 Commit/成员切换串行，已入队的
+原 Raft 操作在调用方取消或超时后仍持有门禁；真实 mTLS learner/joint 进程验收已通过。
+旧 epoch 的管理请求已在效果前拒绝，原 member writer/TLS witness 随独立任务保留。
+Snapshot 心跳/预算及内核阻塞验收见[记录](docs/development/acceptance/2026-10-24-content-voter-admission.md)。
+
 [Replica 内容回收](docs/decisions/0190-replica-content-gc-intent.md)已接入显式 Root7、
 原 stream 退休、删除前 SQL intent/tombstone 和独立删除回执。process v0.5 与 recovery v0.21
 完整保留原 receipt/Unknown、时钟和引用；活跃引用继续阻止回收。实际删除中断、SQL 故障、

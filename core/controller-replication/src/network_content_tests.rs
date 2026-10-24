@@ -3,6 +3,7 @@
 use super::*;
 use sha2::Sha256;
 use std::net::TcpListener;
+use std::os::unix::fs::PermissionsExt;
 
 /// Serializes the tiny reservation-to-bind gap between this module's real mTLS clusters.
 static CLUSTER_ENDPOINTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -267,6 +268,230 @@ async fn actual_mtls_empty_learner_receives_snapshot_prerequisites_before_member
             .voter_ids()
             .any(|member| member == receiver.config.replica_id)
     );
+    for node in &cluster.nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
+/// A real data-corrupt learner must not replace an existing complete voter before fresh byte proof.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn actual_mtls_promotion_refuses_corrupt_learner_before_joint_membership() {
+    let cluster = cluster_with_snapshot_membership(true, true).await;
+    let source = &cluster.nodes[leader(&cluster).await];
+    let receiver = cluster.nodes.last().unwrap();
+    let root = cluster.roots.last().unwrap();
+    let (_sql, cas, key) = crate::content_application_tests::original_payload(
+        cluster.directory.path(),
+        b"actual learner promotion bytes",
+    );
+    let mut candidate = crate::content_application_tests::candidate(
+        &cluster.directory.path().join("source.sqlite3"),
+        &cas,
+        &ReplicaView::default(),
+        &source.profile_identity(),
+    );
+    candidate.epoch = source.current_epoch().unwrap();
+    source
+        .stage_content_from_source(&candidate, &cas, "original-promotion-stage", 30_000)
+        .await
+        .unwrap();
+    assert!(source.commit_content(candidate).await.unwrap().accepted);
+    source.compact_content_snapshot(15_000).await.unwrap();
+    source
+        .add_learner(receiver.config.replica_id)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while receiver.store.network_view().await.unwrap().revision != 1 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    root.verify_content(&key).unwrap();
+    let path = root
+        .root()
+        .join("content-v1")
+        .join(&key.source_owner[15..])
+        .join(&key.content_digest[7..]);
+    let bytes = std::fs::read(&path).unwrap();
+    let permissions = std::fs::metadata(&path).unwrap().permissions();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(&path, b"actual corruption after Snapshot reception").unwrap();
+    let before = source
+        .raft
+        .metrics()
+        .borrow()
+        .membership_config
+        .voter_ids()
+        .collect::<BTreeSet<_>>();
+    let desired = BTreeSet::from([source.config.replica_id, receiver.config.replica_id]);
+    let refused = source
+        .change_membership(desired.clone(), true)
+        .await
+        .is_err();
+    let after = source
+        .raft
+        .metrics()
+        .borrow()
+        .membership_config
+        .voter_ids()
+        .collect::<BTreeSet<_>>();
+    std::fs::write(&path, bytes).unwrap();
+    std::fs::set_permissions(&path, permissions).unwrap();
+    eprintln!(
+        "actual promotion counter: refused={refused}, original_voters={before:?}, observed_voters={after:?}"
+    );
+    if refused && before == after {
+        source
+            .change_membership(desired.clone(), true)
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let target = source.accepted_content_target().await.unwrap();
+                if let Ok(complete) = source.content_quorum(target).await {
+                    assert_eq!(complete, desired);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+    for node in &cluster.nodes {
+        node.shutdown().await.unwrap();
+    }
+    assert!(
+        refused,
+        "actual corrupt learner was promoted without a complete byte proof"
+    );
+    assert_eq!(
+        before, after,
+        "failed admission changed actual original voters"
+    );
+}
+
+/// Actual authenticated administration must reject its stale original epoch before enrollment or joint.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn actual_stale_admin_epoch_cannot_change_original_membership() {
+    let cluster = cluster_with_snapshot_membership(true, true).await;
+    let source = &cluster.nodes[leader(&cluster).await];
+    let receiver = cluster.nodes.last().unwrap().config.replica_id;
+    let original_epoch = source.current_epoch().unwrap();
+    assert!(original_epoch.term > 1);
+    let stale = ControllerEpoch {
+        term: original_epoch.term - 1,
+        ..original_epoch
+    };
+    let before = source.store.try_network_authority().unwrap().1;
+    let enrollment = transport::admin_add_learner(
+        &source.config,
+        source.config.replica_id,
+        source.tls.clone(),
+        stale,
+        receiver,
+    )
+    .await;
+    let enrolled = source.store.try_network_authority().unwrap().1;
+    let changed = transport::admin_change_membership(
+        &source.config,
+        source.config.replica_id,
+        source.tls.clone(),
+        stale,
+        BTreeSet::from([source.config.replica_id, receiver]),
+        true,
+    )
+    .await;
+    let after = source.store.try_network_authority().unwrap().1;
+    eprintln!(
+        "actual stale administration: enrollment={enrollment:?}, change={changed:?}; original={:?}, after_enrollment={:?}, after_change={:?}",
+        before.log_id(),
+        enrolled.log_id(),
+        after.log_id()
+    );
+    for node in &cluster.nodes {
+        node.shutdown().await.unwrap();
+    }
+    assert!(enrollment.is_err());
+    assert!(changed.is_err());
+    assert_eq!(
+        enrolled, before,
+        "stale original epoch enrolled an actual learner"
+    );
+    assert_eq!(
+        after, before,
+        "stale original epoch changed actual original voters"
+    );
+}
+
+/// Cancelled or expired callers cannot release original transition ownership or admit queued effects.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn actual_owned_content_transition_survives_cancelled_and_expired_callers() {
+    let cluster = cluster().await;
+    let source = &cluster.nodes[leader(&cluster).await];
+    for cancel in [true, false] {
+        let (entered, observed) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let node = source.clone();
+        let member_writer = source.member_writer.clone();
+        let clock = crate::content_store::ContentBudget::issue(1000).unwrap();
+        let original_clock = clock.clone();
+        let caller = tokio::spawn(async move {
+            node.run_content_transition(clock, async move {
+                let _original_member_writer = member_writer.lock_owned().await;
+                entered.send(()).unwrap();
+                released.await.map_err(|error| error.to_string())?;
+                original_clock.check().map(|_| ())
+            })
+            .await
+        });
+        observed.await.unwrap();
+        if cancel {
+            caller.abort();
+            assert!(caller.await.unwrap_err().is_cancelled());
+        } else {
+            assert!(caller.await.unwrap().unwrap_err().contains("uncertain"));
+        }
+        assert!(
+            source
+                .content_transition
+                .clone()
+                .try_acquire_owned()
+                .is_err()
+        );
+        assert!(source.member_writer.clone().try_lock_owned().is_err());
+        let executed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let work_executed = executed.clone();
+        assert!(
+            source
+                .run_content_transition(
+                    crate::content_store::ContentBudget::issue(200).unwrap(),
+                    async move {
+                        work_executed.store(true, std::sync::atomic::Ordering::SeqCst);
+                        Ok(())
+                    },
+                )
+                .await
+                .unwrap_err()
+                .contains("admission expired")
+        );
+        assert!(!executed.load(std::sync::atomic::Ordering::SeqCst));
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(permit) = source.content_transition.clone().try_acquire_owned() {
+                    drop(permit);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(source.member_writer.clone().try_lock_owned().is_ok());
+    }
     for node in &cluster.nodes {
         node.shutdown().await.unwrap();
     }
@@ -549,6 +774,112 @@ async fn actual_mtls_retained_log_recovers_missed_bytes_before_application() {
             .is_err()
     );
     assert_eq!(history(), original);
+    for node in &cluster.nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
+/// An actual higher receiver vote must return upstream before admitting any Snapshot prerequisite.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn actual_mtls_snapshot_returns_higher_vote_without_admitting_content() {
+    use openraft::network::{RaftNetwork, RaftNetworkFactory};
+    use openraft::storage::RaftStateMachine;
+    let cluster = cluster_with_snapshots(true).await;
+    let index = leader(&cluster).await;
+    let source = &cluster.nodes[index];
+    let receiver = &cluster.nodes[(index + 1) % cluster.nodes.len()];
+    let (_sql, cas, _key) = crate::content_application_tests::original_payload(
+        cluster.directory.path(),
+        b"actual higher vote Snapshot source",
+    );
+    let mut candidate = crate::content_application_tests::candidate(
+        &cluster.directory.path().join("source.sqlite3"),
+        &cas,
+        &ReplicaView::default(),
+        &source.profile_identity(),
+    );
+    candidate.epoch = source.current_epoch().unwrap();
+    source
+        .stage_content_from_source(&candidate, &cas, "original-higher-vote-stage", 30_000)
+        .await
+        .unwrap();
+    assert!(source.commit_content(candidate).await.unwrap().accepted);
+    source.compact_content_snapshot(15_000).await.unwrap();
+    for node in &cluster.nodes {
+        node.raft.runtime_config().elect(false);
+        node.raft.runtime_config().heartbeat(false);
+    }
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let original_vote = source.raft.metrics().borrow().vote;
+    receiver
+        .network_online
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    receiver.raft.trigger().elect().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while receiver.raft.metrics().borrow().current_term <= original_vote.leader_id.term {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let actual_vote = receiver.raft.metrics().borrow().vote;
+    receiver
+        .network_online
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut factory = transport::ReplicaNetworkFactory::new(
+        source.profile_identity(),
+        source.config.replica_id,
+        source.network_online.clone(),
+        source.config.shared_secret.clone(),
+        source.tls.clone(),
+        source.transport_budget.clone(),
+        source.network_source.clone(),
+    );
+    let mut network = factory
+        .new_client(
+            receiver.config.replica_id,
+            &source
+                .configured_member(receiver.config.replica_id)
+                .unwrap(),
+        )
+        .await;
+    let snapshot = source
+        .store
+        .clone()
+        .get_current_snapshot()
+        .await
+        .unwrap()
+        .unwrap();
+    let response = network
+        .full_snapshot(
+            original_vote,
+            snapshot,
+            std::future::pending::<openraft::error::ReplicationClosed>(),
+            openraft::network::RPCOption::new(Duration::from_secs(10)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.vote, actual_vote);
+    assert!(response.vote > original_vote);
+    let sql = rusqlite::Connection::open(
+        receiver
+            .store
+            .network_content_store()
+            .unwrap()
+            .root()
+            .join("content.sqlite3"),
+    )
+    .unwrap();
+    assert_eq!(
+        sql.query_row(
+            "SELECT COUNT(*) FROM content_snapshot_receives",
+            [],
+            |row| row.get::<_, u64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    drop(sql);
     for node in &cluster.nodes {
         node.shutdown().await.unwrap();
     }
