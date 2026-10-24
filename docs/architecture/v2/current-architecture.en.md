@@ -203,6 +203,15 @@ outcomes. This review starts no Habitat, model or device.
 
 ## Maintenance
 
+ADR-0194 has actual process/full-recovery acceptance: explicit Root8 admits staging reclamation only from original
+copy/stream IDs and actual retirement. Intent/per-item Unknown and mandatory inventories precede
+open/unlink. Only private staging names are removed; CAS, other refs and Root7 tombstones remain
+independent. Process v0.6/recovery v0.22 select this boundary, preserving old outcomes/budgets and
+omitting private staging payloads from restore, without Node/device or global-erasure facts.
+The actual legacy tree copier retained private staging. New v0.22 copies only its empty directory
+and rejects declared files/nested directories there before verification reads their payloads.
+Earlier formats and historical bundles retain their original interpretations.
+
 ADR-0193 sends normal Raft Append heartbeats carrying the original vote/committed Snapshot cut
 while explicit content prerequisites wait. OpenRaft alone handles terms and election timers;
 prefix conflict proves no catch-up, and actual higher votes return upstream. The first heartbeat

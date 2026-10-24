@@ -79,6 +79,7 @@ def validate(
         "roboguide.recovery-profile/v0.19",
         "roboguide.recovery-profile/v0.20",
         "roboguide.recovery-profile/v0.21",
+        "roboguide.recovery-profile/v0.22",
     }:
         raise ValueError("Controller storage v1 requires explicit recovery v0.17")
     if expected is not None and actual != expected:

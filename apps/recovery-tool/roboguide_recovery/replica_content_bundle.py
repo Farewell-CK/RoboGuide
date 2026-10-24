@@ -557,7 +557,9 @@ def bind_restored(
         parent = by_id[source["parent_id"]]
         parent_sql = (root / "stores" / parent["component_id"] / parent["database"]).stat()
         binding = {
-            "schema": "roboguide.replica-content-restore-binding/v0.3"
+            "schema": "roboguide.replica-content-restore-binding/v0.4"
+            if original["version"] == 8
+            else "roboguide.replica-content-restore-binding/v0.3"
             if original["version"] == 7
             else "roboguide.replica-content-restore-binding/v0.2"
             if original["version"] == 6

@@ -223,6 +223,124 @@ fn origin(
     (StreamOrigin::Artifact { writer }, permission)
 }
 
+/// Actual partial bytes require original worker-close and retirement, preserving the stream Unknown.
+#[test]
+fn root8_partial_stream_cleanup_keeps_original_unknown_and_no_cas_availability() {
+    let (_directory, source, receiver, key, bytes) = fixture();
+    let receiver = reclamation(receiver);
+    let path = receiver.root().to_owned();
+    let identity = receiver.identity().clone();
+    drop(receiver);
+    let receiver = ReplicaContentStore::upgrade_staging_gc(
+        &path,
+        &identity.profile_identity,
+        identity.member,
+        None,
+    )
+    .unwrap();
+    let (origin, permission) = origin(&source, Arc::new(AtomicBool::new(true)));
+    let admission = receiver
+        .admit_stream(
+            "partial-staging",
+            target(&receiver, &key),
+            key.clone(),
+            origin,
+            ContentBudget::issue(30_000).unwrap(),
+            permission,
+        )
+        .unwrap();
+    let StreamAdmission::New(mut worker) = admission else {
+        panic!("fresh original worker required")
+    };
+    worker.write_chunk(0, &bytes[..31]).unwrap();
+    let selected = vec![ReplicaStagingTarget::Stream {
+        command_id: "partial-staging".into(),
+    }];
+    assert!(
+        receiver
+            .collect_retired_staging("live-refusal", selected.clone(), 30_000)
+            .is_err()
+    );
+    assert!(
+        receiver
+            .staging_gc_status("live-refusal")
+            .unwrap()
+            .is_none()
+    );
+    drop(worker);
+    let original = receiver.stream_status("partial-staging").unwrap().unwrap();
+    assert!(original.receipt.is_none());
+    assert!(
+        receiver
+            .collect_retired_staging("unretired-refusal", selected.clone(), 30_000)
+            .is_err()
+    );
+    receiver.retire_stream("partial-staging", 30_000).unwrap();
+    let status = receiver
+        .collect_retired_staging("partial-cleanup", selected, 30_000)
+        .unwrap();
+    assert_eq!((status.deleted, status.missing, status.unknown), (1, 0, 0));
+    assert_eq!(
+        status.original["items"][0]["outcome"]["observed_digest"],
+        artifact_store::digest_bytes(&bytes[..31])
+    );
+    assert_ne!(
+        status.original["items"][0]["outcome"]["observed_digest"],
+        key.content_digest
+    );
+    assert_eq!(
+        receiver.stream_status("partial-staging").unwrap(),
+        Some(original)
+    );
+    assert!(receiver.verify_content(&key).is_err());
+    assert!(
+        std::fs::read_dir(path.join("staging-v1"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+}
+
+/// A drained upgrade retains completed stream byte receipts and their independent live ownership.
+#[test]
+fn root8_upgrade_accepts_original_completed_stream_objects_without_rewriting_history() {
+    let (_directory, source, receiver, key, _bytes) = fixture();
+    let receiver = reclamation(receiver);
+    let original = receiver
+        .copy_artifact_stream(
+            &source,
+            target(&receiver, &key),
+            &key,
+            "completed-before-root8",
+            30_000,
+        )
+        .unwrap();
+    let references = receiver.active_references(&key).unwrap();
+    let path = receiver.root().to_owned();
+    let identity = receiver.identity().clone();
+    drop(receiver);
+    let receiver = ReplicaContentStore::upgrade_staging_gc(
+        &path,
+        &identity.profile_identity,
+        identity.member,
+        None,
+    )
+    .unwrap();
+    receiver.verify_content(&key).unwrap();
+    assert_eq!(
+        receiver.stream_status("completed-before-root8").unwrap(),
+        Some(original)
+    );
+    assert_eq!(receiver.active_references(&key).unwrap(), references);
+    assert_eq!(
+        receiver
+            .collect_unreferenced_content("original-stream-keeps-cas", 30_000)
+            .unwrap()
+            .candidates,
+        0
+    );
+}
+
 /// Admits exactly one actual original write worker; duplicate outcomes cannot masquerade as permits.
 fn admit(
     receiver: &ReplicaContentStore,

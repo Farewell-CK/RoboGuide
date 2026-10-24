@@ -120,7 +120,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | 顺序 | 对应原项 | 当前必需交付 | 状态 |
 | --- | --- | --- | --- |
 | A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | Log、purged Snapshot、空 learner、准备/投递心跳及 ACK 预算门禁通过；归档源首次捕获和原故障组合继续 |
-| A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | readiness、Root7 GC/恢复、实际 mTLS learner/joint、损坏与旧 epoch 拒绝已验收；全 producer/partial staging 组合继续 |
+| A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | readiness、Root7 GC/恢复、实际 mTLS learner/joint、损坏与旧 epoch 拒绝、Root8 私有 staging/原 Unknown/完整恢复已验收；全 producer 退休与最终 CAS 回收组合继续 |
 | A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 原 Root4 → 6 → 7 排空同 inode 升级、旧入口拒绝与三 leader 冷恢复通过；滚动/回退继续 |
 | B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | 待接线与组合验收；不重写空间算法 |
 | C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | 待实现与验收；保留现有 quota/units |
@@ -129,6 +129,12 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | 待全部软件必需项通过 |
 
 当前清单为唯一执行队列，下面按原时间保留的切片记录不能替代上表完成条件。
+
+[原 staging 回收与 Root8 恢复](acceptance/2026-10-24-original-staging-reclamation.md)补齐真实
+旧 copy 硬链接和非空中断文件的有界回收、删除前 SIGKILL/删除后 SQL 结果失败、旧 ID 只读
+与新命令独立缺失。实际包检查发现并收紧新恢复格式的私有文件范围；同一批原 Root/SQL
+保留 Unknown/预算，经完整恢复后三个 leader 读取通过。该切片不替代全 producer/最终
+CAS 回收、历史归档源、滚动升级/回退或其余 B–F 要求。
 
 [完整内容 voter 准入与 Snapshot 活性](acceptance/2026-10-24-content-voter-admission.md)
 保留错误返回后 joint 扩大、准备期选举、真实 Root7 metadata ACK 超时及旧 epoch

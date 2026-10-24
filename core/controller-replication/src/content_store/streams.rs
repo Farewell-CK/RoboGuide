@@ -305,6 +305,29 @@ fn reference(intent: &StreamIntent) -> Result<ReplicaContentReference, String> {
     })
 }
 
+/// Resolves exact retained retirement and released ownership before private staging reclamation.
+pub(super) fn staging_ownership(
+    connection: &Connection,
+    command: &str,
+) -> Result<super::staging_gc::Ownership, String> {
+    let id = operation_id(command)?;
+    let original = record(connection, &id)?.ok_or("original staging stream is unavailable")?;
+    let retired = retirement::release_digest(connection, &original)?
+        .ok_or("original staging stream has no complete retirement")?;
+    let expected = reference(&original.intent)?;
+    let pin = reference_record(connection, &expected.reference_id)?
+        .ok_or("original staging stream pin is unavailable")?;
+    if pin.reference != expected || pin.active || pin.release_digest.as_ref() != Some(&retired) {
+        return Err("original staging stream has not released its exact retired ownership".into());
+    }
+    Ok(super::staging_gc::Ownership {
+        content: original.intent.content.clone(),
+        source_digest: digest(&original)?,
+        release_digest: retired,
+        leaf: format!("stream-{id}"),
+    })
+}
+
 /// Reads only an existing complete original record; loss never means another stream may execute.
 fn record(connection: &Connection, id: &str) -> Result<Option<StreamRecord>, String> {
     let length: Option<u64> = connection

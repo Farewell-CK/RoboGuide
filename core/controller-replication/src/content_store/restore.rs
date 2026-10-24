@@ -110,6 +110,10 @@ fn parse(raw: &str, original: &ReplicaContentIdentity, ordinal: usize) -> Result
             (binding.schema.as_str(), binding.source_root_version),
             ("roboguide.replica-content-restore-binding/v0.3", 7)
         )
+        && !matches!(
+            (binding.schema.as_str(), binding.source_root_version),
+            ("roboguide.replica-content-restore-binding/v0.4", 8)
+        )
     {
         return Err(
             "original restore binding has an unsupported explicit source generation".into(),

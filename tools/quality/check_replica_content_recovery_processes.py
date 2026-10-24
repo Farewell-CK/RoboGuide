@@ -88,6 +88,7 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
         if layout in {
             "roboguide.replica-content-layout/v0.6",
             "roboguide.replica-content-layout/v0.7",
+            "roboguide.replica-content-layout/v0.8",
         }:
             root_component["restore_binding_digest"] = config["content"].get(
                 "restore_binding_digest"
@@ -106,7 +107,12 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
         }
     )
     generation = (
-        21
+        22
+        if any(
+            value.get("storage_schema") == "roboguide.replica-content-layout/v0.8"
+            for value in components
+        )
+        else 21
         if any(
             value.get("storage_schema") == "roboguide.replica-content-layout/v0.7"
             for value in components
@@ -188,7 +194,9 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
             if value["component_id"] == f"root-{member}"
         )
         config["schema"] = (
-            "roboguide.controller-replica-process/v0.5"
+            "roboguide.controller-replica-process/v0.6"
+            if binding["source_root_version"] == 8
+            else "roboguide.controller-replica-process/v0.5"
             if binding["source_root_version"] == 7
             else "roboguide.controller-replica-process/v0.4"
             if binding["source_root_version"] == 6
@@ -239,6 +247,25 @@ def prepare_bundle(
         return frozen_bundle, frozen_digest
     declaration = profile(source, output)
     save(output / "profile.json", declaration)
+    if declaration["schema"] == "roboguide.recovery-profile/v0.22":
+        old = {**declaration, "schema": "roboguide.recovery-profile/v0.21"}
+        save(output / "old-profile.json", old)
+        refused = command(
+            output,
+            "old-profile-root8-refused",
+            [
+                "backup",
+                "--profile",
+                str(output / "old-profile.json"),
+                "--destination",
+                str(output / "old-profile-refused-bundle"),
+                "--command-id",
+                "actual-root8-old-profile-refusal",
+            ],
+            refused=True,
+        )
+        assert "staging Root8 requires explicit recovery v0.22" in refused["stderr"]
+        assert not (output / "old-profile-refused-bundle").exists()
     # Actual inode lock must refuse before creating any new Snapshot producer or bundle.
     root_sql = (
         Path(
@@ -283,6 +310,71 @@ def prepare_bundle(
     return output / "bundle", checksum
 
 
+def staging_history(root: Path) -> dict[str, dict[str, str]] | None:
+    """Read exact original Root8 command/item rows independently of product receipt parsing."""
+    with closing(
+        sqlite3.connect((root / "content.sqlite3").as_uri() + "?mode=ro", uri=True)
+    ) as sql:
+        if sql.execute("PRAGMA user_version").fetchone()[0] != 8:
+            return None
+        result: dict[str, dict[str, str]] = {}
+        for table, key in (
+            ("content_staging_gc_commands", "operation_id"),
+            ("content_staging_gc_items", "item_id"),
+        ):
+            rows = sql.execute(f"SELECT {key},record FROM {table} LIMIT 16385").fetchall()
+            assert len(rows) <= 16384
+            result[table] = dict(rows)
+    return result
+
+
+def private_staging_refusal(output: Path, bundle: Path) -> dict[str, Any] | None:
+    """Reject a fully declared and correctly hashed private payload before restore publication."""
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    if manifest["profile"]["schema"] != "roboguide.recovery-profile/v0.22":
+        return None
+    root = next(
+        value
+        for value in manifest["profile"]["components"]
+        if value.get("storage_schema") == "roboguide.replica-content-layout/v0.8"
+    )
+    counter = output / "private-content-counter-bundle"
+    shutil.copytree(bundle, counter)
+    name = "stores/" + root["component_id"] + "/staging-v1/explicit-private-contract-file"
+    payload = b"actual declared private payload; no operation or physical fact"
+    (counter / name).write_bytes(payload)
+    manifest["files"].append(
+        {
+            "path": name,
+            "kind": "content",
+            "byte_size": len(payload),
+            "content_digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+        }
+    )
+    manifest["files"].sort(key=lambda value: value["path"])
+    raw = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    (counter / "manifest.json").write_bytes(raw)
+    checksum = "sha256:" + hashlib.sha256(raw).hexdigest()
+    for action in ("verify", "restore"):
+        arguments = [action, "--bundle", str(counter), "--manifest-digest", checksum]
+        if action == "restore":
+            arguments += [
+                "--destination",
+                str(output / "private-content-refused-restore"),
+                "--command-id",
+                "actual-private-content-refused-restore",
+            ]
+        refused = command(output, "private-content-" + action + "-refused", arguments, refused=True)
+        assert "private Root8 staging payload is outside recovery content" in refused["stderr"]
+    assert not (output / "private-content-refused-restore").exists()
+    return {
+        "private_content_declared_and_hashed": True,
+        "verify_refused": True,
+        "restore_refused_before_publication": True,
+        "manifest_digest": checksum,
+    }
+
+
 def run(
     source: Path,
     output: Path,
@@ -322,6 +414,7 @@ def run(
         "verify",
         ["verify", "--bundle", str(bundle), "--manifest-digest", checksum],
     )
+    private_counter = private_staging_refusal(output, bundle)
     restore_args = [
         "restore",
         "--bundle",
@@ -338,6 +431,30 @@ def run(
         original["original_complete_member_views"]
     )
     assert command(output, "restore-readonly-repeat", restore_args) == restored
+    original_staging = []
+    for path in sorted(source.glob("configuration-*.json")):
+        config = json.loads(path.read_text())
+        source_root = Path(config["content"]["root"])
+        history = staging_history(source_root)
+        if history is None:
+            continue
+        member = config["replica"]["replica_id"]
+        target_root = output / "restored/stores" / f"root-{member}"
+        assert staging_history(target_root) == history
+        assert not list((target_root / "staging-v1").iterdir())
+        unknown = sum(
+            json.loads(raw)["outcome"] is None
+            for raw in history["content_staging_gc_items"].values()
+        )
+        original_staging.append(
+            {
+                "member": member,
+                "unknown": unknown,
+                "source_private_files": len(list((source_root / "staging-v1").iterdir())),
+                "restored_private_files": 0,
+                "exact_original_rows": history,
+            }
+        )
     result: dict[str, Any] = {
         "passed": False,
         "embodied_nodes": 0,
@@ -350,6 +467,8 @@ def run(
         "bindings": restored["replica_content_bindings"],
         "actual_processes": [],
         "observed_leaders": [],
+        "original_staging_recovery": original_staging,
+        "private_content_refusal": private_counter,
     }
     if cold_only:
         result["passed"] = True

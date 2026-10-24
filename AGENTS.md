@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+ADR-0194 defines explicit Root8 private staging reclamation beside unchanged Root7 CAS tombstones.
+Only typed original copy/stream IDs with exact released completion/end or retained retirement can
+admit cleanup. Frozen original source/release digests and actual current file identity precede
+payload open/unlink; normalized item outcomes preserve partial progress and Unknown without replay.
+Only the retired private name is removed. Owners are content_store/staging_gc.rs, copy/streams and
+the explicit maintenance/recovery gates. Process v0.6 and recovery v0.22 explicitly select it; new
+bundles retain only the empty private staging directory. Correctly hashed declared private payloads
+refuse verify/restore before publication. The maintained staging/recovery process gates preserve
+original SQL/Unknown and observe all three actual restored leaders with zero embodied Nodes. No
+Node/checkpoint/wire generation or device/global-erasure authority is implied.
+
 ADR-0193 retains normal original-vote/committed-Snapshot-cut Append heartbeats through actual
 content preparation and metadata delivery. Actual higher votes return upstream without claiming
 Snapshot completion; prefix conflict grants no catch-up. Explicit Root6/Root7 source chunks have

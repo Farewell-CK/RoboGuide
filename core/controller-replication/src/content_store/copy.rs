@@ -159,6 +159,39 @@ fn operation(connection: &Connection, id: &str) -> Result<Option<CopyRecord>, St
     .transpose()
 }
 
+/// Resolves only an ended original copy's released private namespace; it grants no CAS deletion.
+pub(super) fn staging_ownership(
+    connection: &Connection,
+    command: &str,
+) -> Result<super::staging_gc::Ownership, String> {
+    let id = operation_key(command)?;
+    let original = operation(connection, &id)?.ok_or("original staging copy is unavailable")?;
+    let expected = receive_reference(&original.intent)?;
+    let pin = reference_record(connection, &expected.reference_id)?
+        .ok_or("original staging copy pin is unavailable")?;
+    if pin.reference != expected
+        || pin.active
+        || pin.release_digest.is_none()
+        || (original.receipt.is_none() && original.process_end.is_none())
+    {
+        return Err(
+            "original staging copy lacks exact completion/end and released ownership".into(),
+        );
+    }
+    let source_digest = digest(
+        &serde_json::json!({"intent":&original.intent,"receipt":&original.receipt,
+        "process_end":if original.receipt.is_none() { original.process_end.as_ref() } else { None }}),
+    )?;
+    Ok(super::staging_gc::Ownership {
+        content: original.intent.content,
+        source_digest,
+        release_digest: pin
+            .release_digest
+            .ok_or("original staging copy release disappeared")?,
+        leaf: id,
+    })
+}
+
 /// Checks retained original copy evidence even after current availability or unrelated pins have retired.
 pub(super) fn validate_original_receipt(
     connection: &Connection,
@@ -261,7 +294,7 @@ pub(super) fn validate_records(
             let version: i64 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .map_err(|error| error.to_string())?;
-            if !matches!(version, 4..=7) {
+            if !matches!(version, 4..=8) {
                 return Err("legacy object profile contains a hidden stream receipt".into());
             }
             super::streams::validate_object_receipt(connection, &receipt)?;
@@ -467,9 +500,11 @@ impl ReplicaContentStore {
         }
         intent.budget.check()?;
         let destination = object_path(self.root(), content);
+        let mut staging = None;
         if !destination.exists() {
-            let staging = self.root().join("staging-v1").join(&operation_id);
-            let mut output = layout::new_file(&staging)?;
+            let path = self.root().join("staging-v1").join(&operation_id);
+            let mut output = layout::new_file(&path)?;
+            staging = Some(path.clone());
             let mut input = source
                 .open_artifact(&content.content_digest)
                 .map_err(|error| error.to_string())?;
@@ -527,7 +562,7 @@ impl ReplicaContentStore {
                 Err(error) => return Err(error.to_string()),
             }
             layout::directory(parent)?;
-            match std::fs::hard_link(&staging, &destination) {
+            match std::fs::hard_link(&path, &destination) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(error.to_string()),
@@ -545,6 +580,13 @@ impl ReplicaContentStore {
         }
         let file = verify_file_with_budget(&destination, content, Some(&intent.budget))?;
         file.sync_all().map_err(|error| error.to_string())?;
+        if let Some(staging) = staging {
+            intent.budget.check()?;
+            std::fs::remove_file(&staging).map_err(|error| error.to_string())?;
+            File::open(self.root().join("staging-v1"))
+                .and_then(|directory| directory.sync_all())
+                .map_err(|error| error.to_string())?;
+        }
         let actual = file.metadata().map_err(|error| error.to_string())?;
         let receipt = ReplicaContentReceipt {
             schema: "roboguide.replica-content-receipt/v0.1".into(),

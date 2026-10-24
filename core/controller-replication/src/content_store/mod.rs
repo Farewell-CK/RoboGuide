@@ -8,6 +8,7 @@ mod pins;
 mod producers;
 mod reader;
 mod restore;
+mod staging_gc;
 mod streams;
 mod time;
 mod validation;
@@ -20,6 +21,7 @@ pub use producers::{
     ReplicaContentProducerKind, ReplicaContentProducerSource, ReplicaContentProducerStatus,
 };
 pub use reader::{ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus};
+pub use staging_gc::{ReplicaStagingGcStatus, ReplicaStagingTarget};
 pub use streams::ReplicaContentStreamStatus;
 mod snapshot_receive;
 pub(crate) use snapshot_receive::operation as snapshot_receive_operation;
@@ -32,6 +34,8 @@ pub(crate) use time::ContentBudget;
 pub use time::ContentProcessEndObservation;
 #[cfg(test)]
 mod gc_tests;
+#[cfg(test)]
+mod staging_gc_tests;
 #[cfg(test)]
 mod tests;
 
@@ -56,6 +60,8 @@ pub const REPLICA_CONTENT_RESTORE_LAYOUT_SCHEMA: &str = "roboguide.replica-conte
 pub const REPLICA_CONTENT_SNAPSHOT_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.6";
 /// Explicit original GC/tombstone authority, fencing all older Root writers even at zero commands.
 pub const REPLICA_CONTENT_GC_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.7";
+/// Explicit private staging reclamation journals; old Root7 writers refuse even empty Root8.
+pub const REPLICA_CONTENT_STAGING_GC_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.8";
 
 /// Explicit storage interpretation; old maintenance entry points never acquire new producer authority.
 pub(super) enum ContentOpenMode {
@@ -79,6 +85,10 @@ pub(super) enum ContentOpenMode {
     Reclamation,
     /// Explicit original Root6 to GC Root7 drained transition.
     ReclamationUpgrade,
+    /// Complete accepted private staging-reclamation generation only.
+    StagingGc,
+    /// Explicit fully drained Root7 to Root8 transition without changing old authority.
+    StagingGcUpgrade,
 }
 
 /// Fresh root interpretation; old create entry points never gain a stream journal implicitly.
@@ -93,6 +103,8 @@ pub(super) enum ContentCreateMode {
     Snapshots,
     /// Explicit Snapshot receiving plus original GC/tombstone journals.
     Reclamation,
+    /// Explicit original staging command/item journals beside complete Root7 authority.
+    StagingGc,
 }
 /// Bound on retained reference IDs; exhaustion never discards original ownership.
 const MAX_REFERENCES: usize = 65_536;
@@ -191,6 +203,8 @@ struct ContentInner {
     snapshot_receives: bool,
     /// Explicit original GC/tombstone generation selected by this held Root writer.
     reclamation: bool,
+    /// Explicit original staging collection interpretation admitted by this exact connection.
+    staging_gc: bool,
     /// Exact explicitly configured current restoration binding; absent on original physical roots.
     restore_binding: Option<String>,
     /// Bounds actual running/queued stream workers; each unique worker retains its own permit.
@@ -226,6 +240,37 @@ pub struct ReplicaContentStore {
 }
 
 impl ReplicaContentStore {
+    /// Creates only a fresh explicit Root8 with both complete empty staging-GC inventories.
+    pub fn create_with_staging_gc(root: &Path, profile: &str, member: u64) -> Result<Self, String> {
+        layout::create(root, profile, member, ContentCreateMode::StagingGc)
+    }
+
+    /// Opens only Root8 under its exact original/restored declaration, never inferring authority.
+    pub fn open_with_staging_gc(
+        root: &Path,
+        profile: &str,
+        member: u64,
+        binding: Option<&str>,
+    ) -> Result<Self, String> {
+        layout::open_bound(root, profile, member, ContentOpenMode::StagingGc, binding)
+    }
+
+    /// Upgrades only drained Root7 while preserving original inodes, results, clocks and ownership.
+    pub fn upgrade_staging_gc(
+        root: &Path,
+        profile: &str,
+        member: u64,
+        binding: Option<&str>,
+    ) -> Result<Self, String> {
+        layout::open_bound(
+            root,
+            profile,
+            member,
+            ContentOpenMode::StagingGcUpgrade,
+            binding,
+        )
+    }
+
     /// Creates only a fresh explicit Root7 with complete empty original GC inventories.
     pub fn create_with_reclamation(
         root: &Path,

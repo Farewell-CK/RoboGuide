@@ -46,13 +46,14 @@ pub use content_application::{
 pub use content_store::{
     ContentProcessEndObservation, REPLICA_CONTENT_GC_LAYOUT_SCHEMA, REPLICA_CONTENT_LAYOUT_SCHEMA,
     REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA, REPLICA_CONTENT_SNAPSHOT_LAYOUT_SCHEMA,
-    REPLICA_CONTENT_STORAGE_SCHEMA, REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA, ReplicaContentCopyStatus,
-    ReplicaContentGcStatus, ReplicaContentIdentity, ReplicaContentProducerKind,
-    ReplicaContentProducerSource, ReplicaContentProducerStatus, ReplicaContentReadLease,
-    ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus,
-    ReplicaContentReceipt, ReplicaContentReference, ReplicaContentReferenceKind,
-    ReplicaContentStore, ReplicaContentStreamStatus, ReplicaSnapshotCloseStatus,
-    SnapshotContentHeader, SnapshotContentReady, SnapshotContentStatus,
+    REPLICA_CONTENT_STAGING_GC_LAYOUT_SCHEMA, REPLICA_CONTENT_STORAGE_SCHEMA,
+    REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA, ReplicaContentCopyStatus, ReplicaContentGcStatus,
+    ReplicaContentIdentity, ReplicaContentProducerKind, ReplicaContentProducerSource,
+    ReplicaContentProducerStatus, ReplicaContentReadLease, ReplicaContentReader,
+    ReplicaContentReaderReceipt, ReplicaContentReaderStatus, ReplicaContentReceipt,
+    ReplicaContentReference, ReplicaContentReferenceKind, ReplicaContentStore,
+    ReplicaContentStreamStatus, ReplicaSnapshotCloseStatus, ReplicaStagingGcStatus,
+    ReplicaStagingTarget, SnapshotContentHeader, SnapshotContentReady, SnapshotContentStatus,
 };
 pub use controller_ingress::{
     ControllerContentClient, ControllerContentClientConfig, ControllerContentRead,

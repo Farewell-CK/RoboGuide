@@ -17,11 +17,13 @@ from .snapshot_references import OperationBudget, canonical
 PROFILE = "roboguide.recovery-profile/v0.19"
 SNAPSHOT_PROFILE = "roboguide.recovery-profile/v0.20"
 GC_PROFILE = "roboguide.recovery-profile/v0.21"
-PROFILES = frozenset({PROFILE, SNAPSHOT_PROFILE, GC_PROFILE})
+STAGING_PROFILE = "roboguide.recovery-profile/v0.22"
+PROFILES = frozenset({PROFILE, SNAPSHOT_PROFILE, GC_PROFILE, STAGING_PROFILE})
 LAYOUT4 = "roboguide.replica-content-layout/v0.4"
 LAYOUT5 = "roboguide.replica-content-layout/v0.5"
 LAYOUT6 = "roboguide.replica-content-layout/v0.6"
 LAYOUT7 = "roboguide.replica-content-layout/v0.7"
+LAYOUT8 = "roboguide.replica-content-layout/v0.8"
 BINDING_FILE = ".restore-binding.json"
 HEADS = {
     "reference_ids": ("content_references", "reference_id"),
@@ -68,7 +70,7 @@ def metadata_files(component: dict[str, Any]) -> list[str]:
     """Select original identity fences and the explicit current backing head."""
     result = [".content-creation.json", ".retention-owner.json", "blobs"]
     if component["storage_schema"] == LAYOUT5 or (
-        component["storage_schema"] in {LAYOUT6, LAYOUT7}
+        component["storage_schema"] in {LAYOUT6, LAYOUT7, LAYOUT8}
         and component.get("restore_binding_digest") is not None
     ):
         result.append(BINDING_FILE)
@@ -301,6 +303,7 @@ def bindings(raw: str, identity: dict[str, Any]) -> list[str]:
                 ("roboguide.replica-content-restore-binding/v0.1", 4 if index == 0 else 5),
                 ("roboguide.replica-content-restore-binding/v0.2", 6),
                 ("roboguide.replica-content-restore-binding/v0.3", 7),
+                ("roboguide.replica-content-restore-binding/v0.4", 8),
             }
             or not isinstance(binding["command_id"], str)
             or not 0 < len(binding["command_id"]) <= 128
@@ -380,6 +383,7 @@ def inventory(
             (5, LAYOUT5),
             (6, LAYOUT6),
             (7, LAYOUT7),
+            (8, LAYOUT8),
         }:
             raise ValueError("Replica content declared/actual original generation differs")
         heads = HEADS | (
@@ -387,11 +391,16 @@ def inventory(
             if version >= 6
             else {}
         )
-        if version == 7:
+        if version >= 7:
             heads |= {
                 "gc_ids": ("content_gc_commands", "operation_id"),
                 "tombstone_keys": ("content_tombstones", "content_key"),
                 "stream_retirement_ids": ("content_stream_retirements", "stream_id"),
+            }
+        if version == 8:
+            heads |= {
+                "staging_gc_ids": ("content_staging_gc_commands", "operation_id"),
+                "staging_gc_item_ids": ("content_staging_gc_items", "item_id"),
             }
         expected = set(table for table, _ in heads.values()) | {"metadata"}
         objects = dict(
@@ -406,7 +415,7 @@ def inventory(
         ]
         if metadata_columns != [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)]:
             raise ValueError("Replica content original metadata columns/keys differ")
-        metadata = dict(connection.execute("SELECT key,value FROM metadata LIMIT 16"))
+        metadata = dict(connection.execute("SELECT key,value FROM metadata LIMIT 18"))
         required = set(heads) | {"identity", "layout", "legacy_producer_ids"}
         restored = version == 5 or (version >= 6 and metadata.get("backing_mode") == "restored")
         if version >= 6:
@@ -451,6 +460,7 @@ def inventory(
                     in {
                         "content_snapshot_receives",
                         "content_gc_commands",
+                        "content_staging_gc_commands",
                     }
                     else 8 * 1024 * 1024
                     if table in {"content_producers", "content_streams"}
@@ -477,13 +487,17 @@ def inventory(
     elif live and {key: identity[key] for key in _backing(root)} != _backing(root):
         raise ValueError("Replica content original backing inode differs")
     validate_records(identity, tables, json.loads(metadata["legacy_producer_ids"]), budget)
-    if version == 7:
+    if version >= 7:
         from .replica_gc import validate as validate_gc
 
         validate_gc(identity, tables, budget)
         from .replica_stream_retirements import validate as validate_stream_retirements
 
         validate_stream_retirements(identity, tables, budget)
+    if version == 8:
+        from .replica_staging_gc import validate as validate_staging_gc
+
+        validate_staging_gc(identity, tables, budget)
     return {"identity": identity, "tables": tables, "history": history, "version": version}
 
 

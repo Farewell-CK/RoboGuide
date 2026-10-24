@@ -194,6 +194,13 @@ Harness 不绕过 RoboGuide 直接调用 simulator skill。本地导航/操作 C
 
 ## 如何维护
 
+ADR-0194 已实现并通过真实进程/完整恢复验收：显式 Root8 按原 copy/stream ID 和实际退休证据接纳 staging
+回收，intent/逐项 Unknown 与 mandatory inventories 先于 open/unlink。只删除原私有临时
+名字，CAS/原引用/Root7 tombstone 独立；旧结果与预算不改写。process v0.6/recovery v0.22
+显式选择新边界，私有 staging payload 不随恢复传播，不产生 Node/设备或全局删除事实。
+实际旧目录复制会保留私有 staging；v0.22 因此只复制其空目录，并在 verify 读取 payload
+前拒绝该目录下声明的文件或子目录。原旧格式和历史包不被改标为新边界。
+
 ADR-0193 在显式 Snapshot 内容前置条件等待期间发送原 vote/原 committed cut 的普通 Raft
 Append 心跳。OpenRaft 自己处理任期与选举计时；prefix conflict 不算追平，实际 higher vote
 返回上游处理。首个心跳与后续准备沿用同一预算，原 Unknown 不改写，不创建 Node/设备事实。

@@ -16,6 +16,9 @@ struct Store {
     profile: String,
     /// Infrastructure member identity, never an embodied Node.
     member: u64,
+    /// Explicit Root8 native acceptance; no previous generation is silently reinterpreted.
+    #[serde(default)]
+    staging_gc: bool,
     /// Explicit Root7 fixture generation; old declarations retain their original Root4 meaning.
     #[serde(default)]
     reclamation: bool,
@@ -94,7 +97,14 @@ enum Request {
 
 /// Opens only the explicit accepted stream generation; missing authority never initializes a root.
 fn open(store: &Store) -> Result<ReplicaContentStore, String> {
-    if store.reclamation {
+    if store.staging_gc {
+        ReplicaContentStore::open_with_staging_gc(
+            &store.root,
+            &store.profile,
+            store.member,
+            store.restore_binding_digest.as_deref(),
+        )
+    } else if store.reclamation {
         ReplicaContentStore::open_with_reclamation(
             &store.root,
             &store.profile,
@@ -184,7 +194,13 @@ fn run(request: Request) -> Result<Value, String> {
             )
         }
         Request::Create { store } => {
-            let root = if store.reclamation {
+            let root = if store.staging_gc {
+                ReplicaContentStore::create_with_staging_gc(
+                    &store.root,
+                    &store.profile,
+                    store.member,
+                )
+            } else if store.reclamation {
                 ReplicaContentStore::create_with_reclamation(
                     &store.root,
                     &store.profile,

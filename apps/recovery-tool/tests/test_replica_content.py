@@ -217,7 +217,7 @@ def test_active_bytes_require_same_root_exact_qualified_owner(tmp_path: Path) ->
             _require_bytes("root", required, {changed: files[expected]}, objects)
 
 
-@pytest.mark.parametrize("generation", [4, 6, 7])
+@pytest.mark.parametrize("generation", [4, 6, 7, 8])
 def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
     tmp_path: Path,
     generation: int,
@@ -228,7 +228,9 @@ def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
     stores = source / "stores"
     stores.mkdir()
     component = (
-        gc_fixture(stores / "root", delete_bytes=True)
+        staging_fixture(stores / "root")
+        if generation == 8
+        else gc_fixture(stores / "root", delete_bytes=True)
         if generation == 7
         else snapshot_fixture(stores / "root", ready=True)
         if generation == 6
@@ -249,7 +251,9 @@ def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
         parent_info = (source / "stores/parent/replica.sqlite3").stat()
         manifest = {
             "profile": {
-                "schema": content.GC_PROFILE
+                "schema": content.STAGING_PROFILE
+                if generation == 8
+                else content.GC_PROFILE
                 if generation == 7
                 else content.SNAPSHOT_PROFILE
                 if generation == 6
@@ -280,7 +284,7 @@ def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
         assert len(receipts) == 1
         restored_component = component | (
             {
-                "storage_schema": content.LAYOUT7 if generation == 7 else content.LAYOUT6,
+                "storage_schema": f"roboguide.replica-content-layout/v0.{generation}",
                 "restore_binding_digest": receipts[0]["binding_digest"],
             }
             if generation >= 6
@@ -740,6 +744,116 @@ def test_stream_retirement_cannot_borrow_another_original_or_process(
                 sql.execute(
                     "UPDATE content_references SET record=? WHERE reference_id=?",
                     (json.dumps(reference), reference_id),
+                )
+    with pytest.raises(ValueError):
+        content.inventory(root, component, budget(), live=True)
+
+
+def staging_fixture(root: Path) -> dict[str, Any]:
+    """Add synthetic closed Root8 DTOs over actual partial files; this proves no process facts."""
+    component = stream_retirement_fixture(root, closed=False)
+    original = content.inventory(root, component, budget(), live=True)
+    stream_id, stream = next(iter(original["tables"]["content_streams"].items()))
+    retirement = original["tables"]["content_stream_retirements"][stream_id]
+    staging = root / "staging-v1" / ("stream-" + stream_id)
+    staging.write_bytes(b"actual partial bytes")
+    file = staging.stat()
+    intent = {
+        "schema": "roboguide.replica-staging-gc-intent/v0.1",
+        "command_id": "contract-staging-cleanup",
+        "receiver": original["identity"],
+        "budget": retirement["budget"] | {"admitted_ms": 500},
+        "items": [
+            {
+                "target": {"kind": "stream", "command_id": stream["intent"]["command_id"]},
+                "ownership": {
+                    "content": stream["intent"]["content"],
+                    "source_digest": content._digest(stream),
+                    "release_digest": content._digest(retirement),
+                    "leaf": "stream-" + stream_id,
+                },
+                "file": {"device": file.st_dev, "inode": file.st_ino, "byte_size": file.st_size},
+            }
+        ],
+    }
+    command = content._digest(intent["command_id"])
+    item_id = content._digest([command, 0])
+    item = {
+        "operation_id": command,
+        "ordinal": 0,
+        "intent_digest": content._digest(intent),
+        "outcome": None,
+    }
+    with closing(sqlite3.connect(root / "content.sqlite3")) as sql:
+        with sql:
+            for table, column, head, key, row in (
+                ("content_staging_gc_commands", "operation_id", "staging_gc_ids", command, intent),
+                ("content_staging_gc_items", "item_id", "staging_gc_item_ids", item_id, item),
+            ):
+                sql.execute(f"CREATE TABLE {table}({column} TEXT PRIMARY KEY,record TEXT NOT NULL)")
+                sql.execute(f"INSERT INTO {table} VALUES (?,?)", (key, json.dumps(row)))
+                sql.execute("INSERT INTO metadata VALUES (?,?)", (head, json.dumps([key])))
+            sql.execute("UPDATE metadata SET value=? WHERE key='layout'", (content.LAYOUT8,))
+            sql.execute("PRAGMA user_version=8")
+    return component | {"storage_schema": content.LAYOUT8}
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_staging_original_unknown_ignores_current_partial_absence(
+    tmp_path: Path, missing: bool
+) -> None:
+    """Recovery neither copies a private partial nor invents an outcome from restored absence."""
+    root = tmp_path / "root"
+    component = staging_fixture(root)
+    before = content.inventory(root, component, budget(), live=True)
+    if missing:
+        next((root / "staging-v1").iterdir()).unlink()
+    after = content.inventory(root, component, budget(), live=True)
+    assert after == before
+    assert next(iter(after["tables"]["content_staging_gc_items"].values()))["outcome"] is None
+    assert next(iter(after["tables"]["content_streams"].values()))["receipt"] is None
+    assert _required(after), "independent live reader must still retain complete CAS"
+
+
+@pytest.mark.parametrize(
+    "corrupt", ["commands-head", "items-head", "item", "source", "release", "ordinal", "clock"]
+)
+def test_staging_missing_or_borrowed_original_evidence_refuses(
+    tmp_path: Path, corrupt: str
+) -> None:
+    """Exact inventory, source ownership and per-item clock are mandatory even after an unlink."""
+    root = tmp_path / "root"
+    component = staging_fixture(root)
+    with closing(sqlite3.connect(root / "content.sqlite3")) as sql:
+        with sql:
+            if corrupt in {"commands-head", "items-head"}:
+                head = "staging_gc_ids" if corrupt == "commands-head" else "staging_gc_item_ids"
+                sql.execute("DELETE FROM metadata WHERE key=?", (head,))
+            elif corrupt == "item":
+                sql.execute("DELETE FROM content_staging_gc_items")
+                sql.execute("UPDATE metadata SET value='[]' WHERE key='staging_gc_item_ids'")
+            elif corrupt in {"source", "release"}:
+                key, raw = sql.execute("SELECT * FROM content_staging_gc_commands").fetchone()
+                row = json.loads(raw)
+                row["items"][0]["ownership"][corrupt + "_digest"] = "0" * 64
+                sql.execute(
+                    "UPDATE content_staging_gc_commands SET record=? WHERE operation_id=?",
+                    (json.dumps(row), key),
+                )
+            else:
+                key, raw = sql.execute("SELECT * FROM content_staging_gc_items").fetchone()
+                row = json.loads(raw)
+                if corrupt == "ordinal":
+                    row["ordinal"] = True
+                else:
+                    row["outcome"] = {
+                        "state": "deleted",
+                        "observed_ms": 1501,
+                        "observed_digest": "sha256:" + "a" * 64,
+                    }
+                sql.execute(
+                    "UPDATE content_staging_gc_items SET record=? WHERE item_id=?",
+                    (json.dumps(row), key),
                 )
     with pytest.raises(ValueError):
         content.inventory(root, component, budget(), live=True)

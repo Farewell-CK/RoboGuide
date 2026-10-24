@@ -1,6 +1,6 @@
 //! Explicit local OS-admin content maintenance; no listener, consensus or Controller child starts.
 
-use controller_replication::{ReplicaContentStore, SqliteRaftStore};
+use controller_replication::{ReplicaContentStore, ReplicaStagingTarget, SqliteRaftStore};
 use serde::Deserialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -15,12 +15,94 @@ struct Member {
     profile_identity: String,
     /// Exact original infrastructure member, never a capability or device inventory.
     member: u64,
+    /// Explicit Root8 interpretation; absent declarations retain their original Root7 meaning.
+    #[serde(default)]
+    content_layout: Option<String>,
+}
+
+impl Member {
+    /// Opens only the explicitly declared GC generation, never detecting or upgrading from files.
+    fn open_gc(&self, binding: Option<&str>) -> Result<ReplicaContentStore, String> {
+        match self.content_layout.as_deref() {
+            None => ReplicaContentStore::open_with_reclamation(
+                &self.content_root,
+                &self.profile_identity,
+                self.member,
+                binding,
+            ),
+            Some(controller_replication::REPLICA_CONTENT_STAGING_GC_LAYOUT_SCHEMA) => {
+                ReplicaContentStore::open_with_staging_gc(
+                    &self.content_root,
+                    &self.profile_identity,
+                    self.member,
+                    binding,
+                )
+            }
+            Some(_) => Err("unsupported explicit content maintenance layout".into()),
+        }
+    }
+
+    /// Earlier actions cannot silently accept a declaration that changes their interpretation.
+    fn legacy(&self) -> Result<(), String> {
+        if self.content_layout.is_some() {
+            return Err("original maintenance action does not accept a new layout selector".into());
+        }
+        Ok(())
+    }
+
+    /// Requires the caller's explicit Root8 selection before new staging authority is admitted.
+    fn staging(&self) -> Result<(), String> {
+        if self.content_layout.as_deref()
+            != Some(controller_replication::REPLICA_CONTENT_STAGING_GC_LAYOUT_SCHEMA)
+        {
+            return Err("staging maintenance requires explicit Root8".into());
+        }
+        Ok(())
+    }
 }
 
 /// Closed local actions; same-ID adoption retries are observations of the original record.
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
+    /// Releases an Unknown copy only through independently observed original process-end evidence.
+    RetireEndedContentCopy {
+        /// Existing original explicitly declared GC root.
+        member: Member,
+        /// Exact original restored backing when selected.
+        restore_binding_digest: Option<String>,
+        /// Original copy command, never an asserted caller completion or stop flag.
+        command_id: String,
+    },
+    /// Explicitly drains Root7 and installs mandatory Root8 inventories before any cleanup.
+    UpgradeStagingRoot {
+        /// Existing original member and explicit desired Root8 interpretation.
+        member: Member,
+        /// Exact original restored backing, absent for original physical roots.
+        restore_binding_digest: Option<String>,
+    },
+    /// Reclaims only private names derived from exact original retired source operations.
+    CollectStaging {
+        /// Existing original explicit Root8 declaration.
+        member: Member,
+        /// Original restored backing if selected.
+        restore_binding_digest: Option<String>,
+        /// Immutable original cleanup identity; same-ID requests only observe.
+        command_id: String,
+        /// Bounded typed original selectors, never caller paths or close flags.
+        targets: Vec<ReplicaStagingTarget>,
+        /// One original queue/scan/effect/SQL duration.
+        budget_ms: u64,
+    },
+    /// Observes exact original intent/items without another filesystem effect or budget.
+    ObserveStagingGc {
+        /// Existing original explicit Root8 declaration.
+        member: Member,
+        /// Exact original restored backing if selected.
+        restore_binding_digest: Option<String>,
+        /// Original retained cleanup command.
+        command_id: String,
+    },
     /// Retires only the exact actually closed stream, preserving its original receipt or Unknown.
     RetireContentStream {
         /// Complete original accepted Root7 declaration.
@@ -97,24 +179,66 @@ pub(crate) fn run(path: &Path) -> Result<serde_json::Value, String> {
     }
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     match request {
+        Request::RetireEndedContentCopy {
+            member,
+            restore_binding_digest,
+            command_id,
+        } => {
+            let root = member.open_gc(restore_binding_digest.as_deref())?;
+            serde_json::to_value(root.retire_ended_copy(&command_id)?)
+                .map_err(|error| error.to_string())
+        }
+        Request::UpgradeStagingRoot {
+            member,
+            restore_binding_digest,
+        } => {
+            member.staging()?;
+            let root = ReplicaContentStore::upgrade_staging_gc(
+                &member.content_root,
+                &member.profile_identity,
+                member.member,
+                restore_binding_digest.as_deref(),
+            )?;
+            Ok(serde_json::json!({"root_identity":root.identity(),
+                "staging_layout":controller_replication::REPLICA_CONTENT_STAGING_GC_LAYOUT_SCHEMA,
+                "historical_operations":"preserved; no clocks or permissions renewed"}))
+        }
+        Request::CollectStaging {
+            member,
+            restore_binding_digest,
+            command_id,
+            targets,
+            budget_ms,
+        } => {
+            member.staging()?;
+            let root = member.open_gc(restore_binding_digest.as_deref())?;
+            serde_json::to_value(root.collect_retired_staging(&command_id, targets, budget_ms)?)
+                .map_err(|error| error.to_string())
+        }
+        Request::ObserveStagingGc {
+            member,
+            restore_binding_digest,
+            command_id,
+        } => {
+            member.staging()?;
+            let root = member.open_gc(restore_binding_digest.as_deref())?;
+            serde_json::to_value(root.staging_gc_status(&command_id)?)
+                .map_err(|error| error.to_string())
+        }
         Request::RetireContentStream {
             member,
             restore_binding_digest,
             command_id,
             budget_ms,
         } => {
-            let root = ReplicaContentStore::open_with_reclamation(
-                &member.content_root,
-                &member.profile_identity,
-                member.member,
-                restore_binding_digest.as_deref(),
-            )?;
+            let root = member.open_gc(restore_binding_digest.as_deref())?;
             root.retire_stream(&command_id, budget_ms)
         }
         Request::UpgradeReclamationRoot {
             member,
             restore_binding_digest,
         } => {
+            member.legacy()?;
             let root = ReplicaContentStore::upgrade_reclamation(
                 &member.content_root,
                 &member.profile_identity,
@@ -131,12 +255,7 @@ pub(crate) fn run(path: &Path) -> Result<serde_json::Value, String> {
             command_id,
             budget_ms,
         } => {
-            let root = ReplicaContentStore::open_with_reclamation(
-                &member.content_root,
-                &member.profile_identity,
-                member.member,
-                restore_binding_digest.as_deref(),
-            )?;
+            let root = member.open_gc(restore_binding_digest.as_deref())?;
             serde_json::to_value(root.collect_unreferenced_content(&command_id, budget_ms)?)
                 .map_err(|error| error.to_string())
         }
@@ -145,18 +264,14 @@ pub(crate) fn run(path: &Path) -> Result<serde_json::Value, String> {
             restore_binding_digest,
             command_id,
         } => {
-            let root = ReplicaContentStore::open_with_reclamation(
-                &member.content_root,
-                &member.profile_identity,
-                member.member,
-                restore_binding_digest.as_deref(),
-            )?;
+            let root = member.open_gc(restore_binding_digest.as_deref())?;
             serde_json::to_value(root.gc_status(&command_id)?).map_err(|error| error.to_string())
         }
         Request::UpgradeSnapshotRoot {
             member,
             restore_binding_digest,
         } => {
+            member.legacy()?;
             let root = ReplicaContentStore::upgrade_snapshot_receives(
                 &member.content_root,
                 &member.profile_identity,
@@ -169,6 +284,7 @@ pub(crate) fn run(path: &Path) -> Result<serde_json::Value, String> {
             )
         }
         Request::UpgradeRoot { member } => {
+            member.legacy()?;
             let root = ReplicaContentStore::upgrade_producer_journal(
                 &member.content_root,
                 &member.profile_identity,
@@ -184,6 +300,7 @@ pub(crate) fn run(path: &Path) -> Result<serde_json::Value, String> {
             operation_id,
             budget_ms,
         } => {
+            member.legacy()?;
             if !parent_sql.is_absolute() {
                 return Err(
                     "content parent maintenance requires an explicit absolute SQL file".into(),

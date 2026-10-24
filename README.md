@@ -1,5 +1,9 @@
 # RoboGuide
 
+[staging 回收](docs/decisions/0194-original-staging-file-reclamation.md)已接入显式 Root8：
+原操作退休后才接纳私有临时名字的删除，先记录 intent/逐项 Unknown；CAS 与原结果独立。
+实际中断、SQL 结果失败、旧格式拒绝和完整恢复见[验收](docs/development/acceptance/2026-10-24-original-staging-reclamation.md)。
+
 [完整内容 voter 准入](docs/decisions/0192-complete-content-voter-admission.md)在 joint consensus
 前核对原完整 quorum、新 voter 实际字节与新多数派。内容 Commit/成员切换串行，已入队的
 原 Raft 操作在调用方取消或超时后仍持有门禁；真实 mTLS learner/joint 进程验收已通过。

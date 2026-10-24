@@ -86,7 +86,7 @@ pub(crate) fn release_digest(
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
-    if version != 7 {
+    if version < 7 {
         return Ok(None);
     }
     let Some(retired) = record(connection, &operation_id(&original.intent.command_id)?)? else {

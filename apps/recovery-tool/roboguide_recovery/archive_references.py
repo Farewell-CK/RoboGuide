@@ -25,6 +25,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.19",
     "roboguide.recovery-profile/v0.20",
     "roboguide.recovery-profile/v0.21",
+    "roboguide.recovery-profile/v0.22",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -432,6 +433,7 @@ def validate(
                     "roboguide.recovery-profile/v0.19",
                     "roboguide.recovery-profile/v0.20",
                     "roboguide.recovery-profile/v0.21",
+                    "roboguide.recovery-profile/v0.22",
                 } and isinstance(authority_id, str):
                     from .replica_content_bundle import projection_authority
 
@@ -453,6 +455,7 @@ def validate(
                         "roboguide.recovery-profile/v0.19",
                         "roboguide.recovery-profile/v0.20",
                         "roboguide.recovery-profile/v0.21",
+                        "roboguide.recovery-profile/v0.22",
                     }
                 ):
                     raise ValueError(

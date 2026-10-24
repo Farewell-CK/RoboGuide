@@ -219,6 +219,7 @@ def _validate_intent(value: dict[str, Any]) -> None:
         "roboguide.recovery-profile/v0.19",
         "roboguide.recovery-profile/v0.20",
         "roboguide.recovery-profile/v0.21",
+        "roboguide.recovery-profile/v0.22",
     } or not any(
         row["component_id"] == value["component_id"]
         and row["kind"] == "artifact"

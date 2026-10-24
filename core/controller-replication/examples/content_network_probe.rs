@@ -34,6 +34,9 @@ struct Config {
     /// Explicit Root7 native acceptance; older configurations keep their original storage meaning.
     #[serde(default)]
     reclamation: bool,
+    /// Explicit Root8 native acceptance, independent of application and Node generations.
+    #[serde(default)]
+    staging_gc: bool,
 }
 
 /// Closed trusted local process operations; no arbitrary SQL, shell or fabricated execution is accepted.
@@ -285,7 +288,14 @@ fn capture(
 
 /// Serves actual Raft/mTLS while owned local stdin requests drive only maintained core interfaces.
 async fn serve(config: Config) -> Result<(), String> {
-    let root = if config.reclamation {
+    let root = if config.staging_gc {
+        ReplicaContentStore::open_with_staging_gc(
+            &config.content_root,
+            &config.replica.profile_identity(),
+            config.replica.replica_id,
+            None,
+        )
+    } else if config.reclamation {
         ReplicaContentStore::open_with_reclamation(
             &config.content_root,
             &config.replica.profile_identity(),

@@ -172,7 +172,7 @@ pub(super) fn require_live(sql: &Connection, key: &ArtifactContentKey) -> Result
     let version: i64 = sql
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
-    if version == 7 && tombstone(sql, key)?.is_some() {
+    if version >= 7 && tombstone(sql, key)?.is_some() {
         return Err("original qualified content is irreversibly tombstoned".into());
     }
     Ok(())

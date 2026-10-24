@@ -165,6 +165,32 @@ jobs:
           --supervisor target/debug/controller-replica
           --output "${RUNNER_TEMP}/roboguide-content-cold-recovery"
 
+      - name: Build the pinned actual pre-Root8 writer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/tarball/e0b1ac05cd7c6a7cb2c19b77702dbccc8788119b > "${RUNNER_TEMP}/roboguide-pre-root8.tar.gz"
+          mkdir "${RUNNER_TEMP}/roboguide-pre-root8"
+          tar -xzf "${RUNNER_TEMP}/roboguide-pre-root8.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-pre-root8"
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-pre-root8-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-pre-root8/Cargo.toml" -p controller-replication --example content_stream_probe
+
+      - name: Verify actual Root8 staging faults and original drained upgrades with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_replica_staging_gc_processes.py
+          --probe target/debug/examples/content_stream_probe
+          --source-probe target/debug/examples/content_store_probe
+          --maintenance target/debug/controller-replica
+          --old-probe "${RUNNER_TEMP}/roboguide-pre-root8-target/debug/examples/content_stream_probe"
+          --upgrade-source /tmp/rg-ci-runnable-content
+          --output "${RUNNER_TEMP}/roboguide-staging-gc"
+
+      - name: Verify complete Root8 cold recovery and three restored leaders
+        run: >
+          uv run --frozen python tools/quality/check_replica_content_recovery_processes.py
+          --source /tmp/rg-ci-runnable-content
+          --supervisor target/debug/controller-replica
+          --output "${RUNNER_TEMP}/roboguide-staging-cold-recovery"
+
       - name: Verify actual Prepared source scopes and native restart with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_prepared_source_processes.py
