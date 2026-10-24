@@ -2,9 +2,9 @@
 
 use crate::{ControlError, ControlPlane, GroupLifecycle};
 use domain::{
-    ExecutionGroupId, GroupMembershipVersion, MemoryAccessOperation, MemoryArtifactManifest,
-    MemoryAuthorizationRegistry, MemoryOwner, MemoryProviderDescriptor, MemoryScope, NodeId,
-    RoleId, TaskRef,
+    ExecutionGroupId, GroupMembershipVersion, MapArtifactManifest, MemoryAccessOperation,
+    MemoryArtifactManifest, MemoryAuthorizationRegistry, MemoryOwner, MemoryProviderDescriptor,
+    MemoryScope, NodeId, RoleId, TaskRef,
 };
 
 impl ControlPlane {
@@ -210,6 +210,38 @@ impl ControlPlane {
         child
             .validate()
             .map_err(|error| ControlError::InvalidProposal(error.to_string()))?;
+        self.validate_handoff_shape(parent, child)?;
+        self.authorize_memory_principal(parent, tenant, principal, MemoryAccessOperation::Handoff)?;
+        self.validate_handoff_scope(parent, child)
+    }
+
+    /// Authorizes a typed-map source while retaining its complete Spatial provenance at handoff.
+    pub fn authorize_typed_map_handoff(
+        &self,
+        map: &MapArtifactManifest,
+        child: &MemoryArtifactManifest,
+        tenant: &str,
+        principal: &str,
+    ) -> Result<(), ControlError> {
+        let parent = domain::map_memory_manifest(map).map_err(ControlError::InvalidProposal)?;
+        self.validate_handoff_shape(&parent, child)?;
+        self.validate_memory_owner_tenant(&parent, tenant)?;
+        let policy = self
+            .memory_authorization_registry
+            .as_ref()
+            .ok_or_else(|| denied("Memory content policy is unavailable"))?
+            .typed_map_policy(map, tenant)
+            .map_err(ControlError::InvalidProposal)?;
+        Self::authorize_memory_policy_principal(policy, principal, MemoryAccessOperation::Handoff)?;
+        self.validate_handoff_scope(&parent, child)
+    }
+
+    /// Checks immutable parent/child identity before either generic or typed authorization.
+    fn validate_handoff_shape(
+        &self,
+        parent: &MemoryArtifactManifest,
+        child: &MemoryArtifactManifest,
+    ) -> Result<(), ControlError> {
         if parent.selector() == child.selector()
             || parent.visibility() != domain::MemoryVisibility::Exchangeable
             || child.visibility() != domain::MemoryVisibility::Exchangeable
@@ -224,7 +256,15 @@ impl ControlPlane {
                 "Memory handoff changes immutable ownership, contract or bytes",
             ));
         }
-        self.authorize_memory_principal(parent, tenant, principal, MemoryAccessOperation::Handoff)?;
+        Ok(())
+    }
+
+    /// Checks existing scope narrowing and current target Group membership.
+    fn validate_handoff_scope(
+        &self,
+        parent: &MemoryArtifactManifest,
+        child: &MemoryArtifactManifest,
+    ) -> Result<(), ControlError> {
         let scope_allowed = match (parent.scope(), child.scope()) {
             (MemoryScope::Local, MemoryScope::Local)
             | (MemoryScope::ExecutionGroup(_), MemoryScope::Local)

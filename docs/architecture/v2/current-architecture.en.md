@@ -209,6 +209,12 @@ Local inspection/repair opens existing parent9/Root8 only and binds original Log
 actual Artifact owner and the first budget to the existing copy journal. Stable IDs exclude retries
 and epochs; original Unknown, clocks and semantic permissions remain. No replacement authority.
 
+ADR-0199 preserves the complete original `MapArtifactManifest` through typed-map Group handoff.
+Schema v0.2 requests retain frame, anchor, provider and lineage beside the generic child projection;
+Control rechecks scope, tenant, principal and typed policy on retry and restore. Generic v0.1
+handoffs retain their original semantics. This does not select an active map or prove localization,
+device stopping or physical continuity.
+
 ADR-0197 passes actual producer/GC/restart and three-leader cold acceptance: compose an actual retired upload with every member's original
 Log/View/Snapshot and stream/reader retention. Real mTLS Snapshot/applied-cut purge and original
 scope/process end release only their own responsibilities. Local OS-admin reader retirement delegates

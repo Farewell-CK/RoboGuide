@@ -1,7 +1,10 @@
 //! Durable stopped-Group exchange; Control alone owns membership and physical commitments.
 
 use crate::*;
-use domain::{ExecutionGroupId, GroupMembershipVersion, MemoryArtifactManifest, MemorySelector};
+use domain::{
+    ExecutionGroupId, GroupMembershipVersion, MapArtifactManifest, MemoryArtifactManifest,
+    MemorySelector,
+};
 use ports::EventSink;
 use sha2::Digest as _;
 
@@ -17,6 +20,9 @@ pub(crate) struct HandoffRequest {
     parent_selector: MemorySelector,
     /// Complete immutable new child; original owner and production provenance remain unchanged.
     child: MemoryArtifactManifest,
+    /// Complete original Spatial manifest when this handoff starts from a typed map.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    typed_map: Option<MapArtifactManifest>,
     /// Group relinquishing its original content-use context.
     source_group_id: ExecutionGroupId,
     /// Exact Control topology at admission.
@@ -203,19 +209,35 @@ fn authority_current(controller: &ControllerState, record: &HandoffRecord) -> Re
     {
         return Err("original handoff policy revision changed".into());
     }
-    controller
-        .bridge
-        .control()
-        .authorize_stopped_memory_handoff(
-            &record.parent,
-            &record.request.child,
-            &record.request.source_group_id,
-            &record.request.source_membership,
-            &record.request.target_membership,
-            &record.tenant_id,
-            &record.principal,
-        )
-        .map_err(|error| error.to_string())?;
+    if let Some(map) = &record.request.typed_map {
+        controller
+            .bridge
+            .control()
+            .authorize_stopped_typed_map_handoff(
+                map,
+                &record.request.child,
+                &record.request.source_group_id,
+                &record.request.source_membership,
+                &record.request.target_membership,
+                &record.tenant_id,
+                &record.principal,
+            )
+            .map_err(|error| error.to_string())?;
+    } else {
+        controller
+            .bridge
+            .control()
+            .authorize_stopped_memory_handoff(
+                &record.parent,
+                &record.request.child,
+                &record.request.source_group_id,
+                &record.request.source_membership,
+                &record.request.target_membership,
+                &record.tenant_id,
+                &record.principal,
+            )
+            .map_err(|error| error.to_string())?;
+    }
     if members(controller, &record.request.source_group_id)? != record.request.source_execution_ids
         || members(controller, target(record))? != record.target_execution_ids
     {
@@ -382,7 +404,10 @@ pub(crate) fn admit(
     let domain::MemoryScope::ExecutionGroup(target_id) = request.child.scope() else {
         return Err("handoff requires a scoped child".into());
     };
-    if request.schema_version != "roboguide.memory-handoff/v0.1"
+    if !matches!(
+        request.schema_version.as_str(),
+        "roboguide.memory-handoff/v0.1" | "roboguide.memory-handoff/v0.2"
+    ) || request.typed_map.is_some() && request.schema_version != "roboguide.memory-handoff/v0.2"
         || request.handoff_id.is_empty()
         || request.handoff_id.len() > 128
         || !request
@@ -414,11 +439,16 @@ pub(crate) fn admit(
     let (parent, map) = catalog
         .memory_source(&request.parent_selector)?
         .ok_or("published original handoff source unavailable")?;
-    if map.is_some()
-        || parent.kind() == domain::MemoryKind::Spatial
-        || catalog.memory_source(request.child.selector())?.is_some()
-    {
-        return Err("handoff requires a new generic scoped child; typed maps retain their original complete source".into());
+    match (map, request.typed_map.as_ref()) {
+        (Some(original), Some(provided)) if original == *provided => {}
+        (None, None) if parent.kind() != domain::MemoryKind::Spatial => {}
+        (Some(_), None) | (None, Some(_)) => {
+            return Err("typed-map handoff requires its complete original manifest".into());
+        }
+        _ => return Err("typed-map handoff source manifest differs from catalog authority".into()),
+    }
+    if catalog.memory_source(request.child.selector())?.is_some() {
+        return Err("handoff child selector is already published".into());
     }
     let tenant_id = controller
         .bridge
@@ -434,6 +464,27 @@ pub(crate) fn admit(
         .to_string();
     if tenant.is_some_and(|tenant| tenant != tenant_id) {
         return Err("handoff belongs to another tenant".into());
+    }
+    if let Some(map) = &request.typed_map {
+        controller
+            .bridge
+            .control()
+            .authorize_stopped_typed_map_handoff(
+                map,
+                &request.child,
+                &request.source_group_id,
+                &request.source_membership,
+                &request.target_membership,
+                &tenant_id,
+                principal,
+            )
+            .map_err(|error| error.to_string())?;
+    } else {
+        controller
+            .bridge
+            .control()
+            .authorize_memory_handoff(&parent, &request.child, &tenant_id, principal)
+            .map_err(|error| error.to_string())?;
     }
     let source_ids = members(controller, &request.source_group_id)?;
     if source_ids != request.source_execution_ids {
@@ -969,14 +1020,20 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
             || record.parent.selector() == record.request.child.selector()
             || !matches!(record.parent.scope(),domain::MemoryScope::ExecutionGroup(group) if group==&record.request.source_group_id)
             || record.parent.created_at() > record.request.child.created_at()
-            || record.parent.kind() == domain::MemoryKind::Spatial
+            || (record.request.typed_map.is_none()
+                && record.parent.kind() == domain::MemoryKind::Spatial)
             || record.parent.visibility() != domain::MemoryVisibility::Exchangeable
             || target(record) == &record.request.source_group_id
         {
             return Err("restored handoff immutable source lineage changed".into());
         }
         if id != &record.request.handoff_id
-            || record.request.schema_version != "roboguide.memory-handoff/v0.1"
+            || !matches!(
+                record.request.schema_version.as_str(),
+                "roboguide.memory-handoff/v0.1" | "roboguide.memory-handoff/v0.2"
+            )
+            || record.request.typed_map.is_some()
+                && record.request.schema_version != "roboguide.memory-handoff/v0.2"
             || record.admitted_at_ms >= record.request.deadline_ms
             || record.request.deadline_ms - record.admitted_at_ms > 300_000
             || record.target_execution_ids.is_empty()
@@ -1037,10 +1094,18 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         }
         let control = controller.bridge.control();
         for group in [&record.request.source_group_id, target(record)] {
-            let mission = control
+            let bound = control
                 .group(group)
-                .ok_or("restored handoff Group absent")?
-                .mission_id();
+                .ok_or("restored handoff Group absent")?;
+            let expected_membership = if group == &record.request.source_group_id {
+                &record.request.source_membership
+            } else {
+                &record.request.target_membership
+            };
+            if bound.membership_version() != Some(expected_membership) {
+                return Err("restored handoff Group membership changed".into());
+            }
+            let mission = bound.mission_id();
             if control.mission_tenant(mission).unwrap_or("local") != record.tenant_id {
                 return Err("restored handoff immutable tenant changed".into());
             }
@@ -1051,12 +1116,41 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         if original.registry_id != record.request.registry_id {
             return Err("handoff original registry changed".into());
         }
-        let parent_policy = original.policy(&record.parent, &record.tenant_id)?;
+        let source_handoff = if let Some(map) = &record.request.typed_map {
+            if domain::map_memory_manifest(map).map_err(|e| e.to_string())? != record.parent {
+                return Err("restored typed-map handoff projection changed".into());
+            }
+            if map.source_mission_id()
+                != &control
+                    .group(&record.request.source_group_id)
+                    .ok_or("restored handoff source Group absent")?
+                    .mission_id()
+                    .clone()
+                || record.parent.source_mission_id() != record.request.child.source_mission_id()
+            {
+                return Err("restored typed-map handoff source Mission changed".into());
+            }
+            original
+                .typed_map_policy(map, &record.tenant_id)?
+                .principals
+                .get(&record.principal)
+                .is_some_and(|ops| ops.contains(&domain::MemoryAccessOperation::Handoff))
+        } else {
+            true
+        };
+        let parent_policy = if record.request.typed_map.is_some() {
+            None
+        } else {
+            Some(original.policy(&record.parent, &record.tenant_id)?)
+        };
         let child_policy = original.policy(&record.request.child, &record.tenant_id)?;
-        if !parent_policy
-            .principals
-            .get(&record.principal)
-            .is_some_and(|ops| ops.contains(&domain::MemoryAccessOperation::Handoff))
+        if !source_handoff
+            || !parent_policy.as_ref().is_none_or(|policy| {
+                policy
+                    .principals
+                    .get(&record.principal)
+                    .is_some_and(|ops| ops.contains(&domain::MemoryAccessOperation::Handoff))
+            })
             || !child_policy.groups.iter().any(|grant| {
                 &grant.group_id == target(record)
                     && [

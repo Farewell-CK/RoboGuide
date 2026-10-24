@@ -7,6 +7,12 @@ Log/input/entry digest and actual Artifact owner, and delegates to the original 
 Stable repair IDs exclude retry/current epoch; original Unknown and clocks stay. This grants
 placement only, never semantic use or device stopping; no implicit source/parent creation.
 
+ADR-0199 preserves complete `MapArtifactManifest` provenance through Group handoff. Typed-map
+handoff requests use schema v0.2, retain the original frame/anchor/provider/lineage beside the
+generic child projection, and recheck the typed policy on retry and restore. Generic v0.1 handoffs
+remain unchanged; a projection cannot relabel a typed map. This preserves metadata authority only,
+not active-map selection, localization, device stopping or physical continuity.
+
 ADR-0197 passes actual producer/GC/restart and three-leader cold acceptance. Compose actual retired-upload Log/View/Snapshot/stream/reader
 retention with final member-local Root CAS GC using original mTLS parents, actual publication/purge
 and original scope/process observations. The closed OS-admin maintenance path may delegate only an

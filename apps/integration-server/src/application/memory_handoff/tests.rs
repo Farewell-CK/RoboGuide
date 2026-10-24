@@ -37,6 +37,7 @@ fn record() -> HandoffRecord {
             handoff_id: "original".into(),
             parent_selector: parent.selector().clone(),
             child: serde_json::from_value(child).unwrap(),
+            typed_map: None,
             source_group_id: ExecutionGroupId::new("source").unwrap(),
             source_membership: GroupMembershipVersion {
                 generation: 1,

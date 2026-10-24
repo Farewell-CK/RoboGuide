@@ -445,6 +445,194 @@ fn memory_handoff_requires_explicit_policy_and_rejects_cross_group_broadening() 
     );
 }
 
+/// Typed-map handoff requires the complete original Spatial manifest instead of its generic projection.
+#[test]
+fn typed_map_handoff_rechecks_complete_manifest_policy_and_scope() {
+    let (mut control, _, _, _, _, _) = authority();
+    let map: domain::MapArtifactManifest = serde_json::from_value(serde_json::json!({
+        "schema": "roboguide.map-manifest/v0.2",
+        "map_id": "map",
+        "revision_id": "source",
+        "content_digest": format!("sha256:{}", "a".repeat(64)),
+        "byte_size": 1,
+        "media_type": "application/vnd.roboguide.spatial-map",
+        "format": {"name": "occupancy", "version": "v1"},
+        "producer_node_id": "source",
+        "producer_local_system_id": "spatial-eaios",
+        "producer_provider_id": "map-provider",
+        "payload_schema": "roboguide.spatial-file-map/v1",
+        "source_mission_id": "mission",
+        "source_execution_id": "execution",
+        "source_task_ref": {"mission_id": "mission", "task_id": "map-task"},
+        "root_frame": "map",
+        "coordinate_convention": "enu",
+        "resolution_meters": 0.05,
+        "spatial_anchor": {"id": "anchor", "kind": "fixed"},
+        "parent_revision_id": null,
+        "created_at_ms": 1
+    }))
+    .unwrap();
+    let parent = domain::map_memory_manifest(&map).unwrap();
+    let mut child_value = serde_json::to_value(&parent).unwrap();
+    child_value["selector"]["revision_id"] = "child".into();
+    child_value["scope"] = serde_json::json!({"kind": "local"});
+    let child: domain::MemoryArtifactManifest = serde_json::from_value(child_value).unwrap();
+    let policy = domain::MemoryAccessPolicy {
+        policy_id: "typed-map".into(),
+        selector: parent.selector().clone(),
+        manifest_digest: domain::memory_manifest_digest(&parent).unwrap(),
+        typed_map_manifest_digest: Some(domain::map_manifest_digest(&map).unwrap()),
+        tenant_id: "local".into(),
+        principals: BTreeMap::from([("handoff".into(), BTreeSet::from([Op::Handoff]))]),
+        groups: Vec::new(),
+        revoked: false,
+    };
+    let mut registry = control.memory_authorization_registry().unwrap().clone();
+    registry.revision = 2;
+    registry.policies.insert(policy.key(), policy);
+    control
+        .accept_memory_authorization_registry(registry, 1)
+        .unwrap();
+    control
+        .authorize_typed_map_handoff(&map, &child, "local", "handoff")
+        .unwrap();
+    let mut changed = map.clone();
+    let encoded = serde_json::to_value(&changed).unwrap();
+    changed = serde_json::from_value({
+        let mut value = encoded;
+        value["root_frame"] = "odom".into();
+        value
+    })
+    .unwrap();
+    assert!(
+        control
+            .authorize_typed_map_handoff(&changed, &child, "local", "handoff")
+            .is_err()
+    );
+}
+
+/// Typed-map stopped handoff keeps both Group generations and the target generic policy gate.
+#[test]
+fn stopped_typed_map_handoff_requires_source_and_target_memberships() {
+    let (mut control, _, _, _, _, _) = authority();
+    let mission = MissionId::new("mission").unwrap();
+    let target_id = ExecutionGroupId::new("map-target").unwrap();
+    let target = crate::ExecutionGroup::new_mission(
+        target_id.clone(),
+        mission.clone(),
+        TaskRef::new(mission.clone(), TaskId::new("receive").unwrap()),
+    );
+    control.groups.insert(target_id.clone(), target);
+    let map: domain::MapArtifactManifest = serde_json::from_value(serde_json::json!({
+        "schema": "roboguide.map-manifest/v0.2",
+        "map_id": "map-stopped",
+        "revision_id": "source",
+        "content_digest": format!("sha256:{}", "a".repeat(64)),
+        "byte_size": 1,
+        "media_type": "application/vnd.roboguide.spatial-map",
+        "format": {"name": "occupancy", "version": "v1"},
+        "producer_node_id": "source",
+        "producer_local_system_id": "spatial-eaios",
+        "producer_provider_id": "map-provider",
+        "payload_schema": "roboguide.spatial-file-map/v1",
+        "source_mission_id": "mission",
+        "source_execution_id": "execution",
+        "source_task_ref": {"mission_id": "mission", "task_id": "map-task"},
+        "root_frame": "map",
+        "coordinate_convention": "enu",
+        "resolution_meters": 0.05,
+        "spatial_anchor": {"id": "anchor", "kind": "fixed"},
+        "parent_revision_id": null,
+        "created_at_ms": 1
+    }))
+    .unwrap();
+    let parent = domain::map_memory_manifest(&map).unwrap();
+    let mut child_value = serde_json::to_value(&parent).unwrap();
+    child_value["selector"]["revision_id"] = "child".into();
+    child_value["scope"] = serde_json::json!({
+        "kind": "execution_group",
+        "execution_group_id": target_id.as_str()
+    });
+    let child: domain::MemoryArtifactManifest = serde_json::from_value(child_value).unwrap();
+    let provider = domain::MemoryConsumerPolicy {
+        provider_id: Some("map-provider".into()),
+        local_system_id: Some(domain::LocalSystemId::new("spatial-eaios").unwrap()),
+        kind: MemoryKind::Spatial,
+        payload_schema: "roboguide.spatial-file-map/v1".into(),
+        media_type: "application/vnd.roboguide.spatial-map".into(),
+    };
+    let mut registry = control.memory_authorization_registry().unwrap().clone();
+    let source_policy = domain::MemoryAccessPolicy {
+        policy_id: "typed-stopped-source".into(),
+        selector: parent.selector().clone(),
+        manifest_digest: domain::memory_manifest_digest(&parent).unwrap(),
+        typed_map_manifest_digest: Some(domain::map_manifest_digest(&map).unwrap()),
+        tenant_id: "local".into(),
+        principals: BTreeMap::from([("handoff".into(), BTreeSet::from([Op::Handoff]))]),
+        groups: Vec::new(),
+        revoked: false,
+    };
+    let target_policy = domain::MemoryAccessPolicy {
+        policy_id: "typed-stopped-child".into(),
+        selector: child.selector().clone(),
+        manifest_digest: domain::memory_manifest_digest(&child).unwrap(),
+        typed_map_manifest_digest: None,
+        tenant_id: "local".into(),
+        principals: BTreeMap::new(),
+        groups: vec![domain::MemoryGroupPolicy {
+            group_id: target_id.clone(),
+            operations: BTreeSet::from([Op::Read, Op::Import]),
+            providers: vec![provider],
+        }],
+        revoked: false,
+    };
+    registry.policies.insert(source_policy.key(), source_policy);
+    registry.policies.insert(target_policy.key(), target_policy);
+    registry.revision = 2;
+    control
+        .accept_memory_authorization_registry(registry, 1)
+        .unwrap();
+    let source = ExecutionGroupId::new("group").unwrap();
+    let source_membership = control
+        .group(&source)
+        .unwrap()
+        .membership_version()
+        .unwrap()
+        .clone();
+    let target_membership = control
+        .group(&target_id)
+        .unwrap()
+        .membership_version()
+        .unwrap()
+        .clone();
+    control
+        .authorize_stopped_typed_map_handoff(
+            &map,
+            &child,
+            &source,
+            &source_membership,
+            &target_membership,
+            "local",
+            "handoff",
+        )
+        .unwrap();
+    let mut stale = target_membership;
+    stale.generation += 1;
+    assert!(
+        control
+            .authorize_stopped_typed_map_handoff(
+                &map,
+                &child,
+                &source,
+                &source_membership,
+                &stale,
+                "local",
+                "handoff",
+            )
+            .is_err()
+    );
+}
+
 /// Revocation changes content eligibility without changing any Group lifecycle, binding or reservation.
 #[test]
 fn memory_revocation_retains_ownership_and_original_manifest_identity() {
