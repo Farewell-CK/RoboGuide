@@ -125,7 +125,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | ADR-0199 已接通 typed-map handoff 的完整原始 manifest、schema v0.2、Control policy/retry/restore fence；发布/import/use/撤权/MI/恢复/回收的跨阶段组合仍待验收，不重写空间算法 |
 | C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | 待实现与验收；保留现有 quota/units |
 | D | N5/F8 | 运行中抢占、耦合恢复、hazard/handoff/regrasp 与原目标 | 待实现与验收；复用 stop/revoke/revision |
-| E | N6 | 双独立 Control 服务的 mTLS、持久决定及原事务恢复 | ADR-0201 已接入 `/v1/federation/sessions`、tenant/domain grant、双 SQLite 服务、重启 GET 对账及 stale epoch 拒绝；跨主机分区/证书轮换/长期 HA 仍待总矩阵 |
+| E | N6 | 双独立 Control 服务的 mTLS、持久决定及原事务恢复 | ADR-0201/0202 已接入 participant HTTP、持久版本化 tenant/domain grant、原回执、双 SQLite 重启/故障对账；持久 coordinator、真实 peer 请求、资源/epoch 证明和跨主机时钟/恢复组合仍未实现，global dispatch 保持 false |
 | F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | 待全部软件必需项通过 |
 
 当前清单为唯一执行队列，下面按原时间保留的切片记录不能替代上表完成条件。
@@ -537,7 +537,7 @@ F0–F3 当前软件切片已有验收；F4–F8 和 F10 已有可执行实现�
 | N3 | 在线 HA 内容与升级恢复 | 以 N1/N2 的内容与引用身份接通 online Archive/Snapshot/Catalog/CAS 一致性，再验证 leader 接管后的原授权内容、原 receipt 与缺失状态；补缺原 child journal 的旧部署显式排空迁移、滚动版本升级/回退。元数据换主不计为内容就绪或设备连续执行 |
 | N4 | 资源成本与可分配资源 | 连接实际 load/GPU memory/queue/交通等可用成本源，保留来源、接收时间、TTL 和 unavailable；增加显式版本化 divisible allocation 及本地强制，不重解释现有 `units` 最小容量语义；验证正常/Group/recovery Commit、释放和完整时间/空间冲突 |
 | N5 | 运行中抢占、耦合恢复与 MI | 在现有 whole-Group stop/hold、Memory revoke 和 Control ownership 上接策略授权的运行中抢占、多 Role 迁移、hazard/handoff/regrasp 合同；验证 stop/退出/撤权证据齐备后才进入新 Commit/Rebind。与 F8 原目标/Review/新计划/复杂拓扑组合，不重做已有副作用；设备证明缺失保留明确待验证状态 |
-| N6 | Federation 服务边界 | ADR-0201 已增加真实两个 Controller 服务的 mTLS HTTP transport、证书 domain grant、tenant 路由、prepare/commit/abort、重启 GET 对账和 epoch fence；跨主机分区、证书轮换、长期故障域 RTO/RPO 与最终矩阵仍需继续 |
+| N6 | Federation 服务边界 | ADR-0201/0202 已有两个独立 Controller participant 服务的 mTLS、版本化证书 domain grant、tenant 路由、原 prepare/commit/abort 回执和重启/响应丢失/SQL 回滚对账；当前进程 checker 是两个服务的外部调用者。仍必须接持久 coordinator、真实 peer 请求与各域资源/epoch 证明、跨主机 clock translation、证书轮换/分区/恢复总矩阵，不能以 local committed 关闭 N6 |
 | N7 | 运维与全量验收 | 在每个前述工作包持续执行 listener 容量、阻塞 I/O、write-disabled、metrics/alert、升级/回退门禁；最终以固定 deployment profile 运行全部非发布矩阵并核对 SLO/runbook。长期、跨主机、人工响应与设备结果按各自证据填写，不能由短窗口或合成事实代替 |
 
 N1 的第一份交付必须同时包含真实生产者代码与进程证据，不能仅增加一种引用类型、

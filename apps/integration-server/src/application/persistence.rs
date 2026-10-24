@@ -39,6 +39,7 @@ pub(crate) fn server_checkpoint_json(
         .checkpoint_json()
         .map_err(|error| format!("orchestration checkpoint failure: {error}"))?;
     serde_json::to_string(&ServerCheckpoint {
+        federation: controller.federation.clone(),
         replication_profile: controller
             .bridge
             .event_sink()

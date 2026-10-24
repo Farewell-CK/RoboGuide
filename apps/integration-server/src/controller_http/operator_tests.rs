@@ -125,6 +125,7 @@ fn integrated_legacy_wrappers_retain_original_verifier_configuration_fence() {
 /// Creates an empty Controller using the existing application and SQLite authority only.
 fn controller(log: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
     Arc::new(Mutex::new(ControllerState {
+        federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
             state::InMemorySharedNodeState::new(),
@@ -763,6 +764,7 @@ fn identity_controller(log: &state::SqliteEventLog) -> Arc<Mutex<ControllerState
     let mut control = control::ControlPlane::new();
     control.bootstrap_node_identity_registry(registry).unwrap();
     Arc::new(Mutex::new(ControllerState {
+        federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control,
             state::InMemorySharedNodeState::new(),

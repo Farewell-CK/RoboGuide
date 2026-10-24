@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper without durable Federation participant policy and original receipts.
+const PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v53";
 /// Previous wrapper before independent Prepared recovery authority.
 const PRE_UPLOAD_RECOVERY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v52";
 /// Previous wrapper before independent original completed-upload retention release.
@@ -142,6 +144,8 @@ struct ControlHttpRequest {
 /// Live process state sharing one Control authority with Mission orchestration.
 #[derive(Clone)]
 struct ControllerState {
+    /// Durable participant policy and original Federation receipts, separate from remote decisions.
+    federation: application::federation::FederationState,
     /// Original bounded runtime candidate/Review/stop-switch authority, separate from execution facts.
     runtime_revisions: BTreeMap<String, application::plan_revision::RevisionState>,
     /// Immutable HTTP receipts; Orchestration still owns complete plan and Mission lifecycle.
@@ -712,6 +716,9 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
 /// Durable Phase 1 process checkpoint saved in the same event-log transaction.
 #[derive(Clone, Serialize, Deserialize)]
 struct ServerCheckpoint {
+    /// Original Federation participant policy history and command receipts.
+    #[serde(default)]
+    federation: application::federation::FederationState,
     /// Original policy, candidate, Review and switch receipts; historical absence grants no authority.
     #[serde(
         default,
@@ -1159,6 +1166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_UPLOAD_RECOVERY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_UPLOAD_RETIREMENT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA
@@ -1210,10 +1218,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .into());
             }
-            let saved: ServerCheckpoint = serde_json::from_str(&checkpoint.checkpoint_json)?;
+            let value: serde_json::Value = serde_json::from_str(&checkpoint.checkpoint_json)?;
+            if value.get("schema").and_then(serde_json::Value::as_str) != Some(&checkpoint.schema) {
+                return Err(
+                    "Controller wrapper body differs from its original storage schema".into(),
+                );
+            }
+            if checkpoint.schema == SERVER_CHECKPOINT_SCHEMA && value.get("federation").is_none() {
+                return Err(
+                    "current Controller wrapper lacks mandatory Federation reference state".into(),
+                );
+            }
+            let saved: ServerCheckpoint = serde_json::from_value(value)?;
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_UPLOAD_RECOVERY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_UPLOAD_RETIREMENT_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CATALOG_ADOPTION_SERVER_CHECKPOINT_SCHEMA
@@ -1280,7 +1300,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 adopted_initialization = true;
             }
             application::validate_isolation_checkpoint_schema(&saved)?;
+            application::federation::validate_wrapper(&saved)?;
             ControllerState {
+                federation: saved.federation,
                 mission_admissions: saved.mission_admissions,
                 memory_imports: saved.memory_imports,
                 memory_preparation: saved.memory_preparation,
@@ -1308,6 +1330,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .into());
         }
         None => ControllerState {
+            federation: Default::default(),
             mission_admissions: BTreeMap::new(),
             memory_imports: BTreeMap::new(),
             memory_preparation: Default::default(),
@@ -1330,6 +1353,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|feed| feed.source_digest().to_string()),
         },
     };
+    application::federation::validate_restored(&controller)?;
+    application::federation::validate_startup_policy(&controller)?;
     controller.bridge.set_diagnostics(diagnostic_handle.clone());
     let installed_identity_registry = match (
         bootstrap_identity_registry,
@@ -1490,6 +1515,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         process_clock.now(),
     )?;
     let http_event_log = event_log.clone();
+    application::federation::synchronize_policy(
+        &controller,
+        &event_log,
+        event_write_gate.as_ref(),
+    )?;
     let http_controller = controller.clone();
     let http_deployment_feasibility = deployment_feasibility.clone();
     let http_verifier_feed = verifier_feed.clone();

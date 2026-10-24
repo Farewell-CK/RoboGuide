@@ -581,8 +581,10 @@ impl ReplicaRecoveryProjection {
     ) -> Result<(), SqliteEventLogError> {
         self.validate_shape()?;
         let floor = self.history_floor()?;
-        if checkpoint.schema != crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
-            || events.len() > MAX_ROWS
+        if !matches!(
+            checkpoint.schema.as_str(),
+            crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA | "roboguide.controller-checkpoint/v53"
+        ) || events.len() > MAX_ROWS
             || floor.checked_add(events.len() as u64) != Some(checkpoint.event_sequence)
         {
             return Err(SqliteEventLogError::Codec(

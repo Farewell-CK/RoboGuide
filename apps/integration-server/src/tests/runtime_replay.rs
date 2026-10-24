@@ -123,6 +123,7 @@ impl ParallelMission {
             )
             .expect("submit Mission");
         let mut controller = ControllerState {
+            federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(
                 control,
                 state,

@@ -21,7 +21,7 @@ from typing import Any
 from archive_abort_processes import run as run_archive_abort
 from check_artifact_authority_processes import call as http_call
 from check_artifact_authority_processes import grant
-from check_identity_processes import ROOT, client, pki, port, stop
+from check_identity_processes import ROOT, client, pki, ports, stop
 from check_state_verifier_processes import save
 from replica_parent_adoption_processes import run as run_parent_adoption
 from replica_producer_processes import run as run_original_producers
@@ -131,6 +131,7 @@ def run(
         "roboguide.controller-checkpoint/v51",
         "roboguide.controller-checkpoint/v52",
         "roboguide.controller-checkpoint/v53",
+        "roboguide.controller-checkpoint/v54",
     }:
         raise ValueError("unsupported explicit original Archive process profile")
     cleanup_authority = schema in {
@@ -138,6 +139,7 @@ def run(
         "roboguide.controller-checkpoint/v51",
         "roboguide.controller-checkpoint/v52",
         "roboguide.controller-checkpoint/v53",
+        "roboguide.controller-checkpoint/v54",
     }
     if abort_unpublished and not cleanup_authority:
         raise ValueError("explicit original cleanup requires wrapper v50")
@@ -209,7 +211,7 @@ def run(
             "TOKIO_WORKER_THREADS": "1",
         }
     )
-    grpc_port, operator_port, artifact_port = port(), port(), port()
+    grpc_port, operator_port, artifact_port = ports(3)
     operator_origin = f"https://127.0.0.1:{operator_port}"
     artifact_origin = f"https://127.0.0.1:{artifact_port}"
     arguments = [
@@ -556,10 +558,15 @@ def run(
             )
         profile: dict[str, Any] = {
             "schema": "roboguide.recovery-profile/v0.18"
-            if schema == "roboguide.controller-checkpoint/v53"
+            if schema
+            in {"roboguide.controller-checkpoint/v53", "roboguide.controller-checkpoint/v54"}
             else "roboguide.recovery-profile/v0.16"
             if schema
-            in {"roboguide.controller-checkpoint/v52", "roboguide.controller-checkpoint/v53"}
+            in {
+                "roboguide.controller-checkpoint/v52",
+                "roboguide.controller-checkpoint/v53",
+                "roboguide.controller-checkpoint/v54",
+            }
             else "roboguide.recovery-profile/v0.15"
             if schema == "roboguide.controller-checkpoint/v51"
             else "roboguide.recovery-profile/v0.13"
@@ -601,13 +608,18 @@ def run(
         if controller_storage_v1:
             profile["schema"] = (
                 "roboguide.recovery-profile/v0.18"
-                if schema == "roboguide.controller-checkpoint/v53"
+                if schema
+                in {"roboguide.controller-checkpoint/v53", "roboguide.controller-checkpoint/v54"}
                 else "roboguide.recovery-profile/v0.17"
             )
             for component in profile["components"]:
                 if component["kind"] == "controller":
                     component["storage_schema"] = "roboguide.controller-storage/v1"
-        if schema in {"roboguide.controller-checkpoint/v52", "roboguide.controller-checkpoint/v53"}:
+        if schema in {
+            "roboguide.controller-checkpoint/v52",
+            "roboguide.controller-checkpoint/v53",
+            "roboguide.controller-checkpoint/v54",
+        }:
             for component in profile["components"]:
                 if component["kind"] == "artifact":
                     component["storage_schema"] = "roboguide.artifact-storage/v3"
@@ -678,12 +690,17 @@ def run(
         )
         assert receipt["schema"] == (
             "roboguide.restore-receipt/v0.18"
-            if schema == "roboguide.controller-checkpoint/v53"
+            if schema
+            in {"roboguide.controller-checkpoint/v53", "roboguide.controller-checkpoint/v54"}
             else "roboguide.restore-receipt/v0.17"
             if controller_storage_v1
             else "roboguide.restore-receipt/v0.16"
             if schema
-            in {"roboguide.controller-checkpoint/v52", "roboguide.controller-checkpoint/v53"}
+            in {
+                "roboguide.controller-checkpoint/v52",
+                "roboguide.controller-checkpoint/v53",
+                "roboguide.controller-checkpoint/v54",
+            }
             else "roboguide.restore-receipt/v0.15"
             if schema == "roboguide.controller-checkpoint/v51"
             else "roboguide.restore-receipt/v0.13"

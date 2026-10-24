@@ -7,6 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 /// Creates empty real SQL-backed application authorities, without registering any Node.
 fn controller(events: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
     Arc::new(Mutex::new(ControllerState {
+        federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
             state::InMemorySharedNodeState::new(),

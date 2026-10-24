@@ -191,7 +191,7 @@ flowchart TB
 
 The default is one Controller, including valid zero-Node deployment. Explicit HA adds Replica and supervisor processes.
 Consensus does not replicate all CAS content; cold recovery does not prove online cross-host continuity.
-Control's Federation session types are not a cross-domain service entrypoint. Eval Harness organizes experiments externally;
+Federation participant HTTP receipts do not implement a durable coordinator or global dispatch. Eval Harness organizes experiments externally;
 Habitat's official outcomes remain environment-authoritative.
 
 ## Review coverage and open boundaries
@@ -201,7 +201,7 @@ RuntimeExecutionManager, IntegrationRuntimeBridge, Node journal, and application
 Referenced software acceptance records are not new physical measurements.
 
 Tenant/category quota is logical accounting, not resource subdivision or OS/GPU enforcement. Owned CPU-worker rlimit
-proof cannot be generalized to every resource. Running preemption, coupled migration, cross-domain transport,
+proof cannot be generalized to every resource. Running preemption, coupled migration, Federation coordination and peer resource proofs,
 online content recovery and the full composed fault matrix remain bounded by the
 [current inventory audit](../../development/roboguide-branch-audit-2026-10-22.md).
 Q1–Q7 have partial answers; neither their age nor Accepted ADR status establishes overall completion.

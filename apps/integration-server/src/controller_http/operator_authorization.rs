@@ -115,6 +115,14 @@ impl AuthorizedRequestGate {
 }
 
 impl application::ApplicationWriteGate for AuthorizedRequestGate {
+    /// Rechecks the current exact TLS grant after slow SQL without releasing the actual writer.
+    fn validate_locked(&self) -> Result<(), String> {
+        let live = self
+            .controller
+            .lock()
+            .map_err(|_| "controller lock is poisoned")?;
+        self.validate(&live)
+    }
     /// Acquires the real mutex and rechecks authority before exposing the transaction guard.
     fn lock(&self) -> Result<MutexGuard<'_, ()>, String> {
         let guard = self

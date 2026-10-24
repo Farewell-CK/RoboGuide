@@ -1414,6 +1414,7 @@ mod tests {
             }
             let before_sequence = log.latest_sequence().unwrap();
             let controller = Arc::new(Mutex::new(ControllerState {
+                federation: Default::default(),
                 bridge: IntegrationRuntimeBridge::new(
                     control,
                     state,
@@ -2351,6 +2352,7 @@ mod tests {
         let mut control = control::ControlPlane::new();
         let state = initial_cost_nodes(&mut control, &plan, &mut events.clone());
         let controller = Arc::new(Mutex::new(ControllerState {
+            federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(
                 control,
                 state,
@@ -2653,6 +2655,7 @@ mod tests {
             super::super::task_verifier::TaskVerifierFeed::load(&source_path, directory.path().join("verdict.json")).unwrap()
         });
         let controller = Arc::new(Mutex::new(ControllerState {
+            federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(
                 control::ControlPlane::new(),
                 state::InMemorySharedNodeState::new(),

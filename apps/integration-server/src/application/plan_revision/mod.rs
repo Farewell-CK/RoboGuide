@@ -13,7 +13,7 @@ mod memory;
 mod switching;
 #[cfg(test)]
 mod tests;
-mod time;
+pub(crate) mod time;
 pub(crate) use discovery::{work_page, work_query};
 use time::{KernelTime, OriginalBudget};
 

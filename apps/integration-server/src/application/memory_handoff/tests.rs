@@ -5,6 +5,7 @@ use super::*;
 /// Opens only empty authorities and SQLite, without introducing a Node or an execution fact.
 fn empty(events: state::SqliteEventLog) -> ControllerState {
     ControllerState {
+        federation: Default::default(),
         mission_admissions: BTreeMap::new(),
         memory_preparation: Default::default(),
         memory_use: Default::default(),

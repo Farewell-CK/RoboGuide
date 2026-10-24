@@ -5,7 +5,7 @@
 //! State & Memory Plane facade for implemented observable projections.
 
 /// Current composition authority wrapper, shared by Controller, replica supervisor and storage fences.
-pub const CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v53";
+pub const CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v54";
 
 /// Returns whether metadata-only inactive installation would lose mandatory original recovery authority.
 pub fn checkpoint_requires_complete_recovery(schema: &str) -> bool {
@@ -16,6 +16,7 @@ pub fn checkpoint_requires_complete_recovery(schema: &str) -> bool {
             | "roboguide.controller-checkpoint/v50"
             | "roboguide.controller-checkpoint/v51"
             | "roboguide.controller-checkpoint/v52"
+            | "roboguide.controller-checkpoint/v53"
     )
 }
 
@@ -49,6 +50,7 @@ pub fn checkpoint_requires_authority_journal(schema: &str) -> bool {
             | "roboguide.controller-checkpoint/v50"
             | "roboguide.controller-checkpoint/v51"
             | "roboguide.controller-checkpoint/v52"
+            | "roboguide.controller-checkpoint/v53"
             | CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
     )
 }

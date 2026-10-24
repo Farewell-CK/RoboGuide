@@ -216,6 +216,7 @@ mod tests {
             Self {
                 _directory: directory,
                 controller: Arc::new(Mutex::new(ControllerState {
+                    federation: Default::default(),
                     bridge: IntegrationRuntimeBridge::new(
                         control,
                         state,

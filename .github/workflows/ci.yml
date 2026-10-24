@@ -105,6 +105,11 @@ jobs:
           uv run --frozen python tools/quality/check_federation_service_processes.py
           --output "${RUNNER_TEMP}/roboguide-federation-service"
 
+      - name: Check retained actual Federation requests against closed schemas
+        run: >
+          uv run --frozen python tools/quality/check_federation_schemas.py
+          --evidence "${RUNNER_TEMP}/roboguide-federation-service"
+
       - name: Verify local Memory references with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_memory_reference_processes.py

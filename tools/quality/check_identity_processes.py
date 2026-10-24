@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from contextlib import closing
+from contextlib import ExitStack, closing
 from pathlib import Path
 from typing import Any
 
@@ -122,6 +122,19 @@ def port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         return int(listener.getsockname()[1])
+
+
+def ports(count: int) -> list[int]:
+    """Select a distinct actual loopback listener set while retaining every original socket."""
+    if not 1 <= count <= 64:
+        raise ValueError("actual listener set must contain between 1 and 64 sockets")
+    with ExitStack() as reservations:
+        selected: list[int] = []
+        for _ in range(count):
+            listener = reservations.enter_context(closing(socket.socket()))
+            listener.bind(("127.0.0.1", 0))
+            selected.append(int(listener.getsockname()[1]))
+        return selected
 
 
 def client(directory: Path, name: str) -> ssl.SSLContext:

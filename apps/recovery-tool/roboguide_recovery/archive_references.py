@@ -35,6 +35,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v51",
     "roboguide.controller-checkpoint/v52",
     "roboguide.controller-checkpoint/v53",
+    "roboguide.controller-checkpoint/v54",
 }
 MAX_HISTORY_BYTES = 256 * 1024 * 1024
 MAX_CATALOG_BYTES = 64 * 1024 * 1024
@@ -480,6 +481,7 @@ def validate(
                     "roboguide.controller-checkpoint/v51",
                     "roboguide.controller-checkpoint/v52",
                     "roboguide.controller-checkpoint/v53",
+                    "roboguide.controller-checkpoint/v54",
                 },
             )
             cleanups: dict[str, list[tuple[dict[str, Any], dict[str, Any] | None]]] = {}

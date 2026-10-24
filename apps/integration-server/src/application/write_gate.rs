@@ -18,6 +18,10 @@ pub(crate) fn run_synchronous_transaction<T>(apply: impl FnOnce() -> T) -> T {
 pub(crate) trait ApplicationWriteGate: Send + Sync {
     /// Holds the real application mutex until Commit/rollback, or rejects before application mutation.
     fn lock(&self) -> Result<MutexGuard<'_, ()>, String>;
+    /// Rechecks the original transport while the caller still holds its real writer guard.
+    fn validate_locked(&self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 impl ApplicationWriteGate for Mutex<()> {
@@ -31,5 +35,9 @@ impl<G: ApplicationWriteGate + ?Sized> ApplicationWriteGate for Arc<G> {
     /// Preserves the wrapped authorization check when ownership moves into a blocking worker.
     fn lock(&self) -> Result<MutexGuard<'_, ()>, String> {
         self.as_ref().lock()
+    }
+    /// Keeps the underlying witness check at a caller's final Commit boundary.
+    fn validate_locked(&self) -> Result<(), String> {
+        self.as_ref().validate_locked()
     }
 }

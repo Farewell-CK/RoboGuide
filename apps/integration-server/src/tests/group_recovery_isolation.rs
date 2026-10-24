@@ -76,6 +76,7 @@ fn restore_and_register(fixture: &Fixture) {
     let saved: ServerCheckpoint = serde_json::from_str(&checkpoint.checkpoint_json).unwrap();
     validate_isolation_checkpoint_schema(&saved).unwrap();
     let mut restored = ControllerState {
+        federation: Default::default(),
         bridge: IntegrationRuntimeBridge::restore_from_checkpoint(
             &saved.integration_json,
             fixture.events.clone(),

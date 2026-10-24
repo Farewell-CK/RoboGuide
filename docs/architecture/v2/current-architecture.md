@@ -208,11 +208,13 @@ ADR-0200 让新的 generic/typed-map replica evidence 保留原始 Memory import
 import intent，event codec v33 与 State/Catalog snapshot 持久化；旧事件的 provenance 保持
 unavailable，不从 Node/provider 推断 owner。
 
-ADR-0201 将 `FederationSession` 接到实际 Controller HTTP 服务：prepare/commit/abort/get
- 需要 operator mTLS、recovery-admin、明确 tenant、`ROBOGUIDE_CONTROL_DOMAIN` 和证书域对
- 两端的显式授权。每个 Control 域在自己的 checkpoint 中保存相同的 tenant、epoch、digest、
- deadline 和 state；响应丢失通过 GET 对账，重启不续期。两个服务的资源权威仍彼此独立，
- 该入口不发送 Execute、不选择 Node，也不证明设备连续性。
+ADR-0201 接通 Federation participant HTTP 入口；ADR-0202 以 wrapper v54 和 service v0.2
+补齐原始 Prepare/Commit/Abort 回执、版本化域授权、actual TLS/stable principal/tenant
+与 domain pair、预期 epoch 门禁及原同 kernel budget。每个本地域只记录自己的阶段，
+GET 的 `local_commit_current` 与 `global_dispatch_ready=false` 明确分离。响应丢失通过
+原回执对账，重试不重写 journal 或续期；策略撤销/回退与旧 writer 有独立进程反例。
+原始 absolute deadline 的当前证据仅覆盖同主机，两域持久 coordinator、真实域间请求、
+resource ownership/epoch 证明、跨主机 clock translation 和组合恢复仍是 N6 必需软件。
 
 ADR-0197 已通过真实引用/回收/重启与三 leader 冷恢复：以实际已退休上传、各成员原 Log/View/Snapshot 和 stream/reader
 为完整回收链，真实 mTLS Snapshot/原 cut purge 与原进程/作用域结束分别释放自己的引用。

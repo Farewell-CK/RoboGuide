@@ -27,3 +27,8 @@ immutable tenant、配置的 Control domain、prepare/commit/abort 和重启后�
 均由各自 SQLite checkpoint 记录。维护门禁为
 `tools/quality/check_federation_service_processes.py`；它不注册 Node、不发送 Execute，
 不关闭跨主机长期 HA、分区/轮换矩阵或物理连续性。
+
+ADR-0202 随后将服务升为 v0.2 / wrapper v54，保留版本化域授权、原始阶段回执与同 kernel
+预算，并明确单域 Committed 不是双域决定。响应丢失、SQL rollback、重启、撤销/回退、
+旧 writer 与独立 schema 结果见 [当前验收](2026-10-25-federation-original-authority.md)。
+完整 N6 的持久 coordinator、真实 peer 请求及资源/epoch 证明仍是未完成软件。

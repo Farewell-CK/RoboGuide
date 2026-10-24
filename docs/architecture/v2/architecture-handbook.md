@@ -186,8 +186,8 @@ flowchart TB
 ```
 
 默认单 Controller，可零 Node 启动；显式 HA profile 另有副本与 supervisor。
-副本共识不复制所有 CAS 内容；静止恢复不是在线跨主机连续性；Control 内 Federation session
-不等于已经有跨域服务入口。Eval Harness 在系统外编排实验、归档证据；Habitat 官方结果仍由环境权威判定。
+副本共识不复制所有 CAS 内容；静止恢复不是在线跨主机连续性；Federation participant HTTP
+仅记录各域本地阶段；原回执/域授权不等于已经有持久 coordinator 和跨域 dispatch。Eval Harness 在系统外编排实验、归档证据；Habitat 官方结果仍由环境权威判定。
 
 ## 核对与开放边界
 
@@ -196,6 +196,6 @@ RuntimeExecutionManager、IntegrationRuntimeBridge、Node journal，以及 appli
 write gate、persistence、Memory 与 recovery 接线。测试结果和软件验收引用原记录，不能改写为本次物理实测。
 
 当前 quota 是 tenant/category 逻辑记账，不是资源切分或 OS/GPU 强制；独立 CPU worker 的
-rlimit proof 也不能推广到所有资源。运行中抢占、复杂耦合迁移、跨域 transport、在线内容恢复和
+rlimit proof 也不能推广到所有资源。运行中抢占、复杂耦合迁移、Federation coordinator/域间资源证明、在线内容恢复和
 完整跨阶段故障矩阵仍须按[最新存量核对](../../development/roboguide-branch-audit-2026-10-22.md)逐项评估。
 旧 Q1–Q7 已有局部答案，不能统称完全未实现；ADR Accepted 也不表示总体验收完成。

@@ -39,7 +39,7 @@ def standalone_binary_schema(binary: Path) -> str:
         raise ValueError("actual Controller binary returned an invalid schema header")
     return (
         "roboguide.recovery-profile/v0.18"
-        if schema == "roboguide.controller-checkpoint/v53"
+        if schema in {"roboguide.controller-checkpoint/v53", "roboguide.controller-checkpoint/v54"}
         else "roboguide.recovery-profile/v0.16"
     )
 
@@ -52,7 +52,7 @@ def standalone_schema(database: Path) -> str:
         raise ValueError("actual Controller checkpoint header is unavailable")
     return (
         "roboguide.recovery-profile/v0.18"
-        if row[0] == "roboguide.controller-checkpoint/v53"
+        if row[0] in {"roboguide.controller-checkpoint/v53", "roboguide.controller-checkpoint/v54"}
         else "roboguide.recovery-profile/v0.16"
     )
 

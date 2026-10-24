@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Actual kernel boot/time namespace and conservative boottime sample, independent of source clocks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct KernelTime {
+pub(crate) struct KernelTime {
     /// Actual Linux boot identity; this is not device identity or attestation.
     boot_id: String,
     /// Actual time namespace inode and filesystem identity.
@@ -18,7 +18,7 @@ pub(super) struct KernelTime {
 
 impl KernelTime {
     /// Reads actual OS evidence; unsupported/changed namespaces fail closed without an epoch fallback.
-    pub(super) fn observe() -> Result<Self, String> {
+    pub(crate) fn observe() -> Result<Self, String> {
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::fs::MetadataExt;
@@ -80,7 +80,7 @@ impl KernelTime {
 /// One nonrenewable original receive budget; another kernel/namespace or regressed time is unavailable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct OriginalBudget {
+pub(crate) struct OriginalBudget {
     /// Actual original local clock sample retained across process restart.
     issued: KernelTime,
     /// Original bounded duration; no restoration path changes it.
@@ -89,11 +89,11 @@ pub(super) struct OriginalBudget {
 
 impl OriginalBudget {
     /// Returns the immutable declared duration for cross-authority restore validation.
-    pub(super) fn duration_ms(&self) -> u64 {
+    pub(crate) fn duration_ms(&self) -> u64 {
         self.duration_ms
     }
     /// Validates retained original OS evidence without treating another current domain as a renewal.
-    pub(super) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if self.duration_ms == 0
             || self.duration_ms > 3_600_000
             || self.issued.boot_id.len() != 36
@@ -110,7 +110,7 @@ impl OriginalBudget {
         Ok(())
     }
     /// Admits a positive bounded duration from actual current kernel evidence.
-    pub(super) fn new(now: &KernelTime, duration_ms: u64) -> Result<Self, String> {
+    pub(crate) fn new(now: &KernelTime, duration_ms: u64) -> Result<Self, String> {
         if duration_ms == 0 || duration_ms > 3_600_000 {
             return Err("invalid original revision budget".into());
         }
@@ -121,7 +121,7 @@ impl OriginalBudget {
     }
 
     /// Returns a conservative remainder without refreshing its original anchor or duration.
-    pub(super) fn remaining(&self, now: &KernelTime) -> u64 {
+    pub(crate) fn remaining(&self, now: &KernelTime) -> u64 {
         if self.duration_ms == 0
             || self.duration_ms > 3_600_000
             || self.issued.boot_id != now.boot_id

@@ -251,6 +251,7 @@ async fn public_attestation_challenge_and_evidence_survive_replay_and_restore() 
         integration::NodeIdentityPolicy::require_lifecycle(registry).unwrap(),
     );
     let controller = Arc::new(Mutex::new(ControllerState {
+        federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control,
             state::InMemorySharedNodeState::new(),

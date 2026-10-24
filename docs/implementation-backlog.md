@@ -53,8 +53,10 @@ divisible allocation、真实 GPU/交通成本、OS quota enforcement、物理�
 
 2026-10-16 Control 已增加持久 Federation prepare/commit session：epoch、plan/ownership digest、
 deadline 与 abort/dispatch-ready gate 均有 checkpoint 和回归，见
-[F9 Federation 验收](development/acceptance/2026-10-16-f9-federation-session.md)。跨域 transport、
-证书路由和真实多域恢复仍未关闭。
+[F9 Federation 验收](development/acceptance/2026-10-16-f9-federation-session.md)。ADR-0201/0202
+增加 participant HTTP、版本化 mTLS/tenant/domain grant 和原始阶段回执；真实双服务外部调用、
+SQL 回滚/响应丢失/重启等已有软件证据。持久 coordinator、真实 peer 请求、各域资源/epoch
+证明、跨主机 clock translation 和组合恢复仍是未完成的软件，global dispatch 保持 false。
 
 2026-10-16 F7 软件停止/恢复边界已由 integration-server 220 项生产回归重新核对，见
 [F7 停止与恢复验收](development/acceptance/2026-10-16-f7-stop-recovery-software.md)。物理

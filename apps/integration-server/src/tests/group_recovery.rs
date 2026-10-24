@@ -176,6 +176,7 @@ impl Fixture {
             )
             .unwrap();
         let mut controller = ControllerState {
+            federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(control, state, events.clone(), router),
             orchestrator,
             mission_admissions: BTreeMap::new(),

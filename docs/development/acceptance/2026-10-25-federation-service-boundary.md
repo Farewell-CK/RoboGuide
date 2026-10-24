@@ -1,5 +1,10 @@
 # Federation service boundary acceptance (software only)
 
+The first ADR-0201 endpoint package is superseded by ADR-0202's original authority and receipt
+fixes, recorded in [the current acceptance](2026-10-25-federation-original-authority.md). The
+two-service checker acts as an external client. It does not implement a durable peer coordinator;
+current service responses keep global dispatch readiness false.
+
 ADR-0201 connects the durable Control `FederationSession` to the deployed Controller HTTP
 listener. The listener accepts only the authenticated recovery-admin mTLS profile. The grant
 contains explicit tenant delegation and `domain_ids`; the process has one configured

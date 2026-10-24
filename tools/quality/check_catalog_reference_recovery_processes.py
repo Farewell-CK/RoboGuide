@@ -202,7 +202,8 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
         assert completed.returncode != 0
         message = completed.stderr.decode(errors="replace")
         assert "unsupported" in message.lower() and any(
-            version in message for version in ("v29", "v48", "v49", "v50", "v51", "v52", "v53")
+            version in message
+            for version in ("v29", "v48", "v49", "v50", "v51", "v52", "v53", "v54")
         ), message
         assert original_heads(old_database) == before
         old_writer = {

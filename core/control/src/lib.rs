@@ -786,6 +786,12 @@ impl ControlPlane {
         session: FederationSession,
         now: TimestampMs,
     ) -> Result<(), ControlError> {
+        if session.state != FederationSessionState::Prepared || session.tenant_id.trim().is_empty()
+        {
+            return Err(ControlError::InvalidProposal(
+                "new federation prepare requires an exact tenant and Prepared phase".into(),
+            ));
+        }
         session
             .validate_at(now)
             .map_err(ControlError::InvalidProposal)?;
@@ -817,6 +823,11 @@ impl ControlPlane {
             .ok_or_else(|| {
                 ControlError::InvalidProposal("unknown federation transaction".into())
             })?;
+        if session.tenant_id.trim().is_empty() {
+            return Err(ControlError::InvalidProposal(
+                "legacy federation tenant authority is unavailable".into(),
+            ));
+        }
         if session.state == FederationSessionState::Committed
             && session.source_epoch == source_epoch
             && session.plan_digest == plan_digest
@@ -862,12 +873,14 @@ impl ControlPlane {
         Ok(())
     }
 
-    /// Returns true only for a current, committed session; callers still gate physical dispatch.
+    /// Returns participant-local commitment only; remote decisions and dispatch require independent gates.
     pub fn federation_dispatch_ready(&self, transaction_id: &str, now: TimestampMs) -> bool {
         self.federation_sessions
             .get(transaction_id)
             .is_some_and(|session| {
-                session.state == FederationSessionState::Committed && now < session.deadline
+                !session.tenant_id.trim().is_empty()
+                    && session.state == FederationSessionState::Committed
+                    && now < session.deadline
             })
     }
 

@@ -43,6 +43,7 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
     let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
         .expect("event log opens");
     let controller = Arc::new(Mutex::new(ControllerState {
+        federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
             state::InMemorySharedNodeState::new(),
@@ -123,6 +124,7 @@ async fn verifier_plan_without_deployment_source_is_not_submitted() {
     let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
         .expect("event log opens");
     let controller = Arc::new(Mutex::new(ControllerState {
+        federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
             state::InMemorySharedNodeState::new(),
@@ -819,6 +821,7 @@ async fn controller_metrics_expose_durable_high_water() {
     let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
         .expect("event log opens");
     let controller = Arc::new(Mutex::new(ControllerState {
+        federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
             state::InMemorySharedNodeState::new(),

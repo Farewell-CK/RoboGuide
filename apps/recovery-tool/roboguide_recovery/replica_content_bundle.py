@@ -159,7 +159,10 @@ def _parent(
             len(metadata) > 4096
             or json.loads(metadata.get("content_root_identity", "null")) != identity
             or json.loads(metadata.get("identity", "null"))
-            != [identity["profile_identity"], "roboguide.controller-checkpoint/v53"]
+            not in (
+                [identity["profile_identity"], "roboguide.controller-checkpoint/v53"],
+                [identity["profile_identity"], "roboguide.controller-checkpoint/v54"],
+            )
             or json.loads(metadata.get("network_content_membership_schema", "null"))
             != "roboguide.replica-storage/v0.7"
             or json.loads(metadata.get("controller_content_ingress_schema", "null"))

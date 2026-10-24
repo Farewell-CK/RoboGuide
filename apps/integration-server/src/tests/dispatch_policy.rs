@@ -472,6 +472,7 @@ impl Fixture {
                 .unwrap();
         }
         let controller = ControllerState {
+            federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(
                 control,
                 state,

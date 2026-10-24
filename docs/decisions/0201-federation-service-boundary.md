@@ -1,6 +1,10 @@
 # ADR-0201: Expose the Federation session through an authenticated domain boundary
 
-Status: Accepted and implemented; physical continuity remains unavailable.
+Status: Initial participant endpoint implementation; superseded authority/retry details are corrected by ADR-0202.
+
+The original process checker acted as an external client of two services. It did not implement
+a Controller-to-Controller coordinator or prove a global commit decision. Current dispatch
+readiness remains false at the service boundary until that remaining N6 software is implemented.
 
 The existing `FederationSession` was durable inside one Control checkpoint, but no deployed
 service could receive a prepare, commit, or abort from another Control domain. That left the

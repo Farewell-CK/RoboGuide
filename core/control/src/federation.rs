@@ -6,9 +6,9 @@ use domain::TimestampMs;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FederationSessionState {
-    /// Source and target domains have durably retained the exact transaction input.
+    /// This participant retained the exact input; the remote participant is independently observed.
     Prepared,
-    /// Both domains have committed the exact input and dispatch may be considered.
+    /// This participant committed; this row alone never proves a cross-domain decision.
     Committed,
     /// The prepared transaction was explicitly aborted before dispatch.
     Aborted,
@@ -49,7 +49,6 @@ impl FederationSession {
             || self.target_domain.trim().is_empty()
             || self.target_domain.len() > 128
             || self.source_domain == self.target_domain
-            || self.tenant_id.trim().is_empty()
             || self.tenant_id.len() > 128
             || self.source_epoch == 0
             || !valid_digest(&self.plan_digest)

@@ -36,6 +36,7 @@ impl Fixture {
             )
             .unwrap();
         let controller = Arc::new(Mutex::new(ControllerState {
+            federation: Default::default(),
             mission_admissions: BTreeMap::new(),
             memory_imports: BTreeMap::new(),
             memory_preparation: Default::default(),

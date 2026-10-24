@@ -119,65 +119,6 @@ fn authorized_tenant(
     Ok(Some(tenant))
 }
 
-/// Returns the deployment-owned Control domain used by Federation routing.
-fn configured_federation_domain() -> Result<String, String> {
-    let domain = std::env::var("ROBOGUIDE_CONTROL_DOMAIN").unwrap_or_else(|_| "local".into());
-    if domain.trim().is_empty() || domain.len() > 128 || domain.contains('/') {
-        return Err("ROBOGUIDE_CONTROL_DOMAIN is invalid".into());
-    }
-    Ok(domain)
-}
-
-/// Checks the certificate-to-domain deployment file; body/header text never grants a peer domain.
-fn authorize_federation_transport(
-    principal: &OperatorPrincipal,
-    source_domain: &str,
-    target_domain: &str,
-    local_domain: &str,
-    tenant: Option<&str>,
-) -> Result<(), String> {
-    if !principal.mtls
-        || principal.certificate.is_none()
-        || principal.role.as_deref() != Some("recovery-admin")
-        || tenant.is_none()
-    {
-        return Err(
-            "Federation service requires an authenticated recovery-admin mTLS delegation".into(),
-        );
-    }
-    if source_domain == target_domain
-        || (source_domain != local_domain && target_domain != local_domain)
-    {
-        return Err("Federation domain pair does not address this Control service".into());
-    }
-    let path = std::env::var_os("ROBOGUIDE_FEDERATION_DOMAIN_GRANTS")
-        .ok_or("Federation requires an explicit certificate domain-grant file")?;
-    let path = std::path::Path::new(&path);
-    if std::fs::metadata(path)
-        .map_err(|error| error.to_string())?
-        .len()
-        > 1024 * 1024
-    {
-        return Err("Federation domain-grant file exceeds its limit".into());
-    }
-    let grants: BTreeMap<String, BTreeSet<String>> =
-        serde_json::from_slice(&std::fs::read(path).map_err(|error| error.to_string())?)
-            .map_err(|error| format!("invalid Federation domain-grant file: {error}"))?;
-    let digest = principal
-        .certificate
-        .as_ref()
-        .expect("mTLS witness checked above")
-        .digest
-        .as_str();
-    let domains = grants
-        .get(digest)
-        .ok_or("certificate has no Federation domain grant")?;
-    if !domains.contains(source_domain) || !domains.contains(target_domain) {
-        return Err("certificate is not authorized for this Federation domain pair".into());
-    }
-    Ok(())
-}
-
 /// Enforces persisted tenant ownership before any read, cancel, resume, recovery or mutation.
 fn authorize_tenant_path(
     controller: &ControllerState,
@@ -3440,7 +3381,7 @@ where
     write_http_response(stream, status, body).await
 }
 
-/// Handles the isolated Federation request frame so the general HTTP future stays bounded.
+/// Routes participant-local Federation commands after actual mTLS and durable policy checks.
 #[allow(clippy::too_many_arguments)]
 async fn handle_federation_route<S>(
     stream: &mut S,
@@ -3455,148 +3396,86 @@ async fn handle_federation_route<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    let path = request.target.split('?').next().unwrap_or("");
-    let method = request.method.as_str();
-    let local_domain = match configured_federation_domain() {
-        Ok(domain) => domain,
-        Err(error) => {
-            return write_http_response(
-                stream,
-                "503 Service Unavailable",
-                serde_json::json!({"error": error}),
-            )
-            .await;
-        }
-    };
-    let (operation, transaction_id) =
-        if method == "POST" && path == "/v1/federation/sessions/prepare" {
-            (Some(application::federation::Operation::Prepare), None)
-        } else if method == "POST" {
-            if let Some(value) = path
-                .strip_prefix("/v1/federation/sessions/")
-                .and_then(|value| value.strip_suffix("/commit"))
-            {
-                (
-                    Some(application::federation::Operation::Commit),
-                    Some(value),
-                )
-            } else if let Some(value) = path
-                .strip_prefix("/v1/federation/sessions/")
-                .and_then(|value| value.strip_suffix("/abort"))
-            {
-                (Some(application::federation::Operation::Abort), Some(value))
-            } else {
-                (None, None)
-            }
-        } else if method == "GET" {
-            (None, path.strip_prefix("/v1/federation/sessions/"))
-        } else {
-            (None, None)
-        };
-    let Some(transaction_id) = transaction_id
-        .or_else(|| (operation == Some(application::federation::Operation::Prepare)).then_some(""))
+    let (Some(certificate), Some(subject), Some(tenant)) =
+        (&principal.certificate, principal.subject.as_deref(), tenant)
     else {
         return write_http_response(
             stream,
-            "404 Not Found",
-            serde_json::json!({"error": "Federation route is not supported"}),
+            "403 Forbidden",
+            serde_json::json!({"error":"Federation requires actual mTLS and one exact tenant"}),
         )
         .await;
     };
-    let session = if operation == Some(application::federation::Operation::Prepare) {
-        let value = match serde_json::from_slice::<serde_json::Value>(&request.body) {
-            Ok(value) => value,
-            Err(error) => {
-                return write_http_response(
-                    stream,
-                    "400 Bad Request",
-                    serde_json::json!({"error": format!("invalid Federation prepare: {error}")}),
-                )
-                .await;
-            }
-        };
-        match value.get("session").cloned().map(serde_json::from_value) {
-            Some(Ok(session)) => session,
-            Some(Err(error)) => {
-                return write_http_response(
-                    stream,
-                    "400 Bad Request",
-                    serde_json::json!({"error": format!("invalid Federation session: {error}")}),
-                )
-                .await;
-            }
-            None => {
-                return write_http_response(
-                    stream,
-                    "400 Bad Request",
-                    serde_json::json!({"error": "Federation prepare has no session"}),
-                )
-                .await;
-            }
-        }
-    } else {
-        let id = transaction_id;
-        let session = controller
-            .lock()
-            .map_err(|_| "Controller authority is unavailable")?
-            .bridge
-            .control()
-            .federation_session(id)
-            .cloned();
-        let Some(session) = session else {
-            return write_http_response(
-                stream,
-                "404 Not Found",
-                serde_json::json!({"error": "unknown Federation transaction"}),
-            )
-            .await;
-        };
-        session
+    if !principal.mtls || principal.role.as_deref() != Some("recovery-admin") {
+        return write_http_response(stream, "403 Forbidden", serde_json::json!({"error":"Federation requires an authenticated recovery-admin service grant"})).await;
+    }
+    let caller = application::federation::Caller {
+        leaf: certificate.digest.clone(),
+        principal: subject.to_string(),
+        tenant: tenant.to_string(),
     };
-    if let Err(error) = authorize_federation_transport(
-        principal,
-        &session.source_domain,
-        &session.target_domain,
-        &local_domain,
-        tenant,
-    ) {
-        return write_http_response(stream, "403 Forbidden", serde_json::json!({"error": error}))
-            .await;
-    }
-    if operation.is_none() {
-        return match application::federation::view(
-            controller,
-            transaction_id,
-            &local_domain,
-            tenant,
-            clock.now(),
-        ) {
-            Ok(body) => write_http_response(stream, "200 OK", body).await,
-            Err(error) => {
-                write_http_response(stream, "409 Conflict", serde_json::json!({"error": error}))
-                    .await
-            }
+    let result = (|| {
+        application::federation::synchronize_policy(controller, event_log, event_write_gate)?;
+        let path = request.target.split('?').next().unwrap_or("");
+        let prefix = "/v1/federation/sessions/";
+        if request.method == "GET" {
+            return application::federation::view(
+                controller,
+                path.strip_prefix(prefix).ok_or("invalid Federation path")?,
+                &caller,
+                clock.now(),
+            );
+        }
+        let (operation, id) = if path == "/v1/federation/sessions/prepare" {
+            (application::federation::Operation::Prepare, None)
+        } else if let Some(id) = path
+            .strip_prefix(prefix)
+            .and_then(|id| id.strip_suffix("/commit"))
+        {
+            (application::federation::Operation::Commit, Some(id))
+        } else if let Some(id) = path
+            .strip_prefix(prefix)
+            .and_then(|id| id.strip_suffix("/abort"))
+        {
+            (application::federation::Operation::Abort, Some(id))
+        } else {
+            return Err("unsupported Federation route".into());
         };
-    }
-    let result = application::federation::submit(
-        controller,
-        event_log,
-        event_write_gate,
-        clock,
-        &request.body,
-        operation.expect("Federation operation is present"),
-        (!transaction_id.is_empty()).then_some(transaction_id),
-        &local_domain,
-        tenant,
-        principal
-            .subject
-            .as_deref()
-            .unwrap_or("federation-mtls-principal"),
-    );
+        application::federation::submit(
+            controller,
+            event_log,
+            event_write_gate,
+            clock,
+            &request.body,
+            operation,
+            id,
+            &caller,
+        )
+    })();
     match result {
-        Ok(body) => write_http_response(stream, "202 Accepted", body).await,
+        Ok(body) => {
+            write_http_response(
+                stream,
+                if request.method == "GET" {
+                    "200 OK"
+                } else {
+                    "202 Accepted"
+                },
+                body,
+            )
+            .await
+        }
         Err(error) => {
-            write_http_response(stream, "409 Conflict", serde_json::json!({"error": error})).await
+            write_http_response(
+                stream,
+                if event_log.require_writes_enabled().is_err() {
+                    "503 Service Unavailable"
+                } else {
+                    "409 Conflict"
+                },
+                serde_json::json!({"error":error}),
+            )
+            .await
         }
     }
 }

@@ -38,6 +38,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v51",
     "roboguide.controller-checkpoint/v52",
     "roboguide.controller-checkpoint/v53",
+    "roboguide.controller-checkpoint/v54",
 }
 CODEC = "domain.EventPayload.json/v29"
 MAX_EVIDENCE_BYTES = 64 * 1024 * 1024
@@ -193,7 +194,8 @@ def _controller(
         current = checkpoint is not None and checkpoint[0] in WRAPPERS
         if (
             checkpoint is not None
-            and checkpoint[0] == "roboguide.controller-checkpoint/v53"
+            and checkpoint[0]
+            in {"roboguide.controller-checkpoint/v53", "roboguide.controller-checkpoint/v54"}
             and profile_schema
             not in {
                 "roboguide.recovery-profile/v0.18",
@@ -286,6 +288,7 @@ def _controller(
                 "roboguide.controller-checkpoint/v51",
                 "roboguide.controller-checkpoint/v52",
                 "roboguide.controller-checkpoint/v53",
+                "roboguide.controller-checkpoint/v54",
             },
         )
         from . import archive_aborts
@@ -302,6 +305,7 @@ def _controller(
                 "roboguide.controller-checkpoint/v51",
                 "roboguide.controller-checkpoint/v52",
                 "roboguide.controller-checkpoint/v53",
+                "roboguide.controller-checkpoint/v54",
             },
         )
         history = iter(archived)

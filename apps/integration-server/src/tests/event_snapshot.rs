@@ -28,6 +28,7 @@ async fn request_events(
     accepted: Option<tokio::sync::oneshot::Sender<()>>,
 ) -> String {
     let controller = Arc::new(Mutex::new(ControllerState {
+        federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
             state::InMemorySharedNodeState::new(),
