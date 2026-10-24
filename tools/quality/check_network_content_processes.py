@@ -299,6 +299,8 @@ def run(
                         if actor.process.poll() is None:
                             status = actor.ask({"action": "status"})
                             if status["quorum"]:
+                                if status.get("readiness", {}).get("metadata_ready") is not True:
+                                    continue
                                 return member
                     time.sleep(0.05)
                 raise ValueError("actual infrastructure quorum did not become available")
@@ -331,6 +333,10 @@ def run(
                     }
                 )
                 assert actors[current].ask({"action": "commit"})["receipt"]["accepted"] is True
+                ready_status = actors[current].ask({"action": "status"})["readiness"]
+                assert ready_status["metadata_ready"] is True
+                assert ready_status["content_ready"] is True
+                assert len(ready_status["complete_content_members"]) > len(members) // 2
             if missed is not None:
                 root = Path(configs[missed]["content_root"])
                 with closing(

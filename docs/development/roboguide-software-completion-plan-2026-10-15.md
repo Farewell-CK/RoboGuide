@@ -120,7 +120,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | 顺序 | 对应原项 | 当前必需交付 | 状态 |
 | --- | --- | --- | --- |
 | A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | 稳定成员 Log 专项通过；网络 Snapshot/learner/joint/更多故障组合继续 |
-| A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | 待实现或组合验收；复用现有 producers |
+| A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | readiness projection 与 learner 真实门禁已通过；producer GC、joint 组合仍待实现 |
 | A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 待实现或组合验收；复用现有迁移 |
 | B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | 待接线与组合验收；不重写空间算法 |
 | C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | 待实现与验收；保留现有 quota/units |

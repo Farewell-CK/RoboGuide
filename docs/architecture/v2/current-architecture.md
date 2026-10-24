@@ -206,6 +206,14 @@ Log、current membership/epoch、Root/TLS 和原预算。普通已提交路由�
 同一应用。网络 Snapshot 切片也覆盖空 learner 的内容前置条件；joint、完整 GC 和跨域
 连续性继续必需；不增加设备或物理连续性事实。
 
+ADR-0189 增加只读 Replica readiness 投影，把实际 role、metadata quorum/位置、joint 成员和
+同 voter 内容多数派分开；进程存活不能变成 content-ready，producer retirement 仍保持原
+Unknown/对账边界。
+
+[Replica readiness 验收](../../development/acceptance/2026-10-24-replica-readiness.md) 已由真实
+多进程 Snapshot/Log 门禁核对 leader content-ready 与 learner 非 content-ready；producer GC
+和完整 joint 组合仍在 A2 队列。
+
 总体图的单一源码为 [中文 .mmd](../../images/roboguide-current-architecture.mmd)和
 [英文 .mmd](../../images/roboguide-current-architecture-english.mmd)；README、V2 入口和网站导览中的
 标记区同步同一内容，网站检查会拒绝漂移。改动权威、依赖方向、生命周期或公开合同仍须 ADR，

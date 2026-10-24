@@ -218,6 +218,14 @@ on both sides. The network Snapshot slice also covers content prerequisites for 
 joint consensus, complete GC and cross-domain continuity remain required. It creates no device or
 physical-continuity evidence.
 
+ADR-0189 adds a readonly Replica readiness projection separating actual role, metadata quorum/
+positions, joint membership and same-voter content majority. Process liveness never becomes
+content-ready, and producer retirement retains its original Unknown/reconciliation boundary.
+
+The [Replica readiness acceptance](../../development/acceptance/2026-10-24-replica-readiness.md)
+checks leader content-ready and learner non-content-ready through real multi-process Snapshot/Log
+gates; producer GC and the complete joint matrix remain in the A2 queue.
+
 The overview's canonical sources are [Chinese .mmd](../../images/roboguide-current-architecture.mmd) and
 [English .mmd](../../images/roboguide-current-architecture-english.mmd). Marked regions in README, the V2 entry
 and the site tour contain the same content; publication checks reject drift. Authority, dependency,

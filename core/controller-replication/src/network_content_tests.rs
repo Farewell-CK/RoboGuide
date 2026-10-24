@@ -166,6 +166,9 @@ async fn actual_mtls_empty_learner_receives_snapshot_prerequisites_before_member
     let source = &cluster.nodes[index];
     let receiver = cluster.nodes.last().unwrap();
     let root = cluster.roots.last().unwrap();
+    let before = source.readiness().await;
+    assert!(before.metadata_ready);
+    assert!(!before.content_ready);
     assert_eq!(receiver.store.network_view().await.unwrap().revision, 0);
     let (_sql, cas, key) = crate::content_application_tests::original_payload(
         cluster.directory.path(),
@@ -183,6 +186,9 @@ async fn actual_mtls_empty_learner_receives_snapshot_prerequisites_before_member
         .await
         .unwrap();
     assert!(source.commit_content(candidate).await.unwrap().accepted);
+    let ready = source.readiness().await;
+    assert!(ready.metadata_ready && ready.content_ready);
+    assert_eq!(ready.complete_content_members.len(), 2);
     let applied = source.raft.metrics().borrow().last_applied.unwrap();
     source.raft.trigger().snapshot().await.unwrap();
     source
@@ -225,6 +231,9 @@ async fn actual_mtls_empty_learner_receives_snapshot_prerequisites_before_member
     .expect("actual learner never applied original Snapshot");
     assert_eq!(receiver.store.network_view().await.unwrap().revision, 1);
     root.verify_content(&key).unwrap();
+    let learner_ready = receiver.readiness().await;
+    assert!(!learner_ready.content_ready);
+    assert!(learner_ready.reason.is_some());
     let sql = rusqlite::Connection::open(root.root().join("content.sqlite3")).unwrap();
     let raw: String = sql
         .query_row("SELECT record FROM content_snapshot_receives", [], |row| {

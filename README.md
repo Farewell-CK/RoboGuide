@@ -10,6 +10,10 @@ learner/joint、归档接线、完整 GC/升级及全部非发布矩阵继续实
 追赶、重启和独立恢复核对。Root6 的字节就绪、父 Snapshot 应用和引用退休保持分离；
 该门禁只证明软件内容连续性，不创建设备或物理连续性事实。
 
+[Replica readiness 与 producer 退休投影](docs/decisions/0189-replica-readiness-and-producer-retirement.md)
+把实际 Raft role、metadata 追平、joint membership 和同 voter 内容多数派拆开观察；进程存活、
+follower 或 learner 标签都不能伪造 content-ready，producer Unknown 仍由原对账路径保留。
+
 [ADR-0184](docs/decisions/0184-explicit-replica-content-cold-restore.md) 已接通显式
 [完整 Replica 内容恢复 v0.19](contracts/recovery/bundle-v0.19/README.md)。原逻辑身份、操作、
 Unknown 和预算不改写；新 Root5 binding 单独固定恢复后的实际 Root/SQL/parent inode。

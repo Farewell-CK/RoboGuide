@@ -10,6 +10,12 @@
 # `check_network_content_processes.py --snapshot-catchup`. This remains software content
 # continuity only: it creates zero Nodes/devices/models/simulators and proves no physical continuity.
 
+# ADR-0189 adds the readonly `ReplicaReadiness` projection. It separates actual OpenRaft role,
+# metadata quorum/positions and same-voter content readiness; a live process, follower or learner
+# never becomes content-ready by label. Producer retirement still uses its original reconciliation
+# intent/pin authority and keeps Unknown until actual source/process/reference evidence permits it.
+# The projection creates no authority, Node/device fact or physical readiness claim.
+
 ADR-0187 adds separate retained-Log describe/request/push commands, not a widening of ordinary
 committed routing. Actual source Commit/Log/original producer and receiver durable Log/producer
 precede Ready/source reads. Historical target revision is the frozen source observation; its

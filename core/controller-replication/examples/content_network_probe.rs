@@ -352,7 +352,10 @@ async fn serve(config: Config) -> Result<(), String> {
                     Some(epoch) => node.check_epoch(epoch).await.is_ok(),
                     None => false,
                 };
-                Ok(json!({"epoch":epoch,"quorum":quorum,"identity":root.identity()}))
+                let readiness = node.readiness().await;
+                Ok(
+                    json!({"epoch":epoch,"quorum":quorum,"identity":root.identity(),"readiness":readiness}),
+                )
             }
             Request::Capture {
                 source_sql,

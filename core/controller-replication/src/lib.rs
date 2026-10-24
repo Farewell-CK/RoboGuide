@@ -78,6 +78,38 @@ openraft::declare_raft_types!(
 /// Existing OpenRaft election, log ordering, quorum and snapshot engine.
 pub type ControllerRaft = Raft<ControllerRaftConfig>;
 
+/// Readonly infrastructure readiness; process liveness and role labels never grant content authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplicaReadiness {
+    /// Closed observation interpretation.
+    pub schema: String,
+    /// Actual configured infrastructure member.
+    pub member: u64,
+    /// Actual OpenRaft role at the observation sample.
+    pub role: String,
+    /// Actual current term, independent of application revision.
+    pub term: u64,
+    /// Actual current leader, if this process has observed one.
+    pub leader: Option<u64>,
+    /// Actual local last log position.
+    pub last_log_index: Option<u64>,
+    /// Actual local applied position.
+    pub last_applied_index: Option<u64>,
+    /// Number of actual current/joint voting configurations.
+    pub joint_groups: usize,
+    /// Actual committed voter identities.
+    pub voters: BTreeSet<u64>,
+    /// Metadata/quorum observation is separate from content readiness.
+    pub metadata_ready: bool,
+    /// Same-voter complete content majority, never process liveness.
+    pub content_ready: bool,
+    /// Members that independently supplied complete current content evidence.
+    pub complete_content_members: BTreeSet<u64>,
+    /// Bounded reason when a readiness dimension is unavailable or refused.
+    pub reason: Option<String>,
+}
+
 /// Original issuing Controller epoch; no replica identifier is a physical Node selector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -834,6 +866,60 @@ impl ReplicaNode {
             term: metrics.current_term,
             replica_id: self.config.replica_id,
         })
+    }
+
+    /// Reads actual role/quorum/position and, for the leader, the complete same-voter content majority.
+    /// This never creates a producer, renews a budget, changes membership or retires a pin.
+    pub async fn readiness(&self) -> ReplicaReadiness {
+        let metrics = self.raft.metrics().borrow().clone();
+        let role = format!("{:?}", metrics.state).to_ascii_lowercase();
+        let voters = metrics
+            .membership_config
+            .voter_ids()
+            .collect::<BTreeSet<_>>();
+        let metadata_ready = metrics.running_state.is_ok()
+            && metrics.current_leader.is_some()
+            && metrics.millis_since_quorum_ack.is_some();
+        let mut complete_content_members = BTreeSet::new();
+        let mut content_ready = false;
+        let mut reason = if metadata_ready {
+            None
+        } else {
+            Some("actual metadata quorum/leader observation is unavailable".to_string())
+        };
+        if self.config.streams_content() && metrics.state == openraft::ServerState::Leader {
+            match self.accepted_content_target().await {
+                Ok(target) => match self.content_quorum(target).await {
+                    Ok(members) => {
+                        complete_content_members = members;
+                        content_ready = true;
+                    }
+                    Err(error) => reason = Some(error.chars().take(512).collect()),
+                },
+                Err(error) => reason = Some(error.chars().take(512).collect()),
+            }
+        } else if self.config.streams_content() {
+            reason = Some("content readiness requires the actual current leader".into());
+        }
+        ReplicaReadiness {
+            schema: "roboguide.replica-readiness/v0.1".into(),
+            member: self.config.replica_id,
+            role,
+            term: metrics.current_term,
+            leader: metrics.current_leader,
+            last_log_index: metrics.last_log_index,
+            last_applied_index: metrics.last_applied.map(|id| id.index),
+            joint_groups: metrics
+                .membership_config
+                .membership()
+                .get_joint_config()
+                .len(),
+            voters,
+            metadata_ready,
+            content_ready,
+            complete_content_members,
+            reason,
+        }
     }
 
     /// Applies one exact application candidate through majority durability before returning acceptance.
