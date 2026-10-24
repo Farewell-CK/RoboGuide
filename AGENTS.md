@@ -1,5 +1,13 @@
 # Repository Guidelines
 
+ADR-0196 is implemented and actual process/cold recovery acceptance passed. Only exact original-connection managed reader
+transactions may extend the prior complete Root validation witness: original SQL headers, exact
+write delta and actual complete reader/pin/head rows must agree through Commit and readonly
+verification. Failures/external writes/DDL/reopen cannot borrow it. All fresh byte/identity/current
+permission/original-budget/GC checks and durable Unknown remain; no new contract or device fact.
+Actual old-history/trigger/SQL-failure regressions, complete runnable takeover/release and three
+restored leaders pass. Independent original SQL/anchor and current required CAS hashes agree.
+
 ADR-0195 implements explicit original archived-source initialization and actual process acceptance.
 Only an empty application may admit the complete original source, hot tail, Archive/Catalog and
 command evidence through application-initialization/v0.1 / application-snapshot/v0.1. Generic

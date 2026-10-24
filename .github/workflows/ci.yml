@@ -349,14 +349,14 @@ jobs:
           gh api repos/${{ github.repository }}/tarball/faede53c3e149119406fa1b5bc064c7fa538db03 > "${RUNNER_TEMP}/roboguide-pre-parent9.tar.gz"
           mkdir "${RUNNER_TEMP}/roboguide-pre-parent9"
           tar -xzf "${RUNNER_TEMP}/roboguide-pre-parent9.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-pre-parent9"
-          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-pre-root8-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-pre-parent9/Cargo.toml" -p controller-replication --example content_network_probe
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-pre-parent9-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-pre-parent9/Cargo.toml" -p controller-replication --example content_network_probe
 
       - name: Verify actual archived-source initialization before any application child
         run: >
           uv run --frozen python tools/quality/check_archived_source_initialization_processes.py
           --probe target/debug/examples/content_network_probe
           --storage-probe target/debug/examples/content_stream_probe
-          --old-probe "${RUNNER_TEMP}/roboguide-pre-root8-target/debug/examples/content_network_probe"
+          --old-probe "${RUNNER_TEMP}/roboguide-pre-parent9-target/debug/examples/content_network_probe"
           --source /tmp/rg-ci-catalog-archive
           --output "${RUNNER_TEMP}/roboguide-archived-initialization"
 
@@ -377,7 +377,7 @@ jobs:
           content = source / "cas/objects-v1/sha256" / key["content_digest"][7:9] / key["content_digest"][7:]
           common = [sys.executable, "tools/quality/check_archived_source_initialization_processes.py",
                     "--probe", "target/debug/examples/content_network_probe", "--storage-probe", "target/debug/examples/content_stream_probe",
-                    "--old-probe", str(evidence / "roboguide-pre-root8-target/debug/examples/content_network_probe"),
+                    "--old-probe", str(evidence / "roboguide-pre-parent9-target/debug/examples/content_network_probe"),
                     "--source", str(source), "--interrupt-source-content", str(content)]
           for mode in ("interrupted", "log", "snapshot"):
               arguments = common + ["--output", str(evidence / ("roboguide-initialization-" + mode))]

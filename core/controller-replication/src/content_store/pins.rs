@@ -166,6 +166,7 @@ pub(super) fn close_originals(store: &ReplicaContentStore, originals: &[ReaderIn
                 retention_only: true,
             };
             reader::publish(
+                store,
                 connection,
                 &ReaderRecord {
                     intent: original.clone(),

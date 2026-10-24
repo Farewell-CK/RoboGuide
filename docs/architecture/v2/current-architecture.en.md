@@ -203,6 +203,12 @@ outcomes. This review starts no Habitat, model or device.
 
 ## Maintenance
 
+ADR-0196 passes actual runnable and three-leader cold recovery acceptance: Root validation can extend only its original connection's
+complete witness after exact reader write counts, actual reader/pin/heads and two unchanged SQL
+header observations. Failures, extra writes, external commits, DDL, old generations and reopen
+cannot borrow it. Bytes, identity/restore binding, current permission, original budgets and GC
+checks remain fresh; history and persistent/Node/recovery contracts do not change.
+
 ADR-0195 is implemented with actual process checks: an explicit application-initialization/v0.1 envelope/context-bound
 application-snapshot/v0.1 admits the exact compacted source checkpoint, hot tail, commands and
 Archive/Catalog only into an empty application. Incremental v2 keeps its continuity checks.

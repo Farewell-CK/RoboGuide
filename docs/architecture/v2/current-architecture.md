@@ -194,6 +194,11 @@ Harness 不绕过 RoboGuide 直接调用 simulator skill。本地导航/操作 C
 
 ## 如何维护
 
+ADR-0196 已实现并通过实际入口/三 leader 冷恢复：Root 只在同一原连接的完整校验 witness、准确 reader 事务
+写入行数、全部实际 reader/pin/head 和两次 SQL header 观察一致时延续校验。失败、额外
+写入、外部提交、DDL、旧代际和 reopen 不能借用。字节、身份/restore binding、当前权限、
+原预算及 GC 门禁仍逐次检查，不删除历史，也不改变任何持久/Node/恢复合同。
+
 ADR-0195 已接通并通过实际进程门禁：已压缩原源经显式初始化 application-initialization/v0.1 / application-snapshot/v0.1
 接纳完整原 checkpoint、热尾、命令与 Archive/Catalog；接收方必须尚无应用状态，普通
 增量 v2 保持连续性检查。parent9/显式启动与 recovery v0.23 封住旧入口，保留原来源、

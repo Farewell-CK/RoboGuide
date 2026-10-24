@@ -1,5 +1,10 @@
 # RoboGuide
 
+[reader 校验复用](docs/decisions/0196-exact-managed-reader-validation.md)只跨实际原连接的
+精确 reader SQL Commit 延续完整 witness；额外写入、失败或 reopen 仍要求完整校验。
+原历史/Unknown、字节、权限和预算保持，实际接管/release 与三 leader 冷恢复通过，见
+[验收](docs/development/acceptance/2026-10-25-managed-reader-validation.md)。
+
 [归档源首次初始化](docs/development/original-source-initialization-v0.1.md)已接通并通过实际进程门禁：
 显式 parent9/Root8 把完整原 SQL/CAS 引入空副本应用，保留来源、预算、Unknown 与全部
 归档/命令。入口由 `network_initialization.rs`、supervisor 和 recovery v0.23 共同维护；

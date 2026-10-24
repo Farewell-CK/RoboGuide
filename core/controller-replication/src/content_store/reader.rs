@@ -164,7 +164,16 @@ fn status(original: &ReaderRecord) -> Result<ReplicaContentReaderStatus, String>
 }
 
 /// Persists this exact original reader outcome and pin release in the same FULL SQL transaction.
-pub(super) fn publish(connection: &mut Connection, original: &ReaderRecord) -> Result<(), String> {
+pub(super) fn publish(
+    store: &ReplicaContentStore,
+    connection: &mut Connection,
+    original: &ReaderRecord,
+) -> Result<(), String> {
+    let validation = validation::ReaderMutation::begin(
+        &store.inner,
+        connection,
+        validation::ReaderChange::Closure,
+    )?;
     let transaction = connection
         .transaction()
         .map_err(|error| error.to_string())?;
@@ -203,7 +212,28 @@ pub(super) fn publish(connection: &mut Connection, original: &ReaderRecord) -> R
         )
         .map_err(|error| error.to_string())?;
     layout::within_budget(&transaction)?;
-    transaction.commit().map_err(|error| error.to_string())
+    transaction.commit().map_err(|error| error.to_string())?;
+    validation.committed(&store.inner, connection, |connection| {
+        verify_managed_reader(connection, original)
+    })
+}
+
+/// Checks the exact actual reader and independent pin without substituting another operation's result.
+fn verify_managed_reader(connection: &Connection, expected: &ReaderRecord) -> Result<(), String> {
+    let actual = record(connection, &key(&expected.intent.reader_id)?)?;
+    let reference = reference(&expected.intent)?;
+    let pin = reference_record(connection, &reference.reference_id)?
+        .ok_or("managed reader transaction lost its actual independent pin")?;
+    let ended = expected.receipt.is_some() || expected.process_end.is_some();
+    let release = ended.then(|| digest(expected)).transpose()?;
+    if actual.as_ref() != Some(expected)
+        || pin.reference != reference
+        || pin.active == ended
+        || pin.release_digest != release
+    {
+        return Err("managed reader SQL differs from its exact original rows".into());
+    }
+    Ok(())
 }
 
 /// Validates all mandatory reader history, exact pins and immutable original close/process evidence.
@@ -349,6 +379,16 @@ impl ReplicaContentStore {
             }
             super::gc::require_live(connection, &intent.content)?;
             intent.budget.check()?;
+            let validation = validation::ReaderMutation::begin(
+                &self.inner,
+                connection,
+                validation::ReaderChange::Admission,
+            )?;
+            let original = ReaderRecord {
+                intent: intent.clone(),
+                receipt: None,
+                process_end: None,
+            };
             let transaction = connection
                 .transaction()
                 .map_err(|error| error.to_string())?;
@@ -362,12 +402,7 @@ impl ReplicaContentStore {
                     "INSERT INTO content_readers VALUES (?1,?2)",
                     params![
                         id,
-                        serde_json::to_string(&ReaderRecord {
-                            intent: intent.clone(),
-                            receipt: None,
-                            process_end: None
-                        })
-                        .map_err(|error| error.to_string())?
+                        serde_json::to_string(&original).map_err(|error| error.to_string())?
                     ],
                 )
                 .map_err(|error| error.to_string())?;
@@ -386,11 +421,20 @@ impl ReplicaContentStore {
                 )
                 .map_err(|error| error.to_string())?;
             readers.insert(id);
-            pins.insert(expected.reference_id);
+            pins.insert(expected.reference_id.clone());
             layout::write_head(&transaction, "reader_ids", &readers)?;
             layout::write_head(&transaction, "reference_ids", &pins)?;
             layout::within_budget(&transaction)?;
             transaction.commit().map_err(|error| error.to_string())?;
+            validation.committed(&self.inner, connection, |connection| {
+                verify_managed_reader(connection, &original)?;
+                if layout::head(connection, "reader_ids")? != readers
+                    || layout::head(connection, "reference_ids")? != pins
+                {
+                    return Err("managed reader admission changed its complete inventories".into());
+                }
+                Ok(())
+            })?;
         }
         self.verify_content_metadata(content)?;
         let file = copy::verify_file_with_check(
@@ -477,7 +521,7 @@ impl ReplicaContentStore {
             return status(&original);
         }
         original.process_end = Some(original.intent.budget.observe_process_end()?);
-        publish(connection, &original)?;
+        publish(self, connection, &original)?;
         status(&original)
     }
 }
@@ -562,6 +606,7 @@ impl ReplicaContentReader {
             .ok_or("original content connection is closed")?;
         self.store.validate_connection(connection)?;
         publish(
+            &self.store,
             connection,
             &ReaderRecord {
                 intent: self.intent.clone(),

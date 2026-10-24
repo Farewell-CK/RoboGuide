@@ -130,6 +130,15 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 当前清单为唯一执行队列，下面按原时间保留的切片记录不能替代上表完成条件。
 
+A2 随包运维先按 ADR-0196 收敛真实长历史中 reader 小事务导致的重复全历史校验，保留
+原权限/预算/行与 Unknown，再接完整 producer 退休/最终 CAS 回收组合。该内部复用不
+另造存储版本，不缩减 A2/A3 或 B–F；约 141 秒的原性能记录继续保留。
+
+[精确 reader 校验验收](acceptance/2026-10-25-managed-reader-validation.md)已通过 155 项
+Replica 回归、实际长历史接管/SQL 故障/原 Unknown/release 以及三个恢复后 leader。
+本次首次接管 96.10 秒、SQL 故障路径 115.01 秒；两次独立软件运行只提供短观察，不能
+替代长期 SLO。下一项为完整 producer 退休与最终 CAS 回收组合。
+
 [原归档源初始化验收](acceptance/2026-10-24-original-archived-source-initialization.md)
 保留原 floor 82/checkpoint 102/77 个命令，显式 parent9/recovery v0.23 接纳空应用；
 普通增量不放宽连续性，原 source/anchor/Unknown/首次预算保持。真实身份/TLS 输入、
