@@ -583,7 +583,9 @@ impl ReplicaRecoveryProjection {
         let floor = self.history_floor()?;
         if !matches!(
             checkpoint.schema.as_str(),
-            crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA | "roboguide.controller-checkpoint/v53"
+            crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+                | "roboguide.controller-checkpoint/v53"
+                | "roboguide.controller-checkpoint/v54"
         ) || events.len() > MAX_ROWS
             || floor.checked_add(events.len() as u64) != Some(checkpoint.event_sequence)
         {

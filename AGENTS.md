@@ -1,5 +1,17 @@
 # Repository Guidelines
 
+ADR-0204 changes only the default advertised Node heartbeat/health sampling interval to 1,000 ms.
+The independent five-second Control status TTL and fifteen-second lease remain unchanged; explicit
+deployment overrides retain their meaning. Old stale/Unknown/import budgets are never renewed.
+
+ADR-0203 adds explicit runtime revision v0.4 complete typed-map declarations. Actual Catalog and
+source-Group preparation must agree; original typed source policy, target Read/Import and full Review
+precede the unchanged original stop/revoke/CAS/Control gates. Production and consuming Missions
+remain separate immutable provenance. Wrapper v55 fences older writers, retaining original v54
+Federation and v0.3 receipts. The scoped child is generic Spatial Memory, not a new map/localization
+or device fact. The native entry is `check_spatial_node_processes.py --typed-revision` with the actual
+mTLS/map consumer; complete lifecycle/recovery and other non-release work remain mandatory.
+
 ADR-0198 is accepted and implemented. Before Raft startup, inspect actual committed-but-unapplied
 Log inputs under original parent/Root ownership and refuse promptly when original receipts/bytes
 are missing. Closed local inspection/repair opens existing parent9/Root8 only, binds exact original

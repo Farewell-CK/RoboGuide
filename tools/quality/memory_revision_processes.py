@@ -30,10 +30,24 @@ def verify(directory: Path, index: int) -> dict[str, Any]:
     """Independently hash actual original/imported bytes and recompute the complete CPU result."""
     parent = json.loads((directory / "manifest.json").read_bytes())
     evidence = json.loads((directory / f"revision-computation-{index}.json").read_bytes())
+    typed = directory / "revision-typed-map.json"
     paths = (
-        directory / "source/node-state/memory/files/source.bin",
-        directory / "source/backend/content" / parent["artifact"]["content_digest"][7:],
+        (
+            directory / "downloaded.bundle",
+            directory / "consumer/backend/content" / parent["artifact"]["content_digest"][7:],
+        )
+        if typed.is_file()
+        else (
+            directory / "source/node-state/memory/files/source.bin",
+            directory / "source/backend/content" / parent["artifact"]["content_digest"][7:],
+        )
     )
+    if typed.is_file():
+        original = json.loads(typed.read_bytes())
+        assert parent["artifact"] == {
+            "content_digest": original["content_digest"],
+            "byte_size": original["byte_size"],
+        }
     hashes = []
     for path in paths:
         with path.open("rb") as stream:
@@ -75,7 +89,7 @@ def run(
         ),
         "actual original file CPU process running",
     )
-    database = scenario.directory / "source/backend/file-jobs.sqlite3"
+    database = scenario.directory / scenario.worker_names[0] / "backend/file-jobs.sqlite3"
     with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection, connection:
         process = connection.execute(
             "SELECT pid,instance_id FROM original_processes WHERE execution_id=?",
@@ -95,19 +109,28 @@ def run(
     def new_computation_count() -> int:
         """Count actual admitted file jobs independently of plan status or checker expectations."""
         count = 0
-        for name in ("source", "consumer"):
+        for name in scenario.worker_names:
             database = scenario.directory / name / "backend/file-jobs.sqlite3"
             with (
                 closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection,
                 connection,
             ):
-                count += int(
-                    connection.execute(
-                        "SELECT COUNT(*) FROM jobs WHERE execution_id<>?",
-                        (source_attempt["execution_id"],),
-                    ).fetchone()[0]
+                count += sum(
+                    row[0] not in original_jobs
+                    for row in connection.execute("SELECT execution_id FROM jobs")
                 )
         return count
+
+    original_jobs: set[str] = set()
+    for name in scenario.worker_names:
+        with closing(
+            sqlite3.connect(
+                f"file:{scenario.directory / name / 'backend/file-jobs.sqlite3'}?mode=ro", uri=True
+            )
+        ) as connection:
+            original_jobs.update(
+                row[0] for row in connection.execute("SELECT execution_id FROM jobs")
+            )
 
     def command(
         kind: str,
@@ -208,7 +231,7 @@ def run(
     previous = registry["revision"]
     registry["revision"] += 1
     registry["policies"]["/".join(scenario.manifest["selector"].values())]["principals"][
-        "file-administrator"
+        scenario.administrator
     ] = ["handoff"]
     registry["policies"]["/".join(child["selector"].values())] = {
         "policy_id": uuid.uuid4().hex,
@@ -224,7 +247,7 @@ def run(
                     {
                         "provider_id": "files",
                         "local_system_id": "posix-compute",
-                        "kind": "artifact",
+                        "kind": child["kind"],
                         "payload_schema": child["payload_schema"],
                         "media_type": child["media_type"],
                     }
@@ -252,8 +275,12 @@ def run(
             "registry_revision": registry["revision"],
         },
     }
+    declaration_schema = "roboguide.runtime-plan-revision/v0.3"
+    if scenario.typed_map is not None:
+        declaration_schema = "roboguide.runtime-plan-revision/v0.4"
+        declaration["authorization"]["typed_map"] = scenario.typed_map
     denied = {
-        "schema_version": "roboguide.runtime-plan-revision/v0.3",
+        "schema_version": declaration_schema,
         "command_id": uuid.uuid4().hex,
         "expected_revision": view()["authority"]["revision"],
         "action": {"kind": "authorize-memory", **declaration},
@@ -265,8 +292,21 @@ def run(
     older["command_id"] = uuid.uuid4().hex
     status, denial_v2 = scenario.exchange(revision_path, older)
     assert status == 409, denial_v2
+    if scenario.typed_map is not None:
+        malformed = copy.deepcopy(denied)
+        malformed["command_id"] = uuid.uuid4().hex
+        malformed["schema_version"] = "roboguide.runtime-plan-revision/v0.3"
+        assert scenario.exchange(revision_path, malformed)[0] == 409
+        malformed["command_id"] = uuid.uuid4().hex
+        malformed["schema_version"] = declaration_schema
+        malformed["action"]["authorization"]["typed_map"]["root_frame"] += "-changed"
+        assert scenario.exchange(revision_path, malformed)[0] == 409
+        malformed = copy.deepcopy(denied)
+        malformed["command_id"] = uuid.uuid4().hex
+        del malformed["action"]["authorization"]["typed_map"]
+        assert scenario.exchange(revision_path, malformed)[0] == 409
     declaration_command, declared = command(
-        "authorize-memory", declaration, schema="roboguide.runtime-plan-revision/v0.3"
+        "authorize-memory", declaration, schema=declaration_schema
     )
     assert scenario.exchange(revision_path, declaration_command) == (200, declared)
     staged = checkpoint(scenario.directory)
@@ -568,14 +608,18 @@ def run(
             "task_ref": {"mission_id": mission, "task_id": task["id"]},
             "plan_digest": scenario.get(path + "/tenant")["source_plan_digest"],
             "attempts": [{"role_id": attempt["role_id"], "attempt_id": attempt["execution_id"]}],
-            "predicate": "all file digests match",
+            "predicate": task["satisfaction"]["verifier"]["predicate"],
             "verdict": "satisfied",
             "finality": "final",
             "source_observed_at_ms": time.monotonic_ns() // 1_000_000,
             "valid_for_ms": 10000,
             "sequence": 1,
-            "artifact_digest": None,
-            "artifact_size_bytes": None,
+            "artifact_digest": scenario.manifest["artifact"]["content_digest"]
+            if scenario.typed_map is not None
+            else None,
+            "artifact_size_bytes": scenario.manifest["artifact"]["byte_size"]
+            if scenario.typed_map is not None
+            else None,
         }
         wrong_identity = copy.deepcopy(verdict)
         wrong_identity["plan_digest"] = view()["current_plan_digest"]
@@ -653,7 +697,9 @@ def run(
     with (
         closing(
             sqlite3.connect(
-                f"file:{scenario.directory / 'source/backend/memory.sqlite3'}?mode=ro", uri=True
+                f"file:{scenario.directory / scenario.worker_names[0] / 'backend/memory.sqlite3'}"
+                "?mode=ro",
+                uri=True,
             )
         ) as connection,
         connection,
@@ -708,7 +754,7 @@ def run(
     return {
         "passed": True,
         "case": case,
-        "software_nodes": 2,
+        "software_nodes": len(scenario.nodes),
         "executing_nodes": [scenario.nodes[0]],
         "devices": 0,
         "models": 0,
@@ -722,6 +768,7 @@ def run(
         "source_auto_resume": False,
         "restored_original_budgets": True,
         "runtime_mi": mi_result,
+        "complete_typed_map_source": scenario.typed_map,
     }
 
 

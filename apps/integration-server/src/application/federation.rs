@@ -545,8 +545,10 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
 
 /// Refuses a legacy wrapper that hides the newly versioned participant service authority.
 pub(crate) fn validate_wrapper(saved: &ServerCheckpoint) -> Result<(), String> {
-    if saved.schema != SERVER_CHECKPOINT_SCHEMA
-        && (!saved.federation.records.is_empty() || !saved.federation.policies.is_empty())
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
+    ) && (!saved.federation.records.is_empty() || !saved.federation.policies.is_empty())
     {
         return Err("legacy wrapper cannot carry Federation service authority".into());
     }

@@ -221,3 +221,60 @@ fn declaration_authority_and_complete_immutable_source_are_required() {
     assert!(state.candidates["memory-work"].memory.is_empty());
     validate_restored(&live).unwrap();
 }
+
+/// Version selection cannot grant typed authority to an old or incomplete generic declaration.
+#[test]
+fn typed_revision_requires_explicit_complete_map_and_wrapper() {
+    let fixture = Fixture::new();
+    let action = declaration(&fixture);
+    assert!(
+        fixture
+            .command_schema(
+                TYPED_MEMORY_SCHEMA,
+                "missing-map",
+                2,
+                action.clone(),
+                "administrator"
+            )
+            .is_err()
+    );
+    assert!(
+        fixture
+            .command_schema(
+                TYPED_MEMORY_SCHEMA,
+                "unrelated-action",
+                2,
+                serde_json::json!({"kind":"authorize-generation"}),
+                "administrator"
+            )
+            .is_err()
+    );
+    let first = fixture
+        .command_schema(
+            MEMORY_SCHEMA,
+            "generic-original",
+            2,
+            action,
+            "administrator",
+        )
+        .unwrap();
+    assert_eq!(first["schema_version"], MEMORY_SCHEMA);
+    let live = fixture.controller.lock().unwrap();
+    validate_restored(&live).unwrap();
+    let mut saved: ServerCheckpoint =
+        serde_json::from_str(&server_checkpoint_json(&live).unwrap()).unwrap();
+    saved.schema = PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA.into();
+    application::isolation::validate_isolation_checkpoint_schema(&saved).unwrap();
+    let state = saved.runtime_revisions.values_mut().next().unwrap();
+    state
+        .commands
+        .values_mut()
+        .find(|receipt| receipt.result["schema_version"] == MEMORY_SCHEMA)
+        .unwrap()
+        .result["schema_version"] = TYPED_MEMORY_SCHEMA.into();
+    assert!(
+        application::isolation::validate_isolation_checkpoint_schema(&saved)
+            .unwrap_err()
+            .contains("typed-map revision")
+    );
+}

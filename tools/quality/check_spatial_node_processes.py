@@ -10,6 +10,7 @@ import json
 import math
 import os
 import sqlite3
+import ssl
 import struct
 import subprocess
 import sys
@@ -45,6 +46,10 @@ def checker_identity() -> dict[str, str]:
         "memory_use_profile.py",
         "check_memory_processes.py",
         "check_spatial_upgrade_gates.py",
+        "spatial_revision_processes.py",
+        "memory_revision_processes.py",
+        "memory_group_lifecycle.py",
+        "memory_handoff_processes.py",
     )
     result = {
         name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
@@ -252,10 +257,14 @@ def run(
     *,
     mtls: bool = False,
     memory_consumer: bool = False,
+    typed_revision: str | None = None,
+    old_controller: Path | None = None,
 ) -> dict[str, Any]:
     """Start isolated maintained processes and verify restore without redispatch."""
     if memory_consumer and not mtls:
         raise ValueError("prepared map consumption requires the actual mTLS profile")
+    if typed_revision and not (memory_consumer and mtls):
+        raise ValueError("typed revision requires the actual mTLS map consumer")
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     original_checker = checker_identity()
     save(output / "checker-identity.json", original_checker)
@@ -292,8 +301,28 @@ def run(
     contexts, node_leaf = (
         configure_tls(output, node, profile["map_id"], environment) if mtls else ({}, "")
     )
+    if typed_revision:
+        authorization_path = output / "operator-authorization.json"
+        authorization = json.loads(authorization_path.read_bytes())
+        next_leaf = hashlib.sha256(
+            ssl.PEM_cert_to_DER_cert((output / "pki/admin-next.crt").read_text())
+        ).hexdigest()
+        authorization["grants"]["sha256:" + next_leaf] = {
+            "principal_id": "independent-revision-goal-producer",
+            "role": "operator",
+            "tenant_ids": ["local"],
+        }
+        save(authorization_path, authorization)
     consumer = (
-        SpatialMemoryConsumer(output, python, grpc, cas, environment, profile)
+        SpatialMemoryConsumer(
+            output,
+            python,
+            grpc,
+            cas,
+            environment,
+            profile,
+            process_workers=typed_revision is not None,
+        )
         if memory_consumer
         else None
     )
@@ -694,6 +723,25 @@ def run(
             lambda: exchange(origin, f"/v1/missions/{mission}")[1]["status"] == "Completed",
             "independent satisfaction",
         )
+        revision_result = None
+        if typed_revision:
+            assert consumer is not None
+            from spatial_revision_processes import run as run_typed_revision
+
+            scenario, revision_result = run_typed_revision(
+                consumer,
+                origin,
+                cas,
+                exchange,
+                controller,
+                controller_command,
+                start,
+                contexts,
+                node,
+                typed_revision,
+                old_controller,
+            )
+            controller = scenario.controller
         if consumer and consumed:
             memory_path = f"/v1/memories/{profile['map_id']}/revisions/{profile['revision_id']}"
             status, original_replicas = exchange(cas, memory_path)
@@ -738,7 +786,12 @@ def run(
                     0
                 ]
             )
-        assert not json.loads(checkpoint["integration_json"])["control"]["reservations"]
+        remaining = json.loads(checkpoint["integration_json"])["control"]["reservations"]
+        if typed_revision in {"revision-policy", "revision-expiry"}:
+            assert revision_result is not None and revision_result["ownership_retained"] is True
+            assert remaining
+        else:
+            assert not remaining
         result = {
             "passed": True,
             "devices": 0,
@@ -749,6 +802,7 @@ def run(
             "node_cas_publications": 1,
             "independent_verifier_processes": 2 if consumer else 1,
             "prepared_map_consumer": consumed,
+            "typed_map_revision": revision_result,
             "controller_and_node_restart_no_second_worker": True,
             "independent_corrupt_bundle_rejected": True,
             "wrong_worker_exit_identity_unavailable": True,
@@ -797,6 +851,17 @@ def main() -> None:
     parser.add_argument("--verify", type=Path)
     parser.add_argument("--mtls", action="store_true")
     parser.add_argument("--memory-consumer", action="store_true")
+    parser.add_argument(
+        "--typed-revision",
+        choices=(
+            "revision",
+            "revision-sql",
+            "revision-restart",
+            "revision-policy",
+            "revision-expiry",
+        ),
+    )
+    parser.add_argument("--old-controller", type=Path)
     arguments = parser.parse_args()
     if arguments.verify:
         print(json.dumps(verify(arguments.verify)))
@@ -811,6 +876,8 @@ def main() -> None:
                 arguments.output,
                 mtls=arguments.mtls,
                 memory_consumer=arguments.memory_consumer,
+                typed_revision=arguments.typed_revision,
+                old_controller=arguments.old_controller,
             )
         except Exception as error:
             if arguments.output.is_dir():

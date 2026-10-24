@@ -221,6 +221,15 @@ Artifact/Controller admission checks the retained import intent, and event codec
 State/Catalog snapshots retain it. Legacy rows decode with unavailable provenance and never infer
 ownership from a Node or provider.
 
+ADR-0203 retains the complete original typed map in runtime revision v0.4 and requires an exact
+original preparation in the consuming source Group. Production and consuming Missions retain their
+independent provenance. Review, typed policy, original stop/revoke/CAS and normal target Group Control
+gates remain mandatory. Wrapper v55 fences prior writers. The scoped child creates no new map,
+Active Map or localization fact; complete lifecycle combinations require their own acceptance.
+ADR-0204 uses a one-second default Node heartbeat/health sample with the independent five-second
+status TTL. The fifteen-second transport lease, explicit overrides and original Unknown/budgets
+retain their meaning.
+
 ADR-0201 exposes participant HTTP endpoints; ADR-0202 adds wrapper v54 and service v0.2
 with immutable original stage receipts, revisioned domain policy, actual TLS/stable-principal/
 tenant/pair/expected-epoch gates and original same-kernel budgets. Each local domain records

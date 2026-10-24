@@ -473,7 +473,7 @@ effects or end independently owned storage work. This is not an OS/RSS or comple
 | Memory / Spatial | Selective import/use/revoke, Group handoff, Active Map/GC, stored-reference recovery checks, file algorithms | All external reference producer lifecycles, typed-map/multi-kind fault combinations, online content consistency |
 | HA / recovery | Dynamic membership, original-child drain, transfer, certificate rotation, SQL/CAS cold recovery | Complete online content/archive/catalog recovery, rolling upgrades/rollback, independent-domain RTO/RPO |
 | Resources | Bounded selection, attributed costs, future calendar, logical quota, file-worker POSIX proof | Divisible allocation, GPU/load/traffic costs/enforcement, complete spatial commitments |
-| Coordination / revision | Relation stop/hold, continuation, runtime MI, original goal/Review and scoped Memory file paths | Running preemption, complex migration/handoff, more Memory/map/cross-stage combinations |
+| Coordination / revision | Relation stop/hold, continuation, runtime MI, original goal/Review, scoped Memory file paths and explicit complete typed-map source declarations | Running preemption, complex migration/handoff, more Memory and complete cross-stage combinations |
 | Federation | Participant HTTP, mTLS/revisioned tenant/domain grants, original receipts and two-SQLite restart/fault reconciliation | Durable coordinator, actual peer requests, resource/epoch proofs, cross-host clocks and combined recovery; global dispatch remains false |
 | Operations | Write-disabled, metrics-reader, monitoring config, short software alert gates, partial I/O isolation | Remaining listeners/blocking paths, long-term SLO/runbooks, complete version/fault matrix and hardware evidence |
 

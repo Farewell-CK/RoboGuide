@@ -647,8 +647,10 @@ pub(crate) fn submit(
     let command: Command = serde_json::from_slice(body).map_err(|e| e.to_string())?;
     if !matches!(
         command.schema_version.as_str(),
-        SCHEMA | GENERATION_SCHEMA | MEMORY_SCHEMA
+        SCHEMA | GENERATION_SCHEMA | MEMORY_SCHEMA | TYPED_MEMORY_SCHEMA
     ) || !identity(&command.command_id)
+        || command.schema_version == TYPED_MEMORY_SCHEMA
+            && !matches!(command.action, Action::AuthorizeMemory { .. })
     {
         return Err("invalid closed revision command".into());
     }

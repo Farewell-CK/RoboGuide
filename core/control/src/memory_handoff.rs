@@ -22,6 +22,57 @@ impl ControlPlane {
         tenant: &str,
         principal: &str,
     ) -> Result<(), ControlError> {
+        self.authorize_revision_memory_source(
+            parent,
+            child,
+            None,
+            source,
+            source_membership,
+            mission,
+            tenant,
+            principal,
+        )
+    }
+
+    /// Checks the complete original typed source before a yet-unbound revision narrows its scope.
+    /// The application must independently retain Review, original bytes and stop/revoke evidence.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorize_revision_typed_map_child(
+        &self,
+        map: &MapArtifactManifest,
+        child: &MemoryArtifactManifest,
+        source: &ExecutionGroupId,
+        source_membership: &GroupMembershipVersion,
+        mission: &domain::MissionId,
+        tenant: &str,
+        principal: &str,
+    ) -> Result<(), ControlError> {
+        let parent = domain::map_memory_manifest(map).map_err(ControlError::InvalidProposal)?;
+        self.authorize_revision_memory_source(
+            &parent,
+            child,
+            Some(map),
+            source,
+            source_membership,
+            mission,
+            tenant,
+            principal,
+        )
+    }
+
+    /// Shares exact original topology and child identity checks without weakening typed permission.
+    #[allow(clippy::too_many_arguments)]
+    fn authorize_revision_memory_source(
+        &self,
+        parent: &MemoryArtifactManifest,
+        child: &MemoryArtifactManifest,
+        map: Option<&MapArtifactManifest>,
+        source: &ExecutionGroupId,
+        source_membership: &GroupMembershipVersion,
+        mission: &domain::MissionId,
+        tenant: &str,
+        principal: &str,
+    ) -> Result<(), ControlError> {
         let invalid = |text: &str| ControlError::InvalidProposal(text.into());
         parent.validate().map_err(|e| invalid(&e.to_string()))?;
         child.validate().map_err(|e| invalid(&e.to_string()))?;
@@ -39,10 +90,16 @@ impl ControlPlane {
             || original.mission_id() != mission
             || original.membership_version() != Some(source_membership)
             || self.mission_tenant(mission) != Some(tenant)
-            || !matches!(parent.scope(), MemoryScope::ExecutionGroup(owner) if owner == source)
+            || if let Some(map) = map {
+                domain::map_memory_manifest(map).map_err(ControlError::InvalidProposal)? != *parent
+                    || parent.scope() != &MemoryScope::Global
+                    || parent.kind() != domain::MemoryKind::Spatial
+            } else {
+                !matches!(parent.scope(), MemoryScope::ExecutionGroup(owner) if owner == source)
+                    || parent.kind() == domain::MemoryKind::Spatial
+            }
             || parent.selector() == child.selector()
             || parent.visibility() != MemoryVisibility::Exchangeable
-            || parent.kind() == domain::MemoryKind::Spatial
             || parent.created_at() > child.created_at()
         {
             return Err(invalid(
@@ -59,7 +116,21 @@ impl ControlPlane {
                 "revision child changed original owner, bytes or provenance",
             ));
         }
-        self.authorize_memory_principal(parent, tenant, principal, MemoryAccessOperation::Handoff)?;
+        if let Some(map) = map {
+            self.authorize_typed_map_principal(
+                map,
+                tenant,
+                principal,
+                MemoryAccessOperation::Handoff,
+            )?;
+        } else {
+            self.authorize_memory_principal(
+                parent,
+                tenant,
+                principal,
+                MemoryAccessOperation::Handoff,
+            )?;
+        }
         let registry = self
             .memory_authorization_registry()
             .ok_or_else(|| invalid("Memory policy absent"))?;

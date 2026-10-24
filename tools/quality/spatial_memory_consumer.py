@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import os
+import sqlite3
 import ssl
 import subprocess
 import sys
@@ -15,12 +16,14 @@ import tomllib
 import uuid
 import zipfile
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 from check_artifact_authority_processes import grant
 from check_spatial_upgrade_gates import logical_digest
 from check_state_verifier_processes import ROOT, save, stop, wait_for
+from memory_handoff_processes import source_configuration
 from memory_preparation_profile import configuration, node_environment
 from memory_use_profile import request
 
@@ -127,6 +130,7 @@ class SpatialMemoryConsumer:
         cas: str,
         environment: dict[str, str],
         profile: dict[str, Any],
+        process_workers: bool = False,
     ) -> None:
         """Freeze real receiver credentials and configuration before Controller startup."""
         self.output, self.python, self.environment = output, python, environment
@@ -135,6 +139,8 @@ class SpatialMemoryConsumer:
         self.root.mkdir(mode=0o700)
         self.backend = "unix://" + str(self.root / "backend/local.sock")
         self.profile = profile
+        self.cas = cas
+        self.process_workers = process_workers
         self.config = self.root / "node.toml"
         text = configuration(self.root, self.node, grpc, self.backend, cas, True)
         text = text.replace('kind = "artifact"', 'kind = "spatial"')
@@ -147,6 +153,10 @@ class SpatialMemoryConsumer:
             'media_type = "application/vnd.roboguide.spatial-map"',
         )
         text = text.replace("max_artifact_bytes = 1048576", "max_artifact_bytes = 536870912")
+        if process_workers:
+            text = source_configuration(text, self.node, True).replace(
+                "hash-exported-file", "hash-imported-file"
+            )
         self.config.write_text(text)
         certificate = output / "pki/enrolment-next.crt"
         self.leaf = hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate.read_text())).hexdigest()
@@ -257,6 +267,14 @@ class SpatialMemoryConsumer:
             "--enable-use-leases",
             "--enable-active-map",
         ]
+        if self.process_workers:
+            self.backend_command += [
+                "--worker-processes",
+                "--max-job-seconds",
+                "300",
+                "--max-job-rounds",
+                "2000000",
+            ]
         self.backend_process = start(
             self.backend_command,
             "consumer-backend",
@@ -351,15 +369,19 @@ class SpatialMemoryConsumer:
         self, origin: str, exchange: Exchange, mission: str, verifier: str
     ) -> dict[str, Any]:
         """Require actual computation and independent verification before completion."""
-        attempts = wait_for(
-            lambda: [
-                item
-                for item in exchange(origin, "/v1/execution-attempts", None)[1]["attempts"]
-                if item["task_id"] == "consume" and item["status"] == "Completed"
-            ],
-            "actual prepared map consumption",
-            35,
-        )
+        try:
+            attempts = wait_for(
+                lambda: [
+                    item
+                    for item in exchange(origin, "/v1/execution-attempts", None)[1]["attempts"]
+                    if item["task_id"] == "consume" and item["status"] == "Completed"
+                ],
+                "actual prepared map consumption",
+                35,
+            )
+        except TimeoutError:
+            self.observe_failed_import()
+            raise
         assert len(attempts) == 1 and attempts[0]["node_id"] == self.node
         attempt = attempts[0]
         save(self.root / "attempt.json", attempt)
@@ -459,6 +481,42 @@ class SpatialMemoryConsumer:
             + hashlib.sha256(self.config.read_bytes()).hexdigest(),
             "physical_localization": "HardwareEvidencePending",
         }
+
+    def observe_failed_import(self) -> None:
+        """Retain the actual original CAS refusal without replaying an uncertain import."""
+        from check_artifact_authority_processes import call
+        from check_identity_processes import client
+
+        with closing(
+            sqlite3.connect(f"file:{self.output / 'controller.sqlite3'}?mode=ro", uri=True)
+        ) as connection:
+            checkpoint = json.loads(
+                connection.execute("SELECT checkpoint_json FROM controller_checkpoint").fetchone()[
+                    0
+                ]
+            )
+        outcomes = []
+        for identifier, intent in checkpoint["memory_imports"].items():
+            if intent["request"]["node_id"] != self.node:
+                continue
+            status, raw = call(
+                self.cas,
+                client(self.output / "pki", "enrolment-next"),
+                "GET",
+                "/v1/artifacts/" + intent["request"]["manifest"]["artifact"]["content_digest"],
+                headers={"X-RoboGuide-Memory-Import-Id": identifier},
+            )
+            outcomes.append(
+                {
+                    "import_id": identifier,
+                    "original": intent,
+                    "observed_status": status,
+                    "observed_error": raw.decode(errors="replace")[:2048]
+                    if status != 200
+                    else None,
+                }
+            )
+        save(self.root / "failed-import-observed.json", {"outcomes": outcomes})
 
 
 def main() -> None:

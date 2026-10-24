@@ -462,7 +462,7 @@ Controller 投影在实际源 SQL inode/sidecar 租约与原生排空后，使�
 | Memory / Spatial | selective import、use/revoke、双 Group handoff、Active Map/GC、已存活动引用恢复校验、空间文件算法 | 全外部引用 producer 生命周期、typed-map/多类型与复杂故障组合、在线跨服务内容一致性 |
 | HA / 恢复 | 动态成员、原 child 排空、transfer、证书轮换、SQL/CAS 静止恢复 | 在线内容/完整 archive/catalog 恢复、滚动升级/回退、独立故障域与 RTO/RPO |
 | 资源 / 调度 | 有界搜索、来源化成本、future calendar、逻辑 quota、文件 worker POSIX proof | divisible allocation、GPU/load/traffic 成本与执行、完整空间交通承诺 |
-| 协调 / 计划修订 | relation stop/hold、continuation、运行期 MI、原目标、Review、scoped Memory 文件链路 | 运行中抢占、复杂耦合迁移/handoff、更多 Memory/typed-map 与跨阶段组合 |
+| 协调 / 计划修订 | relation stop/hold、continuation、运行期 MI、原目标、Review、scoped Memory 文件链路、显式完整 typed-map 来源声明 | 运行中抢占、复杂耦合迁移/handoff、更多 Memory 与完整跨阶段组合 |
 | Federation | participant session HTTP、mTLS/版本化 tenant/domain 授权、原回执、双 SQLite 重启/故障对账 | 持久 coordinator、实际域间请求与资源/epoch 证明、跨主机时钟与恢复组合；全局 dispatch 保持 false |
 | 运维 | write-disabled、metrics-reader、监控配置、短窗口软件 firing/resolved、部分 I/O 隔离 | 其余 listener/阻塞路径、长期 SLO、完整 runbook/告警/版本组合及硬件证据 |
 

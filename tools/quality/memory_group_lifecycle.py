@@ -36,6 +36,9 @@ class GroupScenario:
     controller_command: list[str]
     start: Callable[..., subprocess.Popen[bytes]]
     node_processes: tuple[subprocess.Popen[bytes], ...] = ()
+    typed_map: dict[str, Any] | None = None
+    worker_names: tuple[str, ...] = ("source", "consumer")
+    administrator: str = "file-administrator"
 
     def get(self, path: str) -> dict[str, Any]:
         """Read committed state without treating transport receipt as a successful write."""

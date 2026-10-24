@@ -2029,6 +2029,37 @@ where
                 Err(error) => ("404 Not Found", serde_json::json!({"error":error})),
             }
         }
+        ("GET", path)
+            if path.starts_with("/v1/missions/") && path.ends_with("/execution-attempts") =>
+        {
+            let mission = domain::MissionId::new(
+                path.trim_start_matches("/v1/missions/")
+                    .trim_end_matches("/execution-attempts"),
+            )?;
+            let controller = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            let attempts = controller
+                .bridge
+                .attempt_history()
+                .into_iter()
+                .filter_map(|attempt| {
+                    let command = attempt.command();
+                    (command.mission_id() == &mission).then(|| {
+                        serde_json::json!({
+                            "execution_id": attempt.execution_id(),
+                            "mission_id": command.mission_id(),
+                            "task_id": command.task_ref().task_id(),
+                            "group_id": command.group_id(),
+                            "role_id": command.role_id(),
+                            "node_id": command.node_id(),
+                            "status": format!("{:?}", attempt.status()),
+                        })
+                    })
+                })
+                .collect::<Vec<_>>();
+            ("200 OK", serde_json::json!({"attempts": attempts}))
+        }
         ("POST", "/v1/missions/validate-plan") => {
             let plan = match decode_mission_plan(request_body) {
                 Ok(plan) => plan,

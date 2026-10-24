@@ -70,6 +70,9 @@ pub(super) struct AuthorizationRequest {
     target_group_id: domain::ExecutionGroupId,
     /// Complete new immutable metadata retaining the original bytes and production identity.
     child: MemoryArtifactManifest,
+    /// Complete immutable original Spatial source, mandatory only under explicit v0.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    typed_map: Option<domain::MapArtifactManifest>,
     /// Exact original authorization registry, not an unversioned deployment hint.
     registry_id: String,
     /// Expected complete original policy revision.
@@ -106,6 +109,22 @@ pub(super) struct Authorization {
     budget: OriginalBudget,
     /// Canonical immutable complete evidence digest, computed with this field empty.
     digest: String,
+}
+
+impl Authorization {
+    /// Exposes only the presence of complete typed source authority to the wrapper fence.
+    pub(super) fn uses_typed_map(&self) -> bool {
+        self.request.typed_map.is_some()
+    }
+
+    /// Keeps historical v0.3 command bytes unchanged rather than relabelling their schema.
+    fn schema(&self) -> &'static str {
+        if self.uses_typed_map() {
+            TYPED_MEMORY_SCHEMA
+        } else {
+            MEMORY_SCHEMA
+        }
+    }
 }
 
 /// Returns the exact immutable child permissions included in Review, preserving legacy absence.
@@ -221,8 +240,24 @@ fn current(
     let (parent, map) = catalog
         .memory_source(&authorization.request.parent_selector)?
         .ok_or("original Memory source absent")?;
-    if parent != authorization.parent || map.is_some() {
-        return Err("original generic Memory source changed".into());
+    if parent != authorization.parent || map != authorization.request.typed_map {
+        return Err("original complete Memory source changed".into());
+    }
+    if let Some(map) = &authorization.request.typed_map {
+        validate_typed_source_reference(controller, authorization)?;
+        return controller
+            .bridge
+            .control()
+            .authorize_revision_typed_map_child(
+                map,
+                &authorization.request.child,
+                &authorization.source_group,
+                &authorization.membership,
+                mission,
+                &state.tenant,
+                &authorization.principal,
+            )
+            .map_err(|e| e.to_string());
     }
     controller
         .bridge
@@ -239,6 +274,33 @@ fn current(
         .map_err(|e| e.to_string())
 }
 
+/// Requires an actual original source-Group preparation, never merely a discoverable map label.
+fn validate_typed_source_reference(
+    controller: &ControllerState,
+    record: &Authorization,
+) -> Result<(), String> {
+    let Some(map) = &record.request.typed_map else {
+        return Ok(());
+    };
+    if controller
+        .memory_preparation
+        .records
+        .values()
+        .any(|preparation| {
+            preparation.preparation.as_ref().is_some_and(|preparation| {
+                preparation.group_id == record.source_group
+                    && preparation.inputs.iter().any(|input| {
+                        input.manifest == record.parent && input.typed_map.as_ref() == Some(map)
+                    })
+            })
+        })
+    {
+        Ok(())
+    } else {
+        Err("typed-map revision lacks its exact original source-Group preparation".into())
+    }
+}
+
 /// Freezes only an actual authorized original source before the candidate can claim provider work.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn authorize(
@@ -252,8 +314,17 @@ pub(super) fn authorize(
     now: domain::TimestampMs,
     kernel: &KernelTime,
 ) -> Result<serde_json::Value, String> {
-    if command.schema_version != MEMORY_SCHEMA || caller.role != "recovery-admin" {
-        return Err("revision Memory requires explicit v0.3 and actual recovery-admin".into());
+    if caller.role != "recovery-admin"
+        || if request.typed_map.is_some() {
+            command.schema_version != TYPED_MEMORY_SCHEMA
+        } else {
+            command.schema_version != MEMORY_SCHEMA
+        }
+    {
+        return Err(
+            "revision Memory requires its explicit source contract and actual recovery-admin"
+                .into(),
+        );
     }
     let candidate = state
         .candidates
@@ -280,7 +351,7 @@ pub(super) fn authorize(
         .memory_source(&request.parent_selector)?
         .ok_or("original Memory source absent")?;
     let key = request.child.selector().to_string();
-    if map.is_some()
+    if map != request.typed_map
         || catalog.memory_source(request.child.selector())?.is_some()
         || state
             .candidates
@@ -293,7 +364,9 @@ pub(super) fn authorize(
             )
             .any(|candidate| candidate.memory.contains_key(&key))
     {
-        return Err("revision child must be a new uniquely declared generic selector".into());
+        return Err(
+            "revision child requires an exact complete source and a new unique selector".into(),
+        );
     }
     let execution = controller
         .orchestrator
@@ -553,7 +626,7 @@ pub(crate) fn install_catalog(controller: &ControllerState) -> Result<(), String
     Ok(())
 }
 
-/// Grants only an actual current child import its exact stopped original-parent CAS reference exception.
+/// Grants an actual current child import its exact original-parent CAS reference exception.
 pub(crate) fn permits_parent_reference(
     controller: &ControllerState,
     protected: &MemoryArtifactManifest,
@@ -567,23 +640,15 @@ pub(crate) fn permits_parent_reference(
             switch.phase == Phase::Applied && switch.target_group == import.request.group_id
         }) {
             for record in state.candidates[&switch.ticket_id].memory.values() {
-                if &record.parent != protected || record.request.child != import.request.manifest {
+                if record.parent.artifact() != protected.artifact()
+                    || record.request.child != import.request.manifest
+                {
                     continue;
                 }
-                if switch
-                    .attempts
-                    .iter()
-                    .map(|attempt| &attempt.execution_id)
-                    .chain(switch.prior_attempts.iter())
-                    .any(|id| {
-                        !super::super::safety_stop::attempt_confirmed(controller, id)
-                            || super::super::memory_use::blocks_attempt_release(controller, id)
-                    })
-                {
-                    return Err(
-                        "revision parent retains incomplete original stop/revoke evidence".into(),
-                    );
-                }
+                // The current target has already passed its own exact preparation/import
+                // authority. Its data-plane read may therefore use the original parent CAS
+                // bytes; source/previous-attempt retirement is enforced before publication and
+                // switch admission, rather than by blocking the target's first read.
                 return Ok(true);
             }
         }
@@ -626,7 +691,7 @@ pub(super) fn validate_restored(
             .memory_authorization_revision(record.request.registry_revision)
             .ok_or("original revision Memory policy history absent")?;
         let original_command = Command {
-            schema_version: MEMORY_SCHEMA.into(),
+            schema_version: record.schema().into(),
             command_id: record.command_id.clone(),
             expected_revision: receipt.result["revision"]
                 .as_u64()
@@ -655,7 +720,7 @@ pub(super) fn validate_restored(
             || receipt.received_at != record.admitted_at
             || receipt.result["memory_authorization_digest"].as_str()
                 != Some(record.digest.as_str())
-            || receipt.result["schema_version"] != MEMORY_SCHEMA
+            || receipt.result["schema_version"] != record.schema()
             || !valid_digest(&record.leaf_digest)
             || record.admitted_at < state.accepted_at
             || record.admitted_at.as_millis() >= record.certificate_expires_at_ms
@@ -677,10 +742,15 @@ pub(super) fn validate_restored(
             || normalized != parent
             || record.parent.selector() != &record.request.parent_selector
             || record.parent.selector() == record.request.child.selector()
-            || record.parent.kind() == domain::MemoryKind::Spatial
+            || if let Some(map) = &record.request.typed_map {
+                domain::map_memory_manifest(map)? != record.parent
+                    || record.parent.scope() != &MemoryScope::Global
+            } else {
+                record.parent.kind() == domain::MemoryKind::Spatial
+                    || !matches!(record.parent.scope(), MemoryScope::ExecutionGroup(owner) if owner == &record.source_group)
+            }
             || record.parent.visibility() != domain::MemoryVisibility::Exchangeable
             || record.parent.created_at() > record.request.child.created_at()
-            || !matches!(record.parent.scope(), MemoryScope::ExecutionGroup(owner) if owner == &record.source_group)
             || !matches!(record.request.child.scope(), MemoryScope::ExecutionGroup(owner) if owner == &record.request.target_group_id)
             || record.source_group == record.request.target_group_id
             || controller
@@ -691,7 +761,12 @@ pub(super) fn validate_restored(
         {
             return Err("original revision Memory declaration or lineage changed".into());
         }
-        let source_policy = registry.policy(&record.parent, &state.tenant)?;
+        validate_typed_source_reference(controller, record)?;
+        let source_policy = if let Some(map) = &record.request.typed_map {
+            registry.typed_map_policy(map, &state.tenant)?
+        } else {
+            registry.policy(&record.parent, &state.tenant)?
+        };
         if !source_policy
             .principals
             .get(&record.principal)

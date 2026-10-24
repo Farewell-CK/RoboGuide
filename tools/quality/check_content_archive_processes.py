@@ -132,6 +132,7 @@ def run(
         "roboguide.controller-checkpoint/v52",
         "roboguide.controller-checkpoint/v53",
         "roboguide.controller-checkpoint/v54",
+        "roboguide.controller-checkpoint/v55",
     }:
         raise ValueError("unsupported explicit original Archive process profile")
     cleanup_authority = schema in {
@@ -140,6 +141,7 @@ def run(
         "roboguide.controller-checkpoint/v52",
         "roboguide.controller-checkpoint/v53",
         "roboguide.controller-checkpoint/v54",
+        "roboguide.controller-checkpoint/v55",
     }
     if abort_unpublished and not cleanup_authority:
         raise ValueError("explicit original cleanup requires wrapper v50")
@@ -559,13 +561,18 @@ def run(
         profile: dict[str, Any] = {
             "schema": "roboguide.recovery-profile/v0.18"
             if schema
-            in {"roboguide.controller-checkpoint/v53", "roboguide.controller-checkpoint/v54"}
+            in {
+                "roboguide.controller-checkpoint/v53",
+                "roboguide.controller-checkpoint/v54",
+                "roboguide.controller-checkpoint/v55",
+            }
             else "roboguide.recovery-profile/v0.16"
             if schema
             in {
                 "roboguide.controller-checkpoint/v52",
                 "roboguide.controller-checkpoint/v53",
                 "roboguide.controller-checkpoint/v54",
+                "roboguide.controller-checkpoint/v55",
             }
             else "roboguide.recovery-profile/v0.15"
             if schema == "roboguide.controller-checkpoint/v51"
@@ -609,7 +616,11 @@ def run(
             profile["schema"] = (
                 "roboguide.recovery-profile/v0.18"
                 if schema
-                in {"roboguide.controller-checkpoint/v53", "roboguide.controller-checkpoint/v54"}
+                in {
+                    "roboguide.controller-checkpoint/v53",
+                    "roboguide.controller-checkpoint/v54",
+                    "roboguide.controller-checkpoint/v55",
+                }
                 else "roboguide.recovery-profile/v0.17"
             )
             for component in profile["components"]:
@@ -619,6 +630,7 @@ def run(
             "roboguide.controller-checkpoint/v52",
             "roboguide.controller-checkpoint/v53",
             "roboguide.controller-checkpoint/v54",
+            "roboguide.controller-checkpoint/v55",
         }:
             for component in profile["components"]:
                 if component["kind"] == "artifact":
@@ -691,7 +703,11 @@ def run(
         assert receipt["schema"] == (
             "roboguide.restore-receipt/v0.18"
             if schema
-            in {"roboguide.controller-checkpoint/v53", "roboguide.controller-checkpoint/v54"}
+            in {
+                "roboguide.controller-checkpoint/v53",
+                "roboguide.controller-checkpoint/v54",
+                "roboguide.controller-checkpoint/v55",
+            }
             else "roboguide.restore-receipt/v0.17"
             if controller_storage_v1
             else "roboguide.restore-receipt/v0.16"
@@ -700,6 +716,7 @@ def run(
                 "roboguide.controller-checkpoint/v52",
                 "roboguide.controller-checkpoint/v53",
                 "roboguide.controller-checkpoint/v54",
+                "roboguide.controller-checkpoint/v55",
             }
             else "roboguide.restore-receipt/v0.15"
             if schema == "roboguide.controller-checkpoint/v51"

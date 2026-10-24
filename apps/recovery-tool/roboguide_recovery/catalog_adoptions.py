@@ -26,6 +26,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v52",
     "roboguide.controller-checkpoint/v53",
     "roboguide.controller-checkpoint/v54",
+    "roboguide.controller-checkpoint/v55",
 }
 CODEC = "domain.EventPayload.json/v30"
 

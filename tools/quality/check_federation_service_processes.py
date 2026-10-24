@@ -294,10 +294,10 @@ def old_writer_refusal(participant: Participant, old_binary: Path, output: Path)
     if (
         completed.returncode == 0
         or "unsupported checkpoint schema" not in text
-        or "/v54" not in text
+        or "/v55" not in text
     ):
         raise AssertionError(
-            "old participant binary did not refuse the actual v54 checkpoint: " + text
+            "old participant binary did not refuse the actual v55 checkpoint: " + text
         )
     if sql_rows(database) != before:
         raise AssertionError("old writer changed the original copied authority")
@@ -506,7 +506,7 @@ def run(
         proof = faults(a, b, output, digests["admin"])
         for participant in (a, b):
             assert participant.call("/v1/inventory")[1]["nodes"] == []
-            assert participant.observe()["schema"] == "roboguide.controller-checkpoint/v54"
+            assert participant.observe()["schema"] == "roboguide.controller-checkpoint/v55"
         if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_hash:
             raise ValueError("actual Controller binary changed during acceptance")
         if source_identity() != original_source:
@@ -516,7 +516,7 @@ def run(
             "passed": True,
             "schema": SCHEMA,
             "binary_sha256": binary_hash,
-            "application_schema": "roboguide.controller-checkpoint/v54",
+            "application_schema": "roboguide.controller-checkpoint/v55",
             "registered_nodes": 0,
             "devices": 0,
             "models": 0,

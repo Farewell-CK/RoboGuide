@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper without complete typed-map runtime revision authority.
+const PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v54";
 /// Previous wrapper without durable Federation participant policy and original receipts.
 const PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v53";
 /// Previous wrapper before independent Prepared recovery authority.
@@ -802,7 +804,7 @@ fn require_secure_artifact_binding(
 
 /// Loads the shared Node transport lease policy from startup-owned configuration.
 ///
-/// Defaults preserve the existing five-second heartbeat and fifteen-second lease. Core crates do
+/// Defaults use a one-second heartbeat and the original fifteen-second lease. Core crates do
 /// not read process environment variables; this composition root resolves them once and passes the
 /// immutable policy to both transport and application authorities.
 fn configured_node_protocol_policy() -> Result<NodeProtocolPolicy, Box<dyn std::error::Error>> {
@@ -1166,6 +1168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_UPLOAD_RECOVERY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_UPLOAD_RETIREMENT_SERVER_CHECKPOINT_SCHEMA
@@ -1224,7 +1227,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "Controller wrapper body differs from its original storage schema".into(),
                 );
             }
-            if checkpoint.schema == SERVER_CHECKPOINT_SCHEMA && value.get("federation").is_none() {
+            if matches!(
+                checkpoint.schema.as_str(),
+                SERVER_CHECKPOINT_SCHEMA | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
+            ) && value.get("federation").is_none()
+            {
                 return Err(
                     "current Controller wrapper lacks mandatory Federation reference state".into(),
                 );
@@ -1233,6 +1240,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_UPLOAD_RECOVERY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_UPLOAD_RETIREMENT_SERVER_CHECKPOINT_SCHEMA

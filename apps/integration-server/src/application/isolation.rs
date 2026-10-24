@@ -339,9 +339,18 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     // Wrappers v45-v51 add infrastructure/content/quota authority while retaining exactly the
     // original v45 scoped revision, safety and Memory isolation contract checked by this function.
     // Their independent SQL/checkpoint journals remain subject to their own strict storage gates.
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA
+        && saved
+            .runtime_revisions
+            .values()
+            .any(|state| state.uses_typed_revision_memory_authority())
+    {
+        return Err("legacy wrapper cannot carry typed-map revision Memory authority".into());
+    }
     let current_isolation_contract = matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_UPLOAD_RECOVERY_SERVER_CHECKPOINT_SCHEMA
             | PRE_UPLOAD_RETIREMENT_SERVER_CHECKPOINT_SCHEMA

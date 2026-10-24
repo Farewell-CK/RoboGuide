@@ -176,10 +176,16 @@ fn attempt_digest(controller: &ControllerState, ids: &[String]) -> Result<String
             .find(|attempt| attempt.execution_id() == id)
             .ok_or("handoff attempt is absent")?;
         let command = attempt.command();
-        let generation = controller
-            .bridge
-            .current_attempt_generation(command.group_id(), command.task_ref(), command.role_id())
-            .ok_or("handoff generation is absent")?;
+        let generation = command
+            .execution_generation()
+            .or_else(|| {
+                controller.bridge.current_attempt_generation(
+                    command.group_id(),
+                    command.task_ref(),
+                    command.role_id(),
+                )
+            })
+            .ok_or("handoff original generation is absent")?;
         frozen.push((id, command, generation));
     }
     digest(&frozen)
@@ -483,7 +489,15 @@ pub(crate) fn admit(
         controller
             .bridge
             .control()
-            .authorize_memory_handoff(&parent, &request.child, &tenant_id, principal)
+            .authorize_stopped_memory_handoff(
+                &parent,
+                &request.child,
+                &request.source_group_id,
+                &request.source_membership,
+                &request.target_membership,
+                &tenant_id,
+                principal,
+            )
             .map_err(|error| error.to_string())?;
     }
     let source_ids = members(controller, &request.source_group_id)?;
@@ -1018,7 +1032,11 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         if normalized_child != original_parent
             || record.parent.selector() != &record.request.parent_selector
             || record.parent.selector() == record.request.child.selector()
-            || !matches!(record.parent.scope(),domain::MemoryScope::ExecutionGroup(group) if group==&record.request.source_group_id)
+            || if record.request.typed_map.is_some() {
+                record.parent.scope() != &domain::MemoryScope::Global
+            } else {
+                !matches!(record.parent.scope(),domain::MemoryScope::ExecutionGroup(group) if group==&record.request.source_group_id)
+            }
             || record.parent.created_at() > record.request.child.created_at()
             || (record.request.typed_map.is_none()
                 && record.parent.kind() == domain::MemoryKind::Spatial)
@@ -1077,6 +1095,13 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         }
         if record.committed_at_ms.is_some() {
             validate_receiver_proofs(record)?;
+            let mut ids = record.request.source_execution_ids.clone();
+            ids.extend(record.target_execution_ids.clone());
+            if attempt_digest(controller, &ids)? != record.attempts_digest {
+                return Err(
+                    "restored handoff lost its original Runtime commands/generations".into(),
+                );
+            }
         } else if !record.receiver_proofs.is_empty()
             || record.receiver_proof_digest.is_some()
             || record.committed_at_ms.is_some()
@@ -1102,7 +1127,9 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
             } else {
                 &record.request.target_membership
             };
-            if bound.membership_version() != Some(expected_membership) {
+            if record.committed_at_ms.is_none()
+                && bound.membership_version() != Some(expected_membership)
+            {
                 return Err("restored handoff Group membership changed".into());
             }
             let mission = bound.mission_id();

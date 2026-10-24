@@ -31,6 +31,7 @@ def run(directory: Path) -> dict[str, Any]:
         "v0.1": "mission/runtime-plan-revision-v0.1/command.schema.json",
         "v0.2": "mission/runtime-plan-revision-v0.2/command.schema.json",
         "v0.3": "mission/runtime-plan-revision-v0.3/command.schema.json",
+        "v0.4": "mission/runtime-plan-revision-v0.4/command.schema.json",
         "plan": "mission/v0.9/mission-plan.schema.json",
     }.items():
         path = ROOT / "contracts" / relative
@@ -65,14 +66,25 @@ def run(directory: Path) -> dict[str, Any]:
     for field, value in (
         ("registry_revision", 0),
         ("child", {**declared["action"]["authorization"]["child"], "scope": {"kind": "global"}}),
-        ("child", {**declared["action"]["authorization"]["child"], "kind": "spatial"}),
+        (
+            "child",
+            {
+                **declared["action"]["authorization"]["child"],
+                "kind": "artifact" if declared["schema_version"].endswith("v0.4") else "spatial",
+            },
+        ),
         ("child", {**declared["action"]["authorization"]["child"], "visibility": "discoverable"}),
         ("stop_proof", True),
     ):
         changed = copy.deepcopy(declared)
         changed["action"]["authorization"][field] = value
-        assert list(validators["v0.3"].iter_errors(changed))
+        assert list(validators[declared["schema_version"].rsplit("/", 1)[1]].iter_errors(changed))
         rejected.append(field)
+    if declared["schema_version"].endswith("v0.4"):
+        missing = copy.deepcopy(declared)
+        del missing["action"]["authorization"]["typed_map"]
+        assert list(validators["v0.4"].iter_errors(missing))
+        rejected.append("missing-complete-typed-map")
     result = {
         "passed": True,
         "commands": commands,

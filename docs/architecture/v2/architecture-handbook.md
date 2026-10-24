@@ -162,6 +162,8 @@ sequenceDiagram
 
 运行期计划修订是另外的授权路径：冻结原目标、原 stop/revoke、MI claim/nonce、独立 Review，
 然后创建新 Group 并正常准入。普通 resume/recovery 不能绕过待完成修订。
+ADR-0203 的显式 v0.4 还要求 typed-map 与 source Group 原 preparation 相符，完整来源进入
+Review；地图生产 Mission 与当前消费 Mission 的证据保持独立。scoped child 不授予定位或设备事实。
 重启、重放或只读观察不刷新原预算、TTL 或权限。
 
 ## 当前部署

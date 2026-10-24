@@ -208,6 +208,13 @@ ADR-0200 让新的 generic/typed-map replica evidence 保留原始 Memory import
 import intent，event codec v33 与 State/Catalog snapshot 持久化；旧事件的 provenance 保持
 unavailable，不从 Node/provider 推断 owner。
 
+ADR-0203 在 runtime revision v0.4 中保留完整 typed-map 原来源，并要求与当前 source Group
+的原 preparation 相符。原地图生产 Mission 与消费 Mission 保持独立；Review、typed policy、
+停止/撤权、原 CAS 和正常新 Group Control 门禁均保留。wrapper v55 拒绝旧 writer；
+scoped child 不创建新地图、Active Map 或定位事实，完整生命周期组合仍独立验收。
+ADR-0204 将默认 Node 心跳/health 采样改为 1 秒，为独立的 5 秒状态 TTL 留出时间；
+15 秒 transport lease、显式覆盖和原 Unknown/预算均保持原语义。
+
 ADR-0201 接通 Federation participant HTTP 入口；ADR-0202 以 wrapper v54 和 service v0.2
 补齐原始 Prepare/Commit/Abort 回执、版本化域授权、actual TLS/stable principal/tenant
 与 domain pair、预期 epoch 门禁及原同 kernel budget。每个本地域只记录自己的阶段，

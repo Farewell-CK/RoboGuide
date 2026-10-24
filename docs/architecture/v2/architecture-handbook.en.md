@@ -166,6 +166,9 @@ sequenceDiagram
 
 Runtime plan revision is a separate authorization path: original objective, complete stop/revoke, MI claim/nonce,
 independent Review, then a fresh Group and normal Control admission. Resume/recovery cannot bypass a pending revision.
+ADR-0203's explicit v0.4 also binds the complete typed map to the source Group's original preparation
+and Review. Production and consuming Missions keep separate provenance. A scoped child grants no
+localization or device fact.
 Restart, replay and read-only observation never renew original budgets, TTLs or permissions.
 
 ## Current deployment

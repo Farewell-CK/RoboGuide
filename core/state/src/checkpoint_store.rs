@@ -224,6 +224,7 @@ pub(super) fn read(
             | "roboguide.controller-checkpoint/v51"
             | "roboguide.controller-checkpoint/v52"
             | "roboguide.controller-checkpoint/v53"
+            | "roboguide.controller-checkpoint/v54"
     ) || head.as_ref().is_some_and(|head| {
         matches!(
             head.schema.as_str(),
@@ -232,6 +233,7 @@ pub(super) fn read(
                 | "roboguide.controller-checkpoint/v51"
                 | "roboguide.controller-checkpoint/v52"
                 | "roboguide.controller-checkpoint/v53"
+                | "roboguide.controller-checkpoint/v54"
         )
     }) {
         super::archive_operation::require_storage(connection)?;

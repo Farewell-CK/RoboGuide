@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
 /// Default interval between Node heartbeat messages.
-pub const DEFAULT_NODE_HEARTBEAT_INTERVAL_MS: u64 = 5_000;
+pub const DEFAULT_NODE_HEARTBEAT_INTERVAL_MS: u64 = 1_000;
 
 /// Default duration for the transport and Control Node lease.
 pub const DEFAULT_NODE_LEASE_DURATION_MS: u64 = 15_000;
@@ -155,7 +155,7 @@ impl NodeLeasePolicy {
 }
 
 impl Default for NodeLeasePolicy {
-    /// Creates the stable 5-second heartbeat and 15-second lease policy.
+    /// Samples every second while retaining the independent fifteen-second transport lease.
     fn default() -> Self {
         Self::try_new(
             DEFAULT_NODE_HEARTBEAT_INTERVAL_MS,
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn default_values_remain_compatible() {
         let policy = NodeLeasePolicy::default();
-        assert_eq!(policy.heartbeat_interval_ms(), 5_000);
+        assert_eq!(policy.heartbeat_interval_ms(), 1_000);
         assert_eq!(policy.lease_duration_ms(), 15_000);
     }
 

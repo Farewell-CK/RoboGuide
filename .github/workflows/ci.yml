@@ -468,6 +468,9 @@ jobs:
             /tmp/rg-ci-*/**/*.log
             /tmp/rg-ci-*/**/result.json
             /tmp/rg-ci-*/*.sqlite3
+            /tmp/rg-ci-*/*.sqlite3-wal
+            /tmp/rg-ci-*/*.sqlite3-shm
+            /tmp/rg-ci-*/**/*observed.json
             /tmp/rg-ci-*/**/source-identity.json
             ${{ runner.temp }}/roboguide-*/**/result.json
             ${{ runner.temp }}/roboguide-*/**/*.log

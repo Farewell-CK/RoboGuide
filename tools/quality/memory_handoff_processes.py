@@ -365,6 +365,14 @@ def run(scenario: GroupScenario, source_id: str, case: str) -> dict[str, Any]:
                     WHEN json_extract(NEW.payload_json,'$.MemoryHandoffTransition.phase')='stopping'
                     BEGIN SELECT RAISE(ABORT,'actual handoff admission rollback window'); END""")
             status, failed = scenario.exchange("/v1/memory/handoffs", command)
+            save(
+                scenario.directory / "handoff-sql-admission-observed.json",
+                {
+                    "status": status,
+                    "response": failed,
+                    "authority": scenario.get("/v1/authority-status"),
+                },
+            )
             assert status == 409, failed
             assert scenario.get(source_path)["isolation"] is None
             rolled_back = checkpoint(scenario.directory)

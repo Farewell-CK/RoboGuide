@@ -159,6 +159,14 @@ pub(super) fn authorize_blob_read(
     for map in catalog.revisions()? {
         if map.manifest().artifact().content_digest().as_str() == digest {
             referenced = true;
+            if let Ok(projected) = map_authorization_manifest(map.manifest()) {
+                if authority
+                    .authorize_handoff_blob_reference(principal, &projected, import_id)
+                    .map_err(HttpError::forbidden)?
+                {
+                    continue;
+                }
+            }
             authorized_map_read(
                 catalog,
                 authority,

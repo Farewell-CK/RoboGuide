@@ -23,6 +23,8 @@ const SCHEMA: &str = "roboguide.runtime-plan-revision/v0.1";
 const GENERATION_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.2";
 /// Explicit scoped Memory permission, never inferred from an older candidate or manifest alias.
 const MEMORY_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.3";
+/// Complete typed-map source permission; generic v0.3 never acquires it through a projection.
+const TYPED_MEMORY_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.4";
 /// Candidate and command storage bounds are independent of prospective Mission admission.
 const MAX_CANDIDATES: usize = 16;
 /// Immutable command receipts cannot grow without a deployment bound.
@@ -384,15 +386,30 @@ struct GenerationGrant {
 impl RevisionState {
     /// Lets migration reject new Memory permissions hidden in an older wrapper.
     pub(crate) fn uses_revision_memory_authority(&self) -> bool {
+        self.commands.values().any(|receipt| {
+            matches!(
+                receipt.result["schema_version"].as_str(),
+                Some(MEMORY_SCHEMA | TYPED_MEMORY_SCHEMA)
+            )
+        }) || self.candidates.values().any(|candidate| {
+            !candidate.memory.is_empty()
+                || candidate
+                    .review
+                    .as_ref()
+                    .is_some_and(|review| review.memory_digest.is_some())
+        })
+    }
+
+    /// Fences complete typed source declarations, including zero-event administrative receipts.
+    pub(crate) fn uses_typed_revision_memory_authority(&self) -> bool {
         self.commands
             .values()
-            .any(|receipt| receipt.result["schema_version"].as_str() == Some(MEMORY_SCHEMA))
+            .any(|receipt| receipt.result["schema_version"].as_str() == Some(TYPED_MEMORY_SCHEMA))
             || self.candidates.values().any(|candidate| {
-                !candidate.memory.is_empty()
-                    || candidate
-                        .review
-                        .as_ref()
-                        .is_some_and(|review| review.memory_digest.is_some())
+                candidate
+                    .memory
+                    .values()
+                    .any(|record| record.uses_typed_map())
             })
     }
 

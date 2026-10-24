@@ -616,6 +616,66 @@ fn stopped_typed_map_handoff_requires_source_and_target_memberships() {
             "handoff",
         )
         .unwrap();
+    // A revision declares an unbound target; the generic contract cannot stand in for its map.
+    let mut revision = control.clone();
+    revision.groups.remove(&target_id);
+    revision
+        .register_mission_tenant(mission.clone(), "local")
+        .unwrap();
+    revision
+        .authorize_revision_typed_map_child(
+            &map,
+            &child,
+            &source,
+            &source_membership,
+            &mission,
+            "local",
+            "handoff",
+        )
+        .unwrap();
+    assert!(revision.group(&target_id).is_none());
+    assert!(
+        revision
+            .authorize_revision_memory_child(
+                &parent,
+                &child,
+                &source,
+                &source_membership,
+                &mission,
+                "local",
+                "handoff",
+            )
+            .is_err()
+    );
+    let mut changed_map = serde_json::to_value(&map).unwrap();
+    changed_map["root_frame"] = "changed-frame-with-identical-bytes".into();
+    let changed_map = serde_json::from_value(changed_map).unwrap();
+    assert!(
+        revision
+            .authorize_revision_typed_map_child(
+                &changed_map,
+                &child,
+                &source,
+                &source_membership,
+                &mission,
+                "local",
+                "handoff",
+            )
+            .is_err()
+    );
+    assert!(
+        revision
+            .authorize_revision_typed_map_child(
+                &map,
+                &child,
+                &source,
+                &source_membership,
+                &mission,
+                "other-tenant",
+                "handoff",
+            )
+            .is_err()
+    );
     let mut stale = target_membership;
     stale.generation += 1;
     assert!(
