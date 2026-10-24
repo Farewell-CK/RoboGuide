@@ -56,6 +56,70 @@ def run(directory: Path) -> dict[str, Any]:
         assert typed_map["schema"] == "roboguide.map-manifest/v0.2"
     else:
         assert "typed_map" not in command
+    typed_contract: dict[str, Any] = {
+        "schema_version": "roboguide.memory-handoff/v0.2",
+        "handoff_id": "typed-schema-probe",
+        "parent_selector": {"memory_id": "map", "revision_id": "source"},
+        "child": {
+            "schema": "roboguide.memory-manifest/v0.1",
+            "selector": {"memory_id": "map", "revision_id": "child"},
+            "kind": "spatial",
+            "provider_id": "map-provider",
+            "owner": {
+                "owner": "node",
+                "node_id": "source-node",
+                "local_system_id": "spatial-eaios",
+            },
+            "scope": {"kind": "execution_group", "execution_group_id": "target"},
+            "visibility": "exchangeable",
+            "payload_schema": "roboguide.spatial-file-map/v1",
+            "media_type": "application/vnd.roboguide.spatial-map",
+            "artifact": {"content_digest": "sha256:" + "a" * 64, "byte_size": 1},
+            "source_mission_id": "mission",
+            "source_execution_id": "source-execution",
+            "source_task_ref": {"mission_id": "mission", "task_id": "map-task"},
+            "created_at": 1,
+        },
+        "typed_map": {
+            "schema": "roboguide.map-manifest/v0.2",
+            "map_id": "map",
+            "revision_id": "source",
+            "content_digest": "sha256:" + "a" * 64,
+            "byte_size": 1,
+            "media_type": "application/vnd.roboguide.spatial-map",
+            "format": {"name": "occupancy", "version": "v1"},
+            "producer_node_id": "source-node",
+            "producer_local_system_id": "spatial-eaios",
+            "producer_provider_id": "map-provider",
+            "payload_schema": "roboguide.spatial-file-map/v1",
+            "source_mission_id": "mission",
+            "source_execution_id": "source-execution",
+            "source_task_ref": {"mission_id": "mission", "task_id": "map-task"},
+            "root_frame": "map",
+            "coordinate_convention": "enu",
+            "spatial_anchor": {"id": "anchor", "kind": "fixed"},
+            "created_at_ms": 1,
+        },
+        "source_group_id": "source",
+        "source_membership": {
+            "generation": 1,
+            "bindings_digest": "sha256:" + "b" * 64,
+        },
+        "source_execution_ids": ["source-attempt"],
+        "target_membership": {
+            "generation": 1,
+            "bindings_digest": "sha256:" + "c" * 64,
+        },
+        "registry_id": "registry",
+        "registry_revision": 1,
+        "deadline_ms": 1000,
+    }
+    validators["handoff_v0_2"].validate(typed_contract)
+    typed_without_source = copy.deepcopy(typed_contract)
+    typed_without_source.pop("typed_map")
+    assert list(validators["handoff_v0_2"].iter_errors(typed_without_source))
+    typed_contract["typed_map"]["root_frame"] = "odom"
+    validators["handoff_v0_2"].validate(typed_contract)
     for name in ("source", "target"):
         validators["mission"].validate(
             json.loads((directory / f"handoff-{name}-mission.json").read_bytes())
@@ -107,6 +171,8 @@ def run(directory: Path) -> dict[str, Any]:
         "jsonschema": importlib.metadata.version("jsonschema"),
         "handoff_schema": command["schema_version"],
         "typed_map_retained": "typed_map" in command,
+        "typed_map_schema_probe": True,
+        "typed_map_projection_semantics_left_to_control": True,
         "positive_availability_observations": observations,
         "positive_use_receipts": use_receipts,
         "structural_rejections": rejected,
