@@ -122,6 +122,130 @@ fn actual_live_producer_reconciliation_preserves_unknown_until_original_scope_cl
     assert!(content.active_references(&key).unwrap().is_empty());
 }
 
+/// A failed later original lookup never erases an earlier real FULL retirement or releases its peer.
+#[test]
+fn actual_batch_reconciliation_retains_partial_original_progress_and_peer_pin() {
+    let (_directory, store, content, key, first) = fixture();
+    let mut second = first.clone();
+    second.log_id.index += 1;
+    for entry in [&first, &second] {
+        let Some(crate::content_store::ProducerAdmission::New(permit)) =
+            store.retain_log_inputs(entry).unwrap()
+        else {
+            panic!("actual original producer was not admitted");
+        };
+        drop(permit);
+    }
+    let originals = store.parent_producers().unwrap();
+    assert_eq!(originals.len(), 2);
+    let connection = store.connection.lock().unwrap();
+    let (referenced, proof) = store
+        .producer_is_referenced(&connection, &originals[0])
+        .unwrap();
+    assert!(!referenced);
+    assert!(
+        content
+            .reconcile_producers(
+                &store._writer,
+                &[
+                    (originals[0].operation_id.clone(), referenced, proof.clone()),
+                    ("original-operation-unavailable".into(), false, proof),
+                ],
+            )
+            .unwrap_err()
+            .contains("original producer operation is unavailable")
+    );
+    drop(connection);
+    let progressed = content
+        .producer_status(&originals[0].operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(progressed.disposition, "retired-unknown");
+    assert_eq!(
+        progressed.original["intent"],
+        originals[0].original["intent"]
+    );
+    assert!(progressed.original["publication"].is_null());
+    assert_eq!(
+        content.producer_status(&originals[1].operation_id).unwrap(),
+        Some(originals[1].clone())
+    );
+    assert_eq!(content.active_references(&key).unwrap().len(), 1);
+    let complete = store.reconcile_content_producers().unwrap();
+    assert!(
+        complete
+            .iter()
+            .all(|row| row.disposition == "retired-unknown")
+    );
+    assert!(complete.contains(&progressed));
+    assert!(content.active_references(&key).unwrap().is_empty());
+}
+
+/// An actual locked Root cannot delay Raft's committed purge ACK or fabricate completed retirement.
+#[tokio::test]
+async fn actual_prefix_ack_precedes_root_cleanup_and_preserves_failed_pins() {
+    let (directory, mut store, content, key, entry) = fixture();
+    copy_fixture(&directory, &content, &key, "actual-prefix-input");
+    store
+        .persist_log_entries(std::slice::from_ref(&entry))
+        .unwrap();
+    let original = original_kind(&store, ReplicaContentProducerKind::Log);
+    let blocked = Connection::open(content.root().join("content.sqlite3")).unwrap();
+    blocked.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    tokio::time::timeout(Duration::from_secs(1), store.purge(entry.log_id))
+        .await
+        .expect("actual Raft metadata ACK waited for the unrelated Root writer")
+        .unwrap();
+    assert_eq!(
+        read_meta::<LogId<u64>>(&store.connection.lock().unwrap(), "purged").unwrap(),
+        Some(entry.log_id)
+    );
+    assert!(store.wait_for_prefix_cleanup().await.is_err());
+    blocked.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(
+        content.producer_status(&original.operation_id).unwrap(),
+        Some(original.clone())
+    );
+    assert!(
+        content
+            .active_references(&key)
+            .unwrap()
+            .iter()
+            .any(|pin| pin.kind == ReplicaContentReferenceKind::Log)
+    );
+    store.purge(entry.log_id).await.unwrap();
+    store.wait_for_prefix_cleanup().await.unwrap();
+    let retired = content
+        .producer_status(&original.operation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retired.disposition, "released");
+    assert_eq!(retired.original["intent"], original.original["intent"]);
+    assert_eq!(
+        retired.original["publication"],
+        original.original["publication"]
+    );
+}
+
+/// The actual durable prefix cannot move backward or lend another original Log identity its cut.
+#[tokio::test]
+async fn actual_purged_prefix_never_regresses_or_changes_original_cut() {
+    let (_directory, mut store, _content, _key, entry) = fixture();
+    store
+        .persist_log_entries(std::slice::from_ref(&entry))
+        .unwrap();
+    store.purge(entry.log_id).await.unwrap();
+    store.wait_for_prefix_cleanup().await.unwrap();
+    let smaller = LogId::new(entry.log_id.leader_id, 0);
+    assert!(store.purge(smaller).await.is_err());
+    let foreign = LogId::new(openraft::CommittedLeaderId::new(2, 2), entry.log_id.index);
+    assert!(store.purge(foreign).await.is_err());
+    assert_eq!(
+        read_meta::<LogId<u64>>(&store.connection.lock().unwrap(), "purged").unwrap(),
+        Some(entry.log_id)
+    );
+}
+
 /// Actual late byte/SQL publication unblocks the original budget without acquiring parent authority.
 #[test]
 fn actual_apply_input_wait_preserves_parent_access_until_real_bytes_publish() {
@@ -267,6 +391,7 @@ async fn actual_log_publication_reopen_and_purge_preserve_original_budget_and_re
     .unwrap();
     assert_eq!(store.parent_producers().unwrap(), vec![original.clone()]);
     store.purge(entry.log_id).await.unwrap();
+    store.wait_for_prefix_cleanup().await.unwrap();
     let released = store.parent_producers().unwrap().pop().unwrap();
     assert_eq!(released.disposition, "released");
     assert_eq!(

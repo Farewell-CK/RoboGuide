@@ -65,6 +65,15 @@ impl Member {
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
+    /// Releases only an original reader whose actual recorded process incarnation has ended.
+    RetireEndedContentReader {
+        /// Complete original accepted Root7/8 declaration.
+        member: Member,
+        /// Exact original restored backing when selected.
+        restore_binding_digest: Option<String>,
+        /// Original reader identity, never a caller-supplied process or stop assertion.
+        reader_id: String,
+    },
     /// Releases an Unknown copy only through independently observed original process-end evidence.
     RetireEndedContentCopy {
         /// Existing original explicitly declared GC root.
@@ -179,6 +188,15 @@ pub(crate) fn run(path: &Path) -> Result<serde_json::Value, String> {
     }
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     match request {
+        Request::RetireEndedContentReader {
+            member,
+            restore_binding_digest,
+            reader_id,
+        } => {
+            let root = member.open_gc(restore_binding_digest.as_deref())?;
+            serde_json::to_value(root.retire_ended_reader(&reader_id)?)
+                .map_err(|error| error.to_string())
+        }
         Request::RetireEndedContentCopy {
             member,
             restore_binding_digest,

@@ -203,6 +203,18 @@ outcomes. This review starts no Habitat, model or device.
 
 ## Maintenance
 
+ADR-0197 passes actual producer/GC/restart and three-leader cold acceptance: compose an actual retired upload with every member's original
+Log/View/Snapshot and stream/reader retention. Real mTLS Snapshot/applied-cut purge and original
+scope/process end release only their own responsibilities. Local OS-admin reader retirement delegates
+to the Root's actual incarnation check; timeouts and labels cannot invent exit. Final CAS tombstone/
+unlink retains independent Artifact/Archive/backup responsibility and all existing generations.
+The actual parent writer/mutex may reconcile its complete producer set under one Root guard with
+full validation before/after; each original FULL Commit and pre-queue observer budget remain.
+Failures retain actual partial progress and Unknown.
+Raft ACK follows actual prefix/pointer Commit before a bounded owned task retires original Log
+references under the real irreversible cut. Root writes release the parent mutex; failures retain
+pins. Maintenance waits for actual cleanup without blocking the consensus core.
+
 ADR-0196 passes actual runnable and three-leader cold recovery acceptance: Root validation can extend only its original connection's
 complete witness after exact reader write counts, actual reader/pin/heads and two unchanged SQL
 header observations. Failures, extra writes, external commits, DDL, old generations and reopen

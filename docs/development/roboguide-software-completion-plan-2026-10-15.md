@@ -111,7 +111,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 每阶段通过对应验收后才进入依赖阶段。类型、文档、占位返回值、内部直调和通用测试通过
 不能独立关闭功能。阶段记录必须包含当前源码/配置 identity、复现命令、调用链、结果和剩余项。
 
-## 当前执行队列（2026-10-24）
+## 当前执行队列（2026-10-25）
 
 用户已接受后续高效收尾计划，冻结基线 `1dc5b6d`，仍只使用
 `codex/nonrelease-remediation-closure`。本轮优先单机真实多进程软件验收；跨主机、
@@ -129,6 +129,17 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | 待全部软件必需项通过 |
 
 当前清单为唯一执行队列，下面按原时间保留的切片记录不能替代上表完成条件。
+
+ADR-0197 的实际组合进一步复现：已提交 Log 依赖的原 stream 回执 Unknown 时，副本在
+Raft 启动回放等待内容，而网络尚未开放。完整备份正确拒绝该 active 缺回执状态；原始
+文件在实际双 writer/inode 租约下另存为 forensic-only，不能当成有效恢复包。此启动恢复
+入口缺口保持开放，在当前 producer/GC 包后优先闭合，再推进 A3 与 B–F。
+
+[原 producer 退休与最终 CAS 验收](acceptance/2026-10-25-complete-producer-retirement.md)
+现已通过：158 项 Replica 回归、每成员两个不再使用的实际 CAS 对象删除、原 transfer
+对账、重启及同一固定 bundle 的三个实际恢复后 leader。原 GC/tombstone/staging/producer
+和全部当前必需 bytes 已独立核对。该结果闭合成员本地组合，原不确定启动、全局
+Archive/跨服务引用、A3 及 B–F 继续必需；下一包先修复实际已复现的 committed-input 启动入口。
 
 A2 随包运维先按 ADR-0196 收敛真实长历史中 reader 小事务导致的重复全历史校验，保留
 原权限/预算/行与 Unknown，再接完整 producer 退休/最终 CAS 回收组合。该内部复用不

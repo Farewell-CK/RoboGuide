@@ -405,19 +405,14 @@ impl SqliteRaftStore {
             .content
             .as_ref()
             .ok_or("metadata-only Replica has no original producer journal")?;
-        let mut result = Vec::new();
+        let mut observations = Vec::with_capacity(originals.len());
         for original in originals {
             let (referenced, proof) = self
                 .producer_is_referenced(connection, &original)
                 .map_err(|error| error.to_string())?;
-            result.push(content.reconcile_producer(
-                &original.operation_id,
-                &self._writer,
-                referenced,
-                &proof,
-            )?);
+            observations.push((original.operation_id, referenced, proof));
         }
-        Ok(result)
+        content.reconcile_producers(&self._writer, &observations)
     }
 
     /// Verifies actual original head membership in this exact original root/SQL journal before release.

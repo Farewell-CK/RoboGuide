@@ -479,20 +479,24 @@ impl ReplicaContentStore {
         Ok(result)
     }
 
-    /// Stores a first exact source observation or retires only this original proven-removed producer.
-    /// Its actual parent adapter holds the original writer and checks every current responsibility first.
-    pub(crate) fn reconcile_producer(
+    /// Reconciles complete original parent observations under one Root guard and full boundary checks.
+    /// Each original FULL transaction, first budget, process proof and partial outcome remain separate.
+    pub(crate) fn reconcile_producers(
         &self,
-        operation_id: &str,
         parent: &crate::store::ReplicaWriterLease,
-        still_referenced: bool,
-        proof_digest: &str,
-    ) -> Result<ReplicaContentProducerStatus, String> {
-        if !self.inner.producers || !crate::content::hex_digest(proof_digest) {
+        observations: &[(String, bool, String)],
+    ) -> Result<Vec<ReplicaContentProducerStatus>, String> {
+        if !self.inner.producers
+            || observations
+                .iter()
+                .any(|(_, _, proof)| !crate::content::hex_digest(proof))
+        {
             return Err("original producer reconciliation lacks its exact profile/proof".into());
         }
-        let actual = parent.identity()?;
-        let observer = ContentBudget::issue(300_000)?;
+        let issued = observations
+            .iter()
+            .map(|observation| Ok((observation, ContentBudget::issue(300_000)?)))
+            .collect::<Result<Vec<_>, String>>()?;
         let mut guard = self
             .inner
             .connection
@@ -502,6 +506,28 @@ impl ReplicaContentStore {
             .as_mut()
             .ok_or("original content connection is closed")?;
         self.validate_connection(connection)?;
+        let mut result = Vec::with_capacity(issued.len());
+        for ((operation_id, still_referenced, proof_digest), observer) in issued {
+            result.push(self.reconcile_original_producer(
+                connection,
+                parent,
+                (operation_id, *still_referenced, proof_digest),
+                observer,
+            )?);
+        }
+        self.validate_connection(connection)?;
+        Ok(result)
+    }
+
+    /// Commits only this exact source observation while the actual parent and Root remain held.
+    fn reconcile_original_producer(
+        &self,
+        connection: &mut Connection,
+        parent: &crate::store::ReplicaWriterLease,
+        (operation_id, still_referenced, proof_digest): (&str, bool, &str),
+        observer: ContentBudget,
+    ) -> Result<ReplicaContentProducerStatus, String> {
+        let actual = parent.identity()?;
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;

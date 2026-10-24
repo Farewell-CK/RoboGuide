@@ -18,6 +18,8 @@ mod initialization_tests;
 mod log_content;
 #[path = "store_network.rs"]
 mod network;
+#[path = "store_prefix.rs"]
+mod prefix;
 #[path = "store_producers.rs"]
 mod producers;
 #[path = "store_snapshot.rs"]
@@ -421,6 +423,8 @@ pub struct SqliteRaftStore {
     storage_jobs: Arc<tokio::sync::Semaphore>,
     /// Bounds actual small consensus SQL jobs separately from eight heavy producer jobs.
     consensus_jobs: Arc<tokio::sync::Semaphore>,
+    /// Coalesced original prefix cleanup, independently of the durable Raft metadata ACK.
+    prefix_cleanup: Arc<prefix::PrefixCleanup>,
 }
 
 /// Explicit application lease, independent of descriptors briefly inherited by child processes.
@@ -1620,6 +1624,7 @@ impl SqliteRaftStore {
             work_clock: None,
             storage_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
             consensus_jobs: Arc::new(tokio::sync::Semaphore::new(16)),
+            prefix_cleanup: Arc::new(prefix::PrefixCleanup::default()),
         };
         let view = store.accepted_view()?;
         view.validate(application_schema, profile)
@@ -2329,6 +2334,14 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
     async fn purge(&mut self, log_id: LogId<u64>) -> Result<(), StorageError<u64>> {
         self.run_consensus_work(move |store| {
             let mut connection = store.connection.lock().map_err(io_error)?;
+            if let Some(previous) = read_meta::<LogId<u64>>(&connection, "purged")?
+                && (previous.index > log_id.index
+                    || previous.index == log_id.index && previous != log_id)
+            {
+                return Err(io_error(
+                    "original durable purged prefix cannot regress or change identity",
+                ));
+            }
             let pins = store.removed_log_pins(&connection, log_id.index, false)?;
             let transaction = connection.transaction().map_err(io_error)?;
             transaction
@@ -2347,14 +2360,13 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
                 )
             );
             store.release_content(&pins, &proof)?;
-            if store.has_producer_journal() {
-                store
-                    .reconcile_content_producers_locked(&connection)
-                    .map_err(io_error)?;
-            }
             Ok(())
         })
-        .await
+        .await?;
+        if self.has_producer_journal() {
+            self.queue_prefix_cleanup();
+        }
+        Ok(())
     }
 }
 

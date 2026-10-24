@@ -1,5 +1,17 @@
 # Repository Guidelines
 
+ADR-0197 passes actual producer/GC/restart and three-leader cold acceptance. Compose actual retired-upload Log/View/Snapshot/stream/reader
+retention with final member-local Root CAS GC using original mTLS parents, actual publication/purge
+and original scope/process observations. The closed OS-admin maintenance path may delegate only an
+exact original reader ID to existing actual process-end retirement; it never accepts an asserted
+stop or expiry as proof. Explicit restore bindings remain mandatory. Preserve all original rows,
+Unknown, clocks and current required bytes; local unlink grants no global erasure or device fact.
+Raft prefix deletion/pointer Commit ACK precedes bounded coalesced owned Root cleanup. Only original
+Log sources below the monotonically durable cut may retire from that frozen actual parent proof;
+the parent mutex is released before Root writes. Other kinds/truncation retain their original path.
+Maintenance waits for actual cleanup under its first budget; errors keep pins and Unknown. A real
+Root-exclusive SQL regression proves metadata ACK independence and retained failure evidence.
+
 ADR-0196 is implemented and actual process/cold recovery acceptance passed. Only exact original-connection managed reader
 transactions may extend the prior complete Root validation witness: original SQL headers, exact
 write delta and actual complete reader/pin/head rows must agree through Commit and readonly

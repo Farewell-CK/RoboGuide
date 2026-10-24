@@ -176,6 +176,7 @@ impl ReplicaNode {
             .purged(Some(applied), "original content Log purge")
             .await
             .map_err(|e| e.to_string())?;
+        self.store.wait_for_prefix_cleanup().await?;
         clock.check()?;
         self.check_epoch(epoch).await?;
         Ok(

@@ -1,5 +1,10 @@
 # RoboGuide
 
+[原 producer 退休与 CAS 回收](docs/development/acceptance/2026-10-25-complete-producer-retirement.md)
+已通过实际 Snapshot/purge、原 transfer 对账、三个成员最终删除、重启及完整冷恢复。
+`store_prefix.rs` 将 durable Raft prefix ACK 与有界 owned Root 清理分离，保留原预算、
+Unknown 与独立引用。缺原内容回执的启动修复和其余非发布项继续执行。
+
 [reader 校验复用](docs/decisions/0196-exact-managed-reader-validation.md)只跨实际原连接的
 精确 reader SQL Commit 延续完整 witness；额外写入、失败或 reopen 仍要求完整校验。
 原历史/Unknown、字节、权限和预算保持，实际接管/release 与三 leader 冷恢复通过，见

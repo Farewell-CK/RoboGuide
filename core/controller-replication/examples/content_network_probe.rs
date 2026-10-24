@@ -37,6 +37,9 @@ struct Config {
     /// Explicit Root8 native acceptance, independent of application and Node generations.
     #[serde(default)]
     staging_gc: bool,
+    /// Exact explicitly declared restored backing, never inferred from a file or copied header.
+    #[serde(default)]
+    restore_binding_digest: Option<String>,
     /// Explicit parent9 source initialization; false keeps the original parent7/8 interpretation.
     #[serde(default)]
     initialization_parent: bool,
@@ -63,6 +66,8 @@ enum Request {
     },
     /// Reads original local operation evidence, separately from current accepted quorum.
     InitializationStatus,
+    /// Performs the maintained supervisor's independent original transfer observation, never another election.
+    ReconcileTransfer,
     /// Enrolls only the declared actual infrastructure member as a non-voter through the core API.
     AddLearner {
         /// Existing configured real software replica, independent of embodied Nodes.
@@ -76,7 +81,11 @@ enum Request {
         retain_removed_as_learners: bool,
     },
     /// Publishes an actual full Snapshot and purges only its original applied cut through the maintained API.
-    CompactSnapshot,
+    CompactSnapshot {
+        /// First declared whole-maintenance duration; old fixtures retain their original 15 seconds.
+        #[serde(default = "snapshot_budget")]
+        budget_ms: u64,
+    },
     /// Observes actual current role and quorum without mutation.
     Status,
     /// Reads a quiescent actual original Controller/CAS and stages its exact complete candidate.
@@ -130,6 +139,11 @@ enum Request {
     StopOwned,
     /// Stops only this owned infrastructure service; no device stopping is inferred.
     Shutdown,
+}
+
+/// Preserves the unchanged original duration when earlier fixture requests omit the field.
+fn snapshot_budget() -> u64 {
+    15000
 }
 
 /// Uses the real authenticated product administration client and this original member's trust SQL.
@@ -313,21 +327,21 @@ async fn serve(config: Config) -> Result<(), String> {
             &config.content_root,
             &config.replica.profile_identity(),
             config.replica.replica_id,
-            None,
+            config.restore_binding_digest.as_deref(),
         )
     } else if config.reclamation {
         ReplicaContentStore::open_with_reclamation(
             &config.content_root,
             &config.replica.profile_identity(),
             config.replica.replica_id,
-            None,
+            config.restore_binding_digest.as_deref(),
         )
     } else if config.snapshot_receives {
         ReplicaContentStore::open_with_snapshot_receives(
             &config.content_root,
             &config.replica.profile_identity(),
             config.replica.replica_id,
-            None,
+            config.restore_binding_digest.as_deref(),
         )
     } else {
         ReplicaContentStore::open_with_streams(
@@ -418,6 +432,10 @@ async fn serve(config: Config) -> Result<(), String> {
                 .content_initialization_status()
                 .await
                 .map(|status| json!({"original_status":status})),
+            Request::ReconcileTransfer => node
+                .reconcile_leader_transfer()
+                .await
+                .map(|reconciled| json!({"original_transfer_reconciled":reconciled})),
             Request::AddLearner { member } => administration(&config.replica, &config.parent_sql)?
                 .add_learner(member)
                 .await
@@ -429,7 +447,9 @@ async fn serve(config: Config) -> Result<(), String> {
                 .change_membership(voters.clone(), retain_removed_as_learners)
                 .await
                 .map(|()| json!({"voters":voters})),
-            Request::CompactSnapshot => node.compact_content_snapshot(15000).await,
+            Request::CompactSnapshot { budget_ms } => {
+                node.compact_content_snapshot(budget_ms).await
+            }
             Request::RouteCommitted {
                 target,
                 content,

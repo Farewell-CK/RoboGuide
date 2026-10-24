@@ -194,6 +194,15 @@ Harness 不绕过 RoboGuide 直接调用 simulator skill。本地导航/操作 C
 
 ## 如何维护
 
+ADR-0197 已通过真实引用/回收/重启与三 leader 冷恢复：以实际已退休上传、各成员原 Log/View/Snapshot 和 stream/reader
+为完整回收链，真实 mTLS Snapshot/原 cut purge 与原进程/作用域结束分别释放自己的引用。
+本地 OS-admin reader 退休只委托原 Root 的实际 incarnation 检查；无权以超时或标签补造
+退出。最终 CAS tombstone/unlink 不删除独立 Artifact/Archive/备份责任，代际和 Node 合同不变。
+实际原 parent writer/mutex 可在一个 Root guard 内对账完整 producer 集合，前后完整校验，
+每条仍独立 FULL Commit 和原排队前观察预算；失败保留实际部分进度与 Unknown。
+Raft purge 的已提交前缀/指针先返回 ACK，独立有界任务按真实不可回退 cut 对账原 Log
+引用；释放 parent mutex 后才写 Root，失败保留 pin。维护等待实际清理，但不阻塞共识核心。
+
 ADR-0196 已实现并通过实际入口/三 leader 冷恢复：Root 只在同一原连接的完整校验 witness、准确 reader 事务
 写入行数、全部实际 reader/pin/head 和两次 SQL header 观察一致时延续校验。失败、额外
 写入、外部提交、DDL、旧代际和 reopen 不能借用。字节、身份/restore binding、当前权限、

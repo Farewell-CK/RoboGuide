@@ -54,3 +54,7 @@ benchmark、长期吞吐或 SLO 达标。原失败记录和首次预算保持。
 之前 pre-Root8 构建的同一 Cargo target 目录，编译器报告的依赖接口缺少旧来源本身已
 存在的 `open_with_staging_gc`。本包为两个历史来源使用独立 target 目录，避免历史构建
 缓存混用；该修正的远程结果另行核对，原失败不改写。
+
+后续 `f8ec309a` 的 [CI 40110479120](https://github.com/Farewell-CK/RoboGuide/actions/runs/40110479120)
+及 [Documentation 40110479005](https://github.com/Farewell-CK/RoboGuide/actions/runs/40110479005)
+均已实际成功，包含固定旧 parent8/Root8 writer 的独立构建与原完整进程门禁。

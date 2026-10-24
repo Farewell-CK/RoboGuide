@@ -133,14 +133,15 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
                 "depends_on": dependencies,
             }
         )
+        content_root = Path(config["content"]["root"])
         with closing(
-            sqlite3.connect((directory / "content/content.sqlite3").as_uri() + "?mode=ro", uri=True)
+            sqlite3.connect((content_root / "content.sqlite3").as_uri() + "?mode=ro", uri=True)
         ) as sql:
             layout = sql.execute("SELECT value FROM metadata WHERE key='layout'").fetchone()[0]
         root_component = {
             "component_id": f"root-{member}",
             "kind": "replica-content",
-            "root": str(directory / "content"),
+            "root": str(content_root),
             "database": None,
             "trees": [],
             "depends_on": [f"parent-{member}"],
@@ -702,11 +703,16 @@ def run(
                 {"member": member, "exact_original_rows": initialization}
             )
         source_root = Path(config["content"]["root"])
-        history = staging_history(source_root)
+        target_root = output / "restored/stores" / f"root-{member}"
+        reference_root = (
+            frozen_bundle / "stores" / f"root-{member}"
+            if frozen_bundle is not None
+            else source_root
+        )
+        history = staging_history(reference_root)
         if history is None:
             continue
         member = config["replica"]["replica_id"]
-        target_root = output / "restored/stores" / f"root-{member}"
         assert staging_history(target_root) == history
         assert not list((target_root / "staging-v1").iterdir())
         unknown = sum(
@@ -717,7 +723,12 @@ def run(
             {
                 "member": member,
                 "unknown": unknown,
-                "source_private_files": len(list((source_root / "staging-v1").iterdir())),
+                "source_private_files": len(list((reference_root / "staging-v1").iterdir())),
+                "reference": (
+                    "original SQL in verified pinned bundle"
+                    if frozen_bundle is not None
+                    else "original quiescent source"
+                ),
                 "restored_private_files": 0,
                 "exact_original_rows": history,
             }
@@ -962,7 +973,7 @@ def run(
                         "--transfer-leader",
                         str(expected),
                         "--transfer-id",
-                        f"actual-restored-transfer-{turn}",
+                        f"actual-restored-transfer-{operation}-{turn}",
                     ],
                     capture_output=True,
                     timeout=100,
