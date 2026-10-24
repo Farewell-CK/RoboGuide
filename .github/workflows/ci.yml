@@ -100,6 +100,11 @@ jobs:
           uv run --frozen python tools/quality/check_resource_quota_processes.py
           --output "${RUNNER_TEMP}/roboguide-resource-quota"
 
+      - name: Verify two-domain Federation service with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_federation_service_processes.py
+          --output "${RUNNER_TEMP}/roboguide-federation-service"
+
       - name: Verify local Memory references with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_memory_reference_processes.py

@@ -463,7 +463,7 @@ Controller 投影在实际源 SQL inode/sidecar 租约与原生排空后，使�
 | HA / 恢复 | 动态成员、原 child 排空、transfer、证书轮换、SQL/CAS 静止恢复 | 在线内容/完整 archive/catalog 恢复、滚动升级/回退、独立故障域与 RTO/RPO |
 | 资源 / 调度 | 有界搜索、来源化成本、future calendar、逻辑 quota、文件 worker POSIX proof | divisible allocation、GPU/load/traffic 成本与执行、完整空间交通承诺 |
 | 协调 / 计划修订 | relation stop/hold、continuation、运行期 MI、原目标、Review、scoped Memory 文件链路 | 运行中抢占、复杂耦合迁移/handoff、更多 Memory/typed-map 与跨阶段组合 |
-| Federation | 持久 prepare/commit/abort session 及恢复校验 | 实际双域 transport、身份/tenant/domain 授权、路由与双域恢复服务 |
+| Federation | 持久 session；Controller `/v1/federation/sessions` 的 mTLS、tenant/domain 路由、双 SQLite 服务恢复 | 在线跨主机 HA、证书轮换/分区长期矩阵及物理连续性 |
 | 运维 | write-disabled、metrics-reader、监控配置、短窗口软件 firing/resolved、部分 I/O 隔离 | 其余 listener/阻塞路径、长期 SLO、完整 runbook/告警/版本组合及硬件证据 |
 
 [全部非发布计划](../../development/roboguide-software-completion-plan-2026-10-15.md)保留目标与完整验收门禁；

@@ -20,3 +20,10 @@ Control/Runtime/Node 的独立 dispatch gate。Checkpoint restore 会保留并�
 `cargo test --locked -p control federation_commit_is_epoch_and_digest_bound_and_checkpointed`
 通过：覆盖 prepare 幂等、旧 epoch 拒绝、digest 绑定、commit、checkpoint restore 和 deadline
 失效；整体 Control 回归保持通过。
+
+2026-10-25 的 ADR-0201 在这一持久合同上增加了实际服务边界：两个独立
+`integration-server` 通过 operator mTLS 调用 `/v1/federation/sessions`，证书域授权、
+immutable tenant、配置的 Control domain、prepare/commit/abort 和重启后的 GET reconciliation
+均由各自 SQLite checkpoint 记录。维护门禁为
+`tools/quality/check_federation_service_processes.py`；它不注册 Node、不发送 Execute，
+不关闭跨主机长期 HA、分区/轮换矩阵或物理连续性。

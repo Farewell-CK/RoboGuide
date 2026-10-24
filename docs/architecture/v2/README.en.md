@@ -474,7 +474,7 @@ effects or end independently owned storage work. This is not an OS/RSS or comple
 | HA / recovery | Dynamic membership, original-child drain, transfer, certificate rotation, SQL/CAS cold recovery | Complete online content/archive/catalog recovery, rolling upgrades/rollback, independent-domain RTO/RPO |
 | Resources | Bounded selection, attributed costs, future calendar, logical quota, file-worker POSIX proof | Divisible allocation, GPU/load/traffic costs/enforcement, complete spatial commitments |
 | Coordination / revision | Relation stop/hold, continuation, runtime MI, original goal/Review and scoped Memory file paths | Running preemption, complex migration/handoff, more Memory/map/cross-stage combinations |
-| Federation | Durable prepare/commit/abort session and recovery validation | Actual dual-domain transport, authorization, routing and recovery service |
+| Federation | Durable session plus mTLS, tenant/domain routing and two-service SQLite recovery at `/v1/federation/sessions` | Long-running cross-host HA, rotation/partition matrix and physical continuity |
 | Operations | Write-disabled, metrics-reader, monitoring config, short software alert gates, partial I/O isolation | Remaining listeners/blocking paths, long-term SLO/runbooks, complete version/fault matrix and hardware evidence |
 
 The [non-release completion plan](../../development/roboguide-software-completion-plan-2026-10-15.md) retains full

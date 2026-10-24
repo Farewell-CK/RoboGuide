@@ -871,6 +871,11 @@ impl ControlPlane {
             })
     }
 
+    /// Returns one immutable cross-domain session for read-only reconciliation.
+    pub fn federation_session(&self, transaction_id: &str) -> Option<&FederationSession> {
+        self.federation_sessions.get(transaction_id)
+    }
+
     /// Creates an empty Control Plane with explicit receive-time freshness TTL.
     pub const fn with_status_ttl(max_status_age_ms: u64) -> Self {
         Self {

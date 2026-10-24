@@ -594,6 +594,14 @@ irreversible original-provider revoke before retirement; workers/maps/other refs
 gates. This is an existing-v3-authority projection, not a new read grant or cross-owner completeness
 claim. See `integrations/memory-provider/roboguide_memory_provider/replica_references.py`.
 
+ADR-0201 exposes the durable FederationSession through `/v1/federation/sessions` on the
+Controller HTTP service. Every prepare/commit/abort/get requires operator mTLS, recovery-admin,
+an explicit tenant, a configured `ROBOGUIDE_CONTROL_DOMAIN`, and a certificate domain grant that
+names both source and target. Each domain persists the exact tenant/epoch/digest/deadline session
+in its own checkpoint and reconciles after response loss or restart. The process gate uses two
+independent SQLite services and creates zero Nodes/devices; this is not physical continuity or
+online HA.
+
 ADR-0145 verifies stored active Memory references, Active Map refs/heads and pending handoff
 source/target against exact CAS bytes in the same quiescent recovery bundle. Missing content,
 tombstone conflicts and absent mandatory reference tables refuse backup/verify before publication;

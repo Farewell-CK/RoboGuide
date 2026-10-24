@@ -24,6 +24,9 @@ pub struct FederationSession {
     pub source_domain: String,
     /// Receiving domain identity.
     pub target_domain: String,
+    /// Immutable tenant whose source and target authorities own this transaction.
+    #[serde(default)]
+    pub tenant_id: String,
     /// Source epoch; a changed epoch cannot commit the prepared session.
     pub source_epoch: u64,
     /// Exact accepted plan identity.
@@ -46,6 +49,8 @@ impl FederationSession {
             || self.target_domain.trim().is_empty()
             || self.target_domain.len() > 128
             || self.source_domain == self.target_domain
+            || self.tenant_id.trim().is_empty()
+            || self.tenant_id.len() > 128
             || self.source_epoch == 0
             || !valid_digest(&self.plan_digest)
             || !valid_digest(&self.ownership_digest)

@@ -12,6 +12,7 @@ mod deployment_operation_admission;
 mod deployment_sources;
 mod dispatch;
 mod fact_batch;
+pub(crate) mod federation;
 #[cfg(test)]
 pub(crate) use fact_batch::fact_is_barrier;
 pub(crate) use fact_batch::{NodeFactDriver, collect_fact_batch};

@@ -221,6 +221,14 @@ Artifact/Controller admission checks the retained import intent, and event codec
 State/Catalog snapshots retain it. Legacy rows decode with unavailable provenance and never infer
 ownership from a Node or provider.
 
+ADR-0201 exposes `FederationSession` through the deployed Controller HTTP service. Prepare/commit/
+abort/get require operator mTLS, the recovery-admin role, an explicit tenant, a configured
+`ROBOGUIDE_CONTROL_DOMAIN`, and a certificate domain grant naming both endpoints. Each Control
+domain stores the same tenant/epoch/digest/deadline/state in its own checkpoint; GET reconciles a
+lost response and restart never renews the deadline. The service does not dispatch Execute,
+select a Node, or claim device continuity, and the two domains retain independent resource
+authority.
+
 ADR-0197 passes actual producer/GC/restart and three-leader cold acceptance: compose an actual retired upload with every member's original
 Log/View/Snapshot and stream/reader retention. Real mTLS Snapshot/applied-cut purge and original
 scope/process end release only their own responsibilities. Local OS-admin reader retirement delegates

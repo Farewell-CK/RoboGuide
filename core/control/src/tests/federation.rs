@@ -7,6 +7,7 @@ fn session() -> FederationSession {
         transaction_id: "federation-1".into(),
         source_domain: "domain-a".into(),
         target_domain: "domain-b".into(),
+        tenant_id: "tenant-a".into(),
         source_epoch: 7,
         plan_digest: format!("sha256:{}", "a".repeat(64)),
         ownership_digest: format!("sha256:{}", "b".repeat(64)),

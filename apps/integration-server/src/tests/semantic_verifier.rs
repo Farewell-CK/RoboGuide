@@ -268,8 +268,28 @@ fn plan() -> serde_json::Value {
 }
 
 /// Local completion retains ownership until final independent evidence, then releases and advances the DAG once.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn intermediate_verifier_releases_task_and_dispatches_dependency_once() {
+#[test]
+fn intermediate_verifier_releases_task_and_dispatches_dependency_once() {
+    std::thread::Builder::new()
+        .name("semantic-verifier-test".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("semantic verifier test runtime")
+                .block_on(
+                    intermediate_verifier_releases_task_and_dispatches_dependency_once_async(),
+                );
+        })
+        .expect("semantic verifier test thread")
+        .join()
+        .expect("semantic verifier test thread did not panic");
+}
+
+/// Runs the semantic verifier scenario on an explicitly bounded large-stack test thread.
+async fn intermediate_verifier_releases_task_and_dispatches_dependency_once_async() {
     let fixture = Fixture::new();
     fixture.sources(false, false).await;
     fixture.submit().await;

@@ -378,7 +378,7 @@ async fn tenant_administrator_cannot_read_or_replace_global_source_and_content_a
 }
 
 /// Resource quotas use a recovery-admin revisioned command, durable receipt and read-only view.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resource_quota_policy_requires_admin_and_commits_idempotently() {
     let directory = tempfile::tempdir().unwrap();
     let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
