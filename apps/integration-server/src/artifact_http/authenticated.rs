@@ -261,6 +261,15 @@ impl MemoryProviderAdmission for AuthenticatedAdmission<'_> {
     ) -> Result<(), String> {
         self.authority.admit_replica(node, provider, manifest)
     }
+    /// Rechecks consumer Task/attempt provenance against the durable Controller import.
+    fn admit_replica_provenance(
+        &self,
+        provenance: Option<&domain::MemoryReplicaProvenance>,
+        import_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.authority
+            .admit_replica_provenance(provenance, import_id)
+    }
     /// Rechecks actual certificate revocation before the existing current-session proof.
     fn admit_publisher(
         &self,

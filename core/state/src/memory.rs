@@ -77,6 +77,7 @@ impl MemoryCatalogProjection {
     }
 
     /// Applies one provider-local replica update after validating manifest identity and ordering.
+    #[allow(clippy::too_many_arguments)]
     fn set_replica(
         &mut self,
         manifest: &MemoryArtifactManifest,
@@ -85,6 +86,7 @@ impl MemoryCatalogProjection {
         status: MemoryReplicaStatus,
         observed_at: TimestampMs,
         rejection_reason: Option<String>,
+        provenance: Option<domain::MemoryReplicaProvenance>,
     ) -> Result<(), MemoryCatalogError> {
         let current_manifest = self
             .manifests
@@ -103,10 +105,12 @@ impl MemoryCatalogProjection {
             status,
             observed_at,
             rejection_reason,
+            provenance,
         )
     }
 
     /// Retains provider-qualified evidence only after the caller proved its complete source identity.
+    #[allow(clippy::too_many_arguments)]
     fn record_known_replica(
         &mut self,
         manifest: &MemoryArtifactManifest,
@@ -115,6 +119,7 @@ impl MemoryCatalogProjection {
         status: MemoryReplicaStatus,
         observed_at: TimestampMs,
         rejection_reason: Option<String>,
+        provenance: Option<domain::MemoryReplicaProvenance>,
     ) -> Result<(), MemoryCatalogError> {
         if manifest.visibility() != domain::MemoryVisibility::Exchangeable
             || manifest.artifact().is_none()
@@ -150,13 +155,14 @@ impl MemoryCatalogProjection {
                 manifest.selector()
             )));
         }
-        let snapshot = MemoryReplicaSnapshot::new(
+        let snapshot = MemoryReplicaSnapshot::new_with_provenance(
             manifest.selector().clone(),
             node_id.clone(),
             consumer_provider_id,
             status,
             observed_at,
             rejection_reason,
+            provenance,
         )
         .map_err(|error| MemoryCatalogError::InvalidReplicaTransition(error.to_string()))?;
         self.replicas
@@ -207,6 +213,7 @@ impl MemoryCatalogWriter for MemoryCatalogProjection {
                 consumer_provider_id,
                 status,
                 rejection_reason,
+                provenance,
             } => {
                 let generic = domain::map_memory_manifest(manifest)
                     .map_err(MemoryCatalogError::RevisionConflict)?;
@@ -229,6 +236,7 @@ impl MemoryCatalogWriter for MemoryCatalogProjection {
                     *status,
                     timestamp,
                     rejection_reason.clone(),
+                    provenance.as_deref().cloned(),
                 )?;
                 self.typed_sources
                     .insert(generic.selector().clone(), digest);
@@ -238,6 +246,7 @@ impl MemoryCatalogWriter for MemoryCatalogProjection {
                 manifest,
                 node_id,
                 consumer_provider_id,
+                provenance,
             } => self.set_replica(
                 manifest,
                 node_id,
@@ -245,11 +254,13 @@ impl MemoryCatalogWriter for MemoryCatalogProjection {
                 MemoryReplicaStatus::Staged,
                 timestamp,
                 None,
+                provenance.as_deref().cloned(),
             ),
             EventPayload::MemoryArtifactImported {
                 manifest,
                 node_id,
                 consumer_provider_id,
+                provenance,
             } => self.set_replica(
                 manifest,
                 node_id,
@@ -257,11 +268,13 @@ impl MemoryCatalogWriter for MemoryCatalogProjection {
                 MemoryReplicaStatus::Imported,
                 timestamp,
                 None,
+                provenance.as_deref().cloned(),
             ),
             EventPayload::MemoryArtifactRejected {
                 manifest,
                 node_id,
                 consumer_provider_id,
+                provenance,
                 reason,
             } => self.set_replica(
                 manifest,
@@ -270,6 +283,7 @@ impl MemoryCatalogWriter for MemoryCatalogProjection {
                 MemoryReplicaStatus::Rejected,
                 timestamp,
                 Some(reason.clone()),
+                provenance.as_deref().cloned(),
             ),
             _ => Err(MemoryCatalogError::UnsupportedEvent),
         }
@@ -318,6 +332,7 @@ mod tests {
                 manifest,
                 node_id: NodeId::new("receiver").unwrap(),
                 consumer_provider_id: provider.into(),
+                provenance: None,
                 status,
                 rejection_reason: None,
             }
@@ -441,6 +456,7 @@ mod tests {
                     manifest: manifest.clone(),
                     node_id: node_id.clone(),
                     consumer_provider_id: "execution-consumer".to_string(),
+                    provenance: None,
                 },
             )
             .expect("staging should apply");
@@ -451,6 +467,7 @@ mod tests {
                     manifest: manifest.clone(),
                     node_id,
                     consumer_provider_id: "execution-consumer".to_string(),
+                    provenance: None,
                 },
             )
             .expect("import should apply");
@@ -485,6 +502,7 @@ mod tests {
                     manifest,
                     node_id: NodeId::new("dog-b").expect("node should be valid"),
                     consumer_provider_id: "execution-consumer".to_string(),
+                    provenance: None,
                 },
             ),
             Err(MemoryCatalogError::InvalidReplicaTransition(_))
@@ -510,6 +528,7 @@ mod tests {
                     manifest: manifest.clone(),
                     node_id: node_id.clone(),
                     consumer_provider_id: "execution-consumer".to_string(),
+                    provenance: None,
                 },
             ),
             (
@@ -518,6 +537,7 @@ mod tests {
                     manifest: manifest.clone(),
                     node_id: node_id.clone(),
                     consumer_provider_id: "execution-consumer".to_string(),
+                    provenance: None,
                 },
             ),
         ] {
@@ -532,6 +552,7 @@ mod tests {
                     manifest,
                     node_id,
                     consumer_provider_id: "execution-consumer".to_string(),
+                    provenance: None,
                     reason: "later request was invalid".to_string(),
                 },
             ),
@@ -576,6 +597,7 @@ mod tests {
                     manifest: discoverable,
                     node_id: NodeId::new("dog-b").expect("node id should be valid"),
                     consumer_provider_id: "execution-consumer".to_string(),
+                    provenance: None,
                 },
             ),
             Err(MemoryCatalogError::InvalidReplicaTransition(_))
@@ -604,6 +626,7 @@ mod tests {
                         manifest: manifest.clone(),
                         node_id: node_id.clone(),
                         consumer_provider_id: provider_id.to_string(),
+                        provenance: None,
                     },
                 )
                 .expect("each provider should stage independently");
@@ -615,6 +638,7 @@ mod tests {
                     manifest: manifest.clone(),
                     node_id,
                     consumer_provider_id: "archive-a".to_string(),
+                    provenance: None,
                 },
             )
             .expect("one provider should import independently");
@@ -625,6 +649,7 @@ mod tests {
                     manifest: manifest.clone(),
                     node_id: NodeId::new("dog-b").expect("node should be valid"),
                     consumer_provider_id: "archive-b".to_string(),
+                    provenance: None,
                     reason: "provider-local rejection".to_string(),
                 },
             )

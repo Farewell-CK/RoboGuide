@@ -148,8 +148,8 @@ pub use localization_evidence::{
 pub use memory::{
     LEGACY_MEMORY_CONSUMER_PROVIDER_ID, MEMORY_MANIFEST_SCHEMA_V0_1, MemoryArtifactManifest,
     MemoryArtifactRef, MemoryId, MemoryKind, MemoryOwner, MemoryProviderDescriptor,
-    MemoryReplicaSnapshot, MemoryReplicaStatus, MemoryRevisionId, MemoryScope, MemoryScopeLimit,
-    MemorySelector, MemoryVisibility,
+    MemoryReplicaProvenance, MemoryReplicaSnapshot, MemoryReplicaStatus, MemoryRevisionId,
+    MemoryScope, MemoryScopeLimit, MemorySelector, MemoryVisibility,
 };
 pub use mission::{MissionGoal, MissionPlan, PlannedTask, TaskGraph};
 pub use node_identity::{

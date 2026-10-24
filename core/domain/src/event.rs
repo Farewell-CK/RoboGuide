@@ -231,6 +231,9 @@ pub enum EventPayload {
         /// Exact node-local provider receiving the staged revision.
         #[serde(default = "legacy_memory_consumer_provider_id")]
         consumer_provider_id: String,
+        /// Exact consumer Task/attempt when supplied by a current prepared import.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<Box<MemoryReplicaProvenance>>,
     },
     /// A node imported one generic Memory artifact into a local heterogeneous store.
     MemoryArtifactImported {
@@ -241,6 +244,9 @@ pub enum EventPayload {
         /// Exact node-local provider owning the imported representation.
         #[serde(default = "legacy_memory_consumer_provider_id")]
         consumer_provider_id: String,
+        /// Exact consumer Task/attempt when supplied by a current prepared import.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<Box<MemoryReplicaProvenance>>,
     },
     /// A node rejected generic Memory staging or import.
     MemoryArtifactRejected {
@@ -251,6 +257,9 @@ pub enum EventPayload {
         /// Exact node-local provider that rejected the operation.
         #[serde(default = "legacy_memory_consumer_provider_id")]
         consumer_provider_id: String,
+        /// Exact consumer Task/attempt when supplied by a current prepared import.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<Box<MemoryReplicaProvenance>>,
         /// Stable diagnostic retained as evidence.
         reason: String,
     },
@@ -272,6 +281,9 @@ pub enum EventPayload {
         node_id: NodeId,
         /// Exact semantic backend identity on that Node.
         consumer_provider_id: String,
+        /// Exact consumer Task/attempt when supplied by a current prepared import.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<Box<MemoryReplicaProvenance>>,
         /// Monotonic byte-import history, independently of map activation or current availability.
         status: MemoryReplicaStatus,
         /// Bounded diagnostic only for rejected import evidence.

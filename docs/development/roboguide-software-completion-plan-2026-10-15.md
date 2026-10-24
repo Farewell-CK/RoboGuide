@@ -532,7 +532,7 @@ F0–F3 当前软件切片已有验收；F4–F8 和 F10 已有可执行实现�
 | 顺序 | 工作包 | 交付与完成条件 |
 | --- | --- | --- |
 | N0（已完成） | 新提交集成 | `227fb62` 与 main 的组合通过定向/3021 项全量 Python、实际 Python 3.9 协议兼容和文档门禁；软件回归覆盖失败后的活动 peer 排空、未下发 slot 保留、迟到派发和 verifier coverage，不将替身结果升级为物理事实 |
-| N1 | Memory 实际引用生命周期 | 在现有本地引用、use-lease、FileJobs 与 GC 上接真实 Replica/lineage/Catalog/Snapshot/Archive 生产与释放；先区分 provider-local CAS 与 Controller Artifact CAS 的 owner，不把不同存储的相同 digest 当同一副本。每个生产者须有副作用前持久 intent、原 owner/provider/generation 绑定、ACK 或只读原命令对账；Unknown/失联/重启不释放引用，过期不冒充退休证明。首个实现包接通一个实际生产者的完整链路，其余生产者继续为 N1 必需项 |
+| N1 | Memory 实际引用生命周期 | 在现有本地引用、use-lease、FileJobs 与 GC 上接真实 Replica/lineage/Catalog/Snapshot/Archive 生产与释放；先区分 provider-local CAS 与 Controller Artifact CAS 的 owner，不把不同存储的相同 digest 当同一副本。每个生产者须有副作用前持久 intent、原 owner/provider/generation 绑定、ACK 或只读原命令对账；Unknown/失联/重启不释放引用，过期不冒充退休证明。ADR-0200 进一步把新 Replica evidence 绑定到原始 consumer TaskRef/execution_id，旧历史保持 unavailable。首个实现包接通一个实际生产者的完整链路，其余生产者继续为 N1 必需项 |
 | N2 | typed-map 与修订组合 | 复用既有实际文件配准/融合/增量算法，验证结果从发布、原 CAS/import、active-map、当前 use、撤权、交接到重启/回收的完整链路；将原地图来源、frame、revision 和完整 lineage 带入 F8 的 scoped Memory 修订。SQL 中断、晚到 ACK、来源/配置变化不得重复导入、重启 worker 或续预算 |
 | N3 | 在线 HA 内容与升级恢复 | 以 N1/N2 的内容与引用身份接通 online Archive/Snapshot/Catalog/CAS 一致性，再验证 leader 接管后的原授权内容、原 receipt 与缺失状态；补缺原 child journal 的旧部署显式排空迁移、滚动版本升级/回退。元数据换主不计为内容就绪或设备连续执行 |
 | N4 | 资源成本与可分配资源 | 连接实际 load/GPU memory/queue/交通等可用成本源，保留来源、接收时间、TTL 和 unavailable；增加显式版本化 divisible allocation 及本地强制，不重解释现有 `units` 最小容量语义；验证正常/Group/recovery Commit、释放和完整时间/空间冲突 |

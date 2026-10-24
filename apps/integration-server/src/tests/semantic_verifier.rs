@@ -268,7 +268,7 @@ fn plan() -> serde_json::Value {
 }
 
 /// Local completion retains ownership until final independent evidence, then releases and advances the DAG once.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn intermediate_verifier_releases_task_and_dispatches_dependency_once() {
     let fixture = Fixture::new();
     fixture.sources(false, false).await;

@@ -867,6 +867,9 @@ pub(super) fn record_memory_replica(
         run_blocking(|| store.verify_artifact(digest, artifact.byte_size()))
             .map_err(map_cas_error)?;
     }
+    authority
+        .admit_replica_provenance(input.provenance.as_ref(), authority.import_id)
+        .map_err(HttpError::forbidden)?;
     let node_id =
         NodeId::new(input.node_id).map_err(|error| HttpError::bad_request(error.to_string()))?;
     let consumer_provider_id = input.consumer_provider_id;
@@ -875,16 +878,19 @@ pub(super) fn record_memory_replica(
             manifest: input.manifest,
             node_id,
             consumer_provider_id,
+            provenance: input.provenance.map(Box::new),
         },
         "imported" => EventPayload::MemoryArtifactImported {
             manifest: input.manifest,
             node_id,
             consumer_provider_id,
+            provenance: input.provenance.map(Box::new),
         },
         "rejected" => EventPayload::MemoryArtifactRejected {
             manifest: input.manifest,
             node_id,
             consumer_provider_id,
+            provenance: input.provenance.map(Box::new),
             reason: input
                 .reason
                 .unwrap_or_else(|| "rejected by node".to_string()),

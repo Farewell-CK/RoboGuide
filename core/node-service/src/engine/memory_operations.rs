@@ -2,6 +2,30 @@
 
 use super::*;
 
+/// Extracts the exact prepared consumer Task/attempt from the canonical import invocation.
+fn replica_provenance(
+    invocation: &serde_json::Value,
+) -> Result<domain::MemoryReplicaProvenance, EngineError> {
+    let mission = invocation_mission_id(invocation)?;
+    let task_id = invocation
+        .get("task_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| EngineError::Protocol("invocation task_id is missing".into()))?;
+    let execution_id = invocation
+        .get("execution_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| EngineError::Protocol("invocation execution_id is missing".into()))?;
+    domain::MemoryReplicaProvenance::new(
+        domain::TaskRef::new(
+            mission,
+            domain::TaskId::new(task_id.to_string())
+                .map_err(|error| EngineError::Artifact(ArtifactError::Domain(error)))?,
+        ),
+        execution_id,
+    )
+    .map_err(|error| EngineError::Artifact(ArtifactError::Domain(error)))
+}
+
 impl LocalIntegrationEngine {
     /// Returns bounded original live invocation contexts for provider-owned Group exports.
     /// Node journal evidence narrows local discovery; only current Controller admission can publish.
@@ -409,6 +433,7 @@ impl LocalIntegrationEngine {
         };
         let stager =
             stager.with_acquisition_guard(self.prepared_import_acquisition_guard(&invocation)?);
+        let provenance = replica_provenance(&invocation).ok();
         let node_id = NodeId::new(self.catalog().node_id().to_string())
             .map_err(|error| EngineError::Memory(error.to_string()))?;
         let ledger = self.inner.memory_ledgers.get(provider_id).ok_or_else(|| {
@@ -443,6 +468,7 @@ impl LocalIntegrationEngine {
                         provider_id,
                         "rejected",
                         Some(&error.to_string()),
+                        provenance.as_ref(),
                     )
                     .await;
             }
@@ -470,6 +496,7 @@ impl LocalIntegrationEngine {
                         provider_id,
                         "rejected",
                         Some(&error.to_string()),
+                        provenance.as_ref(),
                     )
                     .await;
             }
@@ -487,7 +514,15 @@ impl LocalIntegrationEngine {
         };
         if !imported_history {
             stager
-                .record_memory_replica(manifest, &node_id, session_id, provider_id, "staged", None)
+                .record_memory_replica(
+                    manifest,
+                    &node_id,
+                    session_id,
+                    provider_id,
+                    "staged",
+                    None,
+                    provenance.as_ref(),
+                )
                 .await?;
         }
         // A mapping error can follow an earlier step's effects. Preserve staged/unknown evidence;
@@ -503,6 +538,7 @@ impl LocalIntegrationEngine {
                 provider_id,
                 "imported",
                 None,
+                provenance.as_ref(),
             )
             .await?;
         Ok(())

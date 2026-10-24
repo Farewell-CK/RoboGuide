@@ -215,6 +215,12 @@ Control rechecks scope, tenant, principal and typed policy on retry and restore.
 handoffs retain their original semantics. This does not select an active map or prove localization,
 device stopping or physical continuity.
 
+ADR-0200 attaches new generic and typed-map replica evidence to the original Memory import's exact
+consumer `TaskRef` and physical `execution_id`. The Node derives it from the canonical invocation;
+Artifact/Controller admission checks the retained import intent, and event codec v33 plus
+State/Catalog snapshots retain it. Legacy rows decode with unavailable provenance and never infer
+ownership from a Node or provider.
+
 ADR-0197 passes actual producer/GC/restart and three-leader cold acceptance: compose an actual retired upload with every member's original
 Log/View/Snapshot and stream/reader retention. Real mTLS Snapshot/applied-cut purge and original
 scope/process end release only their own responsibilities. Local OS-admin reader retirement delegates

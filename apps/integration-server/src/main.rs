@@ -634,6 +634,39 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
             .map_err(|error| error.to_string())
     }
 
+    /// Requires new replica provenance to match the original durable prepared import.
+    fn admit_replica_provenance(
+        &self,
+        provenance: Option<&domain::MemoryReplicaProvenance>,
+        import_id: Option<&str>,
+    ) -> Result<(), String> {
+        match (provenance, import_id) {
+            (None, None) => Ok(()),
+            (None, Some(_)) => Err("prepared Memory replica is missing consumer provenance".into()),
+            (Some(_), None) => {
+                Err("consumer provenance requires its original import identity".into())
+            }
+            (Some(provenance), Some(import_id)) => {
+                let controller = self
+                    .controller
+                    .lock()
+                    .map_err(|_| "Controller Memory import authority is unavailable".to_string())?;
+                let intent = controller.memory_imports.get(import_id).ok_or_else(|| {
+                    "consumer provenance names an unknown Memory import".to_string()
+                })?;
+                if intent.request.task_ref != *provenance.task_ref()
+                    || intent.request.execution_id != provenance.execution_id()
+                {
+                    return Err(
+                        "consumer provenance differs from the original Memory import attempt"
+                            .into(),
+                    );
+                }
+                Ok(())
+            }
+        }
+    }
+
     /// Requires the declared publisher to own the active, unexpired route for the expected Node.
     fn admit_publisher(
         &self,

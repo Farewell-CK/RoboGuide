@@ -130,6 +130,7 @@ impl ArtifactStager {
     }
 
     /// Records generic Memory replica evidence using the active Node Protocol session identity.
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_memory_replica(
         &self,
         manifest: &MemoryArtifactManifest,
@@ -138,6 +139,7 @@ impl ArtifactStager {
         consumer_provider_id: &str,
         status: &str,
         reason: Option<&str>,
+        provenance: Option<&domain::MemoryReplicaProvenance>,
     ) -> Result<(), ArtifactError> {
         self.client
             .record_memory_replica(
@@ -147,6 +149,7 @@ impl ArtifactStager {
                 consumer_provider_id,
                 status,
                 reason,
+                provenance,
             )
             .await
     }

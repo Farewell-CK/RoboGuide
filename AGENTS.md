@@ -13,6 +13,13 @@ generic child projection, and recheck the typed policy on retry and restore. Gen
 remain unchanged; a projection cannot relabel a typed map. This preserves metadata authority only,
 not active-map selection, localization, device stopping or physical continuity.
 
+ADR-0200 binds new generic and typed-map replica evidence to the exact consumer `TaskRef` and
+physical `execution_id` from the canonical Memory import. Controller admission rejects missing or
+changed provenance for prepared imports; event codec v33 and State/Catalog snapshots retain it.
+Legacy events decode with unavailable provenance and never infer ownership from Node/provider.
+This improves reference/recovery auditability only and grants no new import, stop or physical
+continuity authority.
+
 ADR-0197 passes actual producer/GC/restart and three-leader cold acceptance. Compose actual retired-upload Log/View/Snapshot/stream/reader
 retention with final member-local Root CAS GC using original mTLS parents, actual publication/purge
 and original scope/process observations. The closed OS-admin maintenance path may delegate only an

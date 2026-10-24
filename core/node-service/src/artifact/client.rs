@@ -266,6 +266,7 @@ impl ArtifactClient {
     }
 
     /// Records generic Memory staged/imported/rejected evidence through the shared catalog.
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_memory_replica(
         &self,
         manifest: &MemoryArtifactManifest,
@@ -274,6 +275,7 @@ impl ArtifactClient {
         consumer_provider_id: &str,
         status: &str,
         reason: Option<&str>,
+        provenance: Option<&domain::MemoryReplicaProvenance>,
     ) -> Result<(), ArtifactError> {
         let selector = manifest.selector();
         let endpoint = self.path(&[
@@ -290,6 +292,7 @@ impl ArtifactClient {
             "consumer_provider_id": consumer_provider_id,
             "status": status,
             "reason": reason,
+            "provenance": provenance,
         });
         let response = self
             .request(reqwest::Method::POST, endpoint.clone())

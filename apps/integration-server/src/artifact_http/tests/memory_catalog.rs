@@ -24,6 +24,7 @@ async fn typed_memory_replicas_preserve_published_source_across_http_and_replay(
         manifest: source.clone(),
         node_id: node.clone(),
         consumer_provider_id: "cache-a".into(),
+        provenance: None,
         status: domain::MemoryReplicaStatus::Staged,
         rejection_reason: None,
     };
@@ -42,7 +43,11 @@ async fn typed_memory_replicas_preserve_published_source_across_http_and_replay(
     ] {
         let body = serde_json::to_vec(&serde_json::json!({
             "manifest": generic, "node_id": node,
-            "consumer_provider_id": provider, "status": status
+            "consumer_provider_id": provider, "status": status,
+            "provenance": {
+                "task_ref": {"mission_id": "mission-a", "task_id": "consume"},
+                "execution_id": "consumer-attempt"
+            }
         }))
         .unwrap();
         let mut request = format!(
@@ -75,6 +80,7 @@ async fn typed_memory_replicas_preserve_published_source_across_http_and_replay(
                 manifest: changed.clone(),
                 node_id: node.clone(),
                 consumer_provider_id: "cache-c".into(),
+                provenance: None,
                 status: domain::MemoryReplicaStatus::Staged,
                 rejection_reason: None
             })
@@ -96,11 +102,22 @@ async fn typed_memory_replicas_preserve_published_source_across_http_and_replay(
     assert_eq!(detail["replicas"].as_array().unwrap().len(), 2);
     assert_eq!(detail["replicas"][0]["consumer_provider_id"], "cache-a");
     assert_eq!(detail["replicas"][0]["status"], "imported");
+    assert_eq!(
+        detail["replicas"][0]["provenance"]["execution_id"],
+        "consumer-attempt"
+    );
     assert_eq!(detail["replicas"][1]["consumer_provider_id"], "cache-b");
     assert_eq!(detail["map_replicas"].as_array().unwrap().len(), 0);
     let events = log.decoded_events().unwrap();
     assert!(events.iter().skip(1).all(|event| matches!(event.payload(),
         EventPayload::MapMemoryReplicaRecorded { manifest, .. } if manifest == &source)));
+    assert!(
+        log.events()
+            .unwrap()
+            .iter()
+            .skip(1)
+            .all(|event| event.payload_schema == "domain.EventPayload.json/v33")
+    );
     let sink = state::FileArchiveSink::new(directory.path().join("archive"));
     assert!(matches!(
         log.archive_and_gc(4, &sink),
@@ -127,6 +144,7 @@ async fn typed_memory_replicas_preserve_published_source_across_http_and_replay(
             manifest: changed,
             node_id: node,
             consumer_provider_id: "cache-a".into(),
+            provenance: None,
             status: domain::MemoryReplicaStatus::Staged,
             rejection_reason: None,
         },
@@ -168,6 +186,7 @@ fn archive_gc_preserves_generic_memory_replay_evidence() {
             manifest: manifest.clone(),
             node_id: NodeId::new("dog-b").unwrap(),
             consumer_provider_id: "consumer".into(),
+            provenance: None,
         },
     );
     log.save_checkpoint(TEST_CHECKPOINT_SCHEMA, TEST_CHECKPOINT_JSON)

@@ -203,6 +203,11 @@ ADR-0199 已接通 typed-map handoff：v0.2 请求保留完整原始 MapArtifact
 Control 的 source/target scope、tenant、principal、provider、frame/anchor/lineage policy
 上重查；generic v0.1 仍保持原语义。该门禁不选择 active map、不证明 localization 或设备停止。
 
+ADR-0200 让新的 generic/typed-map replica evidence 保留原始 Memory import 的 `TaskRef` 与
+`execution_id`。Node 从 canonical invocation 生成，Artifact/Controller 在写入前核对原始
+import intent，event codec v33 与 State/Catalog snapshot 持久化；旧事件的 provenance 保持
+unavailable，不从 Node/provider 推断 owner。
+
 ADR-0197 已通过真实引用/回收/重启与三 leader 冷恢复：以实际已退休上传、各成员原 Log/View/Snapshot 和 stream/reader
 为完整回收链，真实 mTLS Snapshot/原 cut purge 与原进程/作用域结束分别释放自己的引用。
 本地 OS-admin reader 退休只委托原 Root 的实际 incarnation 检查；无权以超时或标签补造

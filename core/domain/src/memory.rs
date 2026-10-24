@@ -659,6 +659,49 @@ pub enum MemoryReplicaStatus {
     Rejected,
 }
 
+/// Exact consumer TaskExecution provenance attached to new replica evidence.
+///
+/// Historical events may omit this value; absence remains unavailable rather than being inferred
+/// from a Node or provider identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryReplicaProvenance {
+    /// Mission-scoped Task that requested the local placement.
+    task_ref: TaskRef,
+    /// Physical attempt that owned the import or staging purpose.
+    execution_id: String,
+}
+
+impl MemoryReplicaProvenance {
+    /// Creates bounded provenance for one exact consumer attempt.
+    pub fn new(task_ref: TaskRef, execution_id: impl Into<String>) -> Result<Self, DomainError> {
+        let execution_id = execution_id.into();
+        if execution_id.trim().is_empty()
+            || execution_id.trim() != execution_id
+            || execution_id.len() > 1024
+            || execution_id.chars().any(char::is_control)
+        {
+            return Err(invalid_memory(
+                "Memory replica execution provenance is invalid",
+            ));
+        }
+        Ok(Self {
+            task_ref,
+            execution_id,
+        })
+    }
+
+    /// Returns the exact consumer Task.
+    pub const fn task_ref(&self) -> &TaskRef {
+        &self.task_ref
+    }
+
+    /// Returns the exact consumer physical attempt.
+    pub fn execution_id(&self) -> &str {
+        &self.execution_id
+    }
+}
+
 /// Rebuildable placement evidence for one provider-qualified node-local Memory replica.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryReplicaSnapshot {
@@ -668,6 +711,9 @@ pub struct MemoryReplicaSnapshot {
     node_id: NodeId,
     /// Exact node-local provider whose placement attempt produced this evidence.
     consumer_provider_id: String,
+    /// Exact consumer Task/attempt when supplied by a current prepared import.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provenance: Option<MemoryReplicaProvenance>,
     /// Latest monotonic replica status.
     status: MemoryReplicaStatus,
     /// RoboGuide-local receive time of the latest evidence.
@@ -686,6 +732,27 @@ impl MemoryReplicaSnapshot {
         observed_at: TimestampMs,
         rejection_reason: Option<String>,
     ) -> Result<Self, DomainError> {
+        Self::new_with_provenance(
+            selector,
+            node_id,
+            consumer_provider_id,
+            status,
+            observed_at,
+            rejection_reason,
+            None,
+        )
+    }
+
+    /// Creates a replica snapshot while retaining exact consumer Task/attempt provenance.
+    pub fn new_with_provenance(
+        selector: MemorySelector,
+        node_id: NodeId,
+        consumer_provider_id: impl Into<String>,
+        status: MemoryReplicaStatus,
+        observed_at: TimestampMs,
+        rejection_reason: Option<String>,
+        provenance: Option<MemoryReplicaProvenance>,
+    ) -> Result<Self, DomainError> {
         let consumer_provider_id = consumer_provider_id.into();
         if consumer_provider_id != LEGACY_MEMORY_CONSUMER_PROVIDER_ID {
             validate_identifier(&consumer_provider_id, "Memory consumer provider id")?;
@@ -694,6 +761,7 @@ impl MemoryReplicaSnapshot {
             selector,
             node_id,
             consumer_provider_id,
+            provenance,
             status,
             observed_at,
             rejection_reason,
@@ -713,6 +781,11 @@ impl MemoryReplicaSnapshot {
     /// Returns the exact node-local provider represented by this placement evidence.
     pub fn consumer_provider_id(&self) -> &str {
         &self.consumer_provider_id
+    }
+
+    /// Returns exact consumer Task/attempt provenance when the original event supplied it.
+    pub const fn provenance(&self) -> Option<&MemoryReplicaProvenance> {
+        self.provenance.as_ref()
     }
 
     /// Returns the latest replica lifecycle.

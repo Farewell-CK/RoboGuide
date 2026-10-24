@@ -132,6 +132,8 @@ const EVENT_PAYLOAD_SCHEMA_V30: &str = "domain.EventPayload.json/v30";
 const EVENT_PAYLOAD_SCHEMA_V31: &str = "domain.EventPayload.json/v31";
 /// Independent original Prepared upload recovery authority.
 const EVENT_PAYLOAD_SCHEMA_V32: &str = "domain.EventPayload.json/v32";
+/// Codec retaining exact consumer Task/attempt provenance on Memory replica evidence.
+const EVENT_PAYLOAD_SCHEMA_V33: &str = "domain.EventPayload.json/v33";
 /// Codec including independent original-revoke observation evidence.
 const EVENT_PAYLOAD_SCHEMA_V26: &str = "domain.EventPayload.json/v26";
 /// Complete provider-qualified typed-map byte-import evidence.
@@ -1311,6 +1313,7 @@ fn payload_schema_version(schema: &str) -> Result<u8, SqliteEventLogError> {
         EVENT_PAYLOAD_SCHEMA_V30 => Ok(30),
         EVENT_PAYLOAD_SCHEMA_V31 => Ok(31),
         EVENT_PAYLOAD_SCHEMA_V32 => Ok(32),
+        EVENT_PAYLOAD_SCHEMA_V33 => Ok(33),
         _ => Err(SqliteEventLogError::Codec(format!(
             "unsupported event payload schema {schema}"
         ))),
@@ -1340,6 +1343,7 @@ fn validate_payload_schema(
             record.validate().map_err(SqliteEventLogError::Codec)?;
             29
         }
+        _ if replica_provenance_payload(payload) => 33,
         EventPayload::MissionPlanRevisionCommitted { .. }
         | EventPayload::MissionGoalEvidenceAdmitted { .. } => 28,
         EventPayload::MemoryHandoffTransition { .. } => 27,
@@ -1550,6 +1554,7 @@ fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
         | EventPayload::MissionGoalEvidenceAdmitted { .. } => EVENT_PAYLOAD_SCHEMA_V28,
         EventPayload::MemoryHandoffTransition { .. } => EVENT_PAYLOAD_SCHEMA_V27,
         EventPayload::MemoryUseReconciliationEvidence { .. } => EVENT_PAYLOAD_SCHEMA_V26,
+        _ if replica_provenance_payload(payload) => EVENT_PAYLOAD_SCHEMA_V33,
         EventPayload::MapMemoryReplicaRecorded { .. } => EVENT_PAYLOAD_SCHEMA_V25,
         _ if provider_map_payload(payload) => EVENT_PAYLOAD_SCHEMA_V24,
         EventPayload::ArtifactUploadTransition { .. } => EVENT_PAYLOAD_SCHEMA_V23,
@@ -1561,6 +1566,17 @@ fn payload_schema_for_payload(payload: &EventPayload) -> &'static str {
         | EventPayload::MissionExecutionIsolated { .. } => EVENT_PAYLOAD_SCHEMA_V19,
         EventPayload::TaskSatisfactionRejected { .. } => EVENT_PAYLOAD_SCHEMA_V20,
         _ => EVENT_PAYLOAD_SCHEMA_V17,
+    }
+}
+
+/// Identifies new Memory replica events that carry exact consumer Task/attempt provenance.
+fn replica_provenance_payload(payload: &EventPayload) -> bool {
+    match payload {
+        EventPayload::MapMemoryReplicaRecorded { provenance, .. }
+        | EventPayload::MemoryArtifactStaged { provenance, .. }
+        | EventPayload::MemoryArtifactImported { provenance, .. }
+        | EventPayload::MemoryArtifactRejected { provenance, .. } => provenance.is_some(),
+        _ => false,
     }
 }
 

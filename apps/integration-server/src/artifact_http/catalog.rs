@@ -120,6 +120,15 @@ pub trait MemoryProviderAdmission: Send + Sync {
         manifest: &MemoryArtifactManifest,
     ) -> Result<(), String>;
 
+    /// Checks optional Task/attempt provenance against the original prepared import identity.
+    fn admit_replica_provenance(
+        &self,
+        _provenance: Option<&domain::MemoryReplicaProvenance>,
+        _import_id: Option<&str>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     /// Validates that one write was issued by the active session of its semantic Node owner.
     fn admit_publisher(
         &self,
@@ -244,33 +253,38 @@ impl ArtifactCatalog {
         &self,
         payload: EventPayload,
     ) -> Result<EventPayload, HttpError> {
-        let (generic, node, provider, status, reason) = match &payload {
+        let (generic, node, provider, status, reason, provenance) = match &payload {
             EventPayload::MemoryArtifactStaged {
                 manifest,
                 node_id,
                 consumer_provider_id,
+                provenance,
             } => (
                 manifest,
                 node_id,
                 consumer_provider_id,
                 domain::MemoryReplicaStatus::Staged,
                 None,
+                provenance.clone(),
             ),
             EventPayload::MemoryArtifactImported {
                 manifest,
                 node_id,
                 consumer_provider_id,
+                provenance,
             } => (
                 manifest,
                 node_id,
                 consumer_provider_id,
                 domain::MemoryReplicaStatus::Imported,
                 None,
+                provenance.clone(),
             ),
             EventPayload::MemoryArtifactRejected {
                 manifest,
                 node_id,
                 consumer_provider_id,
+                provenance,
                 reason,
             } => (
                 manifest,
@@ -278,6 +292,7 @@ impl ArtifactCatalog {
                 consumer_provider_id,
                 domain::MemoryReplicaStatus::Rejected,
                 Some(reason.clone()),
+                provenance.clone(),
             ),
             _ => return Ok(payload),
         };
@@ -304,6 +319,7 @@ impl ArtifactCatalog {
             consumer_provider_id: provider.clone(),
             status,
             rejection_reason: reason,
+            provenance,
         })
     }
     /// Federates immutable admitted metadata for application prerequisites without granting content access.
@@ -1104,11 +1120,13 @@ fn admit_memory_payload(
             manifest,
             node_id,
             consumer_provider_id,
+            ..
         }
         | EventPayload::MemoryArtifactImported {
             manifest,
             node_id,
             consumer_provider_id,
+            ..
         }
         | EventPayload::MemoryArtifactRejected {
             manifest,

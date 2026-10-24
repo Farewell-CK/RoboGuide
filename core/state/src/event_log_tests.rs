@@ -18,6 +18,7 @@ fn typed_map_memory_replica_requires_its_own_codec_and_complete_source() {
         manifest: source.clone(),
         node_id: domain::NodeId::new("receiver").unwrap(),
         consumer_provider_id: "file-cache".into(),
+        provenance: None,
         status: domain::MemoryReplicaStatus::Staged,
         rejection_reason: None,
     };
@@ -39,6 +40,49 @@ fn typed_map_memory_replica_requires_its_own_codec_and_complete_source() {
         .execute(
             "UPDATE events SET payload_schema=?1",
             [EVENT_PAYLOAD_SCHEMA_V24],
+        )
+        .unwrap();
+    assert!(log.decoded_events().is_err());
+}
+
+/// New consumer provenance cannot be hidden behind the prior provider-only event codec.
+#[test]
+fn replica_consumer_provenance_requires_codec_v33() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = SqliteEventLog::open(directory.path().join("replica-provenance.sqlite3")).unwrap();
+    let manifest = generic_memory_manifest();
+    let payload = EventPayload::MemoryArtifactImported {
+        manifest,
+        node_id: NodeId::new("dog-b").unwrap(),
+        consumer_provider_id: "consumer".into(),
+        provenance: Some(Box::new(
+            domain::MemoryReplicaProvenance::new(
+                TaskRef::new(
+                    MissionId::new("mission").unwrap(),
+                    TaskId::new("consume").unwrap(),
+                ),
+                "consumer-attempt",
+            )
+            .unwrap(),
+        )),
+    };
+    log.clone().append(
+        TimestampMs::new(1),
+        &CorrelationId::new("replica-provenance").unwrap(),
+        None,
+        payload,
+    );
+    assert!(log.take_error().unwrap().is_none());
+    assert_eq!(
+        log.events().unwrap()[0].payload_schema,
+        "domain.EventPayload.json/v33"
+    );
+    let connection =
+        rusqlite::Connection::open(directory.path().join("replica-provenance.sqlite3")).unwrap();
+    connection
+        .execute(
+            "UPDATE events SET payload_schema=?1",
+            ["domain.EventPayload.json/v32"],
         )
         .unwrap();
     assert!(log.decoded_events().is_err());
@@ -418,6 +462,7 @@ fn memory_replica_payload(consumer_provider_id: &str) -> EventPayload {
         manifest: generic_memory_manifest(),
         node_id: NodeId::new("dog-b").expect("consumer Node id is valid"),
         consumer_provider_id: consumer_provider_id.to_string(),
+        provenance: None,
     }
 }
 

@@ -30,6 +30,31 @@ impl LocalIntegrationEngine {
                 .ok_or_else(|| EngineError::Memory("original import manifest is absent".into()))?,
         )
         .map_err(EngineError::Json)?;
+        let provenance = {
+            let mission = super::invocation_mission_id(&original.original_invocation)?;
+            let task_id = original
+                .original_invocation
+                .get("task_id")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| {
+                    EngineError::Protocol("original invocation task_id is absent".into())
+                })?;
+            domain::MemoryReplicaProvenance::new(
+                domain::TaskRef::new(
+                    mission,
+                    domain::TaskId::new(task_id.to_string())
+                        .map_err(|error| EngineError::Artifact(ArtifactError::Domain(error)))?,
+                ),
+                original
+                    .original_invocation
+                    .get("execution_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        EngineError::Protocol("original invocation execution_id is absent".into())
+                    })?,
+            )
+            .map_err(|error| EngineError::Artifact(ArtifactError::Domain(error)))?
+        };
         let ledger = self
             .inner
             .memory_ledgers
@@ -49,6 +74,7 @@ impl LocalIntegrationEngine {
                 &original.provider_id,
                 "imported",
                 None,
+                Some(&provenance),
             )
             .await?;
         Ok(())

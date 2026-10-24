@@ -98,6 +98,9 @@ pub(super) struct MemoryReplicaInput {
     pub(super) status: String,
     /// Optional rejection diagnostic.
     pub(super) reason: Option<String>,
+    /// Exact consumer Task/attempt when this is a prepared import.
+    #[serde(default)]
+    pub(super) provenance: Option<domain::MemoryReplicaProvenance>,
 }
 
 /// Parsed HTTP request headers and bytes read beyond the header delimiter.
