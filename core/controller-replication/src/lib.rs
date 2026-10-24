@@ -44,13 +44,14 @@ pub use content_application::{
 };
 pub use content_store::{
     ContentProcessEndObservation, REPLICA_CONTENT_LAYOUT_SCHEMA,
-    REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA, REPLICA_CONTENT_STORAGE_SCHEMA,
-    REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA, ReplicaContentCopyStatus, ReplicaContentIdentity,
-    ReplicaContentProducerKind, ReplicaContentProducerSource, ReplicaContentProducerStatus,
-    ReplicaContentReadLease, ReplicaContentReader, ReplicaContentReaderReceipt,
-    ReplicaContentReaderStatus, ReplicaContentReceipt, ReplicaContentReference,
-    ReplicaContentReferenceKind, ReplicaContentStore, ReplicaContentStreamStatus,
-    ReplicaSnapshotCloseStatus,
+    REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA, REPLICA_CONTENT_SNAPSHOT_LAYOUT_SCHEMA,
+    REPLICA_CONTENT_STORAGE_SCHEMA, REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA, ReplicaContentCopyStatus,
+    ReplicaContentIdentity, ReplicaContentProducerKind, ReplicaContentProducerSource,
+    ReplicaContentProducerStatus, ReplicaContentReadLease, ReplicaContentReader,
+    ReplicaContentReaderReceipt, ReplicaContentReaderStatus, ReplicaContentReceipt,
+    ReplicaContentReference, ReplicaContentReferenceKind, ReplicaContentStore,
+    ReplicaContentStreamStatus, ReplicaSnapshotCloseStatus, SnapshotContentHeader,
+    SnapshotContentReady, SnapshotContentStatus,
 };
 pub use controller_ingress::{
     ControllerContentClient, ControllerContentClientConfig, ControllerContentRead,
@@ -459,6 +460,8 @@ impl ReplicaConfig {
 /// Live consensus service and durable accepted history, independent of any executing Controller child.
 #[derive(Clone)]
 pub struct ReplicaNode {
+    /// Weak running-server context for real Snapshot prerequisites; it cannot retain a Raft ownership cycle.
+    network_source: Arc<std::sync::OnceLock<std::sync::Weak<ReplicaNode>>>,
     /// Explicit initial/pre-enrolled root declarations; existing committed member data stays authoritative.
     content_bootstrap: Option<Arc<BTreeMap<u64, String>>>,
     /// Actual local network lifetimes and capacity; never replicated authority.
@@ -620,6 +623,12 @@ impl ReplicaNode {
                 None,
             )
         };
+        if config.streams_content() {
+            let original = store.clone();
+            tokio::task::spawn_blocking(move || original.reconcile_snapshot_receives())
+                .await
+                .map_err(|e| e.to_string())??;
+        }
         let tls = if config.rotates_certificates() {
             let configuration = config.tls.as_ref().ok_or("rotation requires TLS")?;
             store.initialize_certificate_trust(&configuration.peer_certificate_digests)?;
@@ -653,6 +662,7 @@ impl ReplicaNode {
             .map_err(|error| error.to_string())?,
         );
         let network_online = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let network_source = Arc::new(std::sync::OnceLock::new());
         let network = transport::ReplicaNetworkFactory::new(
             config.profile_identity(),
             config.replica_id,
@@ -660,6 +670,7 @@ impl ReplicaNode {
             config.shared_secret.clone(),
             tls.clone(),
             transport_budget.clone(),
+            network_source.clone(),
         );
         let raft = Raft::new(
             config.replica_id,
@@ -671,6 +682,7 @@ impl ReplicaNode {
         .await
         .map_err(|error| error.to_string())?;
         let node = Self {
+            network_source,
             content_bootstrap,
             transport_budget,
             process_instance: supervision::new_process_instance()?,

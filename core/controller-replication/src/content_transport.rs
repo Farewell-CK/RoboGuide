@@ -6,7 +6,7 @@ use crate::content_store::{
 };
 
 /// Explicit transport purposes; historical Log authority never widens proposal or accepted-view routes.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum StreamRoute {
     /// Original leader proposal staging.
     Proposal,
@@ -14,15 +14,20 @@ pub(crate) enum StreamRoute {
     Committed,
     /// Exact durable Log on both members; only the source must already have committed it.
     HistoricalLog(openraft::LogId<u64>),
+    /// Exact already durable original Snapshot receive, distinct from a Log or accepted view.
+    Snapshot(Arc<SnapshotContentHeader>),
 }
 
 /// Historical callbacks parse real retained Logs on an owned blocking task, leaving network workers free.
 async fn check_network_permission(
     node: &ReplicaNode,
     check: &StreamPermission,
-    route: StreamRoute,
+    route: &StreamRoute,
 ) -> Result<(), String> {
-    if matches!(route, StreamRoute::HistoricalLog(_)) {
+    if matches!(
+        route,
+        StreamRoute::HistoricalLog(_) | StreamRoute::Snapshot(_)
+    ) {
         let held = check.clone();
         super::log_content::on_worker(node, move |_| held()).await
     } else {
@@ -253,7 +258,7 @@ pub(crate) async fn send_historical_log_stream(
 
 /// Carries one original scope through the shared bounded transport; committed routing is explicit.
 #[allow(clippy::too_many_arguments)]
-async fn send_stream(
+pub(super) async fn send_stream(
     node: &ReplicaNode,
     receiver: u64,
     target: ContentQuorumTarget,
@@ -277,9 +282,15 @@ async fn send_stream(
         .nodes()
         .find_map(|(id, member)| (*id == receiver).then_some(member.addr.clone()))
         .ok_or("original receiver is absent from the exact committed membership")?;
-    let command = match route {
+    let command = match &route {
+        StreamRoute::Snapshot(header) => Command::PushSnapshotContentV1 {
+            header: Box::new(header.as_ref().clone()),
+            content: content.clone(),
+            command_id: command_id.clone(),
+            budget_ms: duration_ms,
+        },
         StreamRoute::HistoricalLog(log_id) => Command::PushHistoricalLogContentV1 {
-            log_id,
+            log_id: *log_id,
             target: Box::new(target.clone()),
             content: content.clone(),
             command_id: command_id.clone(),
@@ -348,21 +359,22 @@ async fn send_stream(
         let network = permission(node.clone(), target.clone(), receiver, evidence);
         let original_node = node.clone();
         let original_target = target.clone();
+        let live_route = route.clone();
         let check: StreamPermission = Arc::new(move || {
             caller()?;
             network()?;
-            match route {
-                StreamRoute::Proposal => {}
+            match &live_route {
+                StreamRoute::Proposal | StreamRoute::Snapshot(_) => {}
                 StreamRoute::Committed => original_node
                     .store
                     .require_committed_content_target(&original_target)?,
                 StreamRoute::HistoricalLog(id) => original_node
                     .store
-                    .require_historical_log_target(id, &original_target, true)?,
+                    .require_historical_log_target(*id, &original_target, true)?,
             }
             Ok(())
         });
-        check_network_permission(node, &check, route).await?;
+        check_network_permission(node, &check, &route).await?;
         clock.check()?;
         stream
             .write_u64(encoded.bytes.len() as u64)
@@ -377,7 +389,7 @@ async fn send_stream(
             .map_err(|error| error.to_string())?
         {
             Reply::ContentStream(Ok(StreamNotice::Original(original))) => {
-                check_network_permission(node, &check, route).await?;
+                check_network_permission(node, &check, &route).await?;
                 clock.check()?;
                 return Ok(*original);
             }
@@ -390,7 +402,7 @@ async fn send_stream(
             Reply::ContentStream(Err(error)) | Reply::Rejected(error) => return Err(error),
             _ => return Err("actual receiver did not provide its original receive outcome".into()),
         };
-        check_network_permission(node, &check, route).await?;
+        check_network_permission(node, &check, &route).await?;
         clock.check()?;
         let mut source = source_worker(SourceWork {
             root,
@@ -405,7 +417,7 @@ async fn send_stream(
         let mut offset = 0u64;
         while let Some(chunk) = source.recv().await {
             clock.check()?;
-            check_network_permission(node, &check, route).await?;
+            check_network_permission(node, &check, &route).await?;
             match chunk {
                 SourceChunk::Bytes(data) => {
                     stream
@@ -441,7 +453,7 @@ async fn send_stream(
                         Reply::ContentStreamFinished(outcome) => outcome,
                         _ => Err("actual receiver full-byte outcome is absent".into()),
                     }?;
-                    check_network_permission(node, &check, route).await?;
+                    check_network_permission(node, &check, &route).await?;
                     clock.check()?;
                     if result.request_digest != ready_digest {
                         return Err("actual receipt changed its original Ready identity".into());
@@ -542,6 +554,9 @@ where
             StreamRoute::HistoricalLog(id) => held
                 .store
                 .require_historical_log_target(id, &original, false)?,
+            StreamRoute::Snapshot(_) => {
+                return Err("Snapshot receives require their separate original scope".into());
+            }
         }
         Ok(())
     });

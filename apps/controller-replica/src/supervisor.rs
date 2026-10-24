@@ -275,18 +275,27 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
             .join("supervisor.writer.lock"),
     )?;
     let (node, _server) = if let Some(content) = &configuration.content {
-        let root = match content.restore_binding_digest.as_deref() {
-            Some(digest) => controller_replication::ReplicaContentStore::open_restored_streams(
+        let root = if configuration.schema == "roboguide.controller-replica-process/v0.4" {
+            controller_replication::ReplicaContentStore::open_with_snapshot_receives(
                 &content.root,
                 &configuration.replica.profile_identity(),
                 configuration.replica.replica_id,
-                digest,
-            ),
-            None => controller_replication::ReplicaContentStore::open_with_streams(
-                &content.root,
-                &configuration.replica.profile_identity(),
-                configuration.replica.replica_id,
-            ),
+                content.restore_binding_digest.as_deref(),
+            )
+        } else {
+            match content.restore_binding_digest.as_deref() {
+                Some(digest) => controller_replication::ReplicaContentStore::open_restored_streams(
+                    &content.root,
+                    &configuration.replica.profile_identity(),
+                    configuration.replica.replica_id,
+                    digest,
+                ),
+                None => controller_replication::ReplicaContentStore::open_with_streams(
+                    &content.root,
+                    &configuration.replica.profile_identity(),
+                    configuration.replica.replica_id,
+                ),
+            }
         }?;
         ReplicaNode::start_with_controller_content_window(
             configuration.replica.clone(),

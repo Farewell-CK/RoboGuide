@@ -98,15 +98,26 @@ fn parse(raw: &str, original: &ReplicaContentIdentity, ordinal: usize) -> Result
         return Err("original restore binding exceeds its byte bound".into());
     }
     let binding: Binding = serde_json::from_str(raw).map_err(|e| e.to_string())?;
-    if binding.schema != "roboguide.replica-content-restore-binding/v0.1"
-        || binding.command_id.is_empty()
+    if !matches!((binding.schema.as_str(),binding.source_root_version),
+        ("roboguide.replica-content-restore-binding/v0.1",4) if ordinal==1)
+        && !matches!((binding.schema.as_str(),binding.source_root_version),
+            ("roboguide.replica-content-restore-binding/v0.1",5) if ordinal>1)
+        && !matches!(
+            (binding.schema.as_str(), binding.source_root_version),
+            ("roboguide.replica-content-restore-binding/v0.2", 6)
+        )
+    {
+        return Err(
+            "original restore binding has an unsupported explicit source generation".into(),
+        );
+    }
+    if binding.command_id.is_empty()
         || binding.command_id.len() > 128
         || !checksum(&binding.manifest_digest)
         || !checksum(&binding.source_database_digest)
         || binding.original_identity != *original
         || binding.ordinal != ordinal
         || !(1..=MAX_RESTORES).contains(&ordinal)
-        || binding.source_root_version != if ordinal == 1 { 4 } else { 5 }
         || (ordinal == 1) != binding.previous_binding_digest.is_none()
         || binding
             .previous_binding_digest
@@ -179,8 +190,15 @@ pub(super) fn validate_sql(
     }
     let mut previous = None;
     let mut previous_parent = None;
+    let mut snapshot_history = false;
     for (index, raw) in history.iter().enumerate() {
         let binding = parse(raw, original, index + 1)?;
+        if snapshot_history && binding.source_root_version != 6 {
+            return Err(
+                "original Snapshot restore history regressed its backing generation".into(),
+            );
+        }
+        snapshot_history |= binding.source_root_version == 6;
         if binding.previous_binding_digest != previous {
             return Err("original restore history chain differs".into());
         }

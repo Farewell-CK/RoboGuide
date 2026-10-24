@@ -194,11 +194,17 @@ Harness 不绕过 RoboGuide 直接调用 simulator skill。本地导航/操作 C
 
 ## 如何维护
 
+ADR-0188 已为网络 Snapshot 接入显式 Root6 的持久准备/独立 pin、实际字节就绪与
+元数据安装门禁，以及 recovery v0.20 的完整恢复。原副本流量由实际 server 的弱引用
+取得源上下文，避免 writer 生命周期形成强引用环；接收就绪不等于 Snapshot 已应用。
+普通 delta 和原已归档历史的来源/连续性拒绝保持；真实单机多进程、learner、Log 清理、
+重启和独立恢复门禁已通过，跨主机、joint/GC/长期 SLO 仍单独验收。
+
 ADR-0187 为 apply 前的历史 Log 增加独立内容追赶：来源须实际保留并提交同一 Log，接收方
 须先有自己的原 Log/producer，现存 stream 意图和 pin 先于实际源读取；每块仍检查原
 Log、current membership/epoch、Root/TLS 和原预算。普通已提交路由仍要求双方当前接受
-同一应用。此切片只覆盖相同已应用成员配置，learner/joint、网络 Snapshot 和完整 GC
-继续必需；不增加设备或物理连续性事实。
+同一应用。网络 Snapshot 切片也覆盖空 learner 的内容前置条件；joint、完整 GC 和跨域
+连续性继续必需；不增加设备或物理连续性事实。
 
 总体图的单一源码为 [中文 .mmd](../../images/roboguide-current-architecture.mmd)和
 [英文 .mmd](../../images/roboguide-current-architecture-english.mmd)；README、V2 入口和网站导览中的

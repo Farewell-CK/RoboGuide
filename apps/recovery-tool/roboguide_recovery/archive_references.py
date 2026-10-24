@@ -23,6 +23,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.17",
     "roboguide.recovery-profile/v0.18",
     "roboguide.recovery-profile/v0.19",
+    "roboguide.recovery-profile/v0.20",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -426,9 +427,10 @@ def validate(
             current = checkpoint is not None and checkpoint[0] in WRAPPERS
             if current:
                 authority_id = _metadata(connection, "archive_authority_id")
-                if profile_schema == "roboguide.recovery-profile/v0.19" and isinstance(
-                    authority_id, str
-                ):
+                if profile_schema in {
+                    "roboguide.recovery-profile/v0.19",
+                    "roboguide.recovery-profile/v0.20",
+                } and isinstance(authority_id, str):
                     from .replica_content_bundle import projection_authority
 
                     actual_profile = projection_authority(
@@ -444,7 +446,8 @@ def validate(
                     replica_profiles[authority_id] = actual_profile
                 if not isinstance(authority_id, str) or (
                     authority_id in authorities
-                    and profile_schema != "roboguide.recovery-profile/v0.19"
+                    and profile_schema
+                    not in {"roboguide.recovery-profile/v0.19", "roboguide.recovery-profile/v0.20"}
                 ):
                     raise ValueError(
                         "original Controller reference authority is absent or repeated"

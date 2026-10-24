@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+# ADR-0188 adds explicit Root6 Snapshot receive prerequisites under an independent content journal.
+# A real source/receiver mTLS path records the original SnapshotMeta, payload digest, qualified
+# inputs, receiver budget and independent pins before byte work. Same-Root CAS bytes are verified
+# before `ready`; parent Snapshot publication and `retirement` are separate. Root6 may retain an
+# initially empty learner's content prerequisite without granting application or voter authority.
+# Recovery v0.20 preserves Root6 rows, heads, pins, Unknown and explicit original/restored backing;
+# older Root4/Root5 entry points refuse Root6. The native gate is
+# `check_network_content_processes.py --snapshot-catchup`. This remains software content
+# continuity only: it creates zero Nodes/devices/models/simulators and proves no physical continuity.
+
 ADR-0187 adds separate retained-Log describe/request/push commands, not a widening of ordinary
 committed routing. Actual source Commit/Log/original producer and receiver durable Log/producer
 precede Ready/source reads. Historical target revision is the frozen source observation; its

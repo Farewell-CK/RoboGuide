@@ -5,6 +5,11 @@
 新路由保留原 Log/权限/预算及 Unknown，普通 committed route 边界保持；网络 Snapshot、
 learner/joint、归档接线、完整 GC/升级及全部非发布矩阵继续实施。
 
+[网络 Snapshot 内容前置条件](docs/development/acceptance/2026-10-24-network-snapshot-content-prerequisites.md)
+已接入显式 Root6 接收日志、同 Root CAS 校验、真实 mTLS、Log 清理后的 Snapshot/learner
+追赶、重启和独立恢复核对。Root6 的字节就绪、父 Snapshot 应用和引用退休保持分离；
+该门禁只证明软件内容连续性，不创建设备或物理连续性事实。
+
 [ADR-0184](docs/decisions/0184-explicit-replica-content-cold-restore.md) 已接通显式
 [完整 Replica 内容恢复 v0.19](contracts/recovery/bundle-v0.19/README.md)。原逻辑身份、操作、
 Unknown 和预算不改写；新 Root5 binding 单独固定恢复后的实际 Root/SQL/parent inode。

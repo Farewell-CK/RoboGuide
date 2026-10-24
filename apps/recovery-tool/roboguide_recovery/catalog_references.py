@@ -25,6 +25,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.17",
     "roboguide.recovery-profile/v0.18",
     "roboguide.recovery-profile/v0.19",
+    "roboguide.recovery-profile/v0.20",
 }
 WRAPPER = "roboguide.controller-checkpoint/v48"
 WRAPPERS = {
@@ -191,7 +192,11 @@ def _controller(
             checkpoint is not None
             and checkpoint[0] == "roboguide.controller-checkpoint/v53"
             and profile_schema
-            not in {"roboguide.recovery-profile/v0.18", "roboguide.recovery-profile/v0.19"}
+            not in {
+                "roboguide.recovery-profile/v0.18",
+                "roboguide.recovery-profile/v0.19",
+                "roboguide.recovery-profile/v0.20",
+            }
         ):
             raise ValueError("Prepared recovery wrapper requires explicit recovery v0.18")
 
@@ -210,6 +215,7 @@ def _controller(
                 "roboguide.recovery-profile/v0.17",
                 "roboguide.recovery-profile/v0.18",
                 "roboguide.recovery-profile/v0.19",
+                "roboguide.recovery-profile/v0.20",
             }
         ):
             raise ValueError("upload-retention wrapper requires explicit recovery v0.16")
@@ -222,7 +228,10 @@ def _controller(
             if current or profile_schema in SUPPORTED:
                 raise ValueError("mandatory Catalog reference event columns are missing")
             return heads, publications
-        if profile_schema != "roboguide.recovery-profile/v0.19" and (
+        if profile_schema not in {
+            "roboguide.recovery-profile/v0.19",
+            "roboguide.recovery-profile/v0.20",
+        } and (
             connection.execute(
                 "SELECT 1 FROM events WHERE payload_schema='domain.EventPayload.json/v32' LIMIT 1"
             ).fetchone()
@@ -245,9 +254,10 @@ def _controller(
         if profile_schema not in SUPPORTED:
             return heads, publications
         archived = archive_references.catalog_history(connection, profile_schema, budget)
-        if profile_schema != "roboguide.recovery-profile/v0.19" and any(
-            row.get("payload_schema") == "domain.EventPayload.json/v32" for row in archived
-        ):
+        if profile_schema not in {
+            "roboguide.recovery-profile/v0.19",
+            "roboguide.recovery-profile/v0.20",
+        } and any(row.get("payload_schema") == "domain.EventPayload.json/v32" for row in archived):
             raise ValueError("protected Prepared recovery needs complete parent8/Root4 recovery")
         original_archives = archive_references.operations(
             connection,

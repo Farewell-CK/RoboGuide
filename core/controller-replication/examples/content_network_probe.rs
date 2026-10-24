@@ -26,12 +26,17 @@ struct Config {
     /// Actual private endpoint, required only by explicit parent8.
     #[serde(default)]
     child_socket: Option<PathBuf>,
+    /// Explicit durable Snapshot receiving generation; the original Root4 mode remains unchanged.
+    #[serde(default)]
+    snapshot_receives: bool,
 }
 
 /// Closed trusted local process operations; no arbitrary SQL, shell or fabricated execution is accepted.
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
+    /// Publishes an actual full Snapshot and purges only its original applied cut through the maintained API.
+    CompactSnapshot,
     /// Observes actual current role and quorum without mutation.
     Status,
     /// Reads a quiescent actual original Controller/CAS and stages its exact complete candidate.
@@ -258,11 +263,20 @@ fn capture(
 
 /// Serves actual Raft/mTLS while owned local stdin requests drive only maintained core interfaces.
 async fn serve(config: Config) -> Result<(), String> {
-    let root = ReplicaContentStore::open_with_streams(
-        &config.content_root,
-        &config.replica.profile_identity(),
-        config.replica.replica_id,
-    )?;
+    let root = if config.snapshot_receives {
+        ReplicaContentStore::open_with_snapshot_receives(
+            &config.content_root,
+            &config.replica.profile_identity(),
+            config.replica.replica_id,
+            None,
+        )
+    } else {
+        ReplicaContentStore::open_with_streams(
+            &config.content_root,
+            &config.replica.profile_identity(),
+            config.replica.replica_id,
+        )
+    }?;
     let (node, _server) = if config.owned_child {
         ReplicaNode::start_with_controller_content(
             config.replica.clone(),
@@ -316,6 +330,7 @@ async fn serve(config: Config) -> Result<(), String> {
         let request: Request = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
         let shutdown = matches!(request, Request::Shutdown);
         let result = match request {
+            Request::CompactSnapshot => node.compact_content_snapshot(15000).await,
             Request::RouteCommitted {
                 target,
                 content,
@@ -511,6 +526,20 @@ async fn main() -> Result<(), String> {
     let config: Config = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
     config.replica.validate()?;
     match mode.as_str() {
+        "snapshot-upgrade" => {
+            if !config.snapshot_receives {
+                return Err("Snapshot upgrade requires explicit Root6 configuration".into());
+            }
+            let root = ReplicaContentStore::upgrade_snapshot_receives(
+                &config.content_root,
+                &config.replica.profile_identity(),
+                config.replica.replica_id,
+                None,
+            )?;
+            emit(
+                json!({"identity":root.identity(),"layout":REPLICA_CONTENT_SNAPSHOT_LAYOUT_SCHEMA}),
+            )
+        }
         "profile" => emit(json!({"profile":config.replica.profile_identity()})),
         "serve" => serve(config).await,
         _ => Err("unsupported actual network process operation".into()),

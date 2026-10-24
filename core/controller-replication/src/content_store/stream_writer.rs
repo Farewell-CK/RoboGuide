@@ -84,12 +84,14 @@ impl ReplicaContentStore {
                     || original.intent.target != intent.target
                     || original.intent.content != intent.content
                     || original.intent.origin != intent.origin
-                    || original.intent.budget.duration_ms != intent.budget.duration_ms
                 {
                     return Err(
-                        "original stream command changed its immutable source/target/budget".into(),
+                        "original stream command changed its immutable source/target/connection"
+                            .into(),
                     );
                 }
+                // A retry samples a fresh caller clock. Returning the first record keeps its
+                // original nonrenewing budget authoritative and never starts a second effect.
                 return Ok(StreamAdmission::Existing(Box::new(status(&original)?)));
             }
             capacity = self

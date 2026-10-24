@@ -14,6 +14,134 @@ struct SnapshotProducerWork {
 }
 
 impl SqliteRaftStore {
+    /// Independently retires byte-ready receives only when the actual complete parent Snapshot/pins survived.
+    /// Original readiness, effects and budgets stay unchanged; unmatched pending history remains retained.
+    pub(crate) fn reconcile_snapshot_receives(&self) -> Result<(), String> {
+        let Some(root) = self
+            .content
+            .as_ref()
+            .filter(|root| root.snapshot_receives_enabled())
+        else {
+            return Ok(());
+        };
+        let pending = root.pending_snapshot_publications()?;
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let clock = crate::content_store::ContentBudget::issue(15000)?;
+        let connection = self.connection.lock().map_err(|e| e.to_string())?;
+        self.validate_content_producer_heads(&connection)?;
+        let saved: Option<(String, Vec<u8>)> = connection
+            .query_row(
+                "SELECT meta,data FROM replica_v1_snapshot WHERE singleton=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some((raw, data)) = saved else {
+            return Ok(());
+        };
+        let meta: SnapshotMeta<u64, ReplicaMember> =
+            serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        let payload = format!("{:x}", Sha256::digest(&data));
+        let body: StoreSnapshot = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
+        let Some(content) = &body.view.content else {
+            return Ok(());
+        };
+        for (command, header) in pending {
+            clock.check()?;
+            if header.meta != meta || header.payload_digest != payload {
+                continue;
+            }
+            if header.target.inputs != content.inputs
+                || header.target.batch_digest != content.batch_digest
+                || header.target.revision != body.view.revision
+                || body
+                    .view
+                    .checkpoint
+                    .as_ref()
+                    .map(state::checkpoint_identity)
+                    .as_ref()
+                    != Some(&header.target.checkpoint_digest)
+            {
+                return Err(
+                    "original Snapshot receive differs from surviving parent publication".into(),
+                );
+            }
+            for key in &header.target.inputs {
+                clock.check()?;
+                root.verify_content(key)?;
+            }
+            let proof = super::producers::snapshot_record_digest(&meta, &data)
+                .map_err(|e| e.to_string())?;
+            root.retire_snapshot_prerequisites(&command, &proof, || {
+                clock.check()?;
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+    /// Captures one actual retained current Snapshot and its independent content scope for network sending.
+    pub(crate) fn network_snapshot_source(
+        &self,
+        expected: &SnapshotMeta<u64, ReplicaMember>,
+    ) -> Result<Option<(ReplicaView, String, ReplicaSnapshotData)>, String> {
+        let connection = self.connection.lock().map_err(|e| e.to_string())?;
+        self.validate_content_producer_heads(&connection)?;
+        let (meta, raw): (String, Vec<u8>) = connection
+            .query_row(
+                "SELECT meta,data FROM replica_v1_snapshot WHERE singleton=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        let meta: SnapshotMeta<u64, ReplicaMember> =
+            serde_json::from_str(&meta).map_err(|e| e.to_string())?;
+        if meta != *expected || raw.len() > MAX_SNAPSHOT_BYTES {
+            return Err("actual retained Snapshot differs from the upstream original".into());
+        }
+        let body: StoreSnapshot = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
+        body.view
+            .validate(&self.application_schema, &self.profile)
+            .map_err(|e| e.to_string())?;
+        let Some(content) = &body.view.content else {
+            return Ok(None);
+        };
+        let checksum = format!("{:x}", Sha256::digest(&raw));
+        let lease = self.network_content_store()?.retain_reader_scope(
+            &crate::supervision::new_process_instance()?,
+            &content.inputs,
+            &checksum,
+        )?;
+        Ok(Some((
+            body.view,
+            checksum,
+            ReplicaSnapshotData::retained(raw, lease),
+        )))
+    }
+
+    /// Checks the retained original Snapshot identity without hashing its complete body on each payload chunk.
+    pub(crate) fn require_network_snapshot_source(
+        &self,
+        expected: &SnapshotMeta<u64, ReplicaMember>,
+    ) -> Result<(), String> {
+        self.read_network_snapshot(|sql| {
+            let raw: String = sql
+                .query_row(
+                    "SELECT meta FROM replica_v1_snapshot WHERE singleton=1",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            let actual: SnapshotMeta<u64, ReplicaMember> =
+                serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            if actual != *expected {
+                return Err("original retained Snapshot source was replaced".into());
+            }
+            Ok(())
+        })
+    }
     /// Reads the exact actual last Snapshot with a new independent bounded managed reader scope.
     pub(super) fn current_snapshot_record(
         &self,
@@ -293,6 +421,30 @@ impl SqliteRaftStore {
                 "snapshot cannot cross metadata-only/complete original recovery authority",
             ));
         }
+        let receive = if let Some(root) = &self.content
+            && root.snapshot_receives_enabled()
+            && let Some(content) = &restored.view.content
+        {
+            Some(
+                root.require_snapshot_prerequisites(
+                    meta,
+                    &format!("{:x}", Sha256::digest(&data)),
+                    restored.view.revision,
+                    &state::checkpoint_identity(
+                        restored
+                            .view
+                            .checkpoint
+                            .as_ref()
+                            .ok_or_else(|| io_error("Snapshot checkpoint is absent"))?,
+                    ),
+                    &content.batch_digest,
+                    &content.inputs,
+                )
+                .map_err(io_error)?,
+            )
+        } else {
+            None
+        };
         {
             let connection = self.connection.lock().map_err(io_error)?;
             self.require_snapshot_successor(&connection, &restored.view)?;
@@ -466,6 +618,33 @@ impl SqliteRaftStore {
         transaction.commit().map_err(io_error)?;
         if let Some(work) = producer_work {
             self.complete_snapshot_producers(&connection, work)?;
+            if let Some(command) = receive {
+                let proof = super::producers::snapshot_record_digest(meta, &data)?;
+                self.content
+                    .as_ref()
+                    .ok_or_else(|| io_error("Snapshot receiving Root disappeared"))?
+                    .retire_snapshot_prerequisites(&command, &proof, || {
+                        let (actual_meta, actual_data): (String, Vec<u8>) = connection
+                            .query_row(
+                                "SELECT meta,data FROM replica_v1_snapshot WHERE singleton=1",
+                                [],
+                                |row| Ok((row.get(0)?, row.get(1)?)),
+                            )
+                            .map_err(|e| e.to_string())?;
+                        if serde_json::from_str::<SnapshotMeta<u64, ReplicaMember>>(&actual_meta)
+                            .map_err(|e| e.to_string())?
+                            != *meta
+                            || actual_data != data
+                        {
+                            return Err(
+                                "actual Snapshot publication changed before receiving retirement"
+                                    .into(),
+                            );
+                        }
+                        Ok(())
+                    })
+                    .map_err(io_error)?;
+            }
             return Ok(());
         }
         if let Some(previous) = previous_snapshot {

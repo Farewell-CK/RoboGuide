@@ -88,6 +88,8 @@ async fn asynchronous_and_child_clients_pin_exact_server_member() {
 
         let (address, server) = peer(&profiles[server_member - 1]).await;
         let network = ReplicaNetwork {
+            source: None,
+            snapshot_header: None,
             budget: TransportBudget::new(ReplicaTransportLimits::default()).unwrap(),
             target: 1,
             node: ReplicaMember::new(address.to_string()),
@@ -144,6 +146,8 @@ async fn unrelated_ca_is_rejected_before_fence_frame() {
     local.peer_certificate_digests = expected[0].peer_certificate_digests.clone();
     let material = Arc::new(crate::tls::load(Some(&local)).unwrap().unwrap());
     let network = ReplicaNetwork {
+        source: None,
+        snapshot_header: None,
         budget: TransportBudget::new(ReplicaTransportLimits::default()).unwrap(),
         target: 1,
         node: ReplicaMember::new(address.to_string()),
@@ -292,6 +296,8 @@ async fn queued_actual_tls_member_cannot_observe_commands_after_its_leaf_is_reti
             .unwrap(),
     );
     let network = ReplicaNetwork {
+        source: None,
+        snapshot_header: None,
         budget: TransportBudget::new(ReplicaTransportLimits::default()).unwrap(),
         target: leader.config.replica_id,
         node: ReplicaMember::new(leader.local_address().to_string()),

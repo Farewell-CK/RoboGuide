@@ -116,6 +116,10 @@ def _required(original: dict[str, Any]) -> set[tuple[str, str, int]]:
             row = tables[table][reference["reference_id"].split(":", 1)[1]]
             if row["receipt"] is None:
                 continue
+        if reference["kind"] == "snapshot-receive":
+            row = tables["content_snapshot_receives"][reference["reference_id"].split(":")[1]]
+            if row["ready"] is None:
+                continue
         result.add(content._content(reference["content"]))
     return result
 
@@ -456,7 +460,7 @@ def validate_bundle(
     sources: Any,
 ) -> None:
     """Validate paired original stores and active qualified bytes before publication."""
-    if schema != content.PROFILE:
+    if schema not in content.PROFILES:
         if sources is not None:
             raise ValueError("old recovery profile contains hidden Replica content authority")
         return
@@ -532,7 +536,7 @@ def bind_restored(
     budget: OperationBudget,
 ) -> list[dict[str, Any]]:
     """Add only explicit new backing history after complete source verification and copying."""
-    if manifest["profile"]["schema"] != content.PROFILE:
+    if manifest["profile"]["schema"] not in content.PROFILES:
         return []
     components = manifest["profile"]["components"]
     sources = _source_map(manifest["replica_content_sources"], components)
@@ -553,7 +557,9 @@ def bind_restored(
         parent = by_id[source["parent_id"]]
         parent_sql = (root / "stores" / parent["component_id"] / parent["database"]).stat()
         binding = {
-            "schema": "roboguide.replica-content-restore-binding/v0.1",
+            "schema": "roboguide.replica-content-restore-binding/v0.2"
+            if original["version"] == 6
+            else "roboguide.replica-content-restore-binding/v0.1",
             "command_id": command_id,
             "manifest_digest": manifest_digest,
             "source_database_digest": files["stores/" + identifier + "/content.sqlite3"][
@@ -577,19 +583,24 @@ def bind_restored(
         with closing(sqlite3.connect(directory / "content.sqlite3")) as connection:
             with connection:
                 connection.execute(
-                    "UPDATE metadata SET value=? WHERE key='layout'", (content.LAYOUT5,)
+                    "UPDATE metadata SET value=? WHERE key='layout'",
+                    (content.LAYOUT6 if original["version"] == 6 else content.LAYOUT5,),
                 )
                 connection.execute(
                     "INSERT INTO metadata(key,value) VALUES ('restore_bindings',?) "
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (json.dumps(history),),
                 )
-                connection.execute("PRAGMA user_version=5")
+                if original["version"] == 6:
+                    connection.execute(
+                        "UPDATE metadata SET value='restored' WHERE key='backing_mode'"
+                    )
+                connection.execute(
+                    "PRAGMA user_version=" + str(6 if original["version"] == 6 else 5)
+                )
         path = directory / content.BINDING_FILE
         flags = (
-            os.O_WRONLY
-            | os.O_NOFOLLOW
-            | (os.O_TRUNC if original["version"] == 5 else os.O_CREAT | os.O_EXCL)
+            os.O_WRONLY | os.O_NOFOLLOW | (os.O_TRUNC if history[:-1] else os.O_CREAT | os.O_EXCL)
         )
         with os.fdopen(os.open(path, flags, 0o600), "wb") as handle:
             handle.write(raw.encode())
@@ -597,9 +608,12 @@ def bind_restored(
             os.fsync(handle.fileno())
         with (directory / "content.sqlite3").open("rb") as handle:
             os.fsync(handle.fileno())
-        opened = content.inventory(
-            directory, component | {"storage_schema": content.LAYOUT5}, budget, live=True
+        restored_component = component | (
+            {"storage_schema": content.LAYOUT6, "restore_binding_digest": content._sha(raw)}
+            if original["version"] == 6
+            else {"storage_schema": content.LAYOUT5}
         )
+        opened = content.inventory(directory, restored_component, budget, live=True)
         if opened["history"] != history or opened["tables"] != original["tables"]:
             raise ValueError("restoration changed original Replica operational history")
         result.append(
@@ -618,7 +632,7 @@ def validate_restored(
     budget: OperationBudget,
 ) -> set[str]:
     """Compare original operational rows and exact current bindings on read-only retry."""
-    if manifest["profile"]["schema"] != content.PROFILE:
+    if manifest["profile"]["schema"] not in content.PROFILES:
         if receipts:
             raise ValueError("old restore receipt contains hidden Replica backing authority")
         return set()
@@ -637,11 +651,15 @@ def validate_restored(
     for component in roots:
         identifier = component["component_id"]
         source = content.inventory(bundle / "stores" / identifier, component, budget)
-        restored_component = component | {"storage_schema": content.LAYOUT5}
+        row = content._closed(by_id[identifier], {"component_id", "binding_digest", "binding"})
+        restored_component = component | (
+            {"storage_schema": content.LAYOUT6, "restore_binding_digest": row["binding_digest"]}
+            if source["version"] == 6
+            else {"storage_schema": content.LAYOUT5}
+        )
         restored = content.inventory(
             target / "stores" / identifier, restored_component, budget, live=True
         )
-        row = content._closed(by_id[identifier], {"component_id", "binding_digest", "binding"})
         raw = restored["history"][-1]
         binding = json.loads(raw)
         parent = components[sources[identifier]["parent_id"]]
@@ -667,6 +685,6 @@ def validate_restored(
                 "restored Replica original history/backing changed; retry is read-only"
             )
         adjusted.add("stores/" + identifier + "/content.sqlite3")
-        if component["storage_schema"] == content.LAYOUT5:
+        if source["history"]:
             adjusted.add("stores/" + identifier + "/" + content.BINDING_FILE)
     return adjusted

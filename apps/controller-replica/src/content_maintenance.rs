@@ -21,6 +21,13 @@ struct Member {
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
+    /// Explicitly drain and upgrade Root4/Root5 to durable Snapshot receive authority, preserving original history.
+    UpgradeSnapshotRoot {
+        /// Complete existing original member/root declaration.
+        member: Member,
+        /// Exact original restored backing digest; absent for original Root4.
+        restore_binding_digest: Option<String>,
+    },
     /// Explicitly upgrade the original drained reader root; parent authority is not upgraded here.
     UpgradeRoot {
         /// Original existing member-local storage declaration.
@@ -52,6 +59,21 @@ pub(crate) fn run(path: &Path) -> Result<serde_json::Value, String> {
     }
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     match request {
+        Request::UpgradeSnapshotRoot {
+            member,
+            restore_binding_digest,
+        } => {
+            let root = ReplicaContentStore::upgrade_snapshot_receives(
+                &member.content_root,
+                &member.profile_identity,
+                member.member,
+                restore_binding_digest.as_deref(),
+            )?;
+            Ok(
+                serde_json::json!({"root_identity":root.identity(),"snapshot_receive_layout":controller_replication::REPLICA_CONTENT_SNAPSHOT_LAYOUT_SCHEMA,
+                "historical_operations":"preserved; no clocks or permissions renewed"}),
+            )
+        }
         Request::UpgradeRoot { member } => {
             let root = ReplicaContentStore::upgrade_producer_journal(
                 &member.content_root,

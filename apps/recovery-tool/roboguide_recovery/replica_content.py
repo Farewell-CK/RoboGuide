@@ -15,8 +15,11 @@ from typing import Any
 from .snapshot_references import OperationBudget, canonical
 
 PROFILE = "roboguide.recovery-profile/v0.19"
+SNAPSHOT_PROFILE = "roboguide.recovery-profile/v0.20"
+PROFILES = frozenset({PROFILE, SNAPSHOT_PROFILE})
 LAYOUT4 = "roboguide.replica-content-layout/v0.4"
 LAYOUT5 = "roboguide.replica-content-layout/v0.5"
+LAYOUT6 = "roboguide.replica-content-layout/v0.6"
 BINDING_FILE = ".restore-binding.json"
 HEADS = {
     "reference_ids": ("content_references", "reference_id"),
@@ -62,7 +65,10 @@ def _sha(raw: str) -> str:
 def metadata_files(component: dict[str, Any]) -> list[str]:
     """Select original identity fences and the explicit current backing head."""
     result = [".content-creation.json", ".retention-owner.json", "blobs"]
-    if component["storage_schema"] == LAYOUT5:
+    if component["storage_schema"] == LAYOUT5 or (
+        component["storage_schema"] == LAYOUT6
+        and component.get("restore_binding_digest") is not None
+    ):
         result.append(BINDING_FILE)
     return result
 
@@ -205,6 +211,7 @@ def bindings(raw: str, identity: dict[str, Any]) -> list[str]:
     if not isinstance(history, list) or not 1 <= len(history) <= 64:
         raise ValueError("Replica content restore history is absent or unbounded")
     previous = None
+    snapshot_history = False
     for index, encoded in enumerate(history):
         if not isinstance(encoded, str) or len(encoded.encode()) > 16384:
             raise ValueError("Replica content original restore binding exceeds bound")
@@ -236,14 +243,17 @@ def bindings(raw: str, identity: dict[str, Any]) -> list[str]:
             },
         )
         if (
-            binding["schema"] != "roboguide.replica-content-restore-binding/v0.1"
+            (binding["schema"], binding["source_root_version"])
+            not in {
+                ("roboguide.replica-content-restore-binding/v0.1", 4 if index == 0 else 5),
+                ("roboguide.replica-content-restore-binding/v0.2", 6),
+            }
             or not isinstance(binding["command_id"], str)
             or not 0 < len(binding["command_id"]) <= 128
             or binding["original_identity"] != identity
             or type(binding["ordinal"]) is not int
             or binding["ordinal"] != index + 1
             or binding["previous_binding_digest"] != previous
-            or binding["source_root_version"] != (4 if index == 0 else 5)
             or any(
                 not isinstance(binding[key], str) or SHA.fullmatch(binding[key]) is None
                 for key in ("manifest_digest", "source_database_digest")
@@ -258,6 +268,9 @@ def bindings(raw: str, identity: dict[str, Any]) -> list[str]:
             or not 0 < binding["source_parent_inode"] < 2**64
         ):
             raise ValueError("Replica content original restore source/chain/backing differs")
+        if snapshot_history and binding["source_root_version"] != 6:
+            raise ValueError("Snapshot restore history regressed its backing generation")
+        snapshot_history |= binding["source_root_version"] == 6
         if index > 0:
             prior = json.loads(history[index - 1])["backing"]
             if (binding["source_parent_device"], binding["source_parent_inode"]) != (
@@ -305,11 +318,16 @@ def inventory(
     if path.stat().st_size > 128 * 1024 * 1024:
         raise ValueError("Replica content original SQL exceeds its fixed bound")
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)) as connection:
-        connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 8 * 1024 * 1024)
+        connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 32 * 1024 * 1024)
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if (version, component["storage_schema"]) not in {(4, LAYOUT4), (5, LAYOUT5)}:
+        if (version, component["storage_schema"]) not in {(4, LAYOUT4), (5, LAYOUT5), (6, LAYOUT6)}:
             raise ValueError("Replica content declared/actual original generation differs")
-        expected = set(table for table, _ in HEADS.values()) | {"metadata"}
+        heads = HEADS | (
+            {"snapshot_receive_ids": ("content_snapshot_receives", "operation_id")}
+            if version == 6
+            else {}
+        )
+        expected = set(table for table, _ in heads.values()) | {"metadata"}
         objects = dict(
             connection.execute("SELECT name,type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
         )
@@ -322,15 +340,22 @@ def inventory(
         ]
         if metadata_columns != [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)]:
             raise ValueError("Replica content original metadata columns/keys differ")
-        metadata = dict(connection.execute("SELECT key,value FROM metadata LIMIT 12"))
-        required = set(HEADS) | {"identity", "layout", "legacy_producer_ids"}
-        if version == 5:
+        metadata = dict(connection.execute("SELECT key,value FROM metadata LIMIT 14"))
+        required = set(heads) | {"identity", "layout", "legacy_producer_ids"}
+        restored = version == 5 or (version == 6 and metadata.get("backing_mode") == "restored")
+        if version == 6:
+            required.add("backing_mode")
+            if metadata.get("backing_mode") not in {"original", "restored"} or restored != (
+                component.get("restore_binding_digest") is not None
+            ):
+                raise ValueError("Snapshot Root6 declared/actual backing mode differs")
+        if restored:
             required.add("restore_bindings")
         if set(metadata) != required or metadata["layout"] != component["storage_schema"]:
             raise ValueError("Replica content mandatory inventory/layout is missing")
         if json.loads(metadata["identity"]) != identity:
             raise ValueError("Replica content SQL/header original identity differs")
-        for head, (table, column) in HEADS.items():
+        for head, (table, column) in heads.items():
             budget.check()
             columns = [
                 (row[1], row[2], row[3], row[5])
@@ -353,7 +378,11 @@ def inventory(
             for index, row in enumerate(connection.execute(f"SELECT * FROM {table} LIMIT 65537")):
                 budget.check()
                 if index >= 65536 or len(row[-1].encode()) > (
-                    8 * 1024 * 1024 if table in {"content_producers", "content_streams"} else 16384
+                    32 * 1024 * 1024
+                    if table == "content_snapshot_receives"
+                    else 8 * 1024 * 1024
+                    if table in {"content_producers", "content_streams"}
+                    else 16384
                 ):
                     raise ValueError("Replica content original record exceeds fixed bound")
                 value = json.loads(row[-1])
@@ -363,10 +392,12 @@ def inventory(
             if sorted(rows) != ids:
                 raise ValueError("Replica content original mandatory head lost journal rows")
             tables[table] = rows
-        history = bindings(metadata["restore_bindings"], identity) if version == 5 else []
-    if version == 5:
+        history = bindings(metadata["restore_bindings"], identity) if restored else []
+    if restored:
         if _raw(root / BINDING_FILE) != history[-1]:
             raise ValueError("Replica content current binding differs from original SQL head")
+        if version == 6 and component.get("restore_binding_digest") != _sha(history[-1]):
+            raise ValueError("Snapshot Root6 binding differs from its exact explicit declaration")
         if live and {
             key: json.loads(history[-1])["backing"][key] for key in _backing(root)
         } != _backing(root):
@@ -478,7 +509,12 @@ def validate_records(
         _content(reference["content"])
         if (
             reference["reference_id"] != key
-            or reference["kind"] not in {"receive", "stream", "reader", "log", "view", "snapshot"}
+            or reference["kind"]
+            not in {"receive", "stream", "reader", "log", "view", "snapshot", "snapshot-receive"}
+            or (
+                reference["kind"] == "snapshot-receive"
+                and "content_snapshot_receives" not in tables
+            )
             or reference["generation"] != 1
             or type(value["active"]) is not bool
             or not isinstance(reference["authority_digest"], str)
@@ -679,6 +715,9 @@ def validate_records(
                     )
                 ):
                     raise ValueError("Replica content original reader close differs")
+    from .snapshot_content_receives import validate as validate_snapshot_receives
+
+    owned.update(validate_snapshot_receives(identity, tables, budget))
     if owned != set(pins):
         raise ValueError("Replica content original retained pin lost its mandatory owner journal")
     for key, receipt in tables["content_objects"].items():

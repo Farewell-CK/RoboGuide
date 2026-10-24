@@ -159,6 +159,19 @@ fn operation(connection: &Connection, id: &str) -> Result<Option<CopyRecord>, St
     .transpose()
 }
 
+/// Checks retained original copy evidence even after current availability or unrelated pins have retired.
+pub(super) fn validate_original_receipt(
+    connection: &Connection,
+    receipt: &ReplicaContentReceipt,
+) -> Result<(), String> {
+    let original = operation(connection, &operation_key(&receipt.command_id)?)?
+        .ok_or("original byte receipt lost its copy operation")?;
+    if original.receipt.as_ref() != Some(receipt) {
+        return Err("original byte receipt changed its copy evidence".into());
+    }
+    Ok(())
+}
+
 /// Verifies every retained original operation/object against its exact immutable source and pin.
 pub(super) fn validate_records(
     connection: &Connection,
@@ -248,7 +261,7 @@ pub(super) fn validate_records(
             let version: i64 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .map_err(|error| error.to_string())?;
-            if !matches!(version, 4 | 5) {
+            if !matches!(version, 4..=6) {
                 return Err("legacy object profile contains a hidden stream receipt".into());
             }
             super::streams::validate_object_receipt(connection, &receipt)?;

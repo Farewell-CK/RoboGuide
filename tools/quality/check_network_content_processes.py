@@ -157,14 +157,17 @@ def run(
     members: list[int],
     owned_source: Path | None = None,
     historical_log_catchup: bool = False,
+    snapshot_catchup: bool = False,
 ) -> dict[str, Any]:
     """Check independent SQL, byte and TLS observations plus actual process waits."""
     if not 3 <= len(members) <= 9 or len(set(members)) != len(members) or min(members) <= 0:
         raise ValueError("declare three to nine distinct positive infrastructure members")
-    if historical_log_catchup and owned_source is not None:
+    if (historical_log_catchup or snapshot_catchup) and owned_source is not None:
         raise ValueError(
             "historical Log gate requires its actual complete frozen Controller source"
         )
+    if historical_log_catchup and snapshot_catchup:
+        raise ValueError("run retained Log and purged Snapshot gates independently")
     if owned_source is None:
         if source is None:
             raise ValueError("original capture gate requires explicit actual Controller evidence")
@@ -246,6 +249,8 @@ def run(
                     config["owned_child"] = True
                     config["child_socket"] = str(ipc / f"member-{member}.sock")
                     config["replica"]["application_policy_digest"] = digest(owned_source)
+                if snapshot_catchup:
+                    config["snapshot_receives"] = True
                 path = output / f"configuration-{member}.json"
                 save(path, config)
                 profile = json.loads(
@@ -264,6 +269,14 @@ def run(
                     "actual-original-root",
                 )["identity"]
                 owners[str(member)] = identity["store_owner"]
+                if snapshot_catchup:
+                    upgraded = json.loads(
+                        subprocess.check_output(
+                            [str(binary), "snapshot-upgrade", str(path)], timeout=10
+                        )
+                    )
+                    assert upgraded["identity"] == identity
+                    assert upgraded["layout"] == "roboguide.replica-content-layout/v0.6"
                 configs[member] = config
             assert len(profiles) == 1
 
@@ -294,7 +307,7 @@ def run(
                 start(member)
             current = leader()
             missed = None
-            if historical_log_catchup:
+            if historical_log_catchup or snapshot_catchup:
                 missed = next(member for member in members if member != current)
                 actors[missed].stop()
             if owned_source is not None:
@@ -324,6 +337,20 @@ def run(
                     sqlite3.connect((root / "content.sqlite3").as_uri() + "?mode=ro", uri=True)
                 ) as sql:
                     assert sql.execute("SELECT COUNT(*) FROM content_objects").fetchone()[0] == 0
+                compact = None
+                if snapshot_catchup:
+                    compact = actors[current].ask({"action": "compact-snapshot"})
+                    assert (
+                        compact["actual_snapshot"]
+                        == compact["original_applied"]
+                        == compact["actual_purged"]
+                    )
+                    with closing(
+                        sqlite3.connect(
+                            Path(configs[current]["parent_sql"]).as_uri() + "?mode=ro", uri=True
+                        )
+                    ) as sql:
+                        assert sql.execute("SELECT COUNT(*) FROM replica_v1_log").fetchone()[0] == 0
                 start(missed)
                 deadline = time.monotonic() + 60
                 while time.monotonic() < deadline:
@@ -335,7 +362,7 @@ def run(
                     time.sleep(0.05)
                 else:
                     raise ValueError(
-                        "actual retained Log did not supply missing bytes before apply"
+                        "actual original catch-up did not supply missing bytes before apply"
                     )
                 with closing(
                     sqlite3.connect((root / "content.sqlite3").as_uri() + "?mode=ro", uri=True)
@@ -347,7 +374,9 @@ def run(
                 original = [
                     row
                     for row in histories
-                    if row["intent"]["command_id"].startswith("historical-log:")
+                    if row["intent"]["command_id"].startswith(
+                        "snapshot-content:" if snapshot_catchup else "historical-log:"
+                    )
                 ]
                 assert original and all(row["receipt"] is not None for row in original)
                 actual_sources = {row["intent"]["origin"]["member"] for row in original}
@@ -357,13 +386,42 @@ def run(
                     == owners[str(row["intent"]["origin"]["member"])]
                     for row in original
                 )
-                result["actual_historical_log_catchup"] = {
+                evidence = {
                     "member": missed,
                     "original_source": current,
                     "actual_sources": sorted(actual_sources),
                     "streams": original,
                     "independent_actual_bytes": actual_bytes(root),
                 }
+                if snapshot_catchup:
+                    while time.monotonic() < deadline:
+                        with closing(
+                            sqlite3.connect(
+                                (root / "content.sqlite3").as_uri() + "?mode=ro", uri=True
+                            )
+                        ) as sql:
+                            receives = [
+                                json.loads(raw)
+                                for (raw,) in sql.execute(
+                                    "SELECT record FROM content_snapshot_receives"
+                                )
+                            ]
+                        if len(receives) == 1 and receives[0]["retirement"] is not None:
+                            break
+                        time.sleep(0.02)
+                    assert (
+                        len(receives) == 1
+                        and receives[0]["ready"] is not None
+                        and receives[0]["retirement"] is not None
+                    )
+                    assert receives[0]["intent"]["header"]["source_member"] in actual_sources
+                    assert len(receives[0]["ready"]["inputs"]) == len(actual_bytes(root))
+                    evidence.update(original_receives=receives, original_source_compaction=compact)
+                result[
+                    "actual_snapshot_catchup"
+                    if snapshot_catchup
+                    else "actual_historical_log_catchup"
+                ] = evidence
                 current = leader()
             first = actors[current].ask({"action": "quorum"})
             assert set(first["complete_members"]) == set(members)
@@ -383,54 +441,56 @@ def run(
                     == owners[str(member)]
                 )
                 actual_bytes(Path(configs[member]["content_root"]))
-            route_source = next(member for member in members if member != current)
-            source_key = actual_bytes(Path(configs[route_source]["content_root"]))[0]
-            current_root = Path(configs[current]["content_root"])
-            routed_path = (
-                current_root
-                / "content-v1"
-                / source_key["source_owner"][15:]
-                / source_key["content_digest"][7:]
-            )
-            withheld = routed_path.with_suffix(".actual-route-original")
-            routed_path.rename(withheld)
-            route_request = {
-                "action": "route-committed",
-                "target": first["target"],
-                "content": source_key,
-                "receiver": current,
-                "command_id": "actual-committed-follower-to-leader",
-            }
-            routed = actors[route_source].ask(route_request)["original"]
-            assert routed["receipt"]["content"] == source_key
-            assert routed["original"]["intent"]["origin"]["member"] == route_source
-            assert (
-                routed["original"]["intent"]["origin"]["store_owner"] == owners[str(route_source)]
-            )
-            assert routed_path.read_bytes() == withheld.read_bytes()
-            source_path = (
-                Path(configs[route_source]["content_root"])
-                / "content-v1"
-                / source_key["source_owner"][15:]
-                / source_key["content_digest"][7:]
-            )
-            source_hidden = source_path.with_suffix(".actual-route-replay-source")
-            source_path.rename(source_hidden)
-            assert actors[route_source].ask(route_request)["original"] == routed
-            source_hidden.rename(source_path)
-            routed_path.unlink()
-            withheld.rename(routed_path)
-            changed_route = json.loads(json.dumps(route_request))
-            changed_route["command_id"] = "actual-uncommitted-route-refused"
-            changed_route["target"]["revision"] += 1
-            assert "error" in actors[route_source].ask(changed_route, required=False)
-            result["actual_committed_member_route"] = {
-                "source_member": route_source,
-                "receiver": current,
-                "original": routed,
-                "exact_replay_with_source_hidden": True,
-                "uncommitted_target_refused": True,
-            }
+            if not snapshot_catchup:
+                route_source = next(member for member in members if member != current)
+                source_key = actual_bytes(Path(configs[route_source]["content_root"]))[0]
+                current_root = Path(configs[current]["content_root"])
+                routed_path = (
+                    current_root
+                    / "content-v1"
+                    / source_key["source_owner"][15:]
+                    / source_key["content_digest"][7:]
+                )
+                withheld = routed_path.with_suffix(".actual-route-original")
+                routed_path.rename(withheld)
+                route_request = {
+                    "action": "route-committed",
+                    "target": first["target"],
+                    "content": source_key,
+                    "receiver": current,
+                    "command_id": "actual-committed-follower-to-leader",
+                }
+                routed = actors[route_source].ask(route_request)["original"]
+                assert routed["receipt"]["content"] == source_key
+                assert routed["original"]["intent"]["origin"]["member"] == route_source
+                assert (
+                    routed["original"]["intent"]["origin"]["store_owner"]
+                    == owners[str(route_source)]
+                )
+                assert routed_path.read_bytes() == withheld.read_bytes()
+                source_path = (
+                    Path(configs[route_source]["content_root"])
+                    / "content-v1"
+                    / source_key["source_owner"][15:]
+                    / source_key["content_digest"][7:]
+                )
+                source_hidden = source_path.with_suffix(".actual-route-replay-source")
+                source_path.rename(source_hidden)
+                assert actors[route_source].ask(route_request)["original"] == routed
+                source_hidden.rename(source_path)
+                routed_path.unlink()
+                withheld.rename(routed_path)
+                changed_route = json.loads(json.dumps(route_request))
+                changed_route["command_id"] = "actual-uncommitted-route-refused"
+                changed_route["target"]["revision"] += 1
+                assert "error" in actors[route_source].ask(changed_route, required=False)
+                result["actual_committed_member_route"] = {
+                    "source_member": route_source,
+                    "receiver": current,
+                    "original": routed,
+                    "exact_replay_with_source_hidden": True,
+                    "uncommitted_target_refused": True,
+                }
             hidden_inputs = []
             for member in [item for item in members if item != current]:
                 root = Path(configs[member]["content_root"])
@@ -441,12 +501,12 @@ def run(
                 hidden_inputs.append((path, hidden))
                 observed = actors[current].ask({"action": "quorum"}, required=False)
                 available = len(members) - len(hidden_inputs)
-                if available > len(members) // 2:
-                    assert len(observed["complete_members"]) == available
-                else:
+                if "complete_members" not in observed:
                     assert "error" in observed, (
                         "metadata-only majority falsely granted full content ACK"
                     )
+                elif available > len(members) // 2:
+                    assert len(observed["complete_members"]) == available
             for path, hidden in hidden_inputs:
                 hidden.rename(path)
             assert set(actors[current].ask({"action": "quorum"})["complete_members"]) == set(
@@ -463,7 +523,19 @@ def run(
             assert failover["target"]["batch_digest"] == first["target"]["batch_digest"]
             start(current)
             successor = leader()
-            restored = actors[successor].ask({"action": "quorum"})
+            restored = None
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                candidate = actors[successor].ask({"action": "quorum"}, required=False)
+                if "complete_members" in candidate and set(candidate["complete_members"]) == set(
+                    members
+                ):
+                    restored = candidate
+                    break
+                successor = leader()
+                time.sleep(0.05)
+            if restored is None:
+                raise ValueError("actual reopened leader did not expose complete content quorum")
             assert set(restored["complete_members"]) == set(members)
             for member in members:
                 assert Path(configs[member]["parent_sql"]).stat().st_ino == inodes[member]
@@ -514,6 +586,7 @@ def main() -> None:
     parser.add_argument("--owned-source-probe", type=Path)
     parser.add_argument("--members", required=True)
     parser.add_argument("--historical-log-catchup", action="store_true")
+    parser.add_argument("--snapshot-catchup", action="store_true")
     args = parser.parse_args()
     result = run(
         args.output,
@@ -523,6 +596,7 @@ def main() -> None:
         [int(member) for member in args.members.split(",")],
         None if args.owned_source_probe is None else args.owned_source_probe.resolve(strict=True),
         args.historical_log_catchup,
+        args.snapshot_catchup,
     )
     print(json.dumps({"passed": result["passed"], "result": str(args.output / "result.json")}))
 

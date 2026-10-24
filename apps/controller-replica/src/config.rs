@@ -213,9 +213,17 @@ impl ProcessConfig {
                             "restored Root5 requires its exact explicit binding digest".into()
                         );
                     }
-                    "roboguide.controller-replica-process/v0.3"
+                    if self.schema == "roboguide.controller-replica-process/v0.4" {
+                        "roboguide.controller-replica-process/v0.4"
+                    } else {
+                        "roboguide.controller-replica-process/v0.3"
+                    }
                 } else {
-                    "roboguide.controller-replica-process/v0.2"
+                    if self.schema == "roboguide.controller-replica-process/v0.4" {
+                        "roboguide.controller-replica-process/v0.4"
+                    } else {
+                        "roboguide.controller-replica-process/v0.2"
+                    }
                 }
             }
         };

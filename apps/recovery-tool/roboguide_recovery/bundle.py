@@ -490,7 +490,8 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
         validate_replica_sets(profile, components)
         replica_sources = (
             replica_content_bundle.capture_sources(components, budget)
-            if profile["schema"] == "roboguide.recovery-profile/v0.19"
+            if profile["schema"]
+            in {"roboguide.recovery-profile/v0.19", "roboguide.recovery-profile/v0.20"}
             else None
         )
         snapshot_operations = (
@@ -678,7 +679,8 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
             }
             | (
                 {"replica_content_sources"}
-                if manifest.get("profile", {}).get("schema") == "roboguide.recovery-profile/v0.19"
+                if manifest.get("profile", {}).get("schema")
+                in {"roboguide.recovery-profile/v0.19", "roboguide.recovery-profile/v0.20"}
                 else set()
             )
             | (
@@ -867,6 +869,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.17",
                 "roboguide.recovery-profile/v0.18",
                 "roboguide.recovery-profile/v0.19",
+                "roboguide.recovery-profile/v0.20",
             }
             else databases
         )
@@ -982,8 +985,11 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.19"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.19"
+        "roboguide.restore-receipt/v0.20"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.20"
+        else "roboguide.restore-receipt/v0.19"
+        if manifest["profile"]["schema"]
+        in {"roboguide.recovery-profile/v0.19", "roboguide.recovery-profile/v0.20"}
         else "roboguide.restore-receipt/v0.18"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.18"
         else "roboguide.restore-receipt/v0.17"
@@ -1102,6 +1108,7 @@ def restore(
             "roboguide.recovery-profile/v0.17",
             "roboguide.recovery-profile/v0.18",
             "roboguide.recovery-profile/v0.19",
+            "roboguide.recovery-profile/v0.20",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:
@@ -1137,7 +1144,10 @@ def restore(
     }
     if "artifact_replica_sets" in manifest["profile"]:
         receipt["artifact_replica_placements"] = replica_placements
-    if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.19":
+    if manifest["profile"]["schema"] in {
+        "roboguide.recovery-profile/v0.19",
+        "roboguide.recovery-profile/v0.20",
+    }:
         receipt["original_authority_bytes_preserved"] = False
         receipt["original_operational_rows_preserved"] = True
         receipt["replica_content_bindings"] = replica_bindings

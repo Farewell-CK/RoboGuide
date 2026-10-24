@@ -19,6 +19,9 @@ pub use producers::{
 };
 pub use reader::{ReplicaContentReader, ReplicaContentReaderReceipt, ReplicaContentReaderStatus};
 pub use streams::ReplicaContentStreamStatus;
+mod snapshot_receive;
+pub(crate) use snapshot_receive::operation as snapshot_receive_operation;
+pub use snapshot_receive::{SnapshotContentHeader, SnapshotContentReady, SnapshotContentStatus};
 pub(crate) use streams::{
     CHUNK_BYTES as STREAM_CHUNK_BYTES, StreamAdmission, StreamOrigin, StreamPermission,
     verify_original_stream_observation, verify_stream_observation,
@@ -45,6 +48,8 @@ pub const REPLICA_CONTENT_PRODUCER_LAYOUT_SCHEMA: &str = "roboguide.replica-cont
 pub const REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.4";
 /// Explicit relocated backing; original logical identities and all operational rows stay unchanged.
 pub const REPLICA_CONTENT_RESTORE_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.5";
+/// Explicit durable network Snapshot receiving authority and independent pins.
+pub const REPLICA_CONTENT_SNAPSHOT_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.6";
 
 /// Explicit storage interpretation; old maintenance entry points never acquire new producer authority.
 pub(super) enum ContentOpenMode {
@@ -60,6 +65,10 @@ pub(super) enum ContentOpenMode {
     Streams,
     /// Explicit fully drained producer v3 to stream v4 transition.
     StreamUpgrade,
+    /// Already accepted complete original Snapshot receive journal.
+    Snapshots,
+    /// Explicit drained Root4/Root5 to Snapshot Root6 transition.
+    SnapshotUpgrade,
 }
 
 /// Fresh root interpretation; old create entry points never gain a stream journal implicitly.
@@ -70,6 +79,8 @@ pub(super) enum ContentCreateMode {
     Producers,
     /// Explicit local producer plus original stream journal.
     Streams,
+    /// Explicit local streams plus durable Snapshot receiving prerequisites.
+    Snapshots,
 }
 /// Bound on retained reference IDs; exhaustion never discards original ownership.
 const MAX_REFERENCES: usize = 65_536;
@@ -108,6 +119,8 @@ pub enum ReplicaContentReferenceKind {
     Log,
     /// Exact published/current Raft Snapshot retains its complete original inputs.
     Snapshot,
+    /// Independent original network Snapshot receive, before parent installation/publication.
+    SnapshotReceive,
     /// Original actual read/stream lifetime remains independent of Snapshot replacement.
     Reader,
     /// Current accepted complete view keeps its independently needed content.
@@ -162,6 +175,8 @@ struct ContentInner {
     producers: bool,
     /// Exact stream generation admitted by this actual original connection.
     streams: bool,
+    /// Explicit complete Snapshot receiving generation admitted by this connection.
+    snapshot_receives: bool,
     /// Exact explicitly configured current restoration binding; absent on original physical roots.
     restore_binding: Option<String>,
     /// Bounds actual running/queued stream workers; each unique worker retains its own permit.
@@ -239,6 +254,41 @@ impl ReplicaContentStore {
     /// Initializes only a genuinely empty declared root; interrupted/existing authority is not replaced.
     pub fn create(root: &Path, profile_identity: &str, member: u64) -> Result<Self, String> {
         layout::create(root, profile_identity, member, ContentCreateMode::Reader)
+    }
+
+    /// Creates only an explicitly selected fresh Root6, never inferring missing original journals.
+    pub fn create_with_snapshot_receives(
+        root: &Path,
+        profile: &str,
+        member: u64,
+    ) -> Result<Self, String> {
+        layout::create(root, profile, member, ContentCreateMode::Snapshots)
+    }
+
+    /// Requires the complete accepted Root6 and its explicitly configured restored binding, if any.
+    pub fn open_with_snapshot_receives(
+        root: &Path,
+        profile: &str,
+        member: u64,
+        binding: Option<&str>,
+    ) -> Result<Self, String> {
+        layout::open_bound(root, profile, member, ContentOpenMode::Snapshots, binding)
+    }
+
+    /// Upgrades only drained original Root4/Root5 while retaining identities, operations and old clocks.
+    pub fn upgrade_snapshot_receives(
+        root: &Path,
+        profile: &str,
+        member: u64,
+        binding: Option<&str>,
+    ) -> Result<Self, String> {
+        layout::open_bound(
+            root,
+            profile,
+            member,
+            ContentOpenMode::SnapshotUpgrade,
+            binding,
+        )
     }
 
     /// Requires the complete original root, database and mandatory heads before any observation.
@@ -376,6 +426,7 @@ impl ReplicaContentStore {
             ReplicaContentReferenceKind::Receive
                 | ReplicaContentReferenceKind::Reader
                 | ReplicaContentReferenceKind::Stream
+                | ReplicaContentReferenceKind::SnapshotReceive
         ) {
             return Err(
                 "receive/reader pins require the actual original operation transaction".into(),
@@ -435,7 +486,10 @@ impl ReplicaContentStore {
         release_digest: &str,
     ) -> Result<(), String> {
         validate_reference(reference)?;
-        if reference.kind == ReplicaContentReferenceKind::Stream {
+        if matches!(
+            reference.kind,
+            ReplicaContentReferenceKind::Stream | ReplicaContentReferenceKind::SnapshotReceive
+        ) {
             return Err("stream release requires its exact original receiver journal".into());
         }
         if self.inner.producers

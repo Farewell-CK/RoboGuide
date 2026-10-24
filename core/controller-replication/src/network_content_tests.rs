@@ -40,6 +40,16 @@ struct Cluster {
 
 /// Starts actual mTLS members from explicit software configuration and real held root identities.
 async fn cluster() -> Cluster {
+    cluster_with_snapshots(false).await
+}
+
+/// Selects the explicit new receiving generation without changing existing Root4 adapter acceptance.
+async fn cluster_with_snapshots(snapshots: bool) -> Cluster {
+    cluster_with_snapshot_membership(snapshots, false).await
+}
+
+/// Declares one real pre-enrolled non-voter when exercising Snapshot initialization of a learner.
+async fn cluster_with_snapshot_membership(snapshots: bool, learner: bool) -> Cluster {
     let endpoint_scope = CLUSTER_ENDPOINTS.lock().await;
     let directory = tempfile::tempdir().unwrap();
     let pki = testkit::TestPki::new(&directory.path().join("tls"), &["53", "71", "89"]).unwrap();
@@ -81,7 +91,17 @@ async fn cluster() -> Cluster {
             ),
             replica_id: *member,
             members: members.clone(),
-            initial_voters: Some(members.keys().copied().collect()),
+            initial_voters: Some(
+                members
+                    .keys()
+                    .copied()
+                    .take(if learner {
+                        members.len() - 1
+                    } else {
+                        members.len()
+                    })
+                    .collect(),
+            ),
             application_schema: state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA.into(),
             application_policy_digest: "explicit-offline-infrastructure-contract".into(),
             shared_secret: None,
@@ -94,7 +114,11 @@ async fn cluster() -> Cluster {
             }),
         };
         roots.push(
-            ReplicaContentStore::create_with_streams(
+            (if snapshots {
+                ReplicaContentStore::create_with_snapshot_receives
+            } else {
+                ReplicaContentStore::create_with_streams
+            })(
                 &directory.path().join(format!("root-{member}")),
                 &config.profile_identity(),
                 *member,
@@ -131,6 +155,218 @@ async fn cluster() -> Cluster {
         servers,
         roots,
         _endpoint_scope: endpoint_scope,
+    }
+}
+
+/// A real initially empty learner receives complete Snapshot bytes after source Logs have been purged.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn actual_mtls_empty_learner_receives_snapshot_prerequisites_before_membership() {
+    let cluster = cluster_with_snapshot_membership(true, true).await;
+    let index = leader(&cluster).await;
+    let source = &cluster.nodes[index];
+    let receiver = cluster.nodes.last().unwrap();
+    let root = cluster.roots.last().unwrap();
+    assert_eq!(receiver.store.network_view().await.unwrap().revision, 0);
+    let (_sql, cas, key) = crate::content_application_tests::original_payload(
+        cluster.directory.path(),
+        b"actual initially empty learner Snapshot bytes",
+    );
+    let mut candidate = crate::content_application_tests::candidate(
+        &cluster.directory.path().join("source.sqlite3"),
+        &cas,
+        &ReplicaView::default(),
+        &source.profile_identity(),
+    );
+    candidate.epoch = source.current_epoch().unwrap();
+    source
+        .stage_content_from_source(&candidate, &cas, "actual-learner-original-stage", 30000)
+        .await
+        .unwrap();
+    assert!(source.commit_content(candidate).await.unwrap().accepted);
+    let applied = source.raft.metrics().borrow().last_applied.unwrap();
+    source.raft.trigger().snapshot().await.unwrap();
+    source
+        .raft
+        .wait(Some(Duration::from_secs(10)))
+        .snapshot(applied, "actual pre-learner Snapshot")
+        .await
+        .unwrap();
+    source
+        .raft
+        .trigger()
+        .purge_log(applied.index)
+        .await
+        .unwrap();
+    source
+        .raft
+        .wait(Some(Duration::from_secs(10)))
+        .purged(Some(applied), "actual pre-learner purge")
+        .await
+        .unwrap();
+    source
+        .add_learner(receiver.config.replica_id)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if receiver.store.network_view().await.unwrap().revision == 1 {
+                break;
+            }
+            let metrics = receiver.raft.metrics().borrow().clone();
+            assert!(
+                metrics.running_state.is_ok(),
+                "actual learner failed: {:?}",
+                metrics.running_state
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("actual learner never applied original Snapshot");
+    assert_eq!(receiver.store.network_view().await.unwrap().revision, 1);
+    root.verify_content(&key).unwrap();
+    let sql = rusqlite::Connection::open(root.root().join("content.sqlite3")).unwrap();
+    let raw: String = sql
+        .query_row("SELECT record FROM content_snapshot_receives", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let original: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert!(original["ready"].is_object());
+    assert!(original["retirement"].is_string());
+    assert!(
+        !original["intent"]["header"]["meta"]["last_membership"]["membership"]["nodes"]
+            .as_object()
+            .unwrap()
+            .contains_key(&receiver.config.replica_id.to_string())
+    );
+    assert!(
+        source
+            .raft
+            .metrics()
+            .borrow()
+            .membership_config
+            .nodes()
+            .any(|(member, _)| *member == receiver.config.replica_id)
+    );
+    assert!(
+        !source
+            .raft
+            .metrics()
+            .borrow()
+            .membership_config
+            .voter_ids()
+            .any(|member| member == receiver.config.replica_id)
+    );
+    for node in &cluster.nodes {
+        node.shutdown().await.unwrap();
+    }
+}
+
+/// Actual upstream Snapshot catches up an offline member after the original source Log is purged.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn actual_mtls_snapshot_content_precedes_metadata_after_log_purge() {
+    use std::sync::atomic::Ordering;
+    let cluster = cluster_with_snapshots(true).await;
+    let index = leader(&cluster).await;
+    let missed = (index + 1) % cluster.nodes.len();
+    let source = &cluster.nodes[index];
+    let receiver = &cluster.nodes[missed];
+    receiver.network_online.store(false, Ordering::SeqCst);
+    let (_sql, cas, key) = crate::content_application_tests::original_payload(
+        cluster.directory.path(),
+        b"actual original Snapshot prerequisite bytes",
+    );
+    let mut candidate = crate::content_application_tests::candidate(
+        &cluster.directory.path().join("source.sqlite3"),
+        &cas,
+        &ReplicaView::default(),
+        &source.profile_identity(),
+    );
+    candidate.epoch = source.current_epoch().unwrap();
+    source
+        .stage_content_from_source(&candidate, &cas, "actual-snapshot-original-stage", 30000)
+        .await
+        .unwrap();
+    assert!(source.commit_content(candidate).await.unwrap().accepted);
+    assert!(cluster.roots[missed].verify_content(&key).is_err());
+    let applied = source.raft.metrics().borrow().last_applied.unwrap();
+    source.raft.trigger().snapshot().await.unwrap();
+    source
+        .raft
+        .wait(Some(Duration::from_secs(10)))
+        .snapshot(applied, "actual source Snapshot")
+        .await
+        .unwrap();
+    source
+        .raft
+        .trigger()
+        .purge_log(applied.index)
+        .await
+        .unwrap();
+    source
+        .raft
+        .wait(Some(Duration::from_secs(10)))
+        .purged(Some(applied), "actual source purge")
+        .await
+        .unwrap();
+    receiver.network_online.store(true, Ordering::SeqCst);
+    let result = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if receiver.store.network_view().await.unwrap().revision == 1
+                && cluster.roots[missed].verify_content(&key).is_ok()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    if result.is_err() {
+        panic!(
+            "actual Snapshot catch-up failed: source={:?},receiver={:?}, receives={:?}",
+            source.raft.metrics().borrow().clone(),
+            receiver.raft.metrics().borrow().clone(),
+            rusqlite::Connection::open(cluster.roots[missed].root().join("content.sqlite3"))
+                .unwrap()
+                .prepare("SELECT record FROM content_snapshot_receives")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        );
+    }
+    let connection =
+        rusqlite::Connection::open(cluster.roots[missed].root().join("content.sqlite3")).unwrap();
+    let rows = connection
+        .prepare("SELECT record FROM content_snapshot_receives")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    let original: serde_json::Value = serde_json::from_str(&rows[0]).unwrap();
+    assert!(original["ready"].is_object());
+    assert!(original["retirement"].is_string());
+    assert_eq!(
+        original["intent"]["header"]["source_member"],
+        source.config.replica_id
+    );
+    assert!(
+        cluster.roots[missed]
+            .active_references(&key)
+            .unwrap()
+            .iter()
+            .all(|pin| pin.kind != ReplicaContentReferenceKind::SnapshotReceive)
+    );
+    assert_eq!(
+        receiver.store.network_view().await.unwrap().checkpoint,
+        source.store.network_view().await.unwrap().checkpoint
+    );
+    for node in &cluster.nodes {
+        node.shutdown().await.unwrap();
     }
 }
 

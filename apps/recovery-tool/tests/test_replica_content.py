@@ -217,15 +217,19 @@ def test_active_bytes_require_same_root_exact_qualified_owner(tmp_path: Path) ->
             _require_bytes("root", required, {changed: files[expected]}, objects)
 
 
+@pytest.mark.parametrize("snapshots", [False, True])
 def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
     tmp_path: Path,
+    snapshots: bool,
 ) -> None:
     """Repeated relocation appends backing provenance and keeps original operations."""
     source = tmp_path / "source"
     source.mkdir()
     stores = source / "stores"
     stores.mkdir()
-    component = fixture(stores / "root")
+    component = (
+        snapshot_fixture(stores / "root", ready=True) if snapshots else fixture(stores / "root")
+    )
     parent = stores / "parent"
     parent.mkdir()
     (parent / "replica.sqlite3").write_bytes(b"explicit storage binding contract fixture")
@@ -240,7 +244,10 @@ def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
         shutil.copytree(source, target)
         parent_info = (source / "stores/parent/replica.sqlite3").stat()
         manifest = {
-            "profile": {"schema": content.PROFILE, "components": components},
+            "profile": {
+                "schema": content.SNAPSHOT_PROFILE if snapshots else content.PROFILE,
+                "components": components,
+            },
             "replica_content_sources": [
                 {
                     "component_id": "root",
@@ -263,9 +270,17 @@ def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
             target, manifest, "sha256:" + "a" * 64, f"restore-{iteration}", budget()
         )
         assert len(receipts) == 1
+        restored_component = component | (
+            {
+                "storage_schema": content.LAYOUT6,
+                "restore_binding_digest": receipts[0]["binding_digest"],
+            }
+            if snapshots
+            else {"storage_schema": content.LAYOUT5}
+        )
         current = content.inventory(
             target / "stores/root",
-            component | {"storage_schema": content.LAYOUT5},
+            restored_component,
             budget(),
             live=True,
         )
@@ -275,5 +290,163 @@ def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
         assert current["history"][:-1] == prior
         prior = list(current["history"])
         source = target
-        component = copy.deepcopy(component) | {"storage_schema": content.LAYOUT5}
+        component = copy.deepcopy(restored_component)
         components[0] = component
+
+
+def snapshot_fixture(root: Path, *, ready: bool) -> dict[str, Any]:
+    """Extend actual local SQL with explicitly synthetic Root6 source/receive evidence."""
+    component = fixture(root)
+    original = content.inventory(root, component, budget(), live=True)
+    identity = original["identity"]
+    receipt = next(iter(original["tables"]["content_objects"].values()))
+    key = (
+        receipt["content"]
+        if ready
+        else {
+            "source_owner": receipt["content"]["source_owner"],
+            "content_digest": "sha256:" + "f" * 64,
+            "byte_size": 1,
+        }
+    )
+    membership = {
+        "log_id": {"leader_id": {"term": 3, "node_id": 2}, "index": 8},
+        "membership": {
+            "configs": [[2]],
+            "nodes": {
+                "1": {"addr": "127.0.0.1:1", "content_store_owner": identity["store_owner"]},
+                "2": {"addr": "127.0.0.1:2", "content_store_owner": "replica-content:" + "b" * 64},
+            },
+        },
+    }
+    header: dict[str, Any] = {
+        "schema": "roboguide.snapshot-content-header/v0.1",
+        "source_member": 2,
+        "source_store_owner": "replica-content:" + "b" * 64,
+        "source_leaf": "sha256:" + "d" * 64,
+        "meta": {
+            "last_log_id": {"leader_id": {"term": 3, "node_id": 2}, "index": 8},
+            "last_membership": membership,
+            "snapshot_id": "8-1-" + "f" * 64,
+        },
+        "payload_digest": "f" * 64,
+        "target": {
+            "profile_identity": identity["profile_identity"],
+            "epoch": {"term": 3, "replica_id": 2},
+            "revision": 1,
+            "checkpoint_digest": "e" * 64,
+            "batch_digest": "f" * 64,
+            "membership": membership,
+            "member_stores": {"2": "replica-content:" + "b" * 64},
+            "inputs": [key],
+        },
+    }
+    command = "snapshot-receive:" + content._digest(
+        [identity["profile_identity"], 2, 1, header["meta"]["snapshot_id"], "f" * 64]
+    )
+    intent = {
+        "command_id": command,
+        "receiver": identity,
+        "header": header,
+        "budget": next(iter(original["tables"]["content_operations"].values()))["intent"]["budget"],
+    }
+    identifier = content._digest(command)
+    row = {
+        "intent": intent,
+        "ready": {
+            "intent_digest": content._digest(intent),
+            "inputs": [receipt],
+            "verified_files": [[receipt["file_device"], receipt["file_inode"]]],
+            "completed_ms": 250,
+        }
+        if ready
+        else None,
+        "retirement": None,
+    }
+    pin = "snapshot-receive:" + identifier + ":" + content._digest(key)
+    reference = {
+        "reference": {
+            "reference_id": pin,
+            "kind": "snapshot-receive",
+            "content": key,
+            "authority_digest": content._digest(intent),
+            "generation": 1,
+        },
+        "active": True,
+        "release_digest": None,
+    }
+    with closing(sqlite3.connect(root / "content.sqlite3")) as sql:
+        with sql:
+            sql.execute(
+                "CREATE TABLE content_snapshot_receives("
+                "operation_id TEXT PRIMARY KEY,record TEXT NOT NULL)"
+            )
+            sql.execute(
+                "INSERT INTO content_snapshot_receives VALUES (?,?)", (identifier, json.dumps(row))
+            )
+            sql.execute("INSERT INTO content_references VALUES (?,?)", (pin, json.dumps(reference)))
+            heads = json.loads(
+                sql.execute("SELECT value FROM metadata WHERE key='reference_ids'").fetchone()[0]
+            )
+            sql.execute(
+                "UPDATE metadata SET value=? WHERE key='reference_ids'",
+                (json.dumps(sorted([*heads, pin])),),
+            )
+            sql.execute(
+                "INSERT INTO metadata VALUES ('snapshot_receive_ids',?)",
+                (json.dumps([identifier]),),
+            )
+            sql.execute("INSERT INTO metadata VALUES ('backing_mode','original')")
+            sql.execute("UPDATE metadata SET value=? WHERE key='layout'", (content.LAYOUT6,))
+            sql.execute("PRAGMA user_version=6")
+    return component | {"storage_schema": content.LAYOUT6, "restore_binding_digest": None}
+
+
+@pytest.mark.parametrize("ready", [False, True])
+def test_snapshot_receive_required_bytes_follow_original_readiness(
+    tmp_path: Path, ready: bool
+) -> None:
+    """Incomplete Snapshot pins retain Unknown; completed prerequisites require same-Root bytes."""
+    root = tmp_path / "root"
+    component = snapshot_fixture(root, ready=ready)
+    original = content.inventory(root, component, budget(), live=True)
+    row = next(iter(original["tables"]["content_snapshot_receives"].values()))
+    key = content._content(row["intent"]["header"]["target"]["inputs"][0])
+    assert (key in _required(original)) is ready
+    if ready:
+        with pytest.raises(ValueError, match="same-Root"):
+            _require_bytes("root", _required(original), {}, original["tables"]["content_objects"])
+
+
+@pytest.mark.parametrize("corrupt", ["head", "pin", "source", "clock", "receipt", "mode"])
+def test_snapshot_receive_original_corruption_refuses(tmp_path: Path, corrupt: str) -> None:
+    """Independent receive provenance and mandatory heads cannot disappear through recovery."""
+    root = tmp_path / "root"
+    component = snapshot_fixture(root, ready=True)
+    with closing(sqlite3.connect(root / "content.sqlite3")) as sql:
+        with sql:
+            if corrupt == "head":
+                sql.execute("DELETE FROM metadata WHERE key='snapshot_receive_ids'")
+            elif corrupt == "mode":
+                sql.execute("DELETE FROM metadata WHERE key='backing_mode'")
+            elif corrupt == "pin":
+                sql.execute(
+                    "DELETE FROM content_references WHERE reference_id LIKE 'snapshot-receive:%'"
+                )
+            else:
+                identifier, raw = sql.execute(
+                    "SELECT operation_id,record FROM content_snapshot_receives"
+                ).fetchone()
+                row = json.loads(raw)
+                if corrupt == "source":
+                    row["intent"]["header"]["source_member"] = 1
+                elif corrupt == "clock":
+                    row["intent"]["budget"]["duration_ms"] = 0
+                else:
+                    row["ready"]["inputs"][0]["file_inode"] += 1
+                sql.execute(
+                    "UPDATE content_snapshot_receives SET record=? WHERE operation_id=?",
+                    (json.dumps(row), identifier),
+                )
+    with pytest.raises(ValueError):
+        content.inventory(root, component, budget(), live=True)

@@ -19,6 +19,8 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 mod content_streams;
 #[path = "log_content_transport.rs"]
 mod log_content;
+#[path = "snapshot_content_transport.rs"]
+mod snapshot_content;
 pub(crate) use content_streams::{
     StreamNotice, StreamReceive, StreamRoute, receive_owned_stream, send_committed_content_stream,
     send_content_stream, send_content_stream_checked, send_historical_log_stream,
@@ -48,6 +50,31 @@ struct Request {
 /// Private consensus and durability operations never carry an embodied Node selector.
 #[derive(Serialize, Deserialize)]
 enum Command {
+    /// Readonly contract negotiation; a supported Root generation is not byte or application readiness.
+    SnapshotContentContractV1,
+    /// Original durable prerequisite issue before any new content source payload read.
+    PrepareSnapshotContentV1 {
+        /// Complete original authenticated source and exact Snapshot/input identity.
+        header: Box<SnapshotContentHeader>,
+        /// Original receive-relative budget sampled before queue admission.
+        budget_ms: u64,
+    },
+    /// Independent actual complete file verification under the first original receiving budget.
+    CompleteSnapshotContentV1 {
+        /// Complete original immutable receive scope, never a replacement target.
+        header: Box<SnapshotContentHeader>,
+    },
+    /// Explicit byte route scoped by an already durable original Snapshot receive.
+    PushSnapshotContentV1 {
+        /// Complete original immutable receive scope.
+        header: Box<SnapshotContentHeader>,
+        /// Exact qualified original input.
+        content: ArtifactContentKey,
+        /// Deterministic first original stream operation, independent of retry.
+        command_id: String,
+        /// Original receive-relative stream bound, additionally fenced by the Snapshot issue.
+        budget_ms: u64,
+    },
     /// Describes an actual source-committed historical Log without payload reads or effects.
     HistoricalLogTargetV1 {
         /// Exact original retained position, independently checked by both members.
@@ -141,6 +168,13 @@ enum Command {
     Vote(VoteRequest<u64>),
     /// Upstream bounded snapshot chunk.
     Snapshot(InstallSnapshotRequest<ControllerRaftConfig>),
+    /// Explicit content-ready original Snapshot metadata, separate from the old metadata-only envelope.
+    SnapshotPreparedV1 {
+        /// Complete first issue, rechecked against actual TLS on every metadata chunk.
+        header: Box<SnapshotContentHeader>,
+        /// Original upstream metadata chunk, still interpreted only by OpenRaft.
+        rpc: InstallSnapshotRequest<ControllerRaftConfig>,
+    },
     /// Original child epoch requests current quorum confirmation.
     Fence(ControllerEpoch),
     /// Exact private application transaction requests quorum durability.
@@ -216,6 +250,9 @@ impl Command {
                 | Self::PushContent { .. }
                 | Self::PushCommittedContentV1 { .. }
                 | Self::PushHistoricalLogContentV1 { .. }
+                | Self::PrepareSnapshotContentV1 { .. }
+                | Self::CompleteSnapshotContentV1 { .. }
+                | Self::PushSnapshotContentV1 { .. }
                 | Self::AdminRotateCertificate { .. }
                 | Self::AdminAddLearner { .. }
                 | Self::AdminChangeMembership { .. }
@@ -228,6 +265,10 @@ impl Command {
 /// Closed response preserves upstream Raft errors separately from child acceptance.
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Reply {
+    /// Actual explicit local Root generation, with no claim of content readiness.
+    SnapshotContentContract(Result<bool, String>),
+    /// Exact immutable original prerequisite evidence, never parent application success.
+    SnapshotContent(Result<SnapshotContentStatus, String>),
     /// Exact readonly source description; a serialized target alone is never content permission.
     HistoricalLogTarget(Result<ContentQuorumTarget, String>),
     /// Actual original historical stream outcome, independently checked in the receiver's Root.
@@ -291,6 +332,10 @@ impl ReplicaServer {
         let listener = tokio::net::TcpListener::bind(node.local_address())
             .await
             .map_err(|error| error.to_string())?;
+        let node = Arc::new(node);
+        node.network_source
+            .set(Arc::downgrade(&node))
+            .map_err(|_| "original running Snapshot network context was already registered")?;
         let task = tokio::spawn(async move {
             let mut handlers = tokio::task::JoinSet::new();
             loop {
@@ -307,7 +352,7 @@ impl ReplicaServer {
                 let Ok(permit) = node.transport_budget.inbound() else {
                     continue;
                 };
-                let node = node.clone();
+                let node = node.as_ref().clone();
                 handlers.spawn(async move {
                     let _permit = permit;
                     let budget = node.transport_budget.clone();
@@ -385,8 +430,9 @@ where
     let stream_budget = if let Command::PushContent { budget_ms, .. }
     | Command::PushCommittedContentV1 { budget_ms, .. }
     | Command::RouteHistoricalLogV1 { budget_ms, .. }
-    | Command::PushHistoricalLogContentV1 { budget_ms, .. } =
-        &request.command
+    | Command::PushHistoricalLogContentV1 { budget_ms, .. }
+    | Command::PrepareSnapshotContentV1 { budget_ms, .. }
+    | Command::PushSnapshotContentV1 { budget_ms, .. } = &request.command
     {
         Some(crate::content_store::ContentBudget::issue(*budget_ms)?)
     } else {
@@ -437,6 +483,58 @@ where
         Reply::Rejected("replica profile/member identity mismatch".into())
     } else {
         match request.command {
+            Command::SnapshotContentContractV1 => Reply::SnapshotContentContract(
+                node.store
+                    .network_content_store()
+                    .map(|root| root.snapshot_receives_enabled()),
+            ),
+            Command::PrepareSnapshotContentV1 {
+                header,
+                budget_ms: _,
+            } => Reply::SnapshotContent(
+                snapshot_content::prepare(
+                    &node,
+                    request.sender,
+                    *header,
+                    stream_budget.ok_or("original Snapshot prepare budget is absent")?,
+                    certificate_connection
+                        .clone()
+                        .ok_or("Snapshot prepare requires actual mutual TLS")?,
+                )
+                .await,
+            ),
+            Command::CompleteSnapshotContentV1 { header } => Reply::SnapshotContent(
+                snapshot_content::complete(
+                    &node,
+                    request.sender,
+                    *header,
+                    certificate_connection
+                        .clone()
+                        .ok_or("Snapshot completion requires actual mutual TLS")?,
+                )
+                .await,
+            ),
+            Command::PushSnapshotContentV1 {
+                header,
+                content,
+                command_id,
+                budget_ms: _,
+            } => {
+                snapshot_content::receive(
+                    &mut stream,
+                    &node,
+                    request.sender,
+                    *header,
+                    content,
+                    command_id,
+                    stream_budget.ok_or("original Snapshot stream budget is absent")?,
+                    certificate_connection
+                        .clone()
+                        .ok_or("Snapshot stream requires actual mutual TLS")?,
+                )
+                .await?;
+                return Ok(());
+            }
             Command::HistoricalLogTargetV1 { log_id } => Reply::HistoricalLogTarget(
                 log_content::on_worker(&node, move |current| current.historical_log_target(log_id))
                     .await,
@@ -637,12 +735,46 @@ where
             }
             Command::Vote(rpc) => Reply::Vote(node.raft.vote(rpc).await),
             Command::Snapshot(rpc) => {
-                if rpc
+                let root6 = node.config.streams_content()
+                    && node
+                        .store
+                        .network_content_store()?
+                        .snapshot_receives_enabled();
+                if root6 && rpc.meta.snapshot_id.split('-').nth(1) != Some("0") {
+                    Reply::Rejected(
+                        "Root6 content Snapshot requires its original prepared envelope".into(),
+                    )
+                } else if rpc
                     .offset
                     .checked_add(rpc.data.len() as u64)
                     .is_none_or(|size| size > MAX_FRAME_BYTES as u64)
                 {
                     Reply::Rejected("replica snapshot exceeds bounds".into())
+                } else {
+                    Reply::Snapshot(node.raft.install_snapshot(rpc).await)
+                }
+            }
+            Command::SnapshotPreparedV1 { header, rpc } => {
+                let already_applied = snapshot_content::check_delivery(
+                    &node,
+                    request.sender,
+                    *header,
+                    &rpc,
+                    certificate_connection
+                        .clone()
+                        .ok_or("Snapshot metadata requires actual mutual TLS")?,
+                )
+                .await?;
+                if already_applied {
+                    Reply::Snapshot(Ok(InstallSnapshotResponse {
+                        vote: node.raft.metrics().borrow().vote,
+                    }))
+                } else if rpc
+                    .offset
+                    .checked_add(rpc.data.len() as u64)
+                    .is_none_or(|size| size > MAX_FRAME_BYTES as u64)
+                {
+                    Reply::Rejected("replica Snapshot exceeds bounds".into())
                 } else {
                     Reply::Snapshot(node.raft.install_snapshot(rpc).await)
                 }
@@ -781,6 +913,8 @@ pub(crate) async fn request_leader_transfer(
         .get(&target)
         .ok_or_else(|| "leader transfer target is not pre-enrolled".to_string())?;
     let network = ReplicaNetwork {
+        source: None,
+        snapshot_header: None,
         target,
         node: ReplicaMember::new(address.to_string()),
         profile: node.profile_identity(),
@@ -846,6 +980,8 @@ fn network_with_budget(
         .get(&leader)
         .ok_or_else(|| "administration leader is not pre-enrolled".to_string())?;
     Ok(ReplicaNetwork {
+        source: None,
+        snapshot_header: None,
         target: leader,
         node: ReplicaMember::new(address.to_string()),
         profile: config.profile_identity(),
@@ -1097,6 +1233,8 @@ pub(crate) async fn observe_content_target(
         .find_map(|(id, data)| (*id == member).then_some(data.clone()))
         .ok_or("content observation member lacks its exact committed data")?;
     let network = ReplicaNetwork {
+        source: None,
+        snapshot_header: None,
         target: member,
         node: data,
         profile: source.profile_identity(),
@@ -1205,6 +1343,8 @@ pub(crate) async fn admin_request_transfer(
 
 /// Factory establishes no connection until the upstream engine invokes an actual RPC.
 pub(crate) struct ReplicaNetworkFactory {
+    /// Weak actual running source, initialized once the original server owns it.
+    source: Arc<std::sync::OnceLock<std::sync::Weak<ReplicaNode>>>,
     /// Startup cluster/profile identity.
     profile: String,
     /// Sending infrastructure replica.
@@ -1228,8 +1368,10 @@ impl ReplicaNetworkFactory {
         shared_secret: Option<String>,
         tls: Option<Arc<crate::tls::TlsMaterial>>,
         budget: Arc<TransportBudget>,
+        source: Arc<std::sync::OnceLock<std::sync::Weak<ReplicaNode>>>,
     ) -> Self {
         Self {
+            source,
             profile,
             sender,
             online,
@@ -1242,6 +1384,10 @@ impl ReplicaNetworkFactory {
 
 /// One exact remote member of the upstream consensus engine.
 pub(crate) struct ReplicaNetwork {
+    /// Exact header admitted before the first chunk on this actual upstream Snapshot transfer.
+    snapshot_header: Option<SnapshotContentHeader>,
+    /// Weak original running source; readonly administration clients do not acquire a source scope.
+    source: Option<Arc<std::sync::OnceLock<std::sync::Weak<ReplicaNode>>>>,
     /// Exact remote infrastructure identity.
     target: u64,
     /// Upstream-declared member endpoint.
@@ -1266,6 +1412,8 @@ impl RaftNetworkFactory<ControllerRaftConfig> for ReplicaNetworkFactory {
     /// Creates an inert exact-member client without aliasing robot Nodes or opening a socket.
     async fn new_client(&mut self, target: u64, node: &ReplicaMember) -> Self::Network {
         ReplicaNetwork {
+            snapshot_header: None,
+            source: Some(self.source.clone()),
             target,
             node: node.clone(),
             profile: self.profile.clone(),
@@ -1376,6 +1524,28 @@ where
 }
 
 impl RaftNetwork<ControllerRaftConfig> for ReplicaNetwork {
+    /// Freezes one separate original content-operation budget before the unchanged upstream chunk transport.
+    async fn full_snapshot(
+        &mut self,
+        vote: openraft::Vote<u64>,
+        snapshot: openraft::Snapshot<ControllerRaftConfig>,
+        cancel: impl std::future::Future<Output = openraft::error::ReplicationClosed>
+        + openraft::OptionalSend
+        + 'static,
+        option: RPCOption,
+    ) -> Result<
+        openraft::raft::SnapshotResponse<u64>,
+        openraft::error::StreamingError<ControllerRaftConfig, openraft::error::Fatal<u64>>,
+    > {
+        use openraft::network::snapshot_transport::{Chunked, SnapshotTransport};
+        let mut cancel = Box::pin(cancel);
+        self.snapshot_header = tokio::select! {
+            closed=&mut cancel=>return Err(closed.into()),
+            prepared=snapshot_content::before_send(self,&snapshot.meta)=>prepared
+                .map_err(|error|Unreachable::new(&std::io::Error::other(error)))?,
+        };
+        Chunked::send_snapshot(self, vote, snapshot, cancel, option).await
+    }
     /// Forwards exact append RPCs; failures remain network/remote errors to OpenRaft.
     async fn append_entries(
         &mut self,
@@ -1431,8 +1601,21 @@ impl RaftNetwork<ControllerRaftConfig> for ReplicaNetwork {
         InstallSnapshotResponse<u64>,
         RPCError<u64, ReplicaMember, RaftError<u64, InstallSnapshotError>>,
     > {
+        let command = if let Some(header) = &self.snapshot_header {
+            if header.meta != rpc.meta {
+                return Err(RPCError::Unreachable(Unreachable::new(
+                    &std::io::Error::other("Snapshot sender lost its original prerequisite header"),
+                )));
+            }
+            Command::SnapshotPreparedV1 {
+                header: Box::new(header.clone()),
+                rpc,
+            }
+        } else {
+            Command::Snapshot(rpc)
+        };
         match self
-            .exchange(Command::Snapshot(rpc), option)
+            .exchange(command, option)
             .await
             .map_err(|error| RPCError::Unreachable(Unreachable::new(&error)))?
         {
