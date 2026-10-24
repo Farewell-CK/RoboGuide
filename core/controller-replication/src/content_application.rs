@@ -5,8 +5,14 @@ use domain::{ArtifactUploadPhase, CorrelationId, EventId, EventPayload, EventRec
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
+#[path = "content_initialization.rs"]
+mod initialization;
+pub use initialization::{ContentInitializationAnchor, ContentInitializationPolicy};
+
 /// Explicit new private application envelope; ordinary semantic v2 bytes keep their original meaning.
 pub const CONTENT_APPLICATION_SCHEMA: &str = "roboguide.application-commit/v3";
+/// Complete original archived-source initialization, never accepted by ordinary incremental ports.
+pub const CONTENT_INITIALIZATION_SCHEMA: &str = "roboguide.application-initialization/v0.1";
 
 /// Actual original application CAS writer, distinct from every receiving member's content backend.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +46,12 @@ pub struct ContentApplicationBatch {
     pub origins: BTreeMap<String, ArtifactContentKey>,
     /// Exact complete current required content, retaining independent owners for equal hashes.
     pub inputs: Vec<ArtifactContentKey>,
+    /// Mandatory exact original complete-source digest only in the explicit initialization envelope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initialization_digest: Option<String>,
+    /// Immutable original initialization lineage on subsequent parent9 candidates only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_initialization: Option<ContentInitializationAnchor>,
 }
 
 /// Complete accepted v0.4 auxiliary view; local reader/copy/process authority is deliberately excluded.
@@ -51,6 +63,9 @@ pub struct AcceptedContentState {
     /// Complete exact original accepted envelope, retaining the independently recomputable batch digest.
     /// This grants no new permission and contains no member-local copy/reader/process authority.
     pub candidate: Box<ContentApplicationBatch>,
+    /// Original applied initialization anchor; historical metadata grants no current byte/use fact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_initialization: Option<ContentInitializationAnchor>,
 }
 
 impl std::ops::Deref for AcceptedContentState {
@@ -436,6 +451,11 @@ impl ContentApplicationBatch {
             recovery,
             origins,
             inputs,
+            initialization_digest: None,
+            source_initialization: previous
+                .content
+                .as_ref()
+                .and_then(|state| state.source_initialization.clone()),
         };
         result.validate_against(previous, profile_identity)?;
         Ok(result)
@@ -443,9 +463,25 @@ impl ContentApplicationBatch {
 
     /// Validates complete original metadata lineage; real adapters still authenticate epoch/bytes/membership.
     pub fn validate_against(&self, previous: &ReplicaView, profile: &str) -> Result<(), String> {
-        self.batch.validate().map_err(|error| error.to_string())?;
-        if self.schema != CONTENT_APPLICATION_SCHEMA
-            || self.profile_identity != profile
+        self.validate_context_batch()?;
+        let initializing = self.schema == CONTENT_INITIALIZATION_SCHEMA;
+        if initializing && !previous.is_empty_application() {
+            return Err(
+                "original content initialization requires an empty receiver application".into(),
+            );
+        }
+        if !initializing
+            && self.source_initialization.as_ref()
+                != previous
+                    .content
+                    .as_ref()
+                    .and_then(|state| state.source_initialization.as_ref())
+        {
+            return Err(
+                "later content candidate changed or lost original initialization lineage".into(),
+            );
+        }
+        if self.profile_identity != profile
             || !crate::content::hex_digest(profile)
             || self.epoch.term == 0
             || self.epoch.replica_id == 0
@@ -480,6 +516,7 @@ impl ContentApplicationBatch {
             .history_floor()
             .map_err(|error| error.to_string())?
             != old_floor
+            && !initializing
         {
             return Err(
                 "original Archive floor advancement requires coordinated complete maintenance"
@@ -496,7 +533,14 @@ impl ContentApplicationBatch {
         }
         let existing_origins = previous.content.as_ref().map(|content| &content.origins);
         let mut new_origins = BTreeMap::new();
-        for row in &self.batch.events {
+        for row in self
+            .recovery
+            .catalog_archive_events
+            .iter()
+            .flatten()
+            .filter(|_| initializing)
+            .chain(self.batch.events.iter())
+        {
             let payload: EventPayload =
                 serde_json::from_str(&row.payload_json).map_err(|e| e.to_string())?;
             if let Some((content_digest, byte_size)) = bare_content(&payload) {
@@ -506,7 +550,11 @@ impl ContentApplicationBatch {
                         content_digest,
                         byte_size,
                     });
-                new_origins.insert(row.event_id.clone(), origin);
+                if new_origins.insert(row.event_id.clone(), origin).is_some() {
+                    return Err(
+                        "original source initialization contains a duplicate event identity".into(),
+                    );
+                }
             }
         }
         if self.origins.iter().any(|(id, origin)| {
@@ -555,6 +603,7 @@ impl ContentApplicationBatch {
         Ok(AcceptedContentState {
             batch_digest: self.identity()?,
             candidate: Box::new(self.clone()),
+            source_initialization: self.initialization_anchor()?,
         })
     }
 }

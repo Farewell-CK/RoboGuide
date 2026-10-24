@@ -644,9 +644,9 @@ pub(super) fn open_bound(
 /// Reads one exact mandatory complete head; a lost head never becomes an empty producer set.
 pub(super) fn head(connection: &Connection, name: &str) -> Result<BTreeSet<String>, String> {
     let raw: String = connection
-        .query_row("SELECT value FROM metadata WHERE key=?", [name], |row| {
-            row.get(0)
-        })
+        .prepare_cached("SELECT value FROM metadata WHERE key=?")
+        .map_err(|error| error.to_string())?
+        .query_row([name], |row| row.get(0))
         .map_err(|error| {
             format!("original content mandatory head {name} is unavailable: {error}")
         })?;

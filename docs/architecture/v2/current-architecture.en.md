@@ -203,6 +203,37 @@ outcomes. This review starts no Habitat, model or device.
 
 ## Maintenance
 
+ADR-0195 is implemented with actual process checks: an explicit application-initialization/v0.1 envelope/context-bound
+application-snapshot/v0.1 admits the exact compacted source checkpoint, hot tail, commands and
+Archive/Catalog only into an empty application. Incremental v2 keeps its continuity checks.
+Parent9, explicit startup and recovery v0.23 fence older entry points, preserving source identity,
+Unknown, budgets and member-local history. Original Unknown, Log/Snapshot, runnable entry and three
+restored leaders are covered in the [acceptance record](../../development/acceptance/2026-10-24-original-archived-source-initialization.md).
+Global Archive/reference coverage, upgrades and complete non-release conditions remain required.
+Original standalone checkpoint bytes remain exact. Only the actual current child, through its
+PID/Unix/mTLS channel and fresh full quorum, may recognize that exact current initial checkpoint
+before a normal durable startup command binds the new profile. Generic cross-profile restore
+remains refused; a declared child binary must advertise initialization support before application spawn.
+Optional typed Node-TLS deployment inputs pin certificate/key/CA/identity-profile bytes and retain
+original identity recovery requirements. Paths grant no identity; these files enroll or start no Node.
+Local inputs from the immediately prior accepted target in the same epoch/membership can avoid
+another source copy; all candidate bytes still undergo complete verification. Remote old inputs
+skip retransmission only after fresh authenticated prior-state/full-byte observation, with final
+complete quorum verification retained. Typed TLS inputs also retain the existing Operator/Artifact
+authorization profiles and pin their actual file bytes in the common policy.
+Completed original Archive operations still require their declared source CAS and actual Archive
+directory. Metadata initialization cannot replace these stores. Only v0.23 may reuse validation of
+exact repeated operations independently bound to the same actual Replica profile, full original
+records and writer dependencies. Conflicts, other clusters and standalone duplicates refuse.
+Complete archived-candidate validation, original read admission and supervisor parent observations
+run on owned workers retaining original capacity/leases. Async network workers do not wait on the
+parent mutex. Lost epochs still stop/reap the child; observations restore no authority.
+Network-profile Raft log/range/vote/committed reads use fresh readonly WAL transactions on the
+original leased inode with generation/profile checks. They read no pending application value and
+do not wait on its writer mutex; consensus write/durability-callback ordering stays unchanged.
+Unchanged vote/committed saves return only after fresh observation of that exact durable WAL value;
+changed values retain the original FULL writer path.
+
 ADR-0194 has actual process/full-recovery acceptance: explicit Root8 admits staging reclamation only from original
 copy/stream IDs and actual retirement. Intent/per-item Unknown and mandatory inventories precede
 open/unlink. Only private staging names are removed; CAS, other refs and Root7 tombstones remain

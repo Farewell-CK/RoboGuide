@@ -167,6 +167,68 @@ fn actual_network_tls_trust_does_not_wait_for_or_read_pending_application_sql() 
     assert_eq!(result.unwrap().unwrap(), expected);
 }
 
+/// Actual committed consensus reads must finish while a different application transaction holds SQL.
+#[test]
+fn actual_network_consensus_reads_never_wait_for_or_expose_pending_application_values() {
+    use openraft::Vote;
+    use openraft::storage::{RaftLogReader, RaftLogStorage};
+
+    let (_directory, _root, mut store) = original();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let vote = Vote::new_committed(2, 31);
+    let entry = Entry {
+        log_id: LogId::new(CommittedLeaderId::new(2, 31), 1),
+        payload: EntryPayload::Blank,
+    };
+    runtime.block_on(store.save_vote(&vote)).unwrap();
+    store
+        .persist_log_entries(std::slice::from_ref(&entry))
+        .unwrap();
+    runtime
+        .block_on(store.save_committed(Some(entry.log_id)))
+        .unwrap();
+    let mut guard = store.connection.lock().unwrap();
+    let transaction = guard.transaction().unwrap();
+    write_meta(&transaction, "vote", &Vote::new_committed(7, 37)).unwrap();
+    write_meta(
+        &transaction,
+        "committed",
+        &LogId::new(CommittedLeaderId::new(7, 37), 99),
+    )
+    .unwrap();
+    transaction
+        .execute("DELETE FROM replica_v1_log", [])
+        .unwrap();
+    let mut reader = store.clone();
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        let result = runtime.block_on(async {
+            reader.save_vote(&vote).await?;
+            reader.save_committed(Some(entry.log_id)).await?;
+            let vote = reader.read_vote().await?;
+            let committed = reader.read_committed().await?;
+            let state = reader.get_log_state().await?;
+            let entries = reader.try_get_log_entries(0..=9).await?;
+            Ok::<_, StorageError<u64>>((vote, committed, state, entries))
+        });
+        send.send(result).unwrap();
+    });
+    let result = receive.recv_timeout(Duration::from_secs(2));
+    transaction.rollback().unwrap();
+    drop(guard);
+    worker.join().unwrap();
+    let (actual_vote, committed, state, entries) = result.unwrap().unwrap();
+    assert_eq!(actual_vote, Some(vote));
+    assert_eq!(committed, Some(entry.log_id));
+    assert_eq!(state.last_purged_log_id, None);
+    assert_eq!(state.last_log_id, Some(entry.log_id));
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].log_id, entry.log_id);
+}
+
 /// Empty new authority fences old writers and requires its original marker before any operation.
 #[test]
 fn actual_network_parent_requires_explicit_generation_and_original_empty_marker() {

@@ -342,6 +342,67 @@ jobs:
           uv run --frozen python tools/quality/check_catalog_archive_recovery_processes.py
           --from /tmp/rg-ci-catalog-archive --output "${RUNNER_TEMP}/roboguide-catalog-archive-recovery"
 
+      - name: Build the pinned actual parent8 and Root8 compatibility writer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/tarball/faede53c3e149119406fa1b5bc064c7fa538db03 > "${RUNNER_TEMP}/roboguide-pre-parent9.tar.gz"
+          mkdir "${RUNNER_TEMP}/roboguide-pre-parent9"
+          tar -xzf "${RUNNER_TEMP}/roboguide-pre-parent9.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-pre-parent9"
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-pre-root8-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-pre-parent9/Cargo.toml" -p controller-replication --example content_network_probe
+
+      - name: Verify actual archived-source initialization before any application child
+        run: >
+          uv run --frozen python tools/quality/check_archived_source_initialization_processes.py
+          --probe target/debug/examples/content_network_probe
+          --storage-probe target/debug/examples/content_stream_probe
+          --old-probe "${RUNNER_TEMP}/roboguide-pre-root8-target/debug/examples/content_network_probe"
+          --source /tmp/rg-ci-catalog-archive
+          --output "${RUNNER_TEMP}/roboguide-archived-initialization"
+
+      - name: Verify original Unknown and missed archived-source Log and Snapshot
+        run: |
+          uv run --frozen python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          evidence = Path(os.environ["RUNNER_TEMP"])
+          source = Path("/tmp/rg-ci-catalog-archive")
+          baseline = json.loads((evidence / "roboguide-archived-initialization/result.json").read_bytes())
+          assert baseline["passed"]
+          key = baseline["actual_member_401_bytes"][0]
+          content = source / "cas/objects-v1/sha256" / key["content_digest"][7:9] / key["content_digest"][7:]
+          common = [sys.executable, "tools/quality/check_archived_source_initialization_processes.py",
+                    "--probe", "target/debug/examples/content_network_probe", "--storage-probe", "target/debug/examples/content_stream_probe",
+                    "--old-probe", str(evidence / "roboguide-pre-root8-target/debug/examples/content_network_probe"),
+                    "--source", str(source), "--interrupt-source-content", str(content)]
+          for mode in ("interrupted", "log", "snapshot"):
+              arguments = common + ["--output", str(evidence / ("roboguide-initialization-" + mode))]
+              if mode != "interrupted":
+                  arguments += ["--catchup", mode]
+              subprocess.run(arguments, check=True)
+          PY
+
+      - name: Verify initialized Controller TLS and original cross-owner recovery
+        run: >
+          uv run --frozen python tools/quality/check_runnable_content_processes.py
+          --supervisor target/debug/controller-replica
+          --controller target/debug/integration-server
+          --storage-probe target/debug/examples/content_stream_probe
+          --initialization-source /tmp/rg-ci-catalog-archive
+          --owner-failover --prepared-recovery --release-after-recovery
+          --output /tmp/rg-ci-initialized-controller
+
+      - name: Verify complete parent9 cold recovery and three actual restored leaders
+        run: >
+          uv run --frozen python tools/quality/check_replica_content_recovery_processes.py
+          --source /tmp/rg-ci-initialized-controller
+          --supervisor target/debug/controller-replica
+          --output "${RUNNER_TEMP}/roboguide-initialization-cold-recovery"
+
       - name: Retain native gate failure observations
         if: failure()
         uses: actions/upload-artifact@v4

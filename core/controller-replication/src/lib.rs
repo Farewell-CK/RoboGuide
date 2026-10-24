@@ -15,8 +15,10 @@ mod content_uploads;
 mod controller_ingress;
 mod member;
 mod network_content;
+mod network_initialization;
 mod network_membership;
 mod snapshot_data;
+mod source_initialization;
 mod store;
 mod supervision;
 #[cfg(test)]
@@ -41,7 +43,8 @@ pub use certificates::{
 pub use content::{ArtifactContentKey, ContentQuorumTarget, MemberContentObservation};
 pub use content_application::{
     AcceptedContentState, ApplicationArtifactWriter, CONTENT_APPLICATION_SCHEMA,
-    ContentApplicationBatch,
+    CONTENT_INITIALIZATION_SCHEMA, ContentApplicationBatch, ContentInitializationAnchor,
+    ContentInitializationPolicy,
 };
 pub use content_store::{
     ContentProcessEndObservation, REPLICA_CONTENT_GC_LAYOUT_SCHEMA, REPLICA_CONTENT_LAYOUT_SCHEMA,
@@ -60,7 +63,11 @@ pub use controller_ingress::{
     ControllerIngressServer, ControllerIngressStatus,
 };
 pub use member::ReplicaMember;
+pub use network_initialization::inspect_archived_source;
 pub use snapshot_data::ReplicaSnapshotData;
+pub use source_initialization::{
+    ContentInitializationInput, ContentInitializationSourceObservation, ContentInitializationStatus,
+};
 pub use store::ReplicaContentParentAdoptionStatus;
 pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};
 pub use supervision::{ControllerDrainProof, ControllerProcessExit, ControllerProcessIdentity};
@@ -139,7 +146,7 @@ pub struct ReplicaTlsConfig {
 }
 
 /// Quorum-applied application outcome; rejection advances no accepted checkpoint/evidence history.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitReceipt {
     /// Exact target passed every base/tail/codec requirement and is durable.
     pub accepted: bool,
@@ -543,7 +550,7 @@ impl ReplicaNode {
         path: &Path,
         limits: ReplicaTransportLimits,
     ) -> Result<(Self, ReplicaServer), String> {
-        Self::start_inner(config, path, limits, None, false, None).await
+        Self::start_inner(config, path, limits, None, false, None, None).await
     }
 
     /// Starts only explicit v0.4 with actual held Root4 and declared original bootstrap roots.
@@ -561,6 +568,7 @@ impl ReplicaNode {
             limits,
             Some((root, bootstrap_owners)),
             false,
+            None,
             None,
         )
         .await
@@ -580,6 +588,7 @@ impl ReplicaNode {
             limits,
             Some((root, bootstrap_owners)),
             true,
+            None,
             None,
         )
         .await
@@ -604,6 +613,43 @@ impl ReplicaNode {
             Some((root, bootstrap_owners)),
             true,
             Some(quorum_observation_ms),
+            None,
+        )
+        .await
+    }
+
+    /// Starts only explicit parent9/Root8, preserving original owned-child and source declarations.
+    pub async fn start_with_content_initialization(
+        config: ReplicaConfig,
+        path: &Path,
+        root: ReplicaContentStore,
+        bootstrap_owners: BTreeMap<u64, String>,
+        limits: ReplicaTransportLimits,
+        policy: Option<ContentInitializationPolicy>,
+        quorum_observation_ms: Option<u64>,
+    ) -> Result<(Self, ReplicaServer), String> {
+        if quorum_observation_ms.is_some_and(|value| !(100..=30_000).contains(&value)) {
+            return Err("owned quorum observation window must be 100..30000 ms".into());
+        }
+        if let Some(policy) = &policy {
+            policy.validate()?;
+            if !config.members.contains_key(&policy.source_member)
+                || config
+                    .initial_voters
+                    .as_ref()
+                    .is_some_and(|voters| !voters.contains(&policy.source_member))
+            {
+                return Err("initialization source must be an original configured voter".into());
+            }
+        }
+        Self::start_inner(
+            config,
+            path,
+            limits,
+            Some((root, bootstrap_owners)),
+            true,
+            quorum_observation_ms,
+            Some(policy),
         )
         .await
     }
@@ -616,6 +662,7 @@ impl ReplicaNode {
         content: Option<(ReplicaContentStore, BTreeMap<u64, String>)>,
         controller_content: bool,
         quorum_observation_ms: Option<u64>,
+        initialization: Option<Option<ContentInitializationPolicy>>,
     ) -> Result<(Self, ReplicaServer), String> {
         config.validate()?;
         if config.streams_content() != content.is_some() {
@@ -636,19 +683,30 @@ impl ReplicaNode {
             for (id, owner) in &owners {
                 ReplicaMember::with_content_store(config.members[id], owner.clone())?;
             }
-            (
-                (if controller_content {
-                    SqliteRaftStore::open_with_controller_content
-                } else {
-                    SqliteRaftStore::open_with_network_content
-                })(
+            let store = if let Some(policy) = initialization {
+                SqliteRaftStore::open_with_content_initialization(
                     path,
                     &config.profile_identity(),
                     &config.application_schema,
                     root,
-                )?,
-                Some(Arc::new(owners)),
-            )
+                    policy,
+                )
+            } else if controller_content {
+                SqliteRaftStore::open_with_controller_content(
+                    path,
+                    &config.profile_identity(),
+                    &config.application_schema,
+                    root,
+                )
+            } else {
+                SqliteRaftStore::open_with_network_content(
+                    path,
+                    &config.profile_identity(),
+                    &config.application_schema,
+                    root,
+                )
+            }?;
+            (store, Some(Arc::new(owners)))
         } else {
             (
                 SqliteRaftStore::open(
@@ -1274,7 +1332,7 @@ impl ReplicaNode {
 
     /// Observes an original completion without triggering election or renewing effect permission.
     pub async fn reconcile_leader_transfer(&self) -> Result<bool, String> {
-        let Some(record) = self.store.leader_transfer_record()? else {
+        let Some(record) = self.store.leader_transfer_record_on_worker().await? else {
             return Ok(true);
         };
         if matches!(record.state.as_str(), "completed" | "rejected") {
@@ -1293,11 +1351,13 @@ impl ReplicaNode {
             if self.check_consensus_epoch(epoch).await.is_err() {
                 return Ok(false);
             }
-            self.store.persist_leader_transfer(&LeaderTransferRecord {
-                state: "completed".into(),
-                confirmed_epoch: Some(epoch),
-                ..record
-            })?;
+            self.store
+                .persist_leader_transfer_on_worker(LeaderTransferRecord {
+                    state: "completed".into(),
+                    confirmed_epoch: Some(epoch),
+                    ..record
+                })
+                .await?;
             return Ok(true);
         }
         if record.source_epoch.replica_id != self.config.replica_id {
@@ -1324,7 +1384,9 @@ impl ReplicaNode {
         {
             return Ok(false);
         }
-        self.store.persist_leader_transfer(&incoming)?;
+        self.store
+            .persist_leader_transfer_on_worker(incoming)
+            .await?;
         Ok(true)
     }
 

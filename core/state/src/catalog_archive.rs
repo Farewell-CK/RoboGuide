@@ -491,6 +491,84 @@ mod tests {
         assert!(log.catalog_replay_events().is_err());
     }
 
+    /// Context-bound snapshot validation preserves real SQL; this sink fixture proves no bytes/quorum.
+    #[test]
+    fn original_compacted_source_requires_explicit_initialization_context() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("source.sqlite3");
+        let log = SqliteEventLog::open(&path).unwrap();
+        original(&log);
+        let sink = SnapshotSink {
+            log: log.clone(),
+            originals: Mutex::new(Vec::new()),
+            fail: AtomicBool::new(false),
+            effects: AtomicUsize::new(0),
+        };
+        log.archive_and_gc_with_catalog(
+            1,
+            &sink,
+            super::super::archive_operation::ArchiveRequest {
+                command_id: "original-initialization-archive".into(),
+                principal: "explicit-contract-admin".into(),
+                tenant: "local".into(),
+                source_owner: format!("artifact-store:{}", "a".repeat(64)),
+                authority_id: log.archive_authority_id().unwrap(),
+                destination: directory.path().join("archive").to_str().unwrap().into(),
+                budget_ms: 30_000,
+            },
+        )
+        .unwrap();
+        let source = SqliteEventLog::read_complete_replica_state(&path).unwrap();
+        assert_eq!(source.recovery.history_floor().unwrap(), 1);
+        assert!(source.events.is_empty());
+        let mut batch = ApplicationCommitBatch {
+            schema: APPLICATION_CONTENT_INITIALIZATION_SCHEMA.into(),
+            previous_event_sequence: 0,
+            previous_checkpoint_digest: None,
+            checkpoint: source.checkpoint.clone(),
+            events: source.events.clone(),
+            commands: source.commands.clone(),
+        };
+        assert!(
+            batch.validate().is_err(),
+            "ordinary incremental validation admitted a snapshot"
+        );
+        assert_eq!(
+            batch
+                .validate_content_initialization(&source.recovery)
+                .unwrap(),
+            source.identity().unwrap()
+        );
+        batch.previous_event_sequence = 1;
+        assert!(
+            batch
+                .validate_content_initialization(&source.recovery)
+                .is_err()
+        );
+        batch.previous_event_sequence = 0;
+        batch.previous_checkpoint_digest = Some(checkpoint_identity(&source.checkpoint));
+        assert!(
+            batch
+                .validate_content_initialization(&source.recovery)
+                .is_err()
+        );
+        batch.previous_checkpoint_digest = None;
+        batch.commands.clear();
+        assert!(
+            batch
+                .validate_content_initialization(&source.recovery)
+                .is_err()
+        );
+        let mut missing_prefix = source.recovery.clone();
+        missing_prefix.archive_manifests = None;
+        batch.commands = source.commands;
+        assert!(
+            batch
+                .validate_content_initialization(&missing_prefix)
+                .is_err()
+        );
+    }
+
     /// An uncertain original effect never gets called again, and its original pending pin blocks replacement.
     #[test]
     fn interrupted_original_effect_never_repeats_or_renews_its_budget() {

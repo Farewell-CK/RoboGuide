@@ -7,6 +7,7 @@ use controller_replication::{
 };
 use serde::Serialize;
 use serde_json::json;
+use sha2::Digest as _;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::process::Stdio;
@@ -97,6 +98,31 @@ async fn start_controller(
         .stdout(output)
         .stderr(error_output)
         .kill_on_drop(true);
+    if let Some(tls) = &configuration.node_tls {
+        command
+            .env("ROBOGUIDE_NODE_MTLS_SERVER_CERT", &tls.server_cert)
+            .env("ROBOGUIDE_NODE_MTLS_SERVER_KEY", &tls.server_key)
+            .env("ROBOGUIDE_NODE_MTLS_CLIENT_CA", &tls.client_ca)
+            .env("ROBOGUIDE_NODE_MTLS_NODE_CERT_DIGESTS", tls.profile_json()?);
+    }
+    for (plane, configured) in [
+        ("OPERATOR", &configuration.operator_tls),
+        ("ARTIFACT", &configuration.artifact_tls),
+    ] {
+        if let Some(tls) = configured {
+            command
+                .env(
+                    format!("ROBOGUIDE_{plane}_MTLS_SERVER_CERT"),
+                    &tls.server_cert,
+                )
+                .env(
+                    format!("ROBOGUIDE_{plane}_MTLS_SERVER_KEY"),
+                    &tls.server_key,
+                )
+                .env(format!("ROBOGUIDE_{plane}_MTLS_CLIENT_CA"), &tls.client_ca)
+                .env(format!("ROBOGUIDE_{plane}_MTLS_ROLE_MAP"), &tls.profile);
+        }
+    }
     let original = node.begin_controller_process(epoch).await?;
     if let Some(content) = &configuration.content {
         let client = controller_replication::ControllerContentClientConfig {
@@ -244,6 +270,31 @@ async fn write_status(
 
 /// Runs consensus continuously while only current quorum leadership retains one owned child.
 pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
+    if configuration
+        .content
+        .as_ref()
+        .is_some_and(|content| content.initialization.is_some())
+    {
+        let mut command = Command::new(&configuration.controller_binary);
+        command
+            .arg("--replica-initialization-contract")
+            .env_clear()
+            .kill_on_drop(true);
+        let observed = tokio::time::timeout(Duration::from_secs(5), command.output())
+            .await
+            .map_err(|_| "declared Controller initialization contract inspection expired")?
+            .map_err(|error| error.to_string())?;
+        if !observed.status.success()
+            || observed.stdout
+                != format!(
+                    "{}\n",
+                    controller_replication::CONTENT_INITIALIZATION_SCHEMA
+                )
+                .as_bytes()
+        {
+            return Err("declared Controller binary does not advertise the original initialization contract".into());
+        }
+    }
     if configuration.content.is_some() {
         use std::os::unix::fs::{DirBuilderExt, MetadataExt};
         if !configuration.storage_directory.exists() {
@@ -275,7 +326,11 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
             .join("supervisor.writer.lock"),
     )?;
     let (node, _server) = if let Some(content) = &configuration.content {
-        let root = if configuration.schema == "roboguide.controller-replica-process/v0.6" {
+        let root = if matches!(
+            configuration.schema.as_str(),
+            "roboguide.controller-replica-process/v0.6"
+                | "roboguide.controller-replica-process/v0.7"
+        ) {
             controller_replication::ReplicaContentStore::open_with_staging_gc(
                 &content.root,
                 &configuration.replica.profile_identity(),
@@ -311,15 +366,28 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                 ),
             }
         }?;
-        ReplicaNode::start_with_controller_content_window(
-            configuration.replica.clone(),
-            &configuration.storage_directory.join("replica.sqlite3"),
-            root,
-            content.bootstrap_owners.clone(),
-            configuration.transport_limits.clone(),
-            content.quorum_observation_ms,
-        )
-        .await?
+        if configuration.schema == "roboguide.controller-replica-process/v0.7" {
+            ReplicaNode::start_with_content_initialization(
+                configuration.replica.clone(),
+                &configuration.storage_directory.join("replica.sqlite3"),
+                root,
+                content.bootstrap_owners.clone(),
+                configuration.transport_limits.clone(),
+                content.initialization.clone(),
+                Some(content.quorum_observation_ms),
+            )
+            .await?
+        } else {
+            ReplicaNode::start_with_controller_content_window(
+                configuration.replica.clone(),
+                &configuration.storage_directory.join("replica.sqlite3"),
+                root,
+                content.bootstrap_owners.clone(),
+                configuration.transport_limits.clone(),
+                content.quorum_observation_ms,
+            )
+            .await?
+        }
     } else {
         ReplicaNode::start_with_transport_limits(
             configuration.replica.clone(),
@@ -341,6 +409,13 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
     )
     .await?;
     let mut leader_transfer_attempted = false;
+    let mut initialization_started = false;
+    let mut initialization_transfer_attempted = false;
+    let mut initialization_task: Option<
+        tokio::task::JoinHandle<
+            Result<controller_replication::ContentInitializationStatus, String>,
+        >,
+    > = None;
     let shutdown_signal = tokio::signal::ctrl_c();
     tokio::pin!(shutdown_signal);
     let mut timer = tokio::time::interval(Duration::from_millis(200));
@@ -370,6 +445,39 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     stop_controller(&mut owned, &node).await?;
                 }
                 let _transfer_reconciled = node.reconcile_leader_transfer().await?;
+                if initialization_task.as_ref().is_some_and(|task| task.is_finished()) {
+                    let task = initialization_task.take().ok_or("original initialization task disappeared")?;
+                    let result = task.await.map_err(|error| error.to_string())?;
+                    let observed = match result {
+                        Ok(status) => json!({"original_status":status}),
+                        Err(error) => json!({"original_outcome":"unknown_or_refused","error":error}),
+                    };
+                    std::fs::write(configuration.storage_directory.join("content-initialization.json"), serde_json::to_vec(&observed).map_err(|error| error.to_string())?).map_err(|error| error.to_string())?;
+                }
+                let observed_node = node.clone();
+                let revision = tokio::task::spawn_blocking(move || observed_node.accepted_revision())
+                    .await.map_err(|error| error.to_string())??;
+                if let Some(content) = &configuration.content
+                    && let Some(policy) = &content.initialization
+                    && revision == 0 {
+                    if let Some(epoch) = current {
+                        if epoch.replica_id == policy.source_member && !initialization_started {
+                            initialization_started = true;
+                            let input = content.initialization_source.clone().ok_or("original source paths are missing")?;
+                            let source = node.clone();
+                            initialization_task = Some(tokio::spawn(async move { source.initialize_archived_source(input).await }));
+                        } else if epoch.replica_id != policy.source_member && !initialization_transfer_attempted {
+                            initialization_transfer_attempted = true;
+                            let original = serde_json::to_vec(&(policy, epoch.replica_id)).map_err(|error| error.to_string())?;
+                            let operation = format!("source-initialization:{:x}", sha2::Sha256::digest(&original));
+                            if let Err(error) = node.request_leader_transfer(policy.source_member, operation).await {
+                                eprintln!("original source leader handoff remains unresolved: {error}");
+                            }
+                        }
+                    }
+                    write_status(&configuration, &node, current, &owned).await?;
+                    continue;
+                }
                 if !leader_transfer_attempted
                     && let (Some(transfer), Some(epoch)) =
                         (configuration.leader_transfer.as_ref(), current)
@@ -393,12 +501,15 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     }
                     continue;
                 }
+                let observed_node = node.clone();
+                let transfer_blocks = tokio::task::spawn_blocking(move || observed_node.leader_transfer_blocks_controller())
+                    .await.map_err(|error| error.to_string())??;
                 if owned.is_none()
-                    && !node.leader_transfer_blocks_controller()?
+                    && !transfer_blocks
                     && let Some(epoch) = current
                 {
                     configuration.validate()?;
-                    if configuration.content.is_some()&&node.accepted_revision()?>0 {
+                    if configuration.content.is_some() && revision > 0 {
                         let ready=match node.accepted_content_target().await {
                             Ok(target)=>node.content_quorum(target).await,
                             Err(error)=>Err(error),
@@ -435,6 +546,10 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
         }
     };
     if let Some(task) = metrics_task {
+        task.abort();
+    }
+    if let Some(task) = initialization_task {
+        // Ending this wait does not cancel the inner owned source/consensus operation or fill its result.
         task.abort();
     }
     stop_controller(&mut owned, &node).await?;

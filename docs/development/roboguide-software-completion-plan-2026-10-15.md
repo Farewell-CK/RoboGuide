@@ -119,7 +119,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 | 顺序 | 对应原项 | 当前必需交付 | 状态 |
 | --- | --- | --- | --- |
-| A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | Log、purged Snapshot、空 learner、准备/投递心跳及 ACK 预算门禁通过；归档源首次捕获和原故障组合继续 |
+| A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | Log、purged Snapshot、空 learner、准备/投递心跳及 ACK 门禁通过；ADR-0195 原归档源首次初始化、Unknown、Log/Snapshot 追赶、完整实际入口及最新完整存量三 leader 冷恢复通过；远程 CI 另核对，全局 Archive/原完整故障矩阵随 A2/A3 继续 |
 | A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | readiness、Root7 GC/恢复、实际 mTLS learner/joint、损坏与旧 epoch 拒绝、Root8 私有 staging/原 Unknown/完整恢复已验收；全 producer 退休与最终 CAS 回收组合继续 |
 | A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 原 Root4 → 6 → 7 排空同 inode 升级、旧入口拒绝与三 leader 冷恢复通过；滚动/回退继续 |
 | B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | 待接线与组合验收；不重写空间算法 |
@@ -129,6 +129,15 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | 待全部软件必需项通过 |
 
 当前清单为唯一执行队列，下面按原时间保留的切片记录不能替代上表完成条件。
+
+[原归档源初始化验收](acceptance/2026-10-24-original-archived-source-initialization.md)
+保留原 floor 82/checkpoint 102/77 个命令，显式 parent9/recovery v0.23 接纳空应用；
+普通增量不放宽连续性，原 source/anchor/Unknown/首次预算保持。真实身份/TLS 输入、
+实际原进程退出、缺失 Log/purged Snapshot 与三个恢复后 leader 已有证据。
+同 bundle 反复丢失第三目标 epoch 的反例由原 WAL 共识只读/重复持久值和受限工作任务
+收敛；实际原 SQL held-writer 反例和全部 152 项 Replica 回归通过。
+当前长历史接管仍约 141 秒，性能与完整 producer/最终 CAS 回收、滚动升级以及 B–F
+继续必需，不能据此宣布 SoftwareComplete。
 
 [原 staging 回收与 Root8 恢复](acceptance/2026-10-24-original-staging-reclamation.md)补齐真实
 旧 copy 硬链接和非空中断文件的有界回收、删除前 SIGKILL/删除后 SQL 结果失败、旧 ID 只读

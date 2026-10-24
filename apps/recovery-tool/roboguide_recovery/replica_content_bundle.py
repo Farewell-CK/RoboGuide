@@ -172,6 +172,12 @@ def _parent(
             json.loads(metadata["content_producer_heads"]), {"schema", "view", "snapshot"}
         )
         state = json.loads(metadata["content_state"])
+        from .replica_initialization import validate_content, validate_parent
+
+        if connection.execute("PRAGMA user_version").fetchone()[0] == 9:
+            validate_parent(connection)
+        else:
+            validate_content(state, None)
         if heads["schema"] != "roboguide.content-producer-heads/v0.1" or (
             heads["view"] is None
         ) != (state is None):

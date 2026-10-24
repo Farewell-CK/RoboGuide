@@ -9,6 +9,11 @@ mod adoption;
 mod apply;
 #[path = "store_content.rs"]
 mod content;
+#[path = "store_initialization.rs"]
+mod initialization;
+#[cfg(test)]
+#[path = "store_initialization_tests.rs"]
+mod initialization_tests;
 #[path = "store_log_content.rs"]
 mod log_content;
 #[path = "store_network.rs"]
@@ -65,6 +70,12 @@ const NETWORK_CONTENT_KEY: &str = "network_content_membership_schema";
 pub(crate) const CONTROLLER_CONTENT_VERSION: i64 = 8;
 /// Closed original child journal interpretation, independent of Raft/domain codecs.
 pub(crate) const CONTROLLER_CONTENT_SCHEMA: &str = "roboguide.replica-storage/v0.8";
+/// Explicit archived-source initialization authority; parent8 and earlier writers refuse it.
+const INITIALIZATION_CONTENT_VERSION: i64 = 9;
+/// Closed initialization/owned-Controller parent interpretation, independent of domain schemas.
+const INITIALIZATION_CONTENT_SCHEMA: &str = "roboguide.replica-storage/v0.9";
+/// Mandatory immutable initialization declaration; explicit null differs from a missing row.
+const INITIALIZATION_POLICY_KEY: &str = "content_initialization_policy";
 
 /// Explicit local authority generation, never inferred from an existing file or a new table.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -75,6 +86,29 @@ enum NetworkContentMode {
     Member,
     /// Explicit owned-child parent8.
     Controller,
+    /// Explicit parent9; old modes cannot infer this authority from its content root.
+    Initialization,
+}
+
+/// Exact local opening interpretation, including an explicitly requested drained parent migration.
+struct NetworkContentOpening {
+    /// Original selected network generation.
+    mode: NetworkContentMode,
+    /// Common deployment-pinned source declaration, absent for ordinary upgraded applications.
+    initialization_policy: Option<ContentInitializationPolicy>,
+    /// Explicit original-parent migration, never selected by normal open or file discovery.
+    upgrade: bool,
+}
+
+impl From<NetworkContentMode> for NetworkContentOpening {
+    /// Keeps every old constructor's original generation without granting new initialization.
+    fn from(mode: NetworkContentMode) -> Self {
+        Self {
+            mode,
+            initialization_policy: None,
+            upgrade: false,
+        }
+    }
 }
 /// Legacy names retained only as read-only views after the atomic format migration.
 const LEGACY_TABLES: [&str; 5] = [
@@ -267,7 +301,10 @@ impl ReplicaView {
             if self.history_anchor.is_some()
                 || !crate::content::hex_digest(&content.batch_digest)
                 || content.candidate.identity().map_err(io_error)? != content.batch_digest
-                || content.candidate.schema != CONTENT_APPLICATION_SCHEMA
+                || !matches!(
+                    content.candidate.schema.as_str(),
+                    CONTENT_APPLICATION_SCHEMA | CONTENT_INITIALIZATION_SCHEMA
+                )
                 || content.candidate.profile_identity != profile
                 || content.candidate.batch.checkpoint
                     != *self
@@ -282,7 +319,23 @@ impl ReplicaView {
                     "complete original replica view has invalid auxiliary identity/metadata compaction",
                 ));
             }
-            content.candidate.batch.validate().map_err(io_error)?;
+            content
+                .candidate
+                .validate_context_batch()
+                .map_err(io_error)?;
+            if content.source_initialization
+                != content
+                    .candidate
+                    .initialization_anchor()
+                    .map_err(io_error)?
+                || (content.candidate.schema == CONTENT_INITIALIZATION_SCHEMA
+                    && (self.events != content.candidate.batch.events
+                        || self.commands != content.candidate.batch.commands))
+            {
+                return Err(io_error(
+                    "complete original view lost initialization lineage or source rows",
+                ));
+            }
             content
                 .recovery
                 .validate_for(
@@ -292,6 +345,18 @@ impl ReplicaView {
                     })?,
                 )
                 .map_err(io_error)?;
+            if let Some(anchor) = &content.source_initialization
+                && (anchor.history_floor > content.recovery.history_floor().map_err(io_error)?
+                    || anchor.event_sequence > content.batch.checkpoint.event_sequence
+                    || self
+                        .commands
+                        .last()
+                        .is_none_or(|head| anchor.authority_revision > head.authority_revision))
+            {
+                return Err(io_error(
+                    "original initialization anchor exceeds current retained authority",
+                ));
+            }
             if crate::content_application::required_inputs(
                 &content.recovery,
                 &self.events,
@@ -346,6 +411,10 @@ pub struct SqliteRaftStore {
     network_content: bool,
     /// Explicit local original-child journal; false never permits application ingress.
     pub(crate) controller_content: bool,
+    /// Explicit parent9 interpretation, independent of an actual empty application.
+    initialization_content: bool,
+    /// Original immutable declaration, never imported from another member's Snapshot.
+    initialization_policy: Option<Arc<ContentInitializationPolicy>>,
     /// Actual original queue admission on a managed worker clone; it is never serialized or renewed.
     work_clock: Option<crate::content_store::ProducerClock>,
     /// Bounds actual running plus queued heavy work per original store, retained inside each worker.
@@ -407,15 +476,22 @@ fn prepare_storage_format(
     content_identity: Option<&ReplicaContentIdentity>,
     producers: bool,
     adoption: bool,
-    network_mode: NetworkContentMode,
+    opening: &NetworkContentOpening,
 ) -> Result<(), String> {
+    let network_mode = opening.mode;
     let network_content = network_mode != NetworkContentMode::None;
-    let controller_content = network_mode == NetworkContentMode::Controller;
+    let controller_content = matches!(
+        network_mode,
+        NetworkContentMode::Controller | NetworkContentMode::Initialization
+    );
+    let initialization_content = network_mode == NetworkContentMode::Initialization;
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
     let marker = schema_object_type(connection, "replica_storage_format")?;
-    let target_version = if controller_content {
+    let target_version = if initialization_content {
+        INITIALIZATION_CONTENT_VERSION
+    } else if controller_content {
         CONTROLLER_CONTENT_VERSION
     } else if network_content {
         NETWORK_CONTENT_VERSION
@@ -430,6 +506,72 @@ fn prepare_storage_format(
     } else {
         REPLICA_STORAGE_VERSION
     };
+    if let Some(policy) = &opening.initialization_policy {
+        policy.validate()?;
+        if !initialization_content {
+            return Err("initialization policy requires explicit parent9".into());
+        }
+    }
+    if opening.upgrade
+        && !matches!(
+            version,
+            CONTROLLER_CONTENT_VERSION | INITIALIZATION_CONTENT_VERSION
+        )
+    {
+        return Err(
+            "drained initialization upgrade requires an existing original parent8/9".into(),
+        );
+    }
+    if initialization_content && opening.upgrade && version == CONTROLLER_CONTENT_VERSION {
+        prepare_storage_format(
+            connection,
+            profile,
+            application_schema,
+            content_identity,
+            producers,
+            adoption,
+            &NetworkContentMode::Controller.into(),
+        )?;
+        let original = read_view(connection).map_err(|error| error.to_string())?;
+        original
+            .validate(application_schema, profile)
+            .map_err(|error| error.to_string())?;
+        if opening.initialization_policy.is_some() && !original.is_empty_application() {
+            return Err("initialization declaration cannot replace an existing application".into());
+        }
+        let journal: String = connection
+            .query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
+            .map_err(|error| {
+                format!("original initialization SQL connections are not quiescent: {error}")
+            })?;
+        if journal != "delete" {
+            return Err("original initialization SQL is not quiescent".into());
+        }
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Exclusive)
+            .map_err(|error| {
+                format!("original initialization SQL connections are not quiescent: {error}")
+            })?;
+        transaction.execute_batch(&format!("DROP TABLE replica_storage_format; CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version={INITIALIZATION_CONTENT_VERSION}),schema TEXT NOT NULL); INSERT INTO replica_storage_format VALUES ({INITIALIZATION_CONTENT_VERSION},'{INITIALIZATION_CONTENT_SCHEMA}'); PRAGMA user_version={INITIALIZATION_CONTENT_VERSION};"))
+            .map_err(|error| error.to_string())?;
+        write_meta(
+            &transaction,
+            INITIALIZATION_POLICY_KEY,
+            &opening.initialization_policy,
+        )
+        .map_err(|error| error.to_string())?;
+        crate::source_initialization::initialize_storage(&transaction)?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        return prepare_storage_format(
+            connection,
+            profile,
+            application_schema,
+            content_identity,
+            producers,
+            adoption,
+            opening,
+        );
+    }
     if (content_identity.is_some() && version != 0 && version != target_version)
         || (content_identity.is_none()
             && matches!(
@@ -439,6 +581,7 @@ fn prepare_storage_format(
                     | ADOPTED_STORAGE_VERSION
                     | NETWORK_CONTENT_VERSION
                     | CONTROLLER_CONTENT_VERSION
+                    | INITIALIZATION_CONTENT_VERSION
             ))
     {
         return Err("complete-content Replica storage requires explicit original upgrade; metadata-only open/automatic migration refused".into());
@@ -470,6 +613,7 @@ fn prepare_storage_format(
             | ADOPTED_STORAGE_VERSION
             | NETWORK_CONTENT_VERSION
             | CONTROLLER_CONTENT_VERSION
+            | INITIALIZATION_CONTENT_VERSION
     ) && marker.as_deref() == Some("table")
     {
         if current.iter().any(|kind| kind.as_deref() != Some("table"))
@@ -488,6 +632,8 @@ fn prepare_storage_format(
             "roboguide.replica-storage/v0.1"
         } else if version == 2 {
             "roboguide.replica-storage/v0.2"
+        } else if version == INITIALIZATION_CONTENT_VERSION {
+            INITIALIZATION_CONTENT_SCHEMA
         } else if version == CONTROLLER_CONTENT_VERSION {
             CONTROLLER_CONTENT_SCHEMA
         } else if version == NETWORK_CONTENT_VERSION {
@@ -544,7 +690,15 @@ fn prepare_storage_format(
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
-        if object_count != if controller_content { 12 } else { 11 } {
+        if object_count
+            != if initialization_content {
+                13
+            } else if controller_content {
+                12
+            } else {
+                11
+            }
+        {
             return Err("Replica storage contains unknown tables/views".into());
         }
         for (legacy_name, storage_name) in LEGACY_TABLES.iter().zip(STORAGE_TABLES) {
@@ -656,6 +810,22 @@ fn prepare_storage_format(
             return Err("old Replica storage contains hidden network content authority".into());
         }
         crate::controller_ingress::validate_storage(connection, controller_content)?;
+        crate::source_initialization::validate_storage(
+            connection,
+            content_identity,
+            profile,
+            opening.initialization_policy.as_ref(),
+            initialization_content,
+        )?;
+        let retained_policy: Option<Option<ContentInitializationPolicy>> =
+            read_meta(connection, INITIALIZATION_POLICY_KEY).map_err(|error| error.to_string())?;
+        if initialization_content {
+            if retained_policy.as_ref() != Some(&opening.initialization_policy) {
+                return Err("original parent9 initialization policy is missing or differs".into());
+            }
+        } else if retained_policy.is_some() {
+            return Err("old parent contains hidden initialization policy authority".into());
+        }
         adoption::validate_history(
             connection,
             version,
@@ -759,7 +929,7 @@ fn prepare_storage_format(
              CREATE VIEW replica_log AS SELECT * FROM replica_v1_log;
              CREATE VIEW replica_events AS SELECT * FROM replica_v1_events;
              CREATE VIEW replica_snapshot AS SELECT * FROM replica_v1_snapshot;
-             PRAGMA user_version={target_version};",if controller_content{CONTROLLER_CONTENT_SCHEMA}else if network_content{NETWORK_CONTENT_SCHEMA}else if producers{PRODUCER_STORAGE_SCHEMA}else if content_identity.is_some(){CONTENT_STORAGE_SCHEMA}else{REPLICA_STORAGE_SCHEMA}),
+             PRAGMA user_version={target_version};",if initialization_content{INITIALIZATION_CONTENT_SCHEMA}else if controller_content{CONTROLLER_CONTENT_SCHEMA}else if network_content{NETWORK_CONTENT_SCHEMA}else if producers{PRODUCER_STORAGE_SCHEMA}else if content_identity.is_some(){CONTENT_STORAGE_SCHEMA}else{REPLICA_STORAGE_SCHEMA}),
         )
         .map_err(|error| error.to_string())?;
     write_meta(
@@ -814,6 +984,15 @@ fn prepare_storage_format(
     }
     if controller_content {
         crate::controller_ingress::initialize_storage(&transaction)?;
+    }
+    if initialization_content {
+        write_meta(
+            &transaction,
+            INITIALIZATION_POLICY_KEY,
+            &opening.initialization_policy,
+        )
+        .map_err(|error| error.to_string())?;
+        crate::source_initialization::initialize_storage(&transaction)?;
     }
     transaction.commit().map_err(|error| error.to_string())
 }
@@ -1050,7 +1229,13 @@ impl SqliteRaftStore {
             if logs != 0
                 || authority
                     != if allowed_network_genesis {
-                        if self.controller_content { 6 } else { 4 }
+                        if self.initialization_content {
+                            8
+                        } else if self.controller_content {
+                            6
+                        } else {
+                            4
+                        }
                     } else {
                         0
                     }
@@ -1206,6 +1391,103 @@ impl SqliteRaftStore {
         )
     }
 
+    /// Opens only explicit parent9/Root8 and its immutable original source declaration.
+    pub fn open_with_content_initialization(
+        path: &Path,
+        profile: &str,
+        application_schema: &str,
+        content: ReplicaContentStore,
+        policy: Option<ContentInitializationPolicy>,
+    ) -> Result<Self, String> {
+        Self::open_initialization_inner(path, profile, application_schema, content, policy, false)
+    }
+
+    /// Explicitly drains parent8/9 without replacing original identity, operations or uncertain history.
+    pub fn upgrade_content_initialization(
+        path: &Path,
+        profile: &str,
+        application_schema: &str,
+        content: ReplicaContentStore,
+        policy: Option<ContentInitializationPolicy>,
+    ) -> Result<Self, String> {
+        Self::open_initialization_inner(path, profile, application_schema, content, policy, true)
+    }
+
+    /// Requires original Root8 and preserves the exact selected original initialization declaration.
+    fn open_initialization_inner(
+        path: &Path,
+        profile: &str,
+        application_schema: &str,
+        content: ReplicaContentStore,
+        policy: Option<ContentInitializationPolicy>,
+        upgrade: bool,
+    ) -> Result<Self, String> {
+        if !content.staging_reclamation_enabled()
+            || content.identity().profile_identity != profile
+            || application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+        {
+            return Err(
+                "initialization parent requires original Root8/profile/current schema".into(),
+            );
+        }
+        Self::open_inner(
+            path,
+            profile,
+            application_schema,
+            Some(content),
+            false,
+            NetworkContentOpening {
+                mode: NetworkContentMode::Initialization,
+                initialization_policy: policy,
+                upgrade,
+            },
+        )
+    }
+
+    /// Observes only the selected parent9 interpretation, never current membership or write permission.
+    pub fn supports_content_initialization(&self) -> bool {
+        self.initialization_content
+    }
+
+    /// Exposes the immutable declared source without granting availability, read permission or use.
+    pub fn content_initialization_policy(&self) -> Option<&ContentInitializationPolicy> {
+        self.initialization_policy.as_deref()
+    }
+
+    /// Requires the actual selected parent generation and immutable source policy before new effects.
+    pub(crate) fn require_content_initialization(
+        &self,
+        candidate: &ContentApplicationBatch,
+    ) -> Result<(), String> {
+        let initial = candidate.schema == CONTENT_INITIALIZATION_SCHEMA;
+        if initial || candidate.source_initialization.is_some() {
+            if !self.initialization_content {
+                return Err("initialization content requires explicit parent9".into());
+            }
+            let policy = self
+                .initialization_policy
+                .as_ref()
+                .ok_or("parent9 has no declared source initialization")?;
+            if initial {
+                policy.require_candidate(candidate)
+            } else {
+                policy.require_anchor(
+                    candidate
+                        .source_initialization
+                        .as_ref()
+                        .ok_or("original initialization anchor missing")?,
+                )
+            }
+        } else if self.initialization_policy.is_some() {
+            Err(
+                "declared source initialization cannot be replaced by an ordinary empty bootstrap"
+                    .into(),
+            )
+        } else {
+            Ok(())
+        }
+    }
+
     /// Shares original actual SQLite/root lease setup without lending complete authority to old profiles.
     fn open_inner(
         path: &Path,
@@ -1213,8 +1495,10 @@ impl SqliteRaftStore {
         application_schema: &str,
         content: Option<ReplicaContentStore>,
         adoption: bool,
-        network_mode: NetworkContentMode,
+        network_opening: impl Into<NetworkContentOpening>,
     ) -> Result<Self, String> {
+        let opening = network_opening.into();
+        let network_mode = opening.mode;
         let network_content = network_mode != NetworkContentMode::None;
         let canonical = if path.exists() {
             path.canonicalize().map_err(|error| error.to_string())?
@@ -1294,7 +1578,7 @@ impl SqliteRaftStore {
                     .as_ref()
                     .is_some_and(ReplicaContentStore::producer_journal_enabled),
             adoption,
-            network_mode,
+            &opening,
         )?;
         if adoption {
             let journal: String = connection
@@ -1327,7 +1611,12 @@ impl SqliteRaftStore {
             application_schema: application_schema.into(),
             content,
             network_content,
-            controller_content: network_mode == NetworkContentMode::Controller,
+            controller_content: matches!(
+                network_mode,
+                NetworkContentMode::Controller | NetworkContentMode::Initialization
+            ),
+            initialization_content: network_mode == NetworkContentMode::Initialization,
+            initialization_policy: opening.initialization_policy.map(Arc::new),
             work_clock: None,
             storage_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
             consensus_jobs: Arc::new(tokio::sync::Semaphore::new(16)),
@@ -1457,7 +1746,11 @@ impl SqliteRaftStore {
             .connection
             .lock()
             .map_err(|_| "replica store lock is poisoned")?;
-        read_view(&connection).map_err(|error| error.to_string())
+        let view = read_view(&connection).map_err(|error| error.to_string())?;
+        if let Some(content) = &view.content {
+            self.require_content_initialization(&content.candidate)?;
+        }
+        Ok(view)
     }
 
     /// Persists exact local log records using the same original intent/SQL/flush path as OpenRaft.
@@ -1581,6 +1874,16 @@ impl SqliteRaftStore {
         connection: &Connection,
         batch: &state::ApplicationCommitBatch,
     ) -> Result<CommitReceipt, StorageError<u64>> {
+        self.apply_batch_context(connection, batch, None)
+    }
+
+    /// Shares exact row persistence while only parent9 may select the complete initial-source context.
+    fn apply_batch_context(
+        &self,
+        connection: &Connection,
+        batch: &state::ApplicationCommitBatch,
+        initial: Option<&state::ReplicaRecoveryProjection>,
+    ) -> Result<CommitReceipt, StorageError<u64>> {
         let previous: Option<state::PersistedCheckpoint> = read_meta(connection, "checkpoint")?;
         let revision: u64 = read_meta(connection, "revision")?.unwrap_or(0);
         let current_digest = previous.as_ref().map(state::checkpoint_identity);
@@ -1591,8 +1894,18 @@ impl SqliteRaftStore {
                 |row| row.get(0),
             )
             .map_err(io_error)?;
-        let rejection = if let Err(error) = batch.validate() {
-            Some(error.to_string())
+        let validation = match initial {
+            Some(recovery) if self.initialization_content => batch
+                .validate_content_initialization(recovery)
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
+            Some(_) => Err("initial content snapshot requires explicit parent9".into()),
+            None => batch.validate().map_err(|error| error.to_string()),
+        };
+        let rejection = if let Err(error) = validation {
+            Some(error)
+        } else if initial.is_some() && !read_view(connection)?.is_empty_application() {
+            Some("initial content snapshot requires an actual empty receiver".into())
         } else if batch.checkpoint.schema != self.application_schema {
             Some("replica application schema differs".into())
         } else if batch.commands.first().is_some_and(|command| {
@@ -1840,7 +2153,7 @@ impl RaftLogReader<ControllerRaftConfig> for SqliteRaftStore {
             return Ok(Vec::new());
         }
         self.run_consensus_work(move|store|{
-        let connection = store.connection.lock().map_err(io_error)?;
+        store.read_consensus_snapshot(|connection| {
         let mut statement = connection.prepare("SELECT data FROM replica_v1_log WHERE log_index>=?1 AND log_index<=?2 ORDER BY log_index").map_err(io_error)?;
         let rows = statement
             .query_map(params![start, end.min(i64::MAX as u64)], |row| {
@@ -1849,6 +2162,7 @@ impl RaftLogReader<ControllerRaftConfig> for SqliteRaftStore {
             .map_err(io_error)?;
         rows.map(|row| serde_json::from_str(&row.map_err(io_error)?).map_err(io_error))
             .collect()
+        })
         }).await
     }
 }
@@ -1859,24 +2173,26 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
     /// Exposes the exact last-present/purged pointers independently of applied state.
     async fn get_log_state(&mut self) -> Result<LogState<ControllerRaftConfig>, StorageError<u64>> {
         self.run_consensus_work(move |store| {
-            let connection = store.connection.lock().map_err(io_error)?;
-            let purged: Option<LogId<u64>> = read_meta(&connection, "purged")?;
-            let last: Option<String> = connection
-                .query_row(
-                    "SELECT data FROM replica_v1_log ORDER BY log_index DESC LIMIT 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(io_error)?;
-            let last = last
-                .map(|entry| {
-                    serde_json::from_str::<Entry<ControllerRaftConfig>>(&entry).map_err(io_error)
+            store.read_consensus_snapshot(|connection| {
+                let purged: Option<LogId<u64>> = read_meta(connection, "purged")?;
+                let last: Option<String> = connection
+                    .query_row(
+                        "SELECT data FROM replica_v1_log ORDER BY log_index DESC LIMIT 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(io_error)?;
+                let last = last
+                    .map(|entry| {
+                        serde_json::from_str::<Entry<ControllerRaftConfig>>(&entry)
+                            .map_err(io_error)
+                    })
+                    .transpose()?;
+                Ok(LogState {
+                    last_purged_log_id: purged,
+                    last_log_id: last.map(|entry| entry.log_id).or(purged),
                 })
-                .transpose()?;
-            Ok(LogState {
-                last_purged_log_id: purged,
-                last_log_id: last.map(|entry| entry.log_id).or(purged),
             })
         })
         .await
@@ -1891,6 +2207,12 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
     async fn save_vote(&mut self, vote: &Vote<u64>) -> Result<(), StorageError<u64>> {
         let vote = *vote;
         self.run_consensus_work(move |store| {
+            if store.network_content
+                && store.read_consensus_snapshot(|connection| read_meta(connection, "vote"))?
+                    == Some(vote)
+            {
+                return Ok(());
+            }
             let connection = store.connection.lock().map_err(io_error)?;
             write_meta(&connection, "vote", &vote)
         })
@@ -1900,8 +2222,7 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
     /// Returns only the durable vote; malformed values fail closed.
     async fn read_vote(&mut self) -> Result<Option<Vote<u64>>, StorageError<u64>> {
         self.run_consensus_work(move |store| {
-            let connection = store.connection.lock().map_err(io_error)?;
-            read_meta(&connection, "vote")
+            store.read_consensus_snapshot(|connection| read_meta(connection, "vote"))
         })
         .await
     }
@@ -1912,6 +2233,12 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
         committed: Option<LogId<u64>>,
     ) -> Result<(), StorageError<u64>> {
         self.run_consensus_work(move |store| {
+            if store.network_content
+                && store.read_consensus_snapshot(|connection| read_meta(connection, "committed"))?
+                    == committed
+            {
+                return Ok(());
+            }
             let connection = store.connection.lock().map_err(io_error)?;
             match committed {
                 Some(committed) => write_meta(&connection, "committed", &committed),
@@ -1929,8 +2256,7 @@ impl RaftLogStorage<ControllerRaftConfig> for SqliteRaftStore {
     /// Reads the last durable consensus commitment.
     async fn read_committed(&mut self) -> Result<Option<LogId<u64>>, StorageError<u64>> {
         self.run_consensus_work(move |store| {
-            let connection = store.connection.lock().map_err(io_error)?;
-            read_meta(&connection, "committed")
+            store.read_consensus_snapshot(|connection| read_meta(connection, "committed"))
         })
         .await
     }

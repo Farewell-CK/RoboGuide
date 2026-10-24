@@ -117,6 +117,14 @@ impl ReplicaNode {
         if &actual != original_voters {
             return Err("original voting set changed before content admission".into());
         }
+        self.require_initialization_members(
+            voters.clone(),
+            self.current_epoch()
+                .ok_or("voter contract requires the current leader")?,
+            clock,
+            caller.clone(),
+        )
+        .await?;
         let view = self.store.network_view().await?;
         if view.revision == 0
             && view.checkpoint.is_none()

@@ -50,8 +50,9 @@ mod timer_transaction;
 #[path = "write_availability.rs"]
 mod write_availability;
 pub use application_replication::{
-    APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch,
-    checkpoint_identity, validate_persisted_event,
+    APPLICATION_COMMIT_SCHEMA, APPLICATION_CONTENT_INITIALIZATION_SCHEMA,
+    ApplicationBatchReplicator, ApplicationCommitBatch, checkpoint_identity,
+    validate_persisted_event,
 };
 pub use archive::{
     ArchiveManifest, ArchiveSink, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,

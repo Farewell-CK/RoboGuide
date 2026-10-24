@@ -25,7 +25,7 @@ pub(super) fn operation(
 }
 
 /// Retains actual Root work capacity inside each blocking SQL/hash task, even after waiter cancellation.
-pub(super) async fn on_worker<T, F>(node: &ReplicaNode, work: F) -> Result<T, String>
+pub(crate) async fn on_worker<T, F>(node: &ReplicaNode, work: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce(ReplicaNode) -> Result<T, String> + Send + 'static,

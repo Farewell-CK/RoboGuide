@@ -195,19 +195,17 @@ fn reference_kind(kind: ReplicaContentProducerKind) -> ReplicaContentReferenceKi
 
 /// Derives one complete original operation's own pins, without borrowing another producer's identity.
 fn references(intent: &ProducerIntent) -> Result<Vec<ReplicaContentReference>, String> {
+    let operation = digest(&intent.operation_id)?;
+    let authority = digest(intent)?;
     intent
         .inputs
         .iter()
         .map(|content| {
             Ok(ReplicaContentReference {
-                reference_id: format!(
-                    "producer:{}:{}",
-                    digest(&intent.operation_id)?,
-                    digest(content)?
-                ),
+                reference_id: format!("producer:{}:{}", operation, digest(content)?),
                 kind: reference_kind(intent.source.kind),
                 content: content.clone(),
-                authority_digest: digest(intent)?,
+                authority_digest: authority.clone(),
                 generation: 1,
             })
         })

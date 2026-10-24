@@ -8,6 +8,8 @@ mod tests;
 
 /// Versioned exact application batch, independent of Node Protocol and physical lifecycle.
 pub const APPLICATION_COMMIT_SCHEMA: &str = "roboguide.application-commit/v2";
+/// Explicit original compacted-source snapshot; ordinary incremental validation refuses this codec.
+pub const APPLICATION_CONTENT_INITIALIZATION_SCHEMA: &str = "roboguide.application-snapshot/v0.1";
 
 /// Exact transaction candidate requiring one durable quorum decision before local Commit.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -69,6 +71,38 @@ pub fn checkpoint_identity(checkpoint: &PersistedCheckpoint) -> String {
 }
 
 impl ApplicationCommitBatch {
+    /// Validates only the complete original compacted source, returning its unchanged metadata digest.
+    /// The caller must separately prove an empty receiver, negotiated authority, bytes and quorum.
+    pub fn validate_content_initialization(
+        &self,
+        recovery: &ReplicaRecoveryProjection,
+    ) -> Result<String, SqliteEventLogError> {
+        if self.schema != APPLICATION_CONTENT_INITIALIZATION_SCHEMA
+            || self.previous_event_sequence != 0
+            || self.previous_checkpoint_digest.is_some()
+            || recovery.history_floor()? == 0
+            || self.events.len() > 8192
+            || self.commands.len() > 8192
+            || self
+                .commands
+                .first()
+                .is_none_or(|head| head.authority_revision != 1)
+            || self.checkpoint.checkpoint_json.len() > 64 * 1024 * 1024
+        {
+            return Err(SqliteEventLogError::Codec(
+                "initial content snapshot requires its explicit codec, an empty predecessor and complete original compacted source".into(),
+            ));
+        }
+        CompleteReplicaState {
+            schema: "roboguide.complete-replica-state/v0.1".into(),
+            checkpoint: self.checkpoint.clone(),
+            events: self.events.clone(),
+            commands: self.commands.clone(),
+            recovery: recovery.clone(),
+        }
+        .identity()
+    }
+
     /// Rejects wrong codecs, unbounded input, discontinuous evidence or an incomplete target.
     pub fn validate(&self) -> Result<(), SqliteEventLogError> {
         if !matches!(

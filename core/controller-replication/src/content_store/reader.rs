@@ -138,11 +138,9 @@ pub(super) fn reference(intent: &ReaderIntent) -> Result<ReplicaContentReference
 pub(super) fn record(connection: &Connection, id: &str) -> Result<Option<ReaderRecord>, String> {
     use rusqlite::OptionalExtension;
     let raw: Option<String> = connection
-        .query_row(
-            "SELECT record FROM content_readers WHERE reader_id=?",
-            [id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT record FROM content_readers WHERE reader_id=?")
+        .map_err(|error| error.to_string())?
+        .query_row([id], |row| row.get(0))
         .optional()
         .map_err(|error| error.to_string())?;
     raw.map(|raw| {

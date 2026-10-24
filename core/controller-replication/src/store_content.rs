@@ -12,6 +12,10 @@ impl SqliteRaftStore {
         if self.content.is_none() {
             return Ok(());
         }
+        if let Some(content) = &incoming.content {
+            self.require_content_initialization(&content.candidate)
+                .map_err(io_error)?;
+        }
         let previous = read_view(connection)?;
         if incoming.revision < previous.revision
             || !incoming.commands.starts_with(&previous.commands)
@@ -29,6 +33,9 @@ impl SqliteRaftStore {
                 .content
                 .as_ref()
                 .ok_or_else(|| io_error("Snapshot lost original complete content authority"))?;
+            if current.source_initialization != previous.source_initialization {
+                return Err(io_error("Snapshot changed original initialization lineage"));
+            }
             current
                 .recovery
                 .follows(&previous.recovery)
@@ -55,6 +62,8 @@ impl SqliteRaftStore {
             content_application: candidate,
         }) = &entry.payload
         {
+            self.require_content_initialization(candidate)
+                .map_err(io_error)?;
             if self.content.is_none() {
                 return Err(io_error(
                     "metadata-only storage refuses complete-content log admission",
@@ -279,6 +288,9 @@ impl SqliteRaftStore {
             rejection: Some(message),
             certificate: None,
         };
+        if let Err(error) = self.require_content_initialization(candidate) {
+            return Ok(rejected(error));
+        }
         let Some(content) = &self.content else {
             return Ok(rejected(
                 "metadata-only Replica storage refuses complete-content authority".into(),
@@ -350,7 +362,11 @@ impl SqliteRaftStore {
                 ));
             }
         }
-        let receipt = self.apply_batch(connection, &candidate.batch)?;
+        let receipt = if candidate.schema == CONTENT_INITIALIZATION_SCHEMA {
+            self.apply_batch_context(connection, &candidate.batch, Some(&candidate.recovery))?
+        } else {
+            self.apply_batch(connection, &candidate.batch)?
+        };
         if receipt.accepted {
             write_meta(
                 connection,

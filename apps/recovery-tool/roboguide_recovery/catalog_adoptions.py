@@ -18,6 +18,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.20",
     "roboguide.recovery-profile/v0.21",
     "roboguide.recovery-profile/v0.22",
+    "roboguide.recovery-profile/v0.23",
 }
 WRAPPER = "roboguide.controller-checkpoint/v51"
 WRAPPERS = {WRAPPER, "roboguide.controller-checkpoint/v52", "roboguide.controller-checkpoint/v53"}

@@ -62,6 +62,27 @@ impl ReplicaNode {
         duration_ms: u64,
     ) -> Result<ContentQuorumTarget, String> {
         let clock = crate::content_store::ContentBudget::issue(duration_ms)?;
+        self.stage_content_from_source_checked(
+            candidate,
+            source,
+            operation_id,
+            clock,
+            Arc::new(|| Ok(())),
+        )
+        .await
+    }
+
+    /// Uses the original caller clock/witness through all source copies without creating another budget.
+    pub(crate) async fn stage_content_from_source_checked(
+        &self,
+        candidate: &ContentApplicationBatch,
+        source: &artifact_store::FileSystemArtifactStore,
+        operation_id: &str,
+        clock: crate::content_store::ContentBudget,
+        permission: crate::content_store::StreamPermission,
+    ) -> Result<ContentQuorumTarget, String> {
+        clock.check()?;
+        permission()?;
         if operation_id.is_empty()
             || operation_id.len() > 128
             || operation_id.chars().any(char::is_control)
@@ -83,12 +104,19 @@ impl ReplicaNode {
             );
         }
         let target = self.content_target_for(candidate).await?;
+        let reusable = self
+            .previous_content_target(&target)
+            .await
+            .map(|previous| previous.inputs.into_iter().collect::<BTreeSet<_>>())
+            .unwrap_or_default();
         let root = self.store.network_content_store()?;
         let capacity = root.stream_work_permit()?;
         let held = self.clone();
         let expected = target.clone();
-        let check: crate::content_store::StreamPermission =
-            Arc::new(move || held.network_target_authority(&expected).map(|_| ()));
+        let check: crate::content_store::StreamPermission = Arc::new(move || {
+            permission()?;
+            held.network_target_authority(&expected).map(|_| ())
+        });
         let source = source.clone();
         let original = target.clone();
         let command = operation_id.to_string();
@@ -97,7 +125,7 @@ impl ReplicaNode {
             clock.check()?;
             check()?;
             for input in &original.inputs {
-                if input.source_owner == actual.owner_id {
+                if input.source_owner == actual.owner_id && !reusable.contains(input) {
                     let key = serde_json::to_vec(&(&command, &original, input))
                         .map_err(|error| error.to_string())?;
                     let command = format!("source:{:x}", sha2::Sha256::digest(key));
@@ -153,7 +181,7 @@ impl ReplicaNode {
     }
 
     /// Holds the owned transition through actual Raft completion even after its caller stops waiting.
-    async fn commit_content_serialized(
+    pub(crate) async fn commit_content_serialized(
         &self,
         candidate: ContentApplicationBatch,
         clock: crate::content_store::ContentBudget,
@@ -162,6 +190,7 @@ impl ReplicaNode {
         clock.check()?;
         permission()?;
         let target = self.content_target_for(&candidate).await?;
+        let previous = self.previous_content_target(&target).await;
         let root = self.store.network_content_store()?;
         let capacity = root.stream_work_permit()?;
         let node = self.clone();
@@ -193,8 +222,24 @@ impl ReplicaNode {
             let inputs = target.inputs.clone();
             let transfer_clock = clock.clone();
             let caller = permission.clone();
+            let previous = previous.clone();
             transfers.spawn(async move {
+                let reusable = match &previous {
+                    Some(previous) => {
+                        node.reusable_peer_inputs(
+                            receiver,
+                            previous,
+                            &transfer_clock,
+                            caller.clone(),
+                        )
+                        .await?
+                    }
+                    None => BTreeSet::new(),
+                };
                 for input in inputs {
+                    if reusable.contains(&input) {
+                        continue;
+                    }
                     let command = serde_json::to_vec(&(receiver, &target, &input))
                         .map_err(|error| error.to_string())?;
                     let command_id = format!("candidate:{:x}", sha2::Sha256::digest(command));
@@ -248,6 +293,62 @@ impl ReplicaNode {
         clock.check()?;
         permission()?;
         Ok((committed.data, complete))
+    }
+
+    /// Selects only the immediate actual accepted predecessor in the same epoch and membership.
+    async fn previous_content_target(
+        &self,
+        target: &ContentQuorumTarget,
+    ) -> Option<ContentQuorumTarget> {
+        match self.accepted_content_target().await {
+            Ok(previous)
+                if previous.epoch == target.epoch
+                    && previous.membership == target.membership
+                    && previous.revision.checked_add(1) == Some(target.revision) =>
+            {
+                Some(previous)
+            }
+            _ => None,
+        }
+    }
+
+    /// Uses only fresh actual prior metadata/bytes under their still-active accepted-view pins.
+    async fn reusable_peer_inputs(
+        &self,
+        receiver: u64,
+        previous: &ContentQuorumTarget,
+        clock: &crate::content_store::ContentBudget,
+        permission: crate::content_store::StreamPermission,
+    ) -> Result<BTreeSet<ArtifactContentKey>, String> {
+        clock.check()?;
+        permission()?;
+        self.network_target_authority(previous)?;
+        let actual = transport::observe_content_target(self, receiver, previous.clone()).await;
+        clock.check()?;
+        permission()?;
+        self.network_target_authority(previous)?;
+        let Ok(actual) = actual else {
+            return Ok(BTreeSet::new());
+        };
+        let expected = MemberContentObservation {
+            profile_identity: previous.profile_identity.clone(),
+            member: receiver,
+            store_owner: previous
+                .member_stores
+                .get(&receiver)
+                .ok_or("original prior member Root is missing")?
+                .clone(),
+            epoch: previous.epoch,
+            revision: previous.revision,
+            checkpoint_digest: previous.checkpoint_digest.clone(),
+            batch_digest: previous.batch_digest.clone(),
+            membership: previous.membership.clone(),
+            inputs: previous.inputs.clone(),
+        };
+        if actual != expected {
+            return Ok(BTreeSet::new());
+        }
+        Ok(previous.inputs.iter().cloned().collect())
     }
     /// Independently reads this actual committed metadata and all actual bytes on an owned worker.
     pub async fn observe_content_target(
@@ -432,34 +533,44 @@ impl ReplicaNode {
         if candidate.epoch != epoch || !self.config.streams_content() {
             return Err("original content candidate has another leader epoch/generation".into());
         }
-        let previous = self.store.network_view().await?;
-        candidate.validate_against(&previous, &self.profile_identity())?;
-        let (_, membership) = self.store.try_network_authority()?;
-        let mut owners = BTreeMap::new();
-        for voter in membership.voter_ids() {
-            let owner = membership
-                .nodes()
-                .find_map(|(id, node)| {
-                    (*id == voter)
-                        .then_some(node.content_store_owner.clone())
-                        .flatten()
-                })
-                .ok_or("original committed voter lacks its exact root")?;
-            owners.insert(voter, owner);
-        }
-        let target = ContentQuorumTarget {
-            profile_identity: self.profile_identity(),
-            epoch,
-            revision: previous
-                .revision
-                .checked_add(1)
-                .ok_or("original application revision exhausted")?,
-            checkpoint_digest: state::checkpoint_identity(&candidate.batch.checkpoint),
-            batch_digest: candidate.identity()?,
-            membership,
-            member_stores: owners,
-            inputs: candidate.inputs.clone(),
-        };
+        let candidate = candidate.clone();
+        let target = crate::transport::content_worker(self, move |current| {
+            current.store.require_content_initialization(&candidate)?;
+            current
+                .store
+                .require_initialization_submission(&candidate)?;
+            let previous = current.store.accepted_view()?;
+            candidate.validate_against(&previous, &current.profile_identity())?;
+            let (_, membership) = current.store.try_network_authority()?;
+            let mut owners = BTreeMap::new();
+            for voter in membership.voter_ids() {
+                let owner = membership
+                    .nodes()
+                    .find_map(|(id, node)| {
+                        (*id == voter)
+                            .then_some(node.content_store_owner.clone())
+                            .flatten()
+                    })
+                    .ok_or("original committed voter lacks its exact root")?;
+                owners.insert(voter, owner);
+            }
+            let target = ContentQuorumTarget {
+                profile_identity: current.profile_identity(),
+                epoch,
+                revision: previous
+                    .revision
+                    .checked_add(1)
+                    .ok_or("original application revision exhausted")?,
+                checkpoint_digest: state::checkpoint_identity(&candidate.batch.checkpoint),
+                batch_digest: candidate.identity()?,
+                membership,
+                member_stores: owners,
+                inputs: candidate.inputs.clone(),
+            };
+            current.network_target_authority(&target)?;
+            Ok(target)
+        })
+        .await?;
         self.check_epoch(epoch).await?;
         self.network_target_authority(&target)?;
         Ok(target)

@@ -138,7 +138,8 @@ pub(super) async fn write<S: tokio::io::AsyncWrite + Unpin>(
     stream
         .write_all(&encoded.bytes)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    stream.flush().await.map_err(|error| error.to_string())
 }
 
 /// Checks the actual current original process/TLS witness on an owned worker before returning it.
@@ -566,11 +567,10 @@ impl ReplicaNode {
                 handlers.spawn(async move {
                     let _permit = permit;
                     let budget = held.transport_budget.clone();
-                    if tokio::time::timeout(Duration::from_secs(300), handle(stream, held, pid))
-                        .await
-                        .is_err()
-                    {
-                        budget.timed_out();
+                    match tokio::time::timeout(Duration::from_secs(300), handle(stream, held, pid)).await {
+                        Err(_) => budget.timed_out(),
+                        Ok(Err(error)) => eprintln!("original Controller ingress connection ended for actual peer {pid}: {}", error.chars().take(1024).collect::<String>()),
+                        Ok(Ok(())) => {}
                     }
                 });
             }

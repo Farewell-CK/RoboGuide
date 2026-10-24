@@ -66,6 +66,66 @@ pub(super) struct ProcessConfig {
     /// Explicit original child/content contract; unavailable to unchanged process v0.1.
     #[serde(default)]
     pub content: Option<ContentProcessConfig>,
+    /// Optional explicit original Node transport files; configuration creates no Node inventory.
+    #[serde(default)]
+    pub node_tls: Option<ControllerTransportTlsConfig>,
+    /// Optional deployed Operator transport and original authorization profile files.
+    #[serde(default)]
+    pub operator_tls: Option<ControllerTransportTlsConfig>,
+    /// Optional deployed Artifact transport and original authorization profile files.
+    #[serde(default)]
+    pub artifact_tls: Option<ControllerTransportTlsConfig>,
+}
+
+/// Explicit listener TLS dependencies; common policy pins bytes independently of local paths.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ControllerTransportTlsConfig {
+    /// Closed deployed transport-input interpretation.
+    pub schema: String,
+    /// Actual deployed Controller server certificate PEM.
+    pub server_cert: PathBuf,
+    /// Actual deployed Controller server private-key PEM.
+    pub server_key: PathBuf,
+    /// Actual accepted client CA PEM.
+    pub client_ca: PathBuf,
+    /// Exact original listener identity/authorization profile JSON, with no built-in device list.
+    pub profile: PathBuf,
+}
+
+impl ControllerTransportTlsConfig {
+    /// Checks explicit input shape without creating or discovering any Node or certificate.
+    fn validate(&self) -> Result<(), String> {
+        if self.schema != "roboguide.controller-transport-tls-inputs/v0.1"
+            || [
+                &self.server_cert,
+                &self.server_key,
+                &self.client_ca,
+                &self.profile,
+            ]
+            .iter()
+            .any(|path| !path.is_absolute() || path.as_os_str().len() > 4096)
+        {
+            return Err(
+                "Controller TLS inputs require explicit bounded existing file paths".into(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Reads only the declared bounded original identity profile, never inventing an empty replacement.
+    pub fn profile_json(&self) -> Result<String, String> {
+        let mut raw = String::new();
+        std::fs::File::open(&self.profile)
+            .map_err(|error| error.to_string())?
+            .take(1024 * 1024 + 1)
+            .read_to_string(&mut raw)
+            .map_err(|error| error.to_string())?;
+        if raw.len() > 1024 * 1024 {
+            return Err("Controller transport profile exceeds its input bound".into());
+        }
+        Ok(raw)
+    }
 }
 
 /// Explicit original byte root and owned-child transport, independent of Nodes or device inventory.
@@ -87,6 +147,12 @@ pub(super) struct ContentProcessConfig {
     /// Exact explicit Root5 backing receipt; absent for original Root4 process v0.2.
     #[serde(default)]
     pub restore_binding_digest: Option<String>,
+    /// Common immutable complete archived-source declaration; only process v0.7 may select it.
+    #[serde(default)]
+    pub initialization: Option<controller_replication::ContentInitializationPolicy>,
+    /// Original source member's local existing files; other members must leave these absent.
+    #[serde(default)]
+    pub initialization_source: Option<controller_replication::ContentInitializationInput>,
 }
 
 /// Closed one-shot leader handoff command; it never asserts physical continuity.
@@ -122,6 +188,19 @@ impl ProcessConfig {
             "physical_entity_registry":self.physical_entity_registry_path.as_deref().map(file_digest).transpose()?,
             "environment":self.controller_environment,
         });
+        for (name, configured) in [
+            ("node_tls", &self.node_tls),
+            ("operator_tls", &self.operator_tls),
+            ("artifact_tls", &self.artifact_tls),
+        ] {
+            if let Some(tls) = configured {
+                tls.validate()?;
+                tls.profile_json()?;
+                identity[name] = serde_json::json!({"schema":tls.schema,
+                "server_cert":file_digest(&tls.server_cert)?, "server_key":file_digest(&tls.server_key)?,
+                "client_ca":file_digest(&tls.client_ca)?, "profile":file_digest(&tls.profile)?});
+            }
+        }
         if let Some(content) = &self.content {
             identity
                 .as_object_mut()
@@ -134,6 +213,12 @@ impl ProcessConfig {
                         "quorum_observation_ms":content.quorum_observation_ms,
                     }),
                 );
+            if let Some(initialization) = &content.initialization {
+                identity["owned_content"]["parent"] =
+                    serde_json::json!("roboguide.replica-storage/v0.9");
+                identity["owned_content"]["initialization"] =
+                    serde_json::to_value(initialization).map_err(|error| error.to_string())?;
+            }
         }
         let bytes = serde_json::to_vec(&identity).map_err(|error| error.to_string())?;
         Ok(format!("{:x}", Sha256::digest(bytes)))
@@ -142,6 +227,29 @@ impl ProcessConfig {
     /// Rejects broad network/configuration scope before owning files or creating a Controller.
     pub fn validate(&self) -> Result<(), String> {
         self.replica.validate()?;
+        for tls in [&self.node_tls, &self.operator_tls, &self.artifact_tls]
+            .into_iter()
+            .flatten()
+        {
+            tls.validate()?;
+        }
+        if let Some(tls) = &self.node_tls {
+            let profile: serde_json::Value =
+                serde_json::from_str(&tls.profile_json()?).map_err(|error| error.to_string())?;
+            if profile.get("schema").is_some() && self.artifact_tls.is_none() {
+                return Err("lifecycle Node TLS requires its explicit Artifact certificate authorization profile".into());
+            }
+        }
+        if self.operator_tls.is_some()
+            && self
+                .controller_environment
+                .get("ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN")
+                .is_some_and(|value| value == "1")
+        {
+            return Err(
+                "Operator TLS cannot combine with the loopback development administrator".into(),
+            );
+        }
         self.transport_limits.validate()?;
         if self
             .controller_environment
@@ -163,6 +271,42 @@ impl ProcessConfig {
                 "roboguide.controller-replica-process/v0.1"
             }
             Some(content) => {
+                match &content.initialization {
+                    Some(policy) => {
+                        policy.validate()?;
+                        if self.schema != "roboguide.controller-replica-process/v0.7"
+                            || !self.replica.members.contains_key(&policy.source_member)
+                            || self
+                                .replica
+                                .initial_voters
+                                .as_ref()
+                                .is_some_and(|voters| !voters.contains(&policy.source_member))
+                            || (content.initialization_source.is_some()
+                                != (self.replica.replica_id == policy.source_member))
+                        {
+                            return Err("original initialization requires process v0.7 and exactly its configured source member".into());
+                        }
+                        if let Some(input) = &content.initialization_source {
+                            input.validate()?;
+                            if input.source_sql.starts_with(&self.storage_directory)
+                                || input.source_cas.starts_with(&self.storage_directory)
+                                || input.source_sql.starts_with(&content.root)
+                                || input.source_cas.starts_with(&content.root)
+                            {
+                                return Err(
+                                    "original initialization source overlaps the receiving member"
+                                        .into(),
+                                );
+                            }
+                        }
+                    }
+                    None if content.initialization_source.is_some() => {
+                        return Err(
+                            "source paths require the common original initialization policy".into(),
+                        );
+                    }
+                    None => {}
+                }
                 if !self.replica.streams_content()
                     || content.schema != "roboguide.controller-content-process/v0.1"
                     || !content.root.is_absolute()
@@ -213,7 +357,9 @@ impl ProcessConfig {
                             "restored Root5 requires its exact explicit binding digest".into()
                         );
                     }
-                    if self.schema == "roboguide.controller-replica-process/v0.6" {
+                    if self.schema == "roboguide.controller-replica-process/v0.7" {
+                        "roboguide.controller-replica-process/v0.7"
+                    } else if self.schema == "roboguide.controller-replica-process/v0.6" {
                         "roboguide.controller-replica-process/v0.6"
                     } else if self.schema == "roboguide.controller-replica-process/v0.5" {
                         "roboguide.controller-replica-process/v0.5"
@@ -223,7 +369,9 @@ impl ProcessConfig {
                         "roboguide.controller-replica-process/v0.3"
                     }
                 } else {
-                    if self.schema == "roboguide.controller-replica-process/v0.6" {
+                    if self.schema == "roboguide.controller-replica-process/v0.7" {
+                        "roboguide.controller-replica-process/v0.7"
+                    } else if self.schema == "roboguide.controller-replica-process/v0.6" {
                         "roboguide.controller-replica-process/v0.6"
                     } else if self.schema == "roboguide.controller-replica-process/v0.5" {
                         "roboguide.controller-replica-process/v0.5"
@@ -369,6 +517,8 @@ mod tests {
             child_budget_ms: 45000,
             quorum_observation_ms: 5000,
             restore_binding_digest: None,
+            initialization: None,
+            initialization_source: None,
         });
         configuration.controller_environment.extend([
             ("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA".into(), "1".into()),
@@ -441,7 +591,7 @@ mod tests {
         assert!(configuration.validate().is_err());
     }
 
-    /// Explicit Root7/8 selection preserves policy identity while requiring its own process generation.
+    /// Explicit storage selectors preserve ordinary policy identity without granting initialization.
     #[test]
     fn root7_process_is_explicit_and_keeps_original_cluster_policy() {
         let mut configuration = owned_profile();
@@ -450,6 +600,7 @@ mod tests {
         for schema in [
             "roboguide.controller-replica-process/v0.5",
             "roboguide.controller-replica-process/v0.6",
+            "roboguide.controller-replica-process/v0.7",
         ] {
             configuration.schema = schema.into();
             configuration
@@ -484,6 +635,50 @@ mod tests {
                 configuration.policy_digest().unwrap();
             assert_eq!(configuration.validate().is_ok(), matches!(value, "0" | "1"));
         }
+    }
+
+    /// Contract-only input files prove digest binding and relocation, never an actual TLS handshake.
+    #[test]
+    fn node_tls_inputs_pin_bytes_and_allow_identical_declared_relocation() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut configuration = profile("1");
+        let source = directory.path().join("source");
+        let target = directory.path().join("target");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        for name in ["server.pem", "key.pem", "ca.pem", "identity.json"] {
+            std::fs::write(
+                source.join(name),
+                if name == "identity.json" {
+                    "{}".into()
+                } else {
+                    format!("explicit contract-only {name}")
+                },
+            )
+            .unwrap();
+            std::fs::copy(source.join(name), target.join(name)).unwrap();
+        }
+        let inputs = |root: &Path| ControllerTransportTlsConfig {
+            schema: "roboguide.controller-transport-tls-inputs/v0.1".into(),
+            server_cert: root.join("server.pem"),
+            server_key: root.join("key.pem"),
+            client_ca: root.join("ca.pem"),
+            profile: root.join("identity.json"),
+        };
+        configuration.node_tls = Some(inputs(&source));
+        let original = configuration.policy_digest().unwrap();
+        configuration.replica.application_policy_digest = original.clone();
+        configuration.validate().unwrap();
+        configuration.node_tls = Some(inputs(&target));
+        assert_eq!(configuration.policy_digest().unwrap(), original);
+        configuration.validate().unwrap();
+        std::fs::write(
+            target.join("identity.json"),
+            "changed original identity policy",
+        )
+        .unwrap();
+        assert_ne!(configuration.policy_digest().unwrap(), original);
+        assert!(configuration.validate().is_err());
     }
 
     /// Local listener capacity remains bounded without changing original homogeneous cluster identity.

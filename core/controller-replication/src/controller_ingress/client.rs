@@ -307,6 +307,33 @@ impl ControllerContentClient {
         }
     }
 
+    /// Requires this actual current child and full quorum to expose the exact original initial checkpoint.
+    /// This readonly source proof cannot adopt changed/later checkpoints or another cluster's authority.
+    pub fn require_initialization_checkpoint(
+        &self,
+        checkpoint: &state::PersistedCheckpoint,
+    ) -> Result<ContentInitializationAnchor, String> {
+        let view = self.view()?;
+        let content = view
+            .content
+            .as_ref()
+            .ok_or("original initialization content is absent")?;
+        let anchor = content
+            .source_initialization
+            .as_ref()
+            .ok_or("original initialization lineage is absent")?;
+        if content.candidate.schema != CONTENT_INITIALIZATION_SCHEMA
+            || view.revision != 1
+            || view.checkpoint.as_ref() != Some(checkpoint)
+            || content.candidate.batch.checkpoint != *checkpoint
+            || anchor.checkpoint_digest != state::checkpoint_identity(checkpoint)
+        {
+            return Err("actual current accepted state is not this exact original initialization checkpoint".into());
+        }
+        self.check()?;
+        Ok(anchor.clone())
+    }
+
     /// Observes only the exact original operation; no response can renew or repeat its first work.
     pub fn observe(&self, command: &str) -> Result<Option<ControllerIngressStatus>, String> {
         let mut exchange = self.connect(ChildCommand::Observe {

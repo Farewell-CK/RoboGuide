@@ -25,6 +25,45 @@ pub(crate) const BLOB_DIRECTORY: &str = "blobs";
 const WRITER_LOCK_FILE: &str = ".writer.lock";
 
 impl FileSystemArtifactStore {
+    /// Leases an existing complete retained source without creating, repairing or upgrading any file.
+    /// The original layout and journals must already be valid before this handle can read payloads.
+    pub fn open_existing_managed(root: &Path) -> Result<Self, ArtifactStoreError> {
+        validate_directory_tree(root, false, "open existing Artifact source")?;
+        let root = root
+            .canonicalize()
+            .map_err(|error| io_error("resolve existing Artifact source", error))?;
+        let file = open_regular_file(
+            &root.join(WRITER_LOCK_FILE),
+            "open existing Artifact writer lease",
+        )?;
+        file.try_lock()
+            .map_err(|error| io_error("lease existing Artifact source", io::Error::other(error)))?;
+        let writer_lock = Arc::new(ArtifactWriterLease {
+            file,
+            prepared_sources: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+        });
+        let (owner, schema) = crate::layout::inspect_retained(&root)?;
+        let storage_version = match schema {
+            crate::ARTIFACT_LAYOUT_SCHEMA => 1,
+            crate::ARTIFACT_REFERENCE_LAYOUT_SCHEMA => 2,
+            crate::ARTIFACT_ARCHIVE_LAYOUT_SCHEMA => 3,
+            crate::ARTIFACT_GC_LAYOUT_SCHEMA => 5,
+            _ => {
+                return Err(unsafe_path_error(
+                    "open existing Artifact source",
+                    "unsupported original layout",
+                ));
+            }
+        };
+        Ok(Self {
+            root,
+            blob_directory: crate::RETAINED_BLOB_DIRECTORY,
+            owner_id: Some(owner),
+            storage_version,
+            _writer_lock: writer_lock,
+        })
+    }
+
     /// Creates and exclusively leases a store root before initializing its managed directories.
     ///
     /// The returned store holds the writer lease for the lifetime of all its clones and uploads.

@@ -194,6 +194,29 @@ Harness 不绕过 RoboGuide 直接调用 simulator skill。本地导航/操作 C
 
 ## 如何维护
 
+ADR-0195 已接通并通过实际进程门禁：已压缩原源经显式初始化 application-initialization/v0.1 / application-snapshot/v0.1
+接纳完整原 checkpoint、热尾、命令与 Archive/Catalog；接收方必须尚无应用状态，普通
+增量 v2 保持连续性检查。parent9/显式启动与 recovery v0.23 封住旧入口，保留原来源、
+Unknown、预算和 member-local 历史。原 Unknown、Log/Snapshot、实际入口和三 leader 恢复
+见[验收记录](../../development/acceptance/2026-10-24-original-archived-source-initialization.md)；
+全局 Archive/引用覆盖、升级和全部非发布完成条件仍继续。
+原 standalone 检查点保留原字节；仅实际当前 child 经 PID/Unix/mTLS 与完整 quorum 核对
+那一份当前初始检查点后，才可用普通持久化启动命令绑定新 profile。通用恢复仍拒绝跨
+profile；旧 child binary 必须在启动应用前因缺少显式初始化支持而拒绝。
+可选 typed Node-TLS 部署输入按原证书/密钥/CA/身份 profile 文件字节固定策略，保留原
+身份恢复要求；配置文件不注册、合成或启动 Node，文件路径也不替代内容身份。
+同 epoch/成员的紧邻原状态可复用已接纳的本机输入，仍逐字节校验全部候选内容；远端
+只在新鲜 mTLS 原状态/完整字节观察一致时跳过旧输入重传，最终完整 quorum 校验保留。
+typed TLS 输入同时支持 Operator/Artifact 原授权 profile，实际文件字节固定共同策略。
+原已完成 Archive 还须声明原 source CAS 和实际 Archive 目录，不能由初始化元数据替代。
+v0.23 仅对独立核对到同一实际 Replica profile、全部原记录和依赖一致的重复投影复用校验；
+冲突、其他集群和 standalone 重复仍拒绝，原历史不合并改写。
+完整归档候选的校验、原读取接纳以及 supervisor 父库观察在持有原容量/租约的工作任务
+执行，异步网络线程不等待父库互斥锁。原 epoch 丢失仍停止并 wait child，观察不恢复权限。
+网络 profile 的 Raft log/range/vote/committed 读取使用同一原租约 inode 的新只读 WAL
+事务，保持 generation/profile 检查；不等应用 writer，也不读未提交数据。写入/ACK 顺序保持。
+重复保存 vote/committed 仅在新鲜原 WAL 观察已有完全相同持久值时返回，变化值仍经原 FULL writer。
+
 ADR-0194 已实现并通过真实进程/完整恢复验收：显式 Root8 按原 copy/stream ID 和实际退休证据接纳 staging
 回收，intent/逐项 Unknown 与 mandatory inventories 先于 open/unlink。只删除原私有临时
 名字，CAS/原引用/Root7 tombstone 独立；旧结果与预算不改写。process v0.6/recovery v0.22

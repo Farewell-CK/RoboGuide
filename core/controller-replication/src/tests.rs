@@ -7,6 +7,31 @@ use sha2::Digest as _;
 use std::sync::atomic::Ordering;
 use store::io_error;
 
+/// Never reissues an in-process test endpoint during the reservation-to-service-bind gap.
+static NEXT_TEST_PORT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1024);
+
+/// Reserves a distinct endpoint outside the actual kernel's outgoing ephemeral range.
+pub(crate) fn reserved_test_listener() -> std::net::TcpListener {
+    let raw = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range").unwrap();
+    let bounds = raw
+        .split_whitespace()
+        .map(|value| value.parse::<u32>().unwrap())
+        .collect::<Vec<_>>();
+    loop {
+        let port = NEXT_TEST_PORT.fetch_add(1, Ordering::SeqCst);
+        assert!(
+            port <= u16::MAX as u32,
+            "actual test process exhausted distinct endpoint reservations"
+        );
+        if !(bounds[0]..=bounds[1]).contains(&port)
+            && let Ok(listener) =
+                std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port as u16))
+        {
+            return listener;
+        }
+    }
+}
+
 /// Creates a fresh real SQLite store for each upstream storage scenario.
 struct StoreBuilder;
 
@@ -436,7 +461,7 @@ fn members() -> BTreeMap<u64, SocketAddr> {
 /// Acquires a pre-enrolled member universe for dynamic membership tests.
 fn members_with_count(count: usize) -> BTreeMap<u64, SocketAddr> {
     let listeners = (0..count)
-        .map(|_| std::net::TcpListener::bind("127.0.0.1:0").unwrap())
+        .map(|_| reserved_test_listener())
         .collect::<Vec<_>>();
     listeners
         .iter()

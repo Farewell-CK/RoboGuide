@@ -359,6 +359,11 @@ impl ReplicaContentStore {
         self.inner.streams
     }
 
+    /// Reports only the explicitly opened Root8 generation; it grants no source or byte authority.
+    pub(crate) fn staging_reclamation_enabled(&self) -> bool {
+        self.inner.staging_gc
+    }
+
     /// Initializes only a genuinely empty declared root; interrupted/existing authority is not replaced.
     pub fn create(root: &Path, profile_identity: &str, member: u64) -> Result<Self, String> {
         layout::create(root, profile_identity, member, ContentCreateMode::Reader)
@@ -708,11 +713,9 @@ fn validate_reference(reference: &ReplicaContentReference) -> Result<(), String>
 fn reference_record(connection: &Connection, id: &str) -> Result<Option<ReferenceRecord>, String> {
     use rusqlite::OptionalExtension;
     let raw: Option<String> = connection
-        .query_row(
-            "SELECT record FROM content_references WHERE reference_id=?",
-            [id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT record FROM content_references WHERE reference_id=?")
+        .map_err(|error| error.to_string())?
+        .query_row([id], |row| row.get(0))
         .optional()
         .map_err(|error| error.to_string())?;
     raw.map(|raw| {

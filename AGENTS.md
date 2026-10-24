@@ -1,5 +1,19 @@
 # Repository Guidelines
 
+ADR-0195 implements explicit original archived-source initialization and actual process acceptance.
+Only an empty application may admit the complete original source, hot tail, Archive/Catalog and
+command evidence through application-initialization/v0.1 / application-snapshot/v0.1. Generic
+incremental validation stays strict. Parent9/explicit startup/recovery v0.23 must fence old entry
+points before new authority; all original local histories, clocks and Unknown remain. No fabricated
+prefix events, imaginary predecessor, Node inventory or physical facts are permitted.
+Original listener TLS/profile file bytes remain policy-bound. Complete recovery declares original
+Archive/source stores and validates exact repeated projections only within one actual Replica profile.
+Network consensus reads use fresh original-inode committed WAL snapshots; identical durable vote/
+committed saves avoid the application mutex, while changed values retain FULL writer ordering.
+Candidate/read/supervisor work retains original leases/capacity off async network workers. Native
+SIGKILL/Unknown/Log/Snapshot, runnable TLS/recovery/release and three-leader cold reads pass; remaining
+global producer/Archive coverage, upgrade and non-release requirements are not waived.
+
 ADR-0194 defines explicit Root8 private staging reclamation beside unchanged Root7 CAS tombstones.
 Only typed original copy/stream IDs with exact released completion/end or retained retirement can
 admit cleanup. Frozen original source/release digests and actual current file identity precede

@@ -26,6 +26,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.20",
     "roboguide.recovery-profile/v0.21",
     "roboguide.recovery-profile/v0.22",
+    "roboguide.recovery-profile/v0.23",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -393,7 +394,7 @@ def validate(
             )
             assert owner is not None
             owners[owner["owner_id"]] = item["component_id"]
-    seen: set[str] = set()
+    seen: dict[str, tuple[str | None, str, str, str]] = {}
     authorities: dict[str, str] = {}
     replica_profiles: dict[str, str] = {}
     bindings: dict[str, set[str]] = {}
@@ -406,6 +407,7 @@ def validate(
     for component in components:
         if component["kind"] != "controller":
             continue
+        actual_profile: str | None = None
         database = root / "stores" / component["component_id"] / component["database"]
         with closing(
             sqlite3.connect(database.as_uri() + "?mode=ro&immutable=1", uri=True)
@@ -434,6 +436,7 @@ def validate(
                     "roboguide.recovery-profile/v0.20",
                     "roboguide.recovery-profile/v0.21",
                     "roboguide.recovery-profile/v0.22",
+                    "roboguide.recovery-profile/v0.23",
                 } and isinstance(authority_id, str):
                     from .replica_content_bundle import projection_authority
 
@@ -456,6 +459,7 @@ def validate(
                         "roboguide.recovery-profile/v0.20",
                         "roboguide.recovery-profile/v0.21",
                         "roboguide.recovery-profile/v0.22",
+                        "roboguide.recovery-profile/v0.23",
                     }
                 ):
                     raise ValueError(
@@ -506,11 +510,25 @@ def validate(
                 + "/archive-"
                 + hashlib.sha256(request["command_id"].encode()).hexdigest()
             )
+            projection = (
+                actual_profile,
+                digest(
+                    canonical((intent, state, receipt, cleanups.get(request["command_id"], [])))
+                ),
+                source,
+                target["component_id"],
+            )
             if prefix in seen:
-                raise ValueError(
-                    "Archive commands from independent authorities overlap one destination"
-                )
-            seen.add(prefix)
+                if (
+                    profile_schema != "roboguide.recovery-profile/v0.23"
+                    or actual_profile is None
+                    or seen[prefix] != projection
+                ):
+                    raise ValueError(
+                        "Archive commands from independent authorities overlap one destination"
+                    )
+                continue
+            seen[prefix] = projection
             aborted = False
             for cleanup_intent, cleanup_receipt in cleanups.get(request["command_id"], []):
                 aborted = (

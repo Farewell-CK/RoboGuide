@@ -2,6 +2,7 @@
 
 use crate::transport_budget::{MAX_FRAME_BYTES, TransportBudget};
 use crate::*;
+use openraft::StoredMembership;
 use openraft::error::{InstallSnapshotError, RPCError, RaftError, RemoteError, Unreachable};
 use openraft::network::{RPCOption, RaftNetwork, RaftNetworkFactory};
 use openraft::raft::{
@@ -25,6 +26,7 @@ pub(crate) use content_streams::{
     StreamNotice, StreamReceive, StreamRoute, receive_owned_stream, send_committed_content_stream,
     send_content_stream, send_content_stream_checked, send_historical_log_stream,
 };
+pub(crate) use log_content::on_worker as content_worker;
 
 #[cfg(test)]
 #[path = "transport_tls_tests.rs"]
@@ -50,6 +52,13 @@ struct Request {
 /// Private consensus and durability operations never carry an embodied Node selector.
 #[derive(Serialize, Deserialize)]
 enum Command {
+    /// Exact readonly parent9 policy negotiation under the original leader and committed membership.
+    ContentInitializationContractV1 {
+        /// Original current leader, never inferred from a supported-format boolean.
+        epoch: ControllerEpoch,
+        /// Exact original committed voters/nodes, including joint configuration and Root bindings.
+        membership: StoredMembership<u64, ReplicaMember>,
+    },
     /// Readonly contract negotiation; a supported Root generation is not byte or application readiness.
     SnapshotContentContractV1,
     /// Original durable prerequisite issue before any new content source payload read.
@@ -265,6 +274,8 @@ impl Command {
 /// Closed response preserves upstream Raft errors separately from child acceptance.
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Reply {
+    /// Actual immutable local parent9 declaration, without claiming source or byte availability.
+    ContentInitializationContract(Result<Option<ContentInitializationPolicy>, String>),
     /// Actual explicit local Root generation, with no claim of content readiness.
     SnapshotContentContract(Result<bool, String>),
     /// Exact immutable original prerequisite evidence, never parent application success.
@@ -528,6 +539,41 @@ where
         Reply::Rejected("replica profile/member identity mismatch".into())
     } else {
         match request.command {
+            Command::ContentInitializationContractV1 { epoch, membership } => {
+                let sender = request.sender;
+                let connection = certificate_connection.clone();
+                Reply::ContentInitializationContract(
+                    log_content::on_worker(&node, move |current| {
+                        if !current.store.supports_content_initialization()
+                            || epoch.replica_id != sender
+                        {
+                            return Err(
+                                "original member lacks parent9 initialization contract".into()
+                            );
+                        }
+                        let (trust, actual) = current.store.try_network_authority()?;
+                        let metrics = current.raft.metrics().borrow().clone();
+                        if actual != membership
+                            || metrics.membership_config.as_ref() != &membership
+                            || metrics.current_term != epoch.term
+                            || metrics.current_leader != Some(epoch.replica_id)
+                        {
+                            return Err(
+                                "original initialization contract epoch/membership changed".into(),
+                            );
+                        }
+                        current
+                            .store
+                            .validate_content_membership(membership.membership())?;
+                        connection
+                            .as_ref()
+                            .ok_or("initialization contract requires actual mutual TLS")?
+                            .authorize_with_trust(sender, current.config.replica_id, &trust)?;
+                        Ok(current.store.content_initialization_policy().cloned())
+                    })
+                    .await,
+                )
+            }
             Command::SnapshotContentContractV1 => Reply::SnapshotContentContract(
                 node.store
                     .network_content_store()
@@ -864,6 +910,11 @@ where
             Command::ObserveLeaderTransfer { transfer_id } => {
                 Reply::LeaderTransferRecord(if transfer_id.is_empty() || transfer_id.len() > 128 {
                     Err("original transfer observation ID is unbounded".into())
+                } else if node.config.streams_content() {
+                    content_worker(&node, move |current| {
+                        current.store.leader_transfer_by_id(&transfer_id)
+                    })
+                    .await
                 } else {
                     node.store.leader_transfer_by_id(&transfer_id)
                 })
@@ -959,7 +1010,7 @@ where
         .write_all(&encoded.bytes)
         .await
         .map_err(|error| error.to_string())?;
-    Ok(())
+    stream.flush().await.map_err(|error| error.to_string())
 }
 
 /// Sends one authenticated transfer request to a current voter and returns its admission receipt.
@@ -1031,6 +1082,27 @@ fn node_network(node: &ReplicaNode, target: u64) -> Result<ReplicaNetwork, Strin
         node.tls.clone(),
         node.transport_budget.clone(),
     )
+}
+
+/// Negotiates the actual peer generation/policy over its original current authenticated connection.
+pub(crate) async fn initialization_contract(
+    node: &ReplicaNode,
+    target: u64,
+    epoch: ControllerEpoch,
+    membership: StoredMembership<u64, ReplicaMember>,
+    remaining_ms: u64,
+) -> Result<Option<ContentInitializationPolicy>, String> {
+    match node_network(node, target)?
+        .exchange(
+            Command::ContentInitializationContractV1 { epoch, membership },
+            RPCOption::new(Duration::from_millis(remaining_ms)),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::ContentInitializationContract(result) => result,
+        _ => Err("actual peer refused the initialization contract".into()),
+    }
 }
 
 /// Constructs an inert exact-member client with an actual original capacity owner, never a new grant.
@@ -1551,6 +1623,7 @@ impl ReplicaNetwork {
                 }
                 stream.write_u64(encoded.bytes.len() as u64).await?;
                 stream.write_all(&encoded.bytes).await?;
+                stream.flush().await?;
                 let reply = read_reply(&mut stream, &self.budget).await?;
                 if self.node.content_store_owner.is_some() {
                     tls.authenticate_peer(self.target, stream.get_ref().1.peer_certificates())
@@ -1561,6 +1634,7 @@ impl ReplicaNetwork {
                 let mut stream = stream;
                 stream.write_u64(encoded.bytes.len() as u64).await?;
                 stream.write_all(&encoded.bytes).await?;
+                stream.flush().await?;
                 if required_leaf.is_some() {
                     return Err(std::io::Error::other(
                         "certificate evidence requires actual mutual TLS",

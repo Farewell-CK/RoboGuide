@@ -37,12 +37,32 @@ struct Config {
     /// Explicit Root8 native acceptance, independent of application and Node generations.
     #[serde(default)]
     staging_gc: bool,
+    /// Explicit parent9 source initialization; false keeps the original parent7/8 interpretation.
+    #[serde(default)]
+    initialization_parent: bool,
+    /// Exact common immutable source declaration, never fabricated from a received candidate.
+    #[serde(default)]
+    initialization: Option<ContentInitializationPolicy>,
 }
 
 /// Closed trusted local process operations; no arbitrary SQL, shell or fabricated execution is accepted.
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
+    /// Requests the actual maintained leader transfer with independent no-child or original wait proof.
+    TransferTo {
+        /// Exact original configured voter to receive the election trigger.
+        member: u64,
+        /// Immutable first real transfer identity.
+        transfer_id: String,
+    },
+    /// Executes only the core original once-only source path, retaining its first journal and budget.
+    InitializeSource {
+        /// Exact original source files; existing operation retries cannot change them.
+        input: ContentInitializationInput,
+    },
+    /// Reads original local operation evidence, separately from current accepted quorum.
+    InitializationStatus,
     /// Enrolls only the declared actual infrastructure member as a non-voter through the core API.
     AddLearner {
         /// Existing configured real software replica, independent of embodied Nodes.
@@ -316,7 +336,18 @@ async fn serve(config: Config) -> Result<(), String> {
             config.replica.replica_id,
         )
     }?;
-    let (node, _server) = if config.owned_child {
+    let (node, _server) = if config.initialization_parent {
+        ReplicaNode::start_with_content_initialization(
+            config.replica.clone(),
+            &config.parent_sql,
+            root.clone(),
+            config.member_stores,
+            ReplicaTransportLimits::default(),
+            config.initialization,
+            None,
+        )
+        .await?
+    } else if config.owned_child {
         ReplicaNode::start_with_controller_content(
             config.replica.clone(),
             &config.parent_sql,
@@ -335,6 +366,9 @@ async fn serve(config: Config) -> Result<(), String> {
         )
         .await?
     };
+    if config.initialization_parent && !config.owned_child {
+        node.enable_controller_supervision()?;
+    }
     let _ingress = if config.owned_child {
         node.enable_controller_supervision()?;
         Some(
@@ -369,6 +403,21 @@ async fn serve(config: Config) -> Result<(), String> {
         let request: Request = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
         let shutdown = matches!(request, Request::Shutdown);
         let result = match request {
+            Request::TransferTo {
+                member,
+                transfer_id,
+            } => node
+                .request_leader_transfer(member, transfer_id)
+                .await
+                .map(|receipt| json!({"receipt":receipt})),
+            Request::InitializeSource { input } => node
+                .initialize_archived_source(input)
+                .await
+                .map(|status| json!({"original_status":status})),
+            Request::InitializationStatus => node
+                .content_initialization_status()
+                .await
+                .map(|status| json!({"original_status":status})),
             Request::AddLearner { member } => administration(&config.replica, &config.parent_sql)?
                 .add_learner(member)
                 .await
@@ -577,9 +626,38 @@ async fn main() -> Result<(), String> {
     if raw.len() > 1024 * 1024 {
         return Err("original network configuration exceeds its fixed bound".into());
     }
+    if mode == "inspect-initialization-source" {
+        let input: ContentInitializationInput =
+            serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
+        return emit(
+            serde_json::to_value(inspect_archived_source(&input)?)
+                .map_err(|error| error.to_string())?,
+        );
+    }
     let config: Config = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
     config.replica.validate()?;
     match mode.as_str() {
+        "initialization-upgrade" => {
+            if !config.initialization_parent || !config.staging_gc {
+                return Err("parent9 upgrade requires explicit parent9/Root8 declaration".into());
+            }
+            let root = ReplicaContentStore::open_with_staging_gc(
+                &config.content_root,
+                &config.replica.profile_identity(),
+                config.replica.replica_id,
+                None,
+            )?;
+            let store = SqliteRaftStore::upgrade_content_initialization(
+                &config.parent_sql,
+                &config.replica.profile_identity(),
+                &config.replica.application_schema,
+                root,
+                config.initialization,
+            )?;
+            emit(
+                json!({"schema":"roboguide.replica-storage/v0.9","revision":store.accepted_view()?.revision}),
+            )
+        }
         "snapshot-upgrade" => {
             if !config.snapshot_receives {
                 return Err("Snapshot upgrade requires explicit Root6 configuration".into());

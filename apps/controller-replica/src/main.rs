@@ -21,6 +21,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let first = arguments
         .next()
         .ok_or("usage: controller-replica [--policy-digest] <config.json>")?;
+    if first == "--inspect-initialization-source" {
+        let path = arguments
+            .next()
+            .ok_or("source inspection requires an explicit input.json")?;
+        if arguments.next().is_some() {
+            return Err("unexpected source inspection arguments".into());
+        }
+        let mut raw = Vec::new();
+        std::fs::File::open(path)?
+            .take(16 * 1024 + 1)
+            .read_to_end(&mut raw)?;
+        if raw.len() > 16 * 1024 {
+            return Err("source input exceeds its bound".into());
+        }
+        let input: controller_replication::ContentInitializationInput =
+            serde_json::from_slice(&raw)?;
+        let observation = tokio::task::spawn_blocking(move || {
+            controller_replication::inspect_archived_source(&input)
+        })
+        .await??;
+        println!("{}", serde_json::to_string(&observation)?);
+        return Ok(());
+    }
     if first == "--content-maintenance" {
         let path = arguments
             .next()
@@ -170,7 +193,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let digest_only = first == "--policy-digest";
     let profile_only = first == "--profile-identity";
-    let path = if digest_only || profile_only {
+    let upgrade_only = first == "--upgrade-initialization-parent";
+    let path = if digest_only || profile_only || upgrade_only {
         arguments.next().ok_or("missing config.json")?
     } else {
         first
@@ -189,5 +213,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     configuration.validate()?;
+    if upgrade_only {
+        if configuration.schema != "roboguide.controller-replica-process/v0.7" {
+            return Err("parent9 upgrade requires explicit process v0.7".into());
+        }
+        let content = configuration
+            .content
+            .as_ref()
+            .ok_or("explicit Root8 content is missing")?;
+        let root = controller_replication::ReplicaContentStore::open_with_staging_gc(
+            &content.root,
+            &configuration.replica.profile_identity(),
+            configuration.replica.replica_id,
+            content.restore_binding_digest.as_deref(),
+        )?;
+        let parent = controller_replication::SqliteRaftStore::upgrade_content_initialization(
+            &configuration.storage_directory.join("replica.sqlite3"),
+            &configuration.replica.profile_identity(),
+            &configuration.replica.application_schema,
+            root,
+            content.initialization.clone(),
+        )?;
+        println!(
+            "{}",
+            serde_json::json!({"schema":"roboguide.replica-storage/v0.9","revision":parent.accepted_view()?.revision})
+        );
+        return Ok(());
+    }
     supervisor::run(configuration).await.map_err(Into::into)
 }

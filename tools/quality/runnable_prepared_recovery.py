@@ -99,6 +99,7 @@ def verify(
     payload: bytes,
     source_owner: str,
     destination_owner: str,
+    budget_ms: int = 120000,
 ) -> dict[str, Any]:
     """Recover on the real new child and verify read-only retries after completion failure."""
     underlying = http
@@ -130,7 +131,7 @@ def verify(
         "command_id": "actual-prepared-takeover",
         "original_upload_digest": "sha256:"
         + hashlib.sha256(canonical(original).encode()).hexdigest(),
-        "budget_ms": 120000,
+        "budget_ms": budget_ms,
     }
     code, raw = http(origin, path, "POST", canonical(command).encode())
     assert code == 200, (code, raw.decode())
@@ -151,7 +152,7 @@ def verify(
     assert code == 200
     assert json.loads(raw)["record"] == recovered and json.loads(raw)["replayed"]
     assert original_rows(directory / "controller.sqlite3") == before
-    changed = {**command, "budget_ms": command["budget_ms"] + 1}
+    changed = {**command, "budget_ms": command["budget_ms"] - 1}
     assert http(origin, path, "POST", canonical(changed).encode())[0] == 409
     database = directory / "controller.sqlite3"
     with closing(sqlite3.connect(database)) as sql:

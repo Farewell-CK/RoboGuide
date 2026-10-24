@@ -877,6 +877,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args().skip(1).peekable();
     if arguments
         .peek()
+        .is_some_and(|argument| argument == "--replica-initialization-contract")
+    {
+        arguments.next();
+        if arguments.next().is_some() {
+            return Err(
+                "initialization contract inspection accepts no configuration or storage path"
+                    .into(),
+            );
+        }
+        println!("{}", controller_replication::CONTENT_INITIALIZATION_SCHEMA);
+        return Ok(());
+    }
+    if arguments
+        .peek()
         .is_some_and(|argument| argument == "--application-schema")
     {
         arguments.next();
@@ -1106,6 +1120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let receiver_router = router.clone();
     let memory_session_router = router.clone();
+    let mut adopted_initialization = false;
     let mut controller = match checkpoint {
         Some(checkpoint) => {
             if !matches!(
@@ -1214,7 +1229,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .as_ref()
                 .map(|feed| feed.source_digest().to_string());
             validate_restored_verifier_source(&saved, configured_verifier_digest.as_deref())?;
-            validate_replication_checkpoint(&saved, event_log.replication_profile())?;
+            if let Err(error) =
+                validate_replication_checkpoint(&saved, event_log.replication_profile())
+            {
+                if saved.replication_profile.is_some() || saved.schema != SERVER_CHECKPOINT_SCHEMA {
+                    return Err(error.into());
+                }
+                let source = replica_fence
+                    .as_ref()
+                    .and_then(|fence| fence.content_reader())
+                    .ok_or(error)?;
+                let original = checkpoint.clone();
+                tokio::task::spawn_blocking(move || {
+                    source.require_initialization_checkpoint(&original)
+                })
+                .await??;
+                adopted_initialization = true;
+            }
             application::validate_isolation_checkpoint_schema(&saved)?;
             ControllerState {
                 mission_admissions: saved.mission_admissions,
@@ -1374,6 +1405,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if initialize_checkpoint
+        || adopted_initialization
         || migrate_checkpoint
         || restored_stop_holds
         || restored_memory_fences

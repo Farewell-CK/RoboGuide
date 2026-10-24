@@ -85,15 +85,16 @@ pub use decision_policy::{
 };
 pub use decision_state::DecisionStateSnapshot;
 pub use event_log::{
-    APPLICATION_COMMIT_SCHEMA, ApplicationBatchReplicator, ApplicationCommitBatch,
-    ArchiveAbortIntent, ArchiveAbortReceipt, ArchiveAbortRequest, ArchiveAbortSink, ArchiveContent,
-    ArchiveCopierFence, ArchiveIntent, ArchiveLeaseIdentity, ArchiveManifest, ArchiveRequest,
-    ArchiveSink, AuthorityWriteStatus, CheckpointStoragePolicy, CheckpointWriteStats,
-    CompleteReplicaState, ControlCommandJournalEntry, FileArchiveSink, MAX_ARCHIVE_BYTES,
-    MAX_ARCHIVE_EVENTS, PersistedCheckpoint, PersistedEvent, REPLICA_RECOVERY_PROJECTION_SCHEMA,
-    ReplicaArchiveAbort, ReplicaArchiveManifest, ReplicaArchiveOperation,
-    ReplicaRecoveryProjection, SqliteEventLog, SqliteEventLogError, WriteFailure,
-    WriteRecoveryCommand, WriteRecoveryReceipt, checkpoint_identity, validate_persisted_event,
+    APPLICATION_COMMIT_SCHEMA, APPLICATION_CONTENT_INITIALIZATION_SCHEMA,
+    ApplicationBatchReplicator, ApplicationCommitBatch, ArchiveAbortIntent, ArchiveAbortReceipt,
+    ArchiveAbortRequest, ArchiveAbortSink, ArchiveContent, ArchiveCopierFence, ArchiveIntent,
+    ArchiveLeaseIdentity, ArchiveManifest, ArchiveRequest, ArchiveSink, AuthorityWriteStatus,
+    CheckpointStoragePolicy, CheckpointWriteStats, CompleteReplicaState,
+    ControlCommandJournalEntry, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,
+    PersistedCheckpoint, PersistedEvent, REPLICA_RECOVERY_PROJECTION_SCHEMA, ReplicaArchiveAbort,
+    ReplicaArchiveManifest, ReplicaArchiveOperation, ReplicaRecoveryProjection, SqliteEventLog,
+    SqliteEventLogError, WriteFailure, WriteRecoveryCommand, WriteRecoveryReceipt,
+    checkpoint_identity, validate_persisted_event,
 };
 pub use memory::MemoryCatalogProjection;
 pub use node::InMemorySharedNodeState;

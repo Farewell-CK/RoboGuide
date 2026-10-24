@@ -8,6 +8,22 @@ use std::os::unix::fs::MetadataExt;
 mod tests;
 
 impl SqliteRaftStore {
+    /// Reads only a committed original WAL snapshot without queuing consensus behind application SQL.
+    pub(super) fn read_consensus_snapshot<T>(
+        &self,
+        read: impl FnOnce(&Connection) -> Result<T, StorageError<u64>>,
+    ) -> Result<T, StorageError<u64>> {
+        if self.network_content {
+            return self
+                .read_network_snapshot(|connection| {
+                    read(connection).map_err(|error| error.to_string())
+                })
+                .map_err(io_error);
+        }
+        let connection = self.connection.lock().map_err(io_error)?;
+        read(&connection)
+    }
+
     /// Rechecks actual current retention/publication without renewing an original read on unrelated commits.
     pub(crate) fn require_current_content_read(
         &self,
@@ -185,7 +201,9 @@ impl SqliteRaftStore {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|error| error.to_string())?;
         if version
-            != if self.controller_content {
+            != if self.initialization_content {
+                INITIALIZATION_CONTENT_VERSION
+            } else if self.controller_content {
                 CONTROLLER_CONTENT_VERSION
             } else {
                 NETWORK_CONTENT_VERSION
@@ -202,6 +220,16 @@ impl SqliteRaftStore {
         }
         if self.controller_content {
             crate::controller_ingress::require_marker(&transaction)?;
+        }
+        if self.initialization_content
+            && read_meta::<Option<ContentInitializationPolicy>>(
+                &transaction,
+                INITIALIZATION_POLICY_KEY,
+            )
+            .map_err(|error| error.to_string())?
+                != Some(self.initialization_policy.as_deref().cloned())
+        {
+            return Err("original readonly initialization policy is missing or changed".into());
         }
         let result = read(&transaction)?;
         transaction.commit().map_err(|error| error.to_string())?;
@@ -286,6 +314,23 @@ impl SqliteRaftStore {
             return Err(
                 "original Controller ingress history prevents certificate bootstrap".into(),
             );
+        }
+        if self.initialization_content {
+            crate::source_initialization::validate_storage(
+                connection,
+                self.content.as_ref().map(|root| root.identity()),
+                &self.profile,
+                self.initialization_policy.as_deref(),
+                true,
+            )?;
+            if read_meta::<Vec<String>>(connection, crate::source_initialization::HEAD_KEY)
+                .map_err(|error| error.to_string())?
+                != Some(Vec::new())
+            {
+                return Err(
+                    "original initialization history prevents certificate bootstrap".into(),
+                );
+            }
         }
         if read_meta::<String>(connection, NETWORK_CONTENT_KEY)
             .map_err(|error| error.to_string())?

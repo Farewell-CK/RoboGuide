@@ -7,8 +7,10 @@ import hashlib
 import http.client as http_client
 import json
 import os
+import shutil
 import signal
 import sqlite3
+import ssl
 import subprocess
 import tempfile
 import time
@@ -35,10 +37,20 @@ def http(
     body: bytes = b"",
     *,
     timeout_seconds: float = 60,
+    tls_context: ssl.SSLContext | None = None,
 ) -> tuple[int, bytes]:
     """Send one actual local HTTP request; mutation errors never automatically re-execute it."""
+    secure = origin.startswith("https://")
+    if secure:
+        origin = origin.removeprefix("https://")
+        if tls_context is None:
+            raise ValueError("HTTPS observation requires the explicit original client TLS context")
     host, port = origin.rsplit(":", 1)
-    connection = http_client.HTTPConnection(host, int(port), timeout=timeout_seconds)
+    connection = (
+        http_client.HTTPSConnection(host, int(port), timeout=timeout_seconds, context=tls_context)
+        if secure
+        else http_client.HTTPConnection(host, int(port), timeout=timeout_seconds)
+    )
     try:
         connection.request(method, path, body, {"Content-Type": "application/json"})
         response = connection.getresponse()
@@ -85,6 +97,20 @@ def idle_snapshot(directory: Path) -> dict[str, Any]:
     return local
 
 
+def source_streams(configs: dict[int, dict[str, Any]], owner: str) -> dict[int, dict[str, str]]:
+    """Read exact retained source-owner stream rows without creating another transfer or receipt."""
+    result = {}
+    for member, config in configs.items():
+        path = Path(config["content"]["root"]) / "content.sqlite3"
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as sql:
+            result[member] = {
+                key: raw
+                for key, raw in sql.execute("SELECT stream_id,record FROM content_streams")
+                if json.loads(raw)["intent"]["content"]["source_owner"] == owner
+            }
+    return result
+
+
 def run(
     output: Path,
     supervisor: Path,
@@ -94,6 +120,7 @@ def run(
     owner_failover: bool = False,
     prepared_recovery: bool = False,
     release_after_recovery: bool = False,
+    initialization_source: Path | None = None,
 ) -> dict[str, Any]:
     """Retain exact binaries, native waits, complete SQL and independently verified bytes."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -128,6 +155,108 @@ def run(
         "scope": "actual current-owner runnable HTTP and original child restart",
         "observed_phases": [],
     }
+    source_policy = None
+    source_input = None
+    node_tls = None
+    operator_tls = None
+    artifact_tls = None
+    transport_context = None
+    if initialization_source is not None:
+        retained = json.loads((initialization_source / "result.json").read_bytes())
+        waits = json.loads((initialization_source / "owned-process-exits.json").read_bytes())
+        assert retained["passed"] and waits["all_owned_processes_reaped"]
+        source_input = {
+            "source_sql": str(initialization_source / "controller.sqlite3"),
+            "source_cas": str(initialization_source / "cas"),
+        }
+        path = output / "original-source-input.json"
+        save(path, source_input)
+        source = json.loads(
+            subprocess.check_output(
+                [str(supervisor), "--inspect-initialization-source", str(path)], timeout=30
+            )
+        )
+        save(output / "original-source-observation.json", source)
+        source_policy = {
+            "schema": "roboguide.content-initialization-policy/v0.1",
+            "source_state_digest": source["source_state_digest"],
+            "source_owner": source["source_owner"],
+            "source_member": 307,
+            "command_id": "actual-runnable-original-source-initialization",
+            "budget_ms": 120000,
+        }
+        result["source_contains_original_software_node_history"] = True
+        with closing(
+            sqlite3.connect(Path(source_input["source_sql"]).as_uri() + "?mode=ro", uri=True)
+        ) as sql:
+            checkpoint = json.loads(
+                sql.execute(
+                    "SELECT checkpoint_json FROM controller_checkpoint WHERE singleton=1"
+                ).fetchone()[0]
+            )
+        registry = json.loads(checkpoint["integration_json"])["control"].get(
+            "node_identity_registry"
+        )
+        if registry is not None:
+            deployed = output / "node-tls"
+            deployed.mkdir(mode=0o700)
+            for name in ("server.crt", "server.key", "ca.crt", "admin.crt", "admin.key"):
+                shutil.copyfile(initialization_source / "pki" / name, deployed / name)
+            save(deployed / "identity-profile.json", registry)
+            node_tls = {
+                "schema": "roboguide.controller-transport-tls-inputs/v0.1",
+                "server_cert": str(deployed / "server.crt"),
+                "server_key": str(deployed / "server.key"),
+                "client_ca": str(deployed / "ca.crt"),
+                "profile": str(deployed / "identity-profile.json"),
+            }
+            for plane in ("operator", "artifact"):
+                shutil.copyfile(
+                    initialization_source / f"{plane}-authorization.json",
+                    deployed / f"{plane}-authorization.json",
+                )
+            operator_tls = dict(node_tls, profile=str(deployed / "operator-authorization.json"))
+            artifact_tls = dict(node_tls, profile=str(deployed / "artifact-authorization.json"))
+            transport_context = ssl.create_default_context(cafile=str(deployed / "ca.crt"))
+            transport_context.load_cert_chain(deployed / "admin.crt", deployed / "admin.key")
+
+    def request_http(
+        origin: str,
+        path: str,
+        method: str = "GET",
+        body: bytes = b"",
+        *,
+        timeout_seconds: float = 60,
+    ) -> tuple[int, bytes]:
+        """Verify actual listener TLS using only the original declared client credentials."""
+        secured = any(
+            origin == config[address] and config.get(plane) is not None
+            for config in configs.values()
+            for plane, address in (
+                ("operator_tls", "http_address"),
+                ("artifact_tls", "artifact_address"),
+            )
+        )
+        return http(
+            "https://" + origin if secured else origin,
+            path,
+            method,
+            body,
+            timeout_seconds=timeout_seconds,
+            tls_context=transport_context if secured else None,
+        )
+
+    def request_recovery_http(
+        origin: str, path: str, method: str, body: bytes
+    ) -> tuple[int, bytes]:
+        """Bound the original recovery plus response I/O on its actual authenticated listener."""
+        return request_http(
+            origin,
+            path,
+            method,
+            body,
+            timeout_seconds=315 if source_policy is not None else 135,
+        )
 
     def observed(label: str, **facts: Any) -> None:
         """Retain each actual completed observation even if a later original step fails."""
@@ -192,6 +321,20 @@ def run(
                         "quorum_observation_ms": 15000,
                     },
                 }
+                if source_policy is not None:
+                    config["schema"] = "roboguide.controller-replica-process/v0.7"
+                    config["content"]["child_budget_ms"] = 120000
+                    config["content"]["initialization"] = source_policy
+                    config["content"]["initialization_source"] = (
+                        source_input if member == source_policy["source_member"] else None
+                    )
+                    config["node_tls"] = node_tls
+                    config["operator_tls"] = operator_tls
+                    config["artifact_tls"] = artifact_tls
+                    if operator_tls is not None:
+                        config["controller_environment"][
+                            "ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN"
+                        ] = "0"
                 path = output / f"configuration-{member}.json"
                 save(path, config)
                 policy = (
@@ -218,6 +361,7 @@ def run(
                             "root": config["content"]["root"],
                             "profile": profile,
                             "member": member,
+                            "staging_gc": source_policy is not None,
                         },
                     },
                     "actual-runnable-root",
@@ -275,7 +419,7 @@ def run(
                             if status["epoch"] is not None and status["child_pid"] is not None:
                                 if status["child_pid"] == previous_pid:
                                     continue
-                                code, _ = http(configs[member]["http_address"], "/healthz")
+                                code, _ = request_http(configs[member]["http_address"], "/healthz")
                                 if code == 200:
                                     return member, status
                         except (OSError, ValueError, http_client.HTTPException):
@@ -287,6 +431,11 @@ def run(
 
             member, first = current()
             observed("original-controller-healthy", member=member, status=first)
+            original_streams = (
+                None
+                if source_policy is None
+                else source_streams(configs, source_policy["source_owner"])
+            )
             if idle_timer_check:
                 directory = Path(configs[member]["storage_directory"])
                 before = idle_snapshot(directory)
@@ -307,19 +456,39 @@ def run(
             payload = os.urandom(128 * 1024 + 29)
             checksum = "sha256:" + hashlib.sha256(payload).hexdigest()
             upload = "actual-runnable-original-upload"
-            assert (
-                http(
-                    origin,
-                    "/v1/artifact-uploads",
-                    "POST",
-                    json.dumps({"upload_id": upload}).encode(),
-                )[0]
-                == 201
+            admission_code, admission_raw = request_http(
+                origin,
+                "/v1/artifact-uploads",
+                "POST",
+                json.dumps({"upload_id": upload}).encode(),
             )
+            observed(
+                "original-upload-admission-response",
+                status=admission_code,
+                body=admission_raw.decode(errors="replace")[:4096],
+            )
+            assert admission_code == 201, admission_raw
+            if original_streams is not None and source_policy is not None:
+                after_streams = source_streams(configs, source_policy["source_owner"])
+                reused = [
+                    peer
+                    for peer in configs
+                    if peer != member and after_streams[peer] == original_streams[peer]
+                ]
+                assert reused, "fresh complete peer bytes were retransferred by every receiver"
+                observed(
+                    "actual-prior-byte-reuse",
+                    actual_members=reused,
+                    before_counts={str(peer): len(rows) for peer, rows in original_streams.items()},
+                    after_counts={str(peer): len(rows) for peer, rows in after_streams.items()},
+                )
             observed("original-upload-started", upload_id=upload)
-            assert http(origin, f"/v1/artifact-uploads/{upload}/content", "POST", payload)[0] == 202
+            assert (
+                request_http(origin, f"/v1/artifact-uploads/{upload}/content", "POST", payload)[0]
+                == 202
+            )
             observed("original-content-appended", upload_id=upload, actual_bytes=len(payload))
-            code, raw = http(
+            code, raw = request_http(
                 origin,
                 f"/v1/artifact-uploads/{upload}/finalize",
                 "POST",
@@ -331,13 +500,15 @@ def run(
             if idle_timer_check:
                 assert idle_snapshot(directory)["journal_revision"] > before["journal_revision"]
             observed("original-upload-completed", receipt=completed)
-            assert http(origin, "/v1/artifacts/" + checksum[7:]) == (200, payload)
+            assert request_http(origin, "/v1/artifacts/" + checksum[7:]) == (200, payload)
             observed("original-http-content-read", actual_digest=checksum)
             originals: dict[int, Any] = {}
             for replica, config in configs.items():
                 parent = Path(config["storage_directory"]) / "replica.sqlite3"
                 with closing(sqlite3.connect(parent.as_uri() + "?mode=ro", uri=True)) as sql:
-                    assert sql.execute("PRAGMA user_version").fetchone()[0] == 8
+                    assert sql.execute("PRAGMA user_version").fetchone()[0] == (
+                        9 if source_policy is not None else 8
+                    )
                     content = json.loads(
                         sql.execute(
                             "SELECT value FROM replica_v1_meta WHERE key='content_state'"
@@ -366,7 +537,7 @@ def run(
             assert successor == member
             assert restarted["epoch"] == first["epoch"]
             observed("actual-successor-healthy", member=successor, status=restarted)
-            assert http(origin, "/v1/artifacts/" + checksum[7:]) == (200, payload)
+            assert request_http(origin, "/v1/artifacts/" + checksum[7:]) == (200, payload)
             observed("restarted-http-content-read", actual_digest=checksum)
             with closing(
                 sqlite3.connect(
@@ -404,7 +575,7 @@ def run(
             if prepared_recovery:
                 assert owner_failover, "Prepared recovery requires actual owner failover"
                 prepared_case = stage_prepared(
-                    http, origin, Path(configs[member]["storage_directory"])
+                    request_http, origin, Path(configs[member]["storage_directory"])
                 )
                 prepared_key = {
                     "source_owner": source_writer["owner"],
@@ -434,11 +605,11 @@ def run(
                 next_cas = Path(configs[next_member]["storage_directory"]) / "artifacts"
                 next_blob = next_cas / "objects-v1" / "sha256" / checksum[7:9] / checksum[7:]
                 assert not next_blob.exists()
-                store_code, store_raw = http(next_origin, "/v1/artifact-store")
+                store_code, store_raw = request_http(next_origin, "/v1/artifact-store")
                 assert store_code == 200
                 next_owner = json.loads(store_raw)["owner_id"]
                 assert next_owner != source_writer["owner"]
-                assert http(next_origin, "/v1/artifacts/" + checksum[7:]) == (200, payload)
+                assert request_http(next_origin, "/v1/artifacts/" + checksum[7:]) == (200, payload)
                 assert not next_blob.exists()
                 with closing(
                     sqlite3.connect(
@@ -481,13 +652,14 @@ def run(
                 }
                 if prepared_case is not None:
                     result["actual_prepared_recovery"] = verify_prepared(
-                        recovery_http,
+                        request_recovery_http,
                         next_origin,
                         Path(configs[next_member]["storage_directory"]),
                         prepared_case[0],
                         prepared_case[1],
                         source_writer["owner"],
                         next_owner,
+                        budget_ms=300000 if source_policy is not None else 120000,
                     )
                     observed(
                         "actual-prepared-owner-recovery", proof=result["actual_prepared_recovery"]
@@ -517,7 +689,7 @@ def run(
                         ]
                         assert len(reaped) == 1 and reaped[0]["outcome"]["signal"] == 9
                         result["actual_prepared_release"] = release_prepared(
-                            recovery_http,
+                            request_recovery_http,
                             next_origin,
                             directory,
                             prepared_case[0],
@@ -535,7 +707,7 @@ def run(
                             original_root_bytes_retained=True,
                         )
                         result["actual_completed_retirement"] = retire_completed(
-                            recovery_http,
+                            request_recovery_http,
                             next_origin,
                             directory,
                             completed["receipt"],
@@ -604,6 +776,7 @@ def main() -> None:
     parser.add_argument("--owner-failover", action="store_true")
     parser.add_argument("--prepared-recovery", action="store_true")
     parser.add_argument("--release-after-recovery", action="store_true")
+    parser.add_argument("--initialization-source", type=Path)
     args = parser.parse_args()
     if args.release_after_recovery and not args.prepared_recovery:
         parser.error("--release-after-recovery requires --prepared-recovery")
@@ -616,6 +789,9 @@ def main() -> None:
         args.owner_failover,
         args.prepared_recovery,
         args.release_after_recovery,
+        None
+        if args.initialization_source is None
+        else args.initialization_source.resolve(strict=True),
     )
     print(json.dumps({"passed": result["passed"], "result": str(args.output / "result.json")}))
 

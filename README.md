@@ -1,5 +1,11 @@
 # RoboGuide
 
+[归档源首次初始化](docs/development/original-source-initialization-v0.1.md)已接通并通过实际进程门禁：
+显式 parent9/Root8 把完整原 SQL/CAS 引入空副本应用，保留来源、预算、Unknown 与全部
+归档/命令。入口由 `network_initialization.rs`、supervisor 和 recovery v0.23 共同维护；
+原 Source/TLS、Unknown、Log/Snapshot 和三 leader 冷恢复见[验收记录](docs/development/acceptance/2026-10-24-original-archived-source-initialization.md)。
+全局引用/Archive、升级、设备、长期 SLO 与全部非发布整改仍分别验收。
+
 [staging 回收](docs/decisions/0194-original-staging-file-reclamation.md)已接入显式 Root8：
 原操作退休后才接纳私有临时名字的删除，先记录 intent/逐项 Unknown；CAS 与原结果独立。
 实际中断、SQL 结果失败、旧格式拒绝和完整恢复见[验收](docs/development/acceptance/2026-10-24-original-staging-reclamation.md)。

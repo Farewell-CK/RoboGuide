@@ -18,7 +18,10 @@ PROFILE = "roboguide.recovery-profile/v0.19"
 SNAPSHOT_PROFILE = "roboguide.recovery-profile/v0.20"
 GC_PROFILE = "roboguide.recovery-profile/v0.21"
 STAGING_PROFILE = "roboguide.recovery-profile/v0.22"
-PROFILES = frozenset({PROFILE, SNAPSHOT_PROFILE, GC_PROFILE, STAGING_PROFILE})
+INITIALIZATION_PROFILE = "roboguide.recovery-profile/v0.23"
+PROFILES = frozenset(
+    {PROFILE, SNAPSHOT_PROFILE, GC_PROFILE, STAGING_PROFILE, INITIALIZATION_PROFILE}
+)
 LAYOUT4 = "roboguide.replica-content-layout/v0.4"
 LAYOUT5 = "roboguide.replica-content-layout/v0.5"
 LAYOUT6 = "roboguide.replica-content-layout/v0.6"

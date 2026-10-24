@@ -10,19 +10,7 @@ static CLUSTER_ENDPOINTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new
 
 /// Holds a real non-ephemeral endpoint until its declared infrastructure service starts.
 fn reserved_listener() -> TcpListener {
-    let range = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range").unwrap();
-    let bounds = range
-        .split_whitespace()
-        .map(|value| value.parse::<u16>().unwrap())
-        .collect::<Vec<_>>();
-    for port in 1024..=u16::MAX {
-        if !(bounds[0]..=bounds[1]).contains(&port)
-            && let Ok(listener) = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
-        {
-            return listener;
-        }
-    }
-    panic!("actual test kernel has no available non-ephemeral endpoint")
+    crate::tests::reserved_test_listener()
 }
 
 /// Owns three actual infrastructure services and their original roots; no device inventory exists.

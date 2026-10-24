@@ -5,16 +5,19 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import http.client as http_client
 import json
 import os
 import shutil
 import signal
 import sqlite3
+import ssl
 import subprocess
 import sys
 import tempfile
 import time
-from contextlib import closing
+from collections.abc import Callable
+from contextlib import ExitStack, closing
 from pathlib import Path
 from typing import Any
 
@@ -24,19 +27,77 @@ from check_runnable_content_processes import http
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def archive_inputs(source: Path, components: list[dict[str, Any]]) -> None:
+    """Declare this owned fixture's original Archive outputs without granting product authority."""
+    existing = {value["root"] for value in components}
+    for path in sorted(source.glob("configuration-*.json")):
+        config = json.loads(path.read_text())
+        original = config.get("content", {}).get("initialization_source")
+        if original is None or original["source_cas"] in existing:
+            continue
+        components.append(
+            {
+                "component_id": f"initialization-cas-{config['replica']['replica_id']}",
+                "kind": "artifact",
+                "root": original["source_cas"],
+                "database": None,
+                "trees": [],
+                "depends_on": [],
+                "storage_schema": "roboguide.artifact-storage/v3",
+            }
+        )
+        existing.add(original["source_cas"])
+    destinations: set[str] = set()
+    for component in components:
+        if component["kind"] != "controller":
+            continue
+        database = Path(component["root"]) / component["database"]
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as sql:
+            rows = sql.execute(
+                "SELECT intent_json FROM event_archive_operations LIMIT 16385"
+            ).fetchall()
+        assert len(rows) <= 16384
+        for (raw,) in rows:
+            assert len(raw.encode()) <= 256 * 1024 * 1024
+            destinations.add(json.loads(raw)["request"]["destination"])
+    dependencies = [
+        value["component_id"] for value in components if value["kind"] in {"controller", "artifact"}
+    ]
+    for index, destination in enumerate(sorted(destinations)):
+        components.append(
+            {
+                "component_id": f"original-archive-{index}",
+                "kind": "archive",
+                "root": destination,
+                "database": None,
+                "trees": [],
+                "depends_on": dependencies,
+            }
+        )
+
+
 def profile(source: Path, output: Path) -> dict[str, Any]:
     """Declare only actual original members/stores and copy explicit deployment inputs privately."""
     components: list[dict[str, Any]] = []
     inputs = output / "inputs"
     inputs.mkdir(mode=0o700)
     shutil.copytree(source / "tls", inputs / "tls")
+    input_trees = ["tls", "configs"]
+    if (source / "node-tls").exists():
+        shutil.copytree(source / "node-tls", inputs / "node-tls")
+        input_trees.append("node-tls")
     configs = inputs / "configs"
     configs.mkdir(mode=0o700)
+    parent_versions = set()
     for path in sorted(source.glob("configuration-*.json")):
         config = json.loads(path.read_text())
         member = config["replica"]["replica_id"]
         shutil.copyfile(path, configs / path.name)
         directory = Path(config["storage_directory"])
+        with closing(
+            sqlite3.connect((directory / "replica.sqlite3").as_uri() + "?mode=ro", uri=True)
+        ) as parent_sql:
+            parent_versions.add(parent_sql.execute("PRAGMA user_version").fetchone()[0])
         dependencies = []
         if (directory / "controller.sqlite3").exists():
             components.append(
@@ -94,20 +155,23 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
                 "restore_binding_digest"
             )
         components.append(root_component)
+    archive_inputs(source, components)
     components.append(
         {
             "component_id": "inputs",
             "kind": "files",
             "root": str(inputs),
             "database": None,
-            "trees": ["tls", "configs"],
+            "trees": input_trees,
             "depends_on": [
                 value["component_id"] for value in components if value["kind"] == "replica"
             ],
         }
     )
     generation = (
-        22
+        23
+        if 9 in parent_versions
+        else 22
         if any(
             value.get("storage_schema") == "roboguide.replica-content-layout/v0.8"
             for value in components
@@ -194,7 +258,9 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
             if value["component_id"] == f"root-{member}"
         )
         config["schema"] = (
-            "roboguide.controller-replica-process/v0.6"
+            "roboguide.controller-replica-process/v0.7"
+            if config["schema"] == "roboguide.controller-replica-process/v0.7"
+            else "roboguide.controller-replica-process/v0.6"
             if binding["source_root_version"] == 8
             else "roboguide.controller-replica-process/v0.5"
             if binding["source_root_version"] == 7
@@ -206,6 +272,13 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
         config["content"]["root"] = str(stores / f"root-{member}")
         config["content"]["socket"] = str(ipc / f"{member}.sock")
         config["content"]["restore_binding_digest"] = bindings[f"root-{member}"]
+        for plane in ("node_tls", "operator_tls", "artifact_tls"):
+            if config.get(plane) is not None:
+                config[plane] = dict(config[plane])
+                for name in ("server_cert", "server_key", "client_ca", "profile"):
+                    config[plane][name] = str(
+                        stores / "inputs/node-tls" / Path(config[plane][name]).name
+                    )
         config["replica"]["tls"].update(
             {
                 "ca_cert_path": str(stores / "inputs/tls/ca.crt"),
@@ -247,6 +320,25 @@ def prepare_bundle(
         return frozen_bundle, frozen_digest
     declaration = profile(source, output)
     save(output / "profile.json", declaration)
+    if declaration["schema"] == "roboguide.recovery-profile/v0.23":
+        old = {**declaration, "schema": "roboguide.recovery-profile/v0.22"}
+        save(output / "old-profile.json", old)
+        refused = command(
+            output,
+            "old-profile-parent9-refused",
+            [
+                "backup",
+                "--profile",
+                str(output / "old-profile.json"),
+                "--destination",
+                str(output / "old-profile-refused-bundle"),
+                "--command-id",
+                "actual-parent9-old-profile-refusal",
+            ],
+            refused=True,
+        )
+        assert "Replica tables/version differ" in refused["stderr"]
+        assert not (output / "old-profile-refused-bundle").exists()
     if declaration["schema"] == "roboguide.recovery-profile/v0.22":
         old = {**declaration, "schema": "roboguide.recovery-profile/v0.21"}
         save(output / "old-profile.json", old)
@@ -328,10 +420,75 @@ def staging_history(root: Path) -> dict[str, dict[str, str]] | None:
     return result
 
 
+def initialization_history(directory: Path) -> dict[str, dict[str, str]] | None:
+    """Compare original parent9 policy, mandatory inventory and raw member-local operation bytes."""
+    with closing(
+        sqlite3.connect((directory / "replica.sqlite3").as_uri() + "?mode=ro", uri=True)
+    ) as sql:
+        if sql.execute("PRAGMA user_version").fetchone() != (9,):
+            return None
+        return {
+            "metadata": dict(
+                sql.execute(
+                    "SELECT key,value FROM replica_v1_meta WHERE key IN "
+                    "('content_initialization_policy','content_initialization_ids')"
+                )
+            ),
+            "commands": dict(sql.execute("SELECT command_id,record FROM content_initializations")),
+        }
+
+
+def hold_initialization_sources(
+    source: Path, output: Path, supervisor: Path, held: ExitStack
+) -> list[dict[str, Any]]:
+    """Keep original SQL/CAS leases unavailable throughout accepted cold startup and reads."""
+    observations = []
+    for path in sorted(source.glob("configuration-*.json")):
+        config = json.loads(path.read_text())
+        original = config.get("content", {}).get("initialization_source")
+        if original is None:
+            continue
+        sql = Path(original["source_sql"])
+        paths = [
+            Path(str(sql) + ".writer.lock"),
+            sql,
+            Path(original["source_cas"]) / ".writer.lock",
+        ]
+        leases = []
+        for lease in paths:
+            descriptor = held.enter_context(lease.open("rb"))
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            actual = os.fstat(descriptor.fileno())
+            leases.append({"path": str(lease), "device": actual.st_dev, "inode": actual.st_ino})
+        request = output / f"locked-original-source-{config['replica']['replica_id']}.json"
+        save(request, original)
+        refused = subprocess.run(
+            [str(supervisor), "--inspect-initialization-source", str(request)],
+            capture_output=True,
+            timeout=15,
+        )
+        observation = {
+            "leases": leases,
+            "returncode": refused.returncode,
+            "stdout": refused.stdout.decode(),
+            "stderr": refused.stderr.decode(),
+        }
+        save(request.with_suffix(".refused.json"), observation)
+        assert refused.returncode != 0, (
+            "actual original source remained reopenable despite held leases"
+        )
+        assert b"original source writer is active" in refused.stderr
+        observations.append(observation)
+    return observations
+
+
 def private_staging_refusal(output: Path, bundle: Path) -> dict[str, Any] | None:
     """Reject a fully declared and correctly hashed private payload before restore publication."""
     manifest = json.loads((bundle / "manifest.json").read_text())
-    if manifest["profile"]["schema"] != "roboguide.recovery-profile/v0.22":
+    if manifest["profile"]["schema"] not in {
+        "roboguide.recovery-profile/v0.22",
+        "roboguide.recovery-profile/v0.23",
+    }:
         return None
     root = next(
         value
@@ -375,6 +532,104 @@ def private_staging_refusal(output: Path, bundle: Path) -> dict[str, Any] | None
     }
 
 
+def initialization_inventory_refusal(output: Path, bundle: Path) -> dict[str, Any] | None:
+    """Reject a correctly rehashed bundle with a missing original mandatory parent9 inventory."""
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    if manifest["profile"]["schema"] != "roboguide.recovery-profile/v0.23":
+        return None
+    parent = next(
+        value for value in manifest["profile"]["components"] if value["kind"] == "replica"
+    )
+    counter = output / "initialization-inventory-counter-bundle"
+    shutil.copytree(bundle, counter)
+    name = "stores/" + parent["component_id"] + "/" + parent["database"]
+    database = counter / name
+    database.chmod(0o600)
+    with closing(sqlite3.connect(database)) as sql:
+        assert (
+            sql.execute(
+                "DELETE FROM replica_v1_meta WHERE key='content_initialization_ids'"
+            ).rowcount
+            == 1
+        )
+        sql.commit()
+    entry = next(value for value in manifest["files"] if value["path"] == name)
+    entry["byte_size"] = database.stat().st_size
+    entry["content_digest"] = "sha256:" + digest(database)
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = str(ROOT / "apps/recovery-tool")
+    inspection = subprocess.check_output(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path\n"
+            "import json, sys\n"
+            "from roboguide_recovery.bundle import Budget, _identity\n"
+            "profile = json.loads(Path(sys.argv[2]).read_text())['profile']\n"
+            "print(json.dumps(_identity(Path(sys.argv[1]), Budget(profile))))\n",
+            str(database),
+            str(bundle / "manifest.json"),
+        ],
+        env=environment,
+        timeout=30,
+    )
+    entry["sqlite"] = json.loads(inspection)
+    raw = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    (counter / "manifest.json").write_bytes(raw)
+    checksum = "sha256:" + hashlib.sha256(raw).hexdigest()
+    destination = output / "initialization-inventory-refused-restore"
+    for action in ("verify", "restore"):
+        arguments = [action, "--bundle", str(counter), "--manifest-digest", checksum]
+        if action == "restore":
+            arguments += [
+                "--destination",
+                str(destination),
+                "--command-id",
+                "actual-missing-initialization-inventory",
+            ]
+        refused = command(
+            output, "initialization-inventory-" + action + "-refused", arguments, refused=True
+        )
+        assert "parent9 original initialization policy/inventory is missing" in refused["stderr"]
+    assert not destination.exists()
+    return {
+        "database_and_manifest_rehashed": True,
+        "verify_refused": True,
+        "restore_refused_before_publication": True,
+        "manifest_digest": checksum,
+    }
+
+
+def original_read(
+    request: Callable[..., tuple[int, bytes]], output: Path, label: str, origin: str, path: str
+) -> tuple[int, bytes]:
+    """Observe bounded readonly recovery readiness, retaining every failed real GET connection."""
+    started = time.monotonic()
+    deadline = started + 60
+    observations = []
+    while time.monotonic() < deadline:
+        sample: dict[str, Any] = {"elapsed_seconds": time.monotonic() - started}
+        try:
+            code, raw = request(origin, path, timeout_seconds=max(0.1, deadline - time.monotonic()))
+            sample["response_status"] = code
+            sample["response_bytes"] = len(raw)
+            sample["response_sha256"] = hashlib.sha256(raw).hexdigest()
+            if code != 200:
+                sample["response_body"] = raw.decode(errors="replace")[:4096]
+        except (OSError, http_client.HTTPException) as error:
+            code, raw = 0, b""
+            sample["error_type"] = type(error).__name__
+            sample["error"] = str(error)
+        observations.append(sample)
+        save(output / (label + ".json"), {"origin": origin, "path": path, "attempts": observations})
+        if code == 200 and time.monotonic() < deadline:
+            return code, raw
+        if code not in (0, 503):
+            raise ValueError("actual readonly recovery GET refused or exceeded its original clock")
+        time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+    raise ValueError("actual restored readonly readiness exhausted its original budget: " + label)
+
+
 def run(
     source: Path,
     output: Path,
@@ -415,6 +670,7 @@ def run(
         ["verify", "--bundle", str(bundle), "--manifest-digest", checksum],
     )
     private_counter = private_staging_refusal(output, bundle)
+    initialization_counter = initialization_inventory_refusal(output, bundle)
     restore_args = [
         "restore",
         "--bundle",
@@ -432,8 +688,19 @@ def run(
     )
     assert command(output, "restore-readonly-repeat", restore_args) == restored
     original_staging = []
+    original_initializations = []
     for path in sorted(source.glob("configuration-*.json")):
         config = json.loads(path.read_text())
+        member = config["replica"]["replica_id"]
+        initialization = initialization_history(Path(config["storage_directory"]))
+        if initialization is not None:
+            assert (
+                initialization_history(output / "restored/stores" / f"parent-{member}")
+                == initialization
+            )
+            original_initializations.append(
+                {"member": member, "exact_original_rows": initialization}
+            )
         source_root = Path(config["content"]["root"])
         history = staging_history(source_root)
         if history is None:
@@ -468,14 +735,47 @@ def run(
         "actual_processes": [],
         "observed_leaders": [],
         "original_staging_recovery": original_staging,
+        "original_initialization_recovery": original_initializations,
         "private_content_refusal": private_counter,
+        "initialization_inventory_refusal": initialization_counter,
     }
     if cold_only:
         result["passed"] = True
         save(output / "result.json", result)
         return result
-    with tempfile.TemporaryDirectory(prefix="rg-root-restore-") as temporary:
+    with (
+        tempfile.TemporaryDirectory(prefix="rg-root-restore-") as temporary,
+        ExitStack() as held_sources,
+    ):
         configs = assemble(output / "restored", Path(temporary), supervisor)
+        result["unavailable_original_sources"] = hold_initialization_sources(
+            source, output, supervisor, held_sources
+        )
+        deployed = output / "restored/stores/inputs/node-tls"
+        transport_context = None
+        if deployed.exists():
+            transport_context = ssl.create_default_context(cafile=str(deployed / "ca.crt"))
+            transport_context.load_cert_chain(deployed / "admin.crt", deployed / "admin.key")
+
+        def request_http(
+            origin: str, path: str, *, timeout_seconds: float = 60
+        ) -> tuple[int, bytes]:
+            """Use only declared restored listener TLS and retained original client input files."""
+            secured = any(
+                origin == config[address] and config.get(plane) is not None
+                for _, config in configs.values()
+                for plane, address in (
+                    ("operator_tls", "http_address"),
+                    ("artifact_tls", "artifact_address"),
+                )
+            )
+            return http(
+                "https://" + origin if secured else origin,
+                path,
+                timeout_seconds=timeout_seconds,
+                tls_context=transport_context if secured else None,
+            )
+
         first_path = configs[min(configs)][0]
         legacy = dict(configs[min(configs)][1])
         legacy["content"] = dict(legacy["content"])
@@ -549,11 +849,19 @@ def run(
                             ):
                                 os.kill(status["child_pid"], 0)
                                 if (
-                                    http(config["http_address"], "/healthz", timeout_seconds=5)[0]
+                                    request_http(
+                                        config["http_address"], "/healthz", timeout_seconds=5
+                                    )[0]
                                     == 200
                                 ):
                                     return member, status
-                        except (OSError, ValueError, KeyError, TypeError):
+                        except (
+                            OSError,
+                            ValueError,
+                            KeyError,
+                            TypeError,
+                            http_client.HTTPException,
+                        ):
                             pass
                     time.sleep(0.1)
                 raise ValueError("actual restored Controller did not become healthy")
@@ -567,12 +875,19 @@ def run(
             for turn in range(len(configs)):
                 member, status = current(expected)
                 _, config = configs[member]
-                code, raw = http(
-                    config["artifact_address"], "/v1/artifacts/" + published_digest[7:]
+                code, raw = original_read(
+                    request_http,
+                    output,
+                    f"actual-content-get-{member}",
+                    config["artifact_address"],
+                    "/v1/artifacts/" + published_digest[7:],
                 )
                 assert code == 200 and len(raw) == published_size
                 assert "sha256:" + hashlib.sha256(raw).hexdigest() == published_digest
-                code, assessment = http(
+                code, assessment = original_read(
+                    request_http,
+                    output,
+                    f"actual-assessment-get-{member}",
                     config["artifact_address"],
                     "/v1/artifact-uploads/"
                     + unknown["upload"]["upload_id"]
@@ -662,6 +977,12 @@ def run(
                 )
                 assert transfer.returncode == 0
             assert len({value["member"] for value in result["observed_leaders"]}) == len(configs)
+            for original_initialization in original_initializations:
+                member = original_initialization["member"]
+                assert (
+                    initialization_history(Path(configs[member][1]["storage_directory"]))
+                    == (original_initialization["exact_original_rows"])
+                )
             assert all(digest(Path(path)) == checksum for path, checksum in identities.items())
             result["passed"] = True
         finally:

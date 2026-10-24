@@ -72,41 +72,54 @@ pub(super) async fn serve<S: tokio::io::AsyncWrite + Unpin>(
     let process = peer_process(node, peer.clone()).await?;
     let target = node.accepted_content_target().await?;
     let view = node.store.network_view().await?;
-    let recovery = if let ReadPurpose::PreparedRecovery { command_id } = &purpose {
-        let original = super::recovery::pending(&view, command_id)?;
-        let (owner, budget) = super::recovery::evidence(&original)?;
-        budget.check()?;
-        if original.reader_id != reader_id
-            || owner != process
-            || context_digest != domain::artifact_adoption_digest(&original)?[7..]
-        {
-            return Err("Prepared read differs from original recovery process/context".into());
+    let expected = target.clone();
+    let requested_purpose = purpose.clone();
+    let admission_reader = reader_id.clone();
+    let admission_context = context_digest.clone();
+    let admission_process = process.clone();
+    let (content, recovery) = crate::transport::content_worker(node, move |current| {
+        let purpose = requested_purpose;
+        let reader_id = admission_reader;
+        let context_digest = admission_context;
+        let process = admission_process;
+        let recovery = if let ReadPurpose::PreparedRecovery { command_id } = &purpose {
+            let original = super::recovery::pending(&view, command_id)?;
+            let (owner, budget) = super::recovery::evidence(&original)?;
+            budget.check()?;
+            if original.reader_id != reader_id
+                || owner != process
+                || context_digest != domain::artifact_adoption_digest(&original)?[7..]
+            {
+                return Err("Prepared read differs from original recovery process/context".into());
+            }
+            Some(original)
+        } else {
+            None
+        };
+        let content = match &purpose {
+            ReadPurpose::PreparedRecovery { .. } => {
+                super::recovery::source_key(recovery.as_ref().ok_or("original recovery absent")?)?
+            }
+            ReadPurpose::Published { digest } => {
+                let digest =
+                    artifact_store::normalize_digest(digest).map_err(|error| error.to_string())?;
+                view.content
+                    .as_ref()
+                    .ok_or("actual published original metadata unavailable")?
+                    .published_content(&view.events, &digest)?
+            }
+            ReadPurpose::RetainedIntegrity { content } => {
+                content.validate()?;
+                content.clone()
+            }
+        };
+        if expected.inputs.binary_search(&content).is_err() {
+            return Err("original content is not currently retained by the complete target".into());
         }
-        Some(original)
-    } else {
-        None
-    };
-    let content = match &purpose {
-        ReadPurpose::PreparedRecovery { .. } => {
-            super::recovery::source_key(recovery.as_ref().ok_or("original recovery absent")?)?
-        }
-        ReadPurpose::Published { digest } => {
-            let digest =
-                artifact_store::normalize_digest(digest).map_err(|error| error.to_string())?;
-            view.content
-                .as_ref()
-                .ok_or("actual published original metadata unavailable")?
-                .published_content(&view.events, &digest)?
-        }
-        ReadPurpose::RetainedIntegrity { content } => {
-            content.validate()?;
-            content.clone()
-        }
-    };
-    if target.inputs.binary_search(&content).is_err() {
-        return Err("original content is not currently retained by the complete target".into());
-    }
-    node.store.require_committed_content_target(&target)?;
+        current.store.require_committed_content_target(&expected)?;
+        Ok((content, recovery))
+    })
+    .await?;
     let leaf = peer
         .connection
         .peer_digest()
@@ -138,7 +151,8 @@ pub(super) async fn serve<S: tokio::io::AsyncWrite + Unpin>(
             recovery.as_ref(),
         )
     });
-    check()?;
+    let admission = check.clone();
+    crate::transport::content_worker(node, move |_| admission()).await?;
     let root = node.store.network_content_store()?;
     let capacity = root.stream_work_permit()?;
     let (send, mut receive) = tokio::sync::mpsc::channel(2);

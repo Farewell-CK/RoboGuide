@@ -4,6 +4,27 @@ use super::*;
 use crate::content_store::ProducerClock;
 
 impl SqliteRaftStore {
+    /// Observes the retained original handoff without blocking async workers on the parent writer.
+    pub(crate) async fn leader_transfer_record_on_worker(
+        &self,
+    ) -> Result<Option<LeaderTransferRecord>, String> {
+        self.run_consensus_work(|store| store.leader_transfer_record().map_err(io_error))
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Preserves the original handoff transition while retaining its writer through owned SQL work.
+    pub(crate) async fn persist_leader_transfer_on_worker(
+        &self,
+        record: LeaderTransferRecord,
+    ) -> Result<(), String> {
+        self.run_consensus_work(move |store| {
+            store.persist_leader_transfer(&record).map_err(io_error)
+        })
+        .await
+        .map_err(|error| error.to_string())
+    }
+
     /// Keeps actual consensus SQL/parse/flush waits off the network worker while preserving all leases.
     pub(super) async fn run_consensus_work<T, F>(&self, work: F) -> Result<T, StorageError<u64>>
     where

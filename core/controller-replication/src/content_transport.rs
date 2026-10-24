@@ -384,6 +384,7 @@ pub(super) async fn send_stream(
             .write_all(&encoded.bytes)
             .await
             .map_err(|error| error.to_string())?;
+        stream.flush().await.map_err(|error| error.to_string())?;
         let ready_digest = match read_reply(&mut stream, &node.transport_budget)
             .await
             .map_err(|error| error.to_string())?
@@ -446,6 +447,7 @@ pub(super) async fn send_stream(
                         .write_u32(0)
                         .await
                         .map_err(|error| error.to_string())?;
+                    stream.flush().await.map_err(|error| error.to_string())?;
                     let result = match read_reply(&mut stream, &node.transport_budget)
                         .await
                         .map_err(|error| error.to_string())?
@@ -507,7 +509,8 @@ where
     stream
         .write_all(&encoded.bytes)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    stream.flush().await.map_err(|error| error.to_string())
 }
 
 /// Admits before Ready, then moves actual root/FD/capacity into one independent blocking receiver.
