@@ -518,7 +518,7 @@ fn ordinary_artifact_constructors_cannot_write_the_content_authority() {
 }
 
 /// Creates actual immutable source bytes using the maintained Artifact writer, never Node facts.
-fn source(
+pub(super) fn source(
     root: &Path,
     payload: &[u8],
 ) -> (artifact_store::FileSystemArtifactStore, ArtifactContentKey) {
@@ -563,6 +563,56 @@ fn actual_source_copy_is_durable_and_original_retry_has_no_new_copy() {
     assert_eq!(reopened.copy_status("original-copy").unwrap(), Some(status));
     reopened.verify_content(&key).unwrap();
     assert_eq!(reopened.active_references(&key).unwrap(), pins);
+}
+
+/// Actual retired content is unlinked only after a durable GC intent; same-ID retry never unlinks again.
+#[test]
+fn actual_replica_gc_requires_retired_reference_and_preserves_object_history() {
+    let temporary = tempfile::tempdir().unwrap();
+    let payload = b"actual retired Replica GC bytes";
+    let (source, key) = source(&temporary.path().join("source"), payload);
+    let root = temporary.path().join("target");
+    let profile = "a".repeat(64);
+    let store = ReplicaContentStore::create_with_reclamation(&root, &profile, 9).unwrap();
+    let copied = store
+        .copy_from_artifact(&source, &key, "gc-original-copy", &"a".repeat(64), 30_000)
+        .unwrap();
+    let active = store.active_references(&key).unwrap();
+    assert_eq!(active.len(), 1);
+    let blocked = store
+        .collect_unreferenced_content("gc-blocked", 30_000)
+        .unwrap();
+    assert_eq!(blocked.candidates, 0);
+    store.verify_content(&key).unwrap();
+    store
+        .release_reference(&active[0], &"b".repeat(64))
+        .unwrap();
+    let path = copy::object_path(&root, &key);
+    assert!(path.exists());
+    let deleted = store
+        .collect_unreferenced_content("gc-retired", 30_000)
+        .unwrap();
+    assert_eq!(deleted.candidates, 1);
+    assert_eq!(deleted.deleted, 1);
+    assert_eq!(deleted.unknown, 0);
+    assert!(!path.exists());
+    assert!(store.verify_content(&key).is_err());
+    assert_eq!(store.copy_status("gc-original-copy").unwrap(), Some(copied));
+    assert_eq!(
+        store
+            .collect_unreferenced_content("gc-retired", 30_000)
+            .unwrap(),
+        deleted
+    );
+    assert_eq!(
+        store.gc_status("gc-retired").unwrap(),
+        Some(deleted.clone())
+    );
+    drop(store);
+    assert!(ReplicaContentStore::open_with_streams(&root, &profile, 9).is_err());
+    assert!(ReplicaContentStore::open_with_snapshot_receives(&root, &profile, 9, None).is_err());
+    let reopened = ReplicaContentStore::open_with_reclamation(&root, &profile, 9, None).unwrap();
+    assert_eq!(reopened.gc_status("gc-retired").unwrap(), Some(deleted));
 }
 
 /// Real source corruption leaves the original pin/Unknown intact and never restarts the old copy.

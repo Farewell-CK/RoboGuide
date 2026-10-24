@@ -480,6 +480,9 @@ impl ReplicaContentStore {
             }
             return status(&original);
         }
+        for input in &header.target.inputs {
+            super::gc::require_live(sql, input)?;
+        }
         permission()?;
         budget.check()?;
         let original = Record {

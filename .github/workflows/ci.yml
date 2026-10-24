@@ -147,7 +147,18 @@ jobs:
           --release-after-recovery
           --output /tmp/rg-ci-runnable-content
 
-      - name: Verify complete actual Replica content cold recovery and three restored leaders
+      - name: Verify original GC interruption and drained Root7 upgrades with zero Nodes
+        run: >
+          uv run --frozen python tools/quality/check_replica_content_gc_processes.py
+          --probe target/debug/examples/content_stream_probe
+          --old-probe target/debug/examples/content_stream_probe
+          --source-probe target/debug/examples/content_store_probe
+          --maintenance target/debug/controller-replica
+          --member 197
+          --runnable-source /tmp/rg-ci-runnable-content
+          --output "${RUNNER_TEMP}/roboguide-content-gc"
+
+      - name: Verify complete Root7 cold recovery and three restored leaders
         run: >
           uv run --frozen python tools/quality/check_replica_content_recovery_processes.py
           --source /tmp/rg-ci-runnable-content

@@ -213,13 +213,17 @@ impl ProcessConfig {
                             "restored Root5 requires its exact explicit binding digest".into()
                         );
                     }
-                    if self.schema == "roboguide.controller-replica-process/v0.4" {
+                    if self.schema == "roboguide.controller-replica-process/v0.5" {
+                        "roboguide.controller-replica-process/v0.5"
+                    } else if self.schema == "roboguide.controller-replica-process/v0.4" {
                         "roboguide.controller-replica-process/v0.4"
                     } else {
                         "roboguide.controller-replica-process/v0.3"
                     }
                 } else {
-                    if self.schema == "roboguide.controller-replica-process/v0.4" {
+                    if self.schema == "roboguide.controller-replica-process/v0.5" {
+                        "roboguide.controller-replica-process/v0.5"
+                    } else if self.schema == "roboguide.controller-replica-process/v0.4" {
                         "roboguide.controller-replica-process/v0.4"
                     } else {
                         "roboguide.controller-replica-process/v0.2"
@@ -430,6 +434,26 @@ mod tests {
             .as_mut()
             .unwrap()
             .restore_binding_digest = Some("caller-passed".into());
+        assert!(configuration.validate().is_err());
+    }
+
+    /// Explicit Root7 selection preserves policy identity while requiring its own process generation.
+    #[test]
+    fn root7_process_is_explicit_and_keeps_original_cluster_policy() {
+        let mut configuration = owned_profile();
+        let policy = configuration.policy_digest().unwrap();
+        let cluster = configuration.replica.profile_identity();
+        configuration.schema = "roboguide.controller-replica-process/v0.5".into();
+        configuration.validate().unwrap();
+        configuration
+            .content
+            .as_mut()
+            .unwrap()
+            .restore_binding_digest = Some(format!("sha256:{}", "a".repeat(64)));
+        configuration.validate().unwrap();
+        assert_eq!(configuration.policy_digest().unwrap(), policy);
+        assert_eq!(configuration.replica.profile_identity(), cluster);
+        configuration.content = None;
         assert!(configuration.validate().is_err());
     }
 

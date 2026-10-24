@@ -16,12 +16,39 @@ struct Store {
     profile: String,
     /// Infrastructure member identity, never an embodied Node.
     member: u64,
+    /// Explicit Root7 fixture generation; old declarations retain their original Root4 meaning.
+    #[serde(default)]
+    reclamation: bool,
+    /// Explicit Root6 fixture generation used before actual drained product CLI upgrade.
+    #[serde(default)]
+    snapshot_receives: bool,
+    /// Exact original restored backing, never inferred from a file's presence.
+    #[serde(default)]
+    restore_binding_digest: Option<String>,
 }
 
 /// Closed operations over real owned files and native processes, without arbitrary SQL/shell execution.
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
+    /// Copies actual source bytes through the original receipt API for independent GC selection.
+    CopyOriginal {
+        /// Existing complete original receiver.
+        store: Store,
+        /// Actual original owned Artifact source.
+        source: PathBuf,
+        /// Original qualified content identity.
+        content: ArtifactContentKey,
+        /// Immutable first copy operation.
+        command_id: String,
+    },
+    /// Retires only the exact completed copy's pin; Unknown and all independent pins stay retained.
+    RetireCopy {
+        /// Original accepted receiver.
+        store: Store,
+        /// Exact immutable already-completed copy operation.
+        command_id: String,
+    },
     /// Creates only a fresh explicitly opted-in stream root.
     Create {
         /// Exact declared actual receiver.
@@ -67,7 +94,23 @@ enum Request {
 
 /// Opens only the explicit accepted stream generation; missing authority never initializes a root.
 fn open(store: &Store) -> Result<ReplicaContentStore, String> {
-    ReplicaContentStore::open_with_streams(&store.root, &store.profile, store.member)
+    if store.reclamation {
+        ReplicaContentStore::open_with_reclamation(
+            &store.root,
+            &store.profile,
+            store.member,
+            store.restore_binding_digest.as_deref(),
+        )
+    } else if store.snapshot_receives {
+        ReplicaContentStore::open_with_snapshot_receives(
+            &store.root,
+            &store.profile,
+            store.member,
+            store.restore_binding_digest.as_deref(),
+        )
+    } else {
+        ReplicaContentStore::open_with_streams(&store.root, &store.profile, store.member)
+    }
 }
 
 /// Emits bounded structured actual observations immediately, without interpreting stdout as authority.
@@ -95,11 +138,69 @@ fn hold() -> Result<(), String> {
 /// Executes actual storage calls only; local copies create no network, quorum, use or device proof.
 fn run(request: Request) -> Result<Value, String> {
     match request {
-        Request::Create { store } => Ok(json!({
-            "identity":ReplicaContentStore::create_with_streams(
-                &store.root,&store.profile,store.member
-            )?.identity()
-        })),
+        Request::CopyOriginal {
+            store,
+            source,
+            content,
+            command_id,
+        } => {
+            let receiver = open(&store)?;
+            let source =
+                artifact_store::FileSystemArtifactStore::new_with_archive_references(source)
+                    .map_err(|error| error.to_string())?;
+            let original = receiver.copy_from_artifact(
+                &source,
+                &content,
+                &command_id,
+                &"a".repeat(64),
+                30_000,
+            )?;
+            Ok(json!({"copy":original}))
+        }
+        Request::RetireCopy { store, command_id } => {
+            let receiver = open(&store)?;
+            let original = receiver
+                .copy_status(&command_id)?
+                .ok_or("original copy is unavailable")?;
+            let receipt = original
+                .receipt
+                .as_ref()
+                .ok_or("original copy remains Unknown")?;
+            let id = artifact_store::digest_bytes(
+                &serde_json::to_vec(&command_id).map_err(|error| error.to_string())?,
+            );
+            let pin = receiver
+                .active_references(&receipt.content)?
+                .into_iter()
+                .find(|pin| pin.reference_id == format!("receive:{}", &id[7..]));
+            if let Some(pin) = pin {
+                let proof = artifact_store::digest_bytes(
+                    &serde_json::to_vec(receipt).map_err(|error| error.to_string())?,
+                );
+                receiver.release_reference(&pin, &proof[7..])?;
+            }
+            Ok(
+                json!({"copy":original,"active_references":receiver.active_references(&receipt.content)?}),
+            )
+        }
+        Request::Create { store } => {
+            let root = if store.reclamation {
+                ReplicaContentStore::create_with_reclamation(
+                    &store.root,
+                    &store.profile,
+                    store.member,
+                )
+            } else if store.snapshot_receives {
+                ReplicaContentStore::create_with_snapshot_receives(
+                    &store.root,
+                    &store.profile,
+                    store.member,
+                )
+            } else {
+                ReplicaContentStore::create_with_streams(&store.root, &store.profile, store.member)
+            }?;
+            Ok(json!({"identity":root.identity()}))
+        }
         Request::Upgrade { store } => Ok(json!({
             "identity":ReplicaContentStore::upgrade_stream_journal(
                 &store.root,&store.profile,store.member

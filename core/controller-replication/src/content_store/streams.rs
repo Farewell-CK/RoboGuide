@@ -10,6 +10,11 @@ use std::io::Read;
 #[path = "stream_writer.rs"]
 mod writer;
 pub(crate) use writer::{StreamAdmission, StreamPermission};
+#[path = "stream_retirement.rs"]
+mod retirement;
+pub(super) use retirement::{
+    initialize as initialize_retirements, validate_records as validate_retirements,
+};
 
 impl ReplicaContentStore {
     /// Copies real owned Artifact bytes after durable admission; this is a blocking storage API.
@@ -433,7 +438,11 @@ pub(super) fn validate_records(
         let expected = reference(intent)?;
         let pin = reference_record(connection, &expected.reference_id)?
             .ok_or("original stream lost its independent receive pin")?;
-        if pin.reference != expected || !pin.active || pin.release_digest.is_some() {
+        let retired = retirement::release_digest(connection, &original)?;
+        if pin.reference != expected
+            || pin.active != retired.is_none()
+            || pin.release_digest != retired
+        {
             return Err("original stream pin lost its retained responsibility".into());
         }
         if original

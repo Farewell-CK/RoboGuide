@@ -2,6 +2,7 @@
 
 mod close_queue;
 mod copy;
+mod gc;
 mod layout;
 mod pins;
 mod producers;
@@ -12,6 +13,7 @@ mod time;
 mod validation;
 pub use close_queue::ReplicaSnapshotCloseStatus;
 pub use copy::{ReplicaContentCopyStatus, ReplicaContentReceipt};
+pub use gc::ReplicaContentGcStatus;
 pub use pins::ReplicaContentReadLease;
 pub(crate) use producers::{ProducerAdmission, ProducerClock, ProducerPermit};
 pub use producers::{
@@ -28,6 +30,8 @@ pub(crate) use streams::{
 };
 pub(crate) use time::ContentBudget;
 pub use time::ContentProcessEndObservation;
+#[cfg(test)]
+mod gc_tests;
 #[cfg(test)]
 mod tests;
 
@@ -50,6 +54,8 @@ pub const REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA: &str = "roboguide.replica-conten
 pub const REPLICA_CONTENT_RESTORE_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.5";
 /// Explicit durable network Snapshot receiving authority and independent pins.
 pub const REPLICA_CONTENT_SNAPSHOT_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.6";
+/// Explicit original GC/tombstone authority, fencing all older Root writers even at zero commands.
+pub const REPLICA_CONTENT_GC_LAYOUT_SCHEMA: &str = "roboguide.replica-content-layout/v0.7";
 
 /// Explicit storage interpretation; old maintenance entry points never acquire new producer authority.
 pub(super) enum ContentOpenMode {
@@ -69,6 +75,10 @@ pub(super) enum ContentOpenMode {
     Snapshots,
     /// Explicit drained Root4/Root5 to Snapshot Root6 transition.
     SnapshotUpgrade,
+    /// Complete accepted Snapshot and GC generation only.
+    Reclamation,
+    /// Explicit original Root6 to GC Root7 drained transition.
+    ReclamationUpgrade,
 }
 
 /// Fresh root interpretation; old create entry points never gain a stream journal implicitly.
@@ -81,6 +91,8 @@ pub(super) enum ContentCreateMode {
     Streams,
     /// Explicit local streams plus durable Snapshot receiving prerequisites.
     Snapshots,
+    /// Explicit Snapshot receiving plus original GC/tombstone journals.
+    Reclamation,
 }
 /// Bound on retained reference IDs; exhaustion never discards original ownership.
 const MAX_REFERENCES: usize = 65_536;
@@ -177,12 +189,16 @@ struct ContentInner {
     streams: bool,
     /// Explicit complete Snapshot receiving generation admitted by this connection.
     snapshot_receives: bool,
+    /// Explicit original GC/tombstone generation selected by this held Root writer.
+    reclamation: bool,
     /// Exact explicitly configured current restoration binding; absent on original physical roots.
     restore_binding: Option<String>,
     /// Bounds actual running/queued stream workers; each unique worker retains its own permit.
     stream_capacity: Arc<tokio::sync::Semaphore>,
     /// Bounds actual running/queued transport jobs before their owned blocking worker is spawned.
     stream_jobs: Arc<tokio::sync::Semaphore>,
+    /// One independently owned retained-Log catch-up; actual blocking work keeps the guard alive.
+    historical_catchup: Arc<tokio::sync::Semaphore>,
 }
 
 impl Drop for ContentInner {
@@ -210,6 +226,40 @@ pub struct ReplicaContentStore {
 }
 
 impl ReplicaContentStore {
+    /// Creates only a fresh explicit Root7 with complete empty original GC inventories.
+    pub fn create_with_reclamation(
+        root: &Path,
+        profile: &str,
+        member: u64,
+    ) -> Result<Self, String> {
+        layout::create(root, profile, member, ContentCreateMode::Reclamation)
+    }
+
+    /// Opens only accepted Root7, retaining the exact declared original/restored backing.
+    pub fn open_with_reclamation(
+        root: &Path,
+        profile: &str,
+        member: u64,
+        binding: Option<&str>,
+    ) -> Result<Self, String> {
+        layout::open_bound(root, profile, member, ContentOpenMode::Reclamation, binding)
+    }
+
+    /// Upgrades only a drained Root6 while preserving every original ID, receipt, inode and clock.
+    pub fn upgrade_reclamation(
+        root: &Path,
+        profile: &str,
+        member: u64,
+        binding: Option<&str>,
+    ) -> Result<Self, String> {
+        layout::open_bound(
+            root,
+            profile,
+            member,
+            ContentOpenMode::ReclamationUpgrade,
+            binding,
+        )
+    }
     /// Checks actual retained bytes only; absence creates no use/readiness grant or new operation.
     pub(crate) fn retained_content_is_available(
         &self,
@@ -245,6 +295,19 @@ impl ReplicaContentStore {
             .clone()
             .try_acquire_owned()
             .map_err(|_| "original content transport work capacity is exhausted".into())
+    }
+    /// Coalesces overlapping Append observations without queuing duplicate work or renewing budgets.
+    pub(crate) fn try_historical_catchup(
+        &self,
+    ) -> Result<Option<tokio::sync::OwnedSemaphorePermit>, String> {
+        if !self.inner.streams {
+            return Err("historical catch-up requires the original stream Root".into());
+        }
+        match self.inner.historical_catchup.clone().try_acquire_owned() {
+            Ok(permit) => Ok(Some(permit)),
+            Err(tokio::sync::TryAcquireError::NoPermits) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
     }
     /// Observes only this original opened generation; it is no network or source-read permission.
     pub(crate) fn streams_enabled(&self) -> bool {
@@ -453,6 +516,7 @@ impl ReplicaContentStore {
             }
             return Ok(previous.active);
         }
+        gc::require_live(&transaction, &reference.content)?;
         let mut heads = layout::head(&transaction, "reference_ids")?;
         if heads.len() >= MAX_REFERENCES {
             return Err("original content reference history reached its fixed bound".into());

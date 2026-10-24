@@ -119,9 +119,9 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 | 顺序 | 对应原项 | 当前必需交付 | 状态 |
 | --- | --- | --- | --- |
-| A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | 稳定成员 Log 专项通过；网络 Snapshot/learner/joint/更多故障组合继续 |
-| A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | readiness projection 与 learner 真实门禁已通过；producer GC、joint 组合仍待实现 |
-| A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 待实现或组合验收；复用现有迁移 |
+| A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | 稳定成员 Log、purged Snapshot 与空 learner 门禁通过；归档源首次捕获、joint/更多故障组合继续 |
+| A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | readiness/learner、Root7 原 stream 退休/intent/tombstone/GC/恢复已验收；joint/全 producer/partial staging 组合继续 |
+| A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 原 Root4 → 6 → 7 排空同 inode 升级、旧入口拒绝与三 leader 冷恢复通过；滚动/回退继续 |
 | B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | 待接线与组合验收；不重写空间算法 |
 | C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | 待实现与验收；保留现有 quota/units |
 | D | N5/F8 | 运行中抢占、耦合恢复、hazard/handoff/regrasp 与原目标 | 待实现与验收；复用 stop/revoke/revision |
@@ -129,6 +129,12 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | 待全部软件必需项通过 |
 
 当前清单为唯一执行队列，下面按原时间保留的切片记录不能替代上表完成条件。
+
+[Root7 GC 与有界追赶验收](acceptance/2026-10-24-replica-content-gc.md)覆盖真实删除前
+SIGKILL、删除后 SQL 回执失败、原 Unknown/同 ID 只读、61 条原 stream 退休与 3 个原 Root
+同 inode 升级。首个冷运行失败暴露 Append 重叠追赶耗尽 work capacity；ADR-0191 将其
+收敛为独立持有原 admission 的唯一任务。同一 pinned bundle 的 337 → 307 → 311
+恢复/读取/原 Unknown 和全部实际 supervisor wait 均通过；原 GC/退休行另做只读独立比较。
 每项状态必须附实际源码/配置、公开调用链、通过证据和原提交。A1 的缺口是普通
 committed route 要求双方已接受同一应用，无法给 apply 前的落后 Log 供给缺失内容；
 独立历史路由必须核对双方实际原 Log、来源提交位置和现存引用，不能放宽原路由。

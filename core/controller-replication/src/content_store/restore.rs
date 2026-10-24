@@ -106,6 +106,10 @@ fn parse(raw: &str, original: &ReplicaContentIdentity, ordinal: usize) -> Result
             (binding.schema.as_str(), binding.source_root_version),
             ("roboguide.replica-content-restore-binding/v0.2", 6)
         )
+        && !matches!(
+            (binding.schema.as_str(), binding.source_root_version),
+            ("roboguide.replica-content-restore-binding/v0.3", 7)
+        )
     {
         return Err(
             "original restore binding has an unsupported explicit source generation".into(),
@@ -190,15 +194,17 @@ pub(super) fn validate_sql(
     }
     let mut previous = None;
     let mut previous_parent = None;
-    let mut snapshot_history = false;
+    let mut snapshot_history = 0;
     for (index, raw) in history.iter().enumerate() {
         let binding = parse(raw, original, index + 1)?;
-        if snapshot_history && binding.source_root_version != 6 {
+        if snapshot_history > binding.source_root_version {
             return Err(
                 "original Snapshot restore history regressed its backing generation".into(),
             );
         }
-        snapshot_history |= binding.source_root_version == 6;
+        if binding.source_root_version >= 6 {
+            snapshot_history = binding.source_root_version;
+        }
         if binding.previous_binding_digest != previous {
             return Err("original restore history chain differs".into());
         }

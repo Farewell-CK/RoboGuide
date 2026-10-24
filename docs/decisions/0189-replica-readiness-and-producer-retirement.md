@@ -1,6 +1,6 @@
 # ADR-0189: Replica readiness and producer-retirement projection
 
-Status: Accepted; implementation in progress. This closes a readiness observability slice only; it
+Status: Accepted; implemented and software-validated. This closes a readiness observability slice only; it
 does not claim complete N1/A2, HA, device readiness or SoftwareComplete.
 
 ## Decision

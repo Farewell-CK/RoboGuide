@@ -203,6 +203,21 @@ outcomes. This review starts no Habitat, model or device.
 
 ## Maintenance
 
+ADR-0191 moves historical catch-up into one bounded independently owned task per original Root.
+The durable Raft Append ACK no longer waits for that task. Original sender, Log prefix, budget and
+actual blocking-job admission guards remain; overlapping heartbeats create no duplicate task.
+Complete byte/apply/application Commit/readiness gates remain mandatory.
+
+ADR-0190 implements explicit Root7 GC intents, irreversible qualified-key tombstones and
+unlink receipts. Complete original references must retire before admission under the Root writer;
+active/Unknown references keep blocking deletion. Process v0.5/recovery v0.21 explicitly select the
+generation. Actual CLI/fault/drained-upgrade/three-leader cold-recovery acceptance passed.
+Complete producer/joint/partial-staging and cross-host matrices remain mandatory.
+The same Root7 retains complete stream-retirement rows and a mandatory head. Only actual original
+worker closure or independent original process-end observation permits atomic pin retirement.
+Live workers refuse; original receipts/Unknown/budgets stay unchanged and independent
+Log/View/Snapshot/reader pins continue blocking deletion.
+
 ADR-0188 implements explicit Root6 durable network-Snapshot preparation/independent pins,
 actual-byte readiness before metadata installation and complete recovery v0.20. Transport obtains
 its actual server source through a Weak reference without a writer-lifetime cycle. Receiver readiness

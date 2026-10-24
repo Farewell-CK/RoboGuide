@@ -53,6 +53,9 @@ impl ReplicaContentStore {
             .as_mut()
             .ok_or("original content connection is closed")?;
         self.validate_connection(connection)?;
+        for original in &originals {
+            super::gc::require_live(connection, &original.content)?;
+        }
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;

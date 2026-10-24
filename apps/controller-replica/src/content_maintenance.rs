@@ -21,6 +21,44 @@ struct Member {
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
+    /// Retires only the exact actually closed stream, preserving its original receipt or Unknown.
+    RetireContentStream {
+        /// Complete original accepted Root7 declaration.
+        member: Member,
+        /// Exact restored backing when selected.
+        restore_binding_digest: Option<String>,
+        /// Original stream command, never a replacement effect identity.
+        command_id: String,
+        /// Original bounded observation/SQL duration, separate from the original stream budget.
+        budget_ms: u64,
+    },
+    /// Drains original Root6 writers and explicitly enables permanent Root7 GC fences.
+    UpgradeReclamationRoot {
+        /// Complete existing original member/root declaration.
+        member: Member,
+        /// Exact accepted original restored backing, absent for the original physical root.
+        restore_binding_digest: Option<String>,
+    },
+    /// Locally admits original inactive selections and permanently fences their qualified keys.
+    CollectContent {
+        /// Original complete accepted Root7 declaration.
+        member: Member,
+        /// Exact declared restored backing; no automatic discovery changes interpretation.
+        restore_binding_digest: Option<String>,
+        /// Immutable command identity; duplicate calls only observe original outcomes.
+        command_id: String,
+        /// Original duration including scan, SQL, hashing, unlink and durable outcome publication.
+        budget_ms: u64,
+    },
+    /// Observes only the original retained GC command without new effects or budgets.
+    ObserveContentGc {
+        /// Complete original accepted member/root declaration.
+        member: Member,
+        /// Explicit restored backing if selected.
+        restore_binding_digest: Option<String>,
+        /// Original immutable GC command, including retained Unknown.
+        command_id: String,
+    },
     /// Explicitly drain and upgrade Root4/Root5 to durable Snapshot receive authority, preserving original history.
     UpgradeSnapshotRoot {
         /// Complete existing original member/root declaration.
@@ -59,6 +97,62 @@ pub(crate) fn run(path: &Path) -> Result<serde_json::Value, String> {
     }
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     match request {
+        Request::RetireContentStream {
+            member,
+            restore_binding_digest,
+            command_id,
+            budget_ms,
+        } => {
+            let root = ReplicaContentStore::open_with_reclamation(
+                &member.content_root,
+                &member.profile_identity,
+                member.member,
+                restore_binding_digest.as_deref(),
+            )?;
+            root.retire_stream(&command_id, budget_ms)
+        }
+        Request::UpgradeReclamationRoot {
+            member,
+            restore_binding_digest,
+        } => {
+            let root = ReplicaContentStore::upgrade_reclamation(
+                &member.content_root,
+                &member.profile_identity,
+                member.member,
+                restore_binding_digest.as_deref(),
+            )?;
+            Ok(serde_json::json!({"root_identity":root.identity(),
+                "reclamation_layout":controller_replication::REPLICA_CONTENT_GC_LAYOUT_SCHEMA,
+                "historical_operations":"preserved; no clocks or permissions renewed"}))
+        }
+        Request::CollectContent {
+            member,
+            restore_binding_digest,
+            command_id,
+            budget_ms,
+        } => {
+            let root = ReplicaContentStore::open_with_reclamation(
+                &member.content_root,
+                &member.profile_identity,
+                member.member,
+                restore_binding_digest.as_deref(),
+            )?;
+            serde_json::to_value(root.collect_unreferenced_content(&command_id, budget_ms)?)
+                .map_err(|error| error.to_string())
+        }
+        Request::ObserveContentGc {
+            member,
+            restore_binding_digest,
+            command_id,
+        } => {
+            let root = ReplicaContentStore::open_with_reclamation(
+                &member.content_root,
+                &member.profile_identity,
+                member.member,
+                restore_binding_digest.as_deref(),
+            )?;
+            serde_json::to_value(root.gc_status(&command_id)?).map_err(|error| error.to_string())
+        }
         Request::UpgradeSnapshotRoot {
             member,
             restore_binding_digest,

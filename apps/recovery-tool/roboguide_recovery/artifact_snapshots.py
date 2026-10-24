@@ -26,6 +26,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.18",
     "roboguide.recovery-profile/v0.19",
     "roboguide.recovery-profile/v0.20",
+    "roboguide.recovery-profile/v0.21",
 }
 MAX_OPERATIONS = 4096
 MAX_INPUTS = 16_384
@@ -261,6 +262,7 @@ def operations(
                         "roboguide.recovery-profile/v0.18",
                         "roboguide.recovery-profile/v0.19",
                         "roboguide.recovery-profile/v0.20",
+                        "roboguide.recovery-profile/v0.21",
                     }
                     or owner["schema"] != "roboguide.artifact-storage/v5"
                 ):

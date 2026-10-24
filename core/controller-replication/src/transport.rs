@@ -722,9 +722,8 @@ where
                 let appended = node.raft.append_entries(rpc).await;
                 if matches!(appended, Ok(AppendEntriesResponse::Success))
                     && let Some(clock) = catchup_budget
-                    && let Err(error) = node
-                        .catch_up_retained_logs(request.sender, through, clock)
-                        .await
+                    && let Err(error) =
+                        node.queue_retained_log_catchup(request.sender, through, clock)
                 {
                     eprintln!(
                         "original retained Log content remains unavailable: {}",

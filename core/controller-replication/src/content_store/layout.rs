@@ -124,10 +124,14 @@ pub(super) fn create(
     member: u64,
     mode: ContentCreateMode,
 ) -> Result<ReplicaContentStore, String> {
-    let snapshot_receives = matches!(mode, ContentCreateMode::Snapshots);
+    let reclamation = matches!(mode, ContentCreateMode::Reclamation);
+    let snapshot_receives = matches!(
+        mode,
+        ContentCreateMode::Snapshots | ContentCreateMode::Reclamation
+    );
     let streams = matches!(
         mode,
-        ContentCreateMode::Streams | ContentCreateMode::Snapshots
+        ContentCreateMode::Streams | ContentCreateMode::Snapshots | ContentCreateMode::Reclamation
     );
     let producers = !matches!(mode, ContentCreateMode::Reader);
     if !crate::content::hex_digest(profile_identity) {
@@ -179,7 +183,9 @@ pub(super) fn create(
     transaction
         .execute(
             "INSERT INTO metadata VALUES ('layout',?1)",
-            [if snapshot_receives {
+            [if reclamation {
+                REPLICA_CONTENT_GC_LAYOUT_SCHEMA
+            } else if snapshot_receives {
                 REPLICA_CONTENT_SNAPSHOT_LAYOUT_SCHEMA
             } else if streams {
                 REPLICA_CONTENT_STREAM_LAYOUT_SCHEMA
@@ -216,6 +222,12 @@ pub(super) fn create(
             .execute_batch("PRAGMA user_version=6")
             .map_err(|e| e.to_string())?;
     }
+    if reclamation {
+        super::gc::initialize(&transaction)?;
+        transaction
+            .execute_batch("PRAGMA user_version=7")
+            .map_err(|e| e.to_string())?;
+    }
     transaction.commit().map_err(|error| error.to_string())?;
     for name in ["content-v1", "staging-v1"] {
         fs::DirBuilder::new()
@@ -228,7 +240,9 @@ pub(super) fn create(
     validate_version(
         &connection,
         &original,
-        if snapshot_receives {
+        if reclamation {
+            7
+        } else if snapshot_receives {
             6
         } else if streams {
             4
@@ -250,9 +264,11 @@ pub(super) fn create(
             producers,
             streams,
             snapshot_receives,
+            reclamation,
             restore_binding: None,
             stream_capacity: Arc::new(tokio::sync::Semaphore::new(8)),
             stream_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
+            historical_catchup: Arc::new(tokio::sync::Semaphore::new(1)),
         }),
     })
 }
@@ -362,6 +378,8 @@ pub(super) fn open_bound(
             | ContentOpenMode::StreamUpgrade
             | ContentOpenMode::Snapshots
             | ContentOpenMode::SnapshotUpgrade
+            | ContentOpenMode::Reclamation
+            | ContentOpenMode::ReclamationUpgrade
     );
     let streams = matches!(
         mode,
@@ -369,10 +387,19 @@ pub(super) fn open_bound(
             | ContentOpenMode::StreamUpgrade
             | ContentOpenMode::Snapshots
             | ContentOpenMode::SnapshotUpgrade
+            | ContentOpenMode::Reclamation
+            | ContentOpenMode::ReclamationUpgrade
     );
     let snapshot_receives = matches!(
         mode,
-        ContentOpenMode::Snapshots | ContentOpenMode::SnapshotUpgrade
+        ContentOpenMode::Snapshots
+            | ContentOpenMode::SnapshotUpgrade
+            | ContentOpenMode::Reclamation
+            | ContentOpenMode::ReclamationUpgrade
+    );
+    let reclamation = matches!(
+        mode,
+        ContentOpenMode::Reclamation | ContentOpenMode::ReclamationUpgrade
     );
     if snapshot_receives && restore_binding.is_none() && root.join(super::restore::FILE).exists() {
         return Err("original Snapshot Root contains an undeclared restore binding".into());
@@ -448,10 +475,45 @@ pub(super) fn open_bound(
             .map_err(|e| e.to_string())?;
         transaction.commit().map_err(|e| e.to_string())?;
     }
+    if matches!(mode, ContentOpenMode::ReclamationUpgrade) && version == 6 {
+        validate_version(&connection, &original, 6)?;
+        let backing: String = connection
+            .query_row(
+                "SELECT value FROM metadata WHERE key='backing_mode'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if backing
+            != if restore_binding.is_some() {
+                "restored"
+            } else {
+                "original"
+            }
+        {
+            return Err("GC upgrade changed original backing interpretation".into());
+        }
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
+            .map_err(|e| format!("original GC connections are not drained: {e}"))?;
+        super::gc::initialize(&transaction)?;
+        transaction
+            .execute(
+                "UPDATE metadata SET value=?1 WHERE key='layout'",
+                [REPLICA_CONTENT_GC_LAYOUT_SCHEMA],
+            )
+            .map_err(|e| e.to_string())?;
+        transaction
+            .execute_batch("PRAGMA user_version=7")
+            .map_err(|e| e.to_string())?;
+        transaction.commit().map_err(|e| e.to_string())?;
+    }
     validate_version(
         &connection,
         &original,
-        if snapshot_receives {
+        if reclamation {
+            7
+        } else if snapshot_receives {
             6
         } else if restore_binding.is_some() {
             5
@@ -501,9 +563,11 @@ pub(super) fn open_bound(
             producers,
             streams,
             snapshot_receives,
+            reclamation,
             restore_binding: restore_binding.map(str::to_owned),
             stream_capacity: Arc::new(tokio::sync::Semaphore::new(8)),
             stream_jobs: Arc::new(tokio::sync::Semaphore::new(8)),
+            historical_catchup: Arc::new(tokio::sync::Semaphore::new(1)),
         }),
     })
 }
@@ -585,8 +649,16 @@ pub(super) fn validate_version(
             ("content_streams".into(), "table".into()),
         );
     }
-    if expected_version == 6 {
+    if expected_version >= 6 {
         expected.push(("content_snapshot_receives".into(), "table".into()));
+        expected.sort();
+    }
+    if expected_version == 7 {
+        expected.extend([
+            ("content_gc_commands".into(), "table".into()),
+            ("content_tombstones".into(), "table".into()),
+            ("content_stream_retirements".into(), "table".into()),
+        ]);
         expected.sort();
     }
     if version != expected_version || mode != "delete" || actual != expected {
@@ -605,8 +677,15 @@ pub(super) fn validate_version(
     if expected_version >= 4 {
         tables.push(("content_streams", "stream_id"));
     }
-    if expected_version == 6 {
+    if expected_version >= 6 {
         tables.push(("content_snapshot_receives", "operation_id"));
+    }
+    if expected_version == 7 {
+        tables.extend([
+            ("content_gc_commands", "operation_id"),
+            ("content_tombstones", "content_key"),
+            ("content_stream_retirements", "stream_id"),
+        ]);
     }
     for (table, key) in tables {
         let mut statement = connection
@@ -671,12 +750,23 @@ pub(super) fn validate_version(
     if expected_version >= 4 {
         inventories.push(("stream_ids", "content_streams", "stream_id"));
     }
-    if expected_version == 6 {
+    if expected_version >= 6 {
         inventories.push((
             "snapshot_receive_ids",
             "content_snapshot_receives",
             "operation_id",
         ));
+    }
+    if expected_version == 7 {
+        inventories.extend([
+            ("gc_ids", "content_gc_commands", "operation_id"),
+            ("tombstone_keys", "content_tombstones", "content_key"),
+            (
+                "stream_retirement_ids",
+                "content_stream_retirements",
+                "stream_id",
+            ),
+        ]);
     }
     for (name, table, column) in inventories {
         let heads = head(connection, name)?;
@@ -703,7 +793,7 @@ pub(super) fn validate_version(
                     return Err("old content profile contains hidden stream authority".into());
                 }
                 if reference.reference.kind == ReplicaContentReferenceKind::SnapshotReceive
-                    && expected_version != 6
+                    && expected_version < 6
                 {
                     return Err(
                         "old content profile contains hidden Snapshot receive authority".into(),
@@ -722,7 +812,7 @@ pub(super) fn validate_version(
             3 => 8,
             4 => 9,
             5 => 10,
-            6 => {
+            6 | 7 => {
                 let mode: String = connection
                     .query_row(
                         "SELECT value FROM metadata WHERE key='backing_mode'",
@@ -731,8 +821,20 @@ pub(super) fn validate_version(
                     )
                     .map_err(|e| e.to_string())?;
                 match mode.as_str() {
-                    "original" => 11,
-                    "restored" => 12,
+                    "original" => {
+                        if expected_version == 7 {
+                            14
+                        } else {
+                            11
+                        }
+                    }
+                    "restored" => {
+                        if expected_version == 7 {
+                            15
+                        } else {
+                            12
+                        }
+                    }
                     _ => return Err("Snapshot backing mode is invalid".into()),
                 }
             }
@@ -748,7 +850,9 @@ pub(super) fn validate_version(
             })
             .map_err(|error| error.to_string())?;
         if layout
-            != if expected_version == 6 {
+            != if expected_version == 7 {
+                REPLICA_CONTENT_GC_LAYOUT_SCHEMA
+            } else if expected_version == 6 {
                 REPLICA_CONTENT_SNAPSHOT_LAYOUT_SCHEMA
             } else if expected_version == 5 {
                 REPLICA_CONTENT_RESTORE_LAYOUT_SCHEMA
@@ -771,10 +875,14 @@ pub(super) fn validate_version(
     if expected_version >= 4 {
         super::streams::validate_records(connection, original)?;
     }
-    if expected_version == 6 {
+    if expected_version >= 6 {
         super::snapshot_receive::validate_records(connection, original)?;
     }
-    let restored_six: bool = expected_version == 6
+    if expected_version == 7 {
+        super::gc::validate_records(connection, original)?;
+        super::streams::validate_retirements(connection)?;
+    }
+    let restored_six: bool = expected_version >= 6
         && connection
             .query_row(
                 "SELECT value FROM metadata WHERE key='backing_mode'",

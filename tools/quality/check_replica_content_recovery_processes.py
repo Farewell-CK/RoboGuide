@@ -76,17 +76,23 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
             sqlite3.connect((directory / "content/content.sqlite3").as_uri() + "?mode=ro", uri=True)
         ) as sql:
             layout = sql.execute("SELECT value FROM metadata WHERE key='layout'").fetchone()[0]
-        components.append(
-            {
-                "component_id": f"root-{member}",
-                "kind": "replica-content",
-                "root": str(directory / "content"),
-                "database": None,
-                "trees": [],
-                "depends_on": [f"parent-{member}"],
-                "storage_schema": layout,
-            }
-        )
+        root_component = {
+            "component_id": f"root-{member}",
+            "kind": "replica-content",
+            "root": str(directory / "content"),
+            "database": None,
+            "trees": [],
+            "depends_on": [f"parent-{member}"],
+            "storage_schema": layout,
+        }
+        if layout in {
+            "roboguide.replica-content-layout/v0.6",
+            "roboguide.replica-content-layout/v0.7",
+        }:
+            root_component["restore_binding_digest"] = config["content"].get(
+                "restore_binding_digest"
+            )
+        components.append(root_component)
     components.append(
         {
             "component_id": "inputs",
@@ -99,8 +105,23 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
             ],
         }
     )
+    generation = (
+        21
+        if any(
+            value.get("storage_schema") == "roboguide.replica-content-layout/v0.7"
+            for value in components
+        )
+        else (
+            20
+            if any(
+                value.get("storage_schema") == "roboguide.replica-content-layout/v0.6"
+                for value in components
+            )
+            else 19
+        )
+    )
     return {
-        "schema": "roboguide.recovery-profile/v0.19",
+        "schema": f"roboguide.recovery-profile/v0.{generation}",
         "profile_id": "actual-complete-content-roots",
         "revision": 1,
         "max_bytes": 1024**3,
@@ -161,7 +182,18 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
         cas = stores / f"cas-{member}"
         if cas.exists():
             cas.rename(parent / "artifacts")
-        config["schema"] = "roboguide.controller-replica-process/v0.3"
+        binding = next(
+            value["binding"]
+            for value in receipts["replica_content_bindings"]
+            if value["component_id"] == f"root-{member}"
+        )
+        config["schema"] = (
+            "roboguide.controller-replica-process/v0.5"
+            if binding["source_root_version"] == 7
+            else "roboguide.controller-replica-process/v0.4"
+            if binding["source_root_version"] == 6
+            else "roboguide.controller-replica-process/v0.3"
+        )
         config["storage_directory"] = str(parent)
         config["content"]["root"] = str(stores / f"root-{member}")
         config["content"]["socket"] = str(ipc / f"{member}.sock")
@@ -189,32 +221,23 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
     return result
 
 
-def run(
-    source: Path, output: Path, supervisor: Path, old_supervisor: Path | None, cold_only: bool
-) -> dict[str, Any]:
-    """Require actual source waits and complete product backup/restore before restart."""
-    original = json.loads((source / "result.json").read_text())
-    assert original["passed"] and all(
-        value["returncode"] == 0 for value in original["actual_supervisors"]
-    )
-    assert (
-        original["embodied_nodes"]
-        == original["devices"]
-        == original["models"]
-        == original["simulators"]
-        == 0
-    )
-    output.mkdir(mode=0o700, parents=True, exist_ok=False)
-    files = sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py")) + [
-        Path(__file__),
-        supervisor,
-    ]
-    if old_supervisor is not None:
-        files.append(old_supervisor)
-    identities = {str(path): digest(path) for path in files}
-    save(output / "source-identity.json", identities)
+def prepare_bundle(
+    source: Path,
+    output: Path,
+    operation: str,
+    frozen_bundle: Path | None,
+    frozen_digest: str | None,
+) -> tuple[Path, str]:
+    """Reuse only a declared pinned bundle, or run the original complete source backup gate."""
+    if frozen_bundle is not None:
+        if frozen_digest is None:
+            raise ValueError("frozen recovery input requires its original manifest digest")
+        save(
+            output / "frozen-bundle-input.json",
+            {"bundle": str(frozen_bundle), "manifest_digest": frozen_digest},
+        )
+        return frozen_bundle, frozen_digest
     declaration = profile(source, output)
-    operation = hashlib.sha256(str(output).encode()).hexdigest()[:16]
     save(output / "profile.json", declaration)
     # Actual inode lock must refuse before creating any new Snapshot producer or bundle.
     root_sql = (
@@ -257,15 +280,52 @@ def run(
         ],
     )
     checksum = created["manifest_digest"]
+    return output / "bundle", checksum
+
+
+def run(
+    source: Path,
+    output: Path,
+    supervisor: Path,
+    old_supervisor: Path | None,
+    cold_only: bool,
+    frozen_bundle: Path | None = None,
+    frozen_digest: str | None = None,
+) -> dict[str, Any]:
+    """Require actual source waits and complete product backup/restore before restart."""
+    original = json.loads((source / "result.json").read_text())
+    assert original["passed"] and all(
+        value["returncode"] == 0 for value in original["actual_supervisors"]
+    )
+    assert (
+        original["embodied_nodes"]
+        == original["devices"]
+        == original["models"]
+        == original["simulators"]
+        == 0
+    )
+    output.mkdir(mode=0o700, parents=True, exist_ok=False)
+    files = sorted((ROOT / "apps/recovery-tool/roboguide_recovery").glob("*.py")) + [
+        Path(__file__),
+        supervisor,
+    ]
+    if old_supervisor is not None:
+        files.append(old_supervisor)
+    if frozen_bundle is not None:
+        files.append(frozen_bundle / "manifest.json")
+    identities = {str(path): digest(path) for path in files}
+    save(output / "source-identity.json", identities)
+    operation = hashlib.sha256(str(output).encode()).hexdigest()[:16]
+    bundle, checksum = prepare_bundle(source, output, operation, frozen_bundle, frozen_digest)
     command(
         output,
         "verify",
-        ["verify", "--bundle", str(output / "bundle"), "--manifest-digest", checksum],
+        ["verify", "--bundle", str(bundle), "--manifest-digest", checksum],
     )
     restore_args = [
         "restore",
         "--bundle",
-        str(output / "bundle"),
+        str(bundle),
         "--manifest-digest",
         checksum,
         "--destination",
@@ -285,6 +345,7 @@ def run(
         "models": 0,
         "simulators": 0,
         "source": str(source),
+        "bundle": str(bundle),
         "manifest_digest": checksum,
         "bindings": restored["replica_content_bindings"],
         "actual_processes": [],
@@ -509,13 +570,19 @@ def main() -> None:
     parser.add_argument("--supervisor", type=Path, required=True)
     parser.add_argument("--old-supervisor", type=Path)
     parser.add_argument("--cold-only", action="store_true")
+    parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--manifest-digest")
     args = parser.parse_args()
+    if (args.bundle is None) != (args.manifest_digest is None):
+        parser.error("--bundle and --manifest-digest must be supplied together")
     result = run(
         args.source.resolve(strict=True),
         args.output.absolute(),
         args.supervisor.resolve(strict=True),
         args.old_supervisor.resolve(strict=True) if args.old_supervisor is not None else None,
         args.cold_only,
+        args.bundle.resolve(strict=True) if args.bundle is not None else None,
+        args.manifest_digest,
     )
     print(json.dumps(result))
 

@@ -261,7 +261,7 @@ pub(super) fn validate_records(
             let version: i64 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .map_err(|error| error.to_string())?;
-            if !matches!(version, 4..=6) {
+            if !matches!(version, 4..=7) {
                 return Err("legacy object profile contains a hidden stream receipt".into());
             }
             super::streams::validate_object_receipt(connection, &receipt)?;
@@ -420,6 +420,7 @@ impl ReplicaContentStore {
                 }
                 return status(&original);
             }
+            super::gc::require_live(connection, content)?;
             intent.budget.check()?;
             let transaction = connection
                 .transaction()
@@ -634,6 +635,7 @@ impl ReplicaContentStore {
             .as_ref()
             .ok_or("original content connection is closed")?;
         self.validate_connection(connection)?;
+        super::gc::require_live(connection, content)?;
         let raw: String = connection
             .query_row(
                 "SELECT record FROM content_objects WHERE content_key=?",

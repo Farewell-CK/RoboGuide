@@ -68,6 +68,135 @@ fn target(receiver: &ReplicaContentStore, key: &ArtifactContentKey) -> ContentQu
     }
 }
 
+/// Explicitly upgrades only the fixture's drained original Root4, retaining its real storage identity.
+fn reclamation(receiver: ReplicaContentStore) -> ReplicaContentStore {
+    let root = receiver.root().to_owned();
+    let identity = receiver.identity().clone();
+    drop(receiver);
+    drop(
+        ReplicaContentStore::upgrade_snapshot_receives(
+            &root,
+            &identity.profile_identity,
+            identity.member,
+            None,
+        )
+        .unwrap(),
+    );
+    ReplicaContentStore::upgrade_reclamation(
+        &root,
+        &identity.profile_identity,
+        identity.member,
+        None,
+    )
+    .unwrap()
+}
+
+/// A completed real stream can retire while a live independent reader still protects its actual bytes.
+#[test]
+fn root7_retired_stream_keeps_independent_reader_and_original_receive_history() {
+    let (_directory, source, receiver, key, _bytes) = fixture();
+    let receiver = reclamation(receiver);
+    let target = target(&receiver, &key);
+    let original = receiver
+        .copy_artifact_stream(&source, target.clone(), &key, "original-gc-stream", 30_000)
+        .unwrap();
+    let reader = receiver
+        .retain_reader_scope(
+            "independent-reader",
+            std::slice::from_ref(&key),
+            &"d".repeat(64),
+        )
+        .unwrap();
+    let retired = receiver
+        .retire_stream("original-gc-stream", 30_000)
+        .unwrap();
+    assert_eq!(retired["original"], original.original);
+    assert!(retired["process_end"].is_null());
+    assert_eq!(
+        receiver
+            .collect_unreferenced_content("reader-blocked", 30_000)
+            .unwrap()
+            .candidates,
+        0
+    );
+    drop(reader);
+    assert_eq!(
+        receiver
+            .collect_unreferenced_content("original-stream-unlink", 30_000)
+            .unwrap()
+            .deleted,
+        1
+    );
+    assert_eq!(
+        receiver.stream_status("original-gc-stream").unwrap(),
+        Some(original)
+    );
+    assert_eq!(
+        receiver
+            .retire_stream("original-gc-stream", 30_000)
+            .unwrap(),
+        retired
+    );
+    assert!(
+        receiver
+            .copy_artifact_stream(&source, target, &key, "forbidden-new-stream", 30_000)
+            .is_err()
+    );
+}
+
+/// An actual live writer cannot be retired; its later actual Drop closes only that original Unknown.
+#[test]
+fn root7_live_stream_retirement_refuses_until_actual_worker_close() {
+    let (_directory, source, receiver, key, _bytes) = fixture();
+    let receiver = reclamation(receiver);
+    let (origin, permission) = origin(&source, Arc::new(AtomicBool::new(true)));
+    let admission = receiver
+        .admit_stream(
+            "held-original-stream",
+            target(&receiver, &key),
+            key.clone(),
+            origin,
+            ContentBudget::issue(30_000).unwrap(),
+            permission,
+        )
+        .unwrap();
+    let StreamAdmission::New(worker) = admission else {
+        panic!("fresh original worker required")
+    };
+    let original = receiver
+        .stream_status("held-original-stream")
+        .unwrap()
+        .unwrap();
+    assert!(
+        receiver
+            .retire_stream("held-original-stream", 30_000)
+            .is_err()
+    );
+    assert_eq!(
+        receiver.stream_status("held-original-stream").unwrap(),
+        Some(original)
+    );
+    drop(worker);
+    let closed = receiver
+        .stream_status("held-original-stream")
+        .unwrap()
+        .unwrap();
+    assert!(closed.receipt.is_none());
+    let retired = receiver
+        .retire_stream("held-original-stream", 30_000)
+        .unwrap();
+    assert_eq!(retired["original"], closed.original);
+    assert!(receiver.active_references(&key).unwrap().is_empty());
+    assert!(
+        receiver
+            .stream_status("held-original-stream")
+            .unwrap()
+            .unwrap()
+            .receipt
+            .is_none()
+    );
+}
+
 /// Retains the actual source writer in a live permission; an optional test fence grants no network authority.
 fn origin(
     source: &artifact_store::FileSystemArtifactStore,

@@ -557,7 +557,9 @@ def bind_restored(
         parent = by_id[source["parent_id"]]
         parent_sql = (root / "stores" / parent["component_id"] / parent["database"]).stat()
         binding = {
-            "schema": "roboguide.replica-content-restore-binding/v0.2"
+            "schema": "roboguide.replica-content-restore-binding/v0.3"
+            if original["version"] == 7
+            else "roboguide.replica-content-restore-binding/v0.2"
             if original["version"] == 6
             else "roboguide.replica-content-restore-binding/v0.1",
             "command_id": command_id,
@@ -584,19 +586,24 @@ def bind_restored(
             with connection:
                 connection.execute(
                     "UPDATE metadata SET value=? WHERE key='layout'",
-                    (content.LAYOUT6 if original["version"] == 6 else content.LAYOUT5,),
+                    (
+                        f"roboguide.replica-content-layout/v0.{original['version']}"
+                        if original["version"] >= 6
+                        else content.LAYOUT5,
+                    ),
                 )
                 connection.execute(
                     "INSERT INTO metadata(key,value) VALUES ('restore_bindings',?) "
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (json.dumps(history),),
                 )
-                if original["version"] == 6:
+                if original["version"] >= 6:
                     connection.execute(
                         "UPDATE metadata SET value='restored' WHERE key='backing_mode'"
                     )
                 connection.execute(
-                    "PRAGMA user_version=" + str(6 if original["version"] == 6 else 5)
+                    "PRAGMA user_version="
+                    + str(original["version"] if original["version"] >= 6 else 5)
                 )
         path = directory / content.BINDING_FILE
         flags = (
@@ -609,8 +616,11 @@ def bind_restored(
         with (directory / "content.sqlite3").open("rb") as handle:
             os.fsync(handle.fileno())
         restored_component = component | (
-            {"storage_schema": content.LAYOUT6, "restore_binding_digest": content._sha(raw)}
-            if original["version"] == 6
+            {
+                "storage_schema": f"roboguide.replica-content-layout/v0.{original['version']}",
+                "restore_binding_digest": content._sha(raw),
+            }
+            if original["version"] >= 6
             else {"storage_schema": content.LAYOUT5}
         )
         opened = content.inventory(directory, restored_component, budget, live=True)
@@ -653,8 +663,11 @@ def validate_restored(
         source = content.inventory(bundle / "stores" / identifier, component, budget)
         row = content._closed(by_id[identifier], {"component_id", "binding_digest", "binding"})
         restored_component = component | (
-            {"storage_schema": content.LAYOUT6, "restore_binding_digest": row["binding_digest"]}
-            if source["version"] == 6
+            {
+                "storage_schema": f"roboguide.replica-content-layout/v0.{source['version']}",
+                "restore_binding_digest": row["binding_digest"],
+            }
+            if source["version"] >= 6
             else {"storage_schema": content.LAYOUT5}
         )
         restored = content.inventory(

@@ -194,6 +194,18 @@ Harness 不绕过 RoboGuide 直接调用 simulator skill。本地导航/操作 C
 
 ## 如何维护
 
+ADR-0191 将历史内容追赶放入每个原 Root 唯一、有界且独立持有的任务；已持久化的 Raft
+Append ACK 不再等待该任务。原 sender、Log prefix、预算与实际 blocking job 的 admission
+guard 不变，重叠 heartbeat 不创建重复任务；完整 byte/apply/应用 Commit/readiness 门禁保留。
+
+ADR-0190 已接入显式 Root7 的 GC intent、不可逆 qualified-key tombstone 和删除回执。
+原 Root writer 内完整引用均退休后才可持久接纳；活跃/Unknown 引用继续阻止删除。
+process v0.5/recovery v0.21 显式选择新边界；实际 CLI/故障/排空升级/三 leader 冷恢复已验收。
+完整 producer/joint/partial staging 和跨主机矩阵继续必需。
+同一 Root7 还保留完整 stream retirement 表及 mandatory head。只有原 worker 实际关闭或
+独立原进程结束观察才可原子退休其 pin；活跃 worker 拒绝，原 receipt/Unknown 与预算不变，
+其它 Log/View/Snapshot/reader 引用继续独立阻止删除。
+
 ADR-0188 已为网络 Snapshot 接入显式 Root6 的持久准备/独立 pin、实际字节就绪与
 元数据安装门禁，以及 recovery v0.20 的完整恢复。原副本流量由实际 server 的弱引用
 取得源上下文，避免 writer 生命周期形成强引用环；接收就绪不等于 Snapshot 已应用。

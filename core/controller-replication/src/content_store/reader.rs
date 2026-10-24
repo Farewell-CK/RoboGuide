@@ -349,6 +349,7 @@ impl ReplicaContentStore {
                     "original reader ID is retained; observe it without reopening bytes".into(),
                 );
             }
+            super::gc::require_live(connection, &intent.content)?;
             intent.budget.check()?;
             let transaction = connection
                 .transaction()

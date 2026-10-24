@@ -683,6 +683,9 @@ impl ReplicaContentStore {
             }
             return Ok(ProducerAdmission::Existing(status(&original)?));
         }
+        for input in &intent.inputs {
+            super::gc::require_live(connection, input)?;
+        }
         intent.budget.check()?;
         let transaction = connection
             .transaction()

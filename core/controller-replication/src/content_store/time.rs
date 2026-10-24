@@ -237,6 +237,33 @@ impl ContentBudget {
         }))
     }
 
+    /// Binds retained process-end evidence to its actual original retirement observer/decision clock.
+    pub(super) fn validates_end_decision(
+        &self,
+        evidence: &ContentProcessEndObservation,
+        budget: &Self,
+        decision_ms: u64,
+    ) -> bool {
+        let observed = &evidence.observer;
+        self.validates_end(evidence)
+            && (
+                observed.boot_id.as_str(),
+                observed.namespace,
+                observed.pid_namespace,
+                observed.pid,
+                observed.start_ticks,
+            ) == (
+                budget.boot_id.as_str(),
+                budget.namespace,
+                budget.pid_namespace,
+                budget.pid,
+                budget.start_ticks,
+            )
+            && observed.admitted_ms >= budget.admitted_ms
+            && observed.admitted_ms <= decision_ms
+            && budget.validates_completion(decision_ms)
+    }
+
     /// Validates immutable retained negative evidence, without turning it into an OS wait receipt.
     pub(super) fn validates_end(&self, evidence: &ContentProcessEndObservation) -> bool {
         if self.validate().is_err()

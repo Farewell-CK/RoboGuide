@@ -94,6 +94,7 @@ impl ReplicaContentStore {
                 // original nonrenewing budget authoritative and never starts a second effect.
                 return Ok(StreamAdmission::Existing(Box::new(status(&original)?)));
             }
+            super::super::gc::require_live(connection, &intent.content)?;
             capacity = self
                 .inner
                 .stream_capacity

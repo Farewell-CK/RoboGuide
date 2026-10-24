@@ -1,5 +1,21 @@
 # Repository Guidelines
 
+ADR-0191 returns actual durable metadata Append ACK before the separate retained-content task.
+One original Root admission guard follows the owned task and every actual blocking job through
+cancellation. Original sender/Log/clock/current checks and Unknown stay; complete byte/apply/
+application/readiness gates remain. The actual counterexample/fixed recovery use the same pinned
+bundle and new roots, with no Node/device or physical-continuity facts.
+
+ADR-0190 introduces explicit Root7 GC intent/tombstone SQL and mandatory inventories before unlink.
+Exact original stream-retirement rows/heads atomically retain actual worker close or original
+process-end observations before releasing only that pin. Original receipt/Unknown and budgets stay.
+Only completely inactive original references permit admission; live and Unknown pins remain blockers.
+Irreversible qualified-key tombstones fence future copy/stream/producer/read acquisition. Original
+Unknown and budgets survive errors/restarts; same-ID calls observe only. Explicit process v0.5 and
+recovery v0.21 select the new generation. Actual CLI, interrupted effects, drained upgrades and
+same-bundle three-leader cold recovery passed; original GC/retirement rows stay exact. No Node,
+device, global GC or SoftwareComplete evidence follows from local unlink.
+
 # ADR-0188 adds explicit Root6 Snapshot receive prerequisites under an independent content journal.
 # A real source/receiver mTLS path records the original SnapshotMeta, payload digest, qualified
 # inputs, receiver budget and independent pins before byte work. Same-Root CAS bytes are verified

@@ -217,10 +217,10 @@ def test_active_bytes_require_same_root_exact_qualified_owner(tmp_path: Path) ->
             _require_bytes("root", required, {changed: files[expected]}, objects)
 
 
-@pytest.mark.parametrize("snapshots", [False, True])
+@pytest.mark.parametrize("generation", [4, 6, 7])
 def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
     tmp_path: Path,
-    snapshots: bool,
+    generation: int,
 ) -> None:
     """Repeated relocation appends backing provenance and keeps original operations."""
     source = tmp_path / "source"
@@ -228,7 +228,11 @@ def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
     stores = source / "stores"
     stores.mkdir()
     component = (
-        snapshot_fixture(stores / "root", ready=True) if snapshots else fixture(stores / "root")
+        gc_fixture(stores / "root", delete_bytes=True)
+        if generation == 7
+        else snapshot_fixture(stores / "root", ready=True)
+        if generation == 6
+        else fixture(stores / "root")
     )
     parent = stores / "parent"
     parent.mkdir()
@@ -245,7 +249,11 @@ def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
         parent_info = (source / "stores/parent/replica.sqlite3").stat()
         manifest = {
             "profile": {
-                "schema": content.SNAPSHOT_PROFILE if snapshots else content.PROFILE,
+                "schema": content.GC_PROFILE
+                if generation == 7
+                else content.SNAPSHOT_PROFILE
+                if generation == 6
+                else content.PROFILE,
                 "components": components,
             },
             "replica_content_sources": [
@@ -272,10 +280,10 @@ def test_explicit_backing_preserves_unknown_and_immutable_prior_restore_chain(
         assert len(receipts) == 1
         restored_component = component | (
             {
-                "storage_schema": content.LAYOUT6,
+                "storage_schema": content.LAYOUT7 if generation == 7 else content.LAYOUT6,
                 "restore_binding_digest": receipts[0]["binding_digest"],
             }
-            if snapshots
+            if generation >= 6
             else {"storage_schema": content.LAYOUT5}
         )
         current = content.inventory(
@@ -447,6 +455,291 @@ def test_snapshot_receive_original_corruption_refuses(tmp_path: Path, corrupt: s
                 sql.execute(
                     "UPDATE content_snapshot_receives SET record=? WHERE operation_id=?",
                     (json.dumps(row), identifier),
+                )
+    with pytest.raises(ValueError):
+        content.inventory(root, component, budget(), live=True)
+
+
+def root7_fixture(root: Path) -> dict[str, Any]:
+    """Extend the explicit contract fixture with empty complete Root7 inventories."""
+    component = fixture(root)
+    with closing(sqlite3.connect(root / "content.sqlite3")) as sql:
+        with sql:
+            for table, column, head in (
+                ("content_snapshot_receives", "operation_id", "snapshot_receive_ids"),
+                ("content_gc_commands", "operation_id", "gc_ids"),
+                ("content_tombstones", "content_key", "tombstone_keys"),
+                ("content_stream_retirements", "stream_id", "stream_retirement_ids"),
+            ):
+                sql.execute(f"CREATE TABLE {table}({column} TEXT PRIMARY KEY,record TEXT NOT NULL)")
+                sql.execute("INSERT INTO metadata VALUES (?,?)", (head, "[]"))
+            sql.execute("INSERT INTO metadata VALUES ('backing_mode','original')")
+            sql.execute("UPDATE metadata SET value=? WHERE key='layout'", (content.LAYOUT7,))
+            sql.execute("PRAGMA user_version=7")
+    return component | {"storage_schema": content.LAYOUT7, "restore_binding_digest": None}
+
+
+def gc_fixture(root: Path, *, delete_bytes: bool) -> dict[str, Any]:
+    """Create explicitly synthetic closed reference/Root7 Unknown DTOs over actual test files."""
+    component = root7_fixture(root)
+    original = content.inventory(root, component, budget(), live=True)
+    receipt = next(iter(original["tables"]["content_objects"].values()))
+    key = receipt["content"]
+    path = root / "content-v1" / key["source_owner"][15:] / key["content_digest"][7:]
+    refs = {
+        identifier: value | {"active": False, "release_digest": "f" * 64}
+        for identifier, value in original["tables"]["content_references"].items()
+        if value["reference"]["kind"] == "receive"
+    }
+    intent = {
+        "schema": "roboguide.replica-content-gc/v0.1",
+        "command_id": "contract-gc",
+        "receiver": original["identity"],
+        "budget": next(iter(original["tables"]["content_operations"].values()))["intent"]["budget"],
+        "items": [
+            {
+                "receipt": receipt,
+                "reference_digest": content._digest(refs),
+                "file": {"device": path.stat().st_dev, "inode": path.stat().st_ino},
+                "prior_tombstone": None,
+            }
+        ],
+    }
+    command = content._digest(intent["command_id"])
+    tombstone = content._digest(key)
+    with closing(sqlite3.connect(root / "content.sqlite3")) as sql:
+        with sql:
+            sql.execute("DELETE FROM content_readers")
+            sql.execute("DELETE FROM content_references")
+            for identifier, value in refs.items():
+                sql.execute(
+                    "INSERT INTO content_references VALUES (?,?)", (identifier, json.dumps(value))
+                )
+            sql.execute("UPDATE metadata SET value='[]' WHERE key='reader_ids'")
+            sql.execute(
+                "UPDATE metadata SET value=? WHERE key='reference_ids'", (json.dumps(sorted(refs)),)
+            )
+            sql.execute(
+                "INSERT INTO content_gc_commands VALUES (?,?)",
+                (command, json.dumps({"intent": intent, "outcomes": [None]})),
+            )
+            sql.execute(
+                "INSERT INTO content_tombstones VALUES (?,?)",
+                (
+                    tombstone,
+                    json.dumps(
+                        {
+                            "content": key,
+                            "command_id": intent["command_id"],
+                            "intent_digest": content._digest(intent),
+                        }
+                    ),
+                ),
+            )
+            sql.execute("UPDATE metadata SET value=? WHERE key='gc_ids'", (json.dumps([command]),))
+            sql.execute(
+                "UPDATE metadata SET value=? WHERE key='tombstone_keys'", (json.dumps([tombstone]),)
+            )
+    if delete_bytes:
+        path.unlink()
+    return component
+
+
+@pytest.mark.parametrize("delete_bytes", [False, True])
+def test_gc_original_unknown_never_requires_deleted_historical_bytes(
+    tmp_path: Path, delete_bytes: bool
+) -> None:
+    """Original Unknown survives either real file state without requiring retired history bytes."""
+    root = tmp_path / "root"
+    component = gc_fixture(root, delete_bytes=delete_bytes)
+    original = content.inventory(root, component, budget(), live=True)
+    assert next(iter(original["tables"]["content_gc_commands"].values()))["outcomes"] == [None]
+    assert _required(original) == set()
+
+
+@pytest.mark.parametrize(
+    "corrupt", ["gc-head", "fence-head", "fence", "clock", "receipt", "reference", "outcome"]
+)
+def test_gc_missing_originals_or_active_reference_conflict_refuses(
+    tmp_path: Path, corrupt: str
+) -> None:
+    """Require each original command, tombstone, reference and exact effect bound independently."""
+    root = tmp_path / "root"
+    component = gc_fixture(root, delete_bytes=True)
+    with closing(sqlite3.connect(root / "content.sqlite3")) as sql:
+        with sql:
+            if corrupt in {"gc-head", "fence-head"}:
+                sql.execute(
+                    "DELETE FROM metadata WHERE key=?",
+                    ("gc_ids" if corrupt == "gc-head" else "tombstone_keys",),
+                )
+            elif corrupt == "fence":
+                sql.execute("DELETE FROM content_tombstones")
+            elif corrupt == "reference":
+                identifier, raw = sql.execute("SELECT * FROM content_references").fetchone()
+                value = json.loads(raw) | {"active": True, "release_digest": None}
+                sql.execute(
+                    "UPDATE content_references SET record=? WHERE reference_id=?",
+                    (json.dumps(value), identifier),
+                )
+            else:
+                identifier, raw = sql.execute("SELECT * FROM content_gc_commands").fetchone()
+                value = json.loads(raw)
+                if corrupt == "clock":
+                    value["intent"]["budget"]["duration_ms"] = 0
+                elif corrupt == "receipt":
+                    value["intent"]["items"][0]["receipt"]["file_inode"] += 1
+                else:
+                    value["outcomes"] = [{"state": "deleted", "observed_ms": 1101}]
+                sql.execute(
+                    "UPDATE content_gc_commands SET record=? WHERE operation_id=?",
+                    (json.dumps(value), identifier),
+                )
+    with pytest.raises(ValueError):
+        content.inventory(root, component, budget(), live=True)
+
+
+def stream_retirement_fixture(root: Path, *, closed: bool) -> dict[str, Any]:
+    """Build synthetic stream-close/end DTOs; native gates separately prove actual workers."""
+    component = root7_fixture(root)
+    original = content.inventory(root, component, budget(), live=True)
+    identity = original["identity"]
+    copied = next(iter(original["tables"]["content_operations"].values()))
+    key = copied["intent"]["content"]
+    target = {
+        "profile_identity": identity["profile_identity"],
+        "epoch": {"term": 1, "replica_id": 1},
+        "revision": 1,
+        "checkpoint_digest": "a" * 64,
+        "batch_digest": "b" * 64,
+        "membership": {
+            "log_id": {"leader_id": {"term": 1, "node_id": 1}, "index": 1},
+            "membership": {
+                "configs": [[1]],
+                "nodes": {
+                    "1": {"addr": "127.0.0.1:1", "content_store_owner": identity["store_owner"]}
+                },
+            },
+        },
+        "member_stores": {"1": identity["store_owner"]},
+        "inputs": [key],
+    }
+    intent = {
+        "schema": "roboguide.replica-content-stream/v0.1",
+        "command_id": "contract-stream",
+        "receiver": identity,
+        "target": target,
+        "content": key,
+        "origin": {"kind": "artifact", "writer": copied["intent"]["source"]},
+        "budget": copied["intent"]["budget"],
+    }
+    stream = {
+        "intent": intent,
+        "request_digest": content._digest(intent),
+        "receipt": None,
+        "worker_closed_ms": 200 if closed else None,
+    }
+    clock = copied["intent"]["budget"] | {"pid": 2, "start_ticks": 2, "admitted_ms": 300}
+    retirement = {
+        "schema": "roboguide.replica-content-stream-retirement/v0.1",
+        "receiver": identity,
+        "original": stream,
+        "budget": clock,
+        "retired_ms": 350,
+        "process_end": None
+        if closed
+        else {
+            "original_boot_id": intent["budget"]["boot_id"],
+            "original_pid": intent["budget"]["pid"],
+            "original_start_ticks": intent["budget"]["start_ticks"],
+            "observer": clock | {"admitted_ms": 301},
+            "reason": "original-process-absent",
+            "replacement_start_ticks": None,
+        },
+    }
+    identifier = content._digest(intent["command_id"])
+    pin = "stream:" + identifier
+    reference = {
+        "reference": {
+            "reference_id": pin,
+            "kind": "stream",
+            "content": key,
+            "authority_digest": target["batch_digest"],
+            "generation": 1,
+        },
+        "active": False,
+        "release_digest": content._digest(retirement),
+    }
+    with closing(sqlite3.connect(root / "content.sqlite3")) as sql:
+        with sql:
+            sql.execute(
+                "INSERT INTO content_streams VALUES (?,?,?)",
+                (identifier, stream["request_digest"], json.dumps(stream)),
+            )
+            sql.execute(
+                "UPDATE metadata SET value=? WHERE key='stream_ids'", (json.dumps([identifier]),)
+            )
+            sql.execute(
+                "INSERT INTO content_stream_retirements VALUES (?,?)",
+                (identifier, json.dumps(retirement)),
+            )
+            sql.execute(
+                "UPDATE metadata SET value=? WHERE key='stream_retirement_ids'",
+                (json.dumps([identifier]),),
+            )
+            sql.execute("INSERT INTO content_references VALUES (?,?)", (pin, json.dumps(reference)))
+            sql.execute(
+                "UPDATE metadata SET value=? WHERE key='reference_ids'",
+                (json.dumps(sorted([*original["tables"]["content_references"], pin])),),
+            )
+    return component
+
+
+@pytest.mark.parametrize("closed", [False, True])
+def test_stream_retirement_keeps_original_unknown_and_independent_close_or_end(
+    tmp_path: Path, closed: bool
+) -> None:
+    """Exact original closure is independent of byte completion and survives recovery inspection."""
+    root = tmp_path / "root"
+    component = stream_retirement_fixture(root, closed=closed)
+    original = content.inventory(root, component, budget(), live=True)
+    assert next(iter(original["tables"]["content_streams"].values()))["receipt"] is None
+
+
+@pytest.mark.parametrize("corrupt", ["head", "original", "observer", "clock", "pin"])
+def test_stream_retirement_cannot_borrow_another_original_or_process(
+    tmp_path: Path, corrupt: str
+) -> None:
+    """Missing original rows, different observers or renewed decisions cannot authorize release."""
+    root = tmp_path / "root"
+    component = stream_retirement_fixture(root, closed=False)
+    with closing(sqlite3.connect(root / "content.sqlite3")) as sql:
+        with sql:
+            if corrupt == "head":
+                sql.execute("DELETE FROM metadata WHERE key='stream_retirement_ids'")
+            elif corrupt == "pin":
+                sql.execute("DELETE FROM content_stream_retirements")
+                sql.execute("UPDATE metadata SET value='[]' WHERE key='stream_retirement_ids'")
+            else:
+                identifier, raw = sql.execute("SELECT * FROM content_stream_retirements").fetchone()
+                row = json.loads(raw)
+                if corrupt == "original":
+                    row["original"]["intent"]["budget"]["duration_ms"] += 1
+                elif corrupt == "observer":
+                    row["process_end"]["observer"]["pid"] += 1
+                else:
+                    row["retired_ms"] = 1301
+                sql.execute(
+                    "UPDATE content_stream_retirements SET record=? WHERE stream_id=?",
+                    (json.dumps(row), identifier),
+                )
+                reference_id, raw_pin = sql.execute(
+                    "SELECT * FROM content_references WHERE reference_id LIKE 'stream:%'"
+                ).fetchone()
+                reference = json.loads(raw_pin) | {"release_digest": content._digest(row)}
+                sql.execute(
+                    "UPDATE content_references SET record=? WHERE reference_id=?",
+                    (json.dumps(reference), reference_id),
                 )
     with pytest.raises(ValueError):
         content.inventory(root, component, budget(), live=True)

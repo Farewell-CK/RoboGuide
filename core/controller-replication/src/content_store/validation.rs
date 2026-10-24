@@ -46,7 +46,9 @@ pub(super) fn validate(inner: &ContentInner, connection: &Connection) -> Result<
         .as_deref()
         .map(|digest| super::restore::validate_backing(&inner.root, &inner.identity, digest))
         .transpose()?;
-    let version = if inner.snapshot_receives {
+    let version = if inner.reclamation {
+        7
+    } else if inner.snapshot_receives {
         6
     } else if inner.restore_binding.is_some() {
         5

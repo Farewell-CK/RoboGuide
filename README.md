@@ -1,5 +1,10 @@
 # RoboGuide
 
+[Replica 内容回收](docs/decisions/0190-replica-content-gc-intent.md)已接入显式 Root7、
+原 stream 退休、删除前 SQL intent/tombstone 和独立删除回执。process v0.5 与 recovery v0.21
+完整保留原 receipt/Unknown、时钟和引用；活跃引用继续阻止回收。实际删除中断、SQL 故障、
+排空升级和同一 bundle 的三 leader 恢复通过，见[验收记录](docs/development/acceptance/2026-10-24-replica-content-gc.md)。
+
 [历史 Log 内容追赶](docs/development/acceptance/2026-10-24-retained-log-content-catchup.md)
 通过实际离线成员重启、独立 SQL/producer/pin/CAS 核对和原换主/进程退出链。
 新路由保留原 Log/权限/预算及 Unknown，普通 committed route 边界保持；网络 Snapshot、
