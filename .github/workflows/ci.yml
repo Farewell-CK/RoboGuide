@@ -194,6 +194,7 @@ jobs:
           --probe target/debug/examples/content_network_probe
           --storage-probe target/debug/examples/content_stream_probe
           --source /tmp/rg-ci-catalog-retirement --members 137,149,163
+          --historical-log-catchup
           --output "${RUNNER_TEMP}/roboguide-network-content"
 
       - name: Verify original child lineage through stopped Group handoff

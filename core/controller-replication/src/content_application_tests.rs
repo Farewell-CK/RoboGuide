@@ -234,7 +234,7 @@ async fn cross_owner_prepared_release_retains_origin_and_independent_root_pins()
 }
 
 /// Writes one original exact authority command and checkpoint inside the already-open actual SQL batch.
-fn save(log: &state::SqliteEventLog, id: &str, json: &str, sequence: u64) {
+pub(crate) fn save(log: &state::SqliteEventLog, id: &str, json: &str, sequence: u64) {
     assert!(log.take_error().unwrap().is_none());
     log.save_checkpoint_with_command(
         state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA,

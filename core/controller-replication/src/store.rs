@@ -9,6 +9,8 @@ mod adoption;
 mod apply;
 #[path = "store_content.rs"]
 mod content;
+#[path = "store_log_content.rs"]
+mod log_content;
 #[path = "store_network.rs"]
 mod network;
 #[path = "store_producers.rs"]

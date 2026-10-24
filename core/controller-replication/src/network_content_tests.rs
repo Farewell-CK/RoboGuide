@@ -4,6 +4,9 @@ use super::*;
 use sha2::Sha256;
 use std::net::TcpListener;
 
+/// Serializes the tiny reservation-to-bind gap between this module's real mTLS clusters.
+static CLUSTER_ENDPOINTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Holds a real non-ephemeral endpoint until its declared infrastructure service starts.
 fn reserved_listener() -> TcpListener {
     let range = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range").unwrap();
@@ -31,10 +34,13 @@ struct Cluster {
     servers: Vec<ReplicaServer>,
     /// Original managed byte roots; opening another writer remains fenced.
     roots: Vec<ReplicaContentStore>,
+    /// Prevents another local fixture from claiming an endpoint during actual startup.
+    _endpoint_scope: tokio::sync::MutexGuard<'static, ()>,
 }
 
 /// Starts actual mTLS members from explicit software configuration and real held root identities.
 async fn cluster() -> Cluster {
+    let endpoint_scope = CLUSTER_ENDPOINTS.lock().await;
     let directory = tempfile::tempdir().unwrap();
     let pki = testkit::TestPki::new(&directory.path().join("tls"), &["53", "71", "89"]).unwrap();
     let mut pins = BTreeMap::new();
@@ -124,6 +130,7 @@ async fn cluster() -> Cluster {
         nodes,
         servers,
         roots,
+        _endpoint_scope: endpoint_scope,
     }
 }
 
@@ -143,6 +150,163 @@ async fn leader(cluster: &Cluster) -> usize {
     })
     .await
     .unwrap()
+}
+
+/// A real offline member misses bytes, then catches up its retained Log through actual mTLS.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn actual_mtls_retained_log_recovers_missed_bytes_before_application() {
+    use std::sync::atomic::Ordering;
+    let cluster = cluster().await;
+    let index = leader(&cluster).await;
+    let missed = (index + 1) % cluster.nodes.len();
+    let source = &cluster.nodes[index];
+    let receiver = &cluster.nodes[missed];
+    receiver.network_online.store(false, Ordering::SeqCst);
+    let payload = b"actual retained historical Log catch-up bytes";
+    let (sql, cas, key) =
+        crate::content_application_tests::original_payload(cluster.directory.path(), payload);
+    let mut candidate = crate::content_application_tests::candidate(
+        &cluster.directory.path().join("source.sqlite3"),
+        &cas,
+        &ReplicaView::default(),
+        &source.profile_identity(),
+    );
+    candidate.epoch = source.current_epoch().unwrap();
+    source
+        .stage_content_from_source(&candidate, &cas, "actual-log-source-stage", 30000)
+        .await
+        .unwrap();
+    assert!(source.commit_content(candidate).await.unwrap().accepted);
+    sql.begin_batch().unwrap();
+    crate::content_application_tests::save(
+        &sql,
+        "actual-newer-source-command",
+        "{\"original\":2}",
+        3,
+    );
+    sql.commit_batch().unwrap();
+    let mut later = crate::content_application_tests::candidate(
+        &cluster.directory.path().join("source.sqlite3"),
+        &cas,
+        &source.store.network_view().await.unwrap(),
+        &source.profile_identity(),
+    );
+    later.epoch = source.current_epoch().unwrap();
+    assert!(source.commit_content(later).await.unwrap().accepted);
+    assert!(
+        !cluster.roots[missed]
+            .retained_content_is_available(&key)
+            .unwrap()
+    );
+    assert_eq!(receiver.store.network_view().await.unwrap().revision, 0);
+    receiver.network_online.store(true, Ordering::SeqCst);
+    tokio::time::timeout(Duration::from_secs(40), async {
+        loop {
+            if receiver.store.network_view().await.unwrap().revision == 2 {
+                break;
+            }
+            let metrics = receiver.raft.metrics().borrow().clone();
+            assert!(
+                metrics.running_state.is_ok(),
+                "actual catch-up failed: {:?}",
+                metrics.running_state
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        cluster.roots[missed]
+            .retained_content_is_available(&key)
+            .unwrap()
+    );
+    receiver.store.verify_accepted_content().unwrap();
+    let path = cluster.roots[missed].root().join("content.sqlite3");
+    let history = || {
+        let sql = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let mut statement = sql.prepare("SELECT record FROM content_streams").unwrap();
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(|row| serde_json::from_str::<serde_json::Value>(&row.unwrap()).unwrap())
+            .filter(|row| {
+                row["intent"]["command_id"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("historical-log:")
+            })
+            .collect::<Vec<_>>()
+    };
+    let original = history();
+    assert_eq!(original.len(), 1);
+    assert!(!original[0]["receipt"].is_null());
+    let historical: ContentQuorumTarget =
+        serde_json::from_value(original[0]["intent"]["target"].clone()).unwrap();
+    assert!(
+        source
+            .store
+            .require_committed_content_target(&historical)
+            .is_err()
+    );
+    assert_eq!(historical.revision, 2);
+    let actual_source = original[0]["intent"]["origin"]["member"].as_u64().unwrap();
+    assert_ne!(actual_source, receiver.config.replica_id);
+    let actual_root = cluster
+        .roots
+        .iter()
+        .find(|root| root.identity().member == actual_source)
+        .unwrap();
+    assert_eq!(
+        original[0]["intent"]["origin"]["store_owner"],
+        actual_root.identity().store_owner
+    );
+    let log_id: openraft::LogId<u64> = {
+        let sql = rusqlite::Connection::open_with_flags(
+            cluster
+                .directory
+                .path()
+                .join(format!("parent-{}.sqlite3", source.config.replica_id)),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let raw: String = sql
+            .query_row(
+                "SELECT data FROM replica_v1_log WHERE data LIKE '%content_application%' LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        serde_json::from_str::<openraft::Entry<ControllerRaftConfig>>(&raw)
+            .unwrap()
+            .log_id
+    };
+    assert!(
+        receiver
+            .recover_historical_log_from(source.config.replica_id, log_id, 15000)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(history(), original);
+    let wrong = openraft::LogId::new(
+        openraft::CommittedLeaderId::new(log_id.leader_id.term + 1, source.config.replica_id),
+        log_id.index,
+    );
+    assert!(
+        receiver
+            .recover_historical_log_from(source.config.replica_id, wrong, 15000)
+            .await
+            .is_err()
+    );
+    assert_eq!(history(), original);
+    for node in &cluster.nodes {
+        node.shutdown().await.unwrap();
+    }
 }
 
 /// Actual byte streams bind both same-ID receivers independently and never reread after duplicate Ready.

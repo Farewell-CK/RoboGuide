@@ -17,9 +17,11 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 #[path = "content_transport.rs"]
 mod content_streams;
+#[path = "log_content_transport.rs"]
+mod log_content;
 pub(crate) use content_streams::{
-    StreamNotice, StreamReceive, receive_owned_stream, send_committed_content_stream,
-    send_content_stream, send_content_stream_checked,
+    StreamNotice, StreamReceive, StreamRoute, receive_owned_stream, send_committed_content_stream,
+    send_content_stream, send_content_stream_checked, send_historical_log_stream,
 };
 
 #[cfg(test)]
@@ -46,6 +48,37 @@ struct Request {
 /// Private consensus and durability operations never carry an embodied Node selector.
 #[derive(Serialize, Deserialize)]
 enum Command {
+    /// Describes an actual source-committed historical Log without payload reads or effects.
+    HistoricalLogTargetV1 {
+        /// Exact original retained position, independently checked by both members.
+        log_id: openraft::LogId<u64>,
+    },
+    /// Requests one immutable historical transfer to the authenticated requesting member.
+    RouteHistoricalLogV1 {
+        /// Exact original retained position.
+        log_id: openraft::LogId<u64>,
+        /// Frozen original source observation and historical candidate inputs.
+        target: Box<ContentQuorumTarget>,
+        /// Complete original qualified input.
+        content: ArtifactContentKey,
+        /// Deterministic original source/receiver/epoch/Log/input identity.
+        command_id: String,
+        /// Original request-relative budget, frozen before any queue.
+        budget_ms: u64,
+    },
+    /// Separate exact retained-Log route; old peers refuse rather than widening accepted-view routing.
+    PushHistoricalLogContentV1 {
+        /// Original durable Log shared independently by source and receiver.
+        log_id: openraft::LogId<u64>,
+        /// Exact current membership and original historical candidate context.
+        target: Box<ContentQuorumTarget>,
+        /// Exact original qualified bytes.
+        content: ArtifactContentKey,
+        /// One retained immutable receiver operation.
+        command_id: String,
+        /// Original receive-relative budget sampled before its queue.
+        budget_ms: u64,
+    },
     /// Independently observes actual complete committed metadata and bytes; never executes an application.
     ObserveContent {
         /// Exact original epoch/membership/application/qualified-input observation target.
@@ -182,6 +215,7 @@ impl Command {
             Self::Commit { .. }
                 | Self::PushContent { .. }
                 | Self::PushCommittedContentV1 { .. }
+                | Self::PushHistoricalLogContentV1 { .. }
                 | Self::AdminRotateCertificate { .. }
                 | Self::AdminAddLearner { .. }
                 | Self::AdminChangeMembership { .. }
@@ -194,6 +228,10 @@ impl Command {
 /// Closed response preserves upstream Raft errors separately from child acceptance.
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Reply {
+    /// Exact readonly source description; a serialized target alone is never content permission.
+    HistoricalLogTarget(Result<ContentQuorumTarget, String>),
+    /// Actual original historical stream outcome, independently checked in the receiver's Root.
+    HistoricalLogRouted(Result<ReplicaContentStreamStatus, String>),
     /// Actual authenticated member observation; its standalone serialized data never grants a quorum.
     ContentObservation(Result<MemberContentObservation, String>),
     /// Original receive readiness or immutable existing outcome; never an application ACK.
@@ -338,8 +376,17 @@ where
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     drop(bytes);
     let received_at = tokio::time::Instant::now();
+    let catchup_budget =
+        if node.config.streams_content() && matches!(request.command, Command::Append(_)) {
+            Some(crate::content_store::ContentBudget::issue(15000)?)
+        } else {
+            None
+        };
     let stream_budget = if let Command::PushContent { budget_ms, .. }
-    | Command::PushCommittedContentV1 { budget_ms, .. } = &request.command
+    | Command::PushCommittedContentV1 { budget_ms, .. }
+    | Command::RouteHistoricalLogV1 { budget_ms, .. }
+    | Command::PushHistoricalLogContentV1 { budget_ms, .. } =
+        &request.command
     {
         Some(crate::content_store::ContentBudget::issue(*budget_ms)?)
     } else {
@@ -390,6 +437,72 @@ where
         Reply::Rejected("replica profile/member identity mismatch".into())
     } else {
         match request.command {
+            Command::HistoricalLogTargetV1 { log_id } => Reply::HistoricalLogTarget(
+                log_content::on_worker(&node, move |current| current.historical_log_target(log_id))
+                    .await,
+            ),
+            Command::RouteHistoricalLogV1 {
+                log_id,
+                target,
+                content,
+                command_id,
+                budget_ms: _,
+            } => Reply::HistoricalLogRouted(
+                node.route_historical_log_to(
+                    request.sender,
+                    log_id,
+                    *target,
+                    content,
+                    command_id,
+                    stream_budget.ok_or("original historical request clock is absent")?,
+                )
+                .await,
+            ),
+            Command::PushHistoricalLogContentV1 {
+                log_id,
+                target,
+                content,
+                command_id,
+                budget_ms: _,
+            } => {
+                if !target.membership.voter_ids().any(|id| id == request.sender) {
+                    return Err("historical source is not a current voter".into());
+                }
+                if command_id
+                    != log_content::operation(
+                        &node.profile_identity(),
+                        request.sender,
+                        node.config.replica_id,
+                        log_id,
+                        &content,
+                    )?
+                {
+                    return Err(
+                        "historical receive differs from its deterministic original operation"
+                            .into(),
+                    );
+                }
+                let original = target.clone();
+                log_content::on_worker(&node, move |current| {
+                    current.store.retained_log_candidate(log_id, false)?;
+                    current
+                        .store
+                        .require_historical_log_target(log_id, &original, false)
+                })
+                .await?;
+                drop(frame);
+                return content_streams::receive_content_stream(
+                    &mut stream,
+                    node.clone(),
+                    *target,
+                    content,
+                    command_id,
+                    (request.sender, StreamRoute::HistoricalLog(log_id)),
+                    stream_budget.ok_or("original historical receive clock is absent")?,
+                    certificate_connection.ok_or("historical route requires actual mTLS")?,
+                )
+                .await;
+            }
             Command::ObserveContent { target } => {
                 if request.sender != target.epoch.replica_id {
                     return Err("content observation requires its actual original leader".into());
@@ -419,7 +532,7 @@ where
                     *target,
                     content,
                     command_id,
-                    (request.sender, true),
+                    (request.sender, StreamRoute::Committed),
                     stream_budget.ok_or("original route receive clock missing")?,
                     certificate_connection.ok_or("committed route requires actual mTLS")?,
                 )
@@ -443,7 +556,7 @@ where
                     *target,
                     content,
                     command_id,
-                    (request.sender, false),
+                    (request.sender, StreamRoute::Proposal),
                     stream_budget.ok_or("original receive clock is missing")?,
                     certificate_connection.ok_or("content stream requires actual mTLS")?,
                 )
@@ -506,7 +619,22 @@ where
                 local_certificate_digest.as_deref().unwrap_or(""),
                 ca_bundle_digest.as_deref().unwrap_or(""),
             )),
-            Command::Append(rpc) => Reply::Append(node.raft.append_entries(rpc).await),
+            Command::Append(rpc) => {
+                let through = rpc.leader_commit;
+                let appended = node.raft.append_entries(rpc).await;
+                if matches!(appended, Ok(AppendEntriesResponse::Success))
+                    && let Some(clock) = catchup_budget
+                    && let Err(error) = node
+                        .catch_up_retained_logs(request.sender, through, clock)
+                        .await
+                {
+                    eprintln!(
+                        "original retained Log content remains unavailable: {}",
+                        error.chars().take(512).collect::<String>()
+                    );
+                }
+                Reply::Append(appended)
+            }
             Command::Vote(rpc) => Reply::Vote(node.raft.vote(rpc).await),
             Command::Snapshot(rpc) => {
                 if rpc

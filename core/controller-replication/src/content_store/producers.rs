@@ -395,6 +395,36 @@ pub(super) fn validate_records(
 }
 
 impl ReplicaContentStore {
+    /// Checks one original retained Log producer under this actual parent and independent active pins.
+    pub(crate) fn require_original_log_producer(
+        &self,
+        operation: &str,
+        parent: &crate::store::ReplicaWriterLease,
+        source: &ReplicaContentProducerSource,
+        inputs: &[crate::ArtifactContentKey],
+    ) -> Result<(), String> {
+        let actual = parent.identity()?;
+        let guard = self.inner.connection.lock().map_err(|e| e.to_string())?;
+        let connection = guard.as_ref().ok_or("original producer SQL is closed")?;
+        self.validate_connection(connection)?;
+        let original = record(connection, &digest(&operation)?)?
+            .ok_or("historical Log lost its original producer")?;
+        if original.intent.source != *source
+            || original.intent.inputs != inputs
+            || original.resolution.is_some()
+            || !super::restore::matches_parent(
+                &self.inner,
+                connection,
+                actual,
+                (original.intent.sql_device, original.intent.sql_inode),
+            )?
+        {
+            return Err(
+                "historical Log producer is retired or belongs to another original source".into(),
+            );
+        }
+        Ok(())
+    }
     /// Hashes complete retained legacy rows without assigning any of them to a particular parent.
     pub(crate) fn legacy_producer_inventory_digest(&self) -> Result<String, String> {
         let guard = self

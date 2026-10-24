@@ -1,5 +1,7 @@
 # 实现状态与证据边界
 
+[历史 Log 内容追赶](docs/development/acceptance/2026-10-24-retained-log-content-catchup.md)的稳定成员专项已通过实际离线重启、mTLS/SQL/Root、换主和独立原 Log/pin/CAS 核验。网络 Snapshot、learner/joint、已归档源首次接纳、完整 GC/升级与其余非发布要求继续实施。
+
 
 [完整 Replica 静止恢复与实际重启](docs/development/acceptance/2026-10-24-replica-content-cold-recovery.md)已通过显式 v0.19、二次恢复和三 leader 的追赶/transfer/原字节读取；原 intent/receipt、预算和 Unknown 均保留，新增 0 Node/设备。完整 online Archive/Snapshot/GC、历史缺失内容路由、joint/升级回退及其余非发布矩阵仍继续实施。
 内容核对基线：`815ffcd`（ADR-0177–0180）（2026-10-24）；[版本参考](reference.md)记录完整代码基线。下表依据代码与既有验收档案；原始存量详见[10 月 22 日核对](docs/development/roboguide-branch-audit-2026-10-22.md)。

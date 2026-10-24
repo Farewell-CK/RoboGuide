@@ -22,6 +22,120 @@ fn original() -> (tempfile::TempDir, ReplicaContentStore, SqliteRaftStore) {
     (directory, root, store)
 }
 
+/// Exact retained Log rows cannot lend source read authority before their original durable Commit.
+#[tokio::test]
+async fn actual_historical_log_requires_original_producer_commit_and_exact_row() {
+    use openraft::storage::RaftLogStorage;
+    let (directory, _root, mut store) = original();
+    let (_log, cas, _key) = crate::content_application_tests::original(directory.path());
+    let candidate = crate::content_application_tests::candidate(
+        &directory.path().join("source.sqlite3"),
+        &cas,
+        &ReplicaView::default(),
+        &"a".repeat(64),
+    );
+    let entry = Entry {
+        log_id: LogId::new(CommittedLeaderId::new(1, 31), 1),
+        payload: EntryPayload::Normal(ReplicaCommand::ContentApplication {
+            content_application: Box::new(candidate.clone()),
+        }),
+    };
+    assert!(store.retained_log_candidate(entry.log_id, false).is_err());
+    store
+        .persist_log_entries(std::slice::from_ref(&entry))
+        .unwrap();
+    assert_eq!(
+        store.retained_log_candidate(entry.log_id, false).unwrap(),
+        candidate
+    );
+    assert!(
+        store
+            .retained_log_candidate(entry.log_id, true)
+            .unwrap_err()
+            .contains("durable committed")
+    );
+    store.save_committed(Some(entry.log_id)).await.unwrap();
+    assert_eq!(
+        store.retained_log_candidate(entry.log_id, true).unwrap(),
+        candidate
+    );
+    let changed = LogId::new(CommittedLeaderId::new(2, 31), 1);
+    assert!(store.retained_log_candidate(changed, true).is_err());
+    store
+        .connection
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM replica_v1_log", [])
+        .unwrap();
+    assert!(store.retained_log_candidate(entry.log_id, true).is_err());
+    assert!(
+        store
+            .reconcile_content_producers()
+            .unwrap()
+            .iter()
+            .all(|row| row.disposition == "released")
+    );
+    assert!(store.retained_log_candidate(entry.log_id, true).is_err());
+}
+
+/// Original consensus membership becomes durable before a later content command's bounded byte wait.
+#[test]
+fn actual_historical_wait_does_not_block_its_required_membership_prefix() {
+    let (directory, root, mut store) = original();
+    let (_sql, cas, _key) = crate::content_application_tests::original(directory.path());
+    let candidate = crate::content_application_tests::candidate(
+        &directory.path().join("source.sqlite3"),
+        &cas,
+        &ReplicaView::default(),
+        &"a".repeat(64),
+    );
+    let membership = Entry {
+        log_id: LogId::new(CommittedLeaderId::new(1, 31), 1),
+        payload: EntryPayload::Membership(Membership::new(
+            vec![BTreeSet::from([31])],
+            BTreeMap::from([(
+                31,
+                ReplicaMember::with_content_store(
+                    "127.0.0.1:12345",
+                    root.identity().store_owner.clone(),
+                )
+                .unwrap(),
+            )]),
+        )),
+    };
+    let application = Entry {
+        log_id: LogId::new(CommittedLeaderId::new(1, 31), 2),
+        payload: EntryPayload::Normal(ReplicaCommand::ContentApplication {
+            content_application: Box::new(candidate),
+        }),
+    };
+    let entries = vec![membership.clone(), application];
+    store.persist_log_entries(&entries).unwrap();
+    let budget = crate::content_store::ContentBudget::issue(500).unwrap();
+    store.work_clock = Some(crate::content_store::ProducerClock::from_original(&budget).unwrap());
+    let error = store.apply_entries(entries).unwrap_err();
+    assert!(error.to_string().contains("budget expired"));
+    let sql = store.connection.lock().unwrap();
+    assert_eq!(
+        read_meta::<LogId<u64>>(&sql, "applied").unwrap(),
+        Some(membership.log_id)
+    );
+    assert!(
+        read_meta::<StoredMembership<u64, ReplicaMember>>(&sql, "membership")
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(read_meta::<u64>(&sql, "revision").unwrap(), None);
+    drop(sql);
+    assert!(
+        store
+            .parent_producers()
+            .unwrap()
+            .iter()
+            .all(|row| row.original["intent"]["source"]["kind"] == "log")
+    );
+}
+
 /// Actual handshake trust reads committed WAL while the original writer holds a different pending value.
 #[test]
 fn actual_network_tls_trust_does_not_wait_for_or_read_pending_application_sql() {

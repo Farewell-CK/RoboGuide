@@ -5,6 +5,31 @@ use crate::content_store::{
     ContentBudget, STREAM_CHUNK_BYTES, StreamAdmission, StreamOrigin, StreamPermission,
 };
 
+/// Explicit transport purposes; historical Log authority never widens proposal or accepted-view routes.
+#[derive(Clone, Copy)]
+pub(crate) enum StreamRoute {
+    /// Original leader proposal staging.
+    Proposal,
+    /// Exact current accepted application on both members.
+    Committed,
+    /// Exact durable Log on both members; only the source must already have committed it.
+    HistoricalLog(openraft::LogId<u64>),
+}
+
+/// Historical callbacks parse real retained Logs on an owned blocking task, leaving network workers free.
+async fn check_network_permission(
+    node: &ReplicaNode,
+    check: &StreamPermission,
+    route: StreamRoute,
+) -> Result<(), String> {
+    if matches!(route, StreamRoute::HistoricalLog(_)) {
+        let held = check.clone();
+        super::log_content::on_worker(node, move |_| held()).await
+    } else {
+        check()
+    }
+}
+
 /// Readiness is a durable receive intent only; duplicate outcomes never create a second writer.
 #[derive(Serialize, Deserialize)]
 pub(crate) enum StreamNotice {
@@ -168,7 +193,14 @@ pub(crate) async fn send_content_stream_checked(
     caller: StreamPermission,
 ) -> Result<ReplicaContentStreamStatus, String> {
     send_stream(
-        node, receiver, target, content, command_id, clock, caller, false,
+        node,
+        receiver,
+        target,
+        content,
+        command_id,
+        clock,
+        caller,
+        StreamRoute::Proposal,
     )
     .await
 }
@@ -190,7 +222,31 @@ pub(crate) async fn send_committed_content_stream(
         command_id,
         ContentBudget::issue(duration_ms)?,
         Arc::new(|| Ok(())),
-        true,
+        StreamRoute::Committed,
+    )
+    .await
+}
+
+/// Sends exact retained historical bytes without requiring the receiver's application to be applied.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn send_historical_log_stream(
+    node: &ReplicaNode,
+    receiver: u64,
+    target: ContentQuorumTarget,
+    content: ArtifactContentKey,
+    command_id: String,
+    clock: ContentBudget,
+    log_id: openraft::LogId<u64>,
+) -> Result<ReplicaContentStreamStatus, String> {
+    send_stream(
+        node,
+        receiver,
+        target,
+        content,
+        command_id,
+        clock,
+        Arc::new(|| Ok(())),
+        StreamRoute::HistoricalLog(log_id),
     )
     .await
 }
@@ -205,7 +261,7 @@ async fn send_stream(
     command_id: String,
     clock: ContentBudget,
     caller: StreamPermission,
-    committed: bool,
+    route: StreamRoute,
 ) -> Result<ReplicaContentStreamStatus, String> {
     clock.check()?;
     caller()?;
@@ -221,20 +277,26 @@ async fn send_stream(
         .nodes()
         .find_map(|(id, member)| (*id == receiver).then_some(member.addr.clone()))
         .ok_or("original receiver is absent from the exact committed membership")?;
-    let command = if committed {
-        Command::PushCommittedContentV1 {
+    let command = match route {
+        StreamRoute::HistoricalLog(log_id) => Command::PushHistoricalLogContentV1 {
+            log_id,
             target: Box::new(target.clone()),
             content: content.clone(),
             command_id: command_id.clone(),
             budget_ms: duration_ms,
-        }
-    } else {
-        Command::PushContent {
+        },
+        StreamRoute::Committed => Command::PushCommittedContentV1 {
             target: Box::new(target.clone()),
             content: content.clone(),
             command_id: command_id.clone(),
             budget_ms: duration_ms,
-        }
+        },
+        StreamRoute::Proposal => Command::PushContent {
+            target: Box::new(target.clone()),
+            content: content.clone(),
+            command_id: command_id.clone(),
+            budget_ms: duration_ms,
+        },
     };
     let request = Request {
         profile: node.profile_identity(),
@@ -289,14 +351,18 @@ async fn send_stream(
         let check: StreamPermission = Arc::new(move || {
             caller()?;
             network()?;
-            if committed {
-                original_node
+            match route {
+                StreamRoute::Proposal => {}
+                StreamRoute::Committed => original_node
                     .store
-                    .require_committed_content_target(&original_target)?;
+                    .require_committed_content_target(&original_target)?,
+                StreamRoute::HistoricalLog(id) => original_node
+                    .store
+                    .require_historical_log_target(id, &original_target, true)?,
             }
             Ok(())
         });
-        check()?;
+        check_network_permission(node, &check, route).await?;
         clock.check()?;
         stream
             .write_u64(encoded.bytes.len() as u64)
@@ -311,7 +377,7 @@ async fn send_stream(
             .map_err(|error| error.to_string())?
         {
             Reply::ContentStream(Ok(StreamNotice::Original(original))) => {
-                check()?;
+                check_network_permission(node, &check, route).await?;
                 clock.check()?;
                 return Ok(*original);
             }
@@ -324,7 +390,7 @@ async fn send_stream(
             Reply::ContentStream(Err(error)) | Reply::Rejected(error) => return Err(error),
             _ => return Err("actual receiver did not provide its original receive outcome".into()),
         };
-        check()?;
+        check_network_permission(node, &check, route).await?;
         clock.check()?;
         let mut source = source_worker(SourceWork {
             root,
@@ -339,7 +405,7 @@ async fn send_stream(
         let mut offset = 0u64;
         while let Some(chunk) = source.recv().await {
             clock.check()?;
-            check()?;
+            check_network_permission(node, &check, route).await?;
             match chunk {
                 SourceChunk::Bytes(data) => {
                     stream
@@ -375,7 +441,7 @@ async fn send_stream(
                         Reply::ContentStreamFinished(outcome) => outcome,
                         _ => Err("actual receiver full-byte outcome is absent".into()),
                     }?;
-                    check()?;
+                    check_network_permission(node, &check, route).await?;
                     clock.check()?;
                     if result.request_digest != ready_digest {
                         return Err("actual receipt changed its original Ready identity".into());
@@ -440,7 +506,7 @@ pub(super) async fn receive_content_stream<S>(
     target: ContentQuorumTarget,
     content: ArtifactContentKey,
     command_id: String,
-    source_scope: (u64, bool),
+    source_scope: (u64, StreamRoute),
     budget: ContentBudget,
     evidence: crate::tls::VerifiedTlsConnection,
 ) -> Result<(), String>
@@ -448,7 +514,7 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     budget.check()?;
-    let (peer, committed) = source_scope;
+    let (peer, route) = source_scope;
     let source_owner = target
         .membership
         .nodes()
@@ -470,8 +536,12 @@ where
     let original = target.clone();
     let check: StreamPermission = Arc::new(move || {
         network()?;
-        if committed {
-            held.store.require_committed_content_target(&original)?;
+        match route {
+            StreamRoute::Proposal => {}
+            StreamRoute::Committed => held.store.require_committed_content_target(&original)?,
+            StreamRoute::HistoricalLog(id) => held
+                .store
+                .require_historical_log_target(id, &original, false)?,
         }
         Ok(())
     });
@@ -509,7 +579,8 @@ where
         check,
     } = work;
     budget.check()?;
-    check()?;
+    let original_check = check.clone();
+    super::log_content::on_worker(node, move |_| original_check()).await?;
     let root = node.store.network_content_store()?;
     let capacity = root.stream_work_permit()?;
     let expected_size = content.byte_size;

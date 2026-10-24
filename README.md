@@ -1,5 +1,10 @@
 # RoboGuide
 
+[历史 Log 内容追赶](docs/development/acceptance/2026-10-24-retained-log-content-catchup.md)
+通过实际离线成员重启、独立 SQL/producer/pin/CAS 核对和原换主/进程退出链。
+新路由保留原 Log/权限/预算及 Unknown，普通 committed route 边界保持；网络 Snapshot、
+learner/joint、归档接线、完整 GC/升级及全部非发布矩阵继续实施。
+
 [ADR-0184](docs/decisions/0184-explicit-replica-content-cold-restore.md) 已接通显式
 [完整 Replica 内容恢复 v0.19](contracts/recovery/bundle-v0.19/README.md)。原逻辑身份、操作、
 Unknown 和预算不改写；新 Root5 binding 单独固定恢复后的实际 Root/SQL/parent inode。

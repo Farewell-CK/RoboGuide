@@ -113,6 +113,31 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 ## 当前执行队列（2026-10-24）
 
+用户已接受后续高效收尾计划，冻结基线 `1dc5b6d`，仍只使用
+`codex/nonrelease-remediation-closure`。本轮优先单机真实多进程软件验收；跨主机、
+设备和长期 SLO 证据独立列待验证。软件实现和原非发布完成条件均不缩减。
+
+| 顺序 | 对应原项 | 当前必需交付 | 状态 |
+| --- | --- | --- | --- |
+| A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | 稳定成员 Log 专项通过；网络 Snapshot/learner/joint/更多故障组合继续 |
+| A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | 待实现或组合验收；复用现有 producers |
+| A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 待实现或组合验收；复用现有迁移 |
+| B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | 待接线与组合验收；不重写空间算法 |
+| C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | 待实现与验收；保留现有 quota/units |
+| D | N5/F8 | 运行中抢占、耦合恢复、hazard/handoff/regrasp 与原目标 | 待实现与验收；复用 stop/revoke/revision |
+| E | N6 | 双独立 Control 服务的 mTLS、持久决定及原事务恢复 | 待实现与验收；复用域内 session |
+| F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | 待全部软件必需项通过 |
+
+当前清单为唯一执行队列，下面按原时间保留的切片记录不能替代上表完成条件。
+每项状态必须附实际源码/配置、公开调用链、通过证据和原提交。A1 的缺口是普通
+committed route 要求双方已接受同一应用，无法给 apply 前的落后 Log 供给缺失内容；
+独立历史路由必须核对双方实际原 Log、来源提交位置和现存引用，不能放宽原路由。
+
+[ADR-0187 Log 专项验收](acceptance/2026-10-24-retained-log-content-catchup.md)已通过实际
+离线成员重启/原 Log/原字节、换主、SIGKILL/wait/同 inode 重开和独立 SQL/pin/CAS。
+两版本源场景还修复了 apply 的共识前缀等待循环。已归档源首次捕获缺少原来源绑定的
+失败保留在 A2；网络 Snapshot、成员差异和原完整矩阵继续必需。
+
 后续每个提交固定一个可独立验收的缺口，先复用已有实现并检查实际调用链，再做相关验证
 和提交。共享合同变化才扩大回归；普通内部复用不另造合同版本。已通过且未受影响的
 大型进程矩阵保留原证据，最终总体门禁仍按原完整条件执行。

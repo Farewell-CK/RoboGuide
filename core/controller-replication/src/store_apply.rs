@@ -71,7 +71,43 @@ impl SqliteRaftStore {
         &self,
         entries: Vec<Entry<ControllerRaftConfig>>,
     ) -> Result<Vec<CommitReceipt>, StorageError<u64>> {
-        if self.controller_content
+        if self.network_content
+            && entries.iter().any(|entry| {
+                matches!(
+                    entry.payload,
+                    EntryPayload::Normal(ReplicaCommand::ContentApplication { .. })
+                )
+            })
+        {
+            let mut replies = Vec::new();
+            let mut prefix = Vec::new();
+            for entry in entries {
+                if matches!(
+                    entry.payload,
+                    EntryPayload::Normal(ReplicaCommand::ContentApplication { .. })
+                ) {
+                    if !prefix.is_empty() {
+                        replies.extend(self.apply_entry_transaction(std::mem::take(&mut prefix))?);
+                    }
+                    replies.extend(self.apply_entry_transaction(vec![entry])?);
+                } else {
+                    prefix.push(entry);
+                }
+            }
+            if !prefix.is_empty() {
+                replies.extend(self.apply_entry_transaction(prefix)?);
+            }
+            return Ok(replies);
+        }
+        self.apply_entry_transaction(entries)
+    }
+
+    /// Publishes consensus-only prefixes before a content wait; every original command stays atomic.
+    fn apply_entry_transaction(
+        &self,
+        entries: Vec<Entry<ControllerRaftConfig>>,
+    ) -> Result<Vec<CommitReceipt>, StorageError<u64>> {
+        if self.network_content
             && let Some(clock) = &self.work_clock
         {
             self.wait_for_apply_inputs(&entries, clock)?;

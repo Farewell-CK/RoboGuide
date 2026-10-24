@@ -203,6 +203,13 @@ outcomes. This review starts no Habitat, model or device.
 
 ## Maintenance
 
+ADR-0187 adds separate pre-apply historical Log catch-up: the source must actually retain and commit
+the exact Log, the receiver first needs its own durable Log/producer, and original stream intent
+and pins precede payload reads. Every chunk retains original Log/current membership/epoch/Root/TLS
+and budget checks. Ordinary committed routing still requires the same currently accepted application
+on both sides. This slice covers identical applied membership only; learner/joint, network Snapshots
+and complete GC remain required. It creates no device or physical-continuity evidence.
+
 The overview's canonical sources are [Chinese .mmd](../../images/roboguide-current-architecture.mmd) and
 [English .mmd](../../images/roboguide-current-architecture-english.mmd). Marked regions in README, the V2 entry
 and the site tour contain the same content; publication checks reject drift. Authority, dependency,

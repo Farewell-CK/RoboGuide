@@ -156,10 +156,15 @@ def run(
     source: Path | None,
     members: list[int],
     owned_source: Path | None = None,
+    historical_log_catchup: bool = False,
 ) -> dict[str, Any]:
     """Check independent SQL, byte and TLS observations plus actual process waits."""
     if not 3 <= len(members) <= 9 or len(set(members)) != len(members) or min(members) <= 0:
         raise ValueError("declare three to nine distinct positive infrastructure members")
+    if historical_log_catchup and owned_source is not None:
+        raise ValueError(
+            "historical Log gate requires its actual complete frozen Controller source"
+        )
     if owned_source is None:
         if source is None:
             raise ValueError("original capture gate requires explicit actual Controller evidence")
@@ -288,6 +293,10 @@ def run(
             for member in members:
                 start(member)
             current = leader()
+            missed = None
+            if historical_log_catchup:
+                missed = next(member for member in members if member != current)
+                actors[missed].stop()
             if owned_source is not None:
                 result["actual_owned_file_source"] = run_source(
                     actors[current], configs[current], owned_source, output, calls, members
@@ -309,6 +318,53 @@ def run(
                     }
                 )
                 assert actors[current].ask({"action": "commit"})["receipt"]["accepted"] is True
+            if missed is not None:
+                root = Path(configs[missed]["content_root"])
+                with closing(
+                    sqlite3.connect((root / "content.sqlite3").as_uri() + "?mode=ro", uri=True)
+                ) as sql:
+                    assert sql.execute("SELECT COUNT(*) FROM content_objects").fetchone()[0] == 0
+                start(missed)
+                deadline = time.monotonic() + 60
+                while time.monotonic() < deadline:
+                    _, state = sql_identity(Path(configs[missed]["parent_sql"]))
+                    if (state.get("content_state") or {}).get("batch_digest") == captured[
+                        "candidate_digest"
+                    ]:
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise ValueError(
+                        "actual retained Log did not supply missing bytes before apply"
+                    )
+                with closing(
+                    sqlite3.connect((root / "content.sqlite3").as_uri() + "?mode=ro", uri=True)
+                ) as sql:
+                    histories = [
+                        json.loads(raw)
+                        for (raw,) in sql.execute("SELECT record FROM content_streams")
+                    ]
+                original = [
+                    row
+                    for row in histories
+                    if row["intent"]["command_id"].startswith("historical-log:")
+                ]
+                assert original and all(row["receipt"] is not None for row in original)
+                actual_sources = {row["intent"]["origin"]["member"] for row in original}
+                assert actual_sources <= set(members) - {missed}
+                assert all(
+                    row["intent"]["origin"]["store_owner"]
+                    == owners[str(row["intent"]["origin"]["member"])]
+                    for row in original
+                )
+                result["actual_historical_log_catchup"] = {
+                    "member": missed,
+                    "original_source": current,
+                    "actual_sources": sorted(actual_sources),
+                    "streams": original,
+                    "independent_actual_bytes": actual_bytes(root),
+                }
+                current = leader()
             first = actors[current].ask({"action": "quorum"})
             assert set(first["complete_members"]) == set(members)
             assert first["target"]["batch_digest"] == captured["candidate_digest"]
@@ -457,6 +513,7 @@ def main() -> None:
     parser.add_argument("--source", type=Path)
     parser.add_argument("--owned-source-probe", type=Path)
     parser.add_argument("--members", required=True)
+    parser.add_argument("--historical-log-catchup", action="store_true")
     args = parser.parse_args()
     result = run(
         args.output,
@@ -465,6 +522,7 @@ def main() -> None:
         None if args.source is None else args.source.resolve(strict=True),
         [int(member) for member in args.members.split(",")],
         None if args.owned_source_probe is None else args.owned_source_probe.resolve(strict=True),
+        args.historical_log_catchup,
     )
     print(json.dumps({"passed": result["passed"], "result": str(args.output / "result.json")}))
 

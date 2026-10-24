@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+ADR-0187 adds separate retained-Log describe/request/push commands, not a widening of ordinary
+committed routing. Actual source Commit/Log/original producer and receiver durable Log/producer
+precede Ready/source reads. Historical target revision is the frozen source observation; its
+candidate fields describe that exact retained Log. Per-chunk Log/epoch/membership/Root/TLS and
+original clocks remain live; callbacks never reacquire their own held Root mutex. Bounded Root
+work capacity follows actual blocking tasks through cancellation. Original IDs exclude retry and
+epoch, so old Unknown cannot be replaced. Actual consensus-only prefixes are committed before
+following content waits, retaining each original command's atomicity and original queue budget.
+This slice requires identical applied membership; learner/joint, Snapshot, GC/upgrade and full
+non-release work remain mandatory. Gate: check_network_content_processes.py --historical-log-catchup.
+
 ADR-0184 adds explicit complete parent8/Root4 recovery v0.19 and restored Root5 backing history.
 All paired original writers/inodes, current membership owners, mandatory operation/reference heads,
 exact qualified bytes and original recovery closes are checked before publication. Source logical

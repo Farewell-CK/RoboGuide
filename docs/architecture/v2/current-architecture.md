@@ -194,6 +194,12 @@ Harness 不绕过 RoboGuide 直接调用 simulator skill。本地导航/操作 C
 
 ## 如何维护
 
+ADR-0187 为 apply 前的历史 Log 增加独立内容追赶：来源须实际保留并提交同一 Log，接收方
+须先有自己的原 Log/producer，现存 stream 意图和 pin 先于实际源读取；每块仍检查原
+Log、current membership/epoch、Root/TLS 和原预算。普通已提交路由仍要求双方当前接受
+同一应用。此切片只覆盖相同已应用成员配置，learner/joint、网络 Snapshot 和完整 GC
+继续必需；不增加设备或物理连续性事实。
+
 总体图的单一源码为 [中文 .mmd](../../images/roboguide-current-architecture.mmd)和
 [英文 .mmd](../../images/roboguide-current-architecture-english.mmd)；README、V2 入口和网站导览中的
 标记区同步同一内容，网站检查会拒绝漂移。改动权威、依赖方向、生命周期或公开合同仍须 ADR，
