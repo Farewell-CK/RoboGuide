@@ -119,7 +119,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 | 顺序 | 对应原项 | 当前必需交付 | 状态 |
 | --- | --- | --- | --- |
-| A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | Log、purged Snapshot、空 learner、准备/投递心跳及 ACK 门禁通过；ADR-0195 原归档源首次初始化、Unknown、Log/Snapshot 追赶、完整实际入口及最新完整存量三 leader 冷恢复通过；远程 CI 另核对，全局 Archive/原完整故障矩阵随 A2/A3 继续 |
+| A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | Log、purged Snapshot、空 learner、准备/投递心跳及 ACK 门禁通过；ADR-0195 原归档源首次初始化、Unknown、Log/Snapshot 追赶、完整实际入口及最新完整存量三 leader 冷恢复通过；ADR-0198 已补 committed replay 缺失输入的启动拒绝、显式原 owner 修复、重入群与冷恢复；全局 Archive/原完整故障矩阵随 A2/A3 继续 |
 | A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | readiness、Root7 GC/恢复、实际 mTLS learner/joint、损坏与旧 epoch 拒绝、Root8 私有 staging/原 Unknown/完整恢复已验收；全 producer 退休与最终 CAS 回收组合继续 |
 | A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 原 Root4 → 6 → 7 排空同 inode 升级、旧入口拒绝与三 leader 冷恢复通过；滚动/回退继续 |
 | B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | 待接线与组合验收；不重写空间算法 |
@@ -131,9 +131,16 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 当前清单为唯一执行队列，下面按原时间保留的切片记录不能替代上表完成条件。
 
 ADR-0197 的实际组合进一步复现：已提交 Log 依赖的原 stream 回执 Unknown 时，副本在
-Raft 启动回放等待内容，而网络尚未开放。完整备份正确拒绝该 active 缺回执状态；原始
-文件在实际双 writer/inode 租约下另存为 forensic-only，不能当成有效恢复包。此启动恢复
-入口缺口保持开放，在当前 producer/GC 包后优先闭合，再推进 A3 与 B–F。
+Raft 启动回放等待内容，而网络尚未开放。ADR-0198 现已在真实存量上闭合该入口：完整备份
+仍正确拒绝 active 缺回执状态，启动快速拒绝并由本地 exact owner repair 补齐 placement；
+原始 Log/Unknown 不改写，三成员重入群、重启和固定 bundle 冷恢复通过。原始双
+writer/inode 文件仍另存为 forensic-only，不能当成有效恢复包。全局 Archive/原完整故障
+矩阵、A3 与 B–F 继续必需。
+
+[Committed replay input repair 验收](acceptance/2026-10-25-committed-replay-repair.md)已通过：
+原生 gate 保留 1 个真实缺失 input、所有拒绝路径、1 个 repair copy、三成员重入群/重启；
+独立冷 gate 复核固定 post-repair bundle、原 stream Unknown 行和 repair operation。软件
+进程证据不建立设备、物理停止或全局 HA 结论。
 
 [原 producer 退休与最终 CAS 验收](acceptance/2026-10-25-complete-producer-retirement.md)
 现已通过：158 项 Replica 回归、每成员两个不再使用的实际 CAS 对象删除、原 transfer

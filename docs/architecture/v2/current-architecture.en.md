@@ -203,6 +203,12 @@ outcomes. This review starts no Habitat, model or device.
 
 ## Maintenance
 
+ADR-0198 is accepted and implemented: inspect actual committed-but-unapplied Log inputs before
+Raft startup and refuse promptly with a repair requirement when original receipts/bytes are absent.
+Local inspection/repair opens existing parent9/Root8 only and binds original Log/input/digest,
+actual Artifact owner and the first budget to the existing copy journal. Stable IDs exclude retries
+and epochs; original Unknown, clocks and semantic permissions remain. No replacement authority.
+
 ADR-0197 passes actual producer/GC/restart and three-leader cold acceptance: compose an actual retired upload with every member's original
 Log/View/Snapshot and stream/reader retention. Real mTLS Snapshot/applied-cut purge and original
 scope/process end release only their own responsibilities. Local OS-admin reader retirement delegates

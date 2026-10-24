@@ -662,6 +662,64 @@ impl ReplicaContentStore {
             .transpose()
     }
 
+    /// Observes an original repair before source access, refusing changed immutable caller context.
+    pub(crate) fn bound_copy_status(
+        &self,
+        command_id: &str,
+        content: &ArtifactContentKey,
+        authority_digest: &str,
+        duration_ms: u64,
+    ) -> Result<Option<ReplicaContentCopyStatus>, String> {
+        let guard = self
+            .inner
+            .connection
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let connection = guard
+            .as_ref()
+            .ok_or("original content connection is closed")?;
+        self.validate_connection(connection)?;
+        let Some(original) = operation(connection, &operation_key(command_id)?)? else {
+            return Ok(None);
+        };
+        if original.intent.content != *content
+            || original.intent.authority_digest != authority_digest
+            || original.intent.budget.duration_ms != duration_ms
+        {
+            return Err("original replay repair has different immutable input".into());
+        }
+        status(&original).map(Some)
+    }
+
+    /// Releases only this actual completed copy's independent pin using its retained real receipt.
+    pub fn retire_completed_copy(
+        &self,
+        command_id: &str,
+    ) -> Result<ReplicaContentCopyStatus, String> {
+        let (original, reference, proof) = {
+            let guard = self
+                .inner
+                .connection
+                .lock()
+                .map_err(|error| error.to_string())?;
+            let connection = guard
+                .as_ref()
+                .ok_or("original content connection is closed")?;
+            self.validate_connection(connection)?;
+            let original = operation(connection, &operation_key(command_id)?)?
+                .ok_or("original completed copy is unavailable")?;
+            let receipt = original
+                .receipt
+                .as_ref()
+                .ok_or("original copy remains Unknown")?;
+            let reference = receive_reference(&original.intent)?;
+            let proof = digest(receipt)?;
+            (status(&original)?, reference, proof)
+        };
+        self.release_reference(&reference, &proof)?;
+        Ok(original)
+    }
+
     /// Checks original object metadata only; callers must separately hash actual bytes before availability.
     pub(super) fn verify_content_metadata(
         &self,

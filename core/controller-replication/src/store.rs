@@ -20,6 +20,9 @@ mod log_content;
 mod network;
 #[path = "store_prefix.rs"]
 mod prefix;
+#[path = "store_replay_repair.rs"]
+mod replay_repair;
+pub use replay_repair::UnavailableReplayInput;
 #[path = "store_producers.rs"]
 mod producers;
 #[path = "store_snapshot.rs"]
@@ -100,6 +103,8 @@ struct NetworkContentOpening {
     initialization_policy: Option<ContentInitializationPolicy>,
     /// Explicit original-parent migration, never selected by normal open or file discovery.
     upgrade: bool,
+    /// Recovery inspection must refuse missing original authority rather than create new files.
+    existing_only: bool,
 }
 
 impl From<NetworkContentMode> for NetworkContentOpening {
@@ -109,6 +114,7 @@ impl From<NetworkContentMode> for NetworkContentOpening {
             mode,
             initialization_policy: None,
             upgrade: false,
+            existing_only: false,
         }
     }
 }
@@ -1406,6 +1412,37 @@ impl SqliteRaftStore {
         Self::open_initialization_inner(path, profile, application_schema, content, policy, false)
     }
 
+    /// Opens only existing managed parent9/Root8 files without creating a missing inode or lease.
+    pub fn open_existing_with_content_initialization(
+        path: &Path,
+        profile: &str,
+        application_schema: &str,
+        content: ReplicaContentStore,
+        policy: Option<ContentInitializationPolicy>,
+    ) -> Result<Self, String> {
+        if !content.staging_reclamation_enabled()
+            || content.identity().profile_identity != profile
+            || application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+        {
+            return Err(
+                "existing initialization parent requires exact Root8/profile/schema".into(),
+            );
+        }
+        Self::open_inner(
+            path,
+            profile,
+            application_schema,
+            Some(content),
+            false,
+            NetworkContentOpening {
+                mode: NetworkContentMode::Initialization,
+                initialization_policy: policy,
+                upgrade: false,
+                existing_only: true,
+            },
+        )
+    }
+
     /// Explicitly drains parent8/9 without replacing original identity, operations or uncertain history.
     pub fn upgrade_content_initialization(
         path: &Path,
@@ -1444,6 +1481,7 @@ impl SqliteRaftStore {
                 mode: NetworkContentMode::Initialization,
                 initialization_policy: policy,
                 upgrade,
+                existing_only: false,
             },
         )
     }
@@ -1522,7 +1560,11 @@ impl SqliteRaftStore {
         let mut lease = canonical.as_os_str().to_os_string();
         lease.push(".writer.lock");
         let mut options = std::fs::OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(false);
+        options
+            .read(true)
+            .write(true)
+            .create(!opening.existing_only)
+            .truncate(false);
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;

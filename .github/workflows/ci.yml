@@ -441,7 +441,7 @@ jobs:
                        evidence / "roboguide-complete-producer-gc")
           assert result["passed"]
           final = evidence / "roboguide-producer-gc-cold-recovery"
-          recover(source, final, supervisor, None, frozen_bundle=Path(result["post_gc_bundle"]),
+          recover(source, final, supervisor, None, False, frozen_bundle=Path(result["post_gc_bundle"]),
                   frozen_digest=result["post_gc_manifest_digest"])
           assert verify_recovery(evidence / "roboguide-complete-producer-gc", final)["passed"]
           PY

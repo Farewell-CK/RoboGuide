@@ -246,6 +246,136 @@ async fn actual_purged_prefix_never_regresses_or_changes_original_cut() {
     );
 }
 
+/// Real committed metadata stays unapplied until an independent exact owner copy repairs its bytes.
+#[tokio::test]
+async fn actual_committed_replay_repair_preserves_original_log_and_source_unavailability() {
+    let (directory, mut store, content, key, entry) = fixture();
+    store
+        .persist_log_entries(std::slice::from_ref(&entry))
+        .unwrap();
+    store.save_committed(Some(entry.log_id)).await.unwrap();
+    let original = store.parent_producers().unwrap();
+    let unavailable = store.unavailable_replay_inputs().unwrap();
+    assert_eq!(unavailable.len(), 1);
+    assert_eq!(unavailable[0].content, key);
+    let first = &unavailable[0];
+    let source = directory.path().join("source-cas");
+    assert!(
+        store
+            .repair_committed_input_from_artifact(
+                first.log_index,
+                &"a".repeat(64),
+                &key,
+                &source,
+                30000,
+            )
+            .is_err()
+    );
+    let foreign = artifact_store::FileSystemArtifactStore::new_with_archive_references(
+        directory.path().join("foreign-source"),
+    )
+    .unwrap();
+    assert!(
+        store
+            .repair_committed_input_from_artifact(
+                first.log_index,
+                &first.entry_digest,
+                &key,
+                foreign.root(),
+                30000,
+            )
+            .is_err()
+    );
+    drop(foreign);
+    let copied = store
+        .repair_committed_input_from_artifact(
+            first.log_index,
+            &first.entry_digest,
+            &key,
+            &source,
+            30000,
+        )
+        .unwrap();
+    assert!(copied.receipt.is_some());
+    assert!(store.unavailable_replay_inputs().unwrap().is_empty());
+    assert_eq!(store.parent_producers().unwrap(), original);
+    assert!(
+        read_meta::<LogId<u64>>(&store.connection.lock().unwrap(), "applied")
+            .unwrap()
+            .is_none()
+    );
+    std::fs::rename(&source, source.with_extension("unavailable")).unwrap();
+    assert_eq!(
+        serde_json::to_value(
+            store
+                .repair_committed_input_from_artifact(
+                    first.log_index,
+                    &first.entry_digest,
+                    &key,
+                    &source,
+                    30000,
+                )
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(&copied).unwrap()
+    );
+    assert!(
+        store
+            .repair_committed_input_from_artifact(
+                first.log_index,
+                &first.entry_digest,
+                &key,
+                &source,
+                29999,
+            )
+            .is_err()
+    );
+    content.retire_completed_copy(&copied.command_id).unwrap();
+    assert!(
+        content
+            .active_references(&key)
+            .unwrap()
+            .iter()
+            .any(|pin| pin.kind == ReplicaContentReferenceKind::Log)
+    );
+    assert!(
+        !content
+            .active_references(&key)
+            .unwrap()
+            .iter()
+            .any(|pin| pin.kind == ReplicaContentReferenceKind::Receive)
+    );
+}
+
+/// Existing-only recovery refuses missing parent/lease before producing any replacement SQL authority.
+#[test]
+fn actual_replay_existing_parent_never_creates_missing_authority_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let profile = "e".repeat(64);
+    let root =
+        ReplicaContentStore::create_with_staging_gc(&directory.path().join("root"), &profile, 1)
+            .unwrap();
+    let parent = directory.path().join("missing.sqlite3");
+    assert!(
+        SqliteRaftStore::open_existing_with_content_initialization(
+            &parent,
+            &profile,
+            state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA,
+            root,
+            None,
+        )
+        .is_err()
+    );
+    assert!(!parent.exists());
+    assert!(
+        !directory
+            .path()
+            .join("missing.sqlite3.writer.lock")
+            .exists()
+    );
+}
+
 /// Actual late byte/SQL publication unblocks the original budget without acquiring parent authority.
 #[test]
 fn actual_apply_input_wait_preserves_parent_access_until_real_bytes_publish() {

@@ -194,6 +194,11 @@ Harness 不绕过 RoboGuide 直接调用 simulator skill。本地导航/操作 C
 
 ## 如何维护
 
+ADR-0198 已接受并实施：Raft 启动前核对真实 committed-but-unapplied Log 的原输入，
+缺回执/字节时及时拒绝并给出修复入口。已有 parent9/Root8 的本地检查/修复绑定原
+Log/input/digest、真实 Artifact owner 和首次预算，委托既有 copy journal；稳定 ID 不随
+重试或 epoch 改变。原 Unknown、时钟与语义使用权限不改写，不创建替代存储权威。
+
 ADR-0197 已通过真实引用/回收/重启与三 leader 冷恢复：以实际已退休上传、各成员原 Log/View/Snapshot 和 stream/reader
 为完整回收链，真实 mTLS Snapshot/原 cut purge 与原进程/作用域结束分别释放自己的引用。
 本地 OS-admin reader 退休只委托原 Root 的实际 incarnation 检查；无权以超时或标签补造

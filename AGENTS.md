@@ -1,5 +1,12 @@
 # Repository Guidelines
 
+ADR-0198 is accepted and implemented. Before Raft startup, inspect actual committed-but-unapplied
+Log inputs under original parent/Root ownership and refuse promptly when original receipts/bytes
+are missing. Closed local inspection/repair opens existing parent9/Root8 only, binds exact original
+Log/input/entry digest and actual Artifact owner, and delegates to the original copy journal.
+Stable repair IDs exclude retry/current epoch; original Unknown and clocks stay. This grants
+placement only, never semantic use or device stopping; no implicit source/parent creation.
+
 ADR-0197 passes actual producer/GC/restart and three-leader cold acceptance. Compose actual retired-upload Log/View/Snapshot/stream/reader
 retention with final member-local Root CAS GC using original mTLS parents, actual publication/purge
 and original scope/process observations. The closed OS-admin maintenance path may delegate only an

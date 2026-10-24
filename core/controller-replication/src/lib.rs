@@ -69,7 +69,10 @@ pub use source_initialization::{
     ContentInitializationInput, ContentInitializationSourceObservation, ContentInitializationStatus,
 };
 pub use store::ReplicaContentParentAdoptionStatus;
-pub use store::{AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore};
+pub use store::{
+    AcceptedApplicationIdentity, HistoryAnchor, ReplicaView, SqliteRaftStore,
+    UnavailableReplayInput,
+};
 pub use supervision::{ControllerDrainProof, ControllerProcessExit, ControllerProcessIdentity};
 pub use transport::{ReplicaFenceClient, ReplicaServer};
 pub use transport_budget::{ReplicaTransportLimits, ReplicaTransportSnapshot};
@@ -722,6 +725,20 @@ impl ReplicaNode {
             tokio::task::spawn_blocking(move || original.reconcile_snapshot_receives())
                 .await
                 .map_err(|e| e.to_string())??;
+            let original = store.clone();
+            let unavailable =
+                tokio::task::spawn_blocking(move || original.unavailable_replay_inputs())
+                    .await
+                    .map_err(|error| error.to_string())??;
+            if let Some(first) = unavailable.first() {
+                return Err(format!(
+                    "committed replay content requires explicit repair: {} unavailable inputs; first Log {} entry {}: {}",
+                    unavailable.len(),
+                    first.log_index,
+                    first.entry_digest,
+                    first.content.content_digest,
+                ));
+            }
         }
         let tls = if config.rotates_certificates() {
             let configuration = config.tls.as_ref().ok_or("rotation requires TLS")?;

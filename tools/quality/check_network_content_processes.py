@@ -57,7 +57,9 @@ class Actor:
         """Read a bounded actual response; EOF and timeout never imply success."""
         if self.process.stdout is None:
             raise ValueError("actual process output is unavailable")
-        deadline = time.monotonic() + 45
+        # Long retained histories may spend more than one election interval in local replay;
+        # keep the startup wait bounded without mistaking a slow process for readiness.
+        deadline = time.monotonic() + 120
         with selectors.DefaultSelector() as selector:
             selector.register(self.process.stdout, selectors.EVENT_READ)
             while b"\n" not in self.buffer:

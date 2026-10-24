@@ -1,6 +1,9 @@
 //! Explicit local OS-admin content maintenance; no listener, consensus or Controller child starts.
 
-use controller_replication::{ReplicaContentStore, ReplicaStagingTarget, SqliteRaftStore};
+use controller_replication::{
+    ArtifactContentKey, ContentInitializationPolicy, ReplicaContentStore, ReplicaStagingTarget,
+    SqliteRaftStore,
+};
 use serde::Deserialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -61,10 +64,79 @@ impl Member {
     }
 }
 
+/// Exact existing original parent declaration; absent files never bootstrap replacement authority.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReplayParent {
+    /// Explicit parent9 interpretation, independent of domain/Node generations.
+    schema: String,
+    /// Original existing absolute Raft database.
+    path: PathBuf,
+    /// Exact original common initialization declaration, including genuine null.
+    initialization: Option<ContentInitializationPolicy>,
+}
+
+impl ReplayParent {
+    /// Acquires the actual existing pair under its complete original policy and physical binding.
+    fn open(&self, member: &Member, binding: Option<&str>) -> Result<SqliteRaftStore, String> {
+        member.staging()?;
+        if self.schema != "roboguide.replica-storage/v0.9"
+            || !self.path.is_absolute()
+            || self.path.as_os_str().len() > 4096
+        {
+            return Err("replay inspection requires explicit existing parent9".into());
+        }
+        SqliteRaftStore::open_existing_with_content_initialization(
+            &self.path,
+            &member.profile_identity,
+            state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA,
+            member.open_gc(binding)?,
+            self.initialization.clone(),
+        )
+    }
+}
+
 /// Closed local actions; same-ID adoption retries are observations of the original record.
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
+    /// Inspects exact committed replay prerequisites without starting Raft, Controller or a Node.
+    InspectReplayContent {
+        /// Exact existing Root8 receiver.
+        member: Member,
+        /// Explicit current physical restoration binding.
+        restore_binding_digest: Option<String>,
+        /// Exact original parent9 declaration.
+        parent: ReplayParent,
+    },
+    /// Copies only an exact original committed input through its stable independent repair operation.
+    RepairReplayContent {
+        /// Original existing Root8 receiver.
+        member: Member,
+        /// Exact original restored backing.
+        restore_binding_digest: Option<String>,
+        /// Complete existing parent9 declaration.
+        parent: ReplayParent,
+        /// Original actual retained committed Log index.
+        log_index: u64,
+        /// Complete original retained Log row digest.
+        entry_digest: String,
+        /// One exact original qualified declared requirement.
+        content: ArtifactContentKey,
+        /// Actual existing managed Artifact source; no owner is relabelled.
+        source_cas: PathBuf,
+        /// First immutable copy duration, never renewed by duplicate calls.
+        budget_ms: u64,
+    },
+    /// Releases only a completed original copy's own pin, retaining all independent consumers.
+    RetireCompletedContentCopy {
+        /// Complete original existing Root7/8 receiver.
+        member: Member,
+        /// Exact current physical backing if restored.
+        restore_binding_digest: Option<String>,
+        /// Original retained copy operation ID.
+        command_id: String,
+    },
     /// Releases only an original reader whose actual recorded process incarnation has ended.
     RetireEndedContentReader {
         /// Complete original accepted Root7/8 declaration.
@@ -188,6 +260,46 @@ pub(crate) fn run(path: &Path) -> Result<serde_json::Value, String> {
     }
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     match request {
+        Request::InspectReplayContent {
+            member,
+            restore_binding_digest,
+            parent,
+        } => {
+            let store = parent.open(&member, restore_binding_digest.as_deref())?;
+            Ok(
+                serde_json::json!({"schema":"roboguide.replay-content-inspection/v0.1",
+                "unavailable":store.unavailable_replay_inputs()?,"starts_services":false}),
+            )
+        }
+        Request::RepairReplayContent {
+            member,
+            restore_binding_digest,
+            parent,
+            log_index,
+            entry_digest,
+            content,
+            source_cas,
+            budget_ms,
+        } => {
+            let store = parent.open(&member, restore_binding_digest.as_deref())?;
+            serde_json::to_value(store.repair_committed_input_from_artifact(
+                log_index,
+                &entry_digest,
+                &content,
+                &source_cas,
+                budget_ms,
+            )?)
+            .map_err(|error| error.to_string())
+        }
+        Request::RetireCompletedContentCopy {
+            member,
+            restore_binding_digest,
+            command_id,
+        } => {
+            let root = member.open_gc(restore_binding_digest.as_deref())?;
+            serde_json::to_value(root.retire_completed_copy(&command_id)?)
+                .map_err(|error| error.to_string())
+        }
         Request::RetireEndedContentReader {
             member,
             restore_binding_digest,
