@@ -1,6 +1,6 @@
 # Implementation status and evidence limits
 
-Content baseline: `2fa01f3f`, reviewed 2026-10-25. [Reference](reference.md) extracts current source versions.
+Content baseline: `fe82daec`, reviewed 2026-10-25. [Reference](reference.md) extracts current source versions.
 [Quantitative allocation](docs/development/acceptance/2026-10-25-quantitative-resources.md) and
 [application generation upgrades](docs/development/acceptance/2026-10-25-application-generation-upgrade.md)
 pass actual software process acceptance. The complete non-release scope and independent device,
@@ -10,7 +10,7 @@ cross-host and long-term evidence requirements remain; SoftwareComplete is not d
 | --- | --- | --- |
 | MI / Orchestration | Clarification, Review, admission, DAG, satisfaction, versioned revision and automatic MI work | Complex topologies, other Memory types and composed fault matrix |
 | Control / quota | Match/Commit/Bind, exact quota/release, source costs, divisible Compute/Context envelopes, Node admission and recovery; explicit spatial footprints/shared time domains, original booking budgets, recovery deadlines and v0.27 cold recovery | Cross-domain/HA clock composition and actual GPU/traffic or other deployment measurements |
-| Runtime / stop | Attempts/generations, durable intents, relations, whole-Group stop and original-process exit proof | Running preemption, coupled Role migration, hazard/regrasp and device stopping |
+| Runtime / stop | Attempts/generations, durable intents, relations, whole-Group stop, original-process exit proof, reviewed running preemption with atomic beneficiary admission, coupled recovery and active hazards; v59/v0.28 recovery | Device handoff/regrasp/stop observations and global composition |
 | State / verifier | Source policies, Belief lineage, TTL, original Task verifiers and CAS proof | Actual deployment sources, conflicts and continuous physical effects |
 | Memory / Spatial | Preparation/use/revoke/handoff, file algorithms, provider-local GC, complete scoped typed-map/current-use/handoff/automatic MI/original-goal/cold-recovery/old-writer composition; original import Replica, Catalog/lineage, Snapshot/Archive references, relocated provider Snapshot retirement, Archive abort/private recipient GC, source upload retirement and offline GC over supported standalone reference closure | Complete global Archive/reference coverage and cross-host content |
 | Replica / recovery | Certificate rotation, original child drain, V3 transfer, inode/writer fences, supported quiescent bundles, qualified Root reads, Prepared recovery, cross-owner upload release and original recovery assessment, Root8/parent10, Log/Snapshot/learners, final member GC, v55-to-v56 rolling/bad-target repair and v0.25 three-leader cold recovery | Complete global content/reference composition and cross-host fault matrix |
@@ -52,4 +52,6 @@ Update both languages together, following contract → actual code → original 
 
 [Complete scoped typed-map software acceptance](docs/development/acceptance/2026-10-25-scoped-typed-map-lifecycle.md) passes two actual retained-storage process chains and complete v0.26 cold recovery. Every Task has independent preparation/import/use; original production provenance remains unchanged. Device, cross-host and other stages remain independent.
 
-[Spatial and Time software acceptance](docs/development/acceptance/2026-10-25-resource-topology.md) covers explicit deployment declarations, cross-ID conflicts, original budgets and active/uncertain-stop recovery. Actual CPU processes do not establish physical exclusion or device stopping. Remaining A/D/E/F work stays mandatory.
+[Spatial and Time software acceptance](docs/development/acceptance/2026-10-25-resource-topology.md) covers explicit deployment declarations, cross-ID conflicts, original budgets and active/uncertain-stop recovery. Actual CPU processes do not establish physical exclusion or device stopping. Remaining A/E/F work stays mandatory.
+
+[Reviewed execution coordination](docs/development/acceptance/2026-10-25-execution-coordination.md) passes actual CPU preemption, coupled recovery, file-integrity hazards, original-instance restart and complete declared-data cold recovery. Device coordination retains reviewed Memory and independent device-assurance gates. No devices or external models were used.

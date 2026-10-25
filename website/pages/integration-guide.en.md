@@ -33,3 +33,7 @@ The [module map](modules/domain-ports.md) locates code. [Original integration ar
 ## Spatial and Time deployment constraints
 
 Global recovery-admin installs [resource-topology v0.1](docs/development/resource-topology-v0.1.md) over actual declared resources. Space requires exact frame/anchor/bounds/clearance; Time aliases share an explicit time domain and local Controller openings. Deployment booking budgets remain outside canonical model output. Admission, Bind/Rebind and every outbox send check original bounds. Declared geometry never creates device inventory or measured occupancy.
+
+## Coordination and active hazards
+
+[Revision v0.6](docs/development/execution-coordination-v0.1.md) uses actual registered recovery/safety support and canonical successor operations; it supplies no vendor motion. Device handoff/regrasp requires original reviewed Memory/context and DeviceObservation. Explicit decision-policy v0.3 active Readiness gates consume actual source/session/TTL/conflict evidence. Node and MissionPlan contracts retain their versions and meaning.

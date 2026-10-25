@@ -33,3 +33,7 @@ Rust 使用 `rust-toolchain.toml`，Python 使用 `pyproject.toml` 与锁文件�
 ## 时空部署约束
 
 全局 recovery-admin 按实际声明资源安装 [resource-topology v0.1](docs/development/resource-topology-v0.1.md)。Space 明确 frame/anchor/边界/clearance；Time 别名共享明确 time domain，窗口只属于本地 Controller 时钟。部署 booking budget 不进入模型 canonical 输出；准入、Bind/Rebind 与每次 outbox 都核对原期限。声明几何不会创建设备 inventory 或实测占用。
+
+## 协调与活动 hazard
+
+[Revision v0.6](docs/development/execution-coordination-v0.1.md)使用实际登记的 recovery/safety 支持和 canonical successor operations，不生成厂商动作。设备 handoff/regrasp 要求原 reviewed Memory/context 和 DeviceObservation。显式 decision-policy v0.3 活动 Readiness gate 消费真实 source/session/TTL/conflict 证据；Node 与 MissionPlan 合同保留版本与原义。
