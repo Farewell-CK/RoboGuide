@@ -101,6 +101,7 @@ fn drive_application_timer_synchronous(
         apply_runtime_events(&mut candidate, now, &correlation, &mut events)?;
         safety_stop::tick(&mut candidate, now)?;
         super::resource_topology::monitor(&mut candidate, now)?;
+        super::hazards::monitor(&mut candidate, now)?;
         super::plan_revision::tick(&mut candidate, clock, None, verifier_feed)?;
         super::memory_handoff::tick(&mut candidate, now)?;
         begin_current_ambiguity_recoveries(&mut candidate, now, &correlation, &mut events)?;
@@ -128,6 +129,7 @@ fn drive_application_timer_synchronous(
         drive_ready_tasks(&mut candidate, now, &correlation, &mut events)?;
         drive_rebound_attempts(&mut candidate, now, &correlation)?;
         semantic_verifier::monitor_active(&mut candidate, now)?;
+        super::hazards::monitor(&mut candidate, now)?;
         super::plan_revision::apply_goal_pending(&mut candidate, clock)?;
         if let Some(error) = event_log.take_error()? {
             return Err(format!("application timer event sink failed: {error}").into());

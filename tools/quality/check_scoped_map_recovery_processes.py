@@ -242,6 +242,7 @@ def run(
         assert schema in {
             "roboguide.controller-checkpoint/v57",
             "roboguide.controller-checkpoint/v58",
+            "roboguide.controller-checkpoint/v59",
         }
         authority = json.loads(raw)
         assert authority["memory_handoffs"] and authority["runtime_revisions"]

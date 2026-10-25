@@ -21,7 +21,7 @@ AUTHORITY = "application_upgrade_authority_v1"
 OPERATIONS = "application_upgrade_operations_v1"
 BASE = "application_upgrade_base_parent_v1"
 ORIGINAL_POLICY = "application_upgrade_original_policy_v1"
-SCHEMAS = {f"roboguide.controller-checkpoint/v{version}" for version in range(53, 59)}
+SCHEMAS = {f"roboguide.controller-checkpoint/v{version}" for version in range(53, 60)}
 
 
 def _requires_scoped_profile(value: Any) -> bool:
@@ -52,6 +52,18 @@ def _requires_topology_profile(value: Any) -> bool:
             for key, item in value.items()
         )
     return isinstance(value, list) and any(_requires_topology_profile(item) for item in value)
+
+
+def _requires_coordination_profile(value: Any) -> bool:
+    """Fence v59 identities in original base policies and pending upgrade intent alike."""
+    if isinstance(value, dict):
+        return any(
+            key in {"application_schema", "from_schema"}
+            and item == "roboguide.controller-checkpoint/v59"
+            or _requires_coordination_profile(item)
+            for key, item in value.items()
+        )
+    return isinstance(value, list) and any(_requires_coordination_profile(item) for item in value)
 
 
 def _closed(value: Any, fields: set[str]) -> dict[str, Any]:
@@ -256,7 +268,21 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
         return
     metadata = dict(connection.execute("SELECT key,value FROM replica_v1_meta"))
     original_identity = json.loads(metadata.get("identity", "null"))
-    if profile_schema != "roboguide.recovery-profile/v0.27" and (
+    if profile_schema != "roboguide.recovery-profile/v0.28" and (
+        isinstance(original_identity, list)
+        and len(original_identity) == 2
+        and original_identity[1] == "roboguide.controller-checkpoint/v59"
+        or any(
+            _requires_coordination_profile(json.loads(metadata[key]))
+            for key in (AUTHORITY, OPERATIONS)
+            if key in metadata
+        )
+    ):
+        raise ValueError("cohort/hazard application generation requires explicit recovery v0.28")
+    if profile_schema not in {
+        "roboguide.recovery-profile/v0.27",
+        "roboguide.recovery-profile/v0.28",
+    } and (
         isinstance(original_identity, list)
         and len(original_identity) == 2
         and original_identity[1] == "roboguide.controller-checkpoint/v58"
@@ -270,6 +296,7 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
     if profile_schema not in {
         "roboguide.recovery-profile/v0.26",
         "roboguide.recovery-profile/v0.27",
+        "roboguide.recovery-profile/v0.28",
     } and (
         isinstance(original_identity, list)
         and len(original_identity) == 2
@@ -287,7 +314,12 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
         return
     if (
         profile_schema
-        not in {PROFILE, "roboguide.recovery-profile/v0.26", "roboguide.recovery-profile/v0.27"}
+        not in {
+            PROFILE,
+            "roboguide.recovery-profile/v0.26",
+            "roboguide.recovery-profile/v0.27",
+            "roboguide.recovery-profile/v0.28",
+        }
         or not {AUTHORITY, OPERATIONS, BASE} <= metadata.keys()
     ):
         raise ValueError("application upgrade parent10 requires complete explicit recovery v0.25")

@@ -498,6 +498,7 @@ def validate_bundle(
         content.UPGRADE_PROFILE,
         content.SCOPED_PROFILE,
         content.TOPOLOGY_PROFILE,
+        content.COORDINATION_PROFILE,
     } and not any(item["kind"] in {"replica", "replica-content"} for item in components)
     content.validate_pairing(components, allow_standalone=standalone)
     source_map = _source_map(sources, components)

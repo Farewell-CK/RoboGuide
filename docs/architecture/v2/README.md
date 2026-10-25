@@ -7,6 +7,11 @@
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
 
+[ADR-0210](../../decisions/0210-reviewed-execution-coordination.md)冻结运行协调的职责：
+运行中抢占与耦合恢复通过原完整 stop/revoke、独立 Review、fresh Group 和正常 Control；
+显式 handoff/regrasp 合同要求原上下文和 operation-owned device assurance。活动 hazard
+策略保留原门禁并持续检查，撤除规则不释放原权限。[本地软件进程与恢复验收](../../development/acceptance/2026-10-25-execution-coordination.md)通过，完整全局/HA/跨域组合仍须完成。
+
 [ADR-0209](../../decisions/0209-spatiotemporal-resource-authority.md)将声明空间几何、共享时间域和原始预订预算归于 Control；
 完整正常/Group/recovery 批次、逐次执行门禁和超时 stop/revoke 保留原所有权。
 [本地软件验收](../../development/acceptance/2026-10-25-resource-topology.md)与 v58/v0.27 恢复通过；

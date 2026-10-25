@@ -252,6 +252,11 @@ impl ControlPlane {
         self.decision_policy_registry.as_ref()
     }
 
+    /// Returns immutable original gate authority for complete active-attempt monitoring and recovery.
+    pub fn decision_policy_revision(&self, revision: u64) -> Option<&DecisionPolicyRegistry> {
+        self.decision_policy_history.get(&revision)
+    }
+
     /// Admits a complete expected-revision registry update; State bytes grant no policy authority.
     pub fn accept_decision_policy_registry(
         &mut self,
@@ -402,6 +407,21 @@ impl ControlPlane {
         let Some(registry) = &self.decision_policy_registry else {
             return Vec::new();
         };
+        self.evaluate_decision_registry_gates(state, registry, node, role, operation, decision, now)
+    }
+
+    /// Evaluates an exact retained original registry with current source/session evidence, without renewing it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_decision_registry_gates<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        registry: &DecisionPolicyRegistry,
+        node: &NodeId,
+        role: &RoleRequirement,
+        operation: Option<&OperationRef>,
+        decision: DecisionKind,
+        now: TimestampMs,
+    ) -> Vec<DecisionEvidenceReceipt> {
         let tenant = self
             .node_identity_registry()
             .and_then(|identities| identities.records.get(node.as_str()))

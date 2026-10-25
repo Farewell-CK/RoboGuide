@@ -6,6 +6,7 @@ use sha2::{Digest as _, Sha256};
 
 mod admission;
 mod checkpoint;
+mod coordination;
 mod discovery;
 mod generation;
 mod goal;
@@ -28,12 +29,16 @@ const MEMORY_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.3";
 const TYPED_MEMORY_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.4";
 /// Preserves a published scoped parent's original typed root under an independent new Group.
 const SCOPED_MEMORY_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.5";
+/// Explicit reviewed complete-cohort coordination; ordinary switches acquire no such permission.
+const COORDINATION_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.6";
 /// Candidate and command storage bounds are independent of prospective Mission admission.
 const MAX_CANDIDATES: usize = 16;
 /// Immutable command receipts cannot grow without a deployment bound.
 const MAX_COMMANDS: usize = 256;
 /// Complete retained proposal bytes across all Missions; exhaustion never changes running work.
 const MAX_RETAINED_PLAN_BYTES: usize = 16 * 1024 * 1024;
+/// Complete additional original cohort metadata is bounded independently of candidate plan bytes.
+const MAX_RETAINED_COORDINATION_BYTES: usize = 512 * 1024;
 
 /// Exact application principal supplied only after the actual transport/writer authorization check.
 pub(crate) struct Caller<'a> {
@@ -95,6 +100,9 @@ pub(crate) enum Trigger {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Candidate {
+    /// Original complete-cohort permission, frozen before output or independent Review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    coordination: Option<coordination::Authorization>,
     /// Immutable original administrative child declarations, frozen before output and provider claims.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     memory: BTreeMap<String, memory::Authorization>,
@@ -190,6 +198,9 @@ struct ProviderCallReceipt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Review {
+    /// Exact original coordination input approved alongside this candidate and its Memory context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    coordination_digest: Option<String>,
     /// Exact pre-output child permissions reviewed with this plan; historical absence grants none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     memory_digest: Option<String>,
@@ -263,6 +274,9 @@ enum Phase {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Switch {
+    /// Actual normal beneficiary Commit/Bind admitted atomically with a running-preemption switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    beneficiary_admission: Option<coordination::BeneficiaryAdmission>,
     /// Explicit v0.2 permission admitted generation before an exact reviewed candidate existed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     generation: bool,
@@ -387,6 +401,27 @@ struct GenerationGrant {
 }
 
 impl RevisionState {
+    /// Fences additional coordination permission, including immutable zero-event command receipts.
+    pub(crate) fn uses_coordination_authority(&self) -> bool {
+        if self
+            .switches
+            .iter()
+            .any(|switch| switch.beneficiary_admission.is_some())
+        {
+            return true;
+        }
+        self.commands
+            .values()
+            .any(|receipt| receipt.result["schema_version"].as_str() == Some(COORDINATION_SCHEMA))
+            || self.candidates.values().any(|candidate| {
+                candidate.coordination.is_some()
+                    || candidate
+                        .review
+                        .as_ref()
+                        .is_some_and(|review| review.coordination_digest.is_some())
+            })
+    }
+
     /// Lets migration reject new Memory permissions hidden in an older wrapper.
     pub(crate) fn uses_revision_memory_authority(&self) -> bool {
         self.commands.values().any(|receipt| {
@@ -472,6 +507,13 @@ struct Command {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 enum Action {
+    /// Freezes complete current ownership and explicit transition permission before candidate output.
+    AuthorizeCoordination {
+        /// Original bounded candidate ticket.
+        ticket_id: String,
+        /// Semantic purpose and required original stopping assurance.
+        authorization: domain::ExecutionCoordinationRequest,
+    },
     /// Declares an exact original-owner child before output, provider claims or Review.
     AuthorizeMemory {
         /// Original finite candidate budget; the declaration never creates another ticket.

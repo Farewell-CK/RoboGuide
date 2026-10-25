@@ -82,6 +82,7 @@ class QuantitativeCheck:
             "roboguide.controller-checkpoint/v56",
             "roboguide.controller-checkpoint/v57",
             "roboguide.controller-checkpoint/v58",
+            "roboguide.controller-checkpoint/v59",
         }:
             raise ValueError("actual quantitative gate requires the original v56 full checkpoint")
         wrapper = json.loads(raw)
@@ -294,6 +295,7 @@ class QuantitativeCheck:
             "roboguide.controller-checkpoint/v56",
             "roboguide.controller-checkpoint/v57",
             "roboguide.controller-checkpoint/v58",
+            "roboguide.controller-checkpoint/v59",
         }
         control = json.loads(json.loads(raw)["integration_json"])["control"]
         assert control["capacity_ledger"] == self.original

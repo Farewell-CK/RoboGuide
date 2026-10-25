@@ -23,6 +23,7 @@ CAPACITY_PROFILE = "roboguide.recovery-profile/v0.24"
 UPGRADE_PROFILE = "roboguide.recovery-profile/v0.25"
 SCOPED_PROFILE = "roboguide.recovery-profile/v0.26"
 TOPOLOGY_PROFILE = "roboguide.recovery-profile/v0.27"
+COORDINATION_PROFILE = "roboguide.recovery-profile/v0.28"
 PROFILES = frozenset(
     {
         PROFILE,
@@ -34,6 +35,7 @@ PROFILES = frozenset(
         UPGRADE_PROFILE,
         SCOPED_PROFILE,
         TOPOLOGY_PROFILE,
+        COORDINATION_PROFILE,
     }
 )
 LAYOUT4 = "roboguide.replica-content-layout/v0.4"

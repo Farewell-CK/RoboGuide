@@ -22,6 +22,7 @@ PROFILES = {
     "roboguide.recovery-profile/v0.25",
     "roboguide.recovery-profile/v0.26",
     "roboguide.recovery-profile/v0.27",
+    "roboguide.recovery-profile/v0.28",
 }
 STORAGE = "roboguide.artifact-storage/v5"
 WRAPPER = "roboguide.controller-checkpoint/v52"
@@ -33,6 +34,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v56",
     "roboguide.controller-checkpoint/v57",
     "roboguide.controller-checkpoint/v58",
+    "roboguide.controller-checkpoint/v59",
 }
 SQL_SCHEMA = "roboguide.artifact-gc-sql/v0.1"
 DATABASE = "reclamation-v1/journal.sqlite3"

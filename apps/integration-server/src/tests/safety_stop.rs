@@ -773,3 +773,144 @@ fn previous_wrapper_cannot_contain_process_stop_authority() {
         }
     }
 }
+
+/// Declares an explicit software observation gate over the registered test export, without device evidence.
+fn active_hazard_registry(fixture: &stop_recovery::Fixture) -> domain::DecisionPolicyRegistry {
+    let command = fixture.attempt.command();
+    let export = fixture
+        .controller
+        .bridge
+        .state()
+        .node(command.node_id())
+        .unwrap()
+        .registration()
+        .state_exports()[0]
+        .clone();
+    let policy = domain::DecisionEvidencePolicy::new(
+        "software-hazard",
+        1,
+        export.object().clone(),
+        export.export_id(),
+        BTreeSet::from([domain::StateSemantic::Observed]),
+        BTreeSet::from([domain::StateSource::Node {
+            node_id: command.node_id().clone(),
+            local_system_id: export.local_system_id().clone(),
+        }]),
+        10,
+        None,
+        BTreeSet::from([domain::DecisionKind::Readiness]),
+        domain::ConflictReducer::RequireEquivalent,
+    )
+    .unwrap();
+    let mut value = serde_json::to_value(policy).unwrap();
+    value["payload_schema"] = export.payload_schema().into();
+    serde_json::from_value(serde_json::json!({
+        "schema_version":"roboguide.decision-policy-registry/v0.3", "registry_id":"software-hazards", "revision":1,
+        "gates":{"software-hazard":{
+            "active_stop_timeout_ms":100,"tenant_id":"local","enabled":true,"policy":value,
+            "target":{"operation":command.intent().operation()},"candidate_source_only":true,
+            "require_current_session":true,"condition":{"kind":"boolean","pointer":"/safe_state","value":true}
+        }}
+    })).unwrap()
+}
+
+/// A fresh attributed source is admitted; its original receive expiry stops the full Group without renewal.
+#[test]
+fn active_hazard_expiry_retains_original_watch_hold_and_stop_deadline() {
+    let mut fixture = fixture_with_process_exit(true);
+    let registry = active_hazard_registry(&fixture);
+    fixture
+        .controller
+        .bridge
+        .control_mut()
+        .accept_decision_policy_registry(registry, 0)
+        .unwrap();
+    let payload = observation(&fixture);
+    observe(&mut fixture, "s1", 6, payload, None);
+    application::hazards::monitor(&mut fixture.controller, domain::TimestampMs::new(7)).unwrap();
+    assert!(fixture.controller.safety_stops.is_empty());
+    let group = fixture.attempt.command().group_id();
+    assert!(application::hazards::delivery_permitted(
+        &fixture.controller,
+        group,
+        domain::TimestampMs::new(7)
+    ));
+    application::hazards::validate_restored(&fixture.controller).unwrap();
+    application::hazards::monitor(&mut fixture.controller, domain::TimestampMs::new(17)).unwrap();
+    let original = serde_json::to_value(&fixture.controller.hazards).unwrap();
+    let deadline = serde_json::to_value(&fixture.controller.safety_stops).unwrap()
+        [fixture.attempt.execution_id()]["record"]["deadline"]
+        .clone();
+    assert!(
+        fixture
+            .controller
+            .orchestrator
+            .execution(fixture.attempt.command().mission_id())
+            .unwrap()
+            .isolation()
+            .is_some()
+    );
+    application::hazards::monitor(&mut fixture.controller, domain::TimestampMs::new(18)).unwrap();
+    assert_eq!(
+        serde_json::to_value(&fixture.controller.hazards).unwrap(),
+        original
+    );
+    assert_eq!(
+        serde_json::to_value(&fixture.controller.safety_stops).unwrap()
+            [fixture.attempt.execution_id()]["record"]["deadline"],
+        deadline
+    );
+    application::hazards::validate_restored(&fixture.controller).unwrap();
+    let mut saved: ServerCheckpoint =
+        serde_json::from_str(&server_checkpoint_json(&fixture.controller).unwrap()).unwrap();
+    saved.schema = PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA.into();
+    assert!(
+        validate_isolation_checkpoint_schema(&saved)
+            .unwrap_err()
+            .contains("active hazard")
+    );
+    saved.schema = SERVER_CHECKPOINT_SCHEMA.into();
+    saved.hazards = None;
+    assert!(validate_isolation_checkpoint_schema(&saved).is_err());
+}
+
+/// Disabling an original safe gate cannot silently remove protection from an already running attempt.
+#[test]
+fn active_hazard_revocation_stops_under_its_original_policy() {
+    let mut fixture = fixture_with_process_exit(true);
+    let mut registry = active_hazard_registry(&fixture);
+    fixture
+        .controller
+        .bridge
+        .control_mut()
+        .accept_decision_policy_registry(registry.clone(), 0)
+        .unwrap();
+    let payload = observation(&fixture);
+    observe(&mut fixture, "s1", 6, payload, None);
+    application::hazards::monitor(&mut fixture.controller, domain::TimestampMs::new(7)).unwrap();
+    registry.revision = 2;
+    registry.gates.get_mut("software-hazard").unwrap().enabled = false;
+    registry
+        .gates
+        .get_mut("software-hazard")
+        .unwrap()
+        .policy
+        .revision = 2;
+    fixture
+        .controller
+        .bridge
+        .control_mut()
+        .accept_decision_policy_registry(registry, 1)
+        .unwrap();
+    application::hazards::monitor(&mut fixture.controller, domain::TimestampMs::new(8)).unwrap();
+    assert!(safety_stop::blocks_release(
+        &fixture.controller,
+        fixture.attempt.command().mission_id()
+    ));
+    assert!(!application::hazards::delivery_permitted(
+        &fixture.controller,
+        fixture.attempt.command().group_id(),
+        domain::TimestampMs::new(8)
+    ));
+    application::hazards::validate_restored(&fixture.controller).unwrap();
+}

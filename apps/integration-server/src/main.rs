@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Original topology generation has no additional cohort/hazard authority.
+const PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v58";
 /// Previous wrapper without original spatial/calendar declaration and reservation authority.
 const PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v57";
 /// Previous wrapper without scoped typed-map preparations and transitive lifecycle authority.
@@ -152,6 +154,8 @@ struct ControlHttpRequest {
 /// Live process state sharing one Control authority with Mission orchestration.
 #[derive(Clone)]
 struct ControllerState {
+    /// Original continuous hazard gates and their irreversible stop intents.
+    hazards: application::hazards::HazardState,
     /// Durable participant policy and original Federation receipts, separate from remote decisions.
     federation: application::federation::FederationState,
     /// Original bounded runtime candidate/Review/stop-switch authority, separate from execution facts.
@@ -747,6 +751,9 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
 /// Durable Phase 1 process checkpoint saved in the same event-log transaction.
 #[derive(Clone, Serialize, Deserialize)]
 struct ServerCheckpoint {
+    /// Complete active-hazard history; only legacy wrappers may omit this table.
+    #[serde(default)]
+    hazards: Option<application::hazards::HazardState>,
     /// Original Federation participant policy history and command receipts.
     #[serde(default)]
     federation: application::federation::FederationState,
@@ -1208,6 +1215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
@@ -1273,6 +1281,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
@@ -1287,6 +1296,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
@@ -1375,6 +1385,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 memory_use: saved.memory_use,
                 memory_handoffs: saved.memory_handoffs,
                 runtime_revisions: saved.runtime_revisions,
+                hazards: saved.hazards.unwrap_or_default(),
                 safety_stops: saved.safety_stops,
                 bridge: IntegrationRuntimeBridge::restore_from_checkpoint_with_lease_policy(
                     &saved.integration_json,
@@ -1403,6 +1414,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             memory_use: Default::default(),
             memory_handoffs: BTreeMap::new(),
             runtime_revisions: Default::default(),
+            hazards: application::hazards::HazardState::default(),
             safety_stops: BTreeMap::new(),
             bridge: IntegrationRuntimeBridge::new_with_lease_policy(
                 control::ControlPlane::new(),
@@ -1450,6 +1462,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .validate_mission_tenant_authority()?;
     application::scoped_maps::validate_restored(&controller)?;
     application::resource_topology::validate_restored(&controller)?;
+    application::hazards::validate_restored(&controller)?;
     application::memory_import::validate_restored(&controller)?;
     application::memory_handoff::validate_restored(&controller)?;
     application::plan_revision::attach_deployment(&mut controller, deployment_feasibility.clone())?;

@@ -204,7 +204,7 @@ def validate(connection: sqlite3.Connection) -> None:
     if wrapper is None:
         return
     control = json.loads(wrapper["integration_json"])["control"]
-    if wrapper["schema"] != WRAPPER:
+    if wrapper["schema"] not in {WRAPPER, "roboguide.controller-checkpoint/v59"}:
         if (
             control.get("resource_topology_registry") is not None
             or control.get("resource_topology_history")

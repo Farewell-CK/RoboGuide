@@ -175,6 +175,7 @@ pub(crate) fn validate_restored_verifier_source(
     if matches!(
         checkpoint.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA
@@ -560,6 +561,7 @@ mod tests {
             memory_use: Default::default(),
             memory_handoffs: BTreeMap::new(),
             runtime_revisions: Default::default(),
+            hazards: Some(application::hazards::HazardState::default()),
             safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: Some("sha256:source-a".to_string()),

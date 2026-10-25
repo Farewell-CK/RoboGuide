@@ -1,5 +1,10 @@
 # RoboGuide
 
+[运行协调](docs/development/execution-coordination-v0.1.md)接入完整原 cohort 的审批、停止/撤权、
+原目标与新 Group；运行中抢占须在同一事务让受益任务实际获得原冲突资源，持续 hazard
+策略保留原保护。新权威显式使用 Controller v59/recovery v0.28；设备类交接与 regrasp
+要求实际设备证据，软件 CPU 退出不能替代。[实际进程与恢复验收](docs/development/acceptance/2026-10-25-execution-coordination.md)通过，完整全局组合继续。
+
 ADR-0209 的时空资源模块已通过本地软件验收：Control 的显式 resource-topology v0.1 定义原 frame/anchor、
 整数空间边界与 clearance、Controller 本地时间窗口及部署 booking budget。不同资源 ID 的空间冲突
 参与联合调度和完整 Commit；原承诺随 wrapper v58 / recovery v0.27 保存。实际入口为

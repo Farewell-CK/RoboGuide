@@ -163,6 +163,51 @@ impl CandidateSet {
 }
 
 impl ControlPlane {
+    /// Projects exact exclusive blockers for already matched beneficiary candidates without releasing them.
+    pub fn preemption_conflicts<S: SharedNodeStateReader>(
+        &self,
+        state: &S,
+        source_group: &domain::ExecutionGroupId,
+        requirement: &TaskRequirement,
+        candidates: &CandidateSet,
+    ) -> std::collections::BTreeSet<domain::ResourceId> {
+        let mut conflicts = std::collections::BTreeSet::new();
+        if candidates.task_ref() != requirement.task_ref() {
+            return conflicts;
+        }
+        for role in requirement.roles() {
+            let Some(candidates) = candidates
+                .roles()
+                .iter()
+                .find(|entry| entry.role_id() == role.role_id())
+            else {
+                continue;
+            };
+            for node in candidates.node_ids() {
+                let Some(snapshot) = state.node(node) else {
+                    continue;
+                };
+                for resource in snapshot.registration().resources() {
+                    if self
+                        .reservations
+                        .get(resource.id())
+                        .is_some_and(|held| held.group_id.as_ref() == Some(source_group))
+                        && role.resource_requirements().iter().any(|demand| {
+                            demand.allocation_mode() == domain::ResourceAllocationMode::Exclusive
+                                && resource.allocation_mode() == demand.allocation_mode()
+                                && resource.kind() == demand.kind()
+                                && resource.capacity() >= demand.units()
+                                && resource.resource_class() == demand.resource_class()
+                        })
+                    {
+                        conflicts.insert(resource.id().clone());
+                    }
+                }
+            }
+        }
+        conflicts
+    }
+
     /// Explains first-use eligibility using the same predicates as Mission Matching.
     ///
     /// This read-only profile excludes bound/grounded/distinct-entity Missions: their

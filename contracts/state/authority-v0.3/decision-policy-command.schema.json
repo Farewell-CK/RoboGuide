@@ -1,0 +1,642 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "command_id",
+    "expected_revision",
+    "registry"
+  ],
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "registry_id",
+        "revision",
+        "gates"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "roboguide.decision-policy-registry/v0.3"
+        },
+        "registry_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "gates": {
+          "type": "object",
+          "maxProperties": 128,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tenant_id",
+              "enabled",
+              "policy",
+              "target",
+              "candidate_source_only",
+              "require_current_session",
+              "condition"
+            ],
+            "properties": {
+              "tenant_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "policy": {
+                "$ref": "#/$defs/decision_policy"
+              },
+              "target": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [],
+                "properties": {
+                  "operation": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "namespace",
+                          "name",
+                          "version"
+                        ],
+                        "properties": {
+                          "namespace": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "version": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "capability": {
+                    "enum": [
+                      "Mobility",
+                      "Transport",
+                      "Compute",
+                      "Observation",
+                      null
+                    ]
+                  },
+                  "capability_contract": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "namespace",
+                          "name",
+                          "version"
+                        ],
+                        "properties": {
+                          "namespace": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "version": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "role": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "candidate_source_only": {
+                "type": "boolean"
+              },
+              "require_current_session": {
+                "type": "boolean"
+              },
+              "condition": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "pointer",
+                      "value"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "boolean"
+                      },
+                      "pointer": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "value": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "pointer",
+                      "value"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "enum"
+                      },
+                      "pointer": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "value": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "pointer",
+                      "minimum",
+                      "maximum"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "number_interval"
+                      },
+                      "pointer": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "minimum": {
+                        "type": "number"
+                      },
+                      "maximum": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                ]
+              },
+              "active_stop_timeout_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "maximum": 3600000
+              }
+            }
+          }
+        },
+        "scheduling_costs": {
+          "type": "object",
+          "maxProperties": 128,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tenant_id",
+              "enabled",
+              "node_id",
+              "policy",
+              "terms"
+            ],
+            "properties": {
+              "tenant_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "node_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "policy": {
+                "$ref": "#/$defs/cost_source_policy"
+              },
+              "terms": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 5,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "metric",
+                    "weight",
+                    "units_per_cost",
+                    "maximum",
+                    "prefer_higher"
+                  ],
+                  "properties": {
+                    "metric": {
+                      "enum": [
+                        "queue_delay_ms",
+                        "travel_distance_um",
+                        "traffic_delay_ms",
+                        "load_millionths",
+                        "gpu_memory_bytes"
+                      ]
+                    },
+                    "weight": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1000000
+                    },
+                    "units_per_cost": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 18446744073709551615
+                    },
+                    "maximum": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1125899906842624
+                    },
+                    "prefer_higher": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "node_id",
+            "local_system_id"
+          ],
+          "properties": {
+            "owner": {
+              "const": "node"
+            },
+            "node_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "local_system_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "component"
+          ],
+          "properties": {
+            "owner": {
+              "const": "robo_guide"
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        }
+      ]
+    },
+    "object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "class",
+        "object_type",
+        "object_id"
+      ],
+      "properties": {
+        "class": {
+          "enum": [
+            "node",
+            "world",
+            "robo_guide"
+          ]
+        },
+        "object_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "object_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "name",
+        "version"
+      ],
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "decision_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "policy_id",
+        "revision",
+        "object",
+        "channel_id",
+        "allowed_semantics",
+        "allowed_sources",
+        "max_age_ms",
+        "min_confidence_millionths",
+        "allowed_decisions",
+        "reducer",
+        "payload_schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "roboguide.decision-evidence-policy/v0.1"
+        },
+        "policy_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "object": {
+          "$ref": "#/$defs/object"
+        },
+        "channel_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "allowed_semantics": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "desired",
+              "committed",
+              "reported",
+              "observed",
+              "derived",
+              "belief"
+            ]
+          }
+        },
+        "allowed_sources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        },
+        "max_age_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "min_confidence_millionths": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "allowed_decisions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "match",
+              "commit",
+              "bind",
+              "rebind",
+              "readiness",
+              "satisfaction",
+              "belief_fusion"
+            ]
+          }
+        },
+        "reducer": {
+          "enum": [
+            "require_equivalent",
+            "highest_confidence"
+          ]
+        },
+        "payload_schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "cost_source_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "policy_id",
+        "revision",
+        "object",
+        "channel_id",
+        "allowed_semantics",
+        "allowed_sources",
+        "max_age_ms",
+        "min_confidence_millionths",
+        "allowed_decisions",
+        "reducer",
+        "payload_schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "roboguide.decision-evidence-policy/v0.1"
+        },
+        "policy_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "object": {
+          "$ref": "#/$defs/object"
+        },
+        "channel_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "allowed_semantics": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "desired",
+              "committed",
+              "reported",
+              "observed",
+              "derived",
+              "belief"
+            ]
+          }
+        },
+        "allowed_sources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        },
+        "max_age_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "min_confidence_millionths": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "allowed_decisions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "const": "schedule"
+          },
+          "uniqueItems": true
+        },
+        "reducer": {
+          "enum": [
+            "require_equivalent",
+            "highest_confidence"
+          ]
+        },
+        "payload_schema": {
+          "const": "roboguide.scheduling-metrics/v0.1"
+        }
+      }
+    }
+  },
+  "$id": "https://roboguide.dev/contracts/state/authority-v0.3/decision-policy-command.schema.json"
+}

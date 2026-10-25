@@ -12,6 +12,7 @@ fn empty(events: state::SqliteEventLog) -> ControllerState {
         memory_imports: BTreeMap::new(),
         memory_handoffs: BTreeMap::new(),
         runtime_revisions: Default::default(),
+        hazards: application::hazards::HazardState::default(),
         safety_stops: BTreeMap::new(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),

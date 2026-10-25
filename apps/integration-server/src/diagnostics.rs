@@ -595,6 +595,7 @@ mod tests {
             memory_use: Default::default(),
             memory_handoffs: BTreeMap::new(),
             runtime_revisions: Default::default(),
+            hazards: crate::application::hazards::HazardState::default(),
             safety_stops: BTreeMap::new(),
             bridge,
             orchestrator: orchestration::MissionOrchestrator::new(),

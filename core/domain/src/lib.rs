@@ -42,6 +42,8 @@ mod duration_estimate;
 mod error;
 mod event;
 mod execution;
+mod execution_coordination;
+pub use execution_coordination::{ExecutionCoordinationKind, ExecutionCoordinationRequest};
 mod execution_relation;
 mod identity;
 mod lease;

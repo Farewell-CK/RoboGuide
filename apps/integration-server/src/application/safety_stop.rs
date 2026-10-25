@@ -19,6 +19,14 @@ pub(crate) fn metrics(controller: &ControllerState, now: TimestampMs) -> (usize,
     }
     (pending, manual, overdue)
 }
+
+/// Returns only the operation support frozen by the original stop admission, never current observations.
+pub(super) fn original_support<'a>(
+    controller: &'a ControllerState,
+    execution: &str,
+) -> Option<&'a domain::OperationSafetySupport> {
+    controller.safety_stops.get(execution)?.support.as_ref()
+}
 use sha2::{Digest, Sha256};
 
 /// Bounded observation emitted by the operation's registered LocalSystem, never by Control.
@@ -296,7 +304,7 @@ fn digest(value: &impl Serialize) -> Result<String, String> {
 }
 
 /// Freezes only a declared canonical operation's exact registered safety provider.
-fn safety_declaration(
+pub(super) fn safety_declaration(
     controller: &ControllerState,
     command: &domain::ExecutionCommand,
 ) -> Option<(

@@ -291,6 +291,12 @@ pub(crate) fn flush_unisolated_dispatch(
                     execution.isolation().is_some()
                         || super::plan_revision::blocks_mission(controller, &mission)
                         || super::memory_handoff::holds_dispatch(controller, execution.group_id())
+                        || super::hazards::requires_delivery_check(controller, execution.group_id())
+                            && !super::hazards::delivery_permitted(
+                                controller,
+                                execution.group_id(),
+                                clock.now(),
+                            )
                         || execution.is_crash_loop_quarantined()
                         || !super::semantic_verifier::delivery_permitted(
                             controller,
@@ -336,7 +342,36 @@ pub(crate) fn flush_unisolated_commands(
 
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
-    if saved.schema == SERVER_CHECKPOINT_SCHEMA {
+    if saved.schema == SERVER_CHECKPOINT_SCHEMA && saved.hazards.is_none() {
+        return Err("current wrapper lacks mandatory active hazard history".into());
+    }
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA {
+        let integration: serde_json::Value =
+            serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
+        let history = integration["control"]["decision_policy_history"].as_object();
+        if saved
+            .hazards
+            .as_ref()
+            .is_some_and(application::hazards::HazardState::has_authority)
+            || saved
+                .runtime_revisions
+                .values()
+                .any(|state| state.uses_coordination_authority())
+            || history.is_some_and(|history| {
+                history.values().any(|registry| {
+                    registry["schema_version"] == "roboguide.decision-policy-registry/v0.3"
+                })
+            })
+        {
+            return Err(
+                "legacy wrapper cannot carry cohort coordination or active hazard authority".into(),
+            );
+        }
+    }
+    if matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
+    ) {
         let integration: serde_json::Value =
             serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
         let control = integration
@@ -349,7 +384,10 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
             return Err("current wrapper lacks mandatory spatial/calendar reference tables".into());
         }
     }
-    if saved.schema != SERVER_CHECKPOINT_SCHEMA {
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
+    ) {
         let integration: serde_json::Value =
             serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
         let control = &integration["control"];
@@ -375,7 +413,9 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     }
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
+            | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
     ) {
         let integration: serde_json::Value =
             serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
@@ -402,6 +442,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
             | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
@@ -420,7 +461,10 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     let ledger = control.get("capacity_ledger");
     let has_capacity_contract = matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
+            | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
+            | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
     );
     if has_capacity_contract && ledger.is_none() {
         return Err("current wrapper lacks mandatory quantitative capacity ledger".into());
@@ -448,6 +492,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     let current_isolation_contract = matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
             | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
@@ -472,6 +517,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -484,6 +530,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -502,6 +549,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -538,6 +586,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
     ) && (!saved.runtime_revisions.is_empty()
@@ -579,6 +628,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -602,6 +652,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -617,6 +668,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -634,6 +686,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -659,6 +712,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -689,6 +743,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -719,6 +774,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -743,6 +799,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -796,6 +853,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -832,6 +890,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -865,6 +924,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -918,6 +978,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -952,6 +1013,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA

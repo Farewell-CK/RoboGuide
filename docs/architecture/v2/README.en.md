@@ -1,5 +1,11 @@
 # RoboGuide V2 current architecture
 
+[ADR-0210](../../decisions/0210-reviewed-execution-coordination.md) freezes execution-coordination ownership.
+Running preemption and coupled recovery use complete original stop/revoke, independent Review,
+a fresh Group and normal Control. Explicit handoff/regrasp requires original context and
+operation-owned device assurance. Active hazard gates remain frozen and continuously checked.
+[Local software process and recovery acceptance](../../development/acceptance/2026-10-25-execution-coordination.md) passes; complete global/HA/cross-domain composition remains required.
+
 [ADR-0209](../../decisions/0209-spatiotemporal-resource-authority.md) assigns declared geometry, shared time domains
 and original booking budgets to Control. Complete normal/Group/recovery batches, delivery gates
 and overrun stop/revoke preserve original ownership. [Local software acceptance](../../development/acceptance/2026-10-25-resource-topology.md)

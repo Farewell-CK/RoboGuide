@@ -104,6 +104,7 @@ impl Fixture {
             memory_use: Default::default(),
             memory_handoffs: BTreeMap::new(),
             runtime_revisions: BTreeMap::new(),
+            hazards: application::hazards::HazardState::default(),
             safety_stops: BTreeMap::new(),
             verifier_seen: BTreeSet::new(),
             verifier_source_digest: None,

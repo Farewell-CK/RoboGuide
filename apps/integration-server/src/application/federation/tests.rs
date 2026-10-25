@@ -130,6 +130,7 @@ fn controller(log: &state::SqliteEventLog) -> ControllerState {
         memory_use: Default::default(),
         memory_handoffs: Default::default(),
         memory_imports: Default::default(),
+        hazards: Default::default(),
         safety_stops: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),

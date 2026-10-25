@@ -58,9 +58,17 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
     }
     let mut total_bytes = 0_usize;
     let mut memory_bytes = 0_usize;
+    let mut coordination_bytes = 0_usize;
     for (key, state) in &controller.runtime_revisions {
         let mission = domain::MissionId::new(key).map_err(|e| e.to_string())?;
         admission::validate_policy(&state.policy)?;
+        coordination_bytes =
+            coordination_bytes.saturating_add(coordination::retained_bytes(state)?);
+        if coordination_bytes > MAX_RETAINED_COORDINATION_BYTES {
+            return Err(
+                "retained complete coordination metadata exceeds its original bound".into(),
+            );
+        }
         let execution = controller
             .orchestrator
             .execution(&mission)
@@ -100,6 +108,7 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         generation::validate(state)?;
         goal::validate_restored(controller, &mission, state)?;
         for (id, candidate) in &state.candidates {
+            coordination::validate_restored(controller, &mission, state, candidate)?;
             memory_bytes = memory_bytes.saturating_add(memory::validate_restored(
                 controller, &mission, state, candidate,
             )?);
@@ -177,6 +186,7 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
                 .candidates
                 .get(&switch.ticket_id)
                 .ok_or("switch lacks original candidate")?;
+            coordination::validate_beneficiary_admission(controller, candidate, switch)?;
             if !identity(&switch.command_id)
                 || !sources.insert(switch.source_group.clone())
                 || !commands.insert(switch.command_id.clone())
@@ -334,6 +344,7 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
                                 | MEMORY_SCHEMA
                                 | TYPED_MEMORY_SCHEMA
                                 | SCOPED_MEMORY_SCHEMA
+                                | COORDINATION_SCHEMA
                         )
                     })
                 || receipt.result["revision"]

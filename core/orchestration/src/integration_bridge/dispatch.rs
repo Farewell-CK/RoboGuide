@@ -1104,6 +1104,11 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         self.runtime.attempt_history()
     }
 
+    /// Reads only original Runtime resource evidence; it grants no current reservation or continuation.
+    pub fn attempt_resource_ids(&self, execution_id: &str) -> Option<&[domain::ResourceId]> {
+        self.runtime.attempt_resource_ids(execution_id)
+    }
+
     /// Returns the current physical attempt for one exact committed Task Role slot.
     pub fn current_task_attempt_id(
         &self,

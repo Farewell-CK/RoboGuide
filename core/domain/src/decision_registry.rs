@@ -130,6 +130,9 @@ pub struct DecisionGateTarget {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DecisionGate {
+    /// Explicit v0.3 continuous Readiness monitoring; absence preserves the original admission-only gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_stop_timeout_ms: Option<u64>,
     /// Owning authenticated consumer tenant.
     pub tenant_id: String,
     /// Current enabled state; disabling a rule retains its history.
@@ -168,7 +171,9 @@ impl DecisionPolicyRegistry {
     pub fn validate(&self) -> Result<(), String> {
         if !matches!(
             self.schema_version.as_str(),
-            "roboguide.decision-policy-registry/v0.1" | "roboguide.decision-policy-registry/v0.2"
+            "roboguide.decision-policy-registry/v0.1"
+                | "roboguide.decision-policy-registry/v0.2"
+                | "roboguide.decision-policy-registry/v0.3"
         ) || self.schema_version.ends_with("/v0.1") && !self.scheduling_costs.is_empty()
             || self.scheduling_costs.len() > 128
             || self.registry_id.trim().is_empty()
@@ -191,6 +196,16 @@ impl DecisionPolicyRegistry {
             }
         }
         for (id, gate) in &self.gates {
+            if let Some(timeout) = gate.active_stop_timeout_ms
+                && (self.schema_version != "roboguide.decision-policy-registry/v0.3"
+                    || !(1..=3_600_000).contains(&timeout)
+                    || !gate
+                        .policy
+                        .allowed_decisions
+                        .contains(&DecisionKind::Readiness))
+            {
+                return Err("active hazard monitoring requires explicit v0.3, Readiness and a bounded stop timeout".into());
+            }
             gate.policy.validate().map_err(|error| error.to_string())?;
             gate.condition.validate()?;
             if id != &gate.policy.policy_id
@@ -213,7 +228,8 @@ impl DecisionPolicyRegistry {
     /// Fences rollback, silent removal and same-revision interpretation changes.
     pub fn validates_successor(&self, next: &Self) -> Result<(), String> {
         next.validate()?;
-        if self.schema_version.ends_with("/v0.2") && !next.schema_version.ends_with("/v0.2")
+        if self.schema_version.ends_with("/v0.3") && !next.schema_version.ends_with("/v0.3")
+            || self.schema_version.ends_with("/v0.2") && next.schema_version.ends_with("/v0.1")
             || self.registry_id != next.registry_id
             || self.revision > next.revision
             || self.revision == next.revision && self != next

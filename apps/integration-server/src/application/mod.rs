@@ -22,6 +22,7 @@ pub(crate) use initial_operation_assessment::unavailable as unavailable_initial_
 mod isolation;
 #[cfg(test)]
 pub(crate) use isolation::revalidate_mission_resume;
+pub(crate) mod hazards;
 pub(crate) mod map_publication;
 pub(crate) mod memory_handoff;
 pub(crate) mod memory_import;

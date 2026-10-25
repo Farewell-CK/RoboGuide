@@ -91,6 +91,7 @@ fn restore_and_register(fixture: &Fixture) {
         memory_use: saved.memory_use,
         memory_handoffs: saved.memory_handoffs,
         runtime_revisions: saved.runtime_revisions,
+        hazards: saved.hazards.unwrap_or_default(),
         safety_stops: saved.safety_stops,
         verifier_seen: saved.verifier_seen,
         verifier_artifact_store: None,

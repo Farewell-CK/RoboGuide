@@ -14,13 +14,14 @@ from typing import Any
 
 from check_recovery_bundle_processes import logical_rows
 from check_state_verifier_processes import ROOT, address, save
+from recovery_profile_selection import restore_schema, standalone_schema
 
 
 def recover(source: Path, output: Path, old_controller: Path | None) -> dict[str, Any]:
     """Preserve original topology, Node journal and bytes without starting services."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
-    profile = {
-        "schema": "roboguide.recovery-profile/v0.27",
+    profile: dict[str, Any] = {
+        "schema": standalone_schema(source / "controller.sqlite3"),
         "profile_id": "original-software-calendar-stores",
         "revision": 1,
         "max_bytes": 1024 * 1024 * 1024,
@@ -101,7 +102,7 @@ def recover(source: Path, output: Path, old_controller: Path | None) -> dict[str
         "calendar-restore-" + operation,
     )
     receipt = command(*restore)
-    assert receipt["schema"] == "roboguide.restore-receipt/v0.27"
+    assert receipt["schema"] == restore_schema(profile["schema"])
     assert command(*backup) == created and command(*restore) == receipt
     save(output / "restore-receipt.json", receipt)
     roots = {item["component_id"]: Path(item["root"]) for item in receipt["components"]}
@@ -118,17 +119,18 @@ def recover(source: Path, output: Path, old_controller: Path | None) -> dict[str
         ).fetchone()
     authority = json.loads(json.loads(raw)["integration_json"])["control"]
     assert (
-        schema == "roboguide.controller-checkpoint/v58" and authority["resource_topology_history"]
+        schema in {"roboguide.controller-checkpoint/v58", "roboguide.controller-checkpoint/v59"}
+        and authority["resource_topology_history"]
     )
     refusal = None
     if old_controller is not None:
         binary = old_controller.resolve(strict=True)
-        assert (
-            subprocess.check_output([str(binary), "--application-schema"], timeout=5)
-            .decode()
-            .strip()
-            == "roboguide.controller-checkpoint/v57"
-        )
+        assert subprocess.check_output(
+            [str(binary), "--application-schema"], timeout=5
+        ).decode().strip() in {
+            "roboguide.controller-checkpoint/v57",
+            "roboguide.controller-checkpoint/v58",
+        }
         before = logical_rows(roots["controller"] / "controller.sqlite3")
         old_environment = environment | {
             "ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA": "1",
@@ -149,8 +151,7 @@ def recover(source: Path, output: Path, old_controller: Path | None) -> dict[str
         )
         assert (
             refused.returncode != 0
-            and "unsupported checkpoint schema roboguide.controller-checkpoint/v58"
-            in refused.stderr.decode()
+            and f"unsupported checkpoint schema {schema}" in refused.stderr.decode()
         )
         assert logical_rows(roots["controller"] / "controller.sqlite3") == before
         refusal = {

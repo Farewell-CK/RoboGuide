@@ -36,6 +36,7 @@ pub fn supports_application_generation(value: &str) -> bool {
             | "roboguide.controller-checkpoint/v56"
             | "roboguide.controller-checkpoint/v57"
             | "roboguide.controller-checkpoint/v58"
+            | "roboguide.controller-checkpoint/v59"
     )
 }
 

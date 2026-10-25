@@ -64,6 +64,11 @@ jobs:
           --output "${RUNNER_TEMP}/roboguide-resource-calendar"
           --skip-build --resource-calendar
 
+      - name: Verify actual CPU preemption, coupled recovery, hazards and original cold authority
+        run: >-
+          uv run --frozen python tools/quality/check_execution_coordination_processes.py
+          --output "${RUNNER_TEMP}/roboguide-execution-coordination"
+
       - name: Build the actual Controller connection lifetime probe
         run: cargo build --locked -p state --example controller_storage_probe
 

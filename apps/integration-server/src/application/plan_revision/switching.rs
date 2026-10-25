@@ -3,7 +3,7 @@
 use super::*;
 
 /// Freezes only actual current Runtime attempts; absent attempts never become fabricated stop facts.
-fn attempts(
+pub(super) fn attempts(
     controller: &ControllerState,
     group: &domain::ExecutionGroupId,
 ) -> Result<Vec<FrozenAttempt>, String> {
@@ -73,6 +73,7 @@ fn reviewed_plan(
         || candidate.base_digest != orchestration::mission_plan_digest(execution.plan())
         || review.completion_precondition != admission::completed(controller, mission)?
         || review.memory_digest != memory::authorization_digest(candidate)?
+        || review.coordination_digest != coordination::authorization_digest(candidate)?
         || now.as_millis() >= review.certificate_expires_at_ms
         || !admission::authorized_subject(controller, &review.principal, &state.tenant, true, now)
     {
@@ -92,6 +93,7 @@ fn reviewed_plan(
     if orchestration::mission_plan_digest(&plan) != review.plan_digest {
         return Err("reviewed candidate digest differs from original bytes".into());
     }
+    coordination::validate_candidate(controller, mission, candidate, &plan, now)?;
     controller
         .orchestrator
         .validate_plan_revision(mission, &plan, controller.bridge.control())
@@ -254,6 +256,7 @@ pub(super) fn begin(
         }
     }
     let mut switch = Switch {
+        beneficiary_admission: None,
         generation,
         command_id: command_id.into(),
         ticket_id: ticket.into(),
@@ -543,6 +546,13 @@ pub(super) fn commit(
         .bridge
         .register_execution_relations(&plan, &switch.target_group, now, &trace)
         .map_err(|e| e.to_string())?;
+    state.switches[index].beneficiary_admission = coordination::admit_beneficiary(
+        controller,
+        &state.candidates[&switch.ticket_id],
+        &switch,
+        now,
+        &trace,
+    )?;
     state.switches[index].phase = Phase::Applied;
     super::super::drive_ready_tasks(
         controller,

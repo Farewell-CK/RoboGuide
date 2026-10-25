@@ -81,7 +81,10 @@ class CalendarCheck:
             schema, raw = sql.execute(
                 "SELECT schema,checkpoint_json FROM controller_checkpoint"
             ).fetchone()
-        assert schema == "roboguide.controller-checkpoint/v58"
+        assert schema in {
+            "roboguide.controller-checkpoint/v58",
+            "roboguide.controller-checkpoint/v59",
+        }
         result: dict[str, Any] = json.loads(raw)
         return result
 

@@ -1,3 +1,14 @@
+ADR-0210 owns reviewed execution coordination in Domain `execution_coordination`, Control's exact
+preemption conflict view, application `plan_revision/coordination` and `hazards`. Explicit revision
+v0.6 freezes the original complete cohort and purpose before output/claim/Review. Running preemption
+requires actual normal beneficiary admission in the same switch transaction; otherwise rollback
+retains original stopped ownership. Device coordination requires original reviewed Memory context;
+handoff/regrasp additionally requires actual device assurance. Registry v0.3 active Readiness gates
+retain original source/session/TTL/conflict checks and complete stop/revoke. Wrapper v59/recovery
+v0.28 fence new authority; Node/Plan/Memory/event contracts retain their meaning. The maintained real
+CPU/cohort/file-integrity and cold-recovery gate is `check_execution_coordination_processes.py`.
+Hardware and cross-host evidence remain separate; no software process wait proves device stopping.
+
 ADR-0209 owns explicit resource-topology v0.1 in Domain/Control `resource_topology`, the original
 reservation and immutable scheduling snapshot. Actual Node/resource IDs are deployment inputs;
 integer geometry, exact frame/anchor, clearance and local Controller openings create no inventory

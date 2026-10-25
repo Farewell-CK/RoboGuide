@@ -11,7 +11,12 @@ from typing import Any
 from .snapshot_references import canonical
 
 WRAPPER = "roboguide.controller-checkpoint/v56"
-WRAPPERS = {WRAPPER, "roboguide.controller-checkpoint/v57", "roboguide.controller-checkpoint/v58"}
+WRAPPERS = {
+    WRAPPER,
+    "roboguide.controller-checkpoint/v57",
+    "roboguide.controller-checkpoint/v58",
+    "roboguide.controller-checkpoint/v59",
+}
 CHAIN = "roboguide.checkpoint-chain/v1"
 MAXIMUM = 64 * 1024 * 1024
 
@@ -82,7 +87,9 @@ def _reconstruct(previous: bytes, encoded: str) -> bytes:
     return bytes(result)
 
 
-def _checkpoint(connection: sqlite3.Connection) -> dict[str, Any] | None:
+def _checkpoint(
+    connection: sqlite3.Connection, *, schemas: frozenset[str] | None = None
+) -> dict[str, Any] | None:
     """Reconstruct bounded v56 authority under the already held original writer leases."""
     saved = connection.execute(
         "SELECT schema,event_sequence,checkpoint_json FROM controller_checkpoint WHERE singleton=1"
@@ -96,8 +103,9 @@ def _checkpoint(connection: sqlite3.Connection) -> dict[str, Any] | None:
             raise ValueError("original capacity checkpoint chain lacks its baseline")
         return None
     schema, sequence, raw = saved
+    accepted = WRAPPERS if schemas is None else schemas
     if schema != CHAIN:
-        if schema not in WRAPPERS:
+        if schema not in accepted:
             return None
         if (
             head is not None
@@ -110,7 +118,7 @@ def _checkpoint(connection: sqlite3.Connection) -> dict[str, Any] | None:
         if head is None:
             raise ValueError("original capacity checkpoint chain lacks its head")
         base, revision, target_sequence, schema, base_digest, target_digest = head
-        if schema not in WRAPPERS:
+        if schema not in accepted:
             return None
         if not all(_integer(value) for value in (sequence, base, revision, target_sequence)):
             raise ValueError("original capacity checkpoint sequence is invalid")

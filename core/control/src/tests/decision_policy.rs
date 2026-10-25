@@ -39,6 +39,7 @@ fn registry(node: &str) -> DecisionPolicyRegistry {
         gates: BTreeMap::from([(
             "hazard-clear".into(),
             DecisionGate {
+                active_stop_timeout_ms: None,
                 tenant_id: "local".into(),
                 enabled: true,
                 policy,
@@ -239,4 +240,44 @@ fn policy_revision_and_disabled_history_do_not_reset_on_restore() {
     );
     assert_eq!(restored.decision_policy_registry(), Some(&changed));
     assert_eq!(restored.decision_policy_history.len(), 2);
+}
+
+/// Continuous monitoring is explicit, bounded and cannot be hidden in the original registry generations.
+#[test]
+fn active_hazard_policy_requires_new_schema_and_readiness_without_downgrade() {
+    let mut original = registry("configured-software-source");
+    original
+        .gates
+        .get_mut("hazard-clear")
+        .unwrap()
+        .active_stop_timeout_ms = Some(100);
+    assert!(original.validate().is_err());
+    original.schema_version = "roboguide.decision-policy-registry/v0.3".into();
+    assert!(original.validate().is_err());
+    original
+        .gates
+        .get_mut("hazard-clear")
+        .unwrap()
+        .policy
+        .allowed_decisions
+        .insert(DecisionKind::Readiness);
+    original.validate().unwrap();
+    let mut next = original.clone();
+    next.schema_version = "roboguide.decision-policy-registry/v0.2".into();
+    next.revision += 1;
+    next.gates
+        .get_mut("hazard-clear")
+        .unwrap()
+        .active_stop_timeout_ms = None;
+    next.gates.get_mut("hazard-clear").unwrap().policy.revision += 1;
+    assert!(original.validates_successor(&next).is_err());
+    for timeout in [0, 3_600_001] {
+        let mut invalid = original.clone();
+        invalid
+            .gates
+            .get_mut("hazard-clear")
+            .unwrap()
+            .active_stop_timeout_ms = Some(timeout);
+        assert!(invalid.validate().is_err());
+    }
 }

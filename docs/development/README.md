@@ -1,5 +1,9 @@
 # 开发基线
 
+ADR-0210 的[运行协调与活动 hazard](execution-coordination-v0.1.md)已接入原 revision/stop/revoke/Control，
+Controller v59/recovery v0.28；[实际 CPU/独立原目标与冷恢复组合](acceptance/2026-10-25-execution-coordination.md)通过本地软件验收。
+后续全局/跨域/运维矩阵仍按唯一队列继续。
+
 当前工作按[唯一整改队列](roboguide-software-completion-plan-2026-10-15.md)推进。ADR-0208 的
 scoped typed-map 与自动 MI 本地组合已通过；ADR-0209 的[时空资源合同](resource-topology-v0.1.md)
 及实际 CPU/SQL/CAS 恢复通过本地软件验收。运行中抢占、复杂耦合、完整 Federation、全局

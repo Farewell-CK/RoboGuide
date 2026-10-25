@@ -3,6 +3,13 @@
 use super::*;
 
 impl RuntimeExecutionManager {
+    /// Reads immutable original committed resources, including released or superseded attempt history.
+    pub fn attempt_resource_ids(&self, execution_id: &str) -> Option<&[domain::ResourceId]> {
+        self.executions
+            .get(execution_id)
+            .map(|context| context.resource_ids())
+    }
+
     /// Reduces original ingress evidence and freezes a known attempt's first terminal receive time.
     #[allow(clippy::too_many_arguments)]
     pub fn observe_execution_received(
