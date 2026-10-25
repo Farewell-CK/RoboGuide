@@ -243,8 +243,30 @@ struct Work {
     peer: Peer,
     /// Actual stable tenant selector.
     tenant: String,
-    /// Current conservative request timeout, never larger than the first stored budget.
-    remaining: u64,
+    /// Exact SQL-admitted request clock, including time spent publishing the original intent.
+    budget: OriginalBudget,
+}
+
+impl Work {
+    /// Sends once only within the original retained clock; SQL queueing cannot renew network time.
+    fn send(&self) -> Result<Reply, String> {
+        let remaining = self.budget.remaining(&KernelTime::observe()?);
+        if remaining == 0 {
+            return Err("original Federation request budget expired before peer I/O".into());
+        }
+        let path = if self.observation.is_some() || self.phase == "observe" {
+            format!("/v1/federation/executions/{}", self.id)
+        } else {
+            format!("/v1/federation/executions/{}", self.phase)
+        };
+        super::transport::request(
+            &self.peer,
+            &self.tenant,
+            &path,
+            self.body.as_ref(),
+            remaining,
+        )
+    }
 }
 
 /// Installs only an exact unchanged or consecutive same-root peer profile, retaining old source facts.
@@ -786,6 +808,11 @@ fn admit_work(
                 );
                 (None, encoded)
             };
+            let original = &intents[phase];
+            let budget = observation.map_or_else(
+                || original.budget.clone(),
+                |index| original.observations[index].budget.clone(),
+            );
             work = Some(Work {
                 id: id.into(),
                 domain: domain.into(),
@@ -794,7 +821,7 @@ fn admit_work(
                 observation,
                 peer: profile.peers[domain].clone(),
                 tenant: record.manifest.tenant_id.clone(),
-                remaining: timeout,
+                budget,
             });
             bounded(candidate)?;
             Ok(serde_json::json!({"intent_retained":true}))
@@ -819,18 +846,7 @@ fn perform(
     clock: &impl Clock,
     work: Work,
 ) -> Result<(), String> {
-    let path = if work.observation.is_some() || work.phase == "observe" {
-        format!("/v1/federation/executions/{}", work.id)
-    } else {
-        format!("/v1/federation/executions/{}", work.phase)
-    };
-    let reply = super::transport::request(
-        &work.peer,
-        &work.tenant,
-        &path,
-        work.body.as_ref(),
-        work.remaining,
-    );
+    let reply = work.send();
     let received_at = clock.now().as_millis();
     let received_kernel = KernelTime::observe()?;
     let input=serde_json::to_vec(&serde_json::json!({"transaction":work.id,"domain":work.domain,"phase":work.phase,"observation":work.observation,"reply":reply.as_ref().ok(),"error":reply.as_ref().err()})).map_err(|error|error.to_string())?;
@@ -1025,6 +1041,47 @@ pub(crate) fn validate(controller: &ControllerState) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An actual owned TCP listener receives no connection after the original SQL intent expires.
+    #[test]
+    fn original_sql_queue_consumes_peer_io_budget_before_any_connection() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut clock = serde_json::to_value(KernelTime::observe().unwrap()).unwrap();
+        clock["elapsed_ms"] = 0.into();
+        let clock: KernelTime = serde_json::from_value(clock).unwrap();
+        let work = Work {
+            id: "expired-original".into(),
+            domain: "declared-peer".into(),
+            phase: "prepare".into(),
+            body: Some(serde_json::json!({"original":"effect"})),
+            observation: None,
+            peer: Peer {
+                address: listener.local_addr().unwrap(),
+                server_name: "localhost".into(),
+                server_leaf: format!("sha256:{}", "a".repeat(64)),
+                ca_file: "/unavailable-original-credential".into(),
+                ca_digest: format!("sha256:{}", "b".repeat(64)),
+                client_cert: "/unavailable-original-leaf".into(),
+                client_leaf: format!("sha256:{}", "c".repeat(64)),
+                client_key: "/unavailable-original-key".into(),
+                principal_id: "declared-original".into(),
+            },
+            tenant: "original-tenant".into(),
+            budget: OriginalBudget::new(&clock, 100).unwrap(),
+        };
+        let original = serde_json::to_value(&work.budget).unwrap();
+        assert!(
+            work.send()
+                .unwrap_err()
+                .contains("budget expired before peer I/O")
+        );
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        assert_eq!(serde_json::to_value(&work.budget).unwrap(), original);
+    }
 
     /// Builds only synthetic readonly effect history, with an actual local original clock sample.
     fn intent(value: serde_json::Value) -> Intent {

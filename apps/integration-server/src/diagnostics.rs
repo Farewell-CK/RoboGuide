@@ -606,7 +606,7 @@ mod tests {
         crate::drive_application_timer(
             &controller,
             &log,
-            &Arc::new(std::sync::Mutex::new(())),
+            &Arc::new(crate::application::ApplicationWriter::default()),
             domain::TimestampMs::new(20_000),
             None,
         )

@@ -146,11 +146,11 @@ fn controller(log: &state::SqliteEventLog) -> ControllerState {
 }
 
 /// A real retained writer whose final transport witness becomes unavailable after SQL writes.
-struct RejectedFinalWitness(Mutex<()>);
+struct RejectedFinalWitness(crate::application::ApplicationWriter);
 
 impl ApplicationWriteGate for RejectedFinalWitness {
     /// Holds the original mutex through the caller's candidate and SQL transaction.
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, String> {
+    fn lock(&self) -> Result<crate::application::WriteGuard<'_>, String> {
         self.0.lock().map_err(|_| "writer poisoned".into())
     }
 
@@ -175,7 +175,7 @@ fn final_transport_refusal_preserves_original_checkpoint_and_command_journal() {
     let live = Arc::new(Mutex::new(original));
     let mut candidate = live.lock().unwrap().clone();
     candidate.federation.accept_policy(Some(policy())).unwrap();
-    let gate = RejectedFinalWitness(Mutex::new(()));
+    let gate = RejectedFinalWitness(crate::application::ApplicationWriter::default());
     let _guard = gate.lock().unwrap();
     let error = persist(
         &live,

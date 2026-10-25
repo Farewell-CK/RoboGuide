@@ -16,7 +16,7 @@ pub(super) async fn request(
         .await
         .expect("binds");
     let address = listener.local_addr().expect("address exists");
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let clock = runtime::SystemMonotonicClock::new();
     let server = async {
         let (mut stream, _) = listener.accept().await.expect("connects");

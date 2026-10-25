@@ -214,6 +214,17 @@ pub(crate) fn synchronize_policy(
     events: &state::SqliteEventLog,
     gate: &dyn ApplicationWriteGate,
 ) -> Result<(), String> {
+    let configured = configured_policy()?;
+    {
+        let live = controller
+            .lock()
+            .map_err(|_| "Federation authority unavailable")?;
+        if live.federation.policy() == configured.as_ref() {
+            // Only an unchanged committed policy may avoid the writer. Every mutation still
+            // acquires its original authorized gate and rechecks current policy before Commit.
+            return Ok(());
+        }
+    }
     let _guard = gate.lock()?;
     let mut candidate = controller
         .lock()

@@ -63,7 +63,7 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
         verifier_artifact_store: None,
         verifier_source_digest: None,
     }));
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let clock = runtime::SystemMonotonicClock::new();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -157,7 +157,7 @@ async fn verifier_plan_without_deployment_source_is_not_submitted() {
         }
     });
     let body = plan.to_string();
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let clock = runtime::SystemMonotonicClock::new();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -843,7 +843,7 @@ async fn controller_metrics_expose_durable_high_water() {
         verifier_artifact_store: None,
         verifier_source_digest: None,
     }));
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let clock = runtime::SystemMonotonicClock::new();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

@@ -177,7 +177,7 @@ impl Fixture {
         drive_application_timer(
             &self.controller,
             &self.events,
-            &Arc::new(Mutex::new(())),
+            &Arc::new(crate::application::ApplicationWriter::default()),
             TimestampMs::new(now),
             None,
         )
@@ -189,7 +189,7 @@ impl Fixture {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let gate = Arc::new(Mutex::new(()));
+        let gate = Arc::new(crate::application::ApplicationWriter::default());
         let clock = runtime::FixedClock::new(TimestampMs::new(now));
         let server = async {
             let (mut stream, _) = listener.accept().await.unwrap();
@@ -384,7 +384,7 @@ fn production_deadline_sql_failure_remains_global_and_atomic() {
         drive_application_timer(
             &fixture.controller,
             &fixture.events,
-            &Arc::new(Mutex::new(())),
+            &Arc::new(crate::application::ApplicationWriter::default()),
             TimestampMs::new(12),
             None
         )

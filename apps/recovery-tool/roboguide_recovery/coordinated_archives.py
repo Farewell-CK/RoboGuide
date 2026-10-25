@@ -11,6 +11,7 @@ from typing import Any
 from .snapshot_references import OperationBudget, canonical, digest
 
 PROFILE = "roboguide.recovery-profile/v0.30"
+PROFILES = frozenset({PROFILE, "roboguide.recovery-profile/v0.31"})
 STORAGE = "roboguide.archive-operations/v0.3"
 RECOVERY = "roboguide.application-recovery/v0.2"
 ENVELOPE = "roboguide.application-commit/v4"
@@ -169,7 +170,7 @@ def parent_base(connection: sqlite3.Connection, profile_schema: str | None = Non
         if keys & metadata.keys():
             raise ValueError("old Replica parent contains hidden coordinated Archive authority")
         return version
-    if profile_schema is not None and profile_schema != PROFILE:
+    if profile_schema is not None and profile_schema not in PROFILES:
         raise ValueError("coordinated Archive parent11 requires explicit recovery v0.30")
     if not keys <= metadata.keys() or connection.execute(
         "SELECT version,schema FROM replica_storage_format"
@@ -205,7 +206,7 @@ def operations(
         if present:
             raise ValueError("coordinated Archive table lacks its original generation")
         return []
-    if profile_schema != PROFILE or not present:
+    if profile_schema not in PROFILES or not present:
         raise ValueError("mandatory coordinated Archive journal requires explicit recovery v0.30")
     if [
         row[1] for row in connection.execute("PRAGMA table_info(coordinated_archive_operations)")
@@ -362,7 +363,7 @@ def snapshot_publication(
     owner = row["source_store_owner"]
     member = row["source_member"]
     if (
-        profile != PROFILE
+        profile not in PROFILES
         or parent_version != 11
         or row["schema"] != "roboguide.snapshot-publication/v0.1"
         or not _uint(member)

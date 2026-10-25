@@ -6,6 +6,7 @@
 
 mod config;
 mod content_maintenance;
+mod federation_inputs;
 mod metrics;
 mod projection;
 mod supervisor;

@@ -26,6 +26,7 @@ TOPOLOGY_PROFILE = "roboguide.recovery-profile/v0.27"
 COORDINATION_PROFILE = "roboguide.recovery-profile/v0.28"
 FEDERATION_PROFILE = "roboguide.recovery-profile/v0.29"
 ARCHIVE_PROFILE = "roboguide.recovery-profile/v0.30"
+MULTI_PROFILE = "roboguide.recovery-profile/v0.31"
 PROFILES = frozenset(
     {
         PROFILE,
@@ -40,6 +41,7 @@ PROFILES = frozenset(
         COORDINATION_PROFILE,
         FEDERATION_PROFILE,
         ARCHIVE_PROFILE,
+        MULTI_PROFILE,
     }
 )
 LAYOUT4 = "roboguide.replica-content-layout/v0.4"

@@ -27,6 +27,8 @@ pub use replay_repair::UnavailableReplayInput;
 mod producers;
 #[path = "store_snapshot.rs"]
 mod snapshot;
+#[path = "store_view_cache.rs"]
+mod view_cache;
 #[path = "store_work.rs"]
 mod work;
 
@@ -450,6 +452,8 @@ struct StoreSnapshot {
 pub struct SqliteRaftStore {
     /// Atomic SQLite storage shared by log and state-machine traits.
     pub(crate) connection: Arc<Mutex<Connection>>,
+    /// Reuses only an exact validated data frame on that same unchanged private SQL connection.
+    view_cache: Arc<Mutex<view_cache::Cache>>,
     /// Lifetime process writer lease; a second owner cannot fork local consensus history.
     _writer: Arc<ReplicaWriterLease>,
     /// Frozen network/application identity.
@@ -1754,6 +1758,7 @@ impl SqliteRaftStore {
             .map_err(|error| error.to_string())?;
         let store = Self {
             connection: Arc::new(Mutex::new(connection)),
+            view_cache: Arc::new(Mutex::new(view_cache::Cache::default())),
             _writer: Arc::new(writer),
             profile: profile.into(),
             application_schema: application_schema.into(),
@@ -1937,7 +1942,12 @@ impl SqliteRaftStore {
             .connection
             .lock()
             .map_err(|_| "replica store lock is poisoned")?;
-        let view = read_view(&connection).map_err(|error| error.to_string())?;
+        let mut cache = self
+            .view_cache
+            .lock()
+            .map_err(|_| "replica view witness unavailable")?;
+        let view = view_cache::read(&connection, &mut cache)?;
+        drop(cache);
         if let Some(content) = &view.content {
             self.require_content_initialization(&content.candidate)?;
         }

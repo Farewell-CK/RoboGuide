@@ -195,6 +195,18 @@ jobs:
           --example content_network_probe --example prepared_source_probe
           --example owned_content_source_probe
 
+      - name: Build optimized real HA processes for their declared transport budgets
+        run: cargo build --release --locked -p integration-server -p controller-replica -p roboguide-node
+
+      - name: Verify real independent HA domains, partition, certificates and complete recovery
+        run: >-
+          uv run --frozen python tools/quality/check_federation_ha_processes.py
+          --output "${RUNNER_TEMP}/roboguide-federation-ha"
+          --supervisor target/release/controller-replica
+          --controller target/release/integration-server
+          --node target/release/roboguide-node
+          --storage-probe target/debug/examples/content_stream_probe
+
       - name: Verify actual original owned Unix and State content commits with zero Nodes
         run: >
           uv run --frozen python tools/quality/check_network_content_processes.py
@@ -227,7 +239,7 @@ jobs:
           --runnable-source /tmp/rg-ci-runnable-content
           --output "${RUNNER_TEMP}/roboguide-content-gc"
 
-      - name: Verify complete Root7 cold recovery and three restored leaders
+      - name: Verify complete declared-layout cold recovery and three restored leaders
         run: >
           uv run --frozen python tools/quality/check_replica_content_recovery_processes.py
           --source /tmp/rg-ci-runnable-content

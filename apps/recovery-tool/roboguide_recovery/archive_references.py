@@ -34,6 +34,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.28",
     "roboguide.recovery-profile/v0.29",
     "roboguide.recovery-profile/v0.30",
+    "roboguide.recovery-profile/v0.31",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -459,6 +460,7 @@ def validate(
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
+        "roboguide.recovery-profile/v0.31",
     } and not any(item["kind"] in {"replica", "replica-content"} for item in components)
     bindings: dict[str, set[str]] = {}
     if profile_schema in SUPPORTED:
@@ -509,6 +511,7 @@ def validate(
                         "roboguide.recovery-profile/v0.28",
                         "roboguide.recovery-profile/v0.29",
                         "roboguide.recovery-profile/v0.30",
+                        "roboguide.recovery-profile/v0.31",
                     }
                     and isinstance(authority_id, str)
                     and not standalone
@@ -544,6 +547,7 @@ def validate(
                             "roboguide.recovery-profile/v0.28",
                             "roboguide.recovery-profile/v0.29",
                             "roboguide.recovery-profile/v0.30",
+                            "roboguide.recovery-profile/v0.31",
                         }
                     )
                 ):
@@ -638,6 +642,7 @@ def validate(
                         "roboguide.recovery-profile/v0.28",
                         "roboguide.recovery-profile/v0.29",
                         "roboguide.recovery-profile/v0.30",
+                        "roboguide.recovery-profile/v0.31",
                     }
                     or actual_profile is None
                     or seen[prefix] != projection

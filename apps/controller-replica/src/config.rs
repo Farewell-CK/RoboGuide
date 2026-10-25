@@ -58,6 +58,9 @@ pub(super) struct ProcessConfig {
     /// Explicit policy environment; inherited Controller environment is cleared.
     #[serde(default)]
     pub controller_environment: BTreeMap<String, String>,
+    /// Explicit original Federation inputs; raw inherited variables cannot create this authority.
+    #[serde(default)]
+    pub federation: Option<crate::federation_inputs::FederationInputs>,
     /// Optional one-shot software leader transfer requested by the supervisor after startup.
     #[serde(default)]
     pub leader_transfer: Option<LeaderTransferConfig>,
@@ -241,6 +244,14 @@ impl ProcessConfig {
             "physical_entity_registry":self.physical_entity_registry_path.as_deref().map(file_digest).transpose()?,
             "environment":self.controller_environment,
         });
+        if let Some(federation) = &self.federation {
+            if !crate::federation_inputs::FederationInputs::supports(application_schema) {
+                return Err(
+                    "Federation process inputs require the supporting current application".into(),
+                );
+            }
+            identity["federation"] = federation.identity()?;
+        }
         for (name, configured) in [
             ("node_tls", &self.node_tls),
             ("operator_tls", &self.operator_tls),
@@ -280,6 +291,19 @@ impl ProcessConfig {
     /// Rejects broad network/configuration scope before owning files or creating a Controller.
     pub fn validate(&self) -> Result<(), String> {
         self.replica.validate()?;
+        if let Some(federation) = &self.federation {
+            federation.identity()?;
+            if self.content.is_none()
+                || self.node_tls.is_none()
+                || self.operator_tls.is_none()
+                || self.artifact_tls.is_none()
+                || !crate::federation_inputs::FederationInputs::supports(
+                    &self.replica.application_schema,
+                )
+            {
+                return Err("replicated Federation requires current application, owned content and all explicit mTLS inputs".into());
+            }
+        }
         if (self.schema == "roboguide.controller-replica-process/v0.9")
             != self.coordinated_archive_base.is_some()
             || self.coordinated_archive_base.as_ref().is_some_and(|s| {

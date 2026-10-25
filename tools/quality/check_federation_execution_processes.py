@@ -9,9 +9,10 @@ import ssl
 import subprocess
 import threading
 import uuid
+from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from check_execution_coordination_processes import cold as recover
 from check_execution_coordination_processes import complete
@@ -66,6 +67,8 @@ class ReplyLoss(ThreadingHTTPServer):
         self.prepare_held = threading.Event()
         self.commit_held = threading.Event()
         self.release_reply = threading.Event()
+        self.partition = threading.Event()
+        self.request_timeout_seconds = 3.0
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(
             participant.certificates / "server.crt", participant.certificates / "server.key"
@@ -73,6 +76,13 @@ class ReplyLoss(ThreadingHTTPServer):
         context.load_verify_locations(str(coordinator.certificates / "ca.crt"))
         context.verify_mode = ssl.CERT_REQUIRED
         self.socket = context.wrap_socket(self.socket, server_side=True)
+
+    def replace_tls(self, context: ssl.SSLContext) -> ssl.SSLContext:
+        """Change actual future TLS handshakes and retain the original listener context."""
+        socket = cast(ssl.SSLSocket, self.socket)
+        previous = socket.context
+        socket.context = context
+        return previous
 
 
 class Relay(BaseHTTPRequestHandler):
@@ -84,12 +94,17 @@ class Relay(BaseHTTPRequestHandler):
     def forward(self, body: dict[str, Any] | None) -> None:
         """Keep the actual backend response and lose only the first successful Prepare reply."""
         relay: ReplyLoss = self.server  # type: ignore[assignment]
+        if relay.partition.is_set():
+            relay.records.append({"path": self.path, "forwarded": False, "actual_closed": True})
+            self.close_connection = True
+            return
         status, result = request(
             relay.participant.origin,
             relay.context,
             self.path,
             body,
             {"X-RoboGuide-Tenant": "local"},
+            timeout_seconds=relay.request_timeout_seconds,
         )
         relay.records.append(
             {"path": self.path, "status": status, "body": body, "response": result}
@@ -107,6 +122,9 @@ class Relay(BaseHTTPRequestHandler):
             if not relay.release_reply.wait(timeout=12):
                 self.close_connection = True
                 return
+        if relay.partition.is_set():
+            self.close_connection = True
+            return
         encoded = json.dumps(result).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -155,9 +173,19 @@ def registry(case: Case) -> None:
 
 
 def configure(
-    cases: list[Case], lost_reply: bool, interrupt: bool = False
+    cases: Sequence[Case],
+    lost_reply: bool,
+    interrupt: bool = False,
+    *,
+    request_budget_ms: int = 3000,
+    transaction_budget_ms: int = 120000,
+    max_clock_uncertainty_ms: int = 1500,
 ) -> tuple[dict[str, Any], ReplyLoss | None]:
     """Bind declared domains to actual independent endpoints and TLS credentials."""
+    assert 100 <= request_budget_ms <= 10000
+    assert 1000 <= transaction_budget_ms <= 300000
+    assert 1 <= max_clock_uncertainty_ms <= 10000
+    assert max_clock_uncertainty_ms < transaction_budget_ms
     coordinator, participant = cases
     domains = ["domain-" + uuid.uuid4().hex[:10] for _ in cases]
     trust = participant.root / "federation-client-ca.crt"
@@ -200,6 +228,7 @@ def configure(
             }
         )
     relay = ReplyLoss(participant, coordinator, lost_reply, interrupt)
+    relay.request_timeout_seconds = request_budget_ms / 1000
     if relay is not None:
         threading.Thread(target=relay.serve_forever, daemon=True).start()
     profile = {
@@ -208,7 +237,7 @@ def configure(
         "revision": 1,
         "local_domain": domains[0],
         "max_drift_ppm": 100,
-        "request_budget_ms": 3000,
+        "request_budget_ms": request_budget_ms,
         "peers": {
             domain: {
                 "address": f"127.0.0.1:{relay.server_address[1]}" if index and relay else case.http,
@@ -234,8 +263,8 @@ def configure(
         "coordinator_domain": domains[0],
         "tenant_id": "local",
         "objective": "independently verify original files in every declared Control domain",
-        "budget_ms": 120000,
-        "max_clock_uncertainty_ms": 1500,
+        "budget_ms": transaction_budget_ms,
+        "max_clock_uncertainty_ms": max_clock_uncertainty_ms,
         "participants": {},
     }
     for index, (domain, _case) in enumerate(zip(domains, cases, strict=True)):

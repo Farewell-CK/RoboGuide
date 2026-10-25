@@ -408,7 +408,7 @@ async fn slow_commit_does_not_deliver_expired_continuation() {
         drive_application_timer_with_clock(
             &scope.fixture.controller,
             &scope.fixture.events,
-            &Arc::new(Mutex::new(())),
+            &Arc::new(crate::application::ApplicationWriter::default()),
             &clock,
             None,
         )
@@ -461,7 +461,7 @@ async fn expiry_between_two_execute_sends_fences_the_remaining_outbox() {
         drive_application_timer_with_clock(
             &scope.fixture.controller,
             &scope.fixture.events,
-            &Arc::new(Mutex::new(())),
+            &Arc::new(crate::application::ApplicationWriter::default()),
             &clock,
             None,
         )

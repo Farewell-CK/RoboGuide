@@ -27,22 +27,29 @@ def _membership(raw: str, expected: dict[int, str]) -> None:
 
 
 def capture_sources(
-    components: list[dict[str, Any]], budget: OperationBudget, *, allow_standalone: bool = False
+    components: list[dict[str, Any]],
+    budget: OperationBudget,
+    *,
+    allow_standalone: bool = False,
+    multiple_clusters: bool = False,
 ) -> list[dict[str, Any]]:
     """Observe exact source backing only while the caller owns every actual original writer."""
     content.validate_pairing(components, allow_standalone=allow_standalone)
     by_id = {item["component_id"]: item for item in components}
     result = []
-    members: dict[int, str] = {}
+    members: dict[str, dict[int, str]] = {}
+    owners: set[str] = set()
     for component in components:
         if component["kind"] != "replica-content":
             continue
         root = Path(component["root"])
         original = content.inventory(root, component, budget, live=True)
         identity = original["identity"]
-        if identity["member"] in members or identity["store_owner"] in members.values():
+        group = members.setdefault(identity["profile_identity"], {})
+        if identity["member"] in group or identity["store_owner"] in owners:
             raise ValueError("original Replica content source repeats member/Root ownership")
-        members[identity["member"]] = identity["store_owner"]
+        group[identity["member"]] = identity["store_owner"]
+        owners.add(identity["store_owner"])
         parent = by_id[component["depends_on"][0]]
         actual = (Path(parent["root"]) / parent["database"]).stat()
         backing = content._backing(root) | {
@@ -58,12 +65,17 @@ def capture_sources(
                 "source_backing": backing,
             }
         )
+    if len(members) > 1 and not multiple_clusters:
+        raise ValueError("multiple original clusters require explicit recovery v0.31")
     for value in result:
         parent = by_id[value["parent_id"]]
         path = Path(parent["root"]) / parent["database"]
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as sql:
+            identity = json.loads(
+                sql.execute("SELECT value FROM replica_v1_meta WHERE key='identity'").fetchone()[0]
+            )
             row = sql.execute("SELECT value FROM replica_v1_meta WHERE key='membership'").fetchone()
-            _membership(row[0] if row is not None else "null", members)
+            _membership(row[0] if row is not None else "null", members.get(identity[0], {}))
     return sorted(result, key=lambda value: value["component_id"])
 
 
@@ -165,7 +177,8 @@ def _parent(
                 for version in range(
                     53,
                     61
-                    if schema in {content.FEDERATION_PROFILE, content.ARCHIVE_PROFILE}
+                    if schema
+                    in {content.FEDERATION_PROFILE, content.ARCHIVE_PROFILE, content.MULTI_PROFILE}
                     else 60
                     if schema == content.COORDINATION_PROFILE
                     else 59
@@ -192,6 +205,15 @@ def _parent(
 
         physical_parent = connection.execute("PRAGMA user_version").fetchone()[0]
         parent_version = parent_base(connection, schema)
+        original_base = (
+            json.loads(metadata.get("application_upgrade_base_parent_v1", "null"))
+            if parent_version == 10
+            else parent_version
+        )
+        if (physical_parent == 11 or original_base == 9) and original["version"] != 8:
+            raise ValueError(
+                "original initialization/coordinated Archive requires its actual Root8"
+            )
         if (
             state is not None
             and state["candidate"]["schema"] == "roboguide.application-commit/v4"
@@ -533,7 +555,7 @@ def validate_bundle(
         return
     by_id = {item["component_id"]: item for item in components}
     originals, states = [], []
-    expected_members = {}
+    expected_members: dict[str, dict[int, str]] = {}
     for component in components:
         if component["kind"] == "replica-content":
             identity = content._identity(
@@ -543,9 +565,12 @@ def validate_bundle(
                     )
                 )
             )
-            if identity["member"] in expected_members:
+            group = expected_members.setdefault(identity["profile_identity"], {})
+            if identity["member"] in group:
                 raise ValueError("original Replica content repeats a committed member")
-            expected_members[identity["member"]] = identity["store_owner"]
+            group[identity["member"]] = identity["store_owner"]
+    if len(expected_members) > 1 and schema != content.MULTI_PROFILE:
+        raise ValueError("multiple original clusters require explicit recovery v0.31")
     owners, members, profiles = set(), set(), set()
     for component in components:
         if component["kind"] != "replica-content":
@@ -572,7 +597,7 @@ def validate_bundle(
             original,
             source,
             budget,
-            expected_members,
+            expected_members[original["identity"]["profile_identity"]],
             schema,
         )
         _upload_inputs(rows, state)
@@ -606,17 +631,24 @@ def validate_bundle(
             required.update(content._content(value) for value in state["candidate"]["inputs"])
         _require_bytes(identifier, required, files, original["tables"]["content_objects"])
         identity = original["identity"]
-        if identity["store_owner"] in owners or identity["member"] in members:
+        member = (identity["profile_identity"], identity["member"])
+        if identity["store_owner"] in owners or member in members:
             raise ValueError("original Replica content member/Root ownership is repeated")
         owners.add(identity["store_owner"])
-        members.add(identity["member"])
+        members.add(member)
         profiles.add(identity["profile_identity"])
         originals.append(original)
-        states.append(rows)
-    if len(profiles) != 1:
+        states.append((identity["profile_identity"], rows, state))
+    if len(profiles) != 1 and schema != content.MULTI_PROFILE:
         raise ValueError("complete Replica content bundle mixes original clusters/profiles")
-    for rows in states:
-        _recoveries(rows, originals)
+    for profile, rows, _ in states:
+        _recoveries(
+            rows, [item for item in originals if item["identity"]["profile_identity"] == profile]
+        )
+    if schema == content.MULTI_PROFILE:
+        from .federation_bundle import validate_domains
+
+        validate_domains(states, budget)
 
 
 def bind_restored(

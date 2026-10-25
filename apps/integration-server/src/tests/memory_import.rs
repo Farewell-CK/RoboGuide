@@ -255,7 +255,7 @@ fn original_provider_query_resolves_only_current_authorized_import_and_fences_ol
     let (fixture, request) = continuity_fixture();
     let events = fixture.events.clone();
     let controller = Arc::new(Mutex::new(fixture.controller));
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let body = serde_json::to_vec(&serde_json::json!({"import_id":request.import_id,"expected_generation":0,"deadline_ms":100,"query_timeout_ms":50})).unwrap();
     let first = application::memory_query::submit(
         &controller,
@@ -355,7 +355,7 @@ fn late_original_provider_query_does_not_renew_authorization_or_allow_replacemen
     let (fixture, request) = continuity_fixture();
     let events = fixture.events.clone();
     let controller = Arc::new(Mutex::new(fixture.controller));
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let body = serde_json::to_vec(&serde_json::json!({"import_id":request.import_id,"expected_generation":0,"deadline_ms":100,"query_timeout_ms":20})).unwrap();
     application::memory_query::submit(
         &controller,

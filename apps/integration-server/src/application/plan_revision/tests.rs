@@ -13,7 +13,7 @@ struct Fixture {
     /// Actual composition under test, containing zero enrolled Nodes.
     controller: Arc<Mutex<ControllerState>>,
     /// Original application writer mutex; transport authorization is covered separately by process checks.
-    writer: Arc<Mutex<()>>,
+    writer: Arc<crate::application::ApplicationWriter>,
     /// Explicit local unit clock; no distributed or device time assertion is made.
     clock: runtime::FixedClock,
     /// Original accepted semantic plan.
@@ -114,7 +114,7 @@ impl Fixture {
             root,
             log,
             controller,
-            writer: Arc::new(Mutex::new(())),
+            writer: Arc::new(crate::application::ApplicationWriter::default()),
             clock: runtime::FixedClock::new(domain::TimestampMs::new(10)),
             plan,
         }

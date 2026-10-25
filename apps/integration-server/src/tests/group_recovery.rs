@@ -297,7 +297,7 @@ impl Fixture {
         drive_application_timer(
             &self.controller,
             &self.events,
-            &Arc::new(Mutex::new(())),
+            &Arc::new(crate::application::ApplicationWriter::default()),
             TimestampMs::new(now),
             None,
         )
@@ -394,7 +394,7 @@ impl Fixture {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let clock = runtime::FixedClock::new(TimestampMs::new(now));
-        let gate = Arc::new(Mutex::new(()));
+        let gate = Arc::new(crate::application::ApplicationWriter::default());
         let server = async {
             let (mut stream, _) = listener.accept().await.unwrap();
             handle_recovery_admin_test_connection(

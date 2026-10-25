@@ -382,7 +382,7 @@ fn silent_stop_escalates_in_the_actual_timer_transaction() {
     application::drive_application_timer(
         &controller,
         &fixture.events,
-        &Arc::new(Mutex::new(())),
+        &Arc::new(crate::application::ApplicationWriter::default()),
         domain::TimestampMs::new(106),
         None,
     )
@@ -453,7 +453,7 @@ async fn confirmed_software_stop_allows_public_mission_cancellation() {
     );
     safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
     let controller = Arc::new(Mutex::new(fixture.controller.clone()));
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let clock = runtime::FixedClock::new(domain::TimestampMs::new(10));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

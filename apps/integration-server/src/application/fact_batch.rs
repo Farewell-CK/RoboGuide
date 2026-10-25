@@ -49,7 +49,7 @@ pub(crate) struct NodeFactDriver<'a, C: Clock> {
     /// Atomic event/checkpoint store.
     pub(crate) events: &'a state::SqliteEventLog,
     /// Ordering gate shared by timer, HTTP and localization writes.
-    pub(crate) write_gate: &'a Arc<Mutex<()>>,
+    pub(crate) write_gate: &'a Arc<crate::application::ApplicationWriter>,
     /// Exact current-session validation, separate from Control eligibility.
     pub(crate) router: &'a integration::GrpcNodeRouter,
     /// Fresh decision/delivery clock; original receive time stays in each input.

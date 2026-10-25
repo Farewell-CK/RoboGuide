@@ -229,7 +229,19 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
         }
     )
     generation = (
-        30
+        31
+        if (
+            federation_generation
+            or coordination_generation
+            or topology_generation
+            or scoped_generation
+        )
+        and any(
+            value["kind"] == "replica-content"
+            and value["storage_schema"] != "roboguide.replica-content-layout/v0.8"
+            for value in components
+        )
+        else 30
         if 11 in parent_versions
         else 29
         if federation_generation
@@ -302,7 +314,9 @@ def command(
     return result
 
 
-def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Path, dict[str, Any]]]:
+def assemble(
+    restored: Path, ipc: Path, supervisor: Path, *, component_prefix: str = ""
+) -> dict[int, tuple[Path, dict[str, Any]]]:
     """Move child projections/CAS into parents, preserving every bound Root/SQL inode."""
     stores = restored / "stores"
     receipts = json.loads((restored / "restore-receipt.json").read_text())
@@ -311,23 +325,24 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
         for value in receipts["replica_content_bindings"]
     }
     result = {}
-    configured = restored.parent / "restored-configurations"
+    configured = restored.parent / (component_prefix + "restored-configurations")
     configured.mkdir(mode=0o700)
-    for path in sorted((stores / "inputs/configs").glob("configuration-*.json")):
+    inputs = stores / (component_prefix + "inputs")
+    for path in sorted((inputs / "configs").glob("configuration-*.json")):
         config = json.loads(path.read_text())
         member = config["replica"]["replica_id"]
-        parent = stores / f"parent-{member}"
-        child = stores / f"controller-{member}"
+        parent = stores / f"{component_prefix}parent-{member}"
+        child = stores / f"{component_prefix}controller-{member}"
         if child.exists():
             for file in child.iterdir():
                 file.rename(parent / file.name)
-        cas = stores / f"cas-{member}"
+        cas = stores / f"{component_prefix}cas-{member}"
         if cas.exists():
             cas.rename(parent / "artifacts")
         binding = next(
             value["binding"]
             for value in receipts["replica_content_bindings"]
-            if value["component_id"] == f"root-{member}"
+            if value["component_id"] == f"{component_prefix}root-{member}"
         )
         original_process = config["schema"]
         config["schema"] = (
@@ -345,7 +360,7 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
             config["schema"] = original_process
         if config.get("application_upgrade") is not None:
             config["schema"] = original_process
-            binary_root = stores / "inputs/binaries"
+            binary_root = inputs / "binaries"
             index = json.loads((binary_root / "index.json").read_bytes())
             for container, key in [
                 (config, "controller_binary"),
@@ -365,25 +380,19 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
                 executable.chmod(0o700)
                 container[key] = str(executable)
         config["storage_directory"] = str(parent)
-        config["content"]["root"] = str(stores / f"root-{member}")
+        config["content"]["root"] = str(stores / f"{component_prefix}root-{member}")
         config["content"]["socket"] = str(ipc / f"{member}.sock")
-        config["content"]["restore_binding_digest"] = bindings[f"root-{member}"]
+        config["content"]["restore_binding_digest"] = bindings[f"{component_prefix}root-{member}"]
         for plane in ("node_tls", "operator_tls", "artifact_tls"):
             if config.get(plane) is not None:
                 config[plane] = dict(config[plane])
                 for name in ("server_cert", "server_key", "client_ca", "profile"):
-                    config[plane][name] = str(
-                        stores / "inputs/node-tls" / Path(config[plane][name]).name
-                    )
+                    config[plane][name] = str(inputs / "node-tls" / Path(config[plane][name]).name)
         config["replica"]["tls"].update(
             {
-                "ca_cert_path": str(stores / "inputs/tls/ca.crt"),
-                "cert_path": str(
-                    stores / "inputs/tls" / Path(config["replica"]["tls"]["cert_path"]).name
-                ),
-                "key_path": str(
-                    stores / "inputs/tls" / Path(config["replica"]["tls"]["key_path"]).name
-                ),
+                "ca_cert_path": str(inputs / "tls/ca.crt"),
+                "cert_path": str(inputs / "tls" / Path(config["replica"]["tls"]["cert_path"]).name),
+                "key_path": str(inputs / "tls" / Path(config["replica"]["tls"]["key_path"]).name),
             }
         )
         target = configured / f"configuration-{member}.json"

@@ -92,7 +92,11 @@ def validate(
         retained is not None
         and retained["schema"] == "roboguide.controller-checkpoint/v60"
         and profile_schema
-        not in {"roboguide.recovery-profile/v0.29", "roboguide.recovery-profile/v0.30"}
+        not in {
+            "roboguide.recovery-profile/v0.29",
+            "roboguide.recovery-profile/v0.30",
+            "roboguide.recovery-profile/v0.31",
+        }
     ):
         raise ValueError("resource-bearing Federation v60 requires explicit recovery v0.29")
     if actual == STORAGE and profile_schema not in {
@@ -110,6 +114,7 @@ def validate(
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
+        "roboguide.recovery-profile/v0.31",
     }:
         raise ValueError("Controller storage v1 requires explicit recovery v0.17")
     objects = {
@@ -126,6 +131,7 @@ def validate(
             if profile_schema not in {
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
+                "roboguide.recovery-profile/v0.31",
             }:
                 raise ValueError("resource-bearing Federation v60 requires explicit recovery v0.29")
             if retained is None:
@@ -144,6 +150,7 @@ def validate(
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
+                "roboguide.recovery-profile/v0.31",
             }
         ):
             raise ValueError("cohort/hazard Controller v59 requires explicit recovery v0.28")
@@ -159,6 +166,7 @@ def validate(
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
+                "roboguide.recovery-profile/v0.31",
             }
         ):
             raise ValueError("spatial/calendar Controller v58 requires explicit recovery v0.27")
@@ -175,6 +183,7 @@ def validate(
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
+                "roboguide.recovery-profile/v0.31",
             }
         ):
             raise ValueError("scoped typed-map Controller v57 requires explicit recovery v0.26")
@@ -193,6 +202,7 @@ def validate(
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
+                "roboguide.recovery-profile/v0.31",
             }
         ):
             raise ValueError("quantitative Controller v56 requires explicit recovery v0.24")
@@ -204,6 +214,7 @@ def validate(
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
+        "roboguide.recovery-profile/v0.31",
     }:
         from .coordination_recovery import validate as validate_coordination
 
@@ -216,6 +227,7 @@ def validate(
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
+        "roboguide.recovery-profile/v0.31",
     }:
         from .capacity_recovery import validate as validate_capacity
 
@@ -226,6 +238,7 @@ def validate(
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
+        "roboguide.recovery-profile/v0.31",
     }:
         from .scoped_map_recovery import validate as validate_scoped_maps
 
@@ -238,6 +251,7 @@ def validate(
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
+        "roboguide.recovery-profile/v0.31",
     }:
         from .topology_recovery import validate as validate_topology
 

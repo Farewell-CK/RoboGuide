@@ -233,7 +233,7 @@ pub struct ArtifactCatalog {
     /// Durable evidence sink used for map lifecycle events.
     pub(super) event_log: SqliteEventLog,
     /// Process-local serializer shared with the controller's event batches.
-    pub(super) write_gate: Arc<Mutex<()>>,
+    pub(super) write_gate: Arc<crate::application::ApplicationWriter>,
     /// Last event timestamp allocated under the shared write serializer.
     pub(super) timestamp_high_water: Arc<Mutex<TimestampMs>>,
     /// Process-local recovery fence set when a durable catalog commit outcome is uncertain.
@@ -444,7 +444,7 @@ impl ArtifactCatalog {
     #[cfg(test)]
     pub fn replay_with_gate(
         event_log: &SqliteEventLog,
-        write_gate: Arc<Mutex<()>>,
+        write_gate: Arc<crate::application::ApplicationWriter>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Self::replay_with_store(event_log, write_gate, None)
     }
@@ -453,7 +453,7 @@ impl ArtifactCatalog {
     #[cfg(test)]
     pub fn replay_with_store(
         event_log: &SqliteEventLog,
-        write_gate: Arc<Mutex<()>>,
+        write_gate: Arc<crate::application::ApplicationWriter>,
         store: Option<FileSystemArtifactStore>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Self::replay_with_replica(event_log, write_gate, store, None)
@@ -462,7 +462,7 @@ impl ArtifactCatalog {
     /// Preserves original cross-owner dependencies while verifying their exact retained Root bytes.
     pub fn replay_with_replica(
         event_log: &SqliteEventLog,
-        write_gate: Arc<Mutex<()>>,
+        write_gate: Arc<crate::application::ApplicationWriter>,
         store: Option<FileSystemArtifactStore>,
         replica_content: Option<controller_replication::ControllerContentClient>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {

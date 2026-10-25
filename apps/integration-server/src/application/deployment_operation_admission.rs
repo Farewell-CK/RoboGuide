@@ -248,7 +248,7 @@ mod tests {
         ) -> String {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
-            let gate = Arc::new(Mutex::new(()));
+            let gate = Arc::new(crate::application::ApplicationWriter::default());
             let clock = runtime::FixedClock::new(TimestampMs::new(2));
             let body = document.to_string();
             let request = format!(

@@ -73,7 +73,11 @@ async fn artifact_mtls_enforces_node_resource_and_upload_isolation() {
     log.save_checkpoint(TEST_CHECKPOINT_SCHEMA, TEST_CHECKPOINT_JSON)
         .unwrap();
     log.commit_batch().unwrap();
-    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let task = tokio::spawn(serve_artifact_http(
@@ -137,7 +141,11 @@ async fn artifact_tls_reference_requires_actual_uploader_byte_receipt() {
     .unwrap();
     let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
     seed_controller_checkpoint(&log);
-    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     let store = FileSystemArtifactStore::new(directory.path().join("cas")).unwrap();
     let bytes = b"receipt-specific-file";
     let digest = digest_bytes(bytes);

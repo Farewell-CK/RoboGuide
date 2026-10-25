@@ -66,7 +66,11 @@ async fn write_disabled_recovery_observation_preserves_original_cache_and_refuse
         .with_write_failure_fence("actual-cache-observer")
         .unwrap();
     seed_controller_checkpoint(&log);
-    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     let original = recovery_cache_fixture(&catalog);
     log.disable_writes("explicit software SQL-fault contract", false)
         .unwrap();
@@ -289,8 +293,11 @@ async fn write_disabled_recovery_observation_preserves_original_cache_and_refuse
         .with_write_failure_fence("actual-restart-cache-observer")
         .unwrap();
     seed_controller_checkpoint(&restart_log);
-    let restart_catalog =
-        ArtifactCatalog::replay_with_gate(&restart_log, Arc::new(Mutex::new(()))).unwrap();
+    let restart_catalog = ArtifactCatalog::replay_with_gate(
+        &restart_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     recovery_cache_fixture(&restart_catalog);
     restart_log
         .disable_writes("actual unresolved replica authority fixture", true)
@@ -350,7 +357,11 @@ async fn upload_finalization_sql_failure_preserves_original_byte_proof_without_r
     let path = directory.path().join("events.sqlite3");
     let log = SqliteEventLog::open(&path).unwrap();
     seed_controller_checkpoint(&log);
-    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     let uploads = test_uploads();
     let bytes = b"original actual upload bytes";
     let digest = digest_bytes(bytes);
@@ -379,7 +390,11 @@ async fn upload_finalization_sql_failure_preserves_original_byte_proof_without_r
     assert_eq!(uploads.lock().unwrap().active_uploads(), 0);
     sql.execute_batch("DROP TRIGGER fail_upload_completion")
         .unwrap();
-    let restored = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let restored = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     assert_eq!(
         restored.upload_record("original").unwrap(),
         Some(original.clone())
@@ -455,7 +470,11 @@ async fn prepared_sql_failure_preserves_upload_without_leaking_a_scoped_read_gra
     let path = directory.path().join("events.sqlite3");
     let log = SqliteEventLog::open(&path).unwrap();
     seed_controller_checkpoint(&log);
-    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     let uploads = test_uploads();
     let bytes = b"original prepared SQL rollback payload";
     let digest = digest_bytes(bytes);
@@ -517,7 +536,11 @@ async fn existing_foreign_cas_cannot_complete_an_empty_upload() {
     let store = FileSystemArtifactStore::new(directory.path().join("cas")).unwrap();
     let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
     seed_controller_checkpoint(&log);
-    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     let uploads = test_uploads();
     let bytes = b"foreign bytes";
     let digest = digest_bytes(bytes);
@@ -563,7 +586,11 @@ fn new_manifest_alias_cannot_remove_original_group_scope() {
     let directory = tempfile::tempdir().unwrap();
     let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
     seed_controller_checkpoint(&log);
-    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     let digest = digest_bytes(b"scoped");
     let manifest = fixture_memory_manifest("private-source", MemoryKind::Artifact, &digest, 6);
     let mut value = serde_json::to_value(&manifest).unwrap();

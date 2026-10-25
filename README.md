@@ -1,5 +1,9 @@
 # RoboGuide
 
+[跨域 HA 部署接线](docs/development/replicated-federation-deployment-v0.1.md)显式传递原
+Federation 配置，并以 recovery v0.31 区分独立 profile 的同编号成员、原 Root 和活动事务。
+当前整包软件验收进行中；应用代次不会隐式更换物理存储布局或续原预算。
+
 [服务入口容量](docs/development/listener-capacity-v0.1.md)覆盖实际 Node、Operator、Artifact、
 Mission 和 Local Provider TCP/Unix 的 permit、线程与有限等待。固定指标与真实原生告警
 已有[软件验收](docs/development/acceptance/2026-10-26-listener-capacity.md)；连接关闭保留

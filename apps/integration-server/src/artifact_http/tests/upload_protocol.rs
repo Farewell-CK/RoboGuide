@@ -8,8 +8,11 @@ fn typed_and_generic_memory_selectors_are_mutually_exclusive() {
     let first_log = SqliteEventLog::open(first_directory.path().join("events.sqlite3"))
         .expect("event log opens");
     seed_controller_checkpoint(&first_log);
-    let first_catalog = ArtifactCatalog::replay_with_gate(&first_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let first_catalog = ArtifactCatalog::replay_with_gate(
+        &first_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let digest = "a".repeat(64);
     let map = fixture_manifest(&digest, 12);
     let generic = fixture_memory_manifest("map-a", MemoryKind::Artifact, &digest, 12);
@@ -32,8 +35,11 @@ fn typed_and_generic_memory_selectors_are_mutually_exclusive() {
     let second_log = SqliteEventLog::open(second_directory.path().join("events.sqlite3"))
         .expect("event log opens");
     seed_controller_checkpoint(&second_log);
-    let second_catalog = ArtifactCatalog::replay_with_gate(&second_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let second_catalog = ArtifactCatalog::replay_with_gate(
+        &second_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     second_catalog
         .append(EventPayload::MemoryManifestPublished { manifest: generic })
         .expect("generic Memory claims selector first");
@@ -155,8 +161,11 @@ async fn fragmented_headers_and_bodies_are_read_to_declared_length() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let uploads = test_uploads();
 
     let start_body = br#"{"upload_id":"fragmented"}"#;
@@ -218,8 +227,11 @@ async fn restart_rehydrates_durable_partial_upload() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let uploads = test_uploads();
     let start_body = br#"{"upload_id":"restart-upload"}"#;
     response_body(
@@ -300,8 +312,11 @@ async fn json_body_limit_returns_payload_too_large() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let uploads = test_uploads();
     let request = format!(
             "POST /v1/artifact-uploads HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -377,8 +392,11 @@ async fn upload_errors_retain_prefix_and_release_registry_quota_on_abort() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let uploads = test_uploads();
 
     let interrupted_start = Request {

@@ -512,7 +512,7 @@ impl Fixture {
         drive_application_timer(
             &self.controller,
             &self.events,
-            &Arc::new(Mutex::new(())),
+            &Arc::new(crate::application::ApplicationWriter::default()),
             TimestampMs::new(2),
             None,
         )
@@ -523,7 +523,7 @@ impl Fixture {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let gate = Arc::new(Mutex::new(()));
+        let gate = Arc::new(crate::application::ApplicationWriter::default());
         let clock = runtime::FixedClock::new(TimestampMs::new(2));
         let server = async {
             let (mut stream, _) = listener.accept().await.unwrap();

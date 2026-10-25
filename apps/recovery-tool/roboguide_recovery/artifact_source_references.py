@@ -587,6 +587,7 @@ def validate_bundle(
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
+        "roboguide.recovery-profile/v0.31",
     }:
         return
     from . import artifact_layout
@@ -648,6 +649,7 @@ def validate_bundle(
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
+                "roboguide.recovery-profile/v0.31",
             }:
                 # Root's exact committed origins own replicated uploads; local projections may lag.
                 continue

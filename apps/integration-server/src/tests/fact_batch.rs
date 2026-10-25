@@ -40,7 +40,7 @@ struct Fixture {
     /// Actual event/checkpoint transaction store.
     events: state::SqliteEventLog,
     /// Existing writer serialization.
-    gate: Arc<Mutex<()>>,
+    gate: Arc<crate::application::ApplicationWriter>,
     /// Formal exact-session router.
     router: integration::GrpcNodeRouter,
     /// Shared ingress and decision clock.
@@ -151,7 +151,7 @@ impl Fixture {
             directory,
             controller,
             events,
-            gate: Arc::new(Mutex::new(())),
+            gate: Arc::new(crate::application::ApplicationWriter::default()),
             router,
             clock,
             receiver,

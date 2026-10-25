@@ -13,7 +13,7 @@ struct Fixture {
     /// Actual Controller composition, not a second execution authority.
     controller: Arc<Mutex<ControllerState>>,
     /// Shared application serialization gate.
-    gate: Arc<Mutex<()>>,
+    gate: Arc<crate::application::ApplicationWriter>,
 }
 
 impl Fixture {
@@ -60,7 +60,7 @@ impl Fixture {
             directory,
             log,
             controller,
-            gate: Arc::new(Mutex::new(())),
+            gate: Arc::new(crate::application::ApplicationWriter::default()),
         }
     }
 

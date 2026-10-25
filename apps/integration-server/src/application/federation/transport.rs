@@ -129,6 +129,9 @@ pub(crate) fn request(
     let mut socket =
         TcpStream::connect_timeout(&peer.address, budget.saturating_sub(started.elapsed()))
             .map_err(|error| error.to_string())?;
+    socket
+        .set_nodelay(true)
+        .map_err(|error| error.to_string())?;
     let mut connection =
         rustls::ClientConnection::new(config, name).map_err(|error| error.to_string())?;
     while connection.is_handshaking() {

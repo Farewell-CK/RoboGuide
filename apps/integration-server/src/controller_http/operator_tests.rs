@@ -181,7 +181,7 @@ async fn route_with_sources(
     feed: Option<&TaskVerifierFeed>,
 ) -> String {
     let (mut client, mut server) = tokio::io::duplex(128 * 1024);
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let clock = runtime::SystemMonotonicClock::new();
     let serve = async {
         handle_http_connection_with_principal(
@@ -760,7 +760,7 @@ async fn actual_mtls_viewer_and_unmapped_certificate_cannot_submit() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let connector = client(&pki, identity);
-        let gate = Arc::new(Mutex::new(()));
+        let gate = Arc::new(crate::application::ApplicationWriter::default());
         let clock = runtime::SystemMonotonicClock::new();
         let serve = async {
             let (stream, _) = listener.accept().await.unwrap();
@@ -1264,7 +1264,7 @@ fn queued_operator_command_rechecks_transport_authority_before_any_mutation() {
         let directory = tempfile::tempdir().unwrap();
         let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
         let controller = controller(&log);
-        let gate = Arc::new(Mutex::new(()));
+        let gate = Arc::new(crate::application::ApplicationWriter::default());
         let path = directory.path().join("operator.json");
         let digest = format!("sha256:{}", "b".repeat(64));
         let mut profile = domain::OperatorAuthorization {

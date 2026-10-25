@@ -191,7 +191,7 @@ fn distinct_cardinality_defers_without_stopping_other_missions_and_retries() {
     execution_fact(&mut controller, first_attempt, 2, ExecutionPhase::Completed);
     execution_fact(&mut controller, other_attempt, 1, ExecutionPhase::Accepted);
     let controller = Arc::new(Mutex::new(controller));
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     drive_application_timer(&controller, &events, &gate, TimestampMs::new(5), None)
         .expect("cardinality shortage must not reach the server fatal channel");
     {

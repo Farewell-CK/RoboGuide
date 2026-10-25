@@ -93,7 +93,7 @@ fn final_request_witness_rolls_back_publication_and_original_reference() {
     upload.finalize(&digest, bytes.len() as u64).unwrap();
     let events = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
     seed_controller_checkpoint(&events);
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let catalog = ArtifactCatalog::replay_with_store(&events, gate.clone(), Some(store)).unwrap();
     let manifest =
         fixture_memory_manifest("witness", MemoryKind::Artifact, &digest, bytes.len() as u64);
@@ -160,7 +160,7 @@ fn legacy_adoption_preserves_original_publication_and_requires_same_transaction_
     upload.finalize(&digest, bytes.len() as u64).unwrap();
     let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
     seed_controller_checkpoint(&log);
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let manifest = fixture_memory_manifest(
         "unit-legacy-adoption",
         MemoryKind::Artifact,
@@ -224,9 +224,12 @@ fn legacy_adoption_preserves_original_publication_and_requires_same_transaction_
     assert!(first.historical_tenant.is_none() && first.historical_publisher.is_none());
     super::super::adoption::adopt(&catalog, &admission, &request, &request.path).unwrap();
     assert_eq!(log.len().unwrap(), 3);
-    let replay =
-        ArtifactCatalog::replay_with_store(&log, Arc::new(Mutex::new(())), Some(store.clone()))
-            .unwrap();
+    let replay = ArtifactCatalog::replay_with_store(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+        Some(store.clone()),
+    )
+    .unwrap();
     assert_eq!(
         replay
             .retention
@@ -243,6 +246,11 @@ fn legacy_adoption_preserves_original_publication_and_requires_same_transaction_
         )
         .unwrap();
     assert!(
-        ArtifactCatalog::replay_with_store(&log, Arc::new(Mutex::new(())), Some(store)).is_err()
+        ArtifactCatalog::replay_with_store(
+            &log,
+            Arc::new(crate::application::ApplicationWriter::default()),
+            Some(store)
+        )
+        .is_err()
     );
 }

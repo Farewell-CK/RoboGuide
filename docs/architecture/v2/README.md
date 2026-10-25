@@ -1,5 +1,10 @@
 # RoboGuide V2 现行架构
 
+[ADR-0214](../../decisions/0214-replicated-federation-deployment.md)将复制部署的 Federation
+配置归于 supervisor 的显式进程输入：原 domain、authorization 和可选 root peer 文件进入
+共同 policy identity，并传给唯一 owned child。它接线既有 v60 权威，不创建额外账本、
+预算或设备；各域 Raft/Control 与原全局协调职责保持，完整实际组合正在实施。
+
 [ADR-0213](../../decisions/0213-explicit-listener-capacity.md)将实际入口容量归于各服务进程。
 permit 在 TLS/线程前取得，原业务预算和 ownership 独立保留；有限网络等待不会撤销已提交
 工作。Node/Artifact/Mission 固定连接观察和原生告警见[实现合同](../../development/listener-capacity-v0.1.md)，

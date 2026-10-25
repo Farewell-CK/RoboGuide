@@ -8,8 +8,11 @@ async fn spatial_map_cross_node_exchange_reaches_strong_verification() {
     let event_path = directory.path().join("events.sqlite3");
     let event_log = SqliteEventLog::open(&event_path).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let uploads = test_uploads();
     let bytes = b"map-bytes";
     let digest = digest_bytes(bytes);
@@ -259,8 +262,11 @@ async fn publish_requires_existing_blob() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let uploads = test_uploads();
     let digest = digest_bytes(b"missing");
     let manifest = fixture_manifest(&digest, 7);
@@ -293,8 +299,11 @@ async fn publish_rehashes_the_finalized_blob_before_catalog_mutation() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let uploads = test_uploads();
     let bytes = b"map-bytes";
     let digest = digest_bytes(bytes);
@@ -329,8 +338,11 @@ fn append_requires_an_existing_controller_checkpoint() {
     let directory = tempfile::tempdir().expect("temporary directory exists");
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let manifest = fixture_manifest(&digest_bytes(b"map"), 3);
 
     let error = catalog
@@ -372,8 +384,11 @@ fn append_rejects_a_divergent_controller_checkpoint() {
             .expect("append health reads")
             .is_none()
     );
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays the divergent log");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays the divergent log");
 
     let error = catalog
         .append(EventPayload::MapArtifactPublished { manifest })
@@ -399,8 +414,11 @@ fn append_allocates_timestamp_after_persisted_high_water() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let forced_future = TimestampMs::new(9_000_000_000_000);
     *catalog
         .timestamp_high_water
@@ -442,8 +460,11 @@ fn recovery_fence_rejects_stale_projection_access() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let fenced = catalog.fence("simulated commit uncertainty");
     assert_eq!(fenced.status(), "503 Service Unavailable");
     assert!(matches!(
@@ -475,7 +496,7 @@ fn archive_gc_retains_catalog_rebuild_evidence() {
     log.save_checkpoint(TEST_CHECKPOINT_SCHEMA, TEST_CHECKPOINT_JSON)
         .unwrap();
     log.commit_batch().unwrap();
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let before = ArtifactCatalog::replay_with_gate(&log, gate.clone())
         .unwrap()
         .revisions()
@@ -540,7 +561,10 @@ fn archive_gc_preserves_catalog_transition_prefix() {
         ),
         Err(state::SqliteEventLogError::ArchivePolicy(_))
     ));
-    let after = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(())));
+    let after = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    );
     println!("catalog_replay_error={:?}", after.as_ref().err());
     assert!(after.is_ok(), "Valid GC cutoff prevents Controller startup");
 }

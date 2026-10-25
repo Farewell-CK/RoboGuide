@@ -55,7 +55,9 @@ pub(crate) use isolation::{
     flush_unisolated_commands, flush_unisolated_dispatch, run_mission_transition,
     validate_isolation_checkpoint_schema,
 };
-pub(crate) use write_gate::{ApplicationWriteGate, run_synchronous_transaction};
+pub(crate) use write_gate::{
+    ApplicationWriteGate, ApplicationWriter, WriteGuard, run_synchronous_transaction,
+};
 
 pub(crate) use actor_placement::{
     load_actor_placement_file, validate_actor_placement_coverage,

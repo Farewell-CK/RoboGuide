@@ -23,7 +23,7 @@ fn append_heartbeat(log: &state::SqliteEventLog) {
 /// Exercises the production HTTP handler on loopback without any Node or simulator.
 async fn request_events(
     event_log: state::SqliteEventLog,
-    gate: Arc<Mutex<()>>,
+    gate: Arc<crate::application::ApplicationWriter>,
     target: &str,
     accepted: Option<tokio::sync::oneshot::Sender<()>>,
 ) -> String {
@@ -114,7 +114,7 @@ async fn check_open_batch_read(commit: bool) {
     let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
         .expect("event log opens");
     append_heartbeat(&log);
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let writer_log = log.clone();
@@ -184,7 +184,13 @@ async fn event_page_open_batch_without_gate_returns_503() {
         .expect("event log opens");
     log.begin_batch().expect("deliberately ungated batch");
     append_heartbeat(&log);
-    let response = request_events(log.clone(), Arc::new(Mutex::new(())), "/v1/events", None).await;
+    let response = request_events(
+        log.clone(),
+        Arc::new(crate::application::ApplicationWriter::default()),
+        "/v1/events",
+        None,
+    )
+    .await;
     let document = response_body(&response, "HTTP/1.1 503 Service Unavailable");
     assert!(
         document["error"]
@@ -203,7 +209,7 @@ async fn event_page_poisoned_gate_returns_503() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
         .expect("event log opens");
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let poisoned = gate.clone();
     assert!(
         std::thread::spawn(move || {
@@ -233,7 +239,7 @@ async fn event_page_preserves_bounded_cursor_contract() {
         .expect("fixture connection")
         .execute("DELETE FROM events WHERE sequence = 2", [])
         .expect("legal sequence gap");
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let first = request_events(
         log.clone(),
         gate.clone(),

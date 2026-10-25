@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Explicit original Federation child process inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "domain", "authorization"],
+  "properties": {
+    "schema": {"const": "roboguide.federation-process-inputs/v0.1"},
+    "domain": {"type": "string", "minLength": 1, "maxLength": 128},
+    "authorization": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+    "peers": {"oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"}]}
+  }
+}

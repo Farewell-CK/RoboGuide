@@ -1,3 +1,28 @@
+ADR-0216 reuses only a successful `read_view` data frame on the same private SQLite connection.
+Actual total_changes/data_version/schema_version/user_version/journal mode are sampled before and
+after reuse; transactions, rollback, foreign writes, DDL and errors invalidate it. Fresh reads use
+an actual SQL snapshot. Original source initialization checks and all live TLS/PID/membership/
+epoch/quorum/byte/budget checks remain independent. No format, authority or persisted proof changes.
+
+ADR-0215 keeps the same application writer/Commit/authorization boundaries with FIFO original
+arrival tickets, so repeated timer/Node producers cannot overtake queued commands. A panic poisons
+all later arrivals; ticket exhaustion refuses, and guards remain non-Send. Tickets are process-local
+ordering only, never checkpointed permission. Replica/Federation TCP_NODELAY changes packet timing,
+not original quorum, frame, TLS, hash, deadline or Unknown rules. Federation outgoing work retains its
+SQL-admitted kernel budget through intent publication and refuses expired work before peer I/O.
+See `docs/decisions/0215-fair-application-writer.md`; actual software acceptance remains required.
+
+ADR-0214 wires original Federation into replicated children through closed process `federation`
+inputs, owned by supervisor `federation_inputs`. Initial actual JSON bytes enter the common policy;
+raw inherited variables cannot bypass it. Application v60 retains all original business authority.
+Explicit recovery v0.31 qualifies member IDs by original profile, requires every exact committed
+Root map, and joins active original domain/nonce/Prepare/Commit/release evidence in one bundle.
+Application generation and declared physical layout remain independent; no implicit Root upgrade
+or credential deployment follows. `check_federation_ha_processes.py` and
+`federation_ha_recovery_processes.py` own the actual independent-domain process acceptance. See
+`docs/development/replicated-federation-deployment-v0.1.md`. Acceptance is in progress; software,
+single-host, devices and long-term SLO remain distinct.
+
 ADR-0213 owns explicit listener capacity in Integration `listener_capacity`, Mission HTTP and
 the independently deployable Memory/Spatial/Robonix local adapters. Actual permits precede TLS or
 worker creation and remain until handling ends; transport timeout never cancels committed work.

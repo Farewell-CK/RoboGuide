@@ -25,10 +25,14 @@ from memory_preparation_profile import node_environment
 class Case:
     """Own one explicitly declared software deployment and its original native process handles."""
 
-    def __init__(self, root: Path, nodes: int, members: int) -> None:
+    def __init__(
+        self, root: Path, nodes: int, members: int, *, state_interval_ms: int = 100
+    ) -> None:
         """Freeze real input identities and retain bounded original process ownership."""
         root.mkdir(parents=True, exist_ok=False)
         self.root = root
+        assert 1 <= state_interval_ms <= 1000
+        self.state_interval_ms = state_interval_ms
         self.binary = ROOT / "target/debug/integration-server"
         self.node_binary = ROOT / "target/debug/roboguide-node"
         self.certificates = root / "pki"
@@ -141,6 +145,10 @@ class Case:
         """Enroll actual software Nodes with distinct actual TLS certificates."""
         self.controller = self.start(self.arguments, "controller")
         wait_for(lambda: self.exchange("/healthz"), "actual cohort Controller")
+        self.boot_nodes()
+
+    def boot_nodes(self) -> None:
+        """Enroll original real software Nodes after the declared Controller route is live."""
         for index, node in enumerate(self.nodes):
             certificate = ["enrolment-next", "reenrolment"][index]
             self.exchange(
@@ -163,9 +171,9 @@ class Case:
             self.node_roots.append(node_root / "node-state")
             configuration = node_root / "node.toml"
             configuration.write_text(
-                cohort_configuration(node_root, node, self.grpc, self.backend.origin).replace(
-                    'server_endpoint = "http://', 'server_endpoint = "https://'
-                )
+                cohort_configuration(
+                    node_root, node, self.grpc, self.backend.origin, self.state_interval_ms
+                ).replace('server_endpoint = "http://', 'server_endpoint = "https://')
             )
             self.start(
                 [str(self.node_binary), str(configuration)],
@@ -359,8 +367,9 @@ class Case:
         )
         assert child.returncode == 0, record
 
-    def finish_goal(self, mission: str) -> None:
+    def finish_goal(self, mission: str, *, valid_for_ms: int = 5000) -> None:
         """Submit original-goal evidence after independent actual recomputation."""
+        assert 1 <= valid_for_ms <= 10000
         view = self.view(mission)
         for job in self.backend.jobs.values():
             if (
@@ -397,7 +406,7 @@ class Case:
             "finality": "final",
             "source_observed_at_ms": time.monotonic_ns() // 1_000_000,
             "sequence": 1,
-            "valid_for_ms": 5000,
+            "valid_for_ms": valid_for_ms,
             "artifact_digest": None,
             "artifact_size_bytes": None,
         }

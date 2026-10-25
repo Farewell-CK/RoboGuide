@@ -340,6 +340,9 @@ pub(super) async fn send_stream(
         let socket = tokio::net::TcpStream::connect(address)
             .await
             .map_err(|error| error.to_string())?;
+        socket
+            .set_nodelay(true)
+            .map_err(|error| error.to_string())?;
         let name = rustls::pki_types::ServerName::try_from(tls.server_name.clone())
             .map_err(|error| error.to_string())?;
         let mut stream = TlsConnector::from(tls.client.clone())

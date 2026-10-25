@@ -36,6 +36,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.28",
     "roboguide.recovery-profile/v0.29",
     "roboguide.recovery-profile/v0.30",
+    "roboguide.recovery-profile/v0.31",
 }
 WRAPPER = "roboguide.controller-checkpoint/v48"
 WRAPPERS = {
@@ -233,6 +234,7 @@ def _controller(
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
+                "roboguide.recovery-profile/v0.31",
             }
         ):
             raise ValueError("Prepared recovery wrapper requires explicit recovery v0.18")
@@ -263,6 +265,7 @@ def _controller(
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
+                "roboguide.recovery-profile/v0.31",
             }
         ):
             raise ValueError("upload-retention wrapper requires explicit recovery v0.16")
@@ -288,6 +291,7 @@ def _controller(
             "roboguide.recovery-profile/v0.28",
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
+            "roboguide.recovery-profile/v0.31",
         } and (
             connection.execute(
                 "SELECT 1 FROM events WHERE payload_schema='domain.EventPayload.json/v32' LIMIT 1"
@@ -324,6 +328,7 @@ def _controller(
             "roboguide.recovery-profile/v0.28",
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
+            "roboguide.recovery-profile/v0.31",
         } and any(row.get("payload_schema") == "domain.EventPayload.json/v32" for row in archived):
             raise ValueError("protected Prepared recovery needs complete parent8/Root4 recovery")
         original_archives = archive_references.operations(
@@ -488,6 +493,7 @@ def _controller(
             "roboguide.recovery-profile/v0.28",
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
+            "roboguide.recovery-profile/v0.31",
         }:
             from .scoped_map_recovery import validate_catalog
 

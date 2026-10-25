@@ -1,13 +1,12 @@
 //! Durable deployment certificate updates checked after HTTP parsing, before route authority.
 
 use super::*;
-use std::sync::MutexGuard;
 use std::time::Instant;
 
 /// Per-request transport witness checked inside the same mutex held through application Commit.
 pub(super) struct AuthorizedRequestGate {
     /// Actual application writer; this wrapper never releases and reenters it during a transaction.
-    inner: Arc<Mutex<()>>,
+    inner: Arc<crate::application::ApplicationWriter>,
     /// Current committed grant and Mission ownership authorities.
     controller: Arc<Mutex<ControllerState>>,
     /// Actual TLS certificate or the explicitly configured trusted loopback connection.
@@ -25,7 +24,7 @@ pub(super) struct AuthorizedRequestGate {
 impl AuthorizedRequestGate {
     /// Captures an immutable transport witness without acquiring authority or copying request bytes.
     pub(super) fn new(
-        inner: Arc<Mutex<()>>,
+        inner: Arc<crate::application::ApplicationWriter>,
         controller: Arc<Mutex<ControllerState>>,
         principal: OperatorPrincipal,
         request: &ControlHttpRequest,
@@ -124,7 +123,7 @@ impl application::ApplicationWriteGate for AuthorizedRequestGate {
         self.validate(&live)
     }
     /// Acquires the real mutex and rechecks authority before exposing the transaction guard.
-    fn lock(&self) -> Result<MutexGuard<'_, ()>, String> {
+    fn lock(&self) -> Result<crate::application::WriteGuard<'_>, String> {
         let guard = self
             .inner
             .lock()
@@ -234,7 +233,7 @@ pub(super) fn load_grants(
 pub(super) fn synchronize_authority(
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &Arc<crate::application::ApplicationWriter>,
     profile: Option<domain::OperatorAuthorization>,
 ) -> Result<(), String> {
     // Unchanged read authority must not wait for a writer blocked on unrelated SQL.
@@ -285,7 +284,7 @@ pub(super) fn refresh_principal(
     principal: &OperatorPrincipal,
     controller: &Arc<Mutex<ControllerState>>,
     log: &state::SqliteEventLog,
-    gate: &Arc<Mutex<()>>,
+    gate: &Arc<crate::application::ApplicationWriter>,
     now: domain::TimestampMs,
 ) -> Result<OperatorPrincipal, String> {
     let Some(certificate) = &principal.certificate else {

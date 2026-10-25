@@ -64,6 +64,15 @@ Use the [coordination contract](docs/development/execution-coordination-v0.1.md)
 
 Declare actual peers, CA/leaf/client identity files, domain grants and clock bounds before [coordinated execution](docs/development/federation-coordination-v0.1.md). A lost reply remains Unknown; query the original transaction instead of creating a replacement. Root replacement fences its original dispatch epoch. Cold recovery preserves original goal/clock/intent/decision tables and starts no services. Secrets and real cross-host/physical validation remain explicit deployment responsibilities.
 
+Replicated deployment uses closed `federation` process inputs to pass the original domain,
+authorization file and optional root peer profile to the uniquely owned Controller child. Routing
+selects an actual target and forwards TLS; a connection never retries a business mutation. Source
+drain and a new epoch do not grant old dispatch permission. Complete independent-domain cold recovery
+uses explicit v0.31: member IDs are qualified by their original profile, every complete Root map and
+active nonce/Prepare/Commit/release reference is checked, and older layouts keep their actual format.
+Credentials remain separate explicit mounts; restore installs no credentials and starts no service.
+See the [deployment and recovery contract](docs/development/replicated-federation-deployment-v0.1.md).
+
 ## Online coordinated Archive
 
 Explicit process v0.9 retains its original v0.6/v0.7 profile through `coordinated_archive_base`. A global recovery-admin first inspects `/v1/maintenance/coordinated-archive/operations`, then requests an exact cutoff under a fresh original command ID. Duplicate IDs are readonly. Observing Unknown never repeats publication, and abandonment never manufactures completion. Packages are private control metadata; Artifact-admin grants cannot read them. Parent11 and recovery v0.30 require original journals, manifests and actual qualified CAS bytes before publication. Complete restore starts no services. See the [Archive contract](docs/development/coordinated-content-archive-v0.1.md).

@@ -35,7 +35,7 @@ fn unchanged_timer_reduces_without_replicating_identical_empty_authority() {
     let directory = tempfile::tempdir().unwrap();
     let events = state::SqliteEventLog::open(directory.path().join("original.sqlite3")).unwrap();
     let controller = controller(&events);
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     application::drive_application_timer(
         &controller,
         &events,
@@ -66,7 +66,7 @@ async fn original_timer_waits_for_real_writer_while_single_network_worker_serves
     let directory = tempfile::tempdir().unwrap();
     let events = state::SqliteEventLog::open(directory.path().join("original.sqlite3")).unwrap();
     let controller = controller(&events);
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let (held_sender, held_receiver) = tokio::sync::oneshot::channel();
     let (observed_sender, observed_receiver) = std::sync::mpsc::sync_channel(1);
     let original_gate = gate.clone();
@@ -162,7 +162,7 @@ async fn original_operator_waits_for_controller_while_single_worker_serves_indep
             &mut stream,
             &controller,
             &http_events,
-            &Arc::new(Mutex::new(())),
+            &Arc::new(crate::application::ApplicationWriter::default()),
             &http_clock,
             None,
             None,

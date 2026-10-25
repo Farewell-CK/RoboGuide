@@ -1,5 +1,11 @@
 # RoboGuide V2 current architecture
 
+[ADR-0214](../../decisions/0214-replicated-federation-deployment.md) assigns replicated Federation
+configuration to explicit supervisor process inputs. Original domain, authorization and optional
+root peer files enter the common policy identity and reach its unique owned child. This wires
+existing v60 authority without another ledger, budget or device; independent domain Raft/Control
+and original global coordination retain their responsibilities. Actual composition is in progress.
+
 [ADR-0213](../../decisions/0213-explicit-listener-capacity.md) assigns transport capacity to each
 actual service process. Permits precede TLS or request threads. Business budgets and ownership
 remain independent; network timeouts never cancel committed work. Fixed Node/Artifact/Mission

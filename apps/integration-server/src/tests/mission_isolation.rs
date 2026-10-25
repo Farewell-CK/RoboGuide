@@ -618,7 +618,7 @@ async fn http_request(
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let gate = Arc::new(Mutex::new(()));
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
     let clock = runtime::FixedClock::new(domain::TimestampMs::new(3));
     let server = async {
         let (mut stream, _) = listener.accept().await.unwrap();
@@ -714,7 +714,7 @@ async fn admission_contract_rejection_preserves_existing_missions_and_timer_disp
     drive_application_timer(
         &controller,
         &log,
-        &Arc::new(Mutex::new(())),
+        &Arc::new(crate::application::ApplicationWriter::default()),
         domain::TimestampMs::new(4),
         None,
     )

@@ -1435,7 +1435,7 @@ mod tests {
                 verifier_source_digest: None,
             }));
             let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
-            let gate = Arc::new(Mutex::new(()));
+            let gate = Arc::new(crate::application::ApplicationWriter::default());
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let server = async {
@@ -2375,7 +2375,7 @@ mod tests {
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let gate = Arc::new(Mutex::new(()));
+        let gate = Arc::new(crate::application::ApplicationWriter::default());
         let clock = runtime::FixedClock::new(domain::TimestampMs::new(1));
         let body = document.to_string();
         let request = format!(
@@ -2679,7 +2679,7 @@ mod tests {
                 .as_ref()
                 .map(|source| source.source_digest().to_string()),
         }));
-        let gate = Arc::new(Mutex::new(()));
+        let gate = Arc::new(crate::application::ApplicationWriter::default());
         let clock = runtime::SystemMonotonicClock::new();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await

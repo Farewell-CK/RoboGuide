@@ -270,7 +270,9 @@ class CohortHandler(BaseHTTPRequestHandler):
         """Keep local workflow polling and full invocation content out of console output."""
 
 
-def cohort_configuration(directory: Path, node: str, grpc: str, origin: str) -> str:
+def cohort_configuration(
+    directory: Path, node: str, grpc: str, origin: str, state_interval_ms: int = 100
+) -> str:
     """Declare actual CPU continuation, exit and file-integrity support."""
     support = {
         "schema_version": "roboguide.local-execution-recovery/v0.1",
@@ -282,10 +284,14 @@ def cohort_configuration(directory: Path, node: str, grpc: str, origin: str) -> 
             }
         ],
     }
-    text = configuration(directory, node, grpc, origin).replace(
-        'assurance = "software-process"',
-        'assurance = "software-process"\n"roboguide.execution-recovery" = '
-        + json.dumps(json.dumps(support)),
+    text = (
+        configuration(directory, node, grpc, origin)
+        .replace("interval_ms = 100\n", f"interval_ms = {state_interval_ms}\n")
+        .replace(
+            'assurance = "software-process"',
+            'assurance = "software-process"\n"roboguide.execution-recovery" = '
+            + json.dumps(json.dumps(support)),
+        )
     )
     return (
         text
@@ -299,7 +305,7 @@ object_id = "{node}"
 semantic = "observed"
 payload_schema = "roboguide.software-file-integrity/v0.1"
 valid_for_ms = 2000
-interval_ms = 100
+interval_ms = {state_interval_ms}
 value_pointer = ""
 [state_exports.step]
 id = "observe-original-file-integrity"

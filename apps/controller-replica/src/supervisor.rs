@@ -112,6 +112,9 @@ async fn start_controller(
             .env("ROBOGUIDE_NODE_MTLS_CLIENT_CA", &tls.client_ca)
             .env("ROBOGUIDE_NODE_MTLS_NODE_CERT_DIGESTS", tls.profile_json()?);
     }
+    if let Some(federation) = &configuration.federation {
+        federation.configure(&mut command);
+    }
     for (plane, configured) in [
         ("OPERATOR", &configuration.operator_tls),
         ("ARTIFACT", &configuration.artifact_tls),

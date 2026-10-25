@@ -205,7 +205,7 @@ struct ControllerLocalizationObserver {
     /// Durable event/checkpoint store shared with the Integration path.
     event_log: state::SqliteEventLog,
     /// Process-local writer ordering shared by every Controller mutation path.
-    write_gate: Arc<Mutex<()>>,
+    write_gate: Arc<crate::application::ApplicationWriter>,
 }
 
 impl artifact_http::LocalizationEvidenceObserver for ControllerLocalizationObserver {
@@ -1144,7 +1144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(fence) = &replica_fence {
         event_log = event_log.with_replicator(fence.clone());
     }
-    let event_write_gate = Arc::new(Mutex::new(()));
+    let event_write_gate = Arc::new(crate::application::ApplicationWriter::default());
     let process_clock = Arc::new(runtime::SystemMonotonicClock::from_floor(
         event_log.latest_timestamp()?,
     ));

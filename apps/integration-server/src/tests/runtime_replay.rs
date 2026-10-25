@@ -643,7 +643,7 @@ fn late_verifier_after_runtime_failure_keeps_timer_alive() {
         let feed = verifier_feed_for(&mut fixture, satisfied, false);
         let sequence_before = fixture.events.latest_sequence().expect("events readable");
         let controller = Arc::new(Mutex::new(fixture.controller.clone()));
-        let gate = Arc::new(Mutex::new(()));
+        let gate = Arc::new(crate::application::ApplicationWriter::default());
         drive_application_timer(
             &controller,
             &fixture.events,

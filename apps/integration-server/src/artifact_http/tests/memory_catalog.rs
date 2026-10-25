@@ -10,7 +10,11 @@ async fn typed_memory_replicas_preserve_published_source_across_http_and_replay(
     upload.finalize(&digest_bytes(b"map"), 3).unwrap();
     let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
     seed_controller_checkpoint(&log);
-    let catalog = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     let mut value = serde_json::to_value(fixture_manifest(&digest_bytes(b"map"), 3)).unwrap();
     value["schema"] = serde_json::json!(domain::SPATIAL_MEMORY_SCHEMA_V0_2);
     value["producer_local_system_id"] = serde_json::json!("map-files");
@@ -89,7 +93,11 @@ async fn typed_memory_replicas_preserve_published_source_across_http_and_replay(
         "409 Conflict"
     );
     assert_eq!(log.len().unwrap(), 4);
-    let replayed = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let replayed = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     let detail = request_once(
         &store,
         &replayed,
@@ -153,7 +161,13 @@ async fn typed_memory_replicas_preserve_published_source_across_http_and_replay(
         .save_checkpoint(TEST_CHECKPOINT_SCHEMA, TEST_CHECKPOINT_JSON)
         .unwrap();
     broken.commit_batch().unwrap();
-    assert!(ArtifactCatalog::replay_with_gate(&broken, Arc::new(Mutex::new(()))).is_err());
+    assert!(
+        ArtifactCatalog::replay_with_gate(
+            &broken,
+            Arc::new(crate::application::ApplicationWriter::default())
+        )
+        .is_err()
+    );
 }
 
 /// An operator cutoff cannot delete generic Memory manifests or provider-qualified replica replay prerequisites.
@@ -199,7 +213,11 @@ fn archive_gc_preserves_generic_memory_replay_evidence() {
             Err(state::SqliteEventLogError::ArchivePolicy(_))
         ));
     }
-    let replayed = ArtifactCatalog::replay_with_gate(&log, Arc::new(Mutex::new(()))).unwrap();
+    let replayed = ArtifactCatalog::replay_with_gate(
+        &log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
     assert_eq!(
         replayed.memory_replicas(manifest.selector()).unwrap().len(),
         1
@@ -260,8 +278,11 @@ async fn generic_memory_catalog_publishes_all_kinds_and_tracks_selective_exchang
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let uploads = test_uploads();
     let kinds = [
         ("execution-a", MemoryKind::Execution),
@@ -383,8 +404,11 @@ async fn generic_memory_catalog_publishes_all_kinds_and_tracks_selective_exchang
         detail["replicas"][1]["consumer_provider_id"],
         "secondary-consumer"
     );
-    let replayed = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("provider-qualified replicas replay");
+    let replayed = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("provider-qualified replicas replay");
     let replicas = replayed
         .memory_replicas(execution.selector())
         .expect("replayed replicas are readable");
@@ -444,8 +468,11 @@ async fn local_eaios_memory_workflow_cross_node_exchange_is_integrated() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("artifact listener binds");
@@ -645,8 +672,11 @@ async fn generic_memory_publication_requires_existing_verified_cas_bytes() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let manifest = fixture_memory_manifest(
         "missing-a",
         MemoryKind::Artifact,
@@ -691,8 +721,11 @@ async fn generic_memory_publication_requires_admitted_provider() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let manifest = fixture_memory_manifest(
         "experience-a",
         MemoryKind::Experience,
@@ -743,8 +776,11 @@ async fn generic_memory_publication_requires_current_owner_session() {
     let event_log =
         SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("event log opens");
     seed_controller_checkpoint(&event_log);
-    let catalog = ArtifactCatalog::replay_with_gate(&event_log, Arc::new(Mutex::new(())))
-        .expect("catalog replays");
+    let catalog = ArtifactCatalog::replay_with_gate(
+        &event_log,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .expect("catalog replays");
     let manifest = fixture_memory_manifest(
         "session-memory",
         MemoryKind::Experience,

@@ -439,6 +439,11 @@ fn member_command_permission(
 
 /// Dispatches one bounded request; the existing OpenRaft engine alone interprets consensus messages.
 async fn serve_connection(stream: tokio::net::TcpStream, node: ReplicaNode) -> Result<(), String> {
+    // Length prefixes and TLS records are intentionally separate bounded writes. Do not let
+    // delayed ACK/Nagle coupling add a transport pause to every fresh consensus witness.
+    stream
+        .set_nodelay(true)
+        .map_err(|error| error.to_string())?;
     if let Some(tls) = &node.tls {
         let tls = tls.refreshed()?;
         let acceptor = TlsAcceptor::from(tls.server.clone());
@@ -1702,6 +1707,7 @@ impl ReplicaNetwork {
         let encoded = crate::transport_budget::encode(&request, &self.budget)?;
         let operation = async {
             let stream = tokio::net::TcpStream::connect(&self.node.addr).await?;
+            stream.set_nodelay(true)?;
             if let Some(tls) = &self.tls {
                 let tls = tls.refreshed().map_err(std::io::Error::other)?;
                 let connector = TlsConnector::from(tls.client.clone());
@@ -2112,6 +2118,9 @@ impl ReplicaFenceClient {
             return Err("replica child request exceeds bounds".into());
         }
         let stream = std::net::TcpStream::connect_timeout(&self.address, Duration::from_secs(2))
+            .map_err(|error| error.to_string())?;
+        stream
+            .set_nodelay(true)
             .map_err(|error| error.to_string())?;
         stream
             .set_read_timeout(Some(Duration::from_secs(12)))

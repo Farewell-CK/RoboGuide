@@ -63,6 +63,13 @@ recovery-admin 的 `/v1/resource-topology` view 区分声明、原 reservation �
 
 按[跨域协调合同](docs/development/federation-coordination-v0.1.md)显式声明 peer、CA/leaf/client 身份文件、domain grant 与时钟上界。回复丢失保留 Unknown，查询原事务，不能换 ID 消除不确定结果。Root 替换会 fence 原 dispatch epoch。冷恢复保留原 goal/clock/intent/decision 表且不启动服务；Secrets 和实际跨主机/物理验证仍是显式部署责任。
 
+复制部署使用显式 `federation` 进程输入，把原 domain、授权文件和可选 root peer profile
+交给唯一 owned Controller child。路由只选择真实目标并透传 TLS，一次连接不能重发业务
+mutation。原 source 排空/新 epoch 不授予旧事务继续执行的许可。跨域完整静止恢复使用显式
+v0.31：按原 profile 区分同编号成员，核对各域完整 Root、活动事务与原 nonce/Prepare/Commit/
+release；旧布局保留原格式。凭证是独立显式挂载输入，恢复不安装凭证或启动服务。见
+[部署与恢复合同](docs/development/replicated-federation-deployment-v0.1.md)。
+
 ## 在线协调归档
 
 使用显式 process v0.9 的 `coordinated_archive_base` 保留原 v0.6/v0.7 profile。global recovery-admin 先查询 `/v1/maintenance/coordinated-archive/operations`，再用新的原 command ID 请求精确 cutoff。重复 ID 只读；Unknown 查询不重发发布，显式 abort 也不补造完成。包是私有控制元数据，Artifact admin 不具有读取权限。parent11 与 recovery v0.30 在发布前校验必需 journal、原 manifest 和实际 qualified CAS 字节；完整恢复不启动服务。见[归档合同](docs/development/coordinated-content-archive-v0.1.md)。

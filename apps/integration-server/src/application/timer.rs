@@ -8,7 +8,7 @@ use ports::{DiagnosticKind, DiagnosticStage};
 pub(crate) fn drive_application_timer(
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
-    event_write_gate: &Arc<Mutex<()>>,
+    event_write_gate: &Arc<crate::application::ApplicationWriter>,
     now: domain::TimestampMs,
     verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -25,7 +25,7 @@ pub(crate) fn drive_application_timer(
 pub(crate) fn drive_application_timer_with_clock(
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
-    event_write_gate: &Arc<Mutex<()>>,
+    event_write_gate: &Arc<crate::application::ApplicationWriter>,
     clock: &impl Clock,
     verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -44,7 +44,7 @@ pub(crate) fn drive_application_timer_with_clock(
 fn drive_application_timer_synchronous(
     controller: &Arc<Mutex<ControllerState>>,
     event_log: &state::SqliteEventLog,
-    event_write_gate: &Arc<Mutex<()>>,
+    event_write_gate: &Arc<crate::application::ApplicationWriter>,
     clock: &impl Clock,
     verifier_feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
