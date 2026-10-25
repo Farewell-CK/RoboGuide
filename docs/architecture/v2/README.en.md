@@ -1,5 +1,11 @@
 # RoboGuide V2 current architecture
 
+[ADR-0209](../../decisions/0209-spatiotemporal-resource-authority.md) assigns declared geometry, shared time domains
+and original booking budgets to Control. Complete normal/Group/recovery batches, delivery gates
+and overrun stop/revoke preserve original ownership. [Local software acceptance](../../development/acceptance/2026-10-25-resource-topology.md)
+and v58/v0.27 recovery pass; cross-domain/HA clocks and global composition remain required.
+Declared geometry does not establish physical occupancy.
+
 [ADR-0208](../../decisions/0208-scoped-typed-map-lifecycle.md) defines the pending scoped typed-map
 lifecycle work. Original map production, current consuming Group and each new preparation remain
 separate authorities. Handoff/revision cannot relabel the consuming Mission as the producer.

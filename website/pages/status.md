@@ -1,6 +1,6 @@
 # 实现状态与证据边界
 
-内容核对基线：`910054bb`（2026-10-25）；[版本参考](reference.md)从当前源码提取版本。
+内容核对基线：`2fa01f3f`（2026-10-25）；[版本参考](reference.md)从当前源码提取版本。
 [量化资源](docs/development/acceptance/2026-10-25-quantitative-resources.md)与
 [应用代次升级](docs/development/acceptance/2026-10-25-application-generation-upgrade.md)
 已有实际软件进程验收。原全部非发布范围与设备/跨主机/长期证据边界保持，尚未 SoftwareComplete。
@@ -8,7 +8,7 @@
 | 方面 | 已有软件路径 | 仍需完成或独立验证 |
 | --- | --- | --- |
 | MI / Orchestration | 澄清、Review、计划接纳、DAG、satisfaction、版本化运行期修订与自动 MI work | 复杂拓扑、其他 Memory 类型与复合故障矩阵 |
-| Control / quota | Match/Commit/Bind、精确 quota/释放、来源成本与显式 divisible Compute/Context envelope、加权 calendar、Node 原授权准入和活动授权恢复 | 完整时空、其他本地强制与当前部署的 GPU/交通等实际来源 |
+| Control / quota | Match/Commit/Bind、精确 quota/释放、来源成本、divisible Compute/Context envelope、Node 准入和恢复；显式空间边界/共享 time domain、原 booking budget、恢复原截止时间与 v0.27 冷恢复 | 跨域/HA 时钟组合与当前部署 GPU/交通等实际来源 |
 | Runtime / stop | attempt/generation、durable intent、relations、whole-Group stop、原进程 exit proof | 运行中抢占、耦合多 Role 迁移、hazard/regrasp 与设备 stop |
 | State / verifier | 来源策略、Belief lineage、TTL、原 Task verifier 与 CAS proof | 当前部署的物理来源、冲突与持续效果证明 |
 | Memory / Spatial | 准备/use/revoke/handoff、文件空间算法、provider 局部 GC、完整 scoped typed-map/current-use/交接/自动 MI/原目标/冷恢复/旧 writer 拒绝组合；原 import Replica、Catalog/lineage、Snapshot/Archive 引用、恢复后原 provider Snapshot 退休、Archive abort/私有接收 GC、源上传退休和 standalone 已知引用闭包离线 GC | 完整全局 Archive/引用与跨主机内容 |
@@ -50,3 +50,5 @@
 按“合同 → 实际代码 → 原始验收 → 当前缺口”更新本页，中英文同提交维护。依赖版本由[构建参考](reference.md)提取。不能仅因合并、类型定义、测试替身或 ADR 状态而宣布 SoftwareComplete。
 
 [Scoped typed-map 完整软件验收](docs/development/acceptance/2026-10-25-scoped-typed-map-lifecycle.md)通过两条实际 retained-storage 进程链和完整 v0.26 冷恢复。每个 Task 有独立 preparation/import/use，原生产信息保持不变。设备、跨主机与其他阶段证据独立。
+
+[时空资源软件验收](docs/development/acceptance/2026-10-25-resource-topology.md)通过明确部署声明、跨 ID 冲突、原预算与活动/未确认停止恢复。实际 CPU 进程不能证明物理排他或设备停止；其余 A/D/E/F 继续必需。

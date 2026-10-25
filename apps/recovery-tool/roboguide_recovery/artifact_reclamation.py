@@ -109,10 +109,10 @@ def run(
     if (
         profile["schema"] not in journal.PROFILES
         or profile["artifact_replica_sets"]
-        or any(value["kind"] == "replica" for value in components)
+        or any(value["kind"] in {"replica", "replica-content"} for value in components)
     ):
         raise ValueError(
-            "source GC requires explicit standalone recovery v0.16 or v0.18; "
+            "source GC requires an explicit supported standalone recovery profile; "
             "online Replica authority is not yet supported"
         )
     selected = [

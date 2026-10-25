@@ -7,6 +7,11 @@
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
 
+[ADR-0209](../../decisions/0209-spatiotemporal-resource-authority.md)将声明空间几何、共享时间域和原始预订预算归于 Control；
+完整正常/Group/recovery 批次、逐次执行门禁和超时 stop/revoke 保留原所有权。
+[本地软件验收](../../development/acceptance/2026-10-25-resource-topology.md)与 v58/v0.27 恢复通过；
+跨域/HA 时钟和全局组合仍须独立完成，几何声明不建立物理占用事实。
+
 [ADR-0208](../../decisions/0208-scoped-typed-map-lifecycle.md)规定 scoped typed-map 的后续整改：
 原 typed map 生产身份、当前消费 Group 与每个新 preparation 分别保留，交接和修订不得
 把消费 Mission 改成生产 Mission。新 scope/当前使用语义显式协商；完整交接、修订、

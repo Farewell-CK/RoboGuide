@@ -269,7 +269,11 @@ def run(source: Path, directory: Path, old_controller: Path | None = None) -> di
     )
     assert any(
         message in refused_profile["stderr"]
-        for message in ("recovery v0.10", "owner metadata is invalid")
+        for message in (
+            "recovery v0.10",
+            "owner metadata is invalid",
+            "recovery " + profile["schema"].rsplit("/", 1)[1],
+        )
     )
     assert not (directory / "old-profile-refused").exists()
     selected = next(

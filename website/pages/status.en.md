@@ -1,6 +1,6 @@
 # Implementation status and evidence limits
 
-Content baseline: `910054bb`, reviewed 2026-10-25. [Reference](reference.md) extracts current source versions.
+Content baseline: `2fa01f3f`, reviewed 2026-10-25. [Reference](reference.md) extracts current source versions.
 [Quantitative allocation](docs/development/acceptance/2026-10-25-quantitative-resources.md) and
 [application generation upgrades](docs/development/acceptance/2026-10-25-application-generation-upgrade.md)
 pass actual software process acceptance. The complete non-release scope and independent device,
@@ -9,7 +9,7 @@ cross-host and long-term evidence requirements remain; SoftwareComplete is not d
 | Area | Existing software paths | Remaining or independently validated work |
 | --- | --- | --- |
 | MI / Orchestration | Clarification, Review, admission, DAG, satisfaction, versioned revision and automatic MI work | Complex topologies, other Memory types and composed fault matrix |
-| Control / quota | Match/Commit/Bind, exact quota/release, source-bound costs, explicit divisible Compute/Context envelopes, weighted calendar, Node grant admission and active-grant recovery | Complete time/space, other local enforcement and actual deployment GPU/traffic sources |
+| Control / quota | Match/Commit/Bind, exact quota/release, source costs, divisible Compute/Context envelopes, Node admission and recovery; explicit spatial footprints/shared time domains, original booking budgets, recovery deadlines and v0.27 cold recovery | Cross-domain/HA clock composition and actual GPU/traffic or other deployment measurements |
 | Runtime / stop | Attempts/generations, durable intents, relations, whole-Group stop and original-process exit proof | Running preemption, coupled Role migration, hazard/regrasp and device stopping |
 | State / verifier | Source policies, Belief lineage, TTL, original Task verifiers and CAS proof | Actual deployment sources, conflicts and continuous physical effects |
 | Memory / Spatial | Preparation/use/revoke/handoff, file algorithms, provider-local GC, complete scoped typed-map/current-use/handoff/automatic MI/original-goal/cold-recovery/old-writer composition; original import Replica, Catalog/lineage, Snapshot/Archive references, relocated provider Snapshot retirement, Archive abort/private recipient GC, source upload retirement and offline GC over supported standalone reference closure | Complete global Archive/reference coverage and cross-host content |
@@ -51,3 +51,5 @@ Internal TaskSatisfied and Habitat's official metrics are separate judgments. Or
 Update both languages together, following contract → actual code → original acceptance → remaining gap. [Reference](reference.md) extracts versions. Merges, types, test doubles or Accepted status alone cannot announce SoftwareComplete.
 
 [Complete scoped typed-map software acceptance](docs/development/acceptance/2026-10-25-scoped-typed-map-lifecycle.md) passes two actual retained-storage process chains and complete v0.26 cold recovery. Every Task has independent preparation/import/use; original production provenance remains unchanged. Device, cross-host and other stages remain independent.
+
+[Spatial and Time software acceptance](docs/development/acceptance/2026-10-25-resource-topology.md) covers explicit deployment declarations, cross-ID conflicts, original budgets and active/uncertain-stop recovery. Actual CPU processes do not establish physical exclusion or device stopping. Remaining A/D/E/F work stays mandatory.

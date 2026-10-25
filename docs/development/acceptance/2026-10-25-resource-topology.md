@@ -42,3 +42,9 @@ v56–v58，并使用实际 header 选择完整恢复 profile。没有放宽原�
 
 本项闭合 C 的本地软件合同；E 的跨域时钟/事务、A1/A2 的全局内容组合和 F 的最终固定 profile
 仍是原计划的必需项。设备、跨主机与长期 SLO 证据独立保留待验证。
+
+后续完整 GC/SQL 兼容门禁 `/tmp/rgt58-artifact-sql-3/result.json` 通过全部 10 类实际进程案例：
+正常修复、边界拒绝、SQL/copy/receipt 故障、原预算过期、原 source 改变、SIGKILL、缺失
+历史和 WAL 拒绝。修复入口显式支持新的独立 Controller profile，仍拒绝 Replica 和
+Replica-content；不把新版恢复包降级。255 项恢复回归及完整严格类型/风格检查继续通过。
+双语站点严格构建通过，839 个 HTML/46 条维护路由，归档未解决锚点为 0。

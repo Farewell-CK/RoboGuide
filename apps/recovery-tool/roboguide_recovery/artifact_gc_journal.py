@@ -15,7 +15,14 @@ from .profile import real_directory
 from .snapshot_references import OperationBudget, canonical, digest
 
 SCHEMA = "roboguide.recovery-profile/v0.16"
-PROFILES = {SCHEMA, "roboguide.recovery-profile/v0.18"}
+PROFILES = {
+    SCHEMA,
+    "roboguide.recovery-profile/v0.18",
+    "roboguide.recovery-profile/v0.24",
+    "roboguide.recovery-profile/v0.25",
+    "roboguide.recovery-profile/v0.26",
+    "roboguide.recovery-profile/v0.27",
+}
 STORAGE = "roboguide.artifact-storage/v5"
 WRAPPER = "roboguide.controller-checkpoint/v52"
 WRAPPERS = {

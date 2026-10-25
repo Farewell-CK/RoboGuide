@@ -29,3 +29,7 @@ An operation's successful return proves only its contracted local semantics. A T
 Use `rust-toolchain.toml`, `pyproject.toml` and locked dependencies. Checks include fmt, Clippy, pytest, Ruff, mypy and function docs. New integrations also exercise the actual deployment Python compatibility path.
 
 The [module map](modules/domain-ports.md) locates code. [Original integration archives](archives.md) retain complete commands and historical limits.
+
+## Spatial and Time deployment constraints
+
+Global recovery-admin installs [resource-topology v0.1](docs/development/resource-topology-v0.1.md) over actual declared resources. Space requires exact frame/anchor/bounds/clearance; Time aliases share an explicit time domain and local Controller openings. Deployment booking budgets remain outside canonical model output. Admission, Bind/Rebind and every outbox send check original bounds. Declared geometry never creates device inventory or measured occupancy.

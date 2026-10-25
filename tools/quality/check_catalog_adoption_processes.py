@@ -438,7 +438,18 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
             "old-profile",
             passed=False,
         )
-        required = "recovery v0.18" if profile["schema"].endswith("/v0.18") else "recovery v0.16"
+        required = (
+            "recovery " + profile["schema"].rsplit("/", 1)[1]
+            if profile["schema"]
+            in {
+                "roboguide.recovery-profile/v0.24",
+                "roboguide.recovery-profile/v0.26",
+                "roboguide.recovery-profile/v0.27",
+            }
+            else "recovery v0.18"
+            if profile["schema"].endswith("/v0.18")
+            else "recovery v0.16"
+        )
         assert required in refused["stderr"] and not (output / "old-refused").exists()
         old_proof = None
         if old_controller is not None:

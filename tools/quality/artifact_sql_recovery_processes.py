@@ -248,7 +248,12 @@ class Case:
             artifact, self.controllers.admin, "GET", "/v1/artifacts/" + self.retained_digest
         ) == (200, self.retained_payload)
         self.controllers.finish(child)
-        if self.profile["schema"] != "roboguide.recovery-profile/v0.18":
+        if self.profile["schema"] not in {
+            "roboguide.recovery-profile/v0.18",
+            "roboguide.recovery-profile/v0.24",
+            "roboguide.recovery-profile/v0.26",
+            "roboguide.recovery-profile/v0.27",
+        }:
             self.profile["schema"] = "roboguide.recovery-profile/v0.17"
         self.profile["components"][0]["storage_schema"] = "roboguide.controller-storage/v1"
         self.save_profile()

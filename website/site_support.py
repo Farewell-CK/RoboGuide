@@ -65,6 +65,9 @@ def contract_versions() -> dict[str, str]:
     if journal_version is None:
         raise SystemExit("Node journal storage fence declaration is missing")
     return {
+        "Resource topology (explicit Control deployment)": json.loads(
+            (ROOT / "contracts/control/resource-topology-v0.1/registry.schema.json").read_text()
+        )["$id"],
         "MissionPlan (configured default)": default_plan,
         "MissionPlan (explicit Memory)": read_constant(
             "core/domain/src/lib.rs", "MISSION_PLAN_SCHEMA_V0_9"

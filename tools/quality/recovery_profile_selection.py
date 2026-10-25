@@ -11,7 +11,12 @@ from typing import Any
 
 def declare_controller_storage(profile: dict[str, Any]) -> None:
     """Declare observed legacy/v1 storage explicitly; the CLI independently validates full SQL."""
-    if profile["schema"] != "roboguide.recovery-profile/v0.18":
+    if profile["schema"] not in {
+        "roboguide.recovery-profile/v0.18",
+        "roboguide.recovery-profile/v0.24",
+        "roboguide.recovery-profile/v0.26",
+        "roboguide.recovery-profile/v0.27",
+    }:
         return
     for component in profile["components"]:
         if component["kind"] != "controller":

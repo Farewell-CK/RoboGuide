@@ -45,3 +45,7 @@ PYTHONPATH=apps/recovery-tool python -m roboguide_recovery restore   --bundle /a
 保留原日志与 receipt → 检查 exact ID/session/attempt → 判定当前 authority 是否可写 → 核对 State 与 Memory 原期限 → 使用正式只读 observation/reconcile → 满足原 stop/revoke 与 policy 后恢复。禁止以“重新跑一次”消除未知副作用。
 
 显式 scoped typed-map 使用 MissionPlan v0.11、Node v0.14/config v0.15、preparation v0.3、Memory SQL v5 和 recovery v0.26；旧版本不得借用新授权。见[完整生命周期](docs/development/scoped-typed-map-lifecycle-v0.1.md)。
+
+## 原资源预订
+
+recovery-admin 的 `/v1/resource-topology` view 区分声明、原 reservation 与未获证明的物理占用。窗口到期进入既有 whole-Group stop/revoke，原释放门禁通过前保留资源。实际 OS exit 与 Controller stop confirmation 是不同证据。当前 wrapper v58 使用显式 recovery v0.27，保留之前 scoped-map、升级与全部原恢复要求；旧回执保留原版本。

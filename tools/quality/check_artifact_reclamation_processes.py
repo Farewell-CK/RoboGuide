@@ -607,7 +607,11 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
             passed=False,
         )
         assert (
-            "owner metadata" in refused_profile["stderr"] and not (output / "old-refused").exists()
+            any(
+                message in refused_profile["stderr"]
+                for message in ("owner metadata", "recovery " + profile["schema"].rsplit("/", 1)[1])
+            )
+            and not (output / "old-refused").exists()
         )
         tampered = output / "tampered-bundle"
         shutil.copytree(output / "bundle", tampered)

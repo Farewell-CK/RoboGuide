@@ -374,9 +374,16 @@ def run(
     components = validate(profile)
     if (
         profile["schema"]
-        not in {"roboguide.recovery-profile/v0.17", "roboguide.recovery-profile/v0.18"}
+        not in {
+            "roboguide.recovery-profile/v0.17",
+            "roboguide.recovery-profile/v0.18",
+            "roboguide.recovery-profile/v0.24",
+            "roboguide.recovery-profile/v0.25",
+            "roboguide.recovery-profile/v0.26",
+            "roboguide.recovery-profile/v0.27",
+        }
         or profile["artifact_replica_sets"]
-        or any(value["kind"] == "replica" for value in components)
+        or any(value["kind"] in {"replica", "replica-content"} for value in components)
         or gc.CHECKSUM.fullmatch(expected_sql) is None
         or gc.CHECKSUM.fullmatch(expected_journal) is None
         or not gc._text(reason, 1024)

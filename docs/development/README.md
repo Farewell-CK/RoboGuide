@@ -8,7 +8,7 @@ scoped typed-map 与自动 MI 本地组合已通过；ADR-0209 的[时空资源�
 运行期候选、计划历史、独立原目标完成 gate 和新 Group 的停止/撤销门禁原切片见
 [运行期计划修订合同](runtime-plan-revision-v0.1.md)与 ADR-0120；其历史版本为 shared
 wrapper v43 / inner v23 / event codec v28。后续新增权威和当前版本分别以对应 ADR 与
-[版本参考](../../website/pages/contracts.md)为准；独立原 goal 不被 Task 本地完成或新 DAG 替代。
+[实现与版本参考](../../website/pages/status.md)为准；独立原 goal 不被 Task 本地完成或新 DAG 替代。
 
 > 状态：Bootstrap 进行中；MVP 定义仍为 Draft。起草日期：2026-08-17。
 > V2 架构仍是权威基线。本文档将 V2 的职责转换为工程边界，但不冻结传输、

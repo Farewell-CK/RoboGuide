@@ -29,3 +29,7 @@
 Rust 使用 `rust-toolchain.toml`，Python 使用 `pyproject.toml` 与锁文件。基础检查包含 fmt、Clippy、pytest、Ruff、mypy 和函数文档；新增接入还要执行真实部署 Python 的兼容检查。
 
 [模块地图](modules/domain-ports.md)定位代码；[原始扩展与集成材料](archives.md)保留完整命令及历史范围。
+
+## 时空部署约束
+
+全局 recovery-admin 按实际声明资源安装 [resource-topology v0.1](docs/development/resource-topology-v0.1.md)。Space 明确 frame/anchor/边界/clearance；Time 别名共享明确 time domain，窗口只属于本地 Controller 时钟。部署 booking budget 不进入模型 canonical 输出；准入、Bind/Rebind 与每次 outbox 都核对原期限。声明几何不会创建设备 inventory 或实测占用。
