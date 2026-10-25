@@ -38,6 +38,27 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .map_err(|e| IntegrationRuntimeError::Protocol(e.to_string()))
     }
 
+    /// Retains explicit scoped-map receiver requirements while leaving selection authority in Control.
+    pub fn select_memory_provider_for_preparation(
+        &self,
+        node: &NodeId,
+        requirement: &domain::MemoryRequirement,
+        operation: &domain::OperationRef,
+        now: TimestampMs,
+        scoped: bool,
+    ) -> Result<domain::MemoryProviderDescriptor, IntegrationRuntimeError> {
+        self.control
+            .select_memory_provider_for_preparation(
+                &self.decision_state(),
+                node,
+                requirement,
+                operation,
+                now,
+                scoped,
+            )
+            .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))
+    }
+
     /// Revalidates current source permission and exact attempt without changing any lifecycle.
     pub fn validate_memory_preparation(
         &self,
@@ -136,8 +157,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             "objective":command.intent().objective(),"parameters":parameters,"resource_ids":resources,
         });
         if command.registration_evidence().is_some_and(|registration| {
-            registration.contract_version().as_str()
-                == integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            integration::grpc::v0_4::supports_capacity(registration.contract_version().as_str())
         }) {
             value["resource_grants"] = serde_json::json!(command.resource_grants());
         }

@@ -15,6 +15,7 @@ from mission.contract_values import (
     MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
     MISSION_PLAN_SCHEDULING_VERSION,
+    MISSION_PLAN_SCOPED_MEMORY_VERSION,
     MISSION_PLAN_VERSION,
     RELATION_KINDS,
     JSONObject,
@@ -59,7 +60,9 @@ class ContextRole:
         _bounded_keys(
             item,
             {"id", "actor"},
-            {"resource_envelope"} if version == MISSION_PLAN_CAPACITY_VERSION else set(),
+            {"resource_envelope"}
+            if version in {MISSION_PLAN_CAPACITY_VERSION, MISSION_PLAN_SCOPED_MEMORY_VERSION}
+            else set(),
             path,
         )
         envelope = tuple(
@@ -85,7 +88,7 @@ class ContextRole:
         """Serialize the original Context envelope without inventing a physical placement."""
         result: JSONObject = {"id": self.role_id, "actor": self.actor_id}
         if self.resource_envelope:
-            if version != MISSION_PLAN_CAPACITY_VERSION:
+            if version not in {MISSION_PLAN_CAPACITY_VERSION, MISSION_PLAN_SCOPED_MEMORY_VERSION}:
                 raise MissionPlanError("Context capacity requires exact MissionPlan v0.10")
             result["resource_envelope"] = [
                 resource.to_json(version) for resource in self.resource_envelope
@@ -398,6 +401,7 @@ class MissionContext:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             base_keys.add("executor_constraints")
         if version == MISSION_PLAN_COMPAT_VERSION:
@@ -420,7 +424,12 @@ class MissionContext:
                 )
             )
             if version
-            in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION, MISSION_PLAN_CAPACITY_VERSION}
+            in {
+                MISSION_PLAN_VERSION,
+                MISSION_PLAN_MEMORY_VERSION,
+                MISSION_PLAN_CAPACITY_VERSION,
+                MISSION_PLAN_SCOPED_MEMORY_VERSION,
+            }
             else ()
         )
         roles_by_id = {role.role_id: role for role in roles}
@@ -489,6 +498,7 @@ class MissionContext:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             result["coupling_mode"] = self.coupling_mode
             if self.shared_view is not None:
@@ -499,6 +509,7 @@ class MissionContext:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             result["executor_constraints"] = [
                 constraint.to_json() for constraint in self.executor_constraints

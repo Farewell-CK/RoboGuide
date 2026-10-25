@@ -24,6 +24,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v54",
     "roboguide.controller-checkpoint/v55",
     "roboguide.controller-checkpoint/v56",
+    "roboguide.controller-checkpoint/v57",
 }
 SQL_SCHEMA = "roboguide.artifact-gc-sql/v0.1"
 DATABASE = "reclamation-v1/journal.sqlite3"

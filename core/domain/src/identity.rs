@@ -152,6 +152,19 @@ impl NodeContractVersion {
         Self(crate::NODE_CONTRACT_VERSION_V0_13.to_string())
     }
 
+    /// Tests only the explicitly supported quantitative Node contracts.
+    pub fn supports_quantitative_resources(&self) -> bool {
+        matches!(
+            self.as_str(),
+            crate::NODE_CONTRACT_VERSION_V0_13 | crate::NODE_CONTRACT_VERSION_V0_14
+        )
+    }
+
+    /// Selects explicit scoped typed-map preparation beside existing quantitative grants.
+    pub fn v0_14() -> Self {
+        Self(crate::NODE_CONTRACT_VERSION_V0_14.to_string())
+    }
+
     /// Creates the explicitly registered typed-map producer Node Contract identity.
     pub fn v0_8() -> Self {
         Self(NODE_CONTRACT_VERSION_V0_8.to_string())

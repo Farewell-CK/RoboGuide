@@ -246,6 +246,14 @@ def main() -> None:
         action="store_true",
         help="explicitly upgrade the original Memory store to snapshot-reference SQL v4",
     )
+    parser.add_argument(
+        "--enable-scoped-typed-maps",
+        action="store_true",
+        help=(
+            "retain original typed scoped preparations under Memory SQL v5, "
+            "including original snapshot references"
+        ),
+    )
     args = parser.parse_args()
     if not ipaddress.ip_address(args.listen_host).is_loopback:
         parser.error("this Local EAIOS facade requires a literal loopback address")
@@ -275,6 +283,7 @@ def main() -> None:
         args.export_config,
         args.export_directory,
         args.enable_snapshot_references,
+        args.enable_scoped_typed_maps,
     )
     leases: UseLeases | None = None
     jobs: FileJobs | None = None

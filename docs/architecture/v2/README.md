@@ -7,6 +7,11 @@
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
 
+[ADR-0208](../../decisions/0208-scoped-typed-map-lifecycle.md)规定 scoped typed-map 的后续整改：
+原 typed map 生产身份、当前消费 Group 与每个新 preparation 分别保留，交接和修订不得
+把消费 Mission 改成生产 Mission。新 scope/当前使用语义显式协商；完整交接、修订、
+自动 MI、独立原目标、恢复与回收已通过[实际软件进程验收](../../development/acceptance/2026-10-25-scoped-typed-map-lifecycle.md)，其余阶段继续。
+
 [ADR-0207](../../decisions/0207-explicit-application-generation-upgrade.md)明确原 Replica profile
 与当前应用 writer 代次独立。有限旧版本读取兼容不授予新版本写入；所有真实成员支持、
 原 child 的实际退出和持久化授权切换共同约束升级。实际滚动、Unknown 对账、SQL 失败后

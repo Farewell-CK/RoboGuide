@@ -148,6 +148,7 @@ def _parent(
     source: dict[str, Any],
     budget: OperationBudget,
     members: dict[int, str],
+    schema: str = content.UPGRADE_PROFILE,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Validate original parent8 heads, same-member producers and ingress rows."""
     identity, tables = original["identity"], original["tables"]
@@ -159,11 +160,9 @@ def _parent(
             len(metadata) > 4096
             or json.loads(metadata.get("content_root_identity", "null")) != identity
             or json.loads(metadata.get("identity", "null"))
-            not in (
-                [identity["profile_identity"], "roboguide.controller-checkpoint/v53"],
-                [identity["profile_identity"], "roboguide.controller-checkpoint/v54"],
-                [identity["profile_identity"], "roboguide.controller-checkpoint/v55"],
-                [identity["profile_identity"], "roboguide.controller-checkpoint/v56"],
+            not in tuple(
+                [identity["profile_identity"], f"roboguide.controller-checkpoint/v{version}"]
+                for version in range(53, 58 if schema == "roboguide.recovery-profile/v0.26" else 57)
             )
             or json.loads(metadata.get("network_content_membership_schema", "null"))
             != "roboguide.replica-storage/v0.7"
@@ -184,7 +183,7 @@ def _parent(
 
         validate_upgrades(
             connection,
-            content.UPGRADE_PROFILE if parent_version == 10 else content.INITIALIZATION_PROFILE,
+            schema,
         )
         base_version = (
             json.loads(metadata.get("application_upgrade_base_parent_v1", "null"))
@@ -487,9 +486,11 @@ def validate_bundle(
         if sources is not None:
             raise ValueError("old recovery profile contains hidden Replica content authority")
         return
-    standalone = schema in {content.CAPACITY_PROFILE, content.UPGRADE_PROFILE} and not any(
-        item["kind"] in {"replica", "replica-content"} for item in components
-    )
+    standalone = schema in {
+        content.CAPACITY_PROFILE,
+        content.UPGRADE_PROFILE,
+        content.SCOPED_PROFILE,
+    } and not any(item["kind"] in {"replica", "replica-content"} for item in components)
     content.validate_pairing(components, allow_standalone=standalone)
     source_map = _source_map(sources, components)
     if standalone:
@@ -545,6 +546,7 @@ def validate_bundle(
             source,
             budget,
             expected_members,
+            schema,
         )
         _upload_inputs(rows, state)
         required = _required(original)

@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/node/v0.16/resource-allocation-grant.schema.json",
+  "title": "Original quantitative resource grant v0.1",
+  "description": "Closed Control grant outside model parameters. Canonical parent hash, cross-field bounds and exact original ownership are independently enforced by Control and Node.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "allocation_id",
+    "generation",
+    "resource_id",
+    "resource_class",
+    "node_id",
+    "group_id",
+    "owner",
+    "tenant_id",
+    "task_ref",
+    "role_id",
+    "units",
+    "allocation_units",
+    "admitted_capacity"
+  ],
+  "properties": {
+    "schema": {
+      "const": "roboguide.resource-allocation-grant/v0.1"
+    },
+    "allocation_id": {
+      "type": "string",
+      "pattern": "^allocation:sha256:[0-9a-f]{64}$"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615
+    },
+    "resource_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resource_class": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": ".*\\S.*"
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "group_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "Task"
+          ],
+          "properties": {
+            "Task": {
+              "$ref": "#/$defs/taskRef"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "Context"
+          ],
+          "properties": {
+            "Context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mission_id",
+                "context_id",
+                "context_role_id"
+              ],
+              "properties": {
+                "mission_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "context_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "context_role_id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": ".*\\S.*"
+    },
+    "task_ref": {
+      "$ref": "#/$defs/taskRef"
+    },
+    "role_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "units": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "allocation_units": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "admitted_capacity": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    }
+  },
+  "$defs": {
+    "taskRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mission_id",
+        "task_id"
+      ],
+      "properties": {
+        "mission_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

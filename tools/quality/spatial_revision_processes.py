@@ -111,7 +111,14 @@ def run(
         "actual original typed-map receiver process is running",
         30,
     )
-    result = revise(scenario, mission, case, old_controller)
+    if case in {"scoped-lifecycle", "scoped-lifecycle-mi"}:
+        from spatial_scoped_lifecycle import run as scoped_lifecycle
+
+        result = scoped_lifecycle(
+            scenario, mission, original, consumer, runtime_mi=case.endswith("-mi")
+        )
+    else:
+        result = revise(scenario, mission, case, old_controller)
     result["production_mission_id"] = typed["source_mission_id"]
     result["consumer_mission_id"] = mission
     assert result["production_mission_id"] != mission

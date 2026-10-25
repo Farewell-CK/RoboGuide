@@ -131,6 +131,7 @@ class SpatialMemoryConsumer:
         environment: dict[str, str],
         profile: dict[str, Any],
         process_workers: bool = False,
+        scoped_typed_maps: bool = False,
     ) -> None:
         """Freeze real receiver credentials and configuration before Controller startup."""
         self.output, self.python, self.environment = output, python, environment
@@ -141,6 +142,7 @@ class SpatialMemoryConsumer:
         self.profile = profile
         self.cas = cas
         self.process_workers = process_workers
+        self.scoped_typed_maps = scoped_typed_maps
         self.config = self.root / "node.toml"
         text = configuration(self.root, self.node, grpc, self.backend, cas, True)
         text = text.replace('kind = "artifact"', 'kind = "spatial"')
@@ -156,6 +158,17 @@ class SpatialMemoryConsumer:
         if process_workers:
             text = source_configuration(text, self.node, True).replace(
                 "hash-exported-file", "hash-imported-file"
+            )
+        if scoped_typed_maps:
+            from quantitative_resource_processes import configuration as quantitative_configuration
+
+            text = quantitative_configuration(text).replace(
+                "node-config/v0.13", "node-config/v0.15"
+            )
+            text = text.replace(
+                "[memory_providers.availability]\n",
+                "[memory_providers.availability]\n"
+                'contract = "roboguide.memory-provider-availability/v0.2"\n',
             )
         self.config.write_text(text)
         certificate = output / "pki/enrolment-next.crt"
@@ -222,6 +235,18 @@ class SpatialMemoryConsumer:
             ],
         }
         result["tasks"].append(task)
+        if self.scoped_typed_maps:
+            from quantitative_resource_processes import RESOURCE_CLASS
+
+            result["schema_version"] = "roboguide.mission-plan/v0.11"
+            task["roles"][0]["requirements"]["resources"] = [
+                {
+                    "kind": "compute",
+                    "units": 1,
+                    "allocation_mode": "divisible",
+                    "resource_class": RESOURCE_CLASS,
+                }
+            ]
         return result
 
     def start(self, origin: str, exchange: Exchange, start: Start) -> None:
@@ -267,6 +292,8 @@ class SpatialMemoryConsumer:
             "--enable-use-leases",
             "--enable-active-map",
         ]
+        if self.scoped_typed_maps:
+            self.backend_command += ["--enable-scoped-typed-maps", "--enable-content-reclamation"]
         if self.process_workers:
             self.backend_command += [
                 "--worker-processes",
@@ -324,7 +351,12 @@ class SpatialMemoryConsumer:
         assert before == after
         assert request(self.backend, "/v1/file-jobs/health")[1] == health
         active_state = request(self.backend, "/v1/active-map/state")[1]
-        assert all(item["state"] == "stale_after_restart" for item in active_state["heads"])
+        allowed = (
+            {"stale_after_restart", "revoked", "released"}
+            if self.scoped_typed_maps
+            else {"stale_after_restart"}
+        )
+        assert all(item["state"] in allowed for item in active_state["heads"])
         save(self.root / "active-map-restart.json", active_state)
         result = {"passed": True, "original_authority_digests": before}
         save(self.root / "restart.json", result)

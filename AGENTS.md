@@ -1,3 +1,16 @@
+ADR-0208 implements the scoped typed-map lifecycle across Domain/Control, application
+`scoped_maps`, Memory preparation v0.3, Group handoff v0.3 and runtime revision v0.5.
+MissionPlan v0.11 requests semantic `source_contract=scoped_typed_map`; actual Node Contract
+v0.14/config v0.15/wire catalog v0.17 and provider availability v0.2 are explicitly negotiated.
+Original typed production, frame, anchor and bytes remain distinct from receiving scope and use.
+Controller v57, Node journal v15, opted-in Memory SQL v5 and explicit recovery v0.26 retain
+previous histories while fencing older writers. SQL v5 includes the original Snapshot authority;
+`--enable-scoped-typed-maps` opts into it. Complete retained ancestry and original Catalog roots
+are checked without demanding deleted released bytes. Maintained whole-module gates add
+`check_spatial_node_processes.py --typed-revision scoped-lifecycle` and
+`check_scoped_map_recovery_processes.py`. Manual and automatic-MI retained-storage cases, complete v0.26 SQL/CAS recovery, genuine
+old-writer refusal and original local GC pass actual acceptance. Software workers/maps never establish device stopping, localization or physical continuity.
+
 ADR-0207 implements explicit original-profile application generation upgrade under process v0.8,
 parent storage v10 and recovery v0.25. `upgrades.rs` owns immutable authority/local original clocks
 and process-prefix/wait joins; `upgrade_network.rs` collects actual all-member TLS/binary support

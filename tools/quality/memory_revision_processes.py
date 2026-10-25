@@ -277,7 +277,11 @@ def run(
     }
     declaration_schema = "roboguide.runtime-plan-revision/v0.3"
     if scenario.typed_map is not None:
-        declaration_schema = "roboguide.runtime-plan-revision/v0.4"
+        declaration_schema = (
+            "roboguide.runtime-plan-revision/v0.5"
+            if scenario.manifest["scope"]["kind"] == "execution_group"
+            else "roboguide.runtime-plan-revision/v0.4"
+        )
         declaration["authorization"]["typed_map"] = scenario.typed_map
     denied = {
         "schema_version": declaration_schema,
@@ -338,6 +342,9 @@ def run(
         }
     ]
     role["execution_intent"]["parameters"]["rounds"] = 1
+    if declaration_schema == "roboguide.runtime-plan-revision/v0.5":
+        candidate["schema_version"] = "roboguide.mission-plan/v0.11"
+        role["requirements"]["memories"][0]["source_contract"] = "scoped_typed_map"
     follow_up = copy.deepcopy(candidate["tasks"][0])
     follow_up["id"] = "revision-follow-up-" + uuid.uuid4().hex
     follow_up["depends_on"] = [candidate["tasks"][0]["id"]]
@@ -585,6 +592,10 @@ def run(
             method="GET",
         )
         assert status == 200 and computation["state"] == "COMPLETED", computation
+        if declaration_schema == "roboguide.runtime-plan-revision/v0.5":
+            from spatial_scoped_lifecycle import active_map
+
+            active_map(scenario, attempt, "revision-scoped-" + str(index))
         save(
             scenario.directory / f"revision-computation-{index}.json",
             {"attempt": attempt, "computation": computation},

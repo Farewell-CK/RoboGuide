@@ -774,8 +774,10 @@ impl ControlPlane {
                     continue;
                 }
                 if demand.kind() != domain::ResourceKind::Compute
-                    || node.registration().contract_version().as_str()
-                        != domain::NODE_CONTRACT_VERSION_V0_13
+                    || !node
+                        .registration()
+                        .contract_version()
+                        .supports_quantitative_resources()
                     || self.reservations.contains_key(resource_id)
                 {
                     return Err(ControlError::AssignmentUnavailable(

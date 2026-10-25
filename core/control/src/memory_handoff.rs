@@ -60,6 +60,34 @@ impl ControlPlane {
         )
     }
 
+    /// Authorizes only an exact already-scoped parent and retained typed production root.
+    /// Current source preparation, stop/revoke and Review remain application-owned gates.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorize_revision_scoped_map_child(
+        &self,
+        map: &MapArtifactManifest,
+        parent: &MemoryArtifactManifest,
+        child: &MemoryArtifactManifest,
+        source: &ExecutionGroupId,
+        source_membership: &GroupMembershipVersion,
+        mission: &domain::MissionId,
+        tenant: &str,
+        principal: &str,
+    ) -> Result<(), ControlError> {
+        domain::validate_scoped_map_manifest(map, parent, source)
+            .map_err(ControlError::InvalidProposal)?;
+        self.authorize_revision_memory_source(
+            parent,
+            child,
+            Some(map),
+            source,
+            source_membership,
+            mission,
+            tenant,
+            principal,
+        )
+    }
+
     /// Shares exact original topology and child identity checks without weakening typed permission.
     #[allow(clippy::too_many_arguments)]
     fn authorize_revision_memory_source(
@@ -91,9 +119,13 @@ impl ControlPlane {
             || original.membership_version() != Some(source_membership)
             || self.mission_tenant(mission) != Some(tenant)
             || if let Some(map) = map {
-                domain::map_memory_manifest(map).map_err(ControlError::InvalidProposal)? != *parent
-                    || parent.scope() != &MemoryScope::Global
-                    || parent.kind() != domain::MemoryKind::Spatial
+                let projection =
+                    domain::map_memory_manifest(map).map_err(ControlError::InvalidProposal)?;
+                if parent.scope() == &MemoryScope::Global {
+                    projection != *parent
+                } else {
+                    domain::validate_scoped_map_manifest(map, parent, source).is_err()
+                }
             } else {
                 !matches!(parent.scope(), MemoryScope::ExecutionGroup(owner) if owner == source)
                     || parent.kind() == domain::MemoryKind::Spatial
@@ -123,6 +155,14 @@ impl ControlPlane {
                 principal,
                 MemoryAccessOperation::Handoff,
             )?;
+            if matches!(parent.scope(), MemoryScope::ExecutionGroup(_)) {
+                self.authorize_memory_principal(
+                    parent,
+                    tenant,
+                    principal,
+                    MemoryAccessOperation::Handoff,
+                )?;
+            }
         } else {
             self.authorize_memory_principal(
                 parent,
@@ -220,6 +260,84 @@ impl ControlPlane {
         {
             return Err(invalid(
                 "handoff child requires explicit generic target Import/Read policy; maps retain their original typed source",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Authorizes an actual consuming Group's next typed scope while retaining original production.
+    /// Application must additionally retain exact source preparation and complete stop/revoke proof.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorize_stopped_scoped_map_handoff(
+        &self,
+        map: &MapArtifactManifest,
+        parent: &MemoryArtifactManifest,
+        child: &MemoryArtifactManifest,
+        source: &ExecutionGroupId,
+        source_membership: &GroupMembershipVersion,
+        target_membership: &GroupMembershipVersion,
+        tenant: &str,
+        principal: &str,
+    ) -> Result<(), ControlError> {
+        let invalid = |text: &str| ControlError::InvalidProposal(text.into());
+        let root = domain::map_memory_manifest(map).map_err(ControlError::InvalidProposal)?;
+        if parent != &root {
+            domain::validate_scoped_map_manifest(map, parent, source)
+                .map_err(ControlError::InvalidProposal)?;
+        }
+        let MemoryScope::ExecutionGroup(target) = child.scope() else {
+            return Err(invalid(
+                "typed scope handoff requires its exact receiving Group",
+            ));
+        };
+        domain::validate_scoped_map_manifest(map, child, target)
+            .map_err(ControlError::InvalidProposal)?;
+        if source == target
+            || parent.selector() == child.selector()
+            || parent.created_at() > child.created_at()
+        {
+            return Err(invalid(
+                "typed scope handoff changed original source, target or time",
+            ));
+        }
+        for (id, expected) in [(source, source_membership), (target, target_membership)] {
+            let group = self
+                .group(id)
+                .ok_or_else(|| invalid("typed scope handoff Group is absent"))?;
+            if group.lifecycle() == GroupLifecycle::Released
+                || group.membership_version() != Some(expected)
+                || self.mission_tenant(group.mission_id()).unwrap_or("local") != tenant
+            {
+                return Err(invalid(
+                    "typed scope handoff current topology or tenant differs",
+                ));
+            }
+        }
+        self.authorize_typed_map_principal(map, tenant, principal, MemoryAccessOperation::Handoff)?;
+        if parent != &root {
+            self.authorize_memory_principal(
+                parent,
+                tenant,
+                principal,
+                MemoryAccessOperation::Handoff,
+            )?;
+        }
+        let registry = self
+            .memory_authorization_registry()
+            .ok_or_else(|| invalid("typed scope handoff policy is absent"))?;
+        let child_policy = registry
+            .policy(child, tenant)
+            .map_err(ControlError::InvalidProposal)?;
+        if child_policy.typed_map_manifest_digest.is_some()
+            || !child_policy.groups.iter().any(|grant| {
+                &grant.group_id == target
+                    && [MemoryAccessOperation::Read, MemoryAccessOperation::Import]
+                        .iter()
+                        .all(|operation| grant.operations.contains(operation))
+            })
+        {
+            return Err(invalid(
+                "typed scope handoff lacks explicit child Read/Import authority",
             ));
         }
         Ok(())

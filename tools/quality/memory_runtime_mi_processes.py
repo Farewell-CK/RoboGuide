@@ -139,7 +139,7 @@ def generate(
             scenario.start,
             view,
             "independent-file-reader",
-            "file-administrator",
+            scenario.administrator,
         )
         assert len(provider.calls) == 2
         for call in provider.calls:
@@ -159,7 +159,7 @@ def generate(
         reviewer = next(
             row for row in final["authority"]["candidates"] if row["ticket_id"] == ticket
         )["review"]
-        assert reviewer["principal"] == "file-administrator" and reviewer["memory_digest"]
+        assert reviewer["principal"] == scenario.administrator and reviewer["memory_digest"]
         save(scenario.directory / "runtime-mi-scoped-result.json", result)
         return result
     finally:

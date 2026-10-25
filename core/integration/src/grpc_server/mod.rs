@@ -1192,6 +1192,7 @@ async fn run_grpc_session(
         ));
     }
     let node_contract = [
+        crate::grpc::v0_4::SCOPED_MAP_NODE_CONTRACT_VERSION,
         crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION,
         SAFETY_NODE_CONTRACT_VERSION,
         crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION,
@@ -1470,14 +1471,14 @@ fn invocation_for_contract(
     mut invocation: crate::grpc::v0_4::CanonicalInvocation,
     node_contract_version: &str,
 ) -> Result<crate::grpc::v0_4::CanonicalInvocation, Status> {
-    if node_contract_version != crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+    if !crate::grpc::v0_4::supports_capacity(node_contract_version)
         && !invocation.resource_grants_json.is_empty()
     {
         return Err(Status::failed_precondition(
             "quantitative invocation cannot pass through a historical Node contract",
         ));
     }
-    if node_contract_version == crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION {
+    if crate::grpc::v0_4::supports_capacity(node_contract_version) {
         if invocation.resource_grants_json.len() > 131072 {
             return Err(Status::invalid_argument(
                 "resource grants exceed their bound",
@@ -1508,7 +1509,8 @@ fn invocation_for_contract(
         }
     }
     match node_contract_version {
-        crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+        crate::grpc::v0_4::SCOPED_MAP_NODE_CONTRACT_VERSION
+        | crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
         | SAFETY_NODE_CONTRACT_VERSION
         | MEMORY_USE_NODE_CONTRACT_VERSION
         | crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION

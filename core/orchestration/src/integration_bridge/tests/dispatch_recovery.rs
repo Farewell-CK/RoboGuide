@@ -39,6 +39,7 @@ fn memory_barrier_withholds_plain_peer_and_preserves_other_group_outbox() {
                     kind: domain::MemoryKind::Artifact,
                     payload_schema: "unit.bytes/v1".into(),
                     media_type: "application/octet-stream".into(),
+                    source_contract: None,
                 }])
                 .unwrap();
         }

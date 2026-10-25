@@ -32,6 +32,8 @@ def run(directory: Path) -> dict[str, Any]:
         "v0.2": "mission/runtime-plan-revision-v0.2/command.schema.json",
         "v0.3": "mission/runtime-plan-revision-v0.3/command.schema.json",
         "v0.4": "mission/runtime-plan-revision-v0.4/command.schema.json",
+        "v0.5": "mission/runtime-plan-revision-v0.5/command.schema.json",
+        "roboguide.mission-plan/v0.11": "mission/v0.11/mission-plan.schema.json",
         "plan": "mission/v0.9/mission-plan.schema.json",
     }.items():
         path = ROOT / "contracts" / relative
@@ -51,7 +53,12 @@ def run(directory: Path) -> dict[str, Any]:
             declared = command
     assert declared is not None
     for name in ("handoff-source-mission.json", "revision-candidate.json"):
-        validators["plan"].validate(json.loads((directory / name).read_bytes()))
+        plan = json.loads((directory / name).read_bytes())
+        validators[
+            plan["schema_version"]
+            if plan["schema_version"] == "roboguide.mission-plan/v0.11"
+            else "plan"
+        ].validate(plan)
     rejected = []
     for name, value in (
         ("schema_version", "roboguide.runtime-plan-revision/v0.2"),
@@ -70,7 +77,9 @@ def run(directory: Path) -> dict[str, Any]:
             "child",
             {
                 **declared["action"]["authorization"]["child"],
-                "kind": "artifact" if declared["schema_version"].endswith("v0.4") else "spatial",
+                "kind": "artifact"
+                if declared["schema_version"].endswith(("v0.4", "v0.5"))
+                else "spatial",
             },
         ),
         ("child", {**declared["action"]["authorization"]["child"], "visibility": "discoverable"}),
@@ -80,10 +89,10 @@ def run(directory: Path) -> dict[str, Any]:
         changed["action"]["authorization"][field] = value
         assert list(validators[declared["schema_version"].rsplit("/", 1)[1]].iter_errors(changed))
         rejected.append(field)
-    if declared["schema_version"].endswith("v0.4"):
+    if declared["schema_version"].endswith(("v0.4", "v0.5")):
         missing = copy.deepcopy(declared)
         del missing["action"]["authorization"]["typed_map"]
-        assert list(validators["v0.4"].iter_errors(missing))
+        assert list(validators[declared["schema_version"].rsplit("/", 1)[1]].iter_errors(missing))
         rejected.append("missing-complete-typed-map")
     result = {
         "passed": True,

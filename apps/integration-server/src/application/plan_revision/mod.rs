@@ -10,6 +10,7 @@ mod discovery;
 mod generation;
 mod goal;
 mod memory;
+pub(crate) use memory::typed_publication_edges;
 mod switching;
 #[cfg(test)]
 mod tests;
@@ -25,6 +26,8 @@ const GENERATION_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.2";
 const MEMORY_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.3";
 /// Complete typed-map source permission; generic v0.3 never acquires it through a projection.
 const TYPED_MEMORY_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.4";
+/// Preserves a published scoped parent's original typed root under an independent new Group.
+const SCOPED_MEMORY_SCHEMA: &str = "roboguide.runtime-plan-revision/v0.5";
 /// Candidate and command storage bounds are independent of prospective Mission admission.
 const MAX_CANDIDATES: usize = 16;
 /// Immutable command receipts cannot grow without a deployment bound.
@@ -389,7 +392,7 @@ impl RevisionState {
         self.commands.values().any(|receipt| {
             matches!(
                 receipt.result["schema_version"].as_str(),
-                Some(MEMORY_SCHEMA | TYPED_MEMORY_SCHEMA)
+                Some(MEMORY_SCHEMA | TYPED_MEMORY_SCHEMA | SCOPED_MEMORY_SCHEMA)
             )
         }) || self.candidates.values().any(|candidate| {
             !candidate.memory.is_empty()
@@ -402,14 +405,29 @@ impl RevisionState {
 
     /// Fences complete typed source declarations, including zero-event administrative receipts.
     pub(crate) fn uses_typed_revision_memory_authority(&self) -> bool {
+        self.commands.values().any(|receipt| {
+            matches!(
+                receipt.result["schema_version"].as_str(),
+                Some(TYPED_MEMORY_SCHEMA | SCOPED_MEMORY_SCHEMA)
+            )
+        }) || self.candidates.values().any(|candidate| {
+            candidate
+                .memory
+                .values()
+                .any(|record| record.uses_typed_map())
+        })
+    }
+
+    /// Refuses scoped typed declarations hidden inside an older Controller writer generation.
+    pub(crate) fn uses_scoped_revision_memory_authority(&self) -> bool {
         self.commands
             .values()
-            .any(|receipt| receipt.result["schema_version"].as_str() == Some(TYPED_MEMORY_SCHEMA))
+            .any(|receipt| receipt.result["schema_version"].as_str() == Some(SCOPED_MEMORY_SCHEMA))
             || self.candidates.values().any(|candidate| {
                 candidate
                     .memory
                     .values()
-                    .any(|record| record.uses_typed_map())
+                    .any(|record| record.schema() == SCOPED_MEMORY_SCHEMA)
             })
     }
 
@@ -569,5 +587,8 @@ pub(crate) use admission::{candidate_view, submit, view};
 pub(crate) use checkpoint::{attach_deployment, deserialize_states, validate_restored};
 pub(crate) use goal::apply_pending as apply_goal_pending;
 pub(crate) use goal::{observe_goal_ingress, submit_goal};
-pub(crate) use memory::{catalog_retirement_evidence, install_catalog, permits_parent_reference};
+pub(crate) use memory::{
+    catalog_retirement_evidence, install_catalog, permits_parent_reference,
+    requires_scoped_preparation, scoped_typed_source,
+};
 pub(crate) use switching::{blocks_mission, close_terminal, observe_trigger, tick};

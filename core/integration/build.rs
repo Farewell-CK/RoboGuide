@@ -4,7 +4,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
         "../../contracts/node/v0.2/roboguide-node.proto",
         "../../contracts/node/v0.6/roboguide-node.proto",
-        "../../contracts/node/v0.16/roboguide-node.proto",
+        "../../contracts/node/v0.17/roboguide-node.proto",
     ];
     for proto in protos {
         println!("cargo:rerun-if-changed={proto}");

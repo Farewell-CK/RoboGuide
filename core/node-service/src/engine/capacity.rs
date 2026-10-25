@@ -16,8 +16,7 @@ pub(super) fn invocation_grants(
         .unwrap_or_default();
     if grants.len() > 64
         || !grants.is_empty()
-            && catalog.node_contract_version()
-                != integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            && !integration::grpc::v0_4::supports_capacity(catalog.node_contract_version())
     {
         return Err(EngineError::Protocol(
             "quantitative grants exceed the negotiated Node contract".into(),

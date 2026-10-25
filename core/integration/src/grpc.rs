@@ -47,11 +47,29 @@ pub mod v0_4 {
     /// Explicit quantitative execution grants beside the unchanged original safety and Memory contracts.
     pub const CAPACITY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.13";
 
+    /// Contract negotiating scoped typed-map roots without relabelling legacy preparation.
+    pub const SCOPED_MAP_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.14";
+
+    /// Checks quantitative invocation support across the explicitly supported later contracts.
+    pub fn supports_capacity(version: &str) -> bool {
+        matches!(
+            version,
+            CAPACITY_NODE_CONTRACT_VERSION | SCOPED_MAP_NODE_CONTRACT_VERSION
+        )
+    }
+
+    /// Checks only the exact contract which can admit a scoped typed-map context.
+    pub fn supports_scoped_maps(version: &str) -> bool {
+        version == SCOPED_MAP_NODE_CONTRACT_VERSION
+    }
+
     /// Checks original-attempt safety semantics without relabeling older contracts.
     pub fn supports_safety(version: &str) -> bool {
         matches!(
             version,
-            SAFETY_NODE_CONTRACT_VERSION | CAPACITY_NODE_CONTRACT_VERSION
+            SAFETY_NODE_CONTRACT_VERSION
+                | CAPACITY_NODE_CONTRACT_VERSION
+                | SCOPED_MAP_NODE_CONTRACT_VERSION
         )
     }
 
@@ -62,6 +80,7 @@ pub mod v0_4 {
             MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
                 | SAFETY_NODE_CONTRACT_VERSION
                 | CAPACITY_NODE_CONTRACT_VERSION
+                | SCOPED_MAP_NODE_CONTRACT_VERSION
         )
     }
 
@@ -73,6 +92,7 @@ pub mod v0_4 {
                 | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
                 | SAFETY_NODE_CONTRACT_VERSION
                 | CAPACITY_NODE_CONTRACT_VERSION
+                | SCOPED_MAP_NODE_CONTRACT_VERSION
         )
     }
 
@@ -85,6 +105,7 @@ pub mod v0_4 {
                 | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
                 | SAFETY_NODE_CONTRACT_VERSION
                 | CAPACITY_NODE_CONTRACT_VERSION
+                | SCOPED_MAP_NODE_CONTRACT_VERSION
         )
     }
 
@@ -99,6 +120,7 @@ pub mod v0_4 {
                 | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
                 | SAFETY_NODE_CONTRACT_VERSION
                 | CAPACITY_NODE_CONTRACT_VERSION
+                | SCOPED_MAP_NODE_CONTRACT_VERSION
         )
     }
     /// Prior profile-and-intent contract retained for explicit session compatibility.

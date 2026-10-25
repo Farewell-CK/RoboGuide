@@ -64,13 +64,14 @@ pub use local_engine::{
     CONFIG_SCHEMA_V0_2, CONFIG_SCHEMA_V0_3, CONFIG_SCHEMA_V0_4, CONFIG_SCHEMA_V0_5,
     CONFIG_SCHEMA_V0_6, CONFIG_SCHEMA_V0_7, CONFIG_SCHEMA_V0_8, CONFIG_SCHEMA_V0_9,
     CONFIG_SCHEMA_V0_10, CONFIG_SCHEMA_V0_11, CONFIG_SCHEMA_V0_12, CONFIG_SCHEMA_V0_13,
-    CONFIG_SCHEMA_V0_14, CapabilityReadinessFact, CatalogError, CompiledArtifactService,
-    CompiledCapability, CompiledCapabilityProfile, CompiledCapabilityReadiness, CompiledConnection,
-    CompiledHealthCheck, CompiledLocalCatalog, CompiledLocalSystem, CompiledMemoryAvailability,
-    CompiledMemoryContinuity, CompiledMemoryProvider, CompiledMemoryUse, CompiledMemoryWorkflow,
-    CompiledOperation, CompiledPeerChannelObserver, CompiledResource, CompiledSensor,
-    CompiledStateExport, CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact, LocalHealthState,
-    MappedExecutionFact, MappedExecutionPhase, PeerChannelReadinessFact, StateExportFact,
+    CONFIG_SCHEMA_V0_14, CONFIG_SCHEMA_V0_15, CapabilityReadinessFact, CatalogError,
+    CompiledArtifactService, CompiledCapability, CompiledCapabilityProfile,
+    CompiledCapabilityReadiness, CompiledConnection, CompiledHealthCheck, CompiledLocalCatalog,
+    CompiledLocalSystem, CompiledMemoryAvailability, CompiledMemoryContinuity,
+    CompiledMemoryProvider, CompiledMemoryUse, CompiledMemoryWorkflow, CompiledOperation,
+    CompiledPeerChannelObserver, CompiledResource, CompiledSensor, CompiledStateExport,
+    CompiledWorkflow, CompiledWorkflowStep, LocalHealthFact, LocalHealthState, MappedExecutionFact,
+    MappedExecutionPhase, PeerChannelReadinessFact, StateExportFact,
 };
 pub use memory::{FilesystemMemoryLedger, LocalMemoryLedger, MemoryLedgerError, MemoryQuery};
 pub use service::{NodeService, NodeServiceError};

@@ -15,6 +15,7 @@ from typing import Any
 
 from check_state_verifier_processes import ROOT, ComputeServer, address, request, save, wait_for
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+from recovery_profile_selection import standalone_schema
 
 RESOURCE_CLASS = "software.process-slots/v1"
 
@@ -77,7 +78,10 @@ class QuantitativeCheck:
             schema, raw = connection.execute(
                 "SELECT schema,checkpoint_json FROM controller_checkpoint WHERE singleton=1"
             ).fetchone()
-        if schema != "roboguide.controller-checkpoint/v56":
+        if schema not in {
+            "roboguide.controller-checkpoint/v56",
+            "roboguide.controller-checkpoint/v57",
+        }:
             raise ValueError("actual quantitative gate requires the original v56 full checkpoint")
         wrapper = json.loads(raw)
         return dict(json.loads(wrapper["integration_json"])["control"])
@@ -146,7 +150,7 @@ class QuantitativeCheck:
             marker = connection.execute(
                 "SELECT version FROM node_journal_storage_schema"
             ).fetchone()
-        assert marker == (14,)
+        assert marker in {(14,), (15,)}
         current = {identity: (raw, handle, status) for identity, raw, handle, status in rows}
         return len(current) == 2 and all(
             identity in current
@@ -181,7 +185,7 @@ class QuantitativeCheck:
         output = self.directory.with_name(self.directory.name + "-recovery")
         output.mkdir(mode=0o700)
         profile: dict[str, Any] = {
-            "schema": "roboguide.recovery-profile/v0.24",
+            "schema": standalone_schema(self.directory / "controller.sqlite3"),
             "profile_id": "original-quantitative-file-process-stores",
             "revision": 1,
             "max_bytes": 1024 * 1024 * 1024,
@@ -277,7 +281,7 @@ class QuantitativeCheck:
         )
         receipt = command(*restore_arguments)
         save(output / "restore-receipt.json", receipt)
-        assert receipt["schema"] == "roboguide.restore-receipt/v0.24"
+        assert receipt["schema"] == profile["schema"].replace("recovery-profile", "restore-receipt")
         assert command(*backup_arguments) == created
         assert command(*restore_arguments) == receipt
         roots = {item["component_id"]: Path(item["root"]) for item in receipt["components"]}
@@ -285,7 +289,10 @@ class QuantitativeCheck:
             schema, raw = connection.execute(
                 "SELECT schema,checkpoint_json FROM controller_checkpoint WHERE singleton=1"
             ).fetchone()
-        assert schema == "roboguide.controller-checkpoint/v56"
+        assert schema in {
+            "roboguide.controller-checkpoint/v56",
+            "roboguide.controller-checkpoint/v57",
+        }
         control = json.loads(json.loads(raw)["integration_json"])["control"]
         assert control["capacity_ledger"] == self.original
         assert control["quota_ledger"]["claims"] == self.original_claims
@@ -295,7 +302,7 @@ class QuantitativeCheck:
             with closing(sqlite3.connect(path)) as connection:
                 assert connection.execute(
                     "SELECT version FROM node_journal_storage_schema"
-                ).fetchone() == (14,)
+                ).fetchone() in {(14,), (15,)}
                 rows = connection.execute(
                     "SELECT invocation_content,local_handle FROM execution_authority_v7"
                 ).fetchall()

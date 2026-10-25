@@ -343,6 +343,9 @@ pub struct MissionPlan {
     /// Retains explicit quantitative admission even when declarations are empty.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     declared_capacity_contract: bool,
+    /// Retains explicit semantic scoped-map admission even when its first input set is empty.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    declared_scoped_memory_contract: bool,
 }
 
 impl MissionPlan {
@@ -546,6 +549,7 @@ impl MissionPlan {
             declared_binding_contract,
             declared_memory_contract: false,
             declared_capacity_contract: false,
+            declared_scoped_memory_contract: false,
         })
     }
 
@@ -570,11 +574,29 @@ impl MissionPlan {
         self
     }
 
+    /// Retains explicit scoped typed-map semantics without selecting a receiver or backend.
+    pub fn with_v0_11_contract(mut self) -> Self {
+        self = self.with_v0_10_contract();
+        self.declared_scoped_memory_contract = true;
+        self
+    }
+
     /// Returns the minimum wire schema able to represent this domain shape.
     ///
     /// Retains an admitted v0.8 version even when optional binding semantics are empty.
     /// Legacy plans without them remain serializable as v0.7.
     pub fn schema_version(&self) -> &'static str {
+        if self.declared_scoped_memory_contract
+            || self
+                .task_graph
+                .tasks()
+                .iter()
+                .flat_map(|task| task.requirement().roles())
+                .flat_map(|role| role.memories())
+                .any(|requirement| requirement.source_contract.is_some())
+        {
+            return MISSION_PLAN_SCHEMA_V0_11;
+        }
         if self.declared_capacity_contract
             || self
                 .contexts

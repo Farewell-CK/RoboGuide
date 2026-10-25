@@ -15,6 +15,7 @@ from mission.contract_values import (
     MISSION_PLAN_ACTOR_VERSION,
     MISSION_PLAN_CAPACITY_VERSION,
     MISSION_PLAN_MEMORY_VERSION,
+    MISSION_PLAN_SCOPED_MEMORY_VERSION,
     MISSION_PLAN_VERSION,
     JSONObject,
     JSONValue,
@@ -34,11 +35,12 @@ def _canonical_provider_version(schema: JSONObject) -> str:
         MISSION_PLAN_VERSION,
         MISSION_PLAN_MEMORY_VERSION,
         MISSION_PLAN_CAPACITY_VERSION,
+        MISSION_PLAN_SCOPED_MEMORY_VERSION,
     ):
         raise ProviderMissionPlanError(
             "provider MissionPlan adapter requires "
             f"{MISSION_PLAN_VERSION}, explicit {MISSION_PLAN_MEMORY_VERSION} "
-            f"or {MISSION_PLAN_CAPACITY_VERSION}"
+            f"or {MISSION_PLAN_CAPACITY_VERSION, MISSION_PLAN_SCOPED_MEMORY_VERSION}"
         )
     return selected
 

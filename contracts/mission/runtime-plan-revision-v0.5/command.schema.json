@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.dev/contracts/mission/runtime-plan-revision-v0.5/command.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.runtime-plan-revision/v0.5"
+    },
+    "command_id": {
+      "$ref": "https://roboguide.dev/contracts/mission/runtime-plan-revision-v0.2/command.schema.json#/properties/command_id"
+    },
+    "expected_revision": {
+      "$ref": "https://roboguide.dev/contracts/mission/runtime-plan-revision-v0.2/command.schema.json#/properties/expected_revision"
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "authorize-memory"
+        },
+        "ticket_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "authorization": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "parent_selector": {
+              "$ref": "https://roboguide.local/contracts/memory/handoff-v0.1/request.schema.json#/$defs/selector"
+            },
+            "target_group_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "child": {
+              "allOf": [
+                {
+                  "$ref": "https://roboguide.local/contracts/memory/preparation-v0.2/preparation.schema.json#/$defs/manifest"
+                },
+                {
+                  "properties": {
+                    "scope": {
+                      "properties": {
+                        "kind": {
+                          "const": "execution_group"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "execution_group_id"
+                      ]
+                    },
+                    "kind": {
+                      "const": "spatial"
+                    },
+                    "visibility": {
+                      "const": "exchangeable"
+                    }
+                  }
+                }
+              ]
+            },
+            "registry_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "registry_revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "typed_map": {
+              "$ref": "https://roboguide.local/contracts/spatial/v0.2/map-manifest.schema.json"
+            }
+          },
+          "required": [
+            "parent_selector",
+            "target_group_id",
+            "child",
+            "registry_id",
+            "registry_revision",
+            "typed_map"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "ticket_id",
+        "authorization"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "command_id",
+    "expected_revision",
+    "action"
+  ]
+}

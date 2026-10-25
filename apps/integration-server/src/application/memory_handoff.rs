@@ -97,6 +97,65 @@ struct HandoffReceiverProof {
     use_record: super::memory_use::MemoryUseRecord,
 }
 
+/// Retains the explicit new target meaning independently of a caller's later plan encoding.
+pub(crate) fn requires_scoped_preparation(
+    controller: &ControllerState,
+    manifest: &MemoryArtifactManifest,
+) -> bool {
+    controller.memory_handoffs.values().any(|record| {
+        record.request.child == *manifest
+            && record.request.schema_version == "roboguide.memory-handoff/v0.3"
+            && record.published_at_ms.is_some()
+    })
+}
+
+/// Exports complete retained publication edges for immutable startup lineage validation only.
+pub(crate) fn typed_publication_edges(
+    controller: &ControllerState,
+) -> Vec<super::scoped_maps::PublicationEdge> {
+    controller
+        .memory_handoffs
+        .values()
+        .filter(|record| record.published_at_ms.is_some())
+        .filter_map(|record| {
+            record
+                .request
+                .typed_map
+                .as_ref()
+                .map(|map| super::scoped_maps::PublicationEdge {
+                    child: record.request.child.clone(),
+                    parent: record.parent.clone(),
+                    root: map.clone(),
+                })
+        })
+        .collect()
+}
+
+/// Recovers only the original typed root of an exact actually published receiving child.
+pub(crate) fn scoped_typed_source(
+    controller: &ControllerState,
+    manifest: &MemoryArtifactManifest,
+) -> Result<Option<MapArtifactManifest>, String> {
+    let mut original = None;
+    for record in controller.memory_handoffs.values().filter(|record| {
+        record.request.child == *manifest
+            && record.published_at_ms.is_some()
+            && matches!(
+                record.phase,
+                HandoffPhase::Importing | HandoffPhase::Ready | HandoffPhase::Committed
+            )
+    }) {
+        if let Some(map) = &record.request.typed_map {
+            domain::validate_scoped_map_manifest(map, manifest, target(record))?;
+            if original.as_ref().is_some_and(|previous| previous != map) {
+                return Err("handoff child has conflicting retained typed roots".into());
+            }
+            original = Some(map.clone());
+        }
+    }
+    Ok(original)
+}
+
 /// Retains both original endpoints until the existing handoff has its actual committed receiver proof.
 pub(crate) fn holds_catalog(
     controller: &ControllerState,
@@ -203,6 +262,86 @@ fn current(
     authority_current(controller, record)
 }
 
+/// Checks exact typed source/target authority while preserving the historical producer-only profile.
+fn authorize_typed_request(
+    controller: &ControllerState,
+    map: &MapArtifactManifest,
+    parent: &MemoryArtifactManifest,
+    request: &HandoffRequest,
+    tenant: &str,
+    principal: &str,
+) -> Result<(), String> {
+    if request.schema_version == "roboguide.memory-handoff/v0.3" {
+        super::scoped_maps::validate_source_reference(
+            controller,
+            map,
+            parent,
+            &request.source_group_id,
+            Some(&request.source_execution_ids),
+        )?;
+        let domain::MemoryScope::ExecutionGroup(target) = request.child.scope() else {
+            return Err("typed scope handoff lacks its exact target".into());
+        };
+        let group = controller
+            .bridge
+            .control()
+            .group(target)
+            .ok_or("typed scope target Group is absent")?;
+        let execution = controller
+            .orchestrator
+            .execution(group.mission_id())
+            .ok_or("typed scope target Mission is absent")?;
+        let mut uses_child = false;
+        for requirement in execution
+            .plan()
+            .task_graph()
+            .tasks()
+            .iter()
+            .flat_map(|task| task.requirement().roles())
+            .flat_map(|role| role.memories())
+            .filter(|requirement| requirement.selector == *request.child.selector())
+        {
+            uses_child = true;
+            if !requirement.requires_scoped_typed_map()
+                || !requirement.matches_manifest(&request.child)
+            {
+                return Err("typed scope target must retain the explicit semantic source contract in every Task".into());
+            }
+        }
+        if !uses_child {
+            return Err("typed scope target plan does not require its original child".into());
+        }
+        controller
+            .bridge
+            .control()
+            .authorize_stopped_scoped_map_handoff(
+                map,
+                parent,
+                &request.child,
+                &request.source_group_id,
+                &request.source_membership,
+                &request.target_membership,
+                tenant,
+                principal,
+            )
+            .map_err(|error| error.to_string())
+    } else {
+        controller
+            .bridge
+            .control()
+            .authorize_stopped_typed_map_handoff(
+                map,
+                &request.child,
+                &request.source_group_id,
+                &request.source_membership,
+                &request.target_membership,
+                tenant,
+                principal,
+            )
+            .map_err(|error| error.to_string())
+    }
+}
+
 /// Rechecks exact retained authority independently of the caller's separately enforced time budget.
 fn authority_current(controller: &ControllerState, record: &HandoffRecord) -> Result<(), String> {
     let registry = controller
@@ -216,19 +355,14 @@ fn authority_current(controller: &ControllerState, record: &HandoffRecord) -> Re
         return Err("original handoff policy revision changed".into());
     }
     if let Some(map) = &record.request.typed_map {
-        controller
-            .bridge
-            .control()
-            .authorize_stopped_typed_map_handoff(
-                map,
-                &record.request.child,
-                &record.request.source_group_id,
-                &record.request.source_membership,
-                &record.request.target_membership,
-                &record.tenant_id,
-                &record.principal,
-            )
-            .map_err(|error| error.to_string())?;
+        authorize_typed_request(
+            controller,
+            map,
+            &record.parent,
+            &record.request,
+            &record.tenant_id,
+            &record.principal,
+        )?;
     } else {
         controller
             .bridge
@@ -412,8 +546,15 @@ pub(crate) fn admit(
     };
     if !matches!(
         request.schema_version.as_str(),
-        "roboguide.memory-handoff/v0.1" | "roboguide.memory-handoff/v0.2"
-    ) || request.typed_map.is_some() && request.schema_version != "roboguide.memory-handoff/v0.2"
+        "roboguide.memory-handoff/v0.1"
+            | "roboguide.memory-handoff/v0.2"
+            | "roboguide.memory-handoff/v0.3"
+    ) || request.typed_map.is_some()
+        && !matches!(
+            request.schema_version.as_str(),
+            "roboguide.memory-handoff/v0.2" | "roboguide.memory-handoff/v0.3"
+        )
+        || request.schema_version == "roboguide.memory-handoff/v0.3" && request.typed_map.is_none()
         || request.handoff_id.is_empty()
         || request.handoff_id.len() > 128
         || !request
@@ -442,9 +583,14 @@ pub(crate) fn admit(
         .catalog
         .as_ref()
         .ok_or("Memory federation unavailable")?;
-    let (parent, map) = catalog
+    let (parent, catalog_map) = catalog
         .memory_source(&request.parent_selector)?
         .ok_or("published original handoff source unavailable")?;
+    let map = if request.schema_version == "roboguide.memory-handoff/v0.3" {
+        super::scoped_maps::original_typed_source(controller, &parent, catalog_map)?
+    } else {
+        catalog_map
+    };
     match (map, request.typed_map.as_ref()) {
         (Some(original), Some(provided)) if original == *provided => {}
         (None, None) if parent.kind() != domain::MemoryKind::Spatial => {}
@@ -472,19 +618,7 @@ pub(crate) fn admit(
         return Err("handoff belongs to another tenant".into());
     }
     if let Some(map) = &request.typed_map {
-        controller
-            .bridge
-            .control()
-            .authorize_stopped_typed_map_handoff(
-                map,
-                &request.child,
-                &request.source_group_id,
-                &request.source_membership,
-                &request.target_membership,
-                &tenant_id,
-                principal,
-            )
-            .map_err(|error| error.to_string())?;
+        authorize_typed_request(controller, map, &parent, &request, &tenant_id, principal)?;
     } else {
         controller
             .bridge
@@ -514,6 +648,26 @@ pub(crate) fn admit(
             .ok_or("handoff target has already received Execute")?;
         if intent.command.memory_requirements().is_empty() {
             return Err("handoff target attempts must have explicit Memory prerequisites".into());
+        }
+        if request.schema_version == "roboguide.memory-handoff/v0.3"
+            && intent
+                .command
+                .memory_requirements()
+                .iter()
+                .any(domain::MemoryRequirement::requires_scoped_typed_map)
+        {
+            for requirement in intent.command.memory_requirements() {
+                controller
+                    .bridge
+                    .select_memory_provider_for_preparation(
+                        intent.command.node_id(),
+                        requirement,
+                        intent.command.intent().operation(),
+                        now,
+                        true,
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
         }
         uses_child |= intent.command.memory_requirements().iter().any(|input| {
             input.selector == *request.child.selector() && input.matches_manifest(&request.child)
@@ -1032,8 +1186,18 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         if normalized_child != original_parent
             || record.parent.selector() != &record.request.parent_selector
             || record.parent.selector() == record.request.child.selector()
-            || if record.request.typed_map.is_some() {
-                record.parent.scope() != &domain::MemoryScope::Global
+            || if let Some(map) = &record.request.typed_map {
+                if record.request.schema_version == "roboguide.memory-handoff/v0.3" {
+                    record.parent != domain::map_memory_manifest(map)?
+                        && domain::validate_scoped_map_manifest(
+                            map,
+                            &record.parent,
+                            &record.request.source_group_id,
+                        )
+                        .is_err()
+                } else {
+                    record.parent.scope() != &domain::MemoryScope::Global
+                }
             } else {
                 !matches!(record.parent.scope(),domain::MemoryScope::ExecutionGroup(group) if group==&record.request.source_group_id)
             }
@@ -1048,10 +1212,17 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         if id != &record.request.handoff_id
             || !matches!(
                 record.request.schema_version.as_str(),
-                "roboguide.memory-handoff/v0.1" | "roboguide.memory-handoff/v0.2"
+                "roboguide.memory-handoff/v0.1"
+                    | "roboguide.memory-handoff/v0.2"
+                    | "roboguide.memory-handoff/v0.3"
             )
             || record.request.typed_map.is_some()
-                && record.request.schema_version != "roboguide.memory-handoff/v0.2"
+                && !matches!(
+                    record.request.schema_version.as_str(),
+                    "roboguide.memory-handoff/v0.2" | "roboguide.memory-handoff/v0.3"
+                )
+            || record.request.schema_version == "roboguide.memory-handoff/v0.3"
+                && record.request.typed_map.is_none()
             || record.admitted_at_ms >= record.request.deadline_ms
             || record.request.deadline_ms - record.admitted_at_ms > 300_000
             || record.target_execution_ids.is_empty()
@@ -1144,18 +1315,24 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
             return Err("handoff original registry changed".into());
         }
         let source_handoff = if let Some(map) = &record.request.typed_map {
-            if domain::map_memory_manifest(map).map_err(|e| e.to_string())? != record.parent {
-                return Err("restored typed-map handoff projection changed".into());
-            }
-            if map.source_mission_id()
-                != &control
-                    .group(&record.request.source_group_id)
-                    .ok_or("restored handoff source Group absent")?
-                    .mission_id()
-                    .clone()
-                || record.parent.source_mission_id() != record.request.child.source_mission_id()
-            {
-                return Err("restored typed-map handoff source Mission changed".into());
+            if record.request.schema_version == "roboguide.memory-handoff/v0.3" {
+                super::scoped_maps::validate_historical_source_reference(
+                    controller,
+                    map,
+                    &record.parent,
+                    &record.request.source_group_id,
+                    Some(&record.request.source_execution_ids),
+                )?;
+            } else {
+                if domain::map_memory_manifest(map)? != record.parent
+                    || map.source_mission_id()
+                        != control
+                            .group(&record.request.source_group_id)
+                            .ok_or("restored handoff source Group absent")?
+                            .mission_id()
+                {
+                    return Err("restored original typed-map handoff source changed".into());
+                }
             }
             original
                 .typed_map_policy(map, &record.tenant_id)?
@@ -1165,7 +1342,9 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         } else {
             true
         };
-        let parent_policy = if record.request.typed_map.is_some() {
+        let parent_policy = if record.request.typed_map.is_some()
+            && record.parent.scope() == &domain::MemoryScope::Global
+        {
             None
         } else {
             Some(original.policy(&record.parent, &record.tenant_id)?)

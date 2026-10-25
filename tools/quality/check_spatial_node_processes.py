@@ -47,6 +47,7 @@ def checker_identity() -> dict[str, str]:
         "check_memory_processes.py",
         "check_spatial_upgrade_gates.py",
         "spatial_revision_processes.py",
+        "spatial_scoped_lifecycle.py",
         "memory_revision_processes.py",
         "memory_group_lifecycle.py",
         "memory_handoff_processes.py",
@@ -298,6 +299,8 @@ def run(
             "OPENBLAS_NUM_THREADS": "2",
         }
     )
+    if typed_revision in {"scoped-lifecycle", "scoped-lifecycle-mi"}:
+        environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = "roboguide.artifact-storage/v3"
     contexts, node_leaf = (
         configure_tls(output, node, profile["map_id"], environment) if mtls else ({}, "")
     )
@@ -322,6 +325,7 @@ def run(
             environment,
             profile,
             process_workers=typed_revision is not None,
+            scoped_typed_maps=typed_revision in {"scoped-lifecycle", "scoped-lifecycle-mi"},
         )
         if memory_consumer
         else None
@@ -859,6 +863,8 @@ def main() -> None:
             "revision-restart",
             "revision-policy",
             "revision-expiry",
+            "scoped-lifecycle",
+            "scoped-lifecycle-mi",
         ),
     )
     parser.add_argument("--old-controller", type=Path)

@@ -1,5 +1,12 @@
 # RoboGuide V2 current architecture
 
+[ADR-0208](../../decisions/0208-scoped-typed-map-lifecycle.md) defines the pending scoped typed-map
+lifecycle work. Original map production, current consuming Group and each new preparation remain
+separate authorities. Handoff/revision cannot relabel the consuming Mission as the producer.
+The new scope/current-use interpretation requires explicit negotiation. Complete handoff, revision,
+automatic MI, independent original goals, recovery and reclamation pass
+[actual software process acceptance](../../development/acceptance/2026-10-25-scoped-typed-map-lifecycle.md); the other stages remain required.
+
 [ADR-0207](../../decisions/0207-explicit-application-generation-upgrade.md) separates the immutable
 original Replica profile from active application writer authority. A finite reader window grants
 no newer write permission. Actual all-member support, original child wait and durable activation

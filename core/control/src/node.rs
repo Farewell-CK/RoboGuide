@@ -511,7 +511,9 @@ impl ControlPlane {
                 ));
             }
             if resource.allocation_mode() == domain::ResourceAllocationMode::Divisible
-                && (registration.contract_version().as_str() != domain::NODE_CONTRACT_VERSION_V0_13
+                && (!registration
+                    .contract_version()
+                    .supports_quantitative_resources()
                     || resource.kind() != domain::ResourceKind::Compute
                     || resource.resource_class().is_none())
             {

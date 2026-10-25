@@ -21,7 +21,23 @@ AUTHORITY = "application_upgrade_authority_v1"
 OPERATIONS = "application_upgrade_operations_v1"
 BASE = "application_upgrade_base_parent_v1"
 ORIGINAL_POLICY = "application_upgrade_original_policy_v1"
-SCHEMAS = {f"roboguide.controller-checkpoint/v{version}" for version in range(53, 57)}
+SCHEMAS = {f"roboguide.controller-checkpoint/v{version}" for version in range(53, 58)}
+
+
+def _requires_scoped_profile(value: Any) -> bool:
+    """Keep new application identities out of the original v0.25 recovery interpretation."""
+    if isinstance(value, dict):
+        return any(
+            (
+                key in {"application_schema", "from_schema"}
+                and item == "roboguide.controller-checkpoint/v57"
+            )
+            or _requires_scoped_profile(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(_requires_scoped_profile(item) for item in value)
+    return False
 
 
 def _closed(value: Any, fields: set[str]) -> dict[str, Any]:
@@ -225,11 +241,26 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
             raise ValueError("application upgrade parent lost its mandatory original metadata")
         return
     metadata = dict(connection.execute("SELECT key,value FROM replica_v1_meta"))
+    original_identity = json.loads(metadata.get("identity", "null"))
+    if profile_schema != "roboguide.recovery-profile/v0.26" and (
+        isinstance(original_identity, list)
+        and len(original_identity) == 2
+        and original_identity[1] == "roboguide.controller-checkpoint/v57"
+        or any(
+            _requires_scoped_profile(json.loads(metadata[key]))
+            for key in (AUTHORITY, OPERATIONS)
+            if key in metadata
+        )
+    ):
+        raise ValueError("scoped application generation requires explicit recovery v0.26")
     if version != 10:
         if {AUTHORITY, OPERATIONS, BASE} & metadata.keys():
             raise ValueError("old parent contains hidden application upgrade authority")
         return
-    if profile_schema != PROFILE or not {AUTHORITY, OPERATIONS, BASE} <= metadata.keys():
+    if (
+        profile_schema not in {PROFILE, "roboguide.recovery-profile/v0.26"}
+        or not {AUTHORITY, OPERATIONS, BASE} <= metadata.keys()
+    ):
         raise ValueError("application upgrade parent10 requires complete explicit recovery v0.25")
     original = json.loads(metadata["identity"])
     if not isinstance(original, list) or len(original) != 2 or original[1] not in SCHEMAS:

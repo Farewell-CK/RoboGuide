@@ -10,6 +10,14 @@ use std::collections::BTreeSet;
 /// Maximum non-renewable preparation/import/first-use admission window.
 pub const MEMORY_PREPARATION_MAX_BUDGET_MS: u64 = 120_000;
 
+/// Semantic source meaning requested by a plan independently of Node/backend selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemorySourceContract {
+    /// An exact scoped child must retain its complete immutable original typed map.
+    ScopedTypedMap,
+}
+
 /// Accepted-plan Memory requirement; it never contains a consumer Node or provider selector.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,6 +30,9 @@ pub struct MemoryRequirement {
     pub payload_schema: String,
     /// Exact media contract required by the operation.
     pub media_type: String,
+    /// Explicit v0.11 semantic source requirement; absence retains original projection semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_contract: Option<MemorySourceContract>,
 }
 
 impl MemoryRequirement {
@@ -44,7 +55,15 @@ impl MemoryRequirement {
         for value in [&self.payload_schema, &self.media_type] {
             crate::memory_authority::validate_text(value, 256)?;
         }
+        if self.requires_scoped_typed_map() && self.kind != MemoryKind::Spatial {
+            return Err("scoped typed-map source requires Spatial Memory".into());
+        }
         Ok(())
+    }
+
+    /// Requires retained typed scope semantics without naming any Node, provider or transport.
+    pub fn requires_scoped_typed_map(&self) -> bool {
+        self.source_contract == Some(MemorySourceContract::ScopedTypedMap)
     }
 
     /// Compares original catalog content against the accepted semantic requirement.
@@ -53,6 +72,8 @@ impl MemoryRequirement {
             && self.kind == manifest.kind()
             && self.payload_schema == manifest.payload_schema()
             && self.media_type == manifest.media_type()
+            && (!self.requires_scoped_typed_map()
+                || matches!(manifest.scope(), crate::MemoryScope::ExecutionGroup(_)))
     }
 
     /// Checks a live receiving declaration; Control alone selects among compatible providers.
@@ -61,6 +82,7 @@ impl MemoryRequirement {
             && self.payload_schema == provider.payload_schema()
             && self.media_type == provider.media_type()
             && provider.visibility() == crate::MemoryVisibility::Exchangeable
+            && (!self.requires_scoped_typed_map() || provider.supports_scoped_map_preparation())
     }
 }
 
@@ -83,6 +105,24 @@ pub struct PreparedMemoryInput {
 impl PreparedMemoryInput {
     /// Rejects source stripping and incompatible receivers before any provider effect.
     pub fn validate(&self, node: &NodeId) -> Result<(), String> {
+        self.validate_for_group(node, None)
+    }
+
+    /// Identifies a distinct scoped projection after the complete context's validation succeeds.
+    pub fn is_scoped_typed_map(&self) -> bool {
+        self.typed_map.as_ref().is_some_and(|map| {
+            crate::map_memory_manifest(map)
+                .as_ref()
+                .is_ok_and(|root| root != &self.manifest)
+        })
+    }
+
+    /// Allows scoped roots only beneath an explicitly versioned exact receiving Group context.
+    fn validate_for_group(
+        &self,
+        node: &NodeId,
+        group: Option<&ExecutionGroupId>,
+    ) -> Result<(), String> {
         self.requirement.validate()?;
         crate::memory_authority::validate_text(&self.import_id, 128)?;
         if !self.requirement.matches_manifest(&self.manifest)
@@ -99,12 +139,22 @@ impl PreparedMemoryInput {
         if self.manifest.artifact().is_none() {
             return Err("prepared Memory requires actual immutable content".into());
         }
+        if self.requirement.requires_scoped_typed_map()
+            && (group.is_none() || self.typed_map.is_none())
+        {
+            return Err(
+                "semantic scoped typed-map source lacks its explicit complete context/root".into(),
+            );
+        }
         if let Some(map) = &self.typed_map
             && crate::map_memory_manifest(map)? != self.manifest
         {
-            return Err(
-                "prepared typed-map provenance differs from its discovery projection".into(),
-            );
+            let receiving = group
+                .ok_or("prepared typed-map provenance differs from its discovery projection")?;
+            if !self.consumer.supports_scoped_map_preparation() {
+                return Err("receiver did not negotiate scoped typed-map preparation".into());
+            }
+            crate::memory_authority::validate_scoped_map_manifest(map, &self.manifest, receiving)?;
         }
         Ok(())
     }
@@ -162,7 +212,9 @@ impl MemoryPreparation {
         crate::memory_authority::validate_text(&self.preparation_id, 128)?;
         if !matches!(
             self.schema.as_str(),
-            "roboguide.memory-preparation/v0.1" | "roboguide.memory-preparation/v0.2"
+            "roboguide.memory-preparation/v0.1"
+                | "roboguide.memory-preparation/v0.2"
+                | "roboguide.memory-preparation/v0.3"
         ) || !(1..=MEMORY_PREPARATION_MAX_BUDGET_MS).contains(&self.valid_for_ms)
             || self.registry_revision == 0
             || !(1..=8).contains(&self.inputs.len())
@@ -173,10 +225,18 @@ impl MemoryPreparation {
         }
         let mut selectors = BTreeSet::new();
         let mut imports = BTreeSet::new();
+        let scoped = self.schema == "roboguide.memory-preparation/v0.3";
+        let mut scoped_inputs = 0;
         for input in &self.inputs {
-            input.validate(&self.node_id)?;
-            if (self.schema == "roboguide.memory-preparation/v0.2"
-                && !input.consumer.supports_use_lease())
+            input.validate_for_group(&self.node_id, scoped.then_some(&self.group_id))?;
+            if input.is_scoped_typed_map() {
+                scoped_inputs += 1;
+            }
+            if (scoped && !input.consumer.supports_scoped_map_preparation())
+                || (matches!(
+                    self.schema.as_str(),
+                    "roboguide.memory-preparation/v0.2" | "roboguide.memory-preparation/v0.3"
+                ) && !input.consumer.supports_use_lease())
                 || (self.schema == "roboguide.memory-preparation/v0.1"
                     && input.consumer.use_contract().is_some())
             {
@@ -192,6 +252,9 @@ impl MemoryPreparation {
                     "Memory preparation contains duplicate content/import identities".into(),
                 );
             }
+        }
+        if scoped && scoped_inputs == 0 {
+            return Err("scoped preparation requires a distinct scoped typed-map input".into());
         }
         let mut resources = BTreeSet::new();
         for id in &self.resource_ids {
@@ -324,7 +387,8 @@ impl MemoryAvailabilityEvidence {
             .manifest
             .artifact()
             .ok_or("Memory input has no content")?;
-        if self.schema != "roboguide.memory-provider-availability/v0.1"
+        if !input.consumer.supports_preparation()
+            || Some(self.schema.as_str()) != input.consumer.preparation_contract()
             || self.import_id != input.import_id
             || self.manifest_digest != crate::memory_manifest_digest(&input.manifest)?
             || self.content_digest != artifact.content_digest().as_str()

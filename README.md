@@ -1634,3 +1634,9 @@ Mission v0.10, Node config v0.14/Contract v0.13, wrapper v56/journal v14 and rec
 legacy exclusive semantics. [Actual process/recovery acceptance](docs/development/acceptance/2026-10-25-quantitative-resources.md)
 uses one software Node and no devices. Complete time/space and the remaining software queue stay
 in [the completion plan](docs/development/roboguide-software-completion-plan-2026-10-15.md).
+
+ADR-0208 adds explicitly negotiated scoped typed-map lifecycle: original production remains
+immutable across current use, stopped Group handoff and runtime revision. Owners are Domain/Control,
+application `scoped_maps`, Node preparation and the configured Memory provider. See
+[the decision](docs/decisions/0208-scoped-typed-map-lifecycle.md) for versioned gates and evidence
+limits. [Whole-module software-process acceptance](docs/development/acceptance/2026-10-25-scoped-typed-map-lifecycle.md) passes; other remaining stages and hardware evidence stay independent.

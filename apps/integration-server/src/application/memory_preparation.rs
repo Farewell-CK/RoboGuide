@@ -124,7 +124,11 @@ fn build(
         .as_ref()
         .ok_or("Memory source federation is unavailable")?;
     let id = preparation_id(&intent.execution_id);
-    let mut inputs = Vec::new();
+    let scoped = command
+        .memory_requirements()
+        .iter()
+        .any(domain::MemoryRequirement::requires_scoped_typed_map);
+    let mut resolved = Vec::new();
     for requirement in command.memory_requirements() {
         super::memory_handoff::authorize_input(
             controller,
@@ -132,19 +136,42 @@ fn build(
             &requirement.selector,
             now,
         )?;
-        let (manifest, typed_map) = catalog
+        let (manifest, catalog_map) = catalog
             .memory_source(&requirement.selector)?
             .ok_or("Memory source is not yet admitted")?;
         if !requirement.matches_manifest(&manifest) {
             return Err("Memory source differs from accepted semantic contracts".into());
         }
+        if super::scoped_maps::requires_scoped_preparation(controller, &manifest)
+            && !requirement.requires_scoped_typed_map()
+        {
+            return Err(
+                "new scoped typed-map source cannot downgrade to a generic preparation".into(),
+            );
+        }
+        let typed_map = if requirement.requires_scoped_typed_map() {
+            let original =
+                super::scoped_maps::original_typed_source(controller, &manifest, catalog_map)?
+                    .ok_or(
+                        "scoped typed-map source lacks its actual retained original publication",
+                    )?;
+            domain::validate_scoped_map_manifest(&original, &manifest, command.group_id())?;
+            Some(original)
+        } else {
+            catalog_map
+        };
+        resolved.push((requirement.clone(), manifest, typed_map));
+    }
+    let mut inputs = Vec::new();
+    for (requirement, manifest, typed_map) in resolved {
         let consumer = controller
             .bridge
-            .select_memory_provider(
+            .select_memory_provider_for_preparation(
                 command.node_id(),
-                requirement,
+                &requirement,
                 command.intent().operation(),
                 now,
+                scoped,
             )
             .map_err(|e| e.to_string())?;
         let content = serde_json::json!([id, requirement.selector, consumer.provider_id()]);
@@ -161,7 +188,7 @@ fn build(
         });
     }
     let preparation=MemoryPreparation {
-        schema:"roboguide.memory-preparation/v0.2".into(),preparation_id:id,
+        schema:if scoped { "roboguide.memory-preparation/v0.3" } else { "roboguide.memory-preparation/v0.2" }.into(),preparation_id:id,
         tenant_id:control.mission_tenant(command.mission_id()).unwrap_or("local").into(),
         group_id:command.group_id().clone(),task_ref:command.task_ref().clone(),role_id:command.role_id().clone(),
         execution_id:intent.execution_id.clone(),node_id:command.node_id().clone(),

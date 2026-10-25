@@ -90,6 +90,7 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
     configs = inputs / "configs"
     configs.mkdir(mode=0o700)
     parent_versions = set()
+    scoped_generation = False
     binary_inputs: dict[str, dict[str, str]] = {}
     for path in sorted(source.glob("configuration-*.json")):
         config = json.loads(path.read_text())
@@ -122,6 +123,14 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
             sqlite3.connect((directory / "replica.sqlite3").as_uri() + "?mode=ro", uri=True)
         ) as parent_sql:
             parent_versions.add(parent_sql.execute("PRAGMA user_version").fetchone()[0])
+            metadata = dict(parent_sql.execute("SELECT key,value FROM replica_v1_meta"))
+            original_identity = json.loads(metadata["identity"])
+            upgrade = json.loads(metadata.get("application_upgrade_authority_v1", "null"))
+            scoped_generation |= original_identity[1] == "roboguide.controller-checkpoint/v57" or (
+                upgrade is not None
+                and upgrade.get("target", {}).get("application_schema")
+                == "roboguide.controller-checkpoint/v57"
+            )
         dependencies = []
         if (directory / "controller.sqlite3").exists():
             components.append(
@@ -196,7 +205,9 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
         }
     )
     generation = (
-        25
+        26
+        if scoped_generation
+        else 25
         if 10 in parent_versions
         else 23
         if 9 in parent_versions
@@ -544,6 +555,9 @@ def private_staging_refusal(output: Path, bundle: Path) -> dict[str, Any] | None
     if manifest["profile"]["schema"] not in {
         "roboguide.recovery-profile/v0.22",
         "roboguide.recovery-profile/v0.23",
+        "roboguide.recovery-profile/v0.24",
+        "roboguide.recovery-profile/v0.25",
+        "roboguide.recovery-profile/v0.26",
     }:
         return None
     root = next(

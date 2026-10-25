@@ -672,7 +672,16 @@ fn compile_memory_availability(
         &mut BTreeSet::new(),
     )?
     .remove(0);
+    require(
+        config
+            .contract
+            .as_deref()
+            .is_none_or(|contract| contract == "roboguide.memory-provider-availability/v0.2"),
+        "memory_providers.availability.contract",
+        "unsupported explicit provider availability contract",
+    )?;
     Ok(Some(CompiledMemoryAvailability {
+        contract: config.contract,
         observation,
         result_pointer: config.result_pointer,
     }))

@@ -19,6 +19,7 @@ DATABASES = (
 )
 WRITER_SCHEMA = "roboguide.memory-provider-writer/v0.1"
 SNAPSHOT_WRITER_SCHEMA = "roboguide.memory-provider-writer/v0.2"
+SCOPED_MAP_WRITER_SCHEMA = "roboguide.memory-provider-writer/v0.3"
 
 
 class ProviderConnection(sqlite3.Connection):
@@ -79,7 +80,7 @@ class ProviderStorage:
                 if name == "memory.sqlite3":
                     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as probe:
                         version = probe.execute("PRAGMA user_version").fetchone()[0]
-                    if version in (3, 4) and any(
+                    if version in (3, 4, 5) and any(
                         not (root / child).exists() for child in DATABASES
                     ):
                         raise ValueError("original provider managed database is missing")

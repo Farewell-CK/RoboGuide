@@ -37,6 +37,7 @@ pub(crate) mod plan_revision;
 pub(crate) mod plan_validation;
 mod recovery;
 pub(crate) mod safety_stop;
+pub(crate) mod scoped_maps;
 pub(crate) mod semantic_verifier;
 pub(crate) mod state_policy;
 mod task_verifier;

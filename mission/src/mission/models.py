@@ -29,6 +29,7 @@ from mission.contract_values import (
     MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
     MISSION_PLAN_SCHEDULING_VERSION,
+    MISSION_PLAN_SCOPED_MEMORY_VERSION,
     MISSION_PLAN_VERSION,
     RELATION_KINDS,
     RESOURCE_KINDS,
@@ -89,6 +90,7 @@ __all__ = [
     "MISSION_PLAN_VERSION",
     "MISSION_PLAN_MEMORY_VERSION",
     "MISSION_PLAN_CAPACITY_VERSION",
+    "MISSION_PLAN_SCOPED_MEMORY_VERSION",
     "MissionActor",
     "MissionContext",
     "MissionPlan",
@@ -132,7 +134,12 @@ class MissionActor:
             {"id"},
             {"physical_entity"}
             if version
-            in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION, MISSION_PLAN_CAPACITY_VERSION}
+            in {
+                MISSION_PLAN_VERSION,
+                MISSION_PLAN_MEMORY_VERSION,
+                MISSION_PLAN_CAPACITY_VERSION,
+                MISSION_PLAN_SCOPED_MEMORY_VERSION,
+            }
             else set(),
             path,
         )
@@ -150,6 +157,7 @@ class MissionActor:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             result["physical_entity"] = self.physical_entity
         return result
@@ -162,6 +170,7 @@ def _actor_contract(version: str) -> bool:
         MISSION_PLAN_VERSION,
         MISSION_PLAN_MEMORY_VERSION,
         MISSION_PLAN_CAPACITY_VERSION,
+        MISSION_PLAN_SCOPED_MEMORY_VERSION,
     }
 
 
@@ -231,6 +240,7 @@ class MissionPlan:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             raise MissionPlanError(f"unsupported schema_version: {version}")
         tasks = tuple(
@@ -283,6 +293,7 @@ class MissionPlan:
                         MISSION_PLAN_VERSION,
                         MISSION_PLAN_MEMORY_VERSION,
                         MISSION_PLAN_CAPACITY_VERSION,
+                        MISSION_PLAN_SCOPED_MEMORY_VERSION,
                     }:
                         raise MissionPlanError(
                             f"task {task.task_id} role {role.role_id} lacks context role"
@@ -296,7 +307,10 @@ class MissionPlan:
                 for demand in role.resources:
                     if demand.allocation_mode != "divisible":
                         continue
-                    if self.schema_version != MISSION_PLAN_CAPACITY_VERSION:
+                    if self.schema_version not in {
+                        MISSION_PLAN_CAPACITY_VERSION,
+                        MISSION_PLAN_SCOPED_MEMORY_VERSION,
+                    }:
                         raise MissionPlanError(
                             "shared resource declarations require exact MissionPlan v0.10"
                         )
@@ -318,7 +332,8 @@ class MissionPlan:
         for context in self.contexts:
             for context_role in context.roles:
                 if context_role.resource_envelope and (
-                    self.schema_version != MISSION_PLAN_CAPACITY_VERSION
+                    self.schema_version
+                    not in {MISSION_PLAN_CAPACITY_VERSION, MISSION_PLAN_SCOPED_MEMORY_VERSION}
                     or len(context_role.resource_envelope) > 1
                     or any(
                         limit.kind != "compute" or limit.allocation_mode != "divisible"

@@ -13,6 +13,7 @@ from mission.contract_values import (
     MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
     MISSION_PLAN_SCHEDULING_VERSION,
+    MISSION_PLAN_SCOPED_MEMORY_VERSION,
     MISSION_PLAN_VERSION,
     RESOURCE_KINDS,
     U32_MAX,
@@ -289,7 +290,7 @@ class ResourceRequirement:
             item,
             {"kind", "units"},
             {"allocation_mode", "resource_class"}
-            if version == MISSION_PLAN_CAPACITY_VERSION
+            if version in {MISSION_PLAN_CAPACITY_VERSION, MISSION_PLAN_SCOPED_MEMORY_VERSION}
             else set(),
             path,
         )
@@ -311,7 +312,7 @@ class ResourceRequirement:
         """Serialize exact semantic units, refusing lossy output through an older contract."""
         result: JSONObject = {"kind": self.kind, "units": self.units}
         if self.allocation_mode == "divisible":
-            if version != MISSION_PLAN_CAPACITY_VERSION:
+            if version not in {MISSION_PLAN_CAPACITY_VERSION, MISSION_PLAN_SCOPED_MEMORY_VERSION}:
                 raise MissionPlanError("divisible allocation requires exact MissionPlan v0.10")
             result.update(
                 {"allocation_mode": self.allocation_mode, "resource_class": self.resource_class}
@@ -342,6 +343,7 @@ class RoleRequirement:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             _exact_keys(
                 item,
@@ -353,7 +355,12 @@ class RoleRequirement:
                 requirements,
                 {"capabilities", "resources"},
                 {"memories"}
-                if version in {MISSION_PLAN_MEMORY_VERSION, MISSION_PLAN_CAPACITY_VERSION}
+                if version
+                in {
+                    MISSION_PLAN_MEMORY_VERSION,
+                    MISSION_PLAN_CAPACITY_VERSION,
+                    MISSION_PLAN_SCOPED_MEMORY_VERSION,
+                }
                 else set(),
                 f"{path}.requirements",
             )
@@ -361,7 +368,9 @@ class RoleRequirement:
                 requirements.get("memories", []), f"{path}.requirements.memories"
             )
             memories = tuple(
-                MemoryRequirement.from_json(value, f"{path}.requirements.memories[{index}]")
+                MemoryRequirement.from_json(
+                    value, f"{path}.requirements.memories[{index}]", version
+                )
                 for index, value in enumerate(memory_values)
             )
             if len(memories) > 8 or len({(m.memory_id, m.revision_id) for m in memories}) != len(
@@ -481,6 +490,7 @@ class RoleRequirement:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             if self.context_role is None:
                 raise MissionPlanError("normalized Role requires a ContextRole reference")
@@ -494,8 +504,18 @@ class RoleRequirement:
                 "execution_intent": self.execution.to_json(),
                 "resource_scope": self.resource_scope,
             }
-            if version in {MISSION_PLAN_MEMORY_VERSION, MISSION_PLAN_CAPACITY_VERSION}:
+            if version in {
+                MISSION_PLAN_MEMORY_VERSION,
+                MISSION_PLAN_CAPACITY_VERSION,
+                MISSION_PLAN_SCOPED_MEMORY_VERSION,
+            }:
                 requirements = _object(result["requirements"], "requirements")
+                if version != MISSION_PLAN_SCOPED_MEMORY_VERSION and any(
+                    memory.source_contract is not None for memory in self.memories
+                ):
+                    raise MissionPlanError(
+                        "scoped typed-map source requires exact MissionPlan v0.11"
+                    )
                 requirements["memories"] = [memory.to_json() for memory in self.memories]
             elif self.memories:
                 raise MissionPlanError("Memory prerequisites require MissionPlan v0.9")

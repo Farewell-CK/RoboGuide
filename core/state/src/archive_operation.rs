@@ -443,6 +443,7 @@ impl ArchiveIntent {
                     | "roboguide.controller-checkpoint/v53"
                     | "roboguide.controller-checkpoint/v54"
                     | "roboguide.controller-checkpoint/v55"
+                    | "roboguide.controller-checkpoint/v56"
                     | crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
             )
             || self.checkpoint.event_sequence < self.manifest.end_sequence

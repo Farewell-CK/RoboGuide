@@ -61,6 +61,16 @@ def test_complete_empty_original_parent_accepts_each_supported_wrapper(
     assert _parent(path, original, source, budget, {1: "unit-root"}) == (None, [])
 
 
+def test_scoped_wrapper_requires_the_explicit_new_recovery_profile(tmp_path: Path) -> None:
+    """Original v57 identity is accepted only under the newly selected v0.26 contract."""
+    path = tmp_path / "parent.sqlite3"
+    original, source = parent(path, ["a" * 64, "roboguide.controller-checkpoint/v57"])
+    budget = Budget({"max_files": 100, "max_bytes": 1024**2, "budget_seconds": 10})
+    assert _parent(
+        path, original, source, budget, {1: "unit-root"}, "roboguide.recovery-profile/v0.26"
+    ) == (None, [])
+
+
 @pytest.mark.parametrize(
     "identity",
     [

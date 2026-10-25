@@ -31,7 +31,10 @@ impl CompiledMemoryProvider {
             self.continuity,
         );
         if let Some(availability) = &self.availability {
-            content.push_str(&format!("\navailability: {availability:?}"));
+            content.push_str(&format!(
+                "\navailability: {}",
+                availability.identity_content()
+            ));
         }
         if let Some(use_lease) = &self.use_lease {
             content.push_str(&format!("\nuse_lease: {use_lease:?}"));
@@ -403,5 +406,26 @@ impl CompiledCapabilityReadiness {
             .map(value_to_reason)
             .unwrap_or_default();
         Ok(CapabilityReadinessFact { available, detail })
+    }
+}
+
+impl CompiledMemoryAvailability {
+    /// Returns explicit support without inventing a newer contract for historical declarations.
+    pub fn contract(&self) -> &str {
+        self.contract
+            .as_deref()
+            .unwrap_or("roboguide.memory-provider-availability/v0.1")
+    }
+
+    /// Preserves original Debug-based configuration fingerprints when the new opt-in is absent.
+    fn identity_content(&self) -> String {
+        let mut original = format!(
+            "CompiledMemoryAvailability {{ observation: {:?}, result_pointer: {:?} }}",
+            self.observation, self.result_pointer
+        );
+        if let Some(contract) = &self.contract {
+            original.push_str(&format!("\nscoped_contract: {contract:?}"));
+        }
+        original
     }
 }

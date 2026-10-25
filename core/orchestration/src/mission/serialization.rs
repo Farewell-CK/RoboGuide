@@ -27,6 +27,7 @@ fn has_binding_semantics(plan: &MissionPlan) -> bool {
         domain::MISSION_PLAN_SCHEMA_V0_8
             | domain::MISSION_PLAN_SCHEMA_V0_9
             | domain::MISSION_PLAN_SCHEMA_V0_10
+            | domain::MISSION_PLAN_SCHEMA_V0_11
     )
 }
 
@@ -108,7 +109,7 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
                             "parameters": intent.parameters().iter().map(|(key, value)| (key.clone(), execution_value_json(value))).collect::<serde_json::Map<_,_>>(),
                         }
                     });
-                    if matches!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_9 | domain::MISSION_PLAN_SCHEMA_V0_10) {
+                    if matches!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_9 | domain::MISSION_PLAN_SCHEMA_V0_10 | domain::MISSION_PLAN_SCHEMA_V0_11) {
                         value["requirements"]["memories"] = serde_json::json!(role.memories());
                     }
                     value
@@ -188,6 +189,7 @@ fn is_v0_6_compatible(plan: &MissionPlan) -> bool {
         domain::MISSION_PLAN_SCHEMA_V0_8
             | domain::MISSION_PLAN_SCHEMA_V0_9
             | domain::MISSION_PLAN_SCHEMA_V0_10
+            | domain::MISSION_PLAN_SCHEMA_V0_11
     ) {
         return false;
     }

@@ -11,6 +11,7 @@ from typing import Any
 from .snapshot_references import canonical
 
 WRAPPER = "roboguide.controller-checkpoint/v56"
+WRAPPERS = {WRAPPER, "roboguide.controller-checkpoint/v57"}
 CHAIN = "roboguide.checkpoint-chain/v1"
 MAXIMUM = 64 * 1024 * 1024
 
@@ -96,7 +97,7 @@ def _checkpoint(connection: sqlite3.Connection) -> dict[str, Any] | None:
         return None
     schema, sequence, raw = saved
     if schema != CHAIN:
-        if schema != WRAPPER:
+        if schema not in WRAPPERS:
             return None
         if (
             head is not None
@@ -109,7 +110,7 @@ def _checkpoint(connection: sqlite3.Connection) -> dict[str, Any] | None:
         if head is None:
             raise ValueError("original capacity checkpoint chain lacks its head")
         base, revision, target_sequence, schema, base_digest, target_digest = head
-        if schema != WRAPPER:
+        if schema not in WRAPPERS:
             return None
         if not all(_integer(value) for value in (sequence, base, revision, target_sequence)):
             raise ValueError("original capacity checkpoint sequence is invalid")
@@ -155,7 +156,7 @@ def _checkpoint(connection: sqlite3.Connection) -> dict[str, Any] | None:
     if len(content) > MAXIMUM:
         raise ValueError("original capacity checkpoint exceeds its bound")
     value: dict[str, Any] = json.loads(content)
-    if value.get("schema") != WRAPPER:
+    if value.get("schema") != schema:
         raise ValueError("original capacity wrapper differs from its storage identity")
     return value
 

@@ -329,7 +329,11 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
                     .is_some_and(|schema| {
                         matches!(
                             schema,
-                            SCHEMA | GENERATION_SCHEMA | MEMORY_SCHEMA | TYPED_MEMORY_SCHEMA
+                            SCHEMA
+                                | GENERATION_SCHEMA
+                                | MEMORY_SCHEMA
+                                | TYPED_MEMORY_SCHEMA
+                                | SCOPED_MEMORY_SCHEMA
                         )
                     })
                 || receipt.result["revision"]

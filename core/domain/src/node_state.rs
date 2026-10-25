@@ -416,6 +416,15 @@ impl NodeRegistration {
         state_exports: Vec<StateExportDescriptor>,
         memory_providers: Vec<MemoryProviderDescriptor>,
     ) -> Result<Self, DomainError> {
+        if memory_providers
+            .iter()
+            .any(MemoryProviderDescriptor::supports_scoped_map_preparation)
+            && self.contract_version.as_str() != crate::NODE_CONTRACT_VERSION_V0_14
+        {
+            return Err(DomainError::InvalidMemory {
+                reason: "scoped typed-map provider requires exact Node Contract v0.14".into(),
+            });
+        }
         let owners = self
             .local_systems
             .iter()
@@ -498,6 +507,7 @@ impl NodeRegistration {
                     | crate::NODE_CONTRACT_VERSION_V0_11
                     | crate::NODE_CONTRACT_VERSION_V0_12
                     | crate::NODE_CONTRACT_VERSION_V0_13
+                    | crate::NODE_CONTRACT_VERSION_V0_14
             )
         {
             return Err(DomainError::InvalidMissionPlan {
@@ -738,11 +748,14 @@ impl NodeRegistration {
                     | crate::NODE_CONTRACT_VERSION_V0_11
                     | crate::NODE_CONTRACT_VERSION_V0_12
                     | crate::NODE_CONTRACT_VERSION_V0_13
+                    | crate::NODE_CONTRACT_VERSION_V0_14
             ) && crate::MemoryRequirement::validate_set(requirement.memories()).is_ok()
                 && requirement.memories().iter().all(|required| {
-                    self.memory_providers().iter().any(|provider| {
-                        provider.supports_use_lease() && required.matches_provider(provider)
-                    })
+                    (!required.requires_scoped_typed_map()
+                        || self.contract_version.as_str() == crate::NODE_CONTRACT_VERSION_V0_14)
+                        && self.memory_providers().iter().any(|provider| {
+                            provider.supports_use_lease() && required.matches_provider(provider)
+                        })
                 }));
         has_capability && has_contract && has_resource && has_memory
     }

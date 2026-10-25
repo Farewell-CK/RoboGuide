@@ -30,6 +30,7 @@ ARCHIVE_SCHEMAS = {
     "roboguide.recovery-profile/v0.23",
     "roboguide.recovery-profile/v0.24",
     "roboguide.recovery-profile/v0.25",
+    "roboguide.recovery-profile/v0.26",
 }
 OWNER_FILE = ".retention-owner.json"
 FENCE_FILE = "blobs"
@@ -50,6 +51,7 @@ MAINTENANCE_SCHEMAS = {
     "roboguide.recovery-profile/v0.23",
     "roboguide.recovery-profile/v0.24",
     "roboguide.recovery-profile/v0.25",
+    "roboguide.recovery-profile/v0.26",
 }
 MAX_OWNER_BYTES = 4096
 
@@ -145,6 +147,7 @@ def validate_storage(
             "roboguide.recovery-profile/v0.23",
             "roboguide.recovery-profile/v0.24",
             "roboguide.recovery-profile/v0.25",
+            "roboguide.recovery-profile/v0.26",
         }
         else "roboguide.artifact-storage/v3"
         if profile_schema in ARCHIVE_SCHEMAS
@@ -280,5 +283,6 @@ def validate_bundle(
         "roboguide.recovery-profile/v0.23",
         "roboguide.recovery-profile/v0.24",
         "roboguide.recovery-profile/v0.25",
+        "roboguide.recovery-profile/v0.26",
     } and (owner is None or owner["schema"] != component["storage_schema"]):
         raise ValueError("original Artifact bundle format differs from the explicit declaration")

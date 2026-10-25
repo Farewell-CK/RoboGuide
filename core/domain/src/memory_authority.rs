@@ -348,6 +348,37 @@ pub fn map_memory_manifest(map: &MapArtifactManifest) -> Result<MemoryArtifactMa
     .map_err(|e| e.to_string())
 }
 
+/// Checks a scoped alias against its complete immutable root without creating map provenance.
+/// Only selector, receiving Group and monotonic creation time may differ from the root projection.
+pub fn validate_scoped_map_manifest(
+    map: &MapArtifactManifest,
+    manifest: &MemoryArtifactManifest,
+    group: &ExecutionGroupId,
+) -> Result<(), String> {
+    let original = map_memory_manifest(map)?;
+    manifest.validate().map_err(|error| error.to_string())?;
+    if manifest.scope() != &crate::MemoryScope::ExecutionGroup(group.clone())
+        || manifest.selector() == original.selector()
+        || manifest.created_at() < original.created_at()
+    {
+        return Err(
+            "scoped typed-map selector, exact receiving Group or original time differs".into(),
+        );
+    }
+    let original = serde_json::to_value(original).map_err(|error| error.to_string())?;
+    let mut scoped = serde_json::to_value(manifest).map_err(|error| error.to_string())?;
+    for field in ["selector", "scope", "created_at"] {
+        scoped[field] = original[field].clone();
+    }
+    if scoped != original {
+        return Err(
+            "scoped typed-map changes original owner, bytes, contracts or production provenance"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 /// Uses deterministic JSON object ordering for complete cross-language metadata digests.
 pub(crate) fn metadata_digest(manifest: &impl Serialize) -> Result<String, String> {
     use sha2::{Digest as _, Sha256};

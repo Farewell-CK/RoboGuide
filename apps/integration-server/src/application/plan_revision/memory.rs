@@ -2,6 +2,89 @@
 
 use super::*;
 
+/// Exports each actually applied original typed declaration once, preserving historical edges.
+pub(crate) fn typed_publication_edges(
+    controller: &ControllerState,
+) -> Vec<super::super::scoped_maps::PublicationEdge> {
+    controller
+        .runtime_revisions
+        .values()
+        .flat_map(|state| {
+            state
+                .candidates
+                .values()
+                .filter(|candidate| {
+                    state.switches.iter().any(|switch| {
+                        switch.phase == Phase::Applied && switch.ticket_id == candidate.ticket_id
+                    })
+                })
+                .flat_map(|candidate| candidate.memory.values())
+                .filter_map(|record| {
+                    record.request.typed_map.as_ref().map(|map| {
+                        super::super::scoped_maps::PublicationEdge {
+                            child: record.request.child.clone(),
+                            parent: record.parent.clone(),
+                            root: map.clone(),
+                        }
+                    })
+                })
+        })
+        .collect()
+}
+
+/// Preserves the new target meaning after an actual scoped-parent revision has been applied.
+pub(crate) fn requires_scoped_preparation(
+    controller: &ControllerState,
+    manifest: &domain::MemoryArtifactManifest,
+) -> bool {
+    controller.runtime_revisions.values().any(|state| {
+        state.switches.iter().any(|switch| {
+            switch.phase == Phase::Applied
+                && state.candidates[&switch.ticket_id]
+                    .memory
+                    .values()
+                    .any(|record| {
+                        record.request.child == *manifest
+                            && record.schema() == "roboguide.runtime-plan-revision/v0.5"
+                    })
+        })
+    })
+}
+
+/// Recovers production provenance only from an actually applied original revision publication.
+pub(crate) fn scoped_typed_source(
+    controller: &ControllerState,
+    manifest: &domain::MemoryArtifactManifest,
+) -> Result<Option<domain::MapArtifactManifest>, String> {
+    let mut original = None;
+    for state in controller.runtime_revisions.values() {
+        for switch in state
+            .switches
+            .iter()
+            .filter(|switch| switch.phase == Phase::Applied)
+        {
+            for record in state.candidates[&switch.ticket_id]
+                .memory
+                .values()
+                .filter(|record| record.request.child == *manifest)
+            {
+                if let Some(map) = &record.request.typed_map {
+                    domain::validate_scoped_map_manifest(
+                        map,
+                        manifest,
+                        &record.request.target_group_id,
+                    )?;
+                    if original.as_ref().is_some_and(|previous| previous != map) {
+                        return Err("revision child has conflicting retained typed roots".into());
+                    }
+                    original = Some(map.clone());
+                }
+            }
+        }
+    }
+    Ok(original)
+}
+
 /// Keeps original revision declarations pinned until explicit policy revocation and complete closure.
 /// Historical completed plans retain their source/goal evidence without requiring deleted payloads.
 pub(crate) fn catalog_retirement_evidence(
@@ -118,8 +201,10 @@ impl Authorization {
     }
 
     /// Keeps historical v0.3 command bytes unchanged rather than relabelling their schema.
-    fn schema(&self) -> &'static str {
-        if self.uses_typed_map() {
+    pub(super) fn schema(&self) -> &'static str {
+        if self.uses_typed_map() && matches!(self.parent.scope(), MemoryScope::ExecutionGroup(_)) {
+            SCOPED_MEMORY_SCHEMA
+        } else if self.uses_typed_map() {
             TYPED_MEMORY_SCHEMA
         } else {
             MEMORY_SCHEMA
@@ -167,7 +252,9 @@ pub(super) fn validate_review(
         {
             let key = input.selector.to_string();
             if let Some(record) = candidate.memory.get(&key) {
-                if !input.matches_manifest(&record.request.child) {
+                if !input.matches_manifest(&record.request.child)
+                    || record.schema() == SCOPED_MEMORY_SCHEMA && !input.requires_scoped_typed_map()
+                {
                     return Err(
                         "Review child contract differs from its original declaration".into(),
                     );
@@ -240,11 +327,39 @@ fn current(
     let (parent, map) = catalog
         .memory_source(&authorization.request.parent_selector)?
         .ok_or("original Memory source absent")?;
+    let map = if authorization.schema() == SCOPED_MEMORY_SCHEMA {
+        super::super::scoped_maps::original_typed_source(controller, &parent, map)?
+    } else {
+        map
+    };
     if parent != authorization.parent || map != authorization.request.typed_map {
         return Err("original complete Memory source changed".into());
     }
     if let Some(map) = &authorization.request.typed_map {
         validate_typed_source_reference(controller, authorization)?;
+        if authorization.schema() == SCOPED_MEMORY_SCHEMA {
+            super::super::scoped_maps::validate_source_reference(
+                controller,
+                map,
+                &authorization.parent,
+                &authorization.source_group,
+                None,
+            )?;
+            return controller
+                .bridge
+                .control()
+                .authorize_revision_scoped_map_child(
+                    map,
+                    &authorization.parent,
+                    &authorization.request.child,
+                    &authorization.source_group,
+                    &authorization.membership,
+                    mission,
+                    &state.tenant,
+                    &authorization.principal,
+                )
+                .map_err(|error| error.to_string());
+        }
         return controller
             .bridge
             .control()
@@ -282,6 +397,15 @@ fn validate_typed_source_reference(
     let Some(map) = &record.request.typed_map else {
         return Ok(());
     };
+    if record.schema() == SCOPED_MEMORY_SCHEMA {
+        return super::super::scoped_maps::validate_historical_source_reference(
+            controller,
+            map,
+            &record.parent,
+            &record.source_group,
+            None,
+        );
+    }
     if controller
         .memory_preparation
         .records
@@ -316,7 +440,10 @@ pub(super) fn authorize(
 ) -> Result<serde_json::Value, String> {
     if caller.role != "recovery-admin"
         || if request.typed_map.is_some() {
-            command.schema_version != TYPED_MEMORY_SCHEMA
+            !matches!(
+                command.schema_version.as_str(),
+                TYPED_MEMORY_SCHEMA | SCOPED_MEMORY_SCHEMA
+            )
         } else {
             command.schema_version != MEMORY_SCHEMA
         }
@@ -350,6 +477,14 @@ pub(super) fn authorize(
     let (parent, map) = catalog
         .memory_source(&request.parent_selector)?
         .ok_or("original Memory source absent")?;
+    let map = if command.schema_version == SCOPED_MEMORY_SCHEMA {
+        if !matches!(parent.scope(), MemoryScope::ExecutionGroup(_)) {
+            return Err("scoped typed revision requires an already published scoped parent".into());
+        }
+        super::super::scoped_maps::original_typed_source(controller, &parent, map)?
+    } else {
+        map
+    };
     let key = request.child.selector().to_string();
     if map != request.typed_map
         || catalog.memory_source(request.child.selector())?.is_some()
@@ -404,6 +539,22 @@ pub(super) fn authorize(
         budget: OriginalBudget::new(kernel, duration)?,
         digest: String::new(),
     };
+    if record.schema() != command.schema_version {
+        return Err("revision schema differs from its original typed source meaning".into());
+    }
+    if record.schema() == SCOPED_MEMORY_SCHEMA {
+        super::super::scoped_maps::validate_source_reference(
+            controller,
+            record
+                .request
+                .typed_map
+                .as_ref()
+                .ok_or("original typed root absent")?,
+            &record.parent,
+            &record.source_group,
+            None,
+        )?;
+    }
     current(controller, mission, state, candidate, &record, now, kernel)?;
     record.digest = digest(&record)?;
     let retained = state
@@ -472,6 +623,7 @@ pub(super) fn validate_inputs(
                 current(controller, mission, state, candidate, record, now, kernel)?;
                 if &record.request.target_group_id != target
                     || !input.matches_manifest(&record.request.child)
+                    || record.schema() == SCOPED_MEMORY_SCHEMA && !input.requires_scoped_typed_map()
                 {
                     return Err(
                         "candidate changed its original declared child or target Group".into(),
@@ -751,8 +903,13 @@ pub(super) fn validate_restored(
             || record.parent.selector() != &record.request.parent_selector
             || record.parent.selector() == record.request.child.selector()
             || if let Some(map) = &record.request.typed_map {
-                domain::map_memory_manifest(map)? != record.parent
-                    || record.parent.scope() != &MemoryScope::Global
+                if record.schema() == SCOPED_MEMORY_SCHEMA {
+                    domain::validate_scoped_map_manifest(map, &record.parent, &record.source_group)
+                        .is_err()
+                } else {
+                    domain::map_memory_manifest(map)? != record.parent
+                        || record.parent.scope() != &MemoryScope::Global
+                }
             } else {
                 record.parent.kind() == domain::MemoryKind::Spatial
                     || !matches!(record.parent.scope(), MemoryScope::ExecutionGroup(owner) if owner == &record.source_group)
@@ -770,6 +927,19 @@ pub(super) fn validate_restored(
             return Err("original revision Memory declaration or lineage changed".into());
         }
         validate_typed_source_reference(controller, record)?;
+        if record.schema() == SCOPED_MEMORY_SCHEMA
+            && !registry
+                .policy(&record.parent, &state.tenant)?
+                .principals
+                .get(&record.principal)
+                .is_some_and(|operations| {
+                    operations.contains(&domain::MemoryAccessOperation::Handoff)
+                })
+        {
+            return Err(
+                "original scoped revision parent lacked its independent Handoff permission".into(),
+            );
+        }
         let source_policy = if let Some(map) = &record.request.typed_map {
             registry.typed_map_policy(map, &state.tenant)?
         } else {

@@ -1,6 +1,7 @@
 //! Metadata-only authority tests; these fixtures register no Node and prove no physical fact.
 
 use super::*;
+use crate::{MapArtifactManifest, map_memory_manifest};
 
 /// Supplies complete semantic metadata only for deterministic command/receipt validation.
 fn preparation() -> MemoryPreparation {
@@ -29,6 +30,98 @@ fn preparation() -> MemoryPreparation {
                 "scope":{"kind":"global"},"visibility":"exchangeable","payload_schema":"unit.file/v1",
                 "media_type":"application/octet-stream"},"import_id":"unit-import"}]
     })).unwrap()
+}
+
+/// Builds synthetic scoped lineage; it creates no publication, Node, provider or device fact.
+fn scoped_preparation() -> MemoryPreparation {
+    let map: MapArtifactManifest = serde_json::from_value(serde_json::json!({
+        "schema":"roboguide.map-manifest/v0.2","map_id":"unit-map","revision_id":"original",
+        "producer_node_id":"unit-producer","producer_local_system_id":"files","producer_provider_id":"unit-maps",
+        "source_mission_id":"unit-production","source_execution_id":"unit-production-attempt",
+        "source_task_ref":{"mission_id":"unit-production","task_id":"unit-build"},
+        "media_type":"application/vnd.roboguide.spatial-map","payload_schema":"unit.map/v1",
+        "content_digest":format!("sha256:{}","b".repeat(64)),"byte_size":10,"created_at_ms":1,
+        "root_frame":"unit-original-frame","coordinate_convention":"unit-declared-convention",
+        "spatial_anchor":{"kind":"fixed","id":"unit-original-anchor"},
+        "format":{"name":"unit-format","version":"v1"},"resolution_meters":0.1
+    })).unwrap();
+    let mut manifest = serde_json::to_value(map_memory_manifest(&map).unwrap()).unwrap();
+    manifest["selector"]["revision_id"] = "scoped-child".into();
+    manifest["scope"] =
+        serde_json::json!({"kind":"execution_group","execution_group_id":"unit-group"});
+    manifest["created_at"] = 2.into();
+    let mut context = serde_json::to_value(preparation()).unwrap();
+    context["schema"] = "roboguide.memory-preparation/v0.3".into();
+    let input = &mut context["inputs"][0];
+    input["manifest"] = manifest.clone();
+    input["typed_map"] = serde_json::to_value(map).unwrap();
+    input["requirement"] = serde_json::json!({"selector":manifest["selector"],"kind":"spatial",
+        "payload_schema":"unit.map/v1","media_type":"application/vnd.roboguide.spatial-map","source_contract":"scoped_typed_map"});
+    input["consumer"]["preparation_contract"] =
+        "roboguide.memory-provider-availability/v0.2".into();
+    input["consumer"]["kind"] = "spatial".into();
+    input["consumer"]["payload_schema"] = "unit.map/v1".into();
+    input["consumer"]["media_type"] = "application/vnd.roboguide.spatial-map".into();
+    serde_json::from_value(context).unwrap()
+}
+
+/// Explicit new negotiation is mandatory; old contexts cannot silently borrow scoped typed meaning.
+#[test]
+fn scoped_map_preparation_requires_original_root_and_negotiated_contract() {
+    let context = scoped_preparation();
+    context.validate().unwrap();
+    command(&context).validate_preparation(&context).unwrap();
+    assert!(context.inputs[0].is_scoped_typed_map());
+    for schema in [
+        "roboguide.memory-preparation/v0.1",
+        "roboguide.memory-preparation/v0.2",
+    ] {
+        let mut old = context.clone();
+        old.schema = schema.into();
+        assert!(old.validate().is_err());
+    }
+    let mut downgraded = serde_json::to_value(&context).unwrap();
+    downgraded["inputs"][0]["consumer"]["preparation_contract"] =
+        "roboguide.memory-provider-availability/v0.1".into();
+    let old: MemoryPreparation = serde_json::from_value(downgraded).unwrap();
+    assert!(old.validate().is_err());
+    assert!(
+        !context.inputs[0]
+            .requirement
+            .matches_provider(&old.inputs[0].consumer)
+    );
+    assert!(
+        context.inputs[0]
+            .requirement
+            .matches_provider(&context.inputs[0].consumer)
+    );
+}
+
+/// Independent scoped metadata cannot alter the producing owner, bytes, attempt or receiving Group.
+#[test]
+fn scoped_map_preparation_rejects_source_substitution_and_scope_broadening() {
+    let context = scoped_preparation();
+    let original = serde_json::to_value(&context).unwrap();
+    for pointer in [
+        "/inputs/0/manifest/provider_id",
+        "/inputs/0/manifest/owner/node_id",
+        "/inputs/0/manifest/source_execution_id",
+        "/inputs/0/manifest/source_mission_id",
+        "/inputs/0/manifest/scope/execution_group_id",
+        "/inputs/0/manifest/artifact/content_digest",
+    ] {
+        let mut changed = original.clone();
+        *changed.pointer_mut(pointer).unwrap() = if pointer.ends_with("content_digest") {
+            format!("sha256:{}", "c".repeat(64)).into()
+        } else {
+            "another-original".into()
+        };
+        let changed: MemoryPreparation = serde_json::from_value(changed).unwrap();
+        assert!(changed.validate().is_err(), "{pointer}");
+    }
+    let mut changed = context.clone();
+    changed.inputs[0].typed_map = None;
+    assert!(changed.validate().is_err());
 }
 
 /// Constructs metadata authority without invoking Control, providers or devices.

@@ -14,7 +14,13 @@ import uuid
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from .storage import DATABASES, SNAPSHOT_WRITER_SCHEMA, WRITER_SCHEMA, ProviderStorage
+from .storage import (
+    DATABASES,
+    SCOPED_MAP_WRITER_SCHEMA,
+    SNAPSHOT_WRITER_SCHEMA,
+    WRITER_SCHEMA,
+    ProviderStorage,
+)
 
 MAX_METADATA_BYTES = 600 * 1024
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -87,6 +93,7 @@ class MemoryStore:
         export_config: Path | None = None,
         export_directory: Path | None = None,
         enable_snapshot_references: bool = False,
+        enable_scoped_typed_maps: bool = False,
     ) -> None:
         """Open a single-writer durable backend with a persistent observed instance identity."""
         if not provider_id or len(provider_id) > 128 or not 0 < max_bytes <= 1024**3:
@@ -100,7 +107,8 @@ class MemoryStore:
         if not self.input_roots or any(not path.is_dir() for path in self.input_roots):
             raise ValueError("explicit existing readonly staging roots are required")
         self.max_bytes = max_bytes
-        self.snapshot_references_enabled = enable_snapshot_references
+        self.scoped_typed_maps_enabled = enable_scoped_typed_maps
+        self.snapshot_references_enabled = enable_snapshot_references or enable_scoped_typed_maps
         if (export_config is None) != (export_directory is None):
             raise ValueError("export config and controlled handoff directory must be paired")
         self._export_directory = export_directory.resolve(strict=True) if export_directory else None
@@ -134,8 +142,10 @@ class MemoryStore:
             if saved_provider != provider_id:
                 raise ValueError("stored provider ownership differs from configuration")
             self.instance_id = str(instance)
-            if enable_snapshot_references:
+            if self.snapshot_references_enabled:
                 self._enable_snapshot_references()
+            if enable_scoped_typed_maps:
+                self._enable_scoped_typed_maps()
             self._content = self.root / "content"
             self._content.mkdir(mode=0o700, exist_ok=True)
             if self._content.is_symlink():
@@ -154,15 +164,21 @@ class MemoryStore:
     def _initialize_storage(self) -> None:
         """Migrate only quiescent original SQL and durably fence older provider writers."""
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1, 2, 3, 4):
+        if version not in (0, 1, 2, 3, 4, 5):
             raise ValueError("unsupported Memory backend schema")
-        if version in (3, 4):
-            if version == 4 and not self.snapshot_references_enabled:
+        if version in (3, 4, 5):
+            if version == 5 and not self.scoped_typed_maps_enabled:
+                raise ValueError("Memory v5 requires explicit scoped typed-map configuration")
+            if version >= 4 and not self.snapshot_references_enabled:
                 raise ValueError("Memory v4 requires explicit snapshot references configuration")
             marker = self._db.execute(
                 "SELECT schema,databases_json FROM provider_writer_format"
             ).fetchall()
-            writer_schema = SNAPSHOT_WRITER_SCHEMA if version == 4 else WRITER_SCHEMA
+            writer_schema = {
+                3: WRITER_SCHEMA,
+                4: SNAPSHOT_WRITER_SCHEMA,
+                5: SCOPED_MAP_WRITER_SCHEMA,
+            }[version]
             if marker != [(writer_schema, canonical(list(DATABASES)).decode())]:
                 raise ValueError("original provider writer marker is unavailable")
             required = {
@@ -174,7 +190,7 @@ class MemoryStore:
                 "content_references",
                 "provider_writer_format",
             }
-            if version == 4:
+            if version >= 4:
                 required.add("snapshot_operations")
             actual = {
                 row[0]
@@ -182,7 +198,7 @@ class MemoryStore:
             }
             if not required <= actual:
                 raise ValueError("original provider authority table is unavailable")
-            if version == 4:
+            if version >= 4:
                 columns = {
                     row[1] for row in self._db.execute("PRAGMA table_info(snapshot_operations)")
                 }
@@ -264,7 +280,7 @@ class MemoryStore:
 
     def _enable_snapshot_references(self) -> None:
         """Upgrade only an explicitly selected and already validated original v3 authority."""
-        if self._db.execute("PRAGMA user_version").fetchone()[0] == 4:
+        if self._db.execute("PRAGMA user_version").fetchone()[0] in (4, 5):
             return
         if self._db.execute("PRAGMA journal_mode=DELETE").fetchone() != ("delete",):
             raise ValueError("original provider snapshot migration requires drained connections")
@@ -282,6 +298,29 @@ class MemoryStore:
                 (SNAPSHOT_WRITER_SCHEMA, WRITER_SCHEMA),
             )
             self._db.execute("PRAGMA user_version=4")
+            self._db.commit()
+        except BaseException:
+            self._db.rollback()
+            raise
+        self._db.execute("PRAGMA journal_mode=WAL")
+
+    def _enable_scoped_typed_maps(self) -> None:
+        """Fence old writers after retaining the complete validated original v4 authority."""
+        version = self._db.execute("PRAGMA user_version").fetchone()[0]
+        if version == 5:
+            return
+        if version != 4 or self._db.execute("PRAGMA journal_mode=DELETE").fetchone() != ("delete",):
+            raise ValueError("scoped typed-map migration requires a drained original v4 store")
+        self._db.execute("PRAGMA synchronous=FULL")
+        self._db.execute("BEGIN EXCLUSIVE")
+        try:
+            updated = self._db.execute(
+                "UPDATE provider_writer_format SET schema=? WHERE schema=?",
+                (SCOPED_MAP_WRITER_SCHEMA, SNAPSHOT_WRITER_SCHEMA),
+            ).rowcount
+            if updated != 1:
+                raise ValueError("original scoped typed-map writer marker is unavailable")
+            self._db.execute("PRAGMA user_version=5")
             self._db.commit()
         except BaseException:
             self._db.rollback()
@@ -383,6 +422,16 @@ class MemoryStore:
         manifest = json.loads(invocation["manifest_json"])
         if not isinstance(manifest, dict):
             raise ValueError("original immutable manifest is unavailable")
+        raw_map = invocation.get("typed_map_manifest_json", "")
+        if raw_map:
+            from .scoped_maps import validate_typed_input
+
+            validate_typed_input(
+                json.loads(raw_map),
+                manifest,
+                invocation.get("group_id"),
+                self.scoped_typed_maps_enabled,
+            )
         return manifest
 
     def _artifact(self, manifest: dict[str, Any]) -> tuple[str, int]:
@@ -587,7 +636,9 @@ class MemoryStore:
                 is None
             )
             return {
-                "schema": "roboguide.memory-provider-availability/v0.1",
+                "schema": "roboguide.memory-provider-availability/v0.2"
+                if self.scoped_typed_maps_enabled
+                else "roboguide.memory-provider-availability/v0.1",
                 "import_id": original["import_id"],
                 "identity_digest": original["identity_digest"],
                 "provider_instance_id": self.instance_id,

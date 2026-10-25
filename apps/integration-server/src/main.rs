@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper without scoped typed-map preparations and transitive lifecycle authority.
+const PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v56";
 /// Previous wrapper without exact quantitative parent and borrower capacity authority.
 const PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v55";
 /// Previous wrapper without complete typed-map runtime revision authority.
@@ -310,7 +312,7 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
     ) -> Result<(), String> {
         self.revalidate_artifact_principal(principal)?;
         if let Some(id) = import_id {
-            {
+            let selected = {
                 let live = self
                     .controller
                     .lock()
@@ -325,13 +327,17 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
                         "typed Memory purpose lacks this complete original map manifest".into(),
                     );
                 }
-            }
-            return self.authorize_memory_access(
-                principal,
-                &domain::map_memory_manifest(manifest)?,
-                operation,
-                Some(id),
-            );
+                let original = &live.memory_imports[id].request.manifest;
+                let projected = domain::map_memory_manifest(manifest)?;
+                if original != &projected
+                    && application::scoped_maps::permits_ancestor_reference(&live, &projected, id)?
+                {
+                    original.clone()
+                } else {
+                    projected
+                }
+            };
+            return self.authorize_memory_access(principal, &selected, operation, Some(id));
         }
         let live = self
             .controller
@@ -378,6 +384,8 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
                 import_id,
                 ports::Clock::now(self.clock.as_ref()),
             )? && !application::plan_revision::permits_parent_reference(
+                &live, protected, import_id,
+            )? && !application::scoped_maps::permits_ancestor_reference(
                 &live, protected, import_id,
             )? {
                 return Ok(false);
@@ -467,19 +475,36 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
                 original.authority.as_ref().map(|a| &a.membership)
             };
             if let Some(map) = original.request.typed_map.as_ref() {
-                control
-                    .authorize_typed_map_consumer(
-                        map,
-                        &principal.tenant_id,
-                        &original.request.group_id,
-                        &original.request.task_ref,
-                        &original.request.role_id,
-                        &original.request.node_id,
-                        provider,
-                        operation,
-                        expected,
-                    )
-                    .map_err(|e| e.to_string())?;
+                if domain::map_memory_manifest(map)? != *manifest {
+                    control
+                        .authorize_scoped_typed_map_consumer(
+                            map,
+                            manifest,
+                            &principal.tenant_id,
+                            &original.request.group_id,
+                            &original.request.task_ref,
+                            &original.request.role_id,
+                            &original.request.node_id,
+                            provider,
+                            operation,
+                            expected,
+                        )
+                        .map_err(|error| error.to_string())?;
+                } else {
+                    control
+                        .authorize_typed_map_consumer(
+                            map,
+                            &principal.tenant_id,
+                            &original.request.group_id,
+                            &original.request.task_ref,
+                            &original.request.role_id,
+                            &original.request.node_id,
+                            provider,
+                            operation,
+                            expected,
+                        )
+                        .map_err(|e| e.to_string())?;
+                }
             } else {
                 control
                     .authorize_memory_consumer(
@@ -1181,6 +1206,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA
@@ -1244,6 +1270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
             ) && value.get("federation").is_none()
@@ -1256,6 +1283,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA
@@ -1415,6 +1443,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .bridge
         .control()
         .validate_mission_tenant_authority()?;
+    application::scoped_maps::validate_restored(&controller)?;
     application::memory_import::validate_restored(&controller)?;
     application::memory_handoff::validate_restored(&controller)?;
     application::plan_revision::attach_deployment(&mut controller, deployment_feasibility.clone())?;

@@ -68,6 +68,8 @@ pub const CONFIG_SCHEMA_V0_10: &str = "roboguide.node-config/v0.10";
 pub const CONFIG_SCHEMA_V0_13: &str = "roboguide.node-config/v0.13";
 /// Configuration explicitly negotiating typed quantitative resource grants.
 pub const CONFIG_SCHEMA_V0_14: &str = "roboguide.node-config/v0.14";
+/// Configuration explicitly negotiating scoped typed-map original-root preparation.
+pub const CONFIG_SCHEMA_V0_15: &str = "roboguide.node-config/v0.15";
 /// Explicit independent revoke-observation configuration without combined generation semantics.
 pub const CONFIG_SCHEMA_V0_12: &str = "roboguide.node-config/v0.12";
 /// Original continuous content-use configuration.
@@ -326,6 +328,8 @@ pub struct CompiledMemoryUse {
 /// Compiled provider-local current-content observation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledMemoryAvailability {
+    /// Exact newer observation interpretation; absent preserves historical configuration digests.
+    contract: Option<String>,
     /// Fixed read-only provider route under its registered Local EAIOS owner.
     observation: CompiledWorkflowStep,
     /// Response-relative versioned availability evidence pointer.

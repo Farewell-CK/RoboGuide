@@ -45,6 +45,7 @@ fn retain_memory(fixture: &mut ParallelMission, index: usize, providers: usize) 
                     kind: domain::MemoryKind::Artifact,
                     payload_schema: "unit.bytes/v1".into(),
                     media_type: "application/octet-stream".into(),
+                    source_contract: None,
                 },
                 manifest,
                 typed_map: None,

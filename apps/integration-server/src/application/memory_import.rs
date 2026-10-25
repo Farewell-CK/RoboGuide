@@ -539,9 +539,37 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
                 .ok_or("Memory command lacks its original policy history")?;
             let policy = if let Some(map) = &intent.request.typed_map {
                 if domain::map_memory_manifest(map)? != intent.request.manifest {
-                    return Err("restored typed Memory source projection differs".into());
+                    let preparation = controller
+                        .memory_preparation
+                        .records
+                        .get(&intent.request.execution_id)
+                        .and_then(|record| record.preparation.as_ref())
+                        .ok_or("scoped typed import lacks its original preparation")?;
+                    if preparation.schema != "roboguide.memory-preparation/v0.3"
+                        || intent.request.preparation_id.as_deref()
+                            != Some(preparation.preparation_id.as_str())
+                        || preparation.group_id != intent.request.group_id
+                        || preparation.node_id != intent.request.node_id
+                        || preparation.task_ref != intent.request.task_ref
+                        || preparation.role_id != intent.request.role_id
+                        || !preparation.inputs.iter().any(|input| {
+                            input.import_id == intent.request.import_id
+                                && input.manifest == intent.request.manifest
+                                && input.typed_map.as_ref() == Some(map)
+                                && input.consumer == stamp.consumer
+                        })
+                    {
+                        return Err("restored scoped typed import changed its original complete preparation".into());
+                    }
+                    domain::validate_scoped_map_manifest(
+                        map,
+                        &intent.request.manifest,
+                        &intent.request.group_id,
+                    )?;
+                    registry.policy(&intent.request.manifest, &stamp.tenant_id)?
+                } else {
+                    registry.typed_map_policy(map, &stamp.tenant_id)?
                 }
-                registry.typed_map_policy(map, &stamp.tenant_id)?
             } else {
                 registry.policy(&intent.request.manifest, &stamp.tenant_id)?
             };

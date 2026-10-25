@@ -59,6 +59,7 @@ def _private_root_staging(component: dict[str, Any], schema: str, name: str) -> 
             "roboguide.recovery-profile/v0.23",
             "roboguide.recovery-profile/v0.24",
             "roboguide.recovery-profile/v0.25",
+            "roboguide.recovery-profile/v0.26",
         }
         and component["kind"] == "replica-content"
         and component["storage_schema"] == "roboguide.replica-content-layout/v0.8"
@@ -303,7 +304,7 @@ def _validate_memory_content_references(
                 for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
             if (
-                connection.execute("PRAGMA user_version").fetchone()[0] in (3, 4)
+                connection.execute("PRAGMA user_version").fetchone()[0] in (3, 4, 5)
                 and not {"content_references", "content_tombstones"} <= tables
             ):
                 raise ValueError("Memory v3 content reference authority table is missing")
@@ -513,7 +514,11 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                 components,
                 budget,
                 allow_standalone=profile["schema"]
-                in {"roboguide.recovery-profile/v0.24", "roboguide.recovery-profile/v0.25"},
+                in {
+                    "roboguide.recovery-profile/v0.24",
+                    "roboguide.recovery-profile/v0.25",
+                    "roboguide.recovery-profile/v0.26",
+                },
             )
             if profile["schema"]
             in {
@@ -524,6 +529,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                 "roboguide.recovery-profile/v0.23",
                 "roboguide.recovery-profile/v0.24",
                 "roboguide.recovery-profile/v0.25",
+                "roboguide.recovery-profile/v0.26",
             }
             else None
         )
@@ -723,6 +729,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                     "roboguide.recovery-profile/v0.23",
                     "roboguide.recovery-profile/v0.24",
                     "roboguide.recovery-profile/v0.25",
+                    "roboguide.recovery-profile/v0.26",
                 }
                 else set()
             )
@@ -920,6 +927,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.23",
                 "roboguide.recovery-profile/v0.24",
                 "roboguide.recovery-profile/v0.25",
+                "roboguide.recovery-profile/v0.26",
             }
             else databases
         )
@@ -1035,7 +1043,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.25"
+        "roboguide.restore-receipt/v0.26"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.26"
+        else "roboguide.restore-receipt/v0.25"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.25"
         else "roboguide.restore-receipt/v0.24"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.24"
@@ -1057,6 +1067,7 @@ def restore(
             "roboguide.recovery-profile/v0.23",
             "roboguide.recovery-profile/v0.24",
             "roboguide.recovery-profile/v0.25",
+            "roboguide.recovery-profile/v0.26",
         }
         else "roboguide.restore-receipt/v0.18"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.18"
@@ -1182,6 +1193,7 @@ def restore(
             "roboguide.recovery-profile/v0.23",
             "roboguide.recovery-profile/v0.24",
             "roboguide.recovery-profile/v0.25",
+            "roboguide.recovery-profile/v0.26",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:
@@ -1225,6 +1237,7 @@ def restore(
         "roboguide.recovery-profile/v0.23",
         "roboguide.recovery-profile/v0.24",
         "roboguide.recovery-profile/v0.25",
+        "roboguide.recovery-profile/v0.26",
     }:
         receipt["original_authority_bytes_preserved"] = False
         receipt["original_operational_rows_preserved"] = True

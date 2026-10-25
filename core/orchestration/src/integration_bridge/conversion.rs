@@ -165,7 +165,8 @@ pub(super) fn registration_from_wire(
 ) -> Result<domain::NodeRegistration, IntegrationRuntimeError> {
     let semantic_profiles = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::SCOPED_MAP_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
@@ -177,7 +178,8 @@ pub(super) fn registration_from_wire(
     );
     let independent_operation_support = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::SCOPED_MAP_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
@@ -320,7 +322,7 @@ pub(super) fn registration_from_wire(
         let resource_id = ResourceId::new(resource.id)?;
         let owner = LocalSystemId::new(resource.local_system_id)?;
         let declaration = if resource.allocation_mode == "divisible" {
-            if wire.node_contract_version != integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            if !integration::grpc::v0_4::supports_capacity(&wire.node_contract_version)
                 || resource.kind != "compute"
             {
                 return Err(IntegrationRuntimeError::Protocol(
@@ -333,8 +335,7 @@ pub(super) fn registration_from_wire(
             if !matches!(resource.allocation_mode.as_str(), "" | "exclusive")
                 || !resource.resource_class.is_empty()
                 || !resource.allocation_mode.is_empty()
-                    && wire.node_contract_version
-                        != integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+                    && !integration::grpc::v0_4::supports_capacity(&wire.node_contract_version)
             {
                 return Err(IntegrationRuntimeError::Protocol(
                     "resource allocation fields exceed negotiated Node contract".into(),
@@ -466,6 +467,8 @@ pub(super) fn memory_provider_from_wire(
         provider
     } else if wire.preparation_contract == "roboguide.memory-provider-availability/v0.1" {
         provider.with_preparation_support()
+    } else if wire.preparation_contract == "roboguide.memory-provider-availability/v0.2" {
+        provider.with_scoped_map_preparation_support()
     } else {
         return Err(IntegrationRuntimeError::Protocol(
             "unsupported Memory preparation contract".into(),
@@ -545,8 +548,7 @@ pub(super) fn invocation_from_command(command: &ExecutionCommand) -> CanonicalIn
     CanonicalInvocation {
         resource_grants_json: if !command.resource_grants().is_empty()
             || command.registration_evidence().is_some_and(|evidence| {
-                evidence.contract_version().as_str()
-                    == integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+                integration::grpc::v0_4::supports_capacity(evidence.contract_version().as_str())
             }) {
             serde_json::to_string(command.resource_grants())
                 .expect("typed execution grants serialize")

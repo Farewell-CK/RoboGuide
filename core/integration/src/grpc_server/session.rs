@@ -379,7 +379,8 @@ pub(super) fn validate_registration(
     if registration.node_id.trim().is_empty()
         || !matches!(
             registration.node_contract_version.as_str(),
-            crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            crate::grpc::v0_4::SCOPED_MAP_NODE_CONTRACT_VERSION
+                | crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
                 | SAFETY_NODE_CONTRACT_VERSION
                 | MEMORY_USE_NODE_CONTRACT_VERSION
                 | crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
@@ -409,7 +410,11 @@ pub(super) fn validate_registration(
         !provider.preparation_contract.is_empty()
             && (!crate::grpc::v0_4::supports_memory_preparation(
                 &registration.node_contract_version,
-            ) || provider.preparation_contract != "roboguide.memory-provider-availability/v0.1")
+            ) || !(provider.preparation_contract
+                == "roboguide.memory-provider-availability/v0.1"
+                || crate::grpc::v0_4::supports_scoped_maps(&registration.node_contract_version)
+                    && provider.preparation_contract
+                        == "roboguide.memory-provider-availability/v0.2"))
     }) {
         return Err(Status::invalid_argument(
             "Memory availability declarations require the exact negotiated v0.9 contract",
@@ -419,7 +424,11 @@ pub(super) fn validate_registration(
         !provider.use_contract.is_empty()
             && (!crate::grpc::v0_4::supports_memory_use(&registration.node_contract_version)
                 || provider.use_contract != "roboguide.memory-use/shared-kernel/v0.1"
-                || provider.preparation_contract != "roboguide.memory-provider-availability/v0.1")
+                || !matches!(
+                    provider.preparation_contract.as_str(),
+                    "roboguide.memory-provider-availability/v0.1"
+                        | "roboguide.memory-provider-availability/v0.2"
+                ))
     }) {
         return Err(Status::invalid_argument(
             "Memory-use declarations require explicit v0.10 and prepared-content support",
@@ -467,13 +476,11 @@ pub(super) fn validate_registration(
         let valid_mode = match resource.allocation_mode.as_str() {
             "" => resource.resource_class.is_empty(),
             "exclusive" => {
-                registration.node_contract_version
-                    == crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+                crate::grpc::v0_4::supports_capacity(&registration.node_contract_version)
                     && resource.resource_class.is_empty()
             }
             "divisible" => {
-                registration.node_contract_version
-                    == crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+                crate::grpc::v0_4::supports_capacity(&registration.node_contract_version)
                     && resource.kind == "compute"
                     && !resource.resource_class.trim().is_empty()
                     && resource.resource_class.len() <= 128
@@ -589,7 +596,8 @@ fn validate_operation_support(
 ) -> Result<(), Status> {
     if !matches!(
         registration.node_contract_version.as_str(),
-        crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+        crate::grpc::v0_4::SCOPED_MAP_NODE_CONTRACT_VERSION
+            | crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
             | SAFETY_NODE_CONTRACT_VERSION
             | NODE_CONTRACT_VERSION
             | CONTINUITY_NODE_CONTRACT_VERSION

@@ -175,6 +175,9 @@ pub struct MemoryUseConfig {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemoryAvailabilityConfig {
+    /// Explicit newer provider interpretation; absent retains the original v0.1 contract.
+    #[serde(default)]
+    pub contract: Option<String>,
     /// Deployment-fixed GET observation of the original import's current full content.
     pub observation: WorkflowStepConfig,
     /// Response-relative typed availability evidence pointer.

@@ -218,7 +218,14 @@ class ProviderFixtureHandler(BaseHTTPRequestHandler):
             if declarations:
                 assert runtime["schema_version"] == "roboguide.runtime-replanning-context/v0.2"
                 assert len(declarations) == 1
-                declaration = next(iter(declarations.values()))["request"]
+                authorization = next(iter(declarations.values()))
+                declaration = authorization["request"]
+                scoped_typed = (
+                    declaration.get("typed_map") is not None
+                    and authorization["parent"]["scope"]["kind"] == "execution_group"
+                )
+                if scoped_typed:
+                    output["schema_version"] = "roboguide.mission-plan/v0.11"
                 child = declaration["child"]
                 assert declaration["target_group_id"] == runtime["target_group_id"]
                 assert child["scope"]["execution_group_id"] == runtime["target_group_id"]
@@ -231,6 +238,8 @@ class ProviderFixtureHandler(BaseHTTPRequestHandler):
                             for name in ("selector", "kind", "payload_schema", "media_type")
                         }
                     ]
+                    if scoped_typed:
+                        role["requirements"]["memories"][0]["source_contract"] = "scoped_typed_map"
                     role["execution_intent"]["parameters"]["rounds"] = 1
                 follow_up = copy.deepcopy(task)
                 follow_up["id"] = runtime["new_task_id_prefix"] + "follow-up"

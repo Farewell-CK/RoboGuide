@@ -111,7 +111,10 @@ impl MemoryUseControl {
     pub fn validate_preparation(&self, preparation: &MemoryPreparation) -> Result<(), String> {
         self.validate()?;
         preparation.validate()?;
-        if preparation.schema != "roboguide.memory-preparation/v0.2" {
+        if !matches!(
+            preparation.schema.as_str(),
+            "roboguide.memory-preparation/v0.2" | "roboguide.memory-preparation/v0.3"
+        ) {
             return Err(
                 "current Memory use requires original versioned use-capable preparation".into(),
             );

@@ -617,6 +617,73 @@ fn stopped_typed_map_handoff_requires_source_and_target_memberships() {
         )
         .unwrap();
     // A revision declares an unbound target; the generic contract cannot stand in for its map.
+    let mut independent = control.clone();
+    for (id, name) in [
+        (&source, "independent-consumer"),
+        (&target_id, "independent-recipient"),
+    ] {
+        let other = MissionId::new(name).unwrap();
+        independent
+            .register_mission_tenant(other.clone(), "local")
+            .unwrap();
+        independent.groups.insert(
+            id.clone(),
+            crate::ExecutionGroup::new_mission(
+                id.clone(),
+                other.clone(),
+                TaskRef::new(other, TaskId::new("independent-read").unwrap()),
+            ),
+        );
+    }
+    let consumer_membership = independent
+        .group(&source)
+        .unwrap()
+        .membership_version()
+        .unwrap();
+    let recipient_membership = independent
+        .group(&target_id)
+        .unwrap()
+        .membership_version()
+        .unwrap();
+    independent
+        .authorize_stopped_scoped_map_handoff(
+            &map,
+            &parent,
+            &child,
+            &source,
+            consumer_membership,
+            recipient_membership,
+            "local",
+            "handoff",
+        )
+        .unwrap();
+    assert!(
+        independent
+            .authorize_stopped_typed_map_handoff(
+                &map,
+                &child,
+                &source,
+                consumer_membership,
+                recipient_membership,
+                "local",
+                "handoff"
+            )
+            .is_err()
+    );
+    assert!(
+        independent
+            .authorize_stopped_scoped_map_handoff(
+                &map,
+                &parent,
+                &child,
+                &source,
+                consumer_membership,
+                recipient_membership,
+                "local",
+                "ungranted-principal"
+            )
+            .is_err()
+    );
     let mut revision = control.clone();
     revision.groups.remove(&target_id);
     revision

@@ -235,6 +235,8 @@ def run(output: Path, skip_build: bool, binary_path: Path | None) -> dict[str, A
         "roboguide.controller-checkpoint/v53",
         "roboguide.controller-checkpoint/v54",
         "roboguide.controller-checkpoint/v55",
+        "roboguide.controller-checkpoint/v56",
+        "roboguide.controller-checkpoint/v57",
     }:
         raise ValueError(f"unexpected Controller application schema {schema}")
     http_port, artifact_port, grpc_port = port(), port(), port()

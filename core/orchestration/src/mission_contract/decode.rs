@@ -9,11 +9,12 @@ use domain::{
     GroupViewBinding, GroupViewField, MISSION_PLAN_SCHEMA_V0_2, MISSION_PLAN_SCHEMA_V0_3,
     MISSION_PLAN_SCHEMA_V0_4, MISSION_PLAN_SCHEMA_V0_5, MISSION_PLAN_SCHEMA_V0_6,
     MISSION_PLAN_SCHEMA_V0_7, MISSION_PLAN_SCHEMA_V0_8, MISSION_PLAN_SCHEMA_V0_9,
-    MISSION_PLAN_SCHEMA_V0_10, MapId, MapRevisionId, MapRevisionSelector, MissionActor,
-    MissionGoal, MissionId, MissionPlan, OperationRef, PeerChannelSpec, PhysicalEntityId,
-    PlannedExecutionRef, PlannedTask, RelationStateRequirement, ResourceRequirement, RoleId,
-    RoleRequirement, SharedSpatialReference, TaskContinuity, TaskGraph, TaskId, TaskRequirement,
-    TaskSatisfactionBasis, TaskTiming, VerifierSatisfactionSpec,
+    MISSION_PLAN_SCHEMA_V0_10, MISSION_PLAN_SCHEMA_V0_11, MapId, MapRevisionId,
+    MapRevisionSelector, MissionActor, MissionGoal, MissionId, MissionPlan, OperationRef,
+    PeerChannelSpec, PhysicalEntityId, PlannedExecutionRef, PlannedTask, RelationStateRequirement,
+    ResourceRequirement, RoleId, RoleRequirement, SharedSpatialReference, TaskContinuity,
+    TaskGraph, TaskId, TaskRequirement, TaskSatisfactionBasis, TaskTiming,
+    VerifierSatisfactionSpec,
 };
 use std::collections::BTreeMap;
 
@@ -73,6 +74,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
             | MISSION_PLAN_SCHEMA_V0_10
+            | MISSION_PLAN_SCHEMA_V0_11
     ) {
         return Err(OrchestrationError::Mission(format!(
             "unsupported MissionPlan schema {}",
@@ -89,6 +91,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
             | MISSION_PLAN_SCHEMA_V0_10
+            | MISSION_PLAN_SCHEMA_V0_11
     );
     let mode_contract = matches!(
         document.schema_version.as_str(),
@@ -99,6 +102,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
             | MISSION_PLAN_SCHEMA_V0_10
+            | MISSION_PLAN_SCHEMA_V0_11
     );
     let scheduling_contract = matches!(
         document.schema_version.as_str(),
@@ -108,6 +112,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
             | MISSION_PLAN_SCHEMA_V0_10
+            | MISSION_PLAN_SCHEMA_V0_11
     );
     let satisfaction_contract = matches!(
         document.schema_version.as_str(),
@@ -116,6 +121,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
             | MISSION_PLAN_SCHEMA_V0_10
+            | MISSION_PLAN_SCHEMA_V0_11
     );
     let normalized_contract = matches!(
         document.schema_version.as_str(),
@@ -123,11 +129,30 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
             | MISSION_PLAN_SCHEMA_V0_10
+            | MISSION_PLAN_SCHEMA_V0_11
     );
-    let capacity_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_10;
+    let scoped_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_11;
+    let capacity_contract = matches!(
+        document.schema_version.as_str(),
+        MISSION_PLAN_SCHEMA_V0_10 | MISSION_PLAN_SCHEMA_V0_11
+    );
+    if !scoped_contract
+        && document
+            .tasks
+            .iter()
+            .flat_map(|task| &task.roles)
+            .filter_map(|role| role.requirements.as_ref())
+            .filter_map(|requirements| requirements.memories.as_ref())
+            .flatten()
+            .any(|requirement| requirement.source_contract.is_some())
+    {
+        return Err(OrchestrationError::Mission(
+            "scoped typed-map source declarations require exact MissionPlan v0.11".into(),
+        ));
+    }
     let memory_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_9 | MISSION_PLAN_SCHEMA_V0_10
+        MISSION_PLAN_SCHEMA_V0_9 | MISSION_PLAN_SCHEMA_V0_10 | MISSION_PLAN_SCHEMA_V0_11
     );
     let has_capacity = |resources: &[ResourceRequirementDocument]| {
         resources
@@ -173,7 +198,10 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
     }
     let binding_semantics_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_8 | MISSION_PLAN_SCHEMA_V0_9 | MISSION_PLAN_SCHEMA_V0_10
+        MISSION_PLAN_SCHEMA_V0_8
+            | MISSION_PLAN_SCHEMA_V0_9
+            | MISSION_PLAN_SCHEMA_V0_10
+            | MISSION_PLAN_SCHEMA_V0_11
     );
     let MissionDocument {
         id,
@@ -251,7 +279,9 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
     if normalized_contract {
         MissionPlan::new_with_actors(goal, actors, graph, contexts)
             .map(|plan| {
-                if capacity_contract {
+                if scoped_contract {
+                    plan.with_v0_11_contract()
+                } else if capacity_contract {
                     plan.with_v0_10_contract()
                 } else if memory_contract {
                     plan.with_v0_9_contract()

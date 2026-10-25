@@ -548,6 +548,7 @@ pub(crate) fn validate_wrapper(saved: &ServerCheckpoint) -> Result<(), String> {
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
             | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
     ) && (!saved.federation.records.is_empty() || !saved.federation.policies.is_empty())

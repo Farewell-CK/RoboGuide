@@ -190,8 +190,7 @@ impl LocalIntegrationEngine {
         preparation: Option<&domain::MemoryPreparation>,
     ) -> Result<ExecuteDisposition, EngineError> {
         self.validate_execution_generation(execution_generation)?;
-        if (self.catalog().node_contract_version()
-            == integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION)
+        if (integration::grpc::v0_4::supports_capacity(self.catalog().node_contract_version()))
             == invocation.resource_grants_json.is_empty()
         {
             return Err(EngineError::Protocol(

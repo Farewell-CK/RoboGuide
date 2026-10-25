@@ -15,7 +15,7 @@ pub(super) fn configure_connection(connection: &Connection) -> Result<(), Journa
 pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalError> {
     let prior_version =
         connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
-    if prior_version > 14 {
+    if prior_version > 15 {
         return Err(JournalError::Corrupt(
             "journal was written by a newer storage authority".into(),
         ));
@@ -30,7 +30,7 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
             |row| row.get(0),
         )
         .optional()?;
-    if marker.is_some_and(|version| !matches!(version, 7..=14))
+    if marker.is_some_and(|version| !matches!(version, 7..=15))
         || (prior_version >= 7 && marker != Some(prior_version))
     {
         return Err(JournalError::Corrupt(
@@ -170,16 +170,37 @@ pub(super) fn create_schema(connection: &mut Connection) -> Result<(), JournalEr
             [],
         )?;
     }
+    if prior_version < 15 {
+        let mut statement =
+            transaction.prepare("SELECT preparation_json FROM memory_preparations")?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            let raw: String = row.get(0)?;
+            let value: serde_json::Value = serde_json::from_str(&raw)
+                .map_err(|error| JournalError::Corrupt(error.to_string()))?;
+            if value["schema"].as_str() == Some("roboguide.memory-preparation/v0.3")
+                || value["inputs"].as_array().is_some_and(|inputs| {
+                    inputs.iter().any(|input| {
+                        input["requirement"]["source_contract"].as_str() == Some("scoped_typed_map")
+                    })
+                })
+            {
+                return Err(JournalError::Corrupt(
+                    "legacy Node journal hides scoped typed-map authority".into(),
+                ));
+            }
+        }
+    }
     transaction.execute_batch(
         "CREATE VIEW IF NOT EXISTS executions AS SELECT * FROM execution_authority_v7;
         CREATE VIEW IF NOT EXISTS memory_imports AS SELECT * FROM memory_import_authority_v7;",
     )?;
     transaction.execute(
-        "INSERT INTO node_journal_storage_schema VALUES (1,14)
-         ON CONFLICT(singleton) DO UPDATE SET version=14",
+        "INSERT INTO node_journal_storage_schema VALUES (1,15)
+         ON CONFLICT(singleton) DO UPDATE SET version=15",
         [],
     )?;
-    transaction.pragma_update(None, "user_version", 14_i64)?;
+    transaction.pragma_update(None, "user_version", 15_i64)?;
     transaction.commit()?;
     Ok(())
 }

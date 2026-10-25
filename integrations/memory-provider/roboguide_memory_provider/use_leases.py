@@ -207,8 +207,14 @@ class UseLeases:
         preparation = json.loads(encoded)
         if not isinstance(preparation, dict):
             raise ValueError("Memory preparation is not an object")
-        if preparation.get("schema") != "roboguide.memory-preparation/v0.2":
+        schema = preparation.get("schema")
+        if schema not in {"roboguide.memory-preparation/v0.2", "roboguide.memory-preparation/v0.3"}:
             raise ValueError("unsupported original Memory preparation")
+        if (
+            schema == "roboguide.memory-preparation/v0.3"
+            and not self.store.scoped_typed_maps_enabled
+        ):
+            raise ValueError("scoped typed preparation requires the explicitly upgraded provider")
         for key in (
             "preparation_id",
             "tenant_id",
@@ -262,6 +268,26 @@ class UseLeases:
             raw = original["original_invocation"].get("typed_map_manifest_json", "")
             if (json.loads(raw) if raw else None) != item.get("typed_map"):
                 raise ValueError("Memory-use strips complete original Spatial provenance")
+            if raw:
+                from .scoped_maps import validate_typed_input
+
+                scoped = validate_typed_input(
+                    json.loads(raw),
+                    manifest,
+                    control["group_id"],
+                    self.store.scoped_typed_maps_enabled,
+                )
+                if scoped and (
+                    schema != "roboguide.memory-preparation/v0.3"
+                    or item["requirement"].get("source_contract") != "scoped_typed_map"
+                ):
+                    raise ValueError("scoped typed use cannot borrow an older generic preparation")
+            if (
+                schema == "roboguide.memory-preparation/v0.3"
+                and item["consumer"].get("preparation_contract")
+                != "roboguide.memory-provider-availability/v0.2"
+            ):
+                raise ValueError("scoped preparation changed its negotiated provider contract")
             scope = manifest["scope"]
             if scope.get("kind") not in {"local", "execution_group", "global"}:
                 raise ValueError("Memory-use semantic scope is unavailable")

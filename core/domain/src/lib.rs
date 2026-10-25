@@ -58,11 +58,12 @@ pub use memory_authority::{
     GroupMembershipVersion, MEMORY_AUTHORIZATION_SCHEMA, MEMORY_AUTHORIZATION_SCHEMA_V0_1,
     MemoryAccessOperation, MemoryAccessPolicy, MemoryAuthorizationRegistry, MemoryConsumerPolicy,
     MemoryGroupPolicy, map_manifest_digest, map_memory_manifest, memory_manifest_digest,
+    validate_scoped_map_manifest,
 };
 pub use memory_preparation::{
     MEMORY_PREPARATION_MAX_BUDGET_MS, MemoryAvailabilityEvidence, MemoryControlCommand,
     MemoryControlKind, MemoryControlReceipt, MemoryControlStatus, MemoryPreparation,
-    MemoryRequirement, PreparedMemoryInput,
+    MemoryRequirement, MemorySourceContract, PreparedMemoryInput,
 };
 pub use memory_use::{
     MEMORY_USE_MAX_BUDGET_MS, MemoryUseControl, MemoryUseOperation,
@@ -244,6 +245,9 @@ pub const MISSION_PLAN_SCHEMA_V0_9: &str = "roboguide.mission-plan/v0.9";
 /// Explicit typed quantitative resource requirements and Context capacity envelopes.
 pub const MISSION_PLAN_SCHEMA_V0_10: &str = "roboguide.mission-plan/v0.10";
 
+/// Explicit semantic scoped typed-map inputs, preserving complete v0.10 resource semantics.
+pub const MISSION_PLAN_SCHEMA_V0_11: &str = "roboguide.mission-plan/v0.11";
+
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
 
@@ -270,6 +274,9 @@ pub const NODE_CONTRACT_VERSION_V0_12: &str = "roboguide.node.v0.12";
 
 /// Explicit quantitative resource execution contract.
 pub const NODE_CONTRACT_VERSION_V0_13: &str = "roboguide.node.v0.13";
+
+/// Explicit scoped typed-map preparation and original-root current-use contract.
+pub const NODE_CONTRACT_VERSION_V0_14: &str = "roboguide.node.v0.14";
 /// Node Contract with durable pre-execution Memory context and current backend observation.
 pub const NODE_CONTRACT_VERSION_V0_9: &str = "roboguide.node.v0.9";
 

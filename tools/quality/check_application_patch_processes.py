@@ -80,7 +80,11 @@ def run(
     )
     operation = hashlib.sha256(str(output).encode()).hexdigest()[:16]
     selected_profile = profile(source, output)
-    assert selected_profile["schema"] == "roboguide.recovery-profile/v0.25"
+    assert selected_profile["schema"] == (
+        "roboguide.recovery-profile/v0.26"
+        if original_schema == "roboguide.controller-checkpoint/v57"
+        else "roboguide.recovery-profile/v0.25"
+    )
     save(output / "profile.json", selected_profile)
     backup = command(
         output,

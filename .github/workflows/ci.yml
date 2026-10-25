@@ -385,7 +385,7 @@ jobs:
           tar -xzf "${RUNNER_TEMP}/roboguide-original-v55.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-original-v55"
           CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-original-v55-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-original-v55/Cargo.toml" -p integration-server -p controller-replica
 
-      - name: Verify real rolling infrastructure and v55 to v56 application upgrades
+      - name: Verify real rolling infrastructure and original to current application upgrades
         run: >
           uv run --frozen python tools/quality/check_application_upgrade_processes.py
           --supervisor target/debug/controller-replica
@@ -395,7 +395,7 @@ jobs:
           --storage-probe target/debug/examples/content_stream_probe
           --output "${RUNNER_TEMP}/roboguide-application-upgrade"
 
-      - name: Verify complete upgraded v0.25 cold restore and all actual leaders
+      - name: Verify complete upgraded cold restore and all actual leaders
         run: >
           uv run --frozen python tools/quality/check_replica_content_recovery_processes.py
           --source "${RUNNER_TEMP}/roboguide-application-upgrade"

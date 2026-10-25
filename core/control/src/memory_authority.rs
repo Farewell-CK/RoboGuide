@@ -17,6 +17,19 @@ impl ControlPlane {
         operation: &domain::OperationRef,
         now: domain::TimestampMs,
     ) -> Result<MemoryProviderDescriptor, ControlError> {
+        self.select_memory_provider_for_preparation(state, node, requirement, operation, now, false)
+    }
+
+    /// Selects the exact newer receiver only when the complete context retains scoped typed roots.
+    pub fn select_memory_provider_for_preparation<S: ports::SharedNodeStateReader>(
+        &self,
+        state: &S,
+        node: &NodeId,
+        requirement: &domain::MemoryRequirement,
+        operation: &domain::OperationRef,
+        now: domain::TimestampMs,
+        scoped: bool,
+    ) -> Result<MemoryProviderDescriptor, ControlError> {
         requirement
             .validate()
             .map_err(ControlError::InvalidProposal)?;
@@ -34,9 +47,18 @@ impl ControlPlane {
                 | domain::NODE_CONTRACT_VERSION_V0_11
                 | domain::NODE_CONTRACT_VERSION_V0_12
                 | domain::NODE_CONTRACT_VERSION_V0_13
+                | domain::NODE_CONTRACT_VERSION_V0_14
         ) {
             return Err(denied(
                 "Memory preparation requires explicitly negotiated Node Contract v0.10",
+            ));
+        }
+        if scoped
+            && snapshot.registration().contract_version().as_str()
+                != domain::NODE_CONTRACT_VERSION_V0_14
+        {
+            return Err(denied(
+                "scoped typed-map preparation requires exact Node Contract v0.14",
             ));
         }
         let owner = snapshot
@@ -49,6 +71,7 @@ impl ControlPlane {
             .iter()
             .filter(|provider| {
                 provider.supports_use_lease()
+                    && (!scoped || provider.supports_scoped_map_preparation())
                     && requirement.matches_provider(provider)
                     && provider.local_system_id() == owner
             })
@@ -368,6 +391,7 @@ impl ControlPlane {
             operation,
             expected_membership,
             None,
+            false,
         )
     }
 
@@ -397,6 +421,37 @@ impl ControlPlane {
             operation,
             expected_membership,
             Some(map),
+            false,
+        )
+    }
+
+    /// Authorizes an exact current scoped child using its own grants and immutable original typed root.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorize_scoped_typed_map_consumer(
+        &self,
+        map: &MapArtifactManifest,
+        manifest: &MemoryArtifactManifest,
+        tenant: &str,
+        group_id: &ExecutionGroupId,
+        task: &TaskRef,
+        role: &RoleId,
+        node: &NodeId,
+        provider: &MemoryProviderDescriptor,
+        operation: MemoryAccessOperation,
+        expected_membership: Option<&GroupMembershipVersion>,
+    ) -> Result<GroupMembershipVersion, ControlError> {
+        self.authorize_memory_consumer_inner(
+            manifest,
+            tenant,
+            group_id,
+            task,
+            role,
+            node,
+            provider,
+            operation,
+            expected_membership,
+            Some(map),
+            true,
         )
     }
 
@@ -414,6 +469,7 @@ impl ControlPlane {
         operation: MemoryAccessOperation,
         expected_membership: Option<&GroupMembershipVersion>,
         typed_map: Option<&domain::MapArtifactManifest>,
+        scoped: bool,
     ) -> Result<GroupMembershipVersion, ControlError> {
         self.validate_memory_owner_tenant(manifest, tenant)?;
         let group = self
@@ -453,7 +509,18 @@ impl ControlPlane {
         provider
             .admit_import(manifest, node)
             .map_err(|e| denied(&e.to_string()))?;
-        let policy = if let Some(map) = typed_map {
+        let policy = if scoped {
+            let map =
+                typed_map.ok_or_else(|| denied("scoped typed-map input lost its original root"))?;
+            if !provider.supports_scoped_map_preparation() {
+                return Err(denied(
+                    "current receiving provider lacks scoped typed-map support",
+                ));
+            }
+            domain::validate_scoped_map_manifest(map, manifest, group_id)
+                .map_err(ControlError::InvalidProposal)?;
+            self.memory_policy(manifest, tenant)?
+        } else if let Some(map) = typed_map {
             if domain::map_memory_manifest(map).map_err(ControlError::InvalidProposal)? != *manifest
             {
                 return Err(denied(
@@ -523,6 +590,16 @@ impl ControlPlane {
         let membership = group
             .membership_version()
             .ok_or_else(|| denied("prepared Memory membership is unavailable"))?;
+        if preparation.schema == "roboguide.memory-preparation/v0.3"
+            && state.node(&preparation.node_id).is_none_or(|snapshot| {
+                snapshot.registration().contract_version().as_str()
+                    != domain::NODE_CONTRACT_VERSION_V0_14
+            })
+        {
+            return Err(denied(
+                "scoped preparation's exact Node contract is unavailable",
+            ));
+        }
         let role = group
             .role_requirement(&preparation.task_ref, &preparation.role_id)
             .ok_or_else(|| denied("prepared Memory Role is absent"))?;
@@ -593,7 +670,9 @@ impl ControlPlane {
                     "prepared Memory original receiver declaration changed",
                 ));
             }
-            let old_policy = if let Some(map) = &input.typed_map {
+            let old_policy = if input.is_scoped_typed_map() {
+                original.policy(&input.manifest, &preparation.tenant_id)
+            } else if let Some(map) = &input.typed_map {
                 original.typed_map_policy(map, &preparation.tenant_id)
             } else {
                 original.policy(&input.manifest, &preparation.tenant_id)
@@ -620,6 +699,7 @@ impl ControlPlane {
                     operation,
                     None,
                     input.typed_map.as_ref(),
+                    input.is_scoped_typed_map(),
                 )?;
             }
         }

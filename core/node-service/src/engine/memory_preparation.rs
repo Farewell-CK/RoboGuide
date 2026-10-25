@@ -96,8 +96,16 @@ impl LocalIntegrationEngine {
         preparation: &MemoryPreparation,
     ) -> Result<String, EngineError> {
         preparation.validate().map_err(EngineError::Configuration)?;
-        if self.catalog().node_contract_version()
-            == integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+        if preparation.schema == "roboguide.memory-preparation/v0.3"
+            && !integration::grpc::v0_4::supports_scoped_maps(
+                self.catalog().node_contract_version(),
+            )
+        {
+            return Err(EngineError::Protocol(
+                "scoped typed-map preparation requires explicit Node Contract v0.14".into(),
+            ));
+        }
+        if integration::grpc::v0_4::supports_capacity(self.catalog().node_contract_version())
             && preparation.invocation.get("resource_grants").is_none()
         {
             return Err(EngineError::Protocol(
@@ -185,6 +193,11 @@ impl LocalIntegrationEngine {
             )
             .map_err(|e| EngineError::Configuration(e.to_string()))?
             .with_preparation_support();
+            if provider.availability().is_some_and(|availability| {
+                availability.contract() == "roboguide.memory-provider-availability/v0.2"
+            }) {
+                descriptor = descriptor.with_scoped_map_preparation_support();
+            }
             if provider.use_lease().is_some() {
                 descriptor = descriptor.with_use_lease_support();
             }

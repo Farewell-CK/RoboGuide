@@ -317,6 +317,12 @@ impl MemoryProviderDescriptor {
         self
     }
 
+    /// Explicitly negotiates typed roots beside scoped receiving manifests without proving availability.
+    pub fn with_scoped_map_preparation_support(mut self) -> Self {
+        self.preparation_contract = Some("roboguide.memory-provider-availability/v0.2".into());
+        self
+    }
+
     /// Returns the original exact preparation/availability contract when explicitly declared.
     pub fn preparation_contract(&self) -> Option<&str> {
         self.preparation_contract.as_deref()
@@ -324,7 +330,18 @@ impl MemoryProviderDescriptor {
 
     /// Checks supported explicit evidence instead of inferring availability from Imported history.
     pub fn supports_preparation(&self) -> bool {
-        self.preparation_contract() == Some("roboguide.memory-provider-availability/v0.1")
+        matches!(
+            self.preparation_contract(),
+            Some(
+                "roboguide.memory-provider-availability/v0.1"
+                    | "roboguide.memory-provider-availability/v0.2"
+            )
+        )
+    }
+
+    /// Checks exact new provider support instead of borrowing an older availability declaration.
+    pub fn supports_scoped_map_preparation(&self) -> bool {
+        self.preparation_contract() == Some("roboguide.memory-provider-availability/v0.2")
     }
 
     /// Declares current use fencing without claiming content, execution or physical safety.

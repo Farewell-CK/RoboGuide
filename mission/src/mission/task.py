@@ -14,6 +14,7 @@ from mission.contract_values import (
     MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
     MISSION_PLAN_SCHEDULING_VERSION,
+    MISSION_PLAN_SCOPED_MEMORY_VERSION,
     MISSION_PLAN_VERSION,
     U64_MAX,
     JSONObject,
@@ -156,6 +157,7 @@ class TaskSatisfaction:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             _exact_keys(item, {"expected_effect", "basis", "verifier"}, path)
         else:
@@ -170,6 +172,7 @@ class TaskSatisfaction:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             if basis is not TaskSatisfactionBasis.EXECUTION_REPORT:
                 raise MissionPlanError(f"{path}.basis is unsupported before MissionPlan v0.7")
@@ -197,6 +200,7 @@ class TaskSatisfaction:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             return {"basis": self.basis.value}
         return {
@@ -237,6 +241,7 @@ class MissionTask:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             _bounded_keys(
                 item,
@@ -279,6 +284,7 @@ class MissionTask:
                     MISSION_PLAN_VERSION,
                     MISSION_PLAN_MEMORY_VERSION,
                     MISSION_PLAN_CAPACITY_VERSION,
+                    MISSION_PLAN_SCOPED_MEMORY_VERSION,
                 },
             )
             if version
@@ -289,6 +295,7 @@ class MissionTask:
                 MISSION_PLAN_VERSION,
                 MISSION_PLAN_MEMORY_VERSION,
                 MISSION_PLAN_CAPACITY_VERSION,
+                MISSION_PLAN_SCOPED_MEMORY_VERSION,
             }
             else None
         )
@@ -298,6 +305,7 @@ class MissionTask:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             satisfaction = TaskSatisfaction.from_json(
                 item["satisfaction"], f"{path}.satisfaction", version
@@ -332,6 +340,7 @@ class MissionTask:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }
         if (
             version
@@ -343,6 +352,7 @@ class MissionTask:
                 MISSION_PLAN_VERSION,
                 MISSION_PLAN_MEMORY_VERSION,
                 MISSION_PLAN_CAPACITY_VERSION,
+                MISSION_PLAN_SCOPED_MEMORY_VERSION,
             }
             and self.coupling_mode is not None
         ):
@@ -354,6 +364,7 @@ class MissionTask:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             if self.timing is None:
                 raise MissionPlanError(f"task {self.task_id} lacks required scheduling timing")
@@ -364,6 +375,7 @@ class MissionTask:
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
             MISSION_PLAN_CAPACITY_VERSION,
+            MISSION_PLAN_SCOPED_MEMORY_VERSION,
         }:
             result["satisfaction"] = self.satisfaction.to_json(version)
         return result

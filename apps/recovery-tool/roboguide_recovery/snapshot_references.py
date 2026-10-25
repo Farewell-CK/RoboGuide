@@ -42,6 +42,7 @@ def supports(profile_schema: str) -> bool:
         "roboguide.recovery-profile/v0.23",
         "roboguide.recovery-profile/v0.24",
         "roboguide.recovery-profile/v0.25",
+        "roboguide.recovery-profile/v0.26",
     }
 
 
@@ -69,9 +70,9 @@ def digest(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
-def _provider(connection: sqlite3.Connection) -> tuple[str, str]:
+def _provider(connection: sqlite3.Connection, profile_schema: str = SCHEMA) -> tuple[str, str]:
     """Require explicit v4 authority and its original persistent provider instance."""
-    validate_memory_storage(connection, SCHEMA)
+    validate_memory_storage(connection, profile_schema)
     rows = connection.execute("SELECT provider,instance FROM identity WHERE singleton=1").fetchall()
     if len(rows) != 1 or any(
         not isinstance(value, str) or not 0 < len(value) <= 128 for value in rows[0]
@@ -129,7 +130,7 @@ def prepare(
         budget.check()
         root = Path(component["root"])
         with closing(sqlite3.connect(root / "memory.sqlite3")) as connection:
-            provider, instance = _provider(connection)
+            provider, instance = _provider(connection, profile["schema"])
             purpose = {
                 "command_id": command_id,
                 "profile_digest": digest_profile(profile),
@@ -233,7 +234,7 @@ def _original(
         or DIGEST.fullmatch(descriptor["request_digest"]) is None
     ):
         raise ValueError("snapshot descriptor is not closed")
-    provider, instance = _provider(connection)
+    provider, instance = _provider(connection, manifest["profile"]["schema"])
     if (descriptor["provider_id"], descriptor["provider_instance_id"]) != (provider, instance):
         raise ValueError("snapshot proof belongs to a different actual provider instance")
     row = connection.execute(
@@ -457,7 +458,7 @@ def abort(
             continue
         budget.check()
         with closing(sqlite3.connect(Path(component["root"]) / "memory.sqlite3")) as connection:
-            provider, instance = _provider(connection)
+            provider, instance = _provider(connection, profile["schema"])
             purpose = {
                 "command_id": command_id,
                 "profile_digest": digest_profile(profile),
