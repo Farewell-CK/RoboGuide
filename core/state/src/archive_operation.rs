@@ -22,6 +22,7 @@ pub(super) fn initialize(
         .optional()?;
     if accepted || marker.as_deref() == Some(super::archive_abort::STORAGE_SCHEMA) {
         require_storage(connection)?;
+        super::coordinated_archive::read(connection)?;
         return super::archive_abort::validate_storage(connection);
     }
     match marker.as_deref() {
@@ -83,7 +84,9 @@ pub(super) fn require_storage(connection: &Connection) -> Result<(), SqliteEvent
         .optional()?;
     if !matches!(
         marker.as_deref(),
-        Some(STORAGE_SCHEMA) | Some(super::archive_abort::STORAGE_SCHEMA)
+        Some(STORAGE_SCHEMA)
+            | Some(super::archive_abort::STORAGE_SCHEMA)
+            | Some(super::coordinated_archive::COORDINATED_ARCHIVE_STORAGE_SCHEMA)
     ) {
         return Err(SqliteEventLogError::Codec(
             "mandatory original Archive journal marker is missing or changed".into(),
@@ -96,7 +99,11 @@ pub(super) fn require_storage(connection: &Connection) -> Result<(), SqliteEvent
             "original Archive journal exceeds its retained bounds".into(),
         ));
     }
-    if marker.as_deref() == Some(super::archive_abort::STORAGE_SCHEMA) {
+    if matches!(
+        marker.as_deref(),
+        Some(super::archive_abort::STORAGE_SCHEMA)
+            | Some(super::coordinated_archive::COORDINATED_ARCHIVE_STORAGE_SCHEMA)
+    ) {
         super::archive_abort::require_storage(connection)?;
     }
     Ok(())
@@ -445,6 +452,8 @@ impl ArchiveIntent {
                     | "roboguide.controller-checkpoint/v55"
                     | "roboguide.controller-checkpoint/v56"
                     | "roboguide.controller-checkpoint/v57"
+                    | "roboguide.controller-checkpoint/v58"
+                    | "roboguide.controller-checkpoint/v59"
                     | crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
             )
             || self.checkpoint.event_sequence < self.manifest.end_sequence

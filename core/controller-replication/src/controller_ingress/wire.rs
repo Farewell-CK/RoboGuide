@@ -228,9 +228,13 @@ async fn begin<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     let view = node.store.network_view().await?;
     let held = node.clone();
     let original = process.clone();
-    let (candidate, recovery_clocks) = blocking(node, move |_| {
+    let (candidate, recovery_clocks, archive_effects) = blocking(node, move |_| {
         let clocks = super::recovery::validate_new_candidate(&held, &candidate, &original, &view)?;
-        Ok((candidate, clocks))
+        let archive = candidate.archive_effects(&view)?;
+        for effect in &archive {
+            effect.require_budget()?;
+        }
+        Ok((candidate, clocks, archive))
     })
     .await?;
     let target = node.content_target_for(&candidate).await?;
@@ -240,8 +244,21 @@ async fn begin<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
         clock.clone(),
         Some(target.clone()),
     );
+    let source_pid = process.pid;
     let check: StreamPermission = std::sync::Arc::new(move || {
         original_check()?;
+        for effect in &archive_effects {
+            effect.require_budget()?;
+            if std::fs::read_link(format!("/proc/{source_pid}/ns/time"))
+                .map_err(|e| e.to_string())?
+                .to_string_lossy()
+                != effect.time_namespace
+            {
+                return Err(
+                    "original Archive source no longer shares its admitted kernel clock".into(),
+                );
+            }
+        }
         for clock in &recovery_clocks {
             clock.check()?;
         }

@@ -197,9 +197,14 @@ impl SqliteRaftStore {
         let transaction = connection
             .unchecked_transaction()
             .map_err(|error| error.to_string())?;
-        let version: i64 = transaction
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|error| error.to_string())?;
+        let physical = crate::archive_parent::physical(&transaction)?;
+        if (physical == crate::archive_parent::VERSION) != self.coordinated_archive {
+            return Err(
+                "readonly coordinated Archive opening differs from original physical generation"
+                    .into(),
+            );
+        }
+        let version = crate::archive_parent::effective(&transaction)?;
         let base_parent = if self.initialization_content {
             INITIALIZATION_CONTENT_VERSION
         } else if self.controller_content {

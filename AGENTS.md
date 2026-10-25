@@ -1,3 +1,26 @@
+ADR-0213 owns explicit listener capacity in Integration `listener_capacity`, Mission HTTP and
+the independently deployable Memory/Spatial/Robonix local adapters. Actual permits precede TLS or
+worker creation and remain until handling ends; transport timeout never cancels committed work.
+Fixed metrics and native monitoring rules confer no business authority. Defaults remain 128,
+explicit ranges are 1–1024, and Node streams have a separate 1–128 bound. Maintained real-process
+gates are `check_listener_capacity_processes.py`, `check_spatial_capacity_processes.py` and
+`check_default_listener_processes.py`; no device or Node inventory is synthesized. See
+`docs/development/listener-capacity-v0.1.md` and the 2026-10-26 acceptance. These internal transport
+changes do not change application, Node, Memory, Plan or recovery generations.
+
+ADR-0212 owns coordinated original-content Archive in State `coordinated_archive`, Replica
+`content_archive`/`archive_parent` and the application CAS/Operator adapters. Explicit process v0.9
+retains its original v0.6/v0.7 base; parent11 fences old writers even before the first operation.
+Pending intent commits before actual CAS publication; complete-content v4 alone may advance the
+exact floor while preserving checkpoint, commands, origins, protected Catalog and Unknown.
+Journal v0.3/projection v0.2/recovery v0.30 retain original clocks and exact qualified package bytes.
+Packages are private control metadata, never normal Artifact/Memory content. Duplicate originals
+remain readonly across source-owner changes; explicit abandonment never converts Unknown to success.
+The actual zero-Node runnable gate gains `--coordinated-archive --archive-sql-fault`; online,
+SQL/Unknown, actual producer GC, purged Snapshot/learner/joint and final three-leader cold acceptance
+pass under retained original evidence. Node/Plan/Memory/event contracts retain their original meaning. No storage or
+process proof establishes devices, physical stopping, cross-host continuity or long-term SLO.
+
 ADR-0211 owns resource-bearing Federation in application `federation/execution`, root `coordinator`
 and bounded pinned-mTLS `transport`. Normal Control Prepare retains the complete initial local cohort;
 all original Commit proofs precede release, and actual writer epochs/kernel budgets fence restart.

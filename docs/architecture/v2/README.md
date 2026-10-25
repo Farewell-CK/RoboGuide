@@ -1,5 +1,12 @@
 # RoboGuide V2 现行架构
 
+[ADR-0213](../../decisions/0213-explicit-listener-capacity.md)将实际入口容量归于各服务进程。
+permit 在 TLS/线程前取得，原业务预算和 ownership 独立保留；有限网络等待不会撤销已提交
+工作。Node/Artifact/Mission 固定连接观察和原生告警见[实现合同](../../development/listener-capacity-v0.1.md)，
+不增加 application、Node 或 Memory authority。
+
+[ADR-0212](../../decisions/0212-coordinated-content-archive.md)明确在线归档由 State 保留原操作和精确归约，Replica 复用原完整内容 quorum，Artifact CAS 保存私有元数据包。pending 先于实际发布；完成只删除已验证前缀，保留原 checkpoint、命令、Catalog、Unknown 与预算。显式 parent11/process v0.9/recovery v0.30 拒绝旧 writer，wrapper v60 与 Node 合同保持。见[实现与运维](../../development/coordinated-content-archive-v0.1.md)。
+
 核对日期：2026-10-23；当前整改提交基线：`4a7be84`，
 已含 ADR-0172 真实 runnable 内容接线；完整在线矩阵继续实施，
 位于唯一开发分支 `codex/nonrelease-remediation-closure`。本页同步 main 的 10 月 22 日图册，
@@ -92,7 +99,7 @@ flowchart TB
 
   subgraph CTRL[Controller 进程]
     O[Orchestration<br/>Task DAG / 满足判定 / Mission 生命周期]
-    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / 日历 / tenant quota]
+    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / quantitative Compute / 时空日历 / tenant quota]
     R[Runtime<br/>slot / attempt generation<br/>durable intent / 事实归约 / relation fence]
     I[Integration<br/>Node Protocol / session / 路由]
     O -->|Ready Task| C
@@ -100,7 +107,7 @@ flowchart TB
     R -->|命令 intent| I
     R -->|执行结果| O
     S[State + Memory catalog<br/>来源 / 时间 / TTL / 策略 / manifest 元数据]
-    M[应用层 Memory 协调<br/>Prepare / import / probe / use / revoke / handoff]
+    M[应用层 Memory 协调<br/>typed scope / Prepare / import / use / revoke / handoff]
     A[Artifact adapter + CAS<br/>独立内容授权 / 哈希字节]
     I -->|经应用接纳的来源事实| S
     S -.当前依据.-> C

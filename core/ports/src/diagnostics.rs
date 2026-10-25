@@ -65,6 +65,18 @@ pub enum DiagnosticStage {
     OperatorConnectionLimit,
     /// Cumulative transports closed before TLS because no original permit was available.
     OperatorConnectionRejections,
+    /// Actual admitted Node transports, including incomplete handshakes.
+    NodeConnectionsActive,
+    /// Configured maximum simultaneous Node transports.
+    NodeConnectionLimit,
+    /// Actual Node transports refused before TLS for lack of capacity.
+    NodeConnectionRejections,
+    /// Actual admitted Artifact transports through response close.
+    ArtifactConnectionsActive,
+    /// Configured maximum simultaneous Artifact transports.
+    ArtifactConnectionLimit,
+    /// Actual Artifact transports refused before TLS for lack of capacity.
+    ArtifactConnectionRejections,
     /// Validated reader-to-session queue.
     IngressQueue,
     /// Session-to-application queue.
@@ -115,6 +127,12 @@ impl DiagnosticStage {
             Self::OperatorConnectionsActive => "operator_connections_active",
             Self::OperatorConnectionLimit => "operator_connection_limit",
             Self::OperatorConnectionRejections => "operator_connection_rejections",
+            Self::NodeConnectionsActive => "node_connections_active",
+            Self::NodeConnectionLimit => "node_connection_limit",
+            Self::NodeConnectionRejections => "node_connection_rejections",
+            Self::ArtifactConnectionsActive => "artifact_connections_active",
+            Self::ArtifactConnectionLimit => "artifact_connection_limit",
+            Self::ArtifactConnectionRejections => "artifact_connection_rejections",
             Self::IngressQueue => "ingress_queue",
             Self::ApplicationQueue => "application_queue",
             Self::WriteGate => "write_gate",

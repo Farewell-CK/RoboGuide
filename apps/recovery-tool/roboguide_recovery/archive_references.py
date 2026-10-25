@@ -33,6 +33,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.27",
     "roboguide.recovery-profile/v0.28",
     "roboguide.recovery-profile/v0.29",
+    "roboguide.recovery-profile/v0.30",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -59,6 +60,7 @@ PROTECTED = {
     "ArtifactCatalogLegacyAdopted",
     "ArtifactUploadTransition",
     "ArtifactUploadRetired",
+    "ArtifactUploadRecoveryTransition",
     "MapArtifactDeclared",
     "MapArtifactPublished",
     "MapArtifactStaged",
@@ -93,6 +95,8 @@ def _supported_catalog_payload(schema: str, payload: dict[str, Any]) -> bool:
     """Admit only known protected codecs; v33 must retain its exact original Task/attempt trace."""
     if re.fullmatch(r"domain.EventPayload.json/v(?:[1-9]|[12][0-9]|3[01])", schema):
         return True
+    if schema == "domain.EventPayload.json/v32":
+        return next(iter(payload)) == "ArtifactUploadRecoveryTransition"
     if schema != "domain.EventPayload.json/v33" or next(iter(payload)) not in {
         "MemoryArtifactStaged",
         "MemoryArtifactImported",
@@ -354,14 +358,26 @@ def operations(
         if "event_log_metadata" in tables
         else None
     )
+    from .coordinated_archives import operations as coordinated_operations
+
+    coordinated_operations(connection, profile_schema, budget)
     if current and (
-        marker not in {"roboguide.archive-operations/v0.1", "roboguide.archive-operations/v0.2"}
+        marker
+        not in {
+            "roboguide.archive-operations/v0.1",
+            "roboguide.archive-operations/v0.2",
+            "roboguide.archive-operations/v0.3",
+        }
         or "event_archive_operations" not in tables
     ):
         raise ValueError("mandatory original Archive journal is missing")
     if "event_archive_operations" not in tables:
         return []
-    if marker not in {"roboguide.archive-operations/v0.1", "roboguide.archive-operations/v0.2"}:
+    if marker not in {
+        "roboguide.archive-operations/v0.1",
+        "roboguide.archive-operations/v0.2",
+        "roboguide.archive-operations/v0.3",
+    }:
         raise ValueError("original Archive journal marker changed")
     authority_id = _metadata(connection, "archive_authority_id")
     if (
@@ -442,6 +458,7 @@ def validate(
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     } and not any(item["kind"] in {"replica", "replica-content"} for item in components)
     bindings: dict[str, set[str]] = {}
     if profile_schema in SUPPORTED:
@@ -491,6 +508,7 @@ def validate(
                         "roboguide.recovery-profile/v0.27",
                         "roboguide.recovery-profile/v0.28",
                         "roboguide.recovery-profile/v0.29",
+                        "roboguide.recovery-profile/v0.30",
                     }
                     and isinstance(authority_id, str)
                     and not standalone
@@ -525,6 +543,7 @@ def validate(
                             "roboguide.recovery-profile/v0.27",
                             "roboguide.recovery-profile/v0.28",
                             "roboguide.recovery-profile/v0.29",
+                            "roboguide.recovery-profile/v0.30",
                         }
                     )
                 ):
@@ -532,6 +551,22 @@ def validate(
                         "original Controller reference authority is absent or repeated"
                     )
                 authorities[authority_id] = component["component_id"]
+            if (
+                "event_log_metadata" in tables
+                and _metadata(connection, "archive_operations_schema")
+                == "roboguide.archive-operations/v0.3"
+            ):
+                if standalone or actual_profile is None:
+                    raise ValueError(
+                        "coordinated Archive requires complete original paired Replica roots"
+                    )
+                from .coordinated_archives import operations as coordinated_operations
+
+                for original in coordinated_operations(connection, profile_schema, budget):
+                    if not original["intent"]["issuing_epoch"].startswith(actual_profile + ":"):
+                        raise ValueError(
+                            "coordinated Archive belongs to another original Replica profile"
+                        )
             catalog_history(connection, profile_schema, budget)
             rows = operations(connection, profile_schema, budget, current=current)
             cleanup = archive_aborts.operations(
@@ -602,6 +637,7 @@ def validate(
                         "roboguide.recovery-profile/v0.27",
                         "roboguide.recovery-profile/v0.28",
                         "roboguide.recovery-profile/v0.29",
+                        "roboguide.recovery-profile/v0.30",
                     }
                     or actual_profile is None
                     or seen[prefix] != projection

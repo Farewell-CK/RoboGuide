@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.dev/contracts/control/coordinated-archive-v0.1/abort.schema.json",
+  "title": "Original coordinated Archive abandonment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "original_command_id"],
+  "properties": {
+    "schema": {"const": "roboguide.coordinated-archive-abort/v0.1"},
+    "original_command_id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"}
+  }
+}

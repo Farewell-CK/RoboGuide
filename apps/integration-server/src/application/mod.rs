@@ -6,6 +6,7 @@ mod actor_placement;
 pub(crate) mod archive_content;
 pub(crate) mod attestation;
 pub(crate) mod catalog_retention;
+pub(crate) mod coordinated_archive;
 mod deployment_document;
 mod deployment_feasibility;
 mod deployment_operation_admission;

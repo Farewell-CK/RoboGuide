@@ -72,6 +72,9 @@ def validate(
     connection: sqlite3.Connection, profile_schema: str, expected: str | None = None
 ) -> None:
     """Require an explicit compatible profile; neither a declaration nor a view grants authority."""
+    from .coordinated_archives import operations as archive_operations
+
+    archive_operations(connection, profile_schema)
     actual = actual_format(connection)
     from .capacity_recovery import _checkpoint
 
@@ -88,7 +91,8 @@ def validate(
     if (
         retained is not None
         and retained["schema"] == "roboguide.controller-checkpoint/v60"
-        and profile_schema != "roboguide.recovery-profile/v0.29"
+        and profile_schema
+        not in {"roboguide.recovery-profile/v0.29", "roboguide.recovery-profile/v0.30"}
     ):
         raise ValueError("resource-bearing Federation v60 requires explicit recovery v0.29")
     if actual == STORAGE and profile_schema not in {
@@ -105,6 +109,7 @@ def validate(
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     }:
         raise ValueError("Controller storage v1 requires explicit recovery v0.17")
     objects = {
@@ -118,7 +123,10 @@ def validate(
                 "WHERE schema='roboguide.controller-checkpoint/v60' LIMIT 1"
             ).fetchone()
         ):
-            if profile_schema != "roboguide.recovery-profile/v0.29":
+            if profile_schema not in {
+                "roboguide.recovery-profile/v0.29",
+                "roboguide.recovery-profile/v0.30",
+            }:
                 raise ValueError("resource-bearing Federation v60 requires explicit recovery v0.29")
             if retained is None:
                 from .federation_recovery import validate as validate_federation
@@ -132,7 +140,11 @@ def validate(
             ).fetchone()
             is not None
             and profile_schema
-            not in {"roboguide.recovery-profile/v0.28", "roboguide.recovery-profile/v0.29"}
+            not in {
+                "roboguide.recovery-profile/v0.28",
+                "roboguide.recovery-profile/v0.29",
+                "roboguide.recovery-profile/v0.30",
+            }
         ):
             raise ValueError("cohort/hazard Controller v59 requires explicit recovery v0.28")
         if (
@@ -142,7 +154,12 @@ def validate(
             ).fetchone()
             is not None
             and profile_schema
-            not in {"roboguide.recovery-profile/v0.27", "roboguide.recovery-profile/v0.28"}
+            not in {
+                "roboguide.recovery-profile/v0.27",
+                "roboguide.recovery-profile/v0.28",
+                "roboguide.recovery-profile/v0.29",
+                "roboguide.recovery-profile/v0.30",
+            }
         ):
             raise ValueError("spatial/calendar Controller v58 requires explicit recovery v0.27")
         if (
@@ -157,6 +174,7 @@ def validate(
                 "roboguide.recovery-profile/v0.27",
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
+                "roboguide.recovery-profile/v0.30",
             }
         ):
             raise ValueError("scoped typed-map Controller v57 requires explicit recovery v0.26")
@@ -174,6 +192,7 @@ def validate(
                 "roboguide.recovery-profile/v0.27",
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
+                "roboguide.recovery-profile/v0.30",
             }
         ):
             raise ValueError("quantitative Controller v56 requires explicit recovery v0.24")
@@ -181,7 +200,11 @@ def validate(
         from .federation_recovery import validate as validate_federation
 
         validate_federation(connection)
-    if profile_schema in {"roboguide.recovery-profile/v0.28", "roboguide.recovery-profile/v0.29"}:
+    if profile_schema in {
+        "roboguide.recovery-profile/v0.28",
+        "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
+    }:
         from .coordination_recovery import validate as validate_coordination
 
         validate_coordination(connection)
@@ -192,6 +215,7 @@ def validate(
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     }:
         from .capacity_recovery import validate as validate_capacity
 
@@ -201,6 +225,7 @@ def validate(
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     }:
         from .scoped_map_recovery import validate as validate_scoped_maps
 
@@ -212,6 +237,7 @@ def validate(
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     }:
         from .topology_recovery import validate as validate_topology
 

@@ -4,6 +4,7 @@ use super::*;
 use crate::{ControllerEpoch, ReplicaMember};
 use openraft::{CommittedLeaderId, LogId, Membership, StoredMembership};
 use std::collections::BTreeMap;
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
 /// Creates actual owned files and roots with explicitly labelled synthetic source/receiver retention context.
@@ -101,6 +102,11 @@ fn original_snapshot_receive_verifies_bytes_and_releases_only_its_own_pins() {
     assert!(first.ready.is_none());
     assert!(root.verify_content(key).is_err());
     assert!(
+        root.complete_retained_snapshot_receive(&first.command_id, &header, permission.clone())
+            .unwrap()
+            .is_none()
+    );
+    assert!(
         root.complete_snapshot_receive(&first.command_id, permission.clone())
             .is_err()
     );
@@ -120,8 +126,26 @@ fn original_snapshot_receive_verifies_bytes_and_releases_only_its_own_pins() {
         )
         .unwrap();
     assert!(copied.receipt.is_some());
+    let path = copy::object_path(root.root(), key);
+    let bytes = std::fs::read(&path).unwrap();
+    let original_mode = std::fs::metadata(&path).unwrap().permissions();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(&path, b"corrupt retained bytes cannot lend readiness").unwrap();
+    assert!(
+        root.complete_retained_snapshot_receive(&first.command_id, &header, permission.clone())
+            .is_err()
+    );
+    assert_eq!(
+        root.snapshot_receive_status(&first.command_id)
+            .unwrap()
+            .unwrap(),
+        first
+    );
+    std::fs::write(&path, bytes).unwrap();
+    std::fs::set_permissions(&path, original_mode).unwrap();
     let ready = root
-        .complete_snapshot_receive(&first.command_id, permission.clone())
+        .complete_retained_snapshot_receive(&first.command_id, &header, permission.clone())
+        .unwrap()
         .unwrap();
     assert!(ready.ready.is_some());
     assert!(ready.retirement.is_none());

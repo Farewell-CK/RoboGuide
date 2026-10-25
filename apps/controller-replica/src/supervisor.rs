@@ -144,6 +144,7 @@ async fn start_controller(
                 .ok_or("original content child requires actual TLS")?,
             trust_database: directory.join("replica.sqlite3"),
             budget_ms: content.child_budget_ms,
+            coordinated_archive: configuration.coordinated_archive_base.is_some(),
         };
         command.env(
             "ROBOGUIDE_REPLICA_CONTENT_CONFIG",
@@ -383,7 +384,25 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                 ),
             }
         }?;
-        if configuration.base_process_schema() == "roboguide.controller-replica-process/v0.7" {
+        if configuration.coordinated_archive_base.is_some() {
+            ReplicaNode::start_with_coordinated_archive(
+                configuration.replica.clone(),
+                &configuration.storage_directory.join("replica.sqlite3"),
+                root,
+                content.bootstrap_owners.clone(),
+                configuration.transport_limits.clone(),
+                if configuration.base_process_schema()
+                    == "roboguide.controller-replica-process/v0.7"
+                {
+                    Some(content.initialization.clone())
+                } else {
+                    None
+                },
+                Some(content.quorum_observation_ms),
+            )
+            .await?
+        } else if configuration.base_process_schema() == "roboguide.controller-replica-process/v0.7"
+        {
             ReplicaNode::start_with_content_initialization(
                 configuration.replica.clone(),
                 &configuration.storage_directory.join("replica.sqlite3"),

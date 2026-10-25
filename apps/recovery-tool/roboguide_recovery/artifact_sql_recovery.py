@@ -227,6 +227,7 @@ def _validate_intent(value: dict[str, Any]) -> None:
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     } or not any(
         row["component_id"] == value["component_id"]
         and row["kind"] == "artifact"
@@ -385,6 +386,7 @@ def run(
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
             "roboguide.recovery-profile/v0.29",
+            "roboguide.recovery-profile/v0.30",
         }
         or profile["artifact_replica_sets"]
         or any(value["kind"] in {"replica", "replica-content"} for value in components)

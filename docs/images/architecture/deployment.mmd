@@ -18,6 +18,8 @@ flowchart TB
   NODE <-->|配置工作流| LOCAL[独立 Local EAIOS / Memory provider]
   LOCAL --- PS[(provider 自有 SQL / 内容 / 原进程证据)]
   CAS <-->|独立授权的数据面| NODE
-  HA[可选 Replica 成员 / supervisor<br/>各自 Raft SQL + 原 Controller child 日志] -.元数据 quorum / epoch / child 管理.-> APP
+  HA[可选 Replica 成员 / supervisor<br/>各自 Raft SQL + 原 child + qualified CAS] -.完整内容 quorum / epoch / 原进程管理.-> APP
+  AR[在线 private Archive<br/>原 pending / prefix / package / floor] -->|原完整内容事务| HA
+  AR -->|私有元数据包| CAS
   REC[静止 recovery-tool<br/>原 writer / inode lease / 活动引用校验] --> BUNDLE[(完整 profile SQL + 内容包<br/>校验后恢复到新目录)]
   OBS[只读 metrics / deployment inspector] -.认证观察.-> APP

@@ -1,5 +1,13 @@
 # RoboGuide V2 current architecture
 
+[ADR-0213](../../decisions/0213-explicit-listener-capacity.md) assigns transport capacity to each
+actual service process. Permits precede TLS or request threads. Business budgets and ownership
+remain independent; network timeouts never cancel committed work. Fixed Node/Artifact/Mission
+observations and native alerts follow the [implementation contract](../../development/listener-capacity-v0.1.md)
+and introduce no application, Node or Memory authority.
+
+[ADR-0212](../../decisions/0212-coordinated-content-archive.md) assigns original online Archive operations and exact reduction to State, complete-content quorum to Replica, and private metadata packages to Artifact CAS. Pending admission precedes publication. Completion deletes only a verified prefix while preserving checkpoint, commands, Catalog, Unknown and original budgets. Explicit parent11/process v0.9/recovery v0.30 fence old writers; wrapper v60 and Node contracts retain their meaning. See the [implementation and operations contract](../../development/coordinated-content-archive-v0.1.md).
+
 [ADR-0211](../../decisions/0211-durable-cross-domain-coordination.md) defines root Orchestration's durable global decision and each domain's normal Control ownership. Actual pinned peers, original writer epochs/kernel budgets/clock intervals, complete Commit receipts and independent original goals gate execution. [Local process and recovery acceptance](../../development/acceptance/2026-10-25-federation-execution.md) passes; the complete final fault composition and independent physical/cross-host evidence remain required.
 
 [ADR-0210](../../decisions/0210-reviewed-execution-coordination.md) freezes execution-coordination ownership.

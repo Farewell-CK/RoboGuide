@@ -302,9 +302,9 @@ def run(
         "devices": 0,
         "models": 0,
         "simulators": 0,
-        "source_contains_original_software_node_history": original[
-            "source_contains_original_software_node_history"
-        ],
+        "source_contains_original_software_node_history": original.get(
+            "source_contains_original_software_node_history", False
+        ),
         "scope": "actual producer/member-local CAS lifecycle; no global erasure or physical proof",
         "retired_content": key,
         "original_bundle": str(bundle),
@@ -357,8 +357,12 @@ def run(
                         "member_stores": config["content"]["bootstrap_owners"],
                         "staging_gc": True,
                         "restore_binding_digest": config["content"]["restore_binding_digest"],
-                        "initialization_parent": True,
-                        "initialization": config["content"]["initialization"],
+                        "initialization_parent": config.get(
+                            "coordinated_archive_base", "roboguide.controller-replica-process/v0.7"
+                        )
+                        == "roboguide.controller-replica-process/v0.7",
+                        "coordinated_archive": config.get("coordinated_archive_base") is not None,
+                        "initialization": config["content"].get("initialization"),
                     },
                 )
                 paths[member] = path
@@ -500,12 +504,16 @@ def run(
     return result
 
 
-def verify_recovery(original: Path, cold: Path) -> dict[str, Any]:
+def verify_recovery(
+    original: Path, cold: Path, *, expected_manifest: str | None = None
+) -> dict[str, Any]:
     """Independently check original GC/producer evidence and absent bytes after cold leaders."""
     source = json.loads((original / "result.json").read_text())
     restored = json.loads((cold / "result.json").read_text())
     assert source["passed"] and restored["passed"]
-    assert source["post_gc_manifest_digest"] == restored["manifest_digest"]
+    assert restored["manifest_digest"] == (
+        source["post_gc_manifest_digest"] if expected_manifest is None else expected_manifest
+    )
     assert all(row["returncode"] == 0 for row in restored["actual_processes"])
     expected = {row["member"] for row in source["members"]}
     assert {row["member"] for row in restored["observed_leaders"]} == expected

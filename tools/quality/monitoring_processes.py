@@ -101,13 +101,13 @@ class MonitoringProcesses:
             raise ValueError("actual Prometheus query failed")
         return value
 
-    def start(self) -> None:
+    def start(self, additional_services: list[dict[str, Any]] | None = None) -> None:
         """Render/validate native configs, then start real scrape and alert delivery processes."""
         self.receiver = Receiver()
         self.thread = threading.Thread(target=self.receiver.serve_forever, daemon=True)
         self.thread.start()
         empty = {"ca_file": None, "cert_file": None, "key_file": None, "server_name": None}
-        profile = {
+        profile: dict[str, Any] = {
             "schema": "roboguide.observability-profile/v0.1",
             "profile_id": "actual-software-conformance",
             "revision": 1,
@@ -136,6 +136,8 @@ class MonitoringProcesses:
             ],
         }
         profile_path = self.root / "profile.json"
+        if additional_services:
+            profile["services"].extend(additional_services)
         save(profile_path, profile)
         config = self.root / "native"
         rendered = subprocess.run(

@@ -372,11 +372,18 @@ impl ReplicaServer {
                 handlers.spawn(async move {
                     let _permit = permit;
                     let budget = node.transport_budget.clone();
-                    if tokio::time::timeout(Duration::from_secs(15), serve_connection(stream, node))
-                        .await
-                        .is_err()
+                    match tokio::time::timeout(
+                        Duration::from_secs(15),
+                        serve_connection(stream, node),
+                    )
+                    .await
                     {
-                        budget.timed_out();
+                        Err(_) => budget.timed_out(),
+                        Ok(Err(error)) => tracing::warn!(
+                            error = %error.chars().take(512).collect::<String>(),
+                            "Replica transport refused its original request"
+                        ),
+                        Ok(Ok(())) => {}
                     }
                 });
             }
@@ -1792,7 +1799,8 @@ impl RaftNetwork<ControllerRaftConfig> for ReplicaNetwork {
         };
         let heartbeat = self.clone();
         let meta = snapshot.meta.clone();
-        tokio::time::timeout(
+        let original_meta = meta.clone();
+        let transferred = tokio::time::timeout(
             Duration::from_millis(
                 clock
                     .remaining_ms()
@@ -1808,12 +1816,26 @@ impl RaftNetwork<ControllerRaftConfig> for ReplicaNetwork {
                 }
             },
         )
-        .await
-        .map_err(|_| {
-            Unreachable::new(&std::io::Error::other(
+        .await;
+        let outcome = match transferred {
+            Ok(outcome) => outcome,
+            Err(_) => Err(Unreachable::new(&std::io::Error::other(
                 "original Snapshot transfer budget expired; outcome remains uncertain",
             ))
-        })?
+            .into()),
+        };
+        if outcome.is_err()
+            && let Some(source) = heartbeat
+                .source
+                .as_ref()
+                .and_then(|source| source.get())
+                .and_then(std::sync::Weak::upgrade)
+        {
+            // Parent11 creates a new actual journaled publication; legacy profiles need a newer cut.
+            // Original receive, byte readiness, Unknown and first budgets remain immutable.
+            let _ = snapshot_content::refresh_snapshot(&source, &original_meta).await;
+        }
+        outcome
     }
     /// Forwards exact append RPCs; failures remain network/remote errors to OpenRaft.
     async fn append_entries(

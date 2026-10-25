@@ -378,6 +378,7 @@ def run(
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
             "roboguide.recovery-profile/v0.29",
+            "roboguide.recovery-profile/v0.30",
         }
         or IDENTIFIER.fullmatch(command_id) is None
         or not reason.strip()

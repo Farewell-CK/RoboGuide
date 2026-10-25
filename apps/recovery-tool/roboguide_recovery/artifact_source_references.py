@@ -489,6 +489,16 @@ def inspect(
                     raise ValueError(
                         "original independent verifier/goal CAS evidence retains source content"
                     )
+        from .coordinated_archives import operations as coordinated_operations
+
+        for original in coordinated_operations(connection, profile_schema, budget):
+            key = original["intent"]["package"]
+            if (
+                original["abort"] is None
+                and key["source_owner"] == owner
+                and key["content_digest"] == checksum
+            ):
+                raise ValueError("original coordinated Archive retains source package bytes")
         originals = archive_references.operations(connection, profile_schema, budget, current=True)
         cleanups = archive_aborts.operations(
             connection, profile_schema, budget, originals, current=True
@@ -576,6 +586,7 @@ def validate_bundle(
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     }:
         return
     from . import artifact_layout
@@ -608,8 +619,21 @@ def validate_bundle(
             rows = catalog_rows(connection, budget, profile_schema)
             uploads, retired = upload_history(rows)
             authority = archive_references._metadata(connection, "archive_authority_id")
+            from .coordinated_archives import operations as coordinated_operations
+
+            archive_rows = coordinated_operations(connection, profile_schema, budget)
         candidates = {owner: value for owner, value in owners.items() if authority in value[1]}
-        required = []
+        required: list[tuple[str, dict[str, dict[str, Any]], str, int, str | None]] = []
+        for original in archive_rows:
+            if original["completed_ms"] is None:
+                continue
+            key = original["intent"]["package"]
+            archive_owner = owners.get(key["source_owner"])
+            if archive_owner is None or authority not in archive_owner[1]:
+                raise ValueError("completed original Archive source owner/authority is unavailable")
+            required.append(
+                (archive_owner[0], archive_owner[2], key["content_digest"], key["byte_size"], None)
+            )
         for key, upload in uploads.items():
             if profile_schema in {
                 "roboguide.recovery-profile/v0.19",
@@ -623,6 +647,7 @@ def validate_bundle(
                 "roboguide.recovery-profile/v0.27",
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
+                "roboguide.recovery-profile/v0.30",
             }:
                 # Root's exact committed origins own replicated uploads; local projections may lag.
                 continue

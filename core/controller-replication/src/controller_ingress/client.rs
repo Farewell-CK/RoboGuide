@@ -30,6 +30,14 @@ pub struct ControllerContentClientConfig {
     /// Explicit original complete-operation duration, fixed at first admission without retry renewal.
     #[serde(default = "default_budget")]
     pub budget_ms: u64,
+    /// Explicit parent11 capability; old/default clients retain their original interpretation.
+    #[serde(default, skip_serializing_if = "archive_disabled")]
+    pub coordinated_archive: bool,
+}
+
+/// Omits the absent capability so original client envelopes retain their exact prior identity.
+fn archive_disabled(value: &bool) -> bool {
+    !value
 }
 
 /// Preserves the original short default while longer deployment budgets require an explicit value.
@@ -80,6 +88,17 @@ impl ControllerContentClient {
             || !(100..=300000).contains(&config.budget_ms)
         {
             return Err("invalid explicit original Controller content client".into());
+        }
+        if config.coordinated_archive {
+            let original = Connection::open_with_flags(
+                &config.trust_database,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .map_err(|e| e.to_string())?;
+            if crate::archive_parent::physical(&original)? != crate::archive_parent::VERSION {
+                return Err("coordinated Archive client requires actual original parent11".into());
+            }
+            crate::archive_parent::effective(&original)?;
         }
         source
             .writer_identity()
@@ -612,7 +631,18 @@ impl ControllerContentClient {
                     .map_err(|error| error.to_string())?
             )
         );
-        let attempt = self.submit(candidate.clone(), &command);
+        let effects = candidate.archive_effects(&previous)?;
+        let mut bounded = self.clone();
+        for effect in &effects {
+            let now = effect.require_budget()?;
+            let remaining = effect
+                .deadline_ms
+                .checked_sub(now.saturating_add(10))
+                .filter(|ms| *ms >= 100)
+                .ok_or("original Archive has no bounded receive budget remaining")?;
+            bounded.config.budget_ms = bounded.config.budget_ms.min(remaining);
+        }
+        let attempt = bounded.submit(candidate.clone(), &command);
         let first_failure = attempt
             .as_ref()
             .err()
@@ -670,6 +700,30 @@ impl state::ApplicationBatchReplicator for ControllerContentClient {
     /// Explicitly requests complete original auxiliary authority under the actual source transaction.
     fn requires_recovery_projection(&self) -> bool {
         true
+    }
+    /// Admits online Archive only for an explicitly configured and independently checked parent11.
+    fn supports_coordinated_archive(&self) -> bool {
+        self.config.coordinated_archive
+    }
+    /// Reads exact original accepted qualified inputs without importing or relabelling their owners.
+    fn archive_inputs(&self) -> Result<Vec<state::ArchiveContentKey>, String> {
+        if !self.config.coordinated_archive {
+            return Err("coordinated Archive is not negotiated".into());
+        }
+        self.view()?
+            .content
+            .as_ref()
+            .ok_or("original complete content is unavailable")?
+            .inputs
+            .iter()
+            .map(|k| {
+                Ok(state::ArchiveContentKey {
+                    source_owner: k.source_owner.clone(),
+                    content_digest: k.content_digest.clone(),
+                    byte_size: k.byte_size,
+                })
+            })
+            .collect()
     }
     /// Connects the original source SQL candidate to actual bytes and same-member complete quorum.
     fn confirm_recovery_batch(

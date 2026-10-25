@@ -83,6 +83,12 @@ async fn artifact_mtls_enforces_node_resource_and_upload_isolation() {
         Arc::new(AllowTestMemoryAdmission),
         Arc::new(IgnoreTestLocalizationEvidence),
         Some(profile),
+        crate::listener_capacity::Connections::new(
+            crate::listener_capacity::Listener::Artifact,
+            128,
+            ports::DiagnosticHandle::default(),
+        )
+        .unwrap(),
     ));
     let result=timeout(Duration::from_secs(10),async {
         let denied=call(address,&pki,"viewer","POST /v1/artifact-uploads HTTP/1.1\r\nHost: localhost\r\nX-RoboGuide-Role: admin\r\nContent-Length: 2\r\n\r\n{}").await;
@@ -147,6 +153,12 @@ async fn artifact_tls_reference_requires_actual_uploader_byte_receipt() {
         Arc::new(AllowTestMemoryAdmission),
         Arc::new(IgnoreTestLocalizationEvidence),
         Some(profile),
+        crate::listener_capacity::Connections::new(
+            crate::listener_capacity::Listener::Artifact,
+            128,
+            ports::DiagnosticHandle::default(),
+        )
+        .unwrap(),
     ));
     let result=timeout(Duration::from_secs(10),async {
         let manifest=fixture_memory_manifest("own-reference",MemoryKind::Artifact,&digest,bytes.len() as u64);

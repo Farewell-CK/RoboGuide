@@ -13,7 +13,46 @@ struct SnapshotProducerWork {
     view: Option<Box<ProducerPermit>>,
 }
 
+/// Derives the exact managed producer ID from its original independent invocation, before data I/O.
+fn producer_operation_id(
+    kind: ReplicaContentProducerKind,
+    invocation: &str,
+) -> Result<String, StorageError<u64>> {
+    Ok(format!(
+        "producer:{:x}",
+        Sha256::digest(serde_json::to_vec(&(kind, invocation)).map_err(io_error)?)
+    ))
+}
+
 impl SqliteRaftStore {
+    /// Observes only the explicit parent11 capability; it grants no repeated original receive.
+    pub(crate) fn supports_snapshot_publications(&self) -> bool {
+        self.coordinated_archive
+    }
+
+    /// Validates historical source metadata without importing its local producer or process authority.
+    fn validate_snapshot_publication(&self, body: &StoreSnapshot) -> Result<(), StorageError<u64>> {
+        let Some(publication) = &body.source_publication else {
+            return Ok(());
+        };
+        if !self.coordinated_archive
+            || publication.schema != "roboguide.snapshot-publication/v0.1"
+            || !publication
+                .producer_operation_id
+                .strip_prefix("producer:")
+                .is_some_and(crate::content::hex_digest)
+            || !body.membership.nodes().any(|(member, node)| {
+                *member == publication.source_member
+                    && node.content_store_owner.as_ref() == Some(&publication.source_store_owner)
+            })
+        {
+            return Err(io_error(
+                "Snapshot source publication differs from its explicit original scope",
+            ));
+        }
+        Ok(())
+    }
+
     /// Independently retires byte-ready receives only when the actual complete parent Snapshot/pins survived.
     /// Original readiness, effects and budgets stay unchanged; unmatched pending history remains retained.
     pub(crate) fn reconcile_snapshot_receives(&self) -> Result<(), String> {
@@ -102,6 +141,8 @@ impl SqliteRaftStore {
             return Err("actual retained Snapshot differs from the upstream original".into());
         }
         let body: StoreSnapshot = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
+        self.validate_snapshot_publication(&body)
+            .map_err(|error| error.to_string())?;
         body.view
             .validate(&self.application_schema, &self.profile)
             .map_err(|e| e.to_string())?;
@@ -239,10 +280,7 @@ impl SqliteRaftStore {
         } else {
             ReplicaContentProducerKind::SnapshotBuild
         };
-        let local_id = format!(
-            "producer:{:x}",
-            Sha256::digest(serde_json::to_vec(&(kind, operation)).map_err(io_error)?)
-        );
+        let local_id = producer_operation_id(kind, operation)?;
         let epoch = body
             .last_applied
             .map(|id| ControllerEpoch {
@@ -409,6 +447,7 @@ impl SqliteRaftStore {
         {
             return Err(io_error("replica snapshot identity/pointers differ"));
         }
+        self.validate_snapshot_publication(&restored)?;
         restored
             .view
             .validate(&self.application_schema, &self.profile)?;
@@ -729,6 +768,31 @@ impl SqliteRaftStore {
         &self,
         operation_id: Option<&str>,
     ) -> Result<Snapshot<ControllerRaftConfig>, StorageError<u64>> {
+        let generated;
+        let operation_id = if self.coordinated_archive && operation_id.is_none() {
+            generated = crate::supervision::new_process_instance().map_err(io_error)?;
+            Some(generated.as_str())
+        } else {
+            operation_id
+        };
+        let source_publication = if self.coordinated_archive {
+            let root = self
+                .content
+                .as_ref()
+                .ok_or_else(|| io_error("source Snapshot Root is absent"))?;
+            Some(SnapshotPublication {
+                schema: "roboguide.snapshot-publication/v0.1".into(),
+                source_member: root.identity().member,
+                source_store_owner: root.identity().store_owner.clone(),
+                producer_operation_id: producer_operation_id(
+                    ReplicaContentProducerKind::SnapshotBuild,
+                    operation_id
+                        .ok_or_else(|| io_error("source Snapshot original invocation absent"))?,
+                )?,
+            })
+        } else {
+            None
+        };
         let mut connection = self.connection.lock().map_err(io_error)?;
         let snapshot = StoreSnapshot {
             profile: self.profile.clone(),
@@ -737,7 +801,9 @@ impl SqliteRaftStore {
             view: read_view(&connection)?,
             certificate_trust: read_meta(&connection, "certificate_trust")?,
             leader_transfer: None,
+            source_publication,
         };
+        self.validate_snapshot_publication(&snapshot)?;
         let data = serde_json::to_vec(&snapshot).map_err(io_error)?;
         self.validate_content_membership(snapshot.membership.membership())
             .map_err(io_error)?;

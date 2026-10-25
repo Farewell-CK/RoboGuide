@@ -53,6 +53,44 @@ jobs:
       - name: Build the actual Controller composition
         run: cargo build --locked -p integration-server -p controller-replica -p roboguide-node
 
+      - name: Fetch pinned native monitoring tools for owned loopback acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir "${RUNNER_TEMP}/roboguide-monitoring-tools"
+          gh release download v3.13.4 --repo prometheus/prometheus --pattern prometheus-3.13.4.linux-amd64.tar.gz --dir "${RUNNER_TEMP}/roboguide-monitoring-tools"
+          gh release download v0.34.1 --repo prometheus/alertmanager --pattern alertmanager-0.34.1.linux-amd64.tar.gz --dir "${RUNNER_TEMP}/roboguide-monitoring-tools"
+          python - <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import tarfile
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'roboguide-monitoring-tools'
+          pins = {
+              'prometheus-3.13.4.linux-amd64.tar.gz': '87f21a66f96c597a189cef8d640e8921b621fc17a9feff707c332c4f3b3ddd56',
+              'alertmanager-0.34.1.linux-amd64.tar.gz': '265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464ecb1372a7e8',
+          }
+          for name, expected in pins.items():
+              archive = root / name
+              assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected
+              with tarfile.open(archive) as source:
+                  source.extractall(root, filter='data')
+          PY
+
+      - name: Verify real listener limits and native capacity firing and resolved
+        run: >-
+          uv run --frozen python tools/quality/check_listener_capacity_processes.py
+          --controller target/debug/integration-server
+          --output /tmp/rg-ci-listeners
+          --monitoring-tools "${RUNNER_TEMP}/roboguide-monitoring-tools"
+
+      - name: Verify actual default capacities and measured single-worker health performance
+        run: >-
+          uv run --frozen python tools/quality/check_default_listener_processes.py
+          --controller target/debug/integration-server
+          --configuration-evidence /tmp/rg-ci-listeners
+          --output /tmp/rg-ci-listener-defaults
+
       - name: Verify original quantitative Compute, restart and active-grant cold recovery
         run: >
           uv run --frozen python tools/quality/check_state_verifier_processes.py
@@ -503,6 +541,27 @@ jobs:
                   frozen_digest=result["post_gc_manifest_digest"])
           assert verify_recovery(evidence / "roboguide-complete-producer-gc", final)["passed"]
           PY
+
+      - name: Build genuine prior same-wrapper Archive writer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/tarball/307b0a46d2c7402f6b016fdb478d006c4a05e9b4 > "${RUNNER_TEMP}/roboguide-pre-online-archive.tar.gz"
+          mkdir "${RUNNER_TEMP}/roboguide-pre-online-archive"
+          tar -xzf "${RUNNER_TEMP}/roboguide-pre-online-archive.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-pre-online-archive"
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-pre-online-archive-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-pre-online-archive/Cargo.toml" -p integration-server
+
+      - name: Verify complete online Archive, producer GC, member faults and original cold recovery
+        env:
+          ROBOGUIDE_REPLICA_PROBE_WARNINGS: "1"
+        run: >-
+          uv run --frozen python tools/quality/check_coordinated_archive_processes.py
+          --output /tmp/rg-ci-coordinated-archive
+          --controller target/debug/integration-server
+          --supervisor target/debug/controller-replica
+          --storage target/debug/examples/content_stream_probe
+          --network target/debug/examples/content_network_probe
+          --previous "${RUNNER_TEMP}/roboguide-pre-online-archive-target/debug/integration-server"
 
       - name: Retain native gate failure observations
         if: failure()

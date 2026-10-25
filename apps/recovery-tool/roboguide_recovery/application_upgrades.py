@@ -270,7 +270,9 @@ def _authority(value: Any, original: str) -> list[dict[str, Any]]:
 
 def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None:
     """Refuse absent histories and original wait/authority mismatches before cold publication."""
-    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    from .coordinated_archives import parent_base
+
+    version = parent_base(connection, profile_schema)
     names = {
         row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
@@ -280,7 +282,10 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
         return
     metadata = dict(connection.execute("SELECT key,value FROM replica_v1_meta"))
     original_identity = json.loads(metadata.get("identity", "null"))
-    if profile_schema != "roboguide.recovery-profile/v0.29" and (
+    if profile_schema not in {
+        "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
+    } and (
         isinstance(original_identity, list)
         and len(original_identity) == 2
         and original_identity[1] == "roboguide.controller-checkpoint/v60"
@@ -296,6 +301,7 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
     if profile_schema not in {
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     } and (
         isinstance(original_identity, list)
         and len(original_identity) == 2
@@ -311,6 +317,7 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     } and (
         isinstance(original_identity, list)
         and len(original_identity) == 2
@@ -327,6 +334,7 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     } and (
         isinstance(original_identity, list)
         and len(original_identity) == 2
@@ -350,6 +358,7 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
             "roboguide.recovery-profile/v0.29",
+            "roboguide.recovery-profile/v0.30",
         }
         or not {AUTHORITY, OPERATIONS, BASE} <= metadata.keys()
     ):

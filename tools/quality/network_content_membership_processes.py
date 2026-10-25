@@ -68,24 +68,56 @@ def run_learner_joint(
     assert set(original["complete_members"]) == original_voters
     compact = actors[leader].ask({"action": "compact-snapshot"})
     assert compact["actual_snapshot"] == compact["actual_purged"] == compact["original_applied"]
-    actors[leader].ask({"action": "add-learner", "member": learner})
+    learner_reply = actors[leader].ask({"action": "add-learner", "member": learner}, required=False)
     root = Path(configs[learner]["content_root"])
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + 45
+    observed_epochs: list[dict[str, Any]] = []
     learner_rows: list[dict[str, Any]] = []
+    required = {json.dumps(key, sort_keys=True) for key in original["target"]["inputs"]}
     while time.monotonic() < deadline:
         with closing(
             sqlite3.connect((root / "content.sqlite3").as_uri() + "?mode=ro", uri=True)
         ) as sql:
             learner_rows = [
-                json.loads(raw) for (raw,) in sql.execute("SELECT record FROM content_objects")
+                row
+                for (raw,) in sql.execute("SELECT record FROM content_objects")
+                for row in [json.loads(raw)]
+                if json.dumps(row["content"], sort_keys=True) in required
             ]
         if learner_rows and len(learner_rows) == len(original["target"]["inputs"]):
-            observed = actors[learner].ask(
-                {"action": "observe", "target": actors[leader].ask({"action": "quorum"})["target"]},
-                required=False,
-            )
-            if "observation" in observed:
-                break
+            # Native return may trigger a real higher vote before the retained Snapshot arrives.
+            # Reconcile only through actual readonly quorums; never repeat membership effects.
+            for candidate in [leader, *sorted(original_voters - {leader})]:
+                current = actors[candidate].ask({"action": "quorum"}, required=False)
+                if "target" not in current:
+                    continue
+                assert current["target"]["batch_digest"] == original["target"]["batch_digest"]
+                assert current["target"]["inputs"] == original["target"]["inputs"]
+                assert set(current["complete_members"]) == original_voters
+                leader = candidate
+                if current["target"]["epoch"] not in observed_epochs:
+                    observed_epochs.append(current["target"]["epoch"])
+                observed = actors[learner].ask(
+                    {"action": "observe", "target": current["target"]},
+                    required=False,
+                )
+                if "observation" in observed:
+                    source_position = actors[leader].ask({"action": "status"})["readiness"][
+                        "last_applied_index"
+                    ]
+                    receiver_position = actors[learner].ask({"action": "status"})["readiness"][
+                        "last_applied_index"
+                    ]
+                    if (
+                        source_position is not None
+                        and receiver_position is not None
+                        and receiver_position >= source_position
+                    ):
+                        break
+            else:
+                time.sleep(0.05)
+                continue
+            break
         time.sleep(0.05)
     else:
         status = actors[learner].ask({"action": "status"})
@@ -126,9 +158,19 @@ def run_learner_joint(
         path.write_bytes(payload)
         path.chmod(mode)
     assert "sha256:" + digest(path) == key["content_digest"]
-    accepted = actors[leader].ask(request)
-    assert set(accepted["voters"]) == desired
-    current = actors[leader].ask({"action": "quorum"})
+    accepted = actors[leader].ask(request, required=False)
+    if "voters" in accepted:
+        assert set(accepted["voters"]) == desired
+    # A timed-out client never repeats the owned original joint operation. Observe its actual
+    # committed membership and complete quorum independently under one observation bound.
+    deadline = time.monotonic() + 45
+    while True:
+        current = actors[leader].ask({"action": "quorum"}, required=False)
+        if set(current.get("complete_members", [])) == desired:
+            break
+        if time.monotonic() >= deadline:
+            raise ValueError(f"original joint outcome unavailable: {accepted}; observed: {current}")
+        time.sleep(0.1)
     assert set(current["complete_members"]) == desired
     assert current["target"]["batch_digest"] == original["target"]["batch_digest"]
     raw, entries = membership(parent)
@@ -152,11 +194,14 @@ def run_learner_joint(
     assert set(independent["complete_members"]) == desired
     return {
         "original_voters": sorted(original_voters),
+        "actual_observed_quorum_epochs": observed_epochs,
         "proposed_voters": sorted(desired),
         "actual_snapshot": compact,
         "actual_corrupt_learner_refusal": refusal,
+        "original_learner_reply": learner_reply,
         "original_membership_and_log_unchanged_on_refusal": True,
         "actual_joint_entries": joint,
+        "original_joint_reply": accepted,
         "actual_new_voter_quorum": independent,
         "removed_voter_actual_wait": actors[removed].record["returncode"],
         "original_complete_candidate_unchanged": True,

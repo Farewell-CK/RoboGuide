@@ -368,6 +368,12 @@ impl SqliteRaftStore {
             self.apply_batch(connection, &candidate.batch)?
         };
         if receipt.accepted {
+            if candidate.schema == crate::content_application::CONTENT_ARCHIVE_APPLICATION_SCHEMA {
+                let floor = candidate.recovery.history_floor().map_err(io_error)?;
+                connection
+                    .execute("DELETE FROM replica_v1_events WHERE sequence<=?1", [floor])
+                    .map_err(io_error)?;
+            }
             write_meta(
                 connection,
                 "content_state",

@@ -32,6 +32,8 @@ mod operator_tests;
 
 #[path = "archive_maintenance.rs"]
 mod archive_maintenance;
+#[path = "coordinated_archive.rs"]
+mod coordinated_archive;
 
 /// Operator role permitted to acknowledge a crash-loop quarantine.
 const RECOVERY_ADMIN_ROLE: &str = "recovery-admin";
@@ -207,6 +209,9 @@ fn authorize_tenant_path(
             | "/v1/maintenance/archive"
             | "/v1/maintenance/archive/abort"
             | "/v1/maintenance/archive/operations"
+            | "/v1/maintenance/coordinated-archive"
+            | "/v1/maintenance/coordinated-archive/abort"
+            | "/v1/maintenance/coordinated-archive/operations"
             | "/v1/memory/imports"
             | "/v1/memory/import-queries"
             | "/v1/attestation/challenges"
@@ -264,7 +269,8 @@ fn authorize_operator_request(
             | "/v1/artifact-authorizations"
             | "/v1/resource-quotas"
             | "/v1/resource-topology"
-            | "/v1/maintenance/archive/operations",
+            | "/v1/maintenance/archive/operations"
+            | "/v1/maintenance/coordinated-archive/operations",
         ) => 2,
         ("GET", _)
         | ("POST", "/v1/missions/assess-initial-support" | "/v1/missions/validate-plan") => 0,
@@ -276,7 +282,13 @@ fn authorize_operator_request(
         {
             2
         }
-        ("POST", "/v1/maintenance/archive" | "/v1/maintenance/archive/abort") => 2,
+        (
+            "POST",
+            "/v1/maintenance/archive"
+            | "/v1/maintenance/archive/abort"
+            | "/v1/maintenance/coordinated-archive"
+            | "/v1/maintenance/coordinated-archive/abort",
+        ) => 2,
         ("POST", "/v1/authority/recover") => 2,
         ("POST", "/v1/memory/imports") => 2,
         ("POST", "/v1/memory/import-queries") => 2,
@@ -1850,6 +1862,32 @@ where
                     serde_json::json!({"error": error}),
                 ),
             }
+        }
+        ("GET", "/v1/maintenance/coordinated-archive/operations") => {
+            let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            tokio::task::spawn_blocking(move || coordinated_archive::observe(&log, &gate))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        (
+            "POST",
+            "/v1/maintenance/coordinated-archive" | "/v1/maintenance/coordinated-archive/abort",
+        ) => {
+            let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            let current = controller.clone();
+            let body = request.body.clone();
+            let subject = principal
+                .subject
+                .clone()
+                .unwrap_or_else(|| "trusted-loopback:recovery-admin".into());
+            let abort = path.ends_with("/abort");
+            tokio::task::spawn_blocking(move || {
+                coordinated_archive::command(&body, subject, &current, &log, &gate, abort)
+            })
+            .await
+            .map_err(|e| e.to_string())?
         }
         ("GET", "/v1/maintenance/archive/operations") => {
             let log = event_log.clone();

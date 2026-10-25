@@ -20,6 +20,12 @@ Health, readiness, metrics and semantic satisfaction are separate. After write-d
 
 Prometheus/Alertmanager configuration comes from explicit endpoints/TLS/budgets. Short firing/resolved observations establish software paths, not long-term SLO or human acknowledgement. Follow the [observability contract](docs/development/observability-v0.1.md) and inspect queue/drop coverage.
 
+Listeners default to 128 concurrent connections, with explicit limits from 1 to 1024. Node streams
+default to 16 per connection, bounded from 1 to 128. Mission TOML and Local Provider CLI settings
+declare finite transport timeouts. Excess connections fail before TLS or worker creation; permits
+return only when actual handlers finish. Socket timeout never cancels committed work. Follow the
+[capacity contract](docs/development/listener-capacity-v0.1.md), retain original commands and reconcile readonly.
+
 ## Quiescent backup and restore
 
 A closed recovery profile declares original Controller, Node, Request, runtime-MI, four Memory databases, Replica and content stores. All actual writer/inode leases must be acquired before source reads.
@@ -57,3 +63,7 @@ Use the [coordination contract](docs/development/execution-coordination-v0.1.md)
 ## Cross-domain transactions
 
 Declare actual peers, CA/leaf/client identity files, domain grants and clock bounds before [coordinated execution](docs/development/federation-coordination-v0.1.md). A lost reply remains Unknown; query the original transaction instead of creating a replacement. Root replacement fences its original dispatch epoch. Cold recovery preserves original goal/clock/intent/decision tables and starts no services. Secrets and real cross-host/physical validation remain explicit deployment responsibilities.
+
+## Online coordinated Archive
+
+Explicit process v0.9 retains its original v0.6/v0.7 profile through `coordinated_archive_base`. A global recovery-admin first inspects `/v1/maintenance/coordinated-archive/operations`, then requests an exact cutoff under a fresh original command ID. Duplicate IDs are readonly. Observing Unknown never repeats publication, and abandonment never manufactures completion. Packages are private control metadata; Artifact-admin grants cannot read them. Parent11 and recovery v0.30 require original journals, manifests and actual qualified CAS bytes before publication. Complete restore starts no services. See the [Archive contract](docs/development/coordinated-content-archive-v0.1.md).

@@ -74,6 +74,14 @@ impl ReplicaNode {
                         .map_err(|error| format!("original learner catch-up refused: {error}"))?;
                 }
             }
+            node.require_voter_prefix(
+                epoch,
+                &original_voters,
+                &voters,
+                &original_clock,
+                permission.clone(),
+            )
+            .await?;
             node.require_voter_content(
                 &original_voters,
                 &voters,
@@ -95,6 +103,42 @@ impl ReplicaNode {
             node.check_epoch(epoch).await
         })
         .await
+    }
+
+    /// Requires each newly promoted voter to acknowledge the original applied Raft prefix first.
+    /// A matching unchanged application view alone cannot prove membership/Snapshot catch-up.
+    async fn require_voter_prefix(
+        &self,
+        epoch: ControllerEpoch,
+        original_voters: &BTreeSet<u64>,
+        voters: &BTreeSet<u64>,
+        clock: &ContentBudget,
+        permission: crate::content_store::StreamPermission,
+    ) -> Result<(), String> {
+        let original = self.raft.metrics().borrow().last_applied;
+        let Some(cut) = original else {
+            return Ok(());
+        };
+        loop {
+            clock.check()?;
+            permission()?;
+            if self.current_epoch() != Some(epoch) {
+                return Err("new-voter original prefix source epoch changed".into());
+            }
+            let metrics = self.raft.metrics().borrow().clone();
+            if voters.difference(original_voters).all(|member| {
+                metrics
+                    .replication
+                    .as_ref()
+                    .and_then(|members| members.get(member))
+                    .copied()
+                    .flatten()
+                    .is_some_and(|matched| matched.index >= cut.index)
+            }) {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(clock.remaining_ms()?.min(25))).await;
+        }
     }
 
     /// Proves the original current quorum and every proposed learner against the same exact bytes.

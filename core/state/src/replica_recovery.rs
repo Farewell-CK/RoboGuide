@@ -81,6 +81,9 @@ pub struct ReplicaRecoveryProjection {
     pub catalog_archive_events: Option<Vec<PersistedEvent>>,
     /// Original publication history table; absence never becomes invented coverage.
     pub archive_manifests: Option<Vec<ReplicaArchiveManifest>>,
+    /// Explicit complete online-maintenance history; absence preserves the old projection meaning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinated_archives: Option<Vec<CoordinatedArchiveRecord>>,
 }
 
 /// Complete original source state for quiescent/transaction-bound capture and inactive materialization.
@@ -294,12 +297,18 @@ pub(super) fn export(
         None
     };
     let original = ReplicaRecoveryProjection {
-        schema: REPLICA_RECOVERY_PROJECTION_SCHEMA.into(),
+        schema: if super::coordinated_archive::read(connection)?.is_some() {
+            COORDINATED_ARCHIVE_RECOVERY_SCHEMA
+        } else {
+            REPLICA_RECOVERY_PROJECTION_SCHEMA
+        }
+        .into(),
         metadata,
         archive_operations,
         archive_aborts,
         catalog_archive_events,
         archive_manifests,
+        coordinated_archives: super::coordinated_archive::read(connection)?,
     };
     original.validate_shape()?;
     Ok(original)
@@ -401,6 +410,7 @@ pub(super) fn install(
             )?;
         }
     }
+    super::coordinated_archive::install(connection, original.coordinated_archives.as_deref())?;
     Ok(())
 }
 
@@ -469,6 +479,24 @@ impl ReplicaRecoveryProjection {
                 "later replica recovery lost original Catalog/manifest history".into(),
             ));
         }
+        if let Some(old) = &previous.coordinated_archives {
+            let rows = self.coordinated_archives.as_ref().ok_or_else(|| {
+                SqliteEventLogError::Codec(
+                    "later replica recovery lost coordinated Archive authority".into(),
+                )
+            })?;
+            for row in old {
+                rows.iter()
+                    .find(|next| next.intent.request.command_id == row.intent.request.command_id)
+                    .ok_or_else(|| {
+                        SqliteEventLogError::Codec(
+                            "later replica recovery lost an original coordinated Archive".into(),
+                        )
+                    })?
+                    .follows(row)
+                    .map_err(SqliteEventLogError::Codec)?;
+            }
+        }
         if self.history_floor()? == previous.history_floor()? {
             for key in [
                 "archive_manifest",
@@ -494,7 +522,18 @@ impl ReplicaRecoveryProjection {
 
     /// Rejects unbounded/incomplete projection shape before SQL allocation or namespace replacement.
     fn validate_shape(&self) -> Result<(), SqliteEventLogError> {
-        if self.schema != REPLICA_RECOVERY_PROJECTION_SCHEMA
+        if !matches!(
+            self.schema.as_str(),
+            REPLICA_RECOVERY_PROJECTION_SCHEMA | COORDINATED_ARCHIVE_RECOVERY_SCHEMA
+        ) || (self.schema == COORDINATED_ARCHIVE_RECOVERY_SCHEMA)
+            != self.coordinated_archives.is_some()
+            || self.coordinated_archives.as_ref().is_some_and(|rows| {
+                rows.len() > 256
+                    || rows
+                        .windows(2)
+                        .any(|r| r[0].intent.request.command_id >= r[1].intent.request.command_id)
+                    || rows.iter().any(|r| r.validate().is_err())
+            })
             || self
                 .metadata
                 .keys()
@@ -503,7 +542,11 @@ impl ReplicaRecoveryProjection {
                 .metadata
                 .get("archive_operations_schema")
                 .map(String::as_str)
-                != Some("roboguide.archive-operations/v0.2")
+                != Some(if self.coordinated_archives.is_some() {
+                    COORDINATED_ARCHIVE_STORAGE_SCHEMA
+                } else {
+                    "roboguide.archive-operations/v0.2"
+                })
             || self
                 .metadata
                 .get("archive_authority_id")
@@ -589,6 +632,8 @@ impl ReplicaRecoveryProjection {
                 | "roboguide.controller-checkpoint/v55"
                 | "roboguide.controller-checkpoint/v56"
                 | "roboguide.controller-checkpoint/v57"
+                | "roboguide.controller-checkpoint/v58"
+                | "roboguide.controller-checkpoint/v59"
         ) || events.len() > MAX_ROWS
             || floor.checked_add(events.len() as u64) != Some(checkpoint.event_sequence)
         {
@@ -629,6 +674,26 @@ impl ReplicaRecoveryProjection {
             if Some(&intent.request.authority_id) != self.metadata.get("archive_authority_id") {
                 return Err(SqliteEventLogError::Codec(
                     "original Archive recovery changed source authority".into(),
+                ));
+            }
+        }
+        super::coordinated_archive::read(&connection)?;
+        for row in self.coordinated_archives.iter().flatten() {
+            if Some(&row.intent.authority_id) != self.metadata.get("archive_authority_id")
+                || row.intent.manifest.checkpoint_sequence > checkpoint.event_sequence
+                || row.completed_ms.is_some()
+                    && !self.archive_manifests.iter().flatten().any(|m| {
+                        m.start_sequence == row.intent.manifest.start_sequence
+                            && m.end_sequence == row.intent.manifest.end_sequence
+                            && serde_json::from_str::<ArchiveManifest>(&m.manifest_json)
+                                .ok()
+                                .as_ref()
+                                == Some(&row.intent.manifest)
+                    })
+            {
+                return Err(SqliteEventLogError::Codec(
+                    "coordinated Archive recovery lost original authority or completion coverage"
+                        .into(),
                 ));
             }
         }

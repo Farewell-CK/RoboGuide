@@ -124,6 +124,14 @@ impl state::ApplicationBatchReplicator for ApplicationReplicaClient {
     fn requires_recovery_projection(&self) -> bool {
         self.port().requires_recovery_projection()
     }
+    /// Exposes only the actual owned client's explicitly negotiated parent11 maintenance contract.
+    fn supports_coordinated_archive(&self) -> bool {
+        self.port().supports_coordinated_archive()
+    }
+    /// Preserves the selected original complete view's qualified dependencies without relabelling.
+    fn archive_inputs(&self) -> Result<Vec<state::ArchiveContentKey>, String> {
+        self.port().archive_inputs()
+    }
     /// Retains the exact original complete source transaction and its independent recovery authority.
     fn confirm_recovery_batch(
         &self,

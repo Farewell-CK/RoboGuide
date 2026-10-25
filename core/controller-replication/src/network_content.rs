@@ -521,6 +521,65 @@ impl ReplicaNode {
         Ok(trust)
     }
 
+    /// Allows only retained Snapshot bytes through an exact durable pending joint transition.
+    /// Application Commit/reads keep strict current membership; Raft alone decides Snapshot install.
+    pub(crate) fn network_snapshot_authority(
+        &self,
+        target: &ContentQuorumTarget,
+    ) -> Result<CertificateTrust, String> {
+        if let Ok(trust) = self.network_target_authority(target) {
+            return Ok(trust);
+        }
+        target.validate()?;
+        let metrics = self.raft.metrics().borrow().clone();
+        let (trust, committed) = self.store.try_network_authority()?;
+        let proposed = metrics.membership_config.as_ref();
+        let old = target.membership.membership().get_joint_config();
+        let next = proposed.membership().get_joint_config();
+        let legitimate_step = (old.len() == 1 && next.len() == 2 && next[0] == old[0])
+            || (old.len() == 2 && next.len() == 1 && next[0] == old[1]);
+        let position = proposed
+            .log_id()
+            .as_ref()
+            .ok_or("pending Snapshot membership has no original Log")?;
+        if !self.config.streams_content()
+            || target.profile_identity != self.profile_identity()
+            || target.epoch.replica_id != self.config.replica_id
+            || metrics.current_term != target.epoch.term
+            || metrics.current_leader != Some(target.epoch.replica_id)
+            || committed != target.membership
+            || !legitimate_step
+            || position.index <= target.membership.log_id().as_ref().map_or(0, |id| id.index)
+        {
+            return Err("Snapshot has no exact current committed/pending joint authority".into());
+        }
+        self.store
+            .validate_content_membership(proposed.membership())?;
+        self.store.read_network_snapshot(|sql| {
+            let current: openraft::StoredMembership<u64, ReplicaMember> = crate::store::read_meta(sql, "membership")
+                .map_err(|error| error.to_string())?.ok_or("original committed membership is absent")?;
+            let raw: String = sql.query_row(
+                "SELECT data FROM replica_v1_log WHERE log_index=?1 AND length(CAST(data AS BLOB))<=8388608",
+                [position.index], |row| row.get(0),
+            ).map_err(|error| error.to_string())?;
+            let entry: openraft::Entry<ControllerRaftConfig> = serde_json::from_str(&raw)
+                .map_err(|error| error.to_string())?;
+            if current != target.membership || entry.log_id != *position
+                || !matches!(&entry.payload, openraft::EntryPayload::Membership(actual) if actual == proposed.membership()) {
+                return Err("Snapshot pending membership differs from its original durable Raft entry".into());
+            }
+            Ok(())
+        })?;
+        let current = self.raft.metrics().borrow().clone();
+        if current.current_term != metrics.current_term
+            || current.current_leader != metrics.current_leader
+            || current.membership_config != metrics.membership_config
+        {
+            return Err("Snapshot pending transition changed during original observation".into());
+        }
+        Ok(trust)
+    }
+
     /// Builds retention context only after actual current quorum and complete original candidate checks.
     pub async fn content_target_for(
         &self,

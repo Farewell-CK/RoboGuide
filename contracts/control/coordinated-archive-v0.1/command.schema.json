@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.dev/contracts/control/coordinated-archive-v0.1/command.schema.json",
+  "title": "Original coordinated Archive command",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "command_id", "end_sequence", "budget_ms"],
+  "properties": {
+    "schema": {"const": "roboguide.coordinated-archive-command/v0.1"},
+    "command_id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"},
+    "end_sequence": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "budget_ms": {"type": "integer", "minimum": 100, "maximum": 300000}
+  }
+}

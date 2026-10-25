@@ -46,6 +46,14 @@ pub trait ApplicationBatchReplicator: Send + Sync {
     fn requires_recovery_projection(&self) -> bool {
         false
     }
+    /// Requires an explicit deployment/parent generation before online Archive may change its floor.
+    fn supports_coordinated_archive(&self) -> bool {
+        false
+    }
+    /// Returns actual accepted qualified dependencies without relabelling their original owners.
+    fn archive_inputs(&self) -> Result<Vec<ArchiveContentKey>, String> {
+        Err("replica port does not support coordinated original Archive".into())
+    }
     /// Accepts the complete original auxiliary authority beside the unchanged semantic v2 batch.
     /// A port which did not implement the explicit new profile must refuse rather than discard it.
     fn confirm_recovery_batch(

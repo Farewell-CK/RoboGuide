@@ -356,7 +356,16 @@ pub(super) async fn send_stream(
                 .to_vec(),
             local: tls,
         };
-        let network = permission(node.clone(), target.clone(), receiver, evidence);
+        let network: StreamPermission = if matches!(&route, StreamRoute::Snapshot(_)) {
+            let current = node.clone();
+            let original = target.clone();
+            Arc::new(move || {
+                let trust = current.network_snapshot_authority(&original)?;
+                evidence.authorize_with_trust(receiver, current.config.replica_id, &trust)
+            })
+        } else {
+            permission(node.clone(), target.clone(), receiver, evidence)
+        };
         let original_node = node.clone();
         let original_target = target.clone();
         let live_route = route.clone();
@@ -470,7 +479,11 @@ pub(super) async fn send_stream(
         .await
         .map_err(|_| "original content transport deadline expired".to_string())??;
     clock.check()?;
-    node.network_target_authority(&expected.0)?;
+    if matches!(&route, StreamRoute::Snapshot(_)) {
+        node.network_snapshot_authority(&expected.0)?;
+    } else {
+        node.network_target_authority(&expected.0)?;
+    }
     crate::content_store::verify_stream_observation(
         &observed,
         &expected.0,

@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import signal
+import socket
 import sqlite3
 import ssl
 import subprocess
@@ -121,6 +122,8 @@ def run(
     prepared_recovery: bool = False,
     release_after_recovery: bool = False,
     initialization_source: Path | None = None,
+    coordinated_archive: bool = False,
+    archive_sql_fault: bool = False,
 ) -> dict[str, Any]:
     """Retain exact binaries, native waits, complete SQL and independently verified bytes."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -131,6 +134,7 @@ def run(
         storage,
         Path(__file__),
         Path(__file__).with_name("runnable_prepared_recovery.py"),
+        Path(__file__).with_name("runnable_coordinated_archive.py"),
     ]
     for owner in (
         "core/domain",
@@ -335,6 +339,14 @@ def run(
                         config["controller_environment"][
                             "ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN"
                         ] = "0"
+                if coordinated_archive:
+                    config["coordinated_archive_base"] = (
+                        "roboguide.controller-replica-process/v0.7"
+                        if source_policy is not None
+                        else "roboguide.controller-replica-process/v0.6"
+                    )
+                    config["schema"] = "roboguide.controller-replica-process/v0.9"
+                    config["content"]["child_budget_ms"] = 120000
                 path = output / f"configuration-{member}.json"
                 save(path, config)
                 policy = (
@@ -361,7 +373,7 @@ def run(
                             "root": config["content"]["root"],
                             "profile": profile,
                             "member": member,
-                            "staging_gc": source_policy is not None,
+                            "staging_gc": source_policy is not None or coordinated_archive,
                         },
                     },
                     "actual-runnable-root",
@@ -428,6 +440,87 @@ def run(
                 raise ValueError(
                     "actual runnable Controller did not become healthy within its bound"
                 )
+
+            def restart_original_supervisor(
+                member: int, previous_pid: int
+            ) -> tuple[int, dict[str, Any]]:
+                """Recover explicitly after the original application failure latch."""
+                process, record = next(
+                    (p, r)
+                    for p, r in reversed(owned)
+                    if int(r["member"]) == member and not r.get("planned_shutdown")
+                )
+                os.killpg(process.pid, signal.SIGINT)
+                record["returncode"] = process.wait(timeout=20)
+                assert record["returncode"] == 0
+                record["planned_shutdown"] = True
+                record["explicit_supervisor_restart"] = True
+                path = output / f"configuration-{member}.json"
+                log = scope.enter_context(
+                    (output / f"supervisor-{member}-restart-{len(owned)}.log").open("xb")
+                )
+                replacement = subprocess.Popen(
+                    [str(supervisor), str(path)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    close_fds=True,
+                    start_new_session=True,
+                )
+                owned.append(
+                    (
+                        replacement,
+                        {
+                            "pid": replacement.pid,
+                            "member": member,
+                            "configuration": str(path),
+                            "binary": str(supervisor),
+                        },
+                    )
+                )
+                host, port = configs[member]["replica"]["members"][str(member)].rsplit(":", 1)
+                listening = time.monotonic() + 20
+                while True:
+                    if replacement.poll() is not None:
+                        raise ValueError("explicit original supervisor replacement exited")
+                    try:
+                        with socket.create_connection((host, int(port)), timeout=0.2):
+                            break
+                    except OSError:
+                        if time.monotonic() >= listening:
+                            raise ValueError(
+                                "explicit original supervisor listener stayed unavailable"
+                            ) from None
+                        time.sleep(0.02)
+                winner, status = current(previous_pid)
+                if winner != member:
+                    transfer = subprocess.run(
+                        [
+                            str(supervisor),
+                            "--admin",
+                            str(output / f"configuration-{winner}.json"),
+                            "--leader",
+                            str(winner),
+                            "--transfer-leader",
+                            str(member),
+                            "--transfer-id",
+                            f"actual-explicit-original-restart-{len(owned)}",
+                        ],
+                        capture_output=True,
+                        timeout=45,
+                        check=False,
+                    )
+                    assert transfer.returncode == 0, transfer.stderr
+                    winner, status = current(previous_pid)
+                assert winner == member
+                observed(
+                    "actual-explicit-supervisor-restart",
+                    member=member,
+                    original_supervisor_wait=record["returncode"],
+                    replacement_supervisor_pid=replacement.pid,
+                    actual_status=status,
+                )
+                return winner, status
 
             member, first = current()
             observed("original-controller-healthy", member=member, status=first)
@@ -507,7 +600,7 @@ def run(
                 parent = Path(config["storage_directory"]) / "replica.sqlite3"
                 with closing(sqlite3.connect(parent.as_uri() + "?mode=ro", uri=True)) as sql:
                     assert sql.execute("PRAGMA user_version").fetchone()[0] == (
-                        9 if source_policy is not None else 8
+                        11 if coordinated_archive else 9 if source_policy is not None else 8
                     )
                     content = json.loads(
                         sql.execute(
@@ -523,6 +616,13 @@ def run(
                 )
                 originals[replica] = content
             observed("all-three-original-byte-views", members=sorted(originals))
+            if coordinated_archive:
+                from runnable_coordinated_archive import exercise
+
+                result["actual_coordinated_archive"] = exercise(request_http, configs, member)
+                observed(
+                    "actual-online-original-archive", proof=result["actual_coordinated_archive"]
+                )
             original_inodes = {
                 str(path): [path.stat().st_dev, path.stat().st_ino]
                 for path in (Path(configs[member]["storage_directory"])).rglob("*")
@@ -533,9 +633,9 @@ def run(
             old_pid = first["child_pid"]
             os.kill(old_pid, signal.SIGKILL)
             observed("original-child-sigkill-sent", pid=old_pid)
-            successor, restarted = current(old_pid)
+            successor, restarted = restart_original_supervisor(member, old_pid)
             assert successor == member
-            assert restarted["epoch"] == first["epoch"]
+            assert restarted["epoch"]["term"] >= first["epoch"]["term"]
             observed("actual-successor-healthy", member=successor, status=restarted)
             assert request_http(origin, "/v1/artifacts/" + checksum[7:]) == (200, payload)
             observed("restarted-http-content-read", actual_digest=checksum)
@@ -591,7 +691,9 @@ def run(
                 )
             if owner_failover:
                 original_process, original_record = next(
-                    (process, record) for process, record in owned if record["member"] == member
+                    (process, record)
+                    for process, record in reversed(owned)
+                    if record["member"] == member and not record.get("planned_shutdown")
                 )
                 os.killpg(original_process.pid, signal.SIGINT)
                 original_record["returncode"] = original_process.wait(timeout=20)
@@ -667,9 +769,11 @@ def run(
                     if release_after_recovery:
                         failed_pid = next_status["child_pid"]
                         os.kill(failed_pid, signal.SIGKILL)
-                        restored_member, restored_status = current(failed_pid)
+                        restored_member, restored_status = restart_original_supervisor(
+                            next_member, failed_pid
+                        )
                         assert restored_member == next_member
-                        assert restored_status["epoch"] == next_status["epoch"]
+                        assert restored_status["epoch"]["term"] >= next_status["epoch"]["term"]
                         directory = Path(configs[next_member]["storage_directory"])
                         with closing(
                             sqlite3.connect(
@@ -726,6 +830,24 @@ def run(
                             proof=result["actual_completed_retirement"],
                             original_root_bytes_retained=True,
                         )
+            if archive_sql_fault:
+                assert coordinated_archive and owner_failover
+                from runnable_coordinated_archive import sql_failure_and_transfer
+
+                result["actual_archive_sql_fault"] = sql_failure_and_transfer(
+                    request_http,
+                    configs,
+                    current,
+                    supervisor,
+                    [
+                        int(record["member"])
+                        for _, record in owned
+                        if not record.get("planned_shutdown")
+                    ],
+                )
+                observed(
+                    "actual-archive-sql-unknown-transfer", proof=result["actual_archive_sql_fault"]
+                )
             assert all(digest(Path(path)) == expected for path, expected in identities.items())
             result.update(
                 passed=True,
@@ -777,6 +899,8 @@ def main() -> None:
     parser.add_argument("--prepared-recovery", action="store_true")
     parser.add_argument("--release-after-recovery", action="store_true")
     parser.add_argument("--initialization-source", type=Path)
+    parser.add_argument("--coordinated-archive", action="store_true")
+    parser.add_argument("--archive-sql-fault", action="store_true")
     args = parser.parse_args()
     if args.release_after_recovery and not args.prepared_recovery:
         parser.error("--release-after-recovery requires --prepared-recovery")
@@ -792,6 +916,8 @@ def main() -> None:
         None
         if args.initialization_source is None
         else args.initialization_source.resolve(strict=True),
+        args.coordinated_archive,
+        args.archive_sql_fault,
     )
     print(json.dumps({"passed": result["passed"], "result": str(args.output / "result.json")}))
 

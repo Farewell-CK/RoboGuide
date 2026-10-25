@@ -583,6 +583,40 @@ impl ReplicaContentStore {
         Ok(original.intent.budget)
     }
 
+    /// Reuses only exact retained receipts after actual byte verification under the original issue.
+    /// Missing receipts leave the first intent Unknown so its normal bounded streams can fill them.
+    pub(crate) fn complete_retained_snapshot_receive(
+        &self,
+        command: &str,
+        header: &SnapshotContentHeader,
+        permission: StreamPermission,
+    ) -> Result<Option<SnapshotContentStatus>, String> {
+        let clock = self.snapshot_receive_scope(command, header)?;
+        {
+            let guard = self.inner.connection.lock().map_err(|e| e.to_string())?;
+            let sql = guard
+                .as_ref()
+                .ok_or("original Snapshot receive SQL is closed")?;
+            self.validate_connection(sql)?;
+            for input in &header.target.inputs {
+                clock.check()?;
+                permission()?;
+                let present: bool = sql
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM content_objects WHERE content_key=?1)",
+                        [digest(input)?],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| error.to_string())?;
+                if !present {
+                    return Ok(None);
+                }
+            }
+        }
+        self.complete_snapshot_receive(command, permission)
+            .map(Some)
+    }
+
     /// Verifies all actual files within the original budget before atomically publishing byte readiness.
     pub(crate) fn complete_snapshot_receive(
         &self,

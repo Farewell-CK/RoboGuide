@@ -227,7 +227,7 @@ def validate_content(state: Any, policy: dict[str, Any] | None) -> None:
             candidate, policy
         ):
             raise ValueError("accepted initialization lacks its exact immutable source anchor")
-    elif candidate["schema"] == ORDINARY:
+    elif candidate["schema"] in {ORDINARY, "roboguide.application-commit/v4"}:
         anchor = candidate.get("source_initialization")
         if (
             candidate.get("initialization_digest") is not None
@@ -242,6 +242,16 @@ def validate_content(state: Any, policy: dict[str, Any] | None) -> None:
             raise ValueError("declared initialization was replaced by an empty ordinary source")
     else:
         raise ValueError("unsupported original complete-content envelope")
+    from .coordinated_archives import ENVELOPE, validate_projection
+
+    online = validate_projection(candidate["recovery"])
+    if (candidate["schema"] == ENVELOPE) != (
+        candidate["recovery"].get("coordinated_archives") is not None
+    ):
+        raise ValueError("complete-content envelope hides coordinated Archive authority")
+    for row in online:
+        if row["completed_ms"] is not None and row["intent"]["package"] not in candidate["inputs"]:
+            raise ValueError("completed coordinated Archive lost its current qualified package pin")
     if state["batch_digest"] != content._digest(candidate):
         raise ValueError("original accepted candidate digest changed")
 

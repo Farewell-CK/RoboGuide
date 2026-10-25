@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import logging
+import socket
 import sqlite3
 import ssl
 import threading
@@ -264,10 +265,19 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
         if not self._authorize(path, "GET"):
             return
         if path == "/metrics":
-            self._send(HTTPStatus.OK, self.server.engine.metrics())
+            self._send(
+                HTTPStatus.OK,
+                {
+                    **self.server.engine.metrics(),
+                    "http_connections": self.server.transport_metrics(),
+                },
+            )
             return
         if path == "/metrics/prometheus":
-            self._send_text(HTTPStatus.OK, self.server.engine.metrics_prometheus())
+            self._send_text(
+                HTTPStatus.OK,
+                self.server.engine.metrics_prometheus() + self.server.transport_prometheus(),
+            )
             return
         lookup = "/v1/mission-requests/by-mission/"
         if path.startswith(lookup):
@@ -778,6 +788,8 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
         role_map: Mapping[str, CertificateGrant | tuple[str, str]] | None = None,
         tls_context: ssl.SSLContext | None = None,
         authorization_path: Path | None = None,
+        connection_limit: int = 128,
+        connection_timeout_seconds: float = 35.0,
     ) -> None:
         """Bind the configured listener and expose immutable service dependencies."""
         try:
@@ -788,7 +800,23 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
             raise MissionServiceConfigError(
                 "remote Mission listener requires mTLS and certificate grants"
             )
-        self._connections = threading.BoundedSemaphore(128)
+        if type(connection_limit) is not int or not 1 <= connection_limit <= 1024:
+            raise MissionServiceConfigError(
+                "Mission connection limit must be an integer in 1..1024"
+            )
+        if (
+            type(connection_timeout_seconds) not in (int, float)
+            or not 0 < connection_timeout_seconds <= 900
+        ):
+            raise MissionServiceConfigError(
+                "Mission transport timeout must be positive and at most 900 seconds"
+            )
+        self.connection_timeout_seconds = connection_timeout_seconds
+        self.connection_limit = connection_limit
+        self._connections = threading.BoundedSemaphore(connection_limit)
+        self._transport_lock = threading.Lock()
+        self._active_connections = 0
+        self._rejected_connections = 0
         self._service_lock = engine.acquire_http_service_lock()
         try:
             if authorization_path is not None:
@@ -836,20 +864,64 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
     def process_request(self, request: Any, client_address: Any) -> None:
         """Bound independent workers so unauthenticated clients cannot exhaust threads."""
         if not self._connections.acquire(blocking=False):
+            with self._transport_lock:
+                self._rejected_connections = min(self._rejected_connections + 1, 2**64 - 1)
             self.shutdown_request(request)
             return
+        with self._transport_lock:
+            self._active_connections += 1
         try:
             super().process_request(request, client_address)
         except BaseException:
-            self._connections.release()
+            self._release_transport()
             raise
 
     def process_request_thread(self, request: Any, client_address: Any) -> None:
         """Release the worker slot after normal handling, timeout or handshake rejection."""
+
+        def close_original() -> None:
+            """Close only the original transport; committed Mission/model work keeps its journal."""
+            try:
+                request.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+        timer = threading.Timer(self.connection_timeout_seconds, close_original)
+        timer.daemon = True
         try:
+            timer.start()
             super().process_request_thread(request, client_address)
         finally:
-            self._connections.release()
+            timer.cancel()
+            self._release_transport()
+
+    def _release_transport(self) -> None:
+        """Release the original worker permit and its observation after actual close or failure."""
+        with self._transport_lock:
+            self._active_connections -= 1
+        self._connections.release()
+
+    def transport_metrics(self) -> JSONObject:
+        """Observe bounded process capacity without granting HTTP or Mission authority."""
+        with self._transport_lock:
+            return {
+                "active": self._active_connections,
+                "limit": self.connection_limit,
+                "rejected_total": self._rejected_connections,
+            }
+
+    def transport_prometheus(self) -> str:
+        """Render fixed metric names without peer, request, tenant or certificate labels."""
+        metrics = self.transport_metrics()
+        return "".join(
+            f"# TYPE roboguide_mission_http_connections_{name} {kind}\n"
+            f"roboguide_mission_http_connections_{name} {metrics[name]}\n"
+            for name, kind in (
+                ("active", "gauge"),
+                ("limit", "gauge"),
+                ("rejected_total", "counter"),
+            )
+        )
 
     def finish_request(self, request: Any, client_address: Any) -> None:
         """Perform the bounded TLS handshake in its worker before parsing HTTP."""
@@ -950,6 +1022,8 @@ def main(argv: list[str] | None = None) -> int:
         role_map=role_map,
         tls_context=tls_context,
         authorization_path=settings.mtls_role_map,
+        connection_limit=settings.connection_limit,
+        connection_timeout_seconds=settings.connection_timeout_seconds,
     )
     LOG.info("listening on %s:%s", settings.listen_host, settings.listen_port)
     try:

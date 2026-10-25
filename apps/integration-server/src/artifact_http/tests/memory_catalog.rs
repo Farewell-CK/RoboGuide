@@ -457,6 +457,12 @@ async fn local_eaios_memory_workflow_cross_node_exchange_is_integrated() {
         Arc::new(AllowTestMemoryAdmission),
         Arc::new(IgnoreTestLocalizationEvidence),
         None,
+        crate::listener_capacity::Connections::new(
+            crate::listener_capacity::Listener::Artifact,
+            128,
+            ports::DiagnosticHandle::default(),
+        )
+        .unwrap(),
     ));
     let endpoint = format!("http://{address}");
     let client = node_service::ArtifactClient::new(&endpoint, 4, 1024, 1_000, 1_000)

@@ -191,7 +191,11 @@ impl ContentApplicationBatch {
     /// Checks the explicitly selected batch codec; shape validation confers no writer or byte authority.
     pub(crate) fn validate_context_batch(&self) -> Result<(), String> {
         match (self.schema.as_str(), self.initialization_digest.as_deref()) {
-            (CONTENT_APPLICATION_SCHEMA, None) => {
+            (
+                CONTENT_APPLICATION_SCHEMA
+                | crate::content_application::CONTENT_ARCHIVE_APPLICATION_SCHEMA,
+                None,
+            ) => {
                 if let Some(anchor) = &self.source_initialization {
                     anchor.validate()?;
                 }

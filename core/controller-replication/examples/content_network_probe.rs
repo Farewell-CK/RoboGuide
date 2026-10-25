@@ -49,6 +49,9 @@ struct Config {
     /// Explicit parent9 source initialization; false keeps the original parent7/8 interpretation.
     #[serde(default)]
     initialization_parent: bool,
+    /// Explicit parent11 acceptance; old fixtures keep their original parent interpretation.
+    #[serde(default)]
+    coordinated_archive: bool,
     /// Exact common immutable source declaration, never fabricated from a received candidate.
     #[serde(default)]
     initialization: Option<ContentInitializationPolicy>,
@@ -367,7 +370,20 @@ async fn serve(config: Config) -> Result<(), String> {
             config.replica.replica_id,
         )
     }?;
-    let (node, _server) = if config.initialization_parent {
+    let (node, _server) = if config.coordinated_archive {
+        ReplicaNode::start_with_coordinated_archive(
+            config.replica.clone(),
+            &config.parent_sql,
+            root.clone(),
+            config.member_stores,
+            ReplicaTransportLimits::default(),
+            config
+                .initialization_parent
+                .then_some(config.initialization),
+            None,
+        )
+        .await?
+    } else if config.initialization_parent {
         ReplicaNode::start_with_content_initialization(
             config.replica.clone(),
             &config.parent_sql,
@@ -609,6 +625,7 @@ async fn serve(config: Config) -> Result<(), String> {
                             .clone()
                             .ok_or("actual original TLS absent")?,
                         trust_database: config.parent_sql.clone(),
+                        coordinated_archive: false,
                         budget_ms,
                     };
                     let data =

@@ -119,14 +119,14 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 
 | 顺序 | 对应原项 | 当前必需交付 | 状态 |
 | --- | --- | --- | --- |
-| A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | Log、purged Snapshot、空 learner、准备/投递心跳及 ACK 门禁通过；ADR-0195 原归档源首次初始化、Unknown、Log/Snapshot 追赶、完整实际入口及最新完整存量三 leader 冷恢复通过；ADR-0198 已补 committed replay 缺失输入的启动拒绝、显式原 owner 修复、重入群与冷恢复；全局 Archive/原完整故障矩阵随 A2/A3 继续 |
-| A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | readiness、Root7 GC/恢复、实际 mTLS learner/joint、损坏与旧 epoch 拒绝、Root8 私有 staging/原 Unknown/完整恢复已验收；全 producer 退休与最终 CAS 回收组合继续 |
+| A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | 本地软件组合通过：ADR-0212 在线 private Archive、原 pending/CAS/floor/Catalog、SQL 故障、原 Unknown/跨 owner/只读重复/显式放弃，完整包与 genuine 同 wrapper 旧 writer 拒绝通过。原 purged Snapshot、新实际出版、落后成员追赶、损坏拒绝/原 Log 不变、joint 及最终完整 v0.30 三 leader 冷恢复通过；完整原证据见 2026-10-26 归档验收。跨域最终组合仍归 E/F，实际跨主机证据独立 |
+| A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | 本地软件组合通过：原 Log/View/Snapshot/stream/reader 引用，实际 GC、staging、Unknown 和旧 ID 只读；在线 Archive 后三成员各删除两个不再需要的真实 CAS 对象，实际重启与 Snapshot/learner/joint 后完整冷恢复，原 GC/producer/CAS 独立保留校验通过。实际全局跨域组合仍归 E/F，设备与跨主机证据独立 |
 | A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 通过：原 Root4 → 6 → 7 排空同 inode 升级；ADR-0207 genuine v55 → v56 三成员滚动、原 child wait、原 Unknown 重启、SQL 失败/显式放弃、实际坏版本同 schema 补丁、旧/退休程序拒绝，以及原 authority/完整字节的三 leader 冷恢复均已验收。全局内容与引用组合仍归 A1/A2/N3，设备和跨主机证据保持独立 |
 | B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | 通过：ADR-0208 显式 MissionPlan v0.11/Node v0.14/preparation v0.3，完整原 typed root、消费 Group 交接 v0.3、scoped-parent revision v0.5、每 Task 独立 import/use/active-map、原 PID wait/revoke、真实 SQL 回滚与 writer 恢复、自动 MI 原 Request/worker/Review/Unknown、独立原目标、原引用退休和实际本地 GC；完整 retained CAS/SQL v0.26 冷恢复/重试、三类 genuine 旧 writer 拒绝均验收通过。全局 Archive/HA 组合仍归 A1/A2，设备与跨主机证据独立 |
 | C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | 本地软件合同通过：ADR-0205 来源成本；ADR-0206 divisible Compute/原 Context envelope/quota/Node 准入及实际 CPU/原 POSIX 限制；ADR-0209 原 frame/anchor/clearance 空间冲突、跨 ID time-domain 日历、部署 booking 原预算、正常/Group/recovery 完整批次、Bind/Rebind/outbox、原超时 stop/revoke 与持有、v58/v0.27 SQL/CAS 恢复和 genuine v57 拒绝均通过。跨域/HA 时钟与全局组合继续随 E、A1/A2、F 闭合；物理/GPU/硬实时未获证明，不用软件声明替代 |
 | D | N5/F8 | 运行中抢占、耦合恢复、hazard/handoff/regrasp 与原目标 | ADR-0210 已接入显式原 cohort 审批、同事务实际受益 admission、完整停止/撤权、独立原目标、活动 hazard 和 v59/v0.28 恢复；实际三案例、完整原数据冷恢复、原实例重启与 genuine v58 拒绝均通过本地软件验收。设备与跨主机证据独立，全局组合仍归 E/F |
 | E | N6 | 双独立 Control 服务的 mTLS、持久决定及原事务恢复 | ADR-0211 已接入持久 root coordinator、真实 pinned mTLS peer 请求、正常 Control 资源/实际 writer epoch、原 kernel budget/clock 区间、原意图/Unknown、全体 Commit 后 release 和独立原目标；双域正常/响应丢失/准备中 SIGKILL、原实例重启及六份 v60/v0.29 冷恢复通过。本地三案例软件验收通过；证书/分区/HA/全局内容的完整最终组合仍须完成，实际跨主机证据独立 |
-| F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | 待全部软件必需项通过 |
+| F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | ADR-0213 全 listener/本地 adapter 容量和有限等待已接入；真实零 Node TCP/TLS/Unix/worker/原生 firing/resolved、默认 128 容量和单 worker 256 次实际健康延迟通过。SLO 分母/默认目标/处置顺序已冻结。跨域 HA/内容最终组合、完整当前 CI 和 main 集成继续，尚未宣布 SoftwareComplete |
 
 [当前来源成本验收](acceptance/2026-10-25-current-state-scheduling-costs.md)闭合 N4 的成本机制。
 [typed-map 运行期修订验收](acceptance/2026-10-25-typed-map-runtime-revision.md)闭合 B 的修订组合。

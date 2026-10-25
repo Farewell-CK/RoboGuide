@@ -8,6 +8,7 @@ mod application;
 mod artifact_http;
 mod controller_http;
 mod diagnostics;
+mod listener_capacity;
 mod observability;
 
 use diagnostics::StageObservation;
@@ -1039,6 +1040,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .into(),
         );
     }
+    let node_connection_limit =
+        listener_capacity::configured_limit("ROBOGUIDE_NODE_CONNECTION_LIMIT", 128, 1024)?;
+    let node_stream_limit =
+        listener_capacity::configured_limit("ROBOGUIDE_NODE_STREAM_LIMIT", 16, 128)?;
+    let artifact_connection_limit =
+        listener_capacity::configured_limit("ROBOGUIDE_ARTIFACT_CONNECTION_LIMIT", 128, 1024)?;
     let node_protocol_policy = configured_node_protocol_policy()?;
     let (node_identity_policy, node_tls) = configured_node_identity()?;
     let artifact_tls = artifact_http::configured_artifact_tls()?;
@@ -1154,6 +1161,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .map_err(|error| format!("spatial catalog startup replay failed: {error}"))?;
     let artifact_listener = tokio::net::TcpListener::bind(artifact_address).await?;
+    let node_incoming = listener_capacity::Incoming::new(
+        tokio::net::TcpListener::bind(address).await?,
+        listener_capacity::Connections::new(
+            listener_capacity::Listener::Node,
+            node_connection_limit,
+            diagnostic_handle.clone(),
+        )?,
+    );
+    let artifact_connections = listener_capacity::Connections::new(
+        listener_capacity::Listener::Artifact,
+        artifact_connection_limit,
+        diagnostic_handle.clone(),
+    )?;
     let latest_sequence = event_log.latest_sequence()?;
     let checkpoint = event_log.load_checkpoint()?;
     let migrate_checkpoint = checkpoint
@@ -1752,6 +1772,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             memory_admission,
             localization_observer,
             artifact_tls_for_server,
+            artifact_connections,
         )
         .await
         {
@@ -1827,18 +1848,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-    let server = if let Some(tls) = node_tls {
-        tonic::transport::Server::builder()
-            .tls_config(tls)?
-            .add_service(LegacyRoboGuideNodeProtocolServer::new(GrpcLegacyV02Service))
-            .add_service(RoboGuideNodeProtocolServer::new(service))
-            .serve(address)
-    } else {
-        tonic::transport::Server::builder()
-            .add_service(LegacyRoboGuideNodeProtocolServer::new(GrpcLegacyV02Service))
-            .add_service(RoboGuideNodeProtocolServer::new(service))
-            .serve(address)
-    };
+    let mut node_server = tonic::transport::Server::builder()
+        .concurrency_limit_per_connection(node_stream_limit)
+        .max_concurrent_streams(Some(node_stream_limit as u32))
+        .timeout(Duration::from_secs(30))
+        .http2_keepalive_interval(Some(Duration::from_secs(5)))
+        .http2_keepalive_timeout(Some(Duration::from_secs(5)));
+    if let Some(tls) = node_tls {
+        node_server = node_server.tls_config(tls.timeout(listener_capacity::HANDSHAKE_TIMEOUT))?;
+    }
+    let server = node_server
+        .add_service(LegacyRoboGuideNodeProtocolServer::new(GrpcLegacyV02Service))
+        .add_service(RoboGuideNodeProtocolServer::new(service))
+        .serve_with_incoming(node_incoming);
     let outcome = tokio::select! {
         result = server => result.map_err(Into::into),
         fatal = fatal_receiver.recv() => Err(fatal.unwrap_or_else(|| "application driver stopped unexpectedly".to_string()).into()),

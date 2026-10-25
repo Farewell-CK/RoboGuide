@@ -20,6 +20,7 @@ from types import FrameType
 from typing import Any
 
 from .__main__ import observe, parse_job
+from .bounded_transport import BoundedWorkers
 from .contracts import canonical, digest, exact, fields, integer
 from .geometry import code_digest, sdk
 from .storage import read_json, read_source, save_json, sync_directory
@@ -493,10 +494,21 @@ class SpatialService:
             return {"execution_id": handle, "state": "RUNNING", "cancel_accepted": True}
 
 
-class UnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+class UnixServer(BoundedWorkers, socketserver.UnixStreamServer):
     """Serve fixed HTTP routes through a private 0600 local socket, never a remote listener."""
 
     daemon_threads = False
+
+    def __init__(
+        self,
+        address: str,
+        handler: type[BaseHTTPRequestHandler],
+        connection_limit: int = 128,
+        request_timeout_seconds: float = 30.0,
+    ) -> None:
+        """Retain local capacity before accepting any private-socket HTTP worker."""
+        self.configure_capacity(connection_limit, request_timeout_seconds)
+        super().__init__(address, handler)
 
 
 def handler_type(service: SpatialService) -> type[BaseHTTPRequestHandler]:
@@ -538,7 +550,14 @@ def handler_type(service: SpatialService) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib HTTP dispatch.
             """Observe actual backend identity/readiness; no query launches a worker."""
-            if self.path in {"/v1/health", "/v1/readiness"}:
+            if self.path == "/v1/transport":
+                server = self.server
+                self._respond(
+                    server.transport_snapshot()
+                    if isinstance(server, BoundedWorkers)
+                    else {"available": False}
+                )
+            elif self.path in {"/v1/health", "/v1/readiness"}:
                 self._respond(service.readiness())
             elif self.path == "/v1/instance":
                 self._respond(service.identity)
@@ -587,7 +606,13 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--readonly", action="store_true")
+    parser.add_argument("--connection-limit", type=int, default=128)
+    parser.add_argument("--connection-timeout-seconds", type=float, default=30.0)
     args = parser.parse_args()
+    if not 0 < args.connection_timeout_seconds <= 900:
+        parser.error("--connection-timeout-seconds must be positive and at most 900")
+    if not 1 <= args.connection_limit <= 1024:
+        parser.error("--connection-limit must be an integer in 1..1024")
     signal.signal(signal.SIGTERM, termination_requested)
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     sdk()
@@ -607,7 +632,12 @@ def main() -> None:
             if not stat.S_ISSOCK(metadata.st_mode) or metadata.st_uid != os.geteuid():
                 raise ValueError("original socket path is not an owned stale socket")
             socket_path.unlink()
-        server = UnixServer(str(socket_path), handler_type(service))
+        server = UnixServer(
+            str(socket_path),
+            handler_type(service),
+            args.connection_limit,
+            args.connection_timeout_seconds,
+        )
         os.chmod(socket_path, 0o600)
         inode = socket_path.lstat().st_ino
         sync_directory(args.root)

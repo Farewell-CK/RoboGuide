@@ -19,11 +19,14 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import logging
 import os
 import re
 import shlex
+import socket
+import socketserver
 import sqlite3
 import subprocess
 import tarfile
@@ -796,7 +799,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         """Handle loopback-only health and exact-capability readiness observations."""
-        if self.path == "/v1/health":
+        if self.path == "/v1/transport":
+            self._send_json(HTTPStatus.OK, self.server.transport_snapshot())
+        elif self.path == "/v1/health":
             self._send_json(HTTPStatus.OK, self.server.adapter.health())
         elif self.path == "/v1/readiness":
             self._send_json(HTTPStatus.OK, self.server.adapter.readiness())
@@ -868,11 +873,92 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
-class AdapterHTTPServer(ThreadingHTTPServer):
+class BoundedWorkers(socketserver.ThreadingMixIn):
+    """Retain actual local request workers through bounded input, response and close."""
+
+    def configure_capacity(
+        self, connection_limit: int, request_timeout_seconds: float = 30.0
+    ) -> None:
+        """Validate an explicit deployment limit before any listener is bound."""
+        if type(connection_limit) is not int or not 1 <= connection_limit <= 1024:
+            raise ValueError("local connection limit must be an integer in 1..1024")
+        if (
+            type(request_timeout_seconds) not in (int, float)
+            or not 0 < request_timeout_seconds <= 900
+        ):
+            raise ValueError("local transport timeout must be positive and at most 900 seconds")
+        self.request_timeout_seconds = request_timeout_seconds
+        self.connection_limit = connection_limit
+        self._connections = threading.BoundedSemaphore(connection_limit)
+        self._transport_lock = threading.Lock()
+        self._active_connections = 0
+        self._rejected_connections = 0
+
+    def transport_snapshot(self) -> dict[str, int]:
+        """Observe original process capacity without granting content, use or job authority."""
+        with self._transport_lock:
+            return {
+                "active": self._active_connections,
+                "limit": self.connection_limit,
+                "rejected_total": self._rejected_connections,
+            }
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        """Refuse excess sockets before another request thread or backend admission."""
+        if not self._connections.acquire(blocking=False):
+            with self._transport_lock:
+                self._rejected_connections = min(self._rejected_connections + 1, 2**64 - 1)
+            cast(socketserver.BaseServer, self).shutdown_request(request)
+            return
+        with self._transport_lock:
+            self._active_connections += 1
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._release_transport()
+            raise
+
+    def _release_transport(self) -> None:
+        """Return only this original worker's permit after actual handling ends."""
+        with self._transport_lock:
+            self._active_connections -= 1
+        self._connections.release()
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        """Bound header and socket lifetime; committed backend work retains ownership."""
+
+        def close_original() -> None:
+            """Close original I/O while preserving backend jobs and uncertain effects."""
+            try:
+                request.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+        timer = threading.Timer(self.request_timeout_seconds, close_original)
+        timer.daemon = True
+        try:
+            request.settimeout(10.0)
+            timer.start()
+            super().process_request_thread(request, client_address)
+        finally:
+            timer.cancel()
+            self._release_transport()
+
+
+class AdapterHTTPServer(BoundedWorkers, ThreadingHTTPServer):
     """Threaded server carrying one immutable adapter instance."""
 
-    def __init__(self, address: tuple[str, int], adapter: LocalAdapter) -> None:
+    def __init__(
+        self,
+        address: tuple[str, int],
+        adapter: LocalAdapter,
+        connection_limit: int = 128,
+        request_timeout_seconds: float = 30.0,
+    ) -> None:
         """Bind the configured loopback listener and expose its adapter."""
+        if not ipaddress.ip_address(address[0]).is_loopback:
+            raise ValueError("the local Robonix adapter requires a literal loopback address")
+        self.configure_capacity(connection_limit, request_timeout_seconds)
         super().__init__(address, RequestHandler)
         self.adapter = adapter
 
@@ -882,6 +968,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=18101)
+    parser.add_argument("--connection-limit", type=int, default=128)
+    parser.add_argument("--connection-timeout-seconds", type=float, default=30.0)
     parser.add_argument("--map-root", type=Path, default=DEFAULT_MAP_ROOT)
     parser.add_argument("--artifact-root", type=Path, default=DEFAULT_ARTIFACT_ROOT)
     parser.add_argument("--state-db", type=Path, default=DEFAULT_STATE_DB)
@@ -900,6 +988,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     """Start the local adapter and serve until the process receives shutdown."""
     args = parse_args(argv)
+    if not 0 < args.connection_timeout_seconds <= 900:
+        raise SystemExit("--connection-timeout-seconds must be positive and at most 900")
+    if not 1 <= args.connection_limit <= 1024:
+        raise SystemExit("--connection-limit must be an integer in 1..1024")
+    if not ipaddress.ip_address(args.host).is_loopback:
+        raise SystemExit("--host must be a literal loopback address")
     if not 1 <= args.port <= 65_535:
         raise SystemExit("--port must be between 1 and 65535")
     if (
@@ -923,7 +1017,9 @@ def main(argv: list[str] | None = None) -> None:
         ros_discovery_timeout_s=args.ros_discovery_timeout_s,
     )
     adapter = LocalAdapter(config)
-    server = AdapterHTTPServer((args.host, args.port), adapter)
+    server = AdapterHTTPServer(
+        (args.host, args.port), adapter, args.connection_limit, args.connection_timeout_seconds
+    )
     LOG.info("listening on %s:%s for local Robonix workflow", args.host, args.port)
     try:
         server.serve_forever()

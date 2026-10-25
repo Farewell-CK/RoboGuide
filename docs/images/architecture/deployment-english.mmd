@@ -18,6 +18,8 @@ flowchart TB
   NODE <-->|Configured workflows| LOCAL[Separate Local EAIOS / Memory provider]
   LOCAL --- PS[(Provider-owned SQL / content / original process evidence)]
   CAS <-->|Separately authorized data plane| NODE
-  HA[Optional Replica members / supervisors<br/>Own Raft SQL + original Controller child journals] -.Metadata quorum / epoch / child management.-> APP
+  HA[Optional Replica members / supervisors<br/>Own Raft SQL + original child + qualified CAS] -.Complete-content quorum / epoch / process management.-> APP
+  AR[Online private Archive<br/>Original pending / prefix / package / floor] -->|Original complete-content transaction| HA
+  AR -->|Private metadata packages| CAS
   REC[Quiescent recovery-tool<br/>Original writer / inode leases / active-reference checks] --> BUNDLE[(Complete profile SQL + content bundle<br/>Verify and restore to new roots)]
   OBS[Read-only metrics / deployment inspector] -.Authenticated observation.-> APP

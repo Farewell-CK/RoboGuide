@@ -106,7 +106,9 @@ async fn heartbeat(
     {
         return Err("original Snapshot heartbeat source vote changed".into());
     }
-    source.store.require_network_snapshot_source(meta)?;
+    // This is only an ordinary empty Append, never Snapshot/content authority. Keep the
+    // network heartbeat independent of synchronous parent SQL and retained byte validation.
+    // The actual Snapshot source, clocks and TLS are checked separately before publication.
     clock.check()?;
     let response = network
         .exchange(
@@ -239,12 +241,17 @@ pub(super) async fn prepare(
     evidence: crate::tls::VerifiedTlsConnection,
 ) -> Result<SnapshotContentStatus, String> {
     let permission = receiver_permission(node.clone(), source, header.clone(), evidence);
-    permission()?;
     log_content::on_worker(node, move |current| {
-        current
-            .store
-            .network_content_store()?
-            .prepare_snapshot_receive(header, budget, permission)
+        let root = current.store.network_content_store()?;
+        let original = root.prepare_snapshot_receive(header.clone(), budget, permission.clone())?;
+        if original.ready.is_some() || original.retirement.is_some() {
+            return Ok(original);
+        }
+        // A returning Root may already retain every exact input. Verify real files and
+        // receipts under this original receive issue before avoiding redundant TLS streams.
+        Ok(root
+            .complete_retained_snapshot_receive(&original.command_id, &header, permission)?
+            .unwrap_or(original))
     })
     .await
 }
@@ -258,8 +265,8 @@ pub(super) async fn complete(
 ) -> Result<SnapshotContentStatus, String> {
     let command = snapshot_receive_operation(&header, node.config.replica_id)?;
     let permission = receiver_permission(node.clone(), source, header.clone(), evidence);
-    permission()?;
     log_content::on_worker(node, move |current| {
+        permission()?;
         let root = current.store.network_content_store()?;
         root.snapshot_receive_scope(&command, &header)?;
         root.complete_snapshot_receive(&command, permission)
@@ -368,7 +375,11 @@ async fn before_send(
     let content = view
         .content
         .ok_or("original Snapshot content identity is absent")?;
-    let (_, membership) = source.store.try_network_authority()?;
+    let authority_source = source.clone();
+    let (_, membership) = log_content::on_worker(&source, move |_| {
+        authority_source.store.try_network_authority()
+    })
+    .await?;
     let metrics = source.raft.metrics().borrow().clone();
     let epoch = ControllerEpoch {
         term: metrics.current_term,
@@ -407,7 +418,11 @@ async fn before_send(
         member_stores,
         inputs: content.inputs.clone(),
     };
-    source.network_target_authority(&target)?;
+    let checked_target = target.clone();
+    log_content::on_worker(&source, move |current| {
+        current.network_snapshot_authority(&checked_target)
+    })
+    .await?;
     let header = SnapshotContentHeader {
         schema: "roboguide.snapshot-content-header/v0.1".into(),
         source_member: source.config.replica_id,
@@ -439,7 +454,13 @@ async fn before_send(
         .await
         .map_err(|e| e.to_string())?;
     let original = match response {
-        Reply::SnapshotContent(result) => result?,
+        Reply::SnapshotContent(Ok(original)) => original,
+        Reply::SnapshotContent(Err(error)) => {
+            if error == "Snapshot retry changed its original complete header" {
+                refresh_snapshot(&source, meta).await?;
+            }
+            return Err(error);
+        }
         _ => return Err("Snapshot prerequisite issue was rejected".into()),
     };
     check_status(&original, &header, network.target)?;
@@ -449,7 +470,7 @@ async fn before_send(
         let meta = header.meta.clone();
         let check: StreamPermission = Arc::new(move || {
             let _scope = &retained;
-            held.network_target_authority(&target)?;
+            held.network_snapshot_authority(&target)?;
             held.store.require_network_snapshot_source(&meta)
         });
         for key in &header.target.inputs {
@@ -488,8 +509,32 @@ async fn before_send(
         }
     }
     clock.check()?;
-    source.network_target_authority(&header.target)?;
+    let checked_target = header.target.clone();
+    log_content::on_worker(&source, move |current| {
+        current.network_snapshot_authority(&checked_target)
+    })
+    .await?;
     Ok(Some(header))
+}
+
+/// Requests a distinct real Snapshot from a newer cut or explicit actual source publication.
+/// Original receive IDs, Unknown and budgets stay; parent11 journals each new actual publication.
+pub(super) async fn refresh_snapshot(
+    source: &ReplicaNode,
+    original: &openraft::SnapshotMeta<u64, ReplicaMember>,
+) -> Result<(), String> {
+    let metrics = source.raft.metrics().borrow().clone();
+    if source.store.supports_snapshot_publications()
+        || metrics.last_applied.map(|id| id.index) > original.last_log_id.map(|id| id.index)
+    {
+        source
+            .raft
+            .trigger()
+            .snapshot()
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 /// Gates each original metadata chunk on the exact prepared issue, actual current TLS and byte-ready evidence.
@@ -508,9 +553,9 @@ pub(super) async fn check_delivery(
         return Err("Snapshot metadata chunk changed its original prerequisite identity".into());
     }
     let permission = receiver_permission(node.clone(), source, header.clone(), evidence);
-    permission()?;
     let command = snapshot_receive_operation(&header, node.config.replica_id)?;
     log_content::on_worker(node, move |current| {
+        permission()?;
         let root = current.store.network_content_store()?;
         let original = root
             .snapshot_receive_status(&command)?

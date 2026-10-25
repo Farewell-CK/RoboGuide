@@ -1,6 +1,6 @@
 # 当前代码架构（Mermaid）
 
-核对日期：2026-10-22；代码基线：`495a6d274f6f930016d97ec5514124876e539cfe`。
+核对日期：2026-10-26；提交基线：`307b0a46`，本轮 ADR-0212/0213 随包更新。
 [English](current-architecture.en.md)。本文依据实际模块、调用链和组合入口重画 V2 的当前实现视图，
 不新增权威或修改 [V2 语义](README.md)。后续设计以已接受 ADR 为准。
 
@@ -19,7 +19,7 @@ flowchart TB
 
   subgraph CTRL[Controller 进程]
     O[Orchestration<br/>Task DAG / 满足判定 / Mission 生命周期]
-    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / 日历 / tenant quota]
+    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / quantitative Compute / 时空日历 / tenant quota]
     R[Runtime<br/>slot / attempt generation<br/>durable intent / 事实归约 / relation fence]
     I[Integration<br/>Node Protocol / session / 路由]
     O -->|Ready Task| C
@@ -27,7 +27,7 @@ flowchart TB
     R -->|命令 intent| I
     R -->|执行结果| O
     S[State + Memory catalog<br/>来源 / 时间 / TTL / 策略 / manifest 元数据]
-    M[应用层 Memory 协调<br/>Prepare / import / probe / use / revoke / handoff]
+    M[应用层 Memory 协调<br/>typed scope / Prepare / import / use / revoke / handoff]
     A[Artifact adapter + CAS<br/>独立内容授权 / 哈希字节]
     I -->|经应用接纳的来源事实| S
     S -.当前依据.-> C
@@ -132,12 +132,17 @@ flowchart TB
   NODE <-->|配置工作流| LOCAL[独立 Local EAIOS / Memory provider]
   LOCAL --- PS[(provider 自有 SQL / 内容 / 原进程证据)]
   CAS <-->|独立授权的数据面| NODE
-  HA[可选 Replica 成员 / supervisor<br/>各自 Raft SQL + 原 Controller child 日志] -.元数据 quorum / epoch / child 管理.-> APP
+  HA[可选 Replica 成员 / supervisor<br/>各自 Raft SQL + 原 child + qualified CAS] -.完整内容 quorum / epoch / 原进程管理.-> APP
+  AR[在线 private Archive<br/>原 pending / prefix / package / floor] -->|原完整内容事务| HA
+  AR -->|私有元数据包| CAS
   REC[静止 recovery-tool<br/>原 writer / inode lease / 活动引用校验] --> BUNDLE[(完整 profile SQL + 内容包<br/>校验后恢复到新目录)]
   OBS[只读 metrics / deployment inspector] -.认证观察.-> APP
 ```
 
-Replica 复制接受的应用元数据；成员本地 transfer / spawn / PID / wait 历史另行保留。
+Replica 复制接受的应用元数据与精确声明的 qualified CAS 输入；成员本地 transfer / spawn / PID / wait 历史另行保留。
+ADR-0212 的在线 private Archive、producer GC、实际 purged Snapshot/learner/joint 和完整
+v0.30 三 leader 恢复已通过本地软件验收。各 listener 的原 permit/有限等待/固定指标和
+原生告警由 ADR-0213 管理，不改变业务 authority。
 ADR-0184 已实现并通过 parent8/Root4 静止恢复及实际三 leader 软件验收：原逻辑身份和操作
 历史不改写，显式 Root5 binding 单独记录恢复后的实际 inode，旧入口拒绝新绑定。恢复包必须
 同时覆盖原 parent、Root、活动引用及精确字节；Unknown 不因复制而完成。
@@ -147,7 +152,7 @@ ADR-0185 的 producer 对账保留实际仍存活且没有 scope-close 证据的
 仍是后续清理的条件；该存储并发规则不提供设备停止证明。
 
 恢复只处理显式 profile 声明的完整存储和内容，不启动服务、不续原预算。图中 SQL/CAS 的存在
-不证明在线内容复制、跨域 HA 或设备连续性。Control tenant quota 是逻辑承诺核算；Local Memory
+不独立证明跨主机、跨域 HA 或设备连续性。Control tenant quota 是逻辑承诺核算；Local Memory
 进程的 CPU/address-space `rlimit` 回执是另一种证据，不表示 GPU、OS 或硬实时隔离已普遍实现。
 
 ## Habitat 与 Eval Harness 的接入位置
@@ -325,3 +330,14 @@ Unknown/对账边界。
 和 DOCX 作为历史概念快照保留，不再充当当前实现图。
 
 ADR-0186 在显式 parent8 的原 apply worker 内、取得 parent 写锁前，按原预算等待确切输入的实际 receipt/字节就绪。接收 Snapshot 同样在完整身份/后继校验之后、producer 准入和写事务之前复用原 worker 时钟等待；到期不创建 producer 或完成事实。等待不复制内容、不授予权限、不续预算；已知 receipt 的字节损坏仍立即失败，缺失历史内容的路由仍须独立接通。
+
+当前新增职责定位：
+
+| 职责 | 实际维护入口 |
+| --- | --- |
+| 协调归档与原接收出版 | `core/state/src/coordinated_archive.rs`、`core/controller-replication/src/content_archive.rs` / `store_snapshot.rs`、application `coordinated_archive` |
+| 入口容量与观察 | `apps/integration-server/src/listener_capacity.rs`、Mission `api.py`、Local Provider `bounded_transport.py`、`tools/observability/observability_profile.py` |
+| 定量与时空资源 | Control `resource_allocations` / `capacity_calendar` / `resource_topology`，Node 原 envelope 准入 |
+| 执行协调与跨域 | application `plan_revision/coordination` / `hazards` / `federation/execution` / `federation/coordinator` |
+
+软件验收与剩余全局组合以[唯一执行队列](../../development/roboguide-software-completion-plan-2026-10-15.md)为准。

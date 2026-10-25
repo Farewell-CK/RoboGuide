@@ -8,12 +8,12 @@
       "title": "当前总体架构",
       "source": "docs/architecture/v2/current-architecture.md",
       "index": 0,
-      "source_sha256": "b43d69d176a1b62d2cd63a39785c62354467e862e1f540b392c8448bd7d7ebba",
+      "source_sha256": "dfb57b723e76d7720a4ad863ab0c3ea32285bc71c61cfae17860a7f5a76d375f",
       "svg": "docs/images/architecture/overview.svg",
-      "svg_sha256": "35222608493d6be327e9a093663c4c666a6c623286baa744230704ae0fbcab86",
+      "svg_sha256": "1756713b02d253e9b3bf487dffb335967ec77aae5fdcd1a04b8bb9ffacee1f34",
       "mmd": "docs/images/roboguide-current-architecture.mmd",
-      "width": 1612,
-      "height": 1560
+      "width": 1608,
+      "height": 1596
     },
     {
       "name": "execution",
@@ -34,12 +34,12 @@
       "title": "进程与存储拓扑",
       "source": "docs/architecture/v2/current-architecture.md",
       "index": 2,
-      "source_sha256": "871ef0adaa2c4c5332b431fef7685cf1da12765465296b284ce2e7612d34b262",
+      "source_sha256": "c7ac60d92d39d2e3ecf104cfe9badf72cbbcbae47cb2446c514755d272aea18d",
       "svg": "docs/images/architecture/deployment.svg",
-      "svg_sha256": "6224d551d9f46a176d86e1dbb081fd2226a3581009542f076e313ab4440b153a",
+      "svg_sha256": "868cd1ac629dda13595ca91b7ac19550281914269fd137b6515b4514c507e26f",
       "mmd": "docs/images/architecture/deployment.mmd",
-      "width": 1860,
-      "height": 1257
+      "width": 1857,
+      "height": 1445
     },
     {
       "name": "habitat-evaluation",
@@ -99,12 +99,12 @@
       "title": "Process and storage topology",
       "source": "docs/architecture/v2/current-architecture.en.md",
       "index": 2,
-      "source_sha256": "11e84d5e2336aba435eef464dc4f36252d34da40bd511b96210232bf855ed356",
+      "source_sha256": "3b661d6e545c9b040e0049425192c3355ab9526c30860bca6b1a2718f7f40c8b",
       "svg": "docs/images/architecture/deployment-english.svg",
-      "svg_sha256": "3623088e2e1001fe117cbe16ea61a86d2fb923b3a7f516ea8136b999471d51ec",
+      "svg_sha256": "f902d7f94678a6ba04fbf13fe4263b064b46489bdb19914b8219ebfb14794644",
       "mmd": "docs/images/architecture/deployment-english.mmd",
-      "width": 1871,
-      "height": 1336
+      "width": 1878,
+      "height": 1577
     },
     {
       "name": "habitat-evaluation",

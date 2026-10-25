@@ -20,6 +20,11 @@ python tools/deployment/deployment_profile.py   --profile /absolute/profile.json
 
 Prometheus/Alertmanager 配置来自显式 endpoints/TLS/budgets。短窗口 firing/resolved 证明软件路径，不证明长期 SLO 或人工响应。依据[观测合同](docs/development/observability-v0.1.md)部署，并检查队列/drop coverage。
 
+各入口默认同时连接 128，显式范围 1–1024；Node 每连接 stream 默认 16，范围 1–128。
+Mission TOML 与各 Local Provider CLI 单独声明有限 transport timeout。TLS/线程前拒绝
+超额连接，原 handler 退出后才归还 permit；socket 超时不能取消已提交工作。满载和拒绝
+增量告警按[入口容量合同](docs/development/listener-capacity-v0.1.md)处置，原命令保持只读对账。
+
 ## 静止备份与恢复
 
 使用闭合 recovery profile，纳入原 Controller、Node、Request、runtime-MI、Memory 四库、Replica 与声明内容。实际 writer/inode leases 必须都释放后才可读取源。
@@ -57,3 +62,7 @@ recovery-admin 的 `/v1/resource-topology` view 区分声明、原 reservation �
 ## 跨域事务
 
 按[跨域协调合同](docs/development/federation-coordination-v0.1.md)显式声明 peer、CA/leaf/client 身份文件、domain grant 与时钟上界。回复丢失保留 Unknown，查询原事务，不能换 ID 消除不确定结果。Root 替换会 fence 原 dispatch epoch。冷恢复保留原 goal/clock/intent/decision 表且不启动服务；Secrets 和实际跨主机/物理验证仍是显式部署责任。
+
+## 在线协调归档
+
+使用显式 process v0.9 的 `coordinated_archive_base` 保留原 v0.6/v0.7 profile。global recovery-admin 先查询 `/v1/maintenance/coordinated-archive/operations`，再用新的原 command ID 请求精确 cutoff。重复 ID 只读；Unknown 查询不重发发布，显式 abort 也不补造完成。包是私有控制元数据，Artifact admin 不具有读取权限。parent11 与 recovery v0.30 在发布前校验必需 journal、原 manifest 和实际 qualified CAS 字节；完整恢复不启动服务。见[归档合同](docs/development/coordinated-content-archive-v0.1.md)。

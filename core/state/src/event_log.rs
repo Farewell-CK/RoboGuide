@@ -32,6 +32,14 @@ pub use replica_recovery::{
 };
 #[path = "archive.rs"]
 mod archive;
+#[path = "coordinated_archive.rs"]
+mod coordinated_archive;
+pub use coordinated_archive::{
+    ArchiveContentKey, COORDINATED_ARCHIVE_RECOVERY_SCHEMA, COORDINATED_ARCHIVE_STORAGE_SCHEMA,
+    CoordinatedArchiveAbort, CoordinatedArchiveIntent, CoordinatedArchivePackage,
+    CoordinatedArchiveRecord, CoordinatedArchiveRequest, CoordinatedArchiveSink,
+    coordinated_archive_bytes, coordinated_archive_package, coordinated_archive_projection,
+};
 #[path = "archive_abort.rs"]
 mod archive_abort;
 #[path = "archive_operation.rs"]

@@ -18,6 +18,7 @@ def declare_controller_storage(profile: dict[str, Any]) -> None:
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     }:
         return
     for component in profile["components"]:
@@ -70,6 +71,11 @@ def standalone_schema(database: Path) -> str:
     """Observe the actual wrapper; the recovery CLI still validates all original authority."""
     with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as sql:
         row = sql.execute("SELECT schema FROM controller_checkpoint WHERE singleton=1").fetchone()
+        marker = sql.execute(
+            "SELECT value FROM event_log_metadata WHERE key='archive_operations_schema'"
+        ).fetchone()
+        if marker == ("roboguide.archive-operations/v0.3",):
+            return "roboguide.recovery-profile/v0.30"
     if row is None or not isinstance(row[0], str):
         raise ValueError("actual Controller checkpoint header is unavailable")
     return (

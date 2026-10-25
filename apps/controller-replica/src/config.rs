@@ -15,6 +15,9 @@ pub(super) const APPLICATION_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOI
 const ALLOWED_ENVIRONMENT: &[&str] = &[
     "TOKIO_WORKER_THREADS",
     "ROBOGUIDE_OPERATOR_CONNECTION_LIMIT",
+    "ROBOGUIDE_NODE_CONNECTION_LIMIT",
+    "ROBOGUIDE_NODE_STREAM_LIMIT",
+    "ROBOGUIDE_ARTIFACT_CONNECTION_LIMIT",
     "ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA",
     "ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN",
     "ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS",
@@ -79,6 +82,9 @@ pub(super) struct ProcessConfig {
     /// Explicit next executable; old process profiles cannot hide this new upgrade authority.
     #[serde(default)]
     pub application_upgrade: Option<ApplicationUpgradeConfig>,
+    /// Explicit parent11 wrapper around the exact original owned process v0.6/v0.7 layout.
+    #[serde(default)]
+    pub coordinated_archive_base: Option<String>,
 }
 
 /// Explicit future executable configuration; it does not itself change current writer permission.
@@ -197,11 +203,12 @@ pub(super) struct LeaderTransferConfig {
 impl ProcessConfig {
     /// Returns the exact original layout; a new executable declaration does not relabel storage.
     pub fn base_process_schema(&self) -> &str {
-        self.application_upgrade
-            .as_ref()
-            .map_or(self.schema.as_str(), |upgrade| {
-                upgrade.base_process_schema.as_str()
-            })
+        self.application_upgrade.as_ref().map_or(
+            self.coordinated_archive_base
+                .as_deref()
+                .unwrap_or(self.schema.as_str()),
+            |upgrade| upgrade.base_process_schema.as_str(),
+        )
     }
     /// Binds actual binary/configuration bytes; per-member route/storage paths do not change semantics.
     pub fn policy_digest(&self) -> Result<String, String> {
@@ -273,14 +280,34 @@ impl ProcessConfig {
     /// Rejects broad network/configuration scope before owning files or creating a Controller.
     pub fn validate(&self) -> Result<(), String> {
         self.replica.validate()?;
-        if let Some(upgrade) = &self.application_upgrade {
-            if self.schema != "roboguide.controller-replica-process/v0.8"
-                || !matches!(
-                    upgrade.base_process_schema.as_str(),
+        if (self.schema == "roboguide.controller-replica-process/v0.9")
+            != self.coordinated_archive_base.is_some()
+            || self.coordinated_archive_base.as_ref().is_some_and(|s| {
+                !matches!(
+                    s.as_str(),
                     "roboguide.controller-replica-process/v0.6"
                         | "roboguide.controller-replica-process/v0.7"
-                )
-                || !upgrade.binary.is_absolute()
+                ) || self
+                    .application_upgrade
+                    .as_ref()
+                    .is_some_and(|u| u.base_process_schema != *s)
+            })
+        {
+            return Err(
+                "coordinated Archive requires explicit process v0.9 and exact original owned base"
+                    .into(),
+            );
+        }
+        if let Some(upgrade) = &self.application_upgrade {
+            if !matches!(
+                self.schema.as_str(),
+                "roboguide.controller-replica-process/v0.8"
+                    | "roboguide.controller-replica-process/v0.9"
+            ) || !matches!(
+                upgrade.base_process_schema.as_str(),
+                "roboguide.controller-replica-process/v0.6"
+                    | "roboguide.controller-replica-process/v0.7"
+            ) || !upgrade.binary.is_absolute()
                 || upgrade.retained_binaries.len() > 31
                 || self
                     .policy_digest_for_binary(&upgrade.binary, &upgrade.target.application_schema)?
@@ -352,7 +379,7 @@ impl ProcessConfig {
                 match &content.initialization {
                     Some(policy) => {
                         policy.validate()?;
-                        if self.schema != "roboguide.controller-replica-process/v0.7"
+                        if self.base_process_schema() != "roboguide.controller-replica-process/v0.7"
                             || !self.replica.members.contains_key(&policy.source_member)
                             || self
                                 .replica
@@ -480,16 +507,19 @@ impl ProcessConfig {
         {
             return Err("Controller storage format must be explicitly legacy or 1".into());
         }
-        if self
-            .controller_environment
-            .get("ROBOGUIDE_OPERATOR_CONNECTION_LIMIT")
-            .is_some_and(|value| {
+        for (name, maximum) in [
+            ("ROBOGUIDE_OPERATOR_CONNECTION_LIMIT", 1024),
+            ("ROBOGUIDE_NODE_CONNECTION_LIMIT", 1024),
+            ("ROBOGUIDE_NODE_STREAM_LIMIT", 128),
+            ("ROBOGUIDE_ARTIFACT_CONNECTION_LIMIT", 1024),
+        ] {
+            if self.controller_environment.get(name).is_some_and(|value| {
                 value
                     .parse::<usize>()
-                    .map_or(true, |limit| !(1..=1024).contains(&limit))
-            })
-        {
-            return Err("Operator connection limit must be an integer in 1..1024".into());
+                    .map_or(true, |limit| !(1..=maximum).contains(&limit))
+            }) {
+                return Err(format!("{name} must be an integer in 1..{maximum}"));
+            }
         }
         if self
             .controller_environment
@@ -505,8 +535,14 @@ impl ProcessConfig {
             );
         }
         if (self.application_upgrade.is_some()
-            && self.schema != "roboguide.controller-replica-process/v0.8")
-            || (self.application_upgrade.is_none() && self.schema != process_schema)
+            && !matches!(
+                self.schema.as_str(),
+                "roboguide.controller-replica-process/v0.8"
+                    | "roboguide.controller-replica-process/v0.9"
+            ))
+            || (self.application_upgrade.is_none()
+                && self.coordinated_archive_base.is_none()
+                && self.schema != process_schema)
             || self.base_process_schema() != process_schema
             || !controller_replication::supports_application_generation(
                 &self.replica.application_schema,

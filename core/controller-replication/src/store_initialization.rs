@@ -48,6 +48,11 @@ impl SqliteRaftStore {
         &self,
         candidate: &ContentApplicationBatch,
     ) -> Result<(), String> {
+        if candidate.schema == crate::content_application::CONTENT_ARCHIVE_APPLICATION_SCHEMA
+            && !self.supports_coordinated_archive()
+        {
+            return Err("complete-content v4 requires explicit original parent11".into());
+        }
         if candidate.schema != CONTENT_INITIALIZATION_SCHEMA {
             return Ok(());
         }

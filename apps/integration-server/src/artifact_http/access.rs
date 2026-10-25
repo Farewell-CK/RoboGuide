@@ -128,6 +128,18 @@ pub(super) fn authorize_blob_read(
     authority
         .revalidate_artifact_principal(principal)
         .map_err(HttpError::forbidden)?;
+    if catalog.event_log.coordinated_archive_enabled()
+        && catalog
+            .event_log
+            .coordinated_archive_operations()
+            .map_err(|e| HttpError::service_unavailable(e.to_string()))?
+            .iter()
+            .any(|row| row.intent.package.content_digest == digest)
+    {
+        return Err(HttpError::forbidden(
+            "private original Archive packages require the independent maintenance/recovery boundary",
+        ));
+    }
     let mut referenced = false;
     for manifest in catalog.memories()? {
         if manifest

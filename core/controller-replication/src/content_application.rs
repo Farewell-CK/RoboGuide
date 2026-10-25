@@ -10,6 +10,9 @@ mod initialization;
 pub use initialization::{ContentInitializationAnchor, ContentInitializationPolicy};
 
 /// Explicit new private application envelope; ordinary semantic v2 bytes keep their original meaning.
+/// Explicit complete online-Archive interpretation; v3 never gains floor-change authority.
+pub const CONTENT_ARCHIVE_APPLICATION_SCHEMA: &str = "roboguide.application-commit/v4";
+/// Original private complete recovery/content envelope, without online floor advancement.
 pub const CONTENT_APPLICATION_SCHEMA: &str = "roboguide.application-commit/v3";
 /// Complete original archived-source initialization, never accepted by ordinary incremental ports.
 pub const CONTENT_INITIALIZATION_SCHEMA: &str = "roboguide.application-initialization/v0.1";
@@ -284,6 +287,16 @@ pub(crate) fn required_inputs(
             }
         }
     }
+    for row in recovery.coordinated_archives.iter().flatten() {
+        if row.completed_ms.is_some() {
+            let key = &row.intent.package;
+            required.insert(ArtifactContentKey {
+                source_owner: key.source_owner.clone(),
+                content_digest: key.content_digest.clone(),
+                byte_size: key.byte_size,
+            });
+        }
+    }
     let required = required.into_iter().collect::<Vec<_>>();
     if required.len() > 16_384
         || required.windows(2).any(|keys| {
@@ -438,12 +451,19 @@ impl ContentApplicationBatch {
         }
         let mut events = previous.events.clone();
         events.extend(batch.events.clone());
+        let floor = recovery.history_floor().map_err(|e| e.to_string())?;
+        events.retain(|r| r.sequence > floor);
         recovery
             .validate_for(&events, &batch.checkpoint)
             .map_err(|error| error.to_string())?;
         let inputs = required_inputs(&recovery, &events, &origins)?;
         let result = Self {
-            schema: CONTENT_APPLICATION_SCHEMA.into(),
+            schema: if recovery.coordinated_archives.is_some() {
+                CONTENT_ARCHIVE_APPLICATION_SCHEMA
+            } else {
+                CONTENT_APPLICATION_SCHEMA
+            }
+            .into(),
             profile_identity: profile_identity.into(),
             epoch,
             source_writer,
@@ -517,12 +537,14 @@ impl ContentApplicationBatch {
             .map_err(|error| error.to_string())?
             != old_floor
             && !initializing
+            && self.schema != CONTENT_ARCHIVE_APPLICATION_SCHEMA
         {
             return Err(
                 "original Archive floor advancement requires coordinated complete maintenance"
                     .into(),
             );
         }
+        self.validate_archive_transition(previous)?;
         if previous.content.as_ref().is_some_and(|content| {
             content
                 .origins
@@ -573,6 +595,8 @@ impl ContentApplicationBatch {
         }
         let mut events = previous.events.clone();
         events.extend(self.batch.events.clone());
+        let floor = self.recovery.history_floor().map_err(|e| e.to_string())?;
+        events.retain(|r| r.sequence > floor);
         self.recovery
             .validate_for(&events, &self.batch.checkpoint)
             .map_err(|error| error.to_string())?;

@@ -493,9 +493,7 @@ pub(crate) fn binary_digest(path: &Path) -> Result<String, String> {
 
 /// Installs the new writer fence in the same original SQL transaction as its first new authority.
 pub(crate) fn install_format(connection: &Connection) -> Result<(), String> {
-    let version: i64 = connection
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(|error| error.to_string())?;
+    let version = crate::archive_parent::effective(connection)?;
     if version == STORAGE_VERSION {
         return Ok(());
     }
@@ -511,6 +509,9 @@ pub(crate) fn install_format(connection: &Connection) -> Result<(), String> {
         &Option::<ApplicationUpgradeAuthority>::None,
     )
     .map_err(|error| error.to_string())?;
+    if crate::archive_parent::advance_upgrade_base(connection)? {
+        return Ok(());
+    }
     connection.execute_batch("DROP TABLE replica_storage_format; CREATE TABLE replica_storage_format(version INTEGER PRIMARY KEY CHECK(version=10),schema TEXT NOT NULL); INSERT INTO replica_storage_format VALUES (10,'roboguide.replica-storage/v0.10'); PRAGMA user_version=10;").map_err(|error| error.to_string())
 }
 
@@ -520,9 +521,7 @@ pub(crate) fn validate_storage(
     base_parent: i64,
     original: &str,
 ) -> Result<(), String> {
-    let version: i64 = connection
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(|error| error.to_string())?;
+    let version = crate::archive_parent::effective(connection)?;
     if version != STORAGE_VERSION {
         for key in [LOCAL_KEY, AUTHORITY_KEY, BASE_PARENT_KEY] {
             if read_meta::<serde_json::Value>(connection, key)

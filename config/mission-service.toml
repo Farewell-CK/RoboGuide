@@ -1,4 +1,7 @@
 [service]
+# Process-local HTTP/TLS worker bound; does not declare Nodes or device capacity.
+connection_limit = 128
+connection_timeout_seconds = 35
 listen_host = "127.0.0.1"
 listen_port = 8070
 state_db = "artifacts/mission-service/requests.sqlite3"

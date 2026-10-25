@@ -229,7 +229,9 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
         }
     )
     generation = (
-        29
+        30
+        if 11 in parent_versions
+        else 29
         if federation_generation
         else 28
         if coordination_generation
@@ -339,6 +341,8 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
             if binding["source_root_version"] == 6
             else "roboguide.controller-replica-process/v0.3"
         )
+        if config.get("coordinated_archive_base") is not None:
+            config["schema"] = original_process
         if config.get("application_upgrade") is not None:
             config["schema"] = original_process
             binary_root = stores / "inputs/binaries"
@@ -417,6 +421,25 @@ def prepare_bundle(
         return frozen_bundle, frozen_digest
     declaration = profile(source, output)
     save(output / "profile.json", declaration)
+    if declaration["schema"] == "roboguide.recovery-profile/v0.30":
+        old = {**declaration, "schema": "roboguide.recovery-profile/v0.29"}
+        save(output / "old-profile.json", old)
+        refused = command(
+            output,
+            "old-profile-parent11-refused",
+            [
+                "backup",
+                "--profile",
+                str(output / "old-profile.json"),
+                "--destination",
+                str(output / "old-profile-refused-bundle"),
+                "--command-id",
+                "actual-parent11-old-profile-refusal",
+            ],
+            refused=True,
+        )
+        assert "v0.30" in refused["stderr"]
+        assert not (output / "old-profile-refused-bundle").exists()
     if declaration["schema"] == "roboguide.recovery-profile/v0.23":
         old = {**declaration, "schema": "roboguide.recovery-profile/v0.22"}
         save(output / "old-profile.json", old)
@@ -522,7 +545,21 @@ def initialization_history(directory: Path) -> dict[str, dict[str, str]] | None:
     with closing(
         sqlite3.connect((directory / "replica.sqlite3").as_uri() + "?mode=ro", uri=True)
     ) as sql:
-        if sql.execute("PRAGMA user_version").fetchone() != (9,):
+        version = sql.execute("PRAGMA user_version").fetchone()[0]
+        if version == 11:
+            version = json.loads(
+                sql.execute(
+                    "SELECT value FROM replica_v1_meta WHERE key='coordinated_archive_parent_base'"
+                ).fetchone()[0]
+            )
+        if version == 10:
+            version = json.loads(
+                sql.execute(
+                    "SELECT value FROM replica_v1_meta "
+                    "WHERE key='application_upgrade_base_parent_v1'"
+                ).fetchone()[0]
+            )
+        if version != 9:
             return None
         return {
             "metadata": dict(
@@ -999,7 +1036,11 @@ def run(
             published_size = (
                 None if prepared_completion is None else prepared_completion["byte_size"]
             )
-            prepared_unknown = None if prepared is None else prepared["prepared_unknown"]
+            prepared_unknown = (
+                None
+                if prepared is None
+                else prepared.get("prepared_unknown", prepared.get("unknown"))
+            )
             if prepared is None:
                 assert "actual_generation_receipt" in original and "original_quota" in original
             for turn in range(len(configs)):

@@ -172,17 +172,17 @@ pub async fn serve_artifact_http(
     memory_admission: Arc<dyn MemoryProviderAdmission>,
     localization_observer: Arc<dyn LocalizationEvidenceObserver>,
     tls: Option<ArtifactTlsProfile>,
+    connections: crate::listener_capacity::Connections,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let uploads = run_blocking(|| restore_uploads(&store, &catalog))
         .map_err(|error| std::io::Error::other(error.message))?;
-    let connections = Arc::new(tokio::sync::Semaphore::new(128));
     let mut sweep = interval(UPLOAD_SWEEP_INTERVAL);
     sweep.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 let (mut stream, _) = accepted?;
-                let Ok(permit) = Arc::clone(&connections).try_acquire_owned() else { continue; };
+                let Some(permit) = connections.acquire() else { continue; };
                 let shared_store = store.clone();
                 let shared_catalog = catalog.clone();
                 let shared_uploads = uploads.clone();

@@ -1,5 +1,16 @@
 # RoboGuide
 
+[服务入口容量](docs/development/listener-capacity-v0.1.md)覆盖实际 Node、Operator、Artifact、
+Mission 和 Local Provider TCP/Unix 的 permit、线程与有限等待。固定指标与真实原生告警
+已有[软件验收](docs/development/acceptance/2026-10-26-listener-capacity.md)；连接关闭保留
+已提交工作与 Unknown，不建立 Node、设备或长期 SLO 事实。
+
+[在线协调归档](docs/development/coordinated-content-archive-v0.1.md)由 State 保留原操作，
+Replica 在原完整内容 quorum 下提交精确 floor/Catalog/manifest 变化；私有 CAS 包继续由
+原 Log/View/Snapshot 引用保护。显式 process v0.9/parent11/recovery v0.30 保留 wrapper v60，
+旧 writer、缺少必需 journal 或实际包字节均被拒绝。实际进程、故障与完整恢复的
+[验收记录](docs/development/acceptance/2026-10-26-coordinated-content-archive.md)分别记录软件范围与剩余总验收。
+
 [跨域持久协调](docs/development/federation-coordination-v0.1.md)已接入真实 peer mTLS、正常 Control 资源准备、
 原预算/epoch、持久全局决定和独立原目标。wrapper v60/recovery v0.29 保留原请求、Unknown 与恢复；
 实际双域 CPU、响应丢失和原实例重启组合正在完成最终随包检查，设备与跨主机证据独立。
@@ -439,7 +450,7 @@ flowchart TB
 
   subgraph CTRL[Controller 进程]
     O[Orchestration<br/>Task DAG / 满足判定 / Mission 生命周期]
-    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / 日历 / tenant quota]
+    C[Control<br/>Match / Scheduler / Commit / Bind<br/>Group / quantitative Compute / 时空日历 / tenant quota]
     R[Runtime<br/>slot / attempt generation<br/>durable intent / 事实归约 / relation fence]
     I[Integration<br/>Node Protocol / session / 路由]
     O -->|Ready Task| C
@@ -447,7 +458,7 @@ flowchart TB
     R -->|命令 intent| I
     R -->|执行结果| O
     S[State + Memory catalog<br/>来源 / 时间 / TTL / 策略 / manifest 元数据]
-    M[应用层 Memory 协调<br/>Prepare / import / probe / use / revoke / handoff]
+    M[应用层 Memory 协调<br/>typed scope / Prepare / import / use / revoke / handoff]
     A[Artifact adapter + CAS<br/>独立内容授权 / 哈希字节]
     I -->|经应用接纳的来源事实| S
     S -.当前依据.-> C

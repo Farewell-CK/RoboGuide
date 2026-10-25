@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .active_map import ActiveMapLedger
+from .bounded_transport import BoundedWorkers
 from .content_references import ContentReferences
 from .cost_metrics import scheduling_metrics
 from .jobs import FileJobs
@@ -26,11 +27,22 @@ from .store import MAX_METADATA_BYTES, MemoryStore, canonical
 from .use_leases import UseLeases
 
 
-class UnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+class UnixServer(BoundedWorkers, socketserver.UnixStreamServer):
     """Serve only same-user local peers under the explicit shared-kernel budget profile."""
 
     daemon_threads = False
     block_on_close = True
+
+    def __init__(
+        self,
+        address: str,
+        handler: type[BaseHTTPRequestHandler],
+        connection_limit: int = 128,
+        request_timeout_seconds: float = 30.0,
+    ) -> None:
+        """Bound original same-user workers before binding the private local socket."""
+        self.configure_capacity(connection_limit, request_timeout_seconds)
+        super().__init__(address, handler)
 
     def verify_request(
         self, request: socket.socket | tuple[bytes, socket.socket], client_address: Any
@@ -45,6 +57,21 @@ class UnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
             return bool(uid == os.getuid())
         except (OSError, AttributeError):
             return False
+
+
+class BoundedHTTPServer(BoundedWorkers, ThreadingHTTPServer):
+    """Bound only the explicit loopback reference backend, without Node or device inventory."""
+
+    def __init__(
+        self,
+        address: tuple[str, int],
+        handler: type[BaseHTTPRequestHandler],
+        connection_limit: int = 128,
+        request_timeout_seconds: float = 30.0,
+    ) -> None:
+        """Retain the original worker limit before binding the actual local listener."""
+        self.configure_capacity(connection_limit, request_timeout_seconds)
+        super().__init__(address, handler)
 
 
 def handler_type(
@@ -94,7 +121,15 @@ def handler_type(
         def do_GET(self) -> None:  # noqa: N802 - stdlib HTTP dispatch contract.
             """Read actual backend identity or query an original operation without mutation."""
             try:
-                if leases is not None and self.path == "/v1/memory-use/query":
+                if self.path == "/v1/transport":
+                    server = self.server
+                    self._respond(
+                        200,
+                        server.transport_snapshot()
+                        if isinstance(server, BoundedWorkers)
+                        else {"available": False},
+                    )
+                elif leases is not None and self.path == "/v1/memory-use/query":
                     self._respond(200, leases.query(self._body()))
                 elif reclamation is not None and self.path == "/v1/content/reclamation":
                     if not isinstance(self.server, UnixServer):
@@ -229,6 +264,8 @@ def main() -> None:
     parser.add_argument("--max-bytes", type=int, default=256 * 1024 * 1024)
     parser.add_argument("--listen-host", default="127.0.0.1")
     parser.add_argument("--listen-port", type=int, default=0)
+    parser.add_argument("--connection-limit", type=int, default=128)
+    parser.add_argument("--connection-timeout-seconds", type=float, default=30.0)
     parser.add_argument("--export-config", type=Path)
     parser.add_argument("--enable-file-jobs", action="store_true")
     parser.add_argument("--worker-processes", action="store_true")
@@ -255,6 +292,10 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    if not 0 < args.connection_timeout_seconds <= 900:
+        parser.error("--connection-timeout-seconds must be positive and at most 900")
+    if not 1 <= args.connection_limit <= 1024:
+        parser.error("--connection-limit must be an integer in 1..1024")
     if not ipaddress.ip_address(args.listen_host).is_loopback:
         parser.error("this Local EAIOS facade requires a literal loopback address")
     if args.enable_use_leases and not args.listen_unix:
@@ -337,14 +378,20 @@ def main() -> None:
                     raise ValueError("existing Local Memory socket is not an owned socket")
                 socket_path.unlink()
             server = UnixServer(
-                str(socket_path), handler_type(store, jobs, leases, active_maps, reclamation)
+                str(socket_path),
+                handler_type(store, jobs, leases, active_maps, reclamation),
+                args.connection_limit,
+                args.connection_timeout_seconds,
             )
             socket_path.chmod(0o600)
             socket_inode = socket_path.stat().st_ino
             endpoint = "unix://" + str(socket_path)
         else:
-            server = ThreadingHTTPServer(
-                (args.listen_host, args.listen_port), handler_type(store, jobs, leases, active_maps)
+            server = BoundedHTTPServer(
+                (args.listen_host, args.listen_port),
+                handler_type(store, jobs, leases, active_maps),
+                args.connection_limit,
+                args.connection_timeout_seconds,
             )
             endpoint = f"http://{args.listen_host}:{server.server_port}"
         server.daemon_threads = False

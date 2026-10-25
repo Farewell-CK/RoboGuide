@@ -5,11 +5,15 @@
 //! Quorum durability for one Controller authority; replicas never match, bind or execute work.
 
 mod application_client;
+mod archive_parent;
 mod certificates;
 mod content;
 mod content_application;
 #[cfg(test)]
 mod content_application_tests;
+mod content_archive;
+#[cfg(test)]
+mod content_archive_tests;
 mod content_store;
 mod content_uploads;
 mod controller_ingress;
@@ -45,8 +49,8 @@ pub use certificates::{
 pub use content::{ArtifactContentKey, ContentQuorumTarget, MemberContentObservation};
 pub use content_application::{
     AcceptedContentState, ApplicationArtifactWriter, CONTENT_APPLICATION_SCHEMA,
-    CONTENT_INITIALIZATION_SCHEMA, ContentApplicationBatch, ContentInitializationAnchor,
-    ContentInitializationPolicy,
+    CONTENT_ARCHIVE_APPLICATION_SCHEMA, CONTENT_INITIALIZATION_SCHEMA, ContentApplicationBatch,
+    ContentInitializationAnchor, ContentInitializationPolicy,
 };
 pub use content_store::{
     ContentProcessEndObservation, REPLICA_CONTENT_GC_LAYOUT_SCHEMA, REPLICA_CONTENT_LAYOUT_SCHEMA,
@@ -629,7 +633,7 @@ impl ReplicaNode {
         path: &Path,
         limits: ReplicaTransportLimits,
     ) -> Result<(Self, ReplicaServer), String> {
-        Self::start_inner(config, path, limits, None, false, None, None).await
+        Self::start_inner(config, path, limits, None, false, None, None, false).await
     }
 
     /// Starts only explicit v0.4 with actual held Root4 and declared original bootstrap roots.
@@ -649,6 +653,7 @@ impl ReplicaNode {
             false,
             None,
             None,
+            false,
         )
         .await
     }
@@ -669,6 +674,7 @@ impl ReplicaNode {
             true,
             None,
             None,
+            false,
         )
         .await
     }
@@ -693,6 +699,7 @@ impl ReplicaNode {
             true,
             Some(quorum_observation_ms),
             None,
+            false,
         )
         .await
     }
@@ -729,11 +736,45 @@ impl ReplicaNode {
             true,
             quorum_observation_ms,
             Some(policy),
+            false,
+        )
+        .await
+    }
+
+    /// Starts only explicit parent11 with the original owned-child/base initialization declaration.
+    pub async fn start_with_coordinated_archive(
+        config: ReplicaConfig,
+        path: &Path,
+        root: ReplicaContentStore,
+        owners: BTreeMap<u64, String>,
+        limits: ReplicaTransportLimits,
+        policy: Option<Option<ContentInitializationPolicy>>,
+        observation_ms: Option<u64>,
+    ) -> Result<(Self, ReplicaServer), String> {
+        if observation_ms.is_some_and(|v| !(100..=30_000).contains(&v)) {
+            return Err("owned quorum observation window must be 100..30000 ms".into());
+        }
+        if let Some(Some(policy)) = &policy {
+            policy.validate()?;
+            if !config.members.contains_key(&policy.source_member) {
+                return Err("original initialization source is not a configured member".into());
+            }
+        }
+        Self::start_inner(
+            config,
+            path,
+            limits,
+            Some((root, owners)),
+            true,
+            observation_ms,
+            policy,
+            true,
         )
         .await
     }
 
     /// Retains old startup while admitting network content only through the explicit owned constructor.
+    #[allow(clippy::too_many_arguments)]
     async fn start_inner(
         config: ReplicaConfig,
         path: &Path,
@@ -742,6 +783,7 @@ impl ReplicaNode {
         controller_content: bool,
         quorum_observation_ms: Option<u64>,
         initialization: Option<Option<ContentInitializationPolicy>>,
+        coordinated_archive: bool,
     ) -> Result<(Self, ReplicaServer), String> {
         config.validate()?;
         if config.streams_content() != content.is_some() {
@@ -762,7 +804,15 @@ impl ReplicaNode {
             for (id, owner) in &owners {
                 ReplicaMember::with_content_store(config.members[id], owner.clone())?;
             }
-            let store = if let Some(policy) = initialization {
+            let store = if coordinated_archive {
+                SqliteRaftStore::open_with_coordinated_archive(
+                    path,
+                    &config.profile_identity(),
+                    &config.application_schema,
+                    root,
+                    initialization,
+                )
+            } else if let Some(policy) = initialization {
                 SqliteRaftStore::open_with_content_initialization(
                     path,
                     &config.profile_identity(),

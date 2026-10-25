@@ -38,7 +38,7 @@ from .profile import (
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 RESTORE_RECEIPT_SCHEMAS = {
     f"roboguide.recovery-profile/v0.{version}": f"roboguide.restore-receipt/v0.{version}"
-    for version in range(1, 30)
+    for version in range(1, 31)
 }
 CHUNK = 1024 * 1024
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -67,6 +67,7 @@ def _private_root_staging(component: dict[str, Any], schema: str, name: str) -> 
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
             "roboguide.recovery-profile/v0.29",
+            "roboguide.recovery-profile/v0.30",
         }
         and component["kind"] == "replica-content"
         and component["storage_schema"] == "roboguide.replica-content-layout/v0.8"
@@ -528,6 +529,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                     "roboguide.recovery-profile/v0.27",
                     "roboguide.recovery-profile/v0.28",
                     "roboguide.recovery-profile/v0.29",
+                    "roboguide.recovery-profile/v0.30",
                 },
             )
             if profile["schema"]
@@ -543,6 +545,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                 "roboguide.recovery-profile/v0.27",
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
+                "roboguide.recovery-profile/v0.30",
             }
             else None
         )
@@ -746,6 +749,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                     "roboguide.recovery-profile/v0.27",
                     "roboguide.recovery-profile/v0.28",
                     "roboguide.recovery-profile/v0.29",
+                    "roboguide.recovery-profile/v0.30",
                 }
                 else set()
             )
@@ -947,6 +951,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.27",
                 "roboguide.recovery-profile/v0.28",
                 "roboguide.recovery-profile/v0.29",
+                "roboguide.recovery-profile/v0.30",
             }
             else databases
         )
@@ -1153,6 +1158,7 @@ def restore(
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
             "roboguide.recovery-profile/v0.29",
+            "roboguide.recovery-profile/v0.30",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:
@@ -1200,6 +1206,7 @@ def restore(
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
         "roboguide.recovery-profile/v0.29",
+        "roboguide.recovery-profile/v0.30",
     }:
         receipt["original_authority_bytes_preserved"] = False
         receipt["original_operational_rows_preserved"] = True

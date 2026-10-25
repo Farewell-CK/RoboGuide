@@ -34,6 +34,8 @@ JSON metrics 与 Prometheus metrics 共享门禁，未注册/撤销证书和 ten
   oldest age 与 coverage、observer dropped counter。
 - Replica 实际 accepted revision、当前 supervisor 的 majority epoch 与 owned child。
   status 本身缺失/超过五秒/时间倒退时拒绝 scrape；重新读取不会刷新原 publication time。
+- Node、Artifact、Mission 的实际连接 active/limit/rejected，加上原 Operator 观察。
+  [入口容量合同](listener-capacity-v0.1.md)独立保留实际 permit、线程与网络预算。
 
 统计标签不包含 Mission、Node、session、证书、路径或指令。聚合只 try-lock，观察失败不
 阻塞实际工作；丢样、缺少 queue identity、超容量或 timestamp 缺失保持 unavailable。
@@ -69,6 +71,9 @@ private loopback webhook，独立保存 Alertmanager 原生 firing/resolved 与 
    再检查 write gate、SQL/CAS I/O 和真实控制流。丢样无法支持已达标结论。
 6. `ReplicaQuorumUnavailable`/`ReplicaRevisionLag`：核对原 majority/epoch、成员和 accepted
    prefix、内容可用性，再做受控迁移/升级。禁止在少数派强制启动第二 writer。
+7. `NodeCapacitySaturated`/`ArtifactCapacitySaturated`/`MissionCapacitySaturated`/
+   `TransportConnectionsRejected`：区分当前满载和五分钟拒绝增量，核对原连接/线程退出、
+   timeout 和慢 SQL；先保留原命令并只读对账，再按实际主机容量变更部署限额。
 
 恢复后保留 resolved 通知和原 incident 时间线；消息到达不证明人工确认或设备恢复。
 30 天 99.9%、跨主机响应/恢复时限和人工 SLA 必须由实际窗口与完整故障矩阵统计验收，

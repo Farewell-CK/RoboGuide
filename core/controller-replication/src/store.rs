@@ -105,6 +105,8 @@ struct NetworkContentOpening {
     upgrade: bool,
     /// Recovery inspection must refuse missing original authority rather than create new files.
     existing_only: bool,
+    /// Explicit parent11 capability; old constructors must refuse the new physical format.
+    coordinated_archive: bool,
 }
 
 impl From<NetworkContentMode> for NetworkContentOpening {
@@ -115,6 +117,7 @@ impl From<NetworkContentMode> for NetworkContentOpening {
             initialization_policy: None,
             upgrade: false,
             existing_only: false,
+            coordinated_archive: false,
         }
     }
 }
@@ -332,7 +335,9 @@ impl ReplicaView {
                 || content.candidate.identity().map_err(io_error)? != content.batch_digest
                 || !matches!(
                     content.candidate.schema.as_str(),
-                    CONTENT_APPLICATION_SCHEMA | CONTENT_INITIALIZATION_SCHEMA
+                    CONTENT_APPLICATION_SCHEMA
+                        | CONTENT_INITIALIZATION_SCHEMA
+                        | crate::content_application::CONTENT_ARCHIVE_APPLICATION_SCHEMA
                 )
                 || content.candidate.profile_identity != profile
                 || content.candidate.batch.checkpoint
@@ -403,6 +408,20 @@ impl ReplicaView {
     }
 }
 
+/// Historical source-publication observation, never imported as member-local authority.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnapshotPublication {
+    /// Closed non-authority source evidence interpretation.
+    schema: String,
+    /// Actual publishing software member, independent of embodied Nodes.
+    source_member: u64,
+    /// Original qualified Root whose managed producer preceded publication.
+    source_store_owner: String,
+    /// Exact original local SnapshotBuild producer, retained separately from receiving producers.
+    producer_operation_id: String,
+}
+
 /// Closed snapshot body preserves log/membership pointers and source identity atomically.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -418,6 +437,9 @@ struct StoreSnapshot {
     /// Optional v0.3 infrastructure trust; absent in unchanged legacy snapshot bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     certificate_trust: Option<CertificateTrust>,
+    /// Explicit parent11's actual independent source publication; legacy bodies retain absence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_publication: Option<SnapshotPublication>,
     /// Legacy snapshot compatibility only; never imported into member-local authority.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     leader_transfer: Option<LeaderTransferRecord>,
@@ -442,6 +464,8 @@ pub struct SqliteRaftStore {
     pub(crate) controller_content: bool,
     /// Explicit parent9 interpretation, independent of an actual empty application.
     initialization_content: bool,
+    /// Explicit physical parent11 authority selected before network startup.
+    coordinated_archive: bool,
     /// Original immutable declaration, never imported from another member's Snapshot.
     initialization_policy: Option<Arc<ContentInitializationPolicy>>,
     /// Actual original queue admission on a managed worker clone; it is never serialized or renewed.
@@ -516,9 +540,13 @@ fn prepare_storage_format(
         NetworkContentMode::Controller | NetworkContentMode::Initialization
     );
     let initialization_content = network_mode == NetworkContentMode::Initialization;
-    let version: i64 = connection
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(|error| error.to_string())?;
+    let physical_version = crate::archive_parent::physical(connection)?;
+    if physical_version == crate::archive_parent::VERSION && !opening.coordinated_archive {
+        return Err(
+            "coordinated Archive parent11 requires its explicit current constructor".into(),
+        );
+    }
+    let version = crate::archive_parent::effective(connection)?;
     let marker = schema_object_type(connection, "replica_storage_format")?;
     let base_parent_version = if initialization_content {
         INITIALIZATION_CONTENT_VERSION
@@ -689,7 +717,19 @@ fn prepare_storage_format(
         } else {
             REPLICA_STORAGE_SCHEMA
         };
-        if stored != (version, expected_schema.to_string())
+        if stored
+            != (
+                if physical_version == crate::archive_parent::VERSION {
+                    physical_version
+                } else {
+                    version
+                },
+                if physical_version == crate::archive_parent::VERSION {
+                    crate::archive_parent::SCHEMA.to_string()
+                } else {
+                    expected_schema.to_string()
+                },
+            )
             && !(adoption
                 && version == CONTENT_STORAGE_VERSION
                 && stored == (version, adoption::PENDING_SCHEMA.into()))
@@ -1274,16 +1314,30 @@ impl SqliteRaftStore {
                 )
                 .map_err(|error| error.to_string())?;
             let allowed_network_genesis = self.network_genesis(&transaction)?;
+            let original_policy: Option<String> =
+                read_meta(&transaction, "application_upgrade_original_policy_v1")
+                    .map_err(|e| e.to_string())?;
+            if original_policy
+                .as_ref()
+                .is_some_and(|p| !crate::content::hex_digest(p))
+            {
+                return Err(
+                    "original application policy digest is malformed before certificate genesis"
+                        .into(),
+                );
+            }
+            let extra_genesis =
+                u64::from(original_policy.is_some()) + if self.coordinated_archive { 2 } else { 0 };
             if logs != 0
                 || authority
                     != if allowed_network_genesis {
-                        if self.initialization_content {
+                        (if self.initialization_content {
                             8
                         } else if self.controller_content {
                             6
                         } else {
                             4
-                        }
+                        }) + extra_genesis
                     } else {
                         0
                     }
@@ -1477,6 +1531,7 @@ impl SqliteRaftStore {
                 initialization_policy: policy,
                 upgrade: false,
                 existing_only: true,
+                coordinated_archive: false,
             },
         )
     }
@@ -1520,6 +1575,7 @@ impl SqliteRaftStore {
                 initialization_policy: policy,
                 upgrade,
                 existing_only: false,
+                coordinated_archive: false,
             },
         )
     }
@@ -1539,6 +1595,11 @@ impl SqliteRaftStore {
         &self,
         candidate: &ContentApplicationBatch,
     ) -> Result<(), String> {
+        if candidate.schema == crate::content_application::CONTENT_ARCHIVE_APPLICATION_SCHEMA
+            && !self.coordinated_archive
+        {
+            return Err("complete-content v4 requires explicit original parent11".into());
+        }
         let initial = candidate.schema == CONTENT_INITIALIZATION_SCHEMA;
         if initial || candidate.source_initialization.is_some() {
             if !self.initialization_content {
@@ -1664,6 +1725,9 @@ impl SqliteRaftStore {
             adoption,
             &opening,
         )?;
+        if opening.coordinated_archive {
+            crate::archive_parent::install(&mut connection)?;
+        }
         if adoption {
             let journal: String = connection
                 .query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
@@ -1695,6 +1759,7 @@ impl SqliteRaftStore {
             application_schema: application_schema.into(),
             content,
             network_content,
+            coordinated_archive: opening.coordinated_archive,
             controller_content: matches!(
                 network_mode,
                 NetworkContentMode::Controller | NetworkContentMode::Initialization
@@ -1729,6 +1794,47 @@ impl SqliteRaftStore {
             adoption::validate_root_records(&store, &connection)?;
         }
         Ok(store)
+    }
+
+    /// Opens only explicit coordinated Archive while preserving the original owned parent contract.
+    pub fn open_with_coordinated_archive(
+        path: &Path,
+        profile: &str,
+        application_schema: &str,
+        content: ReplicaContentStore,
+        initialization: Option<Option<ContentInitializationPolicy>>,
+    ) -> Result<Self, String> {
+        if !content.staging_reclamation_enabled()
+            || content.identity().profile_identity != profile
+            || !supports_application_generation(application_schema)
+        {
+            return Err(
+                "coordinated Archive requires actual Root8/profile/supported application".into(),
+            );
+        }
+        let (mode, policy) = match initialization {
+            Some(policy) => (NetworkContentMode::Initialization, policy),
+            None => (NetworkContentMode::Controller, None),
+        };
+        Self::open_inner(
+            path,
+            profile,
+            application_schema,
+            Some(content),
+            false,
+            NetworkContentOpening {
+                mode,
+                initialization_policy: policy,
+                upgrade: false,
+                existing_only: false,
+                coordinated_archive: true,
+            },
+        )
+    }
+
+    /// Observes only the explicit parent11 opening; a checkpoint never grants this local authority.
+    pub fn supports_coordinated_archive(&self) -> bool {
+        self.coordinated_archive
     }
 
     /// Reads the most recent local operation, retaining all original IDs in the same store.

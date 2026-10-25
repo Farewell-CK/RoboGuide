@@ -60,6 +60,8 @@ class MissionServiceSettings:
     artifact_client_cert: Path | None = None
     artifact_client_key: Path | None = None
     artifact_client_ca: Path | None = None
+    connection_limit: int = 128
+    connection_timeout_seconds: float = 35.0
 
     @property
     def approval_required_contracts(self) -> frozenset[str]:
@@ -149,6 +151,12 @@ def load_service_settings(
         )
     if recovery_attempts and not preflight:
         raise MissionServiceConfigError("deployment recovery requires Controller preflight")
+    connection_limit = _optional_positive_integer(service, "connection_limit", 128)
+    if connection_limit > 1024:
+        raise MissionServiceConfigError("service.connection_limit must be between 1 and 1024")
+    connection_timeout = _optional_positive_number(service, "connection_timeout_seconds", 35.0)
+    if connection_timeout > 900:
+        raise MissionServiceConfigError("service.connection_timeout_seconds must be at most 900")
     return MissionServiceSettings(
         listen_host=host,
         listen_port=port,
@@ -187,6 +195,8 @@ def load_service_settings(
         execution_planning_evidence_required=execution_planning_required,
         max_request_bytes=_positive_integer(service, "max_request_bytes"),
         approval_policy=approval_policy,
+        connection_limit=connection_limit,
+        connection_timeout_seconds=connection_timeout,
         controller_preflight_enabled=preflight,
         max_deployment_recovery_attempts=recovery_attempts,
         deployment_recovery_timeout_ms=recovery_timeout,

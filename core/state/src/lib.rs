@@ -22,6 +22,7 @@ pub fn checkpoint_requires_complete_recovery(schema: &str) -> bool {
             | "roboguide.controller-checkpoint/v56"
             | "roboguide.controller-checkpoint/v57"
             | "roboguide.controller-checkpoint/v58"
+            | "roboguide.controller-checkpoint/v59"
     )
 }
 
@@ -61,6 +62,7 @@ pub fn checkpoint_requires_authority_journal(schema: &str) -> bool {
             | "roboguide.controller-checkpoint/v56"
             | "roboguide.controller-checkpoint/v57"
             | "roboguide.controller-checkpoint/v58"
+            | "roboguide.controller-checkpoint/v59"
             | CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
     )
 }
@@ -99,14 +101,18 @@ pub use decision_state::DecisionStateSnapshot;
 pub use event_log::{
     APPLICATION_COMMIT_SCHEMA, APPLICATION_CONTENT_INITIALIZATION_SCHEMA,
     ApplicationBatchReplicator, ApplicationCommitBatch, ArchiveAbortIntent, ArchiveAbortReceipt,
-    ArchiveAbortRequest, ArchiveAbortSink, ArchiveContent, ArchiveCopierFence, ArchiveIntent,
-    ArchiveLeaseIdentity, ArchiveManifest, ArchiveRequest, ArchiveSink, AuthorityWriteStatus,
+    ArchiveAbortRequest, ArchiveAbortSink, ArchiveContent, ArchiveContentKey, ArchiveCopierFence,
+    ArchiveIntent, ArchiveLeaseIdentity, ArchiveManifest, ArchiveRequest, ArchiveSink,
+    AuthorityWriteStatus, COORDINATED_ARCHIVE_RECOVERY_SCHEMA, COORDINATED_ARCHIVE_STORAGE_SCHEMA,
     CheckpointStoragePolicy, CheckpointWriteStats, CompleteReplicaState,
-    ControlCommandJournalEntry, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,
+    ControlCommandJournalEntry, CoordinatedArchiveAbort, CoordinatedArchiveIntent,
+    CoordinatedArchivePackage, CoordinatedArchiveRecord, CoordinatedArchiveRequest,
+    CoordinatedArchiveSink, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,
     PersistedCheckpoint, PersistedEvent, REPLICA_RECOVERY_PROJECTION_SCHEMA, ReplicaArchiveAbort,
     ReplicaArchiveManifest, ReplicaArchiveOperation, ReplicaRecoveryProjection, SqliteEventLog,
     SqliteEventLogError, WriteFailure, WriteRecoveryCommand, WriteRecoveryReceipt,
-    checkpoint_identity, validate_persisted_event,
+    checkpoint_identity, coordinated_archive_bytes, coordinated_archive_package,
+    coordinated_archive_projection, validate_persisted_event,
 };
 pub use memory::MemoryCatalogProjection;
 pub use node::InMemorySharedNodeState;

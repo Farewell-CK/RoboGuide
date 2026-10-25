@@ -1,6 +1,6 @@
 # Current code architecture (Mermaid)
 
-Reviewed: 2026-10-22. Code baseline: `495a6d274f6f930016d97ec5514124876e539cfe`.
+Reviewed: 2026-10-26. Commit baseline: `307b0a46`, updated with ADR-0212/0213 in this work package.
 [中文](current-architecture.md). These views redraw the implemented V2 architecture from modules,
 call chains and composition roots. They introduce no new authority or change to [V2 semantics](README.md).
 Accepted ADRs govern subsequent evolution.
@@ -147,14 +147,19 @@ flowchart TB
   NODE <-->|Configured workflows| LOCAL[Separate Local EAIOS / Memory provider]
   LOCAL --- PS[(Provider-owned SQL / content / original process evidence)]
   CAS <-->|Separately authorized data plane| NODE
-  HA[Optional Replica members / supervisors<br/>Own Raft SQL + original Controller child journals] -.Metadata quorum / epoch / child management.-> APP
+  HA[Optional Replica members / supervisors<br/>Own Raft SQL + original child + qualified CAS] -.Complete-content quorum / epoch / process management.-> APP
+  AR[Online private Archive<br/>Original pending / prefix / package / floor] -->|Original complete-content transaction| HA
+  AR -->|Private metadata packages| CAS
   REC[Quiescent recovery-tool<br/>Original writer / inode leases / active-reference checks] --> BUNDLE[(Complete profile SQL + content bundle<br/>Verify and restore to new roots)]
   OBS[Read-only metrics / deployment inspector] -.Authenticated observation.-> APP
 ```
 
-Replica copies accepted application metadata; member-local transfer, spawn, PID and wait history remains
+Replica copies accepted application metadata and exactly declared qualified CAS inputs; member-local transfer, spawn, PID and wait history remains
 separate. Recovery handles only complete stores/content declared by an explicit profile, starts no service
-and renews no budget. SQL/CAS boxes do not establish online content replication, cross-domain HA or physical
+and renews no budget. ADR-0212 online private Archive, producer GC, actual purged Snapshot/learner/joint
+and complete v0.30 three-leader recovery pass local software acceptance. ADR-0213 assigns actual listener
+permits, finite waits and native alerts to each process without changing business authority.
+SQL/CAS boxes do not independently establish cross-host, cross-domain HA or physical
 continuity. Control tenant quota accounts for logical commitments. Local Memory process CPU/address-space
 `rlimit` receipts are separate evidence, not general GPU, OS or hard-realtime isolation.
 
@@ -365,3 +370,9 @@ The old [V2 PNG](../../images/roboguide-v2-overall-architecture.png) and DOCX re
 snapshots, not current implementation diagrams.
 
 ADR-0186 waits for exact actual input receipts/bytes within parent8's original apply-worker budget, before acquiring the parent writer. Receiving Snapshots reuse the original worker clock after complete identity/successor checks and before producer admission or a write transaction; expiry creates no producer or completion fact. Waiting neither copies content nor grants permission or renews budgets. Corrupt bytes behind a known receipt still fail immediately; absent historical-content routing remains a separate required implementation.
+
+Current ownership additions: State `coordinated_archive`, Replica `content_archive`/`store_snapshot`,
+application `coordinated_archive`, Integration `listener_capacity`, local `bounded_transport`,
+Control quantitative/calendar/topology modules, and application reviewed coordination/hazards/Federation.
+The [single execution queue](../../development/roboguide-software-completion-plan-2026-10-15.md)
+records actual acceptance and remaining global composition.

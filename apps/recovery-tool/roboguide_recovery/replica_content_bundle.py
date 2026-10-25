@@ -165,7 +165,7 @@ def _parent(
                 for version in range(
                     53,
                     61
-                    if schema == content.FEDERATION_PROFILE
+                    if schema in {content.FEDERATION_PROFILE, content.ARCHIVE_PROFILE}
                     else 60
                     if schema == content.COORDINATION_PROFILE
                     else 59
@@ -187,9 +187,17 @@ def _parent(
             json.loads(metadata["content_producer_heads"]), {"schema", "view", "snapshot"}
         )
         state = json.loads(metadata["content_state"])
+        from .coordinated_archives import parent_base
         from .replica_initialization import validate_content, validate_parent
 
-        parent_version = connection.execute("PRAGMA user_version").fetchone()[0]
+        physical_parent = connection.execute("PRAGMA user_version").fetchone()[0]
+        parent_version = parent_base(connection, schema)
+        if (
+            state is not None
+            and state["candidate"]["schema"] == "roboguide.application-commit/v4"
+            and physical_parent != 11
+        ):
+            raise ValueError("complete-content v4 lacks its original mandatory parent11")
         from .application_upgrades import validate_parent as validate_upgrades
 
         validate_upgrades(
@@ -248,6 +256,11 @@ def _parent(
                 ).fetchone()
                 if row is None:
                     raise ValueError("original parent Snapshot head lost its bytes")
+                from .coordinated_archives import snapshot_publication
+
+                snapshot_publication(
+                    row[1], json.loads(row[0]), schema, physical_parent, identity, tables
+                )
                 actual = hashlib.sha256(
                     json.dumps(
                         [json.loads(row[0]), hashlib.sha256(row[1]).hexdigest()],
@@ -563,6 +576,31 @@ def validate_bundle(
             schema,
         )
         _upload_inputs(rows, state)
+        if state is not None:
+            from .coordinated_archives import validate_package, validate_projection
+
+            for archive in validate_projection(state["candidate"]["recovery"]):
+                if archive["completed_ms"] is None:
+                    continue
+                key = archive["intent"]["package"]
+                name = (
+                    "stores/"
+                    + identifier
+                    + "/content-v1/"
+                    + key["source_owner"][15:]
+                    + "/"
+                    + key["content_digest"][7:]
+                )
+                entry = files.get(name)
+                if entry is None or (entry["content_digest"], entry["byte_size"]) != (
+                    key["content_digest"],
+                    key["byte_size"],
+                ):
+                    raise ValueError(
+                        "completed original Archive package is absent from its same Root"
+                    )
+                budget.check()
+                validate_package((root / name).read_bytes(), archive)
         required = _required(original)
         if state is not None:
             required.update(content._content(value) for value in state["candidate"]["inputs"])

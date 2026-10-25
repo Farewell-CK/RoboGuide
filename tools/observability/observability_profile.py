@@ -234,6 +234,30 @@ def rules(profile: dict[str, Any]) -> dict[str, Any]:
             "Operator transports exceeded the declared budget; "
             "rejected connections admitted no command.",
         ),
+        *[
+            (
+                "RoboGuide" + label + "CapacitySaturated",
+                f"roboguide_{metric}_connections_active >= "
+                f"roboguide_{metric}_connections_limit > 0",
+                "warning",
+                label + " transports reached their original process capacity; "
+                "inspect real connections and deadlines before changing deployment limits.",
+            )
+            for label, metric in (
+                ("Node", "node"),
+                ("Artifact", "artifact"),
+                ("Mission", "mission_http"),
+            )
+        ],
+        (
+            "RoboGuideTransportConnectionsRejected",
+            "increase(roboguide_node_connections_rejected_total[5m]) > 0 or "
+            "increase(roboguide_artifact_connections_rejected_total[5m]) > 0 or "
+            "increase(roboguide_mission_http_connections_rejected_total[5m]) > 0",
+            "warning",
+            "Actual excess connections were refused before application admission. "
+            "A closed response never proves a committed command had no effect.",
+        ),
         (
             "RoboGuideRuntimeUnknown",
             "roboguide_runtime_unknown_attempts > 0",

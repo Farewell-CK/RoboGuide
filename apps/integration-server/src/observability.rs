@@ -203,6 +203,36 @@ pub(crate) fn render(diagnostics: &DiagnosticHandle) -> String {
                     "counter",
                     "Actual Operator transports closed before TLS because all permits were held.",
                 )),
+                DiagnosticStage::NodeConnectionsActive => Some((
+                    "roboguide_node_connections_active",
+                    "gauge",
+                    "Actual admitted transports including handshake and response.",
+                )),
+                DiagnosticStage::NodeConnectionLimit => Some((
+                    "roboguide_node_connections_limit",
+                    "gauge",
+                    "Configured process-local transport limit.",
+                )),
+                DiagnosticStage::NodeConnectionRejections => Some((
+                    "roboguide_node_connections_rejected_total",
+                    "counter",
+                    "Actual excess transports refused before TLS or application admission.",
+                )),
+                DiagnosticStage::ArtifactConnectionsActive => Some((
+                    "roboguide_artifact_connections_active",
+                    "gauge",
+                    "Actual admitted transports including handshake and response.",
+                )),
+                DiagnosticStage::ArtifactConnectionLimit => Some((
+                    "roboguide_artifact_connections_limit",
+                    "gauge",
+                    "Configured process-local transport limit.",
+                )),
+                DiagnosticStage::ArtifactConnectionRejections => Some((
+                    "roboguide_artifact_connections_rejected_total",
+                    "counter",
+                    "Actual excess transports refused before TLS or application admission.",
+                )),
                 _ => None,
             };
             if aggregate.kind == DiagnosticKind::Http

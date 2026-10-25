@@ -165,7 +165,10 @@ def operations(
         if "event_log_metadata" in tables
         else None
     )
-    new = marker == (MARKER,)
+    new = marker == (MARKER,) or (
+        marker == ("roboguide.archive-operations/v0.3",)
+        and profile_schema == "roboguide.recovery-profile/v0.30"
+    )
     if current and (
         not new
         or profile_schema
@@ -187,6 +190,7 @@ def operations(
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
             "roboguide.recovery-profile/v0.29",
+            "roboguide.recovery-profile/v0.30",
         }
         or "event_archive_aborts" not in tables
     ):
@@ -215,6 +219,7 @@ def operations(
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
             "roboguide.recovery-profile/v0.29",
+            "roboguide.recovery-profile/v0.30",
         }
         or not current
         or "event_archive_aborts" not in tables

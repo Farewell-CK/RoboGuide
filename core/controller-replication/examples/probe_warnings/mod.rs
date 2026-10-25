@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Metadata, Subscriber};
 
-/// Records only actual warning/error messages, excluding spans and arbitrary application fields.
+/// Records bounded transport warning reasons, excluding spans and arbitrary application fields.
 struct WarningSink;
 
 /// Limits each rendered diagnostic without buffering unbounded original application metadata.
@@ -33,9 +33,11 @@ impl tracing::field::Visit for Fields {
 }
 
 impl Subscriber for WarningSink {
-    /// Accepts only upstream warnings/errors; this never observes or grants application decisions.
+    /// Accepts bounded consensus/transport warnings; diagnostics never grant application decisions.
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        *metadata.level() <= tracing::Level::WARN && metadata.target().starts_with("openraft")
+        *metadata.level() <= tracing::Level::WARN
+            && (metadata.target().starts_with("openraft")
+                || metadata.target().starts_with("controller_replication"))
     }
     /// Ignores span authority; no diagnostic span is interpreted as a process or command identity.
     fn new_span(&self, _span: &Attributes<'_>) -> Id {

@@ -247,7 +247,10 @@ pub(super) fn require_storage(connection: &Connection) -> Result<(), SqliteEvent
             |row| row.get(0),
         )
         .optional()?;
-    if marker.as_deref() != Some(STORAGE_SCHEMA) {
+    if !matches!(
+        marker.as_deref(),
+        Some(STORAGE_SCHEMA) | Some(COORDINATED_ARCHIVE_STORAGE_SCHEMA)
+    ) {
         return Err(SqliteEventLogError::ArchivePolicy(
             "original Archive cleanup requires explicit operations v0.2".into(),
         ));
