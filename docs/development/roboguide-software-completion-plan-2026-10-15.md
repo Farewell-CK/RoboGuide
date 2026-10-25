@@ -121,7 +121,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | --- | --- | --- | --- |
 | A1 | N1/N3 | 历史 Log/Snapshot 原授权内容追赶及独立缺失状态 | Log、purged Snapshot、空 learner、准备/投递心跳及 ACK 门禁通过；ADR-0195 原归档源首次初始化、Unknown、Log/Snapshot 追赶、完整实际入口及最新完整存量三 leader 冷恢复通过；ADR-0198 已补 committed replay 缺失输入的启动拒绝、显式原 owner 修复、重入群与冷恢复；全局 Archive/原完整故障矩阵随 A2/A3 继续 |
 | A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | readiness、Root7 GC/恢复、实际 mTLS learner/joint、损坏与旧 epoch 拒绝、Root8 私有 staging/原 Unknown/完整恢复已验收；全 producer 退休与最终 CAS 回收组合继续 |
-| A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 原 Root4 → 6 → 7 排空同 inode 升级、旧入口拒绝与三 leader 冷恢复通过；滚动/回退继续 |
+| A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 通过：原 Root4 → 6 → 7 排空同 inode 升级；ADR-0207 genuine v55 → v56 三成员滚动、原 child wait、原 Unknown 重启、SQL 失败/显式放弃、实际坏版本同 schema 补丁、旧/退休程序拒绝，以及原 authority/完整字节的三 leader 冷恢复均已验收。全局内容与引用组合仍归 A1/A2/N3，设备和跨主机证据保持独立 |
 | B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | ADR-0199 已接通 typed-map handoff 的完整原始 manifest、schema v0.2、Control policy/retry/restore fence；ADR-0203 增加 runtime revision v0.4 的完整原 map/当前消费 preparation/Review/恢复权威，原生产 Mission 不改写。完整跨阶段组合仍须实际验收，不重写空间算法 |
 | C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | ADR-0205 当前来源成本及选定容量复检已验收。ADR-0206 显式 divisible Compute、原 Context envelope、精确 quota/释放、加权 future calendar 和 Node 原授权准入已实现；实际单软件 Node/三个 CPU child/独立 verifier、Controller+Node 重启、活动授权 backup/verify/restore/retry、旧 v55 拒绝通过。完整时空与其他本地强制继续必需 |
 | D | N5/F8 | 运行中抢占、耦合恢复、hazard/handoff/regrasp 与原目标 | 待实现与验收；复用 stop/revoke/revision |

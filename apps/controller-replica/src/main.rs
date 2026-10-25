@@ -83,6 +83,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ReplicaAdminClient::new(configuration.replica, leader)?
         };
         match operation.as_str() {
+            "--abort-application-upgrade" => {
+                let original = arguments
+                    .next()
+                    .ok_or("missing original application upgrade ID")?;
+                let command = arguments
+                    .next()
+                    .ok_or("missing original abandonment command ID")?;
+                if arguments.next().is_some() {
+                    return Err("unexpected application upgrade abandonment arguments".into());
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string(
+                        &client
+                            .abort_application_generation(original, command)
+                            .await?
+                    )?
+                );
+            }
+            "--application-upgrade" => {
+                let path = arguments
+                    .next()
+                    .ok_or("application upgrade requires original request.json")?;
+                if arguments.next().is_some() {
+                    return Err("unexpected application upgrade arguments".into());
+                }
+                let mut bytes = Vec::new();
+                std::fs::File::open(path)?
+                    .take(16 * 1024 + 1)
+                    .read_to_end(&mut bytes)?;
+                if bytes.len() > 16 * 1024 {
+                    return Err("original application upgrade request exceeds its bound".into());
+                }
+                let request = serde_json::from_slice(&bytes)?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&client.upgrade_application_generation(request).await?)?
+                );
+            }
+            "--observe-application-upgrade" => {
+                if arguments.next().is_some() {
+                    return Err("unexpected application upgrade observation arguments".into());
+                }
+                let (authority, pending) = client.observe_application_upgrade().await?;
+                println!(
+                    "{}",
+                    serde_json::json!({"authority":authority,"pending":pending})
+                );
+            }
             "--observe-leader-transfer" => {
                 let transfer_id = arguments.next().ok_or("missing original transfer id")?;
                 if arguments.next().is_some() {
@@ -192,9 +241,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let digest_only = first == "--policy-digest";
+    let upgrade_digest_only = first == "--upgrade-policy-digest";
     let profile_only = first == "--profile-identity";
     let upgrade_only = first == "--upgrade-initialization-parent";
-    let path = if digest_only || profile_only || upgrade_only {
+    let path = if digest_only || upgrade_digest_only || profile_only || upgrade_only {
         arguments.next().ok_or("missing config.json")?
     } else {
         first
@@ -205,6 +255,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let configuration: config::ProcessConfig = serde_json::from_slice(&std::fs::read(&path)?)?;
     if digest_only {
         println!("{}", configuration.policy_digest()?);
+        return Ok(());
+    }
+    if upgrade_digest_only {
+        let upgrade = configuration
+            .application_upgrade
+            .as_ref()
+            .ok_or("explicit target executable is absent")?;
+        println!(
+            "{}",
+            configuration
+                .policy_digest_for_binary(&upgrade.binary, &upgrade.target.application_schema)?
+        );
         return Ok(());
     }
     if profile_only {

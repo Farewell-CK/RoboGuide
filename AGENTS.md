@@ -1,3 +1,18 @@
+ADR-0207 implements explicit original-profile application generation upgrade under process v0.8,
+parent storage v10 and recovery v0.25. `upgrades.rs` owns immutable authority/local original clocks
+and process-prefix/wait joins; `upgrade_network.rs` collects actual all-member TLS/binary support
+and original drains before quorum activation. Finite v53-v56 reading grants no old/new write
+permission. Supervisor verifies bounded actual retained binaries, preserves original base policy,
+and keeps infrastructure available after one unexpected application failure per epoch/generation.
+Same-schema repair forbids original/retired code; exact activated bytes and frozen predecessor gate
+startup migration. Snapshot never imports/erases local stop authority. Native upgrade, actual failed
+source patch with SQL failure/explicit abandonment, Unknown restart and full v0.25 three-leader cold
+recovery passed with zero embodied Nodes/devices/models/simulators. Maintained gates are
+`check_application_upgrade_processes.py`, `check_application_patch_processes.py --abort-before-patch`,
+`check_application_upgrade_reconciliation_processes.py` and existing complete-content recovery.
+Global Archive/reference, typed lifecycle and remaining B-F requirements still apply; no software
+process wait establishes device stopping, cross-host continuity or SoftwareComplete.
+
 ADR-0206's quantitative Compute module is implemented and actual process acceptance passed.
 Typed allocation is owned by Domain resource grants, Control's `resource_allocations`
 and `capacity_calendar`, and Node Engine admission. Context envelopes come from the original

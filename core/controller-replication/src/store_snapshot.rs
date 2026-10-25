@@ -505,6 +505,45 @@ impl SqliteRaftStore {
         }
         let mut connection = self.connection.lock().map_err(io_error)?;
         let transaction = connection.transaction().map_err(io_error)?;
+        let previous_upgrade: Option<ApplicationUpgradeAuthority> =
+            read_meta::<Option<ApplicationUpgradeAuthority>>(
+                &transaction,
+                crate::upgrades::AUTHORITY_KEY,
+            )?
+            .flatten();
+        if let Some(incoming) = &restored.view.application_upgrade {
+            crate::upgrades::validate_original_policy(&transaction, incoming).map_err(io_error)?;
+        }
+        match (&previous_upgrade, &restored.view.application_upgrade) {
+            (None, None) => {}
+            (None, Some(incoming)) => {
+                incoming
+                    .validate(&self.application_schema)
+                    .map_err(io_error)?;
+                crate::upgrades::install_format(&transaction).map_err(io_error)?;
+                write_meta(
+                    &transaction,
+                    crate::upgrades::AUTHORITY_KEY,
+                    &Some(incoming),
+                )?;
+            }
+            (Some(original), Some(incoming))
+                if incoming.original_schema == original.original_schema
+                    && incoming.receipts.starts_with(&original.receipts)
+                    && incoming.aborts.starts_with(&original.aborts) =>
+            {
+                write_meta(
+                    &transaction,
+                    crate::upgrades::AUTHORITY_KEY,
+                    &Some(incoming),
+                )?;
+            }
+            _ => {
+                return Err(io_error(
+                    "snapshot cannot erase, downgrade or fork original application upgrade authority",
+                ));
+            }
+        }
         let previous_snapshot: Option<Vec<u8>> = transaction
             .query_row(
                 "SELECT data FROM replica_v1_snapshot WHERE singleton=1",

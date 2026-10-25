@@ -52,6 +52,8 @@ struct Request {
 /// Private consensus and durability operations never carry an embodied Node selector.
 #[derive(Serialize, Deserialize)]
 enum Command {
+    /// Explicit actual application-generation negotiation; older members refuse the new envelope.
+    ApplicationUpgradeV1(Box<crate::upgrade_network::UpgradeWire>),
     /// Exact readonly parent9 policy negotiation under the original leader and committed membership.
     ContentInitializationContractV1 {
         /// Original current leader, never inferred from a supported-format boolean.
@@ -253,27 +255,30 @@ enum Command {
 impl Command {
     /// Keeps actual member credentials current while queued administration waits for its writer.
     fn requires_member_writer(&self) -> bool {
-        matches!(
-            self,
-            Self::Commit { .. }
-                | Self::PushContent { .. }
-                | Self::PushCommittedContentV1 { .. }
-                | Self::PushHistoricalLogContentV1 { .. }
-                | Self::PrepareSnapshotContentV1 { .. }
-                | Self::CompleteSnapshotContentV1 { .. }
-                | Self::PushSnapshotContentV1 { .. }
-                | Self::AdminRotateCertificate { .. }
-                | Self::AdminAddLearner { .. }
-                | Self::AdminChangeMembership { .. }
-                | Self::AdminRequestTransfer { .. }
-                | Self::TransferLeadership { .. }
-        )
+        matches!(self, Self::ApplicationUpgradeV1(wire) if matches!(wire.as_ref(), crate::upgrade_network::UpgradeWire::Drain { .. } | crate::upgrade_network::UpgradeWire::ObserveDrain { .. }))
+            || matches!(
+                self,
+                Self::Commit { .. }
+                    | Self::PushContent { .. }
+                    | Self::PushCommittedContentV1 { .. }
+                    | Self::PushHistoricalLogContentV1 { .. }
+                    | Self::PrepareSnapshotContentV1 { .. }
+                    | Self::CompleteSnapshotContentV1 { .. }
+                    | Self::PushSnapshotContentV1 { .. }
+                    | Self::AdminRotateCertificate { .. }
+                    | Self::AdminAddLearner { .. }
+                    | Self::AdminChangeMembership { .. }
+                    | Self::AdminRequestTransfer { .. }
+                    | Self::TransferLeadership { .. }
+            )
     }
 }
 
 /// Closed response preserves upstream Raft errors separately from child acceptance.
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Reply {
+    /// Original authenticated support, drain, activation or readonly reconciliation evidence.
+    ApplicationUpgradeV1(Result<crate::upgrade_network::UpgradeReply, String>),
     /// Actual immutable local parent9 declaration, without claiming source or byte availability.
     ContentInitializationContract(Result<Option<ContentInitializationPolicy>, String>),
     /// Actual explicit local Root generation, with no claim of content readiness.
@@ -477,6 +482,18 @@ where
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     drop(bytes);
     let received_at = tokio::time::Instant::now();
+    let upgrade_budget = match &request.command {
+        Command::ApplicationUpgradeV1(wire) => match wire.as_ref() {
+            crate::upgrade_network::UpgradeWire::Drain { budget_ms, .. } => {
+                Some(crate::content_store::ContentBudget::issue(*budget_ms)?)
+            }
+            crate::upgrade_network::UpgradeWire::Activate { request, .. } => Some(
+                crate::content_store::ContentBudget::issue(request.budget_ms)?,
+            ),
+            _ => None,
+        },
+        _ => None,
+    };
     let catchup_budget =
         if node.config.streams_content() && matches!(request.command, Command::Append(_)) {
             Some(crate::content_store::ContentBudget::issue(15000)?)
@@ -539,6 +556,21 @@ where
         Reply::Rejected("replica profile/member identity mismatch".into())
     } else {
         match request.command {
+            Command::ApplicationUpgradeV1(wire) => {
+                Reply::ApplicationUpgradeV1(match &certificate_connection {
+                    Some(connection) => {
+                        crate::upgrade_network::handle(
+                            &node,
+                            request.sender,
+                            connection,
+                            *wire,
+                            upgrade_budget,
+                        )
+                        .await
+                    }
+                    None => Err("application upgrade requires actual mutual TLS".into()),
+                })
+            }
             Command::ContentInitializationContractV1 { epoch, membership } => {
                 let sender = request.sender;
                 let connection = certificate_connection.clone();
@@ -1082,6 +1114,70 @@ fn node_network(node: &ReplicaNode, target: u64) -> Result<ReplicaNetwork, Strin
         node.tls.clone(),
         node.transport_budget.clone(),
     )
+}
+
+/// Exchanges one explicit upgrade command and binds reported support/wait to the actual served leaf.
+pub(crate) async fn upgrade_exchange(
+    node: &ReplicaNode,
+    target: u64,
+    wire: crate::upgrade_network::UpgradeWire,
+    budget_ms: u64,
+) -> Result<crate::upgrade_network::UpgradeReply, String> {
+    let (reply, leaf) = node_network(node, target)?
+        .exchange_observed(
+            Command::ApplicationUpgradeV1(Box::new(wire)),
+            RPCOption::new(Duration::from_millis(budget_ms)),
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    match reply {
+        Reply::ApplicationUpgradeV1(Ok(response)) => {
+            let observed = match &response {
+                crate::upgrade_network::UpgradeReply::Support(proof) => {
+                    Some((proof.member, proof.leaf.as_str()))
+                }
+                crate::upgrade_network::UpgradeReply::Drain(Some(proof))
+                    if proof.member != target =>
+                {
+                    return Err("original drain came from another member".into());
+                }
+                _ => None,
+            };
+            if observed
+                .is_some_and(|(member, served)| member != target || leaf.as_deref() != Some(served))
+            {
+                return Err(
+                    "upgrade evidence differs from actual authenticated target leaf".into(),
+                );
+            }
+            Ok(response)
+        }
+        Reply::ApplicationUpgradeV1(Err(error)) | Reply::Rejected(error) => Err(error),
+        _ => Err("member does not support the explicit application upgrade contract".into()),
+    }
+}
+
+/// Sends one original administrative operation without ever retrying an uncertain activation.
+pub(crate) async fn admin_upgrade(
+    config: &ReplicaConfig,
+    leader: u64,
+    tls: Option<Arc<crate::tls::TlsMaterial>>,
+    wire: crate::upgrade_network::UpgradeWire,
+    budget_ms: u64,
+) -> Result<crate::upgrade_network::UpgradeReply, String> {
+    match admin_network(config, leader, tls)?
+        .exchange(
+            Command::ApplicationUpgradeV1(Box::new(wire)),
+            RPCOption::new(Duration::from_millis(budget_ms)),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Reply::ApplicationUpgradeV1(result) => result,
+        Reply::Rejected(error) => Err(error),
+        _ => Err("administration target does not support explicit application upgrade".into()),
+    }
 }
 
 /// Negotiates the actual peer generation/policy over its original current authenticated connection.

@@ -334,6 +334,47 @@ impl ControllerContentClient {
         Ok(anchor.clone())
     }
 
+    /// Authorizes migration only from the exact frozen predecessor to this actual committed executable.
+    pub fn require_generation_upgrade_checkpoint(
+        &self,
+        checkpoint: &state::PersistedCheckpoint,
+    ) -> Result<ApplicationUpgradeReceipt, String> {
+        self.check()?;
+        let view = self.view()?;
+        let authority = view
+            .application_upgrade
+            .as_ref()
+            .ok_or("original generation upgrade authority is absent")?;
+        let receipt = authority
+            .receipts
+            .last()
+            .ok_or("no application generation was activated")?;
+        if receipt.intent.request.target.application_schema
+            != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            || view.checkpoint.as_ref() != Some(checkpoint)
+            || receipt.intent.predecessor.checkpoint_digest.as_deref()
+                != Some(state::checkpoint_identity(checkpoint).as_str())
+            || receipt.intent.predecessor.event_sequence != checkpoint.event_sequence
+            || receipt.intent.predecessor.revision != view.revision
+            || !crate::upgrades::can_read_generation(&checkpoint.schema, authority.active_schema())
+        {
+            return Err(
+                "original generation upgrade does not authorize this exact checkpoint migration"
+                    .into(),
+            );
+        }
+        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        if crate::upgrades::binary_digest(&executable)?
+            != receipt.intent.request.target.binary_digest
+        {
+            return Err(
+                "actual migrating executable differs from the quorum-activated target bytes".into(),
+            );
+        }
+        self.check()?;
+        Ok(receipt.clone())
+    }
+
     /// Observes only the exact original operation; no response can renew or repeat its first work.
     pub fn observe(&self, command: &str) -> Result<Option<ControllerIngressStatus>, String> {
         let mut exchange = self.connect(ChildCommand::Observe {

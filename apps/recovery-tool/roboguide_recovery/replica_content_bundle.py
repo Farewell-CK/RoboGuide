@@ -179,7 +179,19 @@ def _parent(
         state = json.loads(metadata["content_state"])
         from .replica_initialization import validate_content, validate_parent
 
-        if connection.execute("PRAGMA user_version").fetchone()[0] == 9:
+        parent_version = connection.execute("PRAGMA user_version").fetchone()[0]
+        from .application_upgrades import validate_parent as validate_upgrades
+
+        validate_upgrades(
+            connection,
+            content.UPGRADE_PROFILE if parent_version == 10 else content.INITIALIZATION_PROFILE,
+        )
+        base_version = (
+            json.loads(metadata.get("application_upgrade_base_parent_v1", "null"))
+            if parent_version == 10
+            else parent_version
+        )
+        if base_version == 9:
             validate_parent(connection)
         else:
             validate_content(state, None)
@@ -475,7 +487,7 @@ def validate_bundle(
         if sources is not None:
             raise ValueError("old recovery profile contains hidden Replica content authority")
         return
-    standalone = schema == content.CAPACITY_PROFILE and not any(
+    standalone = schema in {content.CAPACITY_PROFILE, content.UPGRADE_PROFILE} and not any(
         item["kind"] in {"replica", "replica-content"} for item in components
     )
     content.validate_pairing(components, allow_standalone=standalone)

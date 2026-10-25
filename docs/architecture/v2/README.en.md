@@ -1,5 +1,13 @@
 # RoboGuide V2 current architecture
 
+[ADR-0207](../../decisions/0207-explicit-application-generation-upgrade.md) separates the immutable
+original Replica profile from active application writer authority. A finite reader window grants
+no newer write permission. Actual all-member support, original child wait and durable activation
+jointly gate upgrades. Actual rolling replacement, original Unknown reconciliation, SQL-failure
+abandonment, same-schema repair and complete cold recovery pass
+[software process acceptance](../../development/acceptance/2026-10-25-application-generation-upgrade.md).
+Device and cross-host evidence remains independent.
+
 [ADR-0206](../../decisions/0206-quantitative-resource-allocation.md) defines explicit quantitative
 Compute authority on the development branch. Mission declares semantic units and original Context
 envelopes; Control owns Commit, quota and exact release; Node validates original grants and retains

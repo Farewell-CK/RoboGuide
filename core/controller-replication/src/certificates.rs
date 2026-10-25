@@ -152,9 +152,19 @@ pub struct CertificateMutation {
 }
 
 /// Distinguishes new infrastructure authority while preserving the original Application batch bytes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum ReplicaCommand {
+    /// Irreversible abandonment of an original uncertain generation request, never rollback.
+    ApplicationUpgradeAbort {
+        /// Complete original pending intent and current independent infrastructure authority.
+        application_upgrade_abort: Box<ApplicationUpgradeAbort>,
+    },
+    /// Complete original all-member generation activation; older binaries cannot decode it.
+    ApplicationUpgrade {
+        /// Immutable complete actual support, wait proofs and independent upgrade revision.
+        application_upgrade: Box<ApplicationUpgradeReceipt>,
+    },
     /// Explicit complete original recovery/content candidate, refused by metadata-only storage.
     ContentApplication {
         /// Exact private v3 candidate; metadata acceptance alone is not an application success ACK.
@@ -167,6 +177,62 @@ pub enum ReplicaCommand {
     },
     /// Existing exact opaque application acceptance, with unchanged wire representation.
     Application(state::ApplicationCommitBatch),
+}
+
+impl<'de> Deserialize<'de> for ReplicaCommand {
+    /// Dispatches exact existing envelopes before typed JSON parsing, preserving numeric member-map keys.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if let Some(object) = value.as_object() {
+            for key in [
+                "application_upgrade",
+                "application_upgrade_abort",
+                "content_application",
+                "certificate",
+            ] {
+                if let Some(payload) = object.get(key) {
+                    if object.len() != 1 {
+                        return Err(serde::de::Error::custom(
+                            "Replica command envelope contains hidden fields",
+                        ));
+                    }
+                    return match key {
+                        "application_upgrade" => {
+                            serde_json::from_value(payload.clone()).map(|receipt| {
+                                Self::ApplicationUpgrade {
+                                    application_upgrade: Box::new(receipt),
+                                }
+                            })
+                        }
+                        "application_upgrade_abort" => {
+                            serde_json::from_value(payload.clone()).map(|receipt| {
+                                Self::ApplicationUpgradeAbort {
+                                    application_upgrade_abort: Box::new(receipt),
+                                }
+                            })
+                        }
+                        "content_application" => {
+                            serde_json::from_value(payload.clone()).map(|candidate| {
+                                Self::ContentApplication {
+                                    content_application: Box::new(candidate),
+                                }
+                            })
+                        }
+                        "certificate" => serde_json::from_value(payload.clone()).map(|mutation| {
+                            Self::Certificate {
+                                certificate: mutation,
+                            }
+                        }),
+                        _ => unreachable!("closed original command key"),
+                    }
+                    .map_err(serde::de::Error::custom);
+                }
+            }
+        }
+        serde_json::from_value(value)
+            .map(Self::Application)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 impl From<state::ApplicationCommitBatch> for ReplicaCommand {

@@ -58,6 +58,7 @@ def _private_root_staging(component: dict[str, Any], schema: str, name: str) -> 
             "roboguide.recovery-profile/v0.22",
             "roboguide.recovery-profile/v0.23",
             "roboguide.recovery-profile/v0.24",
+            "roboguide.recovery-profile/v0.25",
         }
         and component["kind"] == "replica-content"
         and component["storage_schema"] == "roboguide.replica-content-layout/v0.8"
@@ -511,7 +512,8 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             replica_content_bundle.capture_sources(
                 components,
                 budget,
-                allow_standalone=profile["schema"] == "roboguide.recovery-profile/v0.24",
+                allow_standalone=profile["schema"]
+                in {"roboguide.recovery-profile/v0.24", "roboguide.recovery-profile/v0.25"},
             )
             if profile["schema"]
             in {
@@ -521,6 +523,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                 "roboguide.recovery-profile/v0.22",
                 "roboguide.recovery-profile/v0.23",
                 "roboguide.recovery-profile/v0.24",
+                "roboguide.recovery-profile/v0.25",
             }
             else None
         )
@@ -719,6 +722,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                     "roboguide.recovery-profile/v0.22",
                     "roboguide.recovery-profile/v0.23",
                     "roboguide.recovery-profile/v0.24",
+                    "roboguide.recovery-profile/v0.25",
                 }
                 else set()
             )
@@ -915,6 +919,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.22",
                 "roboguide.recovery-profile/v0.23",
                 "roboguide.recovery-profile/v0.24",
+                "roboguide.recovery-profile/v0.25",
             }
             else databases
         )
@@ -1030,7 +1035,9 @@ def restore(
     budget.check()
     replica_placements = _replica_placements(manifest)
     receipt_schema = (
-        "roboguide.restore-receipt/v0.24"
+        "roboguide.restore-receipt/v0.25"
+        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.25"
+        else "roboguide.restore-receipt/v0.24"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.24"
         else "roboguide.restore-receipt/v0.23"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.23"
@@ -1049,6 +1056,7 @@ def restore(
             "roboguide.recovery-profile/v0.22",
             "roboguide.recovery-profile/v0.23",
             "roboguide.recovery-profile/v0.24",
+            "roboguide.recovery-profile/v0.25",
         }
         else "roboguide.restore-receipt/v0.18"
         if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.18"
@@ -1173,6 +1181,7 @@ def restore(
             "roboguide.recovery-profile/v0.22",
             "roboguide.recovery-profile/v0.23",
             "roboguide.recovery-profile/v0.24",
+            "roboguide.recovery-profile/v0.25",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:
@@ -1215,6 +1224,7 @@ def restore(
         "roboguide.recovery-profile/v0.22",
         "roboguide.recovery-profile/v0.23",
         "roboguide.recovery-profile/v0.24",
+        "roboguide.recovery-profile/v0.25",
     }:
         receipt["original_authority_bytes_preserved"] = False
         receipt["original_operational_rows_preserved"] = True

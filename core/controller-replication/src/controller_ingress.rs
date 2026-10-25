@@ -282,6 +282,9 @@ impl ReplicaNode {
             return Err("original owned Controller content epoch is unavailable".into());
         }
         self.store.read_network_snapshot(|connection| {
+            if SqliteRaftStore::upgrade_blocks(connection)? {
+                return Err("original Controller ingress is fenced by application upgrade".into());
+            }
             let trust: CertificateTrust = read_meta(connection, "certificate_trust")
                 .map_err(|error| error.to_string())?
                 .ok_or("original Controller TLS authority absent")?;

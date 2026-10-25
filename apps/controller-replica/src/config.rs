@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 /// Application wrapper fences standalone/older binaries from a cluster's authority history.
+#[cfg(test)]
 pub(super) const APPLICATION_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
 /// Controller environment allowed by the current static software deployment.
 const ALLOWED_ENVIRONMENT: &[&str] = &[
@@ -75,6 +76,34 @@ pub(super) struct ProcessConfig {
     /// Optional deployed Artifact transport and original authorization profile files.
     #[serde(default)]
     pub artifact_tls: Option<ControllerTransportTlsConfig>,
+    /// Explicit next executable; old process profiles cannot hide this new upgrade authority.
+    #[serde(default)]
+    pub application_upgrade: Option<ApplicationUpgradeConfig>,
+}
+
+/// Explicit future executable configuration; it does not itself change current writer permission.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ApplicationUpgradeConfig {
+    /// Exact original process layout retained during rolling infrastructure replacement.
+    pub base_process_schema: String,
+    /// Actual existing next application executable, separate from the immutable original binary.
+    pub binary: PathBuf,
+    /// Independently checked bytes/schema and complete target policy.
+    pub target: controller_replication::UpgradeBinary,
+    /// Explicit prior verified targets needed to keep an active writer available while preparing a patch.
+    #[serde(default)]
+    pub retained_binaries: Vec<RetainedUpgradeBinary>,
+}
+
+/// One retained original target; its path grants no writer authority without the committed receipt.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RetainedUpgradeBinary {
+    /// Actual original activated executable, never selected from a caller request path.
+    pub binary: PathBuf,
+    /// Exact original schema, file digest and complete deployment policy.
+    pub target: controller_replication::UpgradeBinary,
 }
 
 /// Explicit listener TLS dependencies; common policy pins bytes independently of local paths.
@@ -166,8 +195,25 @@ pub(super) struct LeaderTransferConfig {
 }
 
 impl ProcessConfig {
+    /// Returns the exact original layout; a new executable declaration does not relabel storage.
+    pub fn base_process_schema(&self) -> &str {
+        self.application_upgrade
+            .as_ref()
+            .map_or(self.schema.as_str(), |upgrade| {
+                upgrade.base_process_schema.as_str()
+            })
+    }
     /// Binds actual binary/configuration bytes; per-member route/storage paths do not change semantics.
     pub fn policy_digest(&self) -> Result<String, String> {
+        self.policy_digest_for_binary(&self.controller_binary, &self.replica.application_schema)
+    }
+
+    /// Hashes exact original deployment inputs with one explicitly selected executable/generation.
+    pub fn policy_digest_for_binary(
+        &self,
+        executable: &Path,
+        application_schema: &str,
+    ) -> Result<String, String> {
         let file_digest = |path: &Path| -> Result<String, String> {
             let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
             let mut digest = Sha256::new();
@@ -182,8 +228,8 @@ impl ProcessConfig {
             Ok(format!("{:x}", digest.finalize()))
         };
         let mut identity = serde_json::json!({
-            "schema":APPLICATION_SCHEMA,
-            "controller_binary":file_digest(&self.controller_binary)?,
+            "schema":application_schema,
+            "controller_binary":file_digest(executable)?,
             "actor_placement": self.actor_placement_path.as_deref().map(file_digest).transpose()?,
             "physical_entity_registry":self.physical_entity_registry_path.as_deref().map(file_digest).transpose()?,
             "environment":self.controller_environment,
@@ -227,6 +273,38 @@ impl ProcessConfig {
     /// Rejects broad network/configuration scope before owning files or creating a Controller.
     pub fn validate(&self) -> Result<(), String> {
         self.replica.validate()?;
+        if let Some(upgrade) = &self.application_upgrade {
+            if self.schema != "roboguide.controller-replica-process/v0.8"
+                || !matches!(
+                    upgrade.base_process_schema.as_str(),
+                    "roboguide.controller-replica-process/v0.6"
+                        | "roboguide.controller-replica-process/v0.7"
+                )
+                || !upgrade.binary.is_absolute()
+                || upgrade.retained_binaries.len() > 31
+                || self
+                    .policy_digest_for_binary(&upgrade.binary, &upgrade.target.application_schema)?
+                    != upgrade.target.policy_digest
+            {
+                return Err("explicit upgrade executable requires original parent8/9 layout and exact target policy".into());
+            }
+            let mut digests = std::collections::BTreeSet::from([&upgrade.target.binary_digest]);
+            for retained in &upgrade.retained_binaries {
+                if !retained.binary.is_absolute()
+                    || !digests.insert(&retained.target.binary_digest)
+                    || self.policy_digest_for_binary(
+                        &retained.binary,
+                        &retained.target.application_schema,
+                    )? != retained.target.policy_digest
+                {
+                    return Err("retained upgrade executable requires distinct original bytes and exact policy".into());
+                }
+            }
+        } else if self.schema == "roboguide.controller-replica-process/v0.8" {
+            return Err(
+                "upgrade process profile lacks its explicit original layout and executable".into(),
+            );
+        }
         for tls in [&self.node_tls, &self.operator_tls, &self.artifact_tls]
             .into_iter()
             .flatten()
@@ -357,25 +435,37 @@ impl ProcessConfig {
                             "restored Root5 requires its exact explicit binding digest".into()
                         );
                     }
-                    if self.schema == "roboguide.controller-replica-process/v0.7" {
+                    if self.base_process_schema() == "roboguide.controller-replica-process/v0.7" {
                         "roboguide.controller-replica-process/v0.7"
-                    } else if self.schema == "roboguide.controller-replica-process/v0.6" {
+                    } else if self.base_process_schema()
+                        == "roboguide.controller-replica-process/v0.6"
+                    {
                         "roboguide.controller-replica-process/v0.6"
-                    } else if self.schema == "roboguide.controller-replica-process/v0.5" {
+                    } else if self.base_process_schema()
+                        == "roboguide.controller-replica-process/v0.5"
+                    {
                         "roboguide.controller-replica-process/v0.5"
-                    } else if self.schema == "roboguide.controller-replica-process/v0.4" {
+                    } else if self.base_process_schema()
+                        == "roboguide.controller-replica-process/v0.4"
+                    {
                         "roboguide.controller-replica-process/v0.4"
                     } else {
                         "roboguide.controller-replica-process/v0.3"
                     }
                 } else {
-                    if self.schema == "roboguide.controller-replica-process/v0.7" {
+                    if self.base_process_schema() == "roboguide.controller-replica-process/v0.7" {
                         "roboguide.controller-replica-process/v0.7"
-                    } else if self.schema == "roboguide.controller-replica-process/v0.6" {
+                    } else if self.base_process_schema()
+                        == "roboguide.controller-replica-process/v0.6"
+                    {
                         "roboguide.controller-replica-process/v0.6"
-                    } else if self.schema == "roboguide.controller-replica-process/v0.5" {
+                    } else if self.base_process_schema()
+                        == "roboguide.controller-replica-process/v0.5"
+                    {
                         "roboguide.controller-replica-process/v0.5"
-                    } else if self.schema == "roboguide.controller-replica-process/v0.4" {
+                    } else if self.base_process_schema()
+                        == "roboguide.controller-replica-process/v0.4"
+                    {
                         "roboguide.controller-replica-process/v0.4"
                     } else {
                         "roboguide.controller-replica-process/v0.2"
@@ -414,8 +504,13 @@ impl ProcessConfig {
                 "Controller async worker count must be an explicit integer in 1..64".into(),
             );
         }
-        if self.schema != process_schema
-            || self.replica.application_schema != APPLICATION_SCHEMA
+        if (self.application_upgrade.is_some()
+            && self.schema != "roboguide.controller-replica-process/v0.8")
+            || (self.application_upgrade.is_none() && self.schema != process_schema)
+            || self.base_process_schema() != process_schema
+            || !controller_replication::supports_application_generation(
+                &self.replica.application_schema,
+            )
             || !self.controller_binary.is_absolute()
             || !self.storage_directory.is_absolute()
             || self.controller_environment.iter().any(|(key, value)| {

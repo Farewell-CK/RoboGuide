@@ -14,6 +14,12 @@ mod probe_warnings;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
+    /// Explicit actual next executable used only by the upgrade conformance path.
+    #[serde(default)]
+    upgrade_binary: Option<PathBuf>,
+    /// Closed expected target; actual executable bytes and schema are independently checked.
+    #[serde(default)]
+    upgrade_target: Option<UpgradeBinary>,
     /// Actual full-content infrastructure declaration with real TLS material.
     replica: ReplicaConfig,
     /// Actual original existing private Root4.
@@ -52,6 +58,17 @@ struct Config {
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
+    /// Executes the real core upgrade API after original actual all-member support and drain.
+    UpgradeApplication { request: ApplicationUpgradeRequest },
+    /// Irreversibly abandons only an actually retained uncertain original operation.
+    AbortApplicationUpgrade {
+        /// Original uncertain upgrade whose exact input remains independently retained.
+        original_command_id: String,
+        /// Distinct immutable administrative abandonment identity.
+        command_id: String,
+    },
+    /// Reads original committed activation without replaying the request.
+    ObserveApplicationUpgrade,
     /// Requests the actual maintained leader transfer with independent no-child or original wait proof.
     TransferTo {
         /// Exact original configured voter to receive the election trigger.
@@ -383,6 +400,18 @@ async fn serve(config: Config) -> Result<(), String> {
     if config.initialization_parent && !config.owned_child {
         node.enable_controller_supervision()?;
     }
+    match (&config.upgrade_binary, &config.upgrade_target) {
+        (Some(binary), Some(target)) => {
+            node.configure_application_upgrade_binary(binary, target.clone())
+                .await?
+        }
+        (None, None) => {}
+        _ => {
+            return Err(
+                "upgrade conformance requires both actual executable and exact target".into(),
+            );
+        }
+    }
     let _ingress = if config.owned_child {
         node.enable_controller_supervision()?;
         Some(
@@ -417,6 +446,28 @@ async fn serve(config: Config) -> Result<(), String> {
         let request: Request = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
         let shutdown = matches!(request, Request::Shutdown);
         let result = match request {
+            Request::UpgradeApplication { request } => {
+                let epoch = node
+                    .current_epoch()
+                    .ok_or("application upgrade requires the actual current leader")?;
+                node.upgrade_application_generation(epoch, request)
+                    .await
+                    .map(|receipt| json!({"receipt":receipt}))
+            }
+            Request::ObserveApplicationUpgrade => node
+                .application_upgrade_authority()
+                .map(|authority| json!({"authority":authority})),
+            Request::AbortApplicationUpgrade {
+                original_command_id,
+                command_id,
+            } => {
+                let epoch = node
+                    .current_epoch()
+                    .ok_or("abandonment requires current infrastructure leadership")?;
+                node.abort_application_generation(epoch, original_command_id, command_id)
+                    .await
+                    .map(|receipt| json!({"receipt":receipt}))
+            }
             Request::TransferTo {
                 member,
                 transfer_id,

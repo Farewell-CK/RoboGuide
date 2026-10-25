@@ -145,6 +145,9 @@ const MAX_LEADER_TRANSFERS: usize = 512;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplicaView {
+    /// Explicit independent writer authority; old absence never grants a newer application schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_upgrade: Option<ApplicationUpgradeAuthority>,
     /// Highest accepted application revision.
     pub revision: u64,
     /// Exact complete accepted authority snapshot.
@@ -209,9 +212,27 @@ impl ReplicaView {
         application_schema: &str,
         profile: &str,
     ) -> Result<(), StorageError<u64>> {
+        if let Some(authority) = &self.application_upgrade {
+            if application_schema != authority.original_schema
+                && application_schema != authority.active_schema()
+            {
+                return Err(io_error(
+                    "reader generation differs from original/active application authority",
+                ));
+            }
+            authority
+                .validate(&authority.original_schema)
+                .map_err(io_error)?;
+        }
         match &self.checkpoint {
             Some(checkpoint)
-                if checkpoint.schema == application_schema
+                if (self
+                    .application_upgrade
+                    .as_ref()
+                    .map_or(checkpoint.schema == application_schema, |authority| {
+                        authority.permits_checkpoint(checkpoint)
+                    })
+                    || self.permits_original_source_checkpoint(checkpoint, application_schema))
                     && checkpoint.checkpoint_json.len() <= 64 * 1024 * 1024
                     && self.revision > 0 => {}
             None if self.events.is_empty() && self.revision == 0 => {}
@@ -499,7 +520,14 @@ fn prepare_storage_format(
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
     let marker = schema_object_type(connection, "replica_storage_format")?;
-    let target_version = if initialization_content {
+    let base_parent_version = if initialization_content {
+        INITIALIZATION_CONTENT_VERSION
+    } else {
+        CONTROLLER_CONTENT_VERSION
+    };
+    let target_version = if version == crate::upgrades::STORAGE_VERSION {
+        crate::upgrades::STORAGE_VERSION
+    } else if initialization_content {
         INITIALIZATION_CONTENT_VERSION
     } else if controller_content {
         CONTROLLER_CONTENT_VERSION
@@ -592,6 +620,7 @@ fn prepare_storage_format(
                     | NETWORK_CONTENT_VERSION
                     | CONTROLLER_CONTENT_VERSION
                     | INITIALIZATION_CONTENT_VERSION
+                    | crate::upgrades::STORAGE_VERSION
             ))
     {
         return Err("complete-content Replica storage requires explicit original upgrade; metadata-only open/automatic migration refused".into());
@@ -624,6 +653,7 @@ fn prepare_storage_format(
             | NETWORK_CONTENT_VERSION
             | CONTROLLER_CONTENT_VERSION
             | INITIALIZATION_CONTENT_VERSION
+            | crate::upgrades::STORAGE_VERSION
     ) && marker.as_deref() == Some("table")
     {
         if current.iter().any(|kind| kind.as_deref() != Some("table"))
@@ -642,6 +672,8 @@ fn prepare_storage_format(
             "roboguide.replica-storage/v0.1"
         } else if version == 2 {
             "roboguide.replica-storage/v0.2"
+        } else if version == crate::upgrades::STORAGE_VERSION {
+            crate::upgrades::STORAGE_SCHEMA
         } else if version == INITIALIZATION_CONTENT_VERSION {
             INITIALIZATION_CONTENT_SCHEMA
         } else if version == CONTROLLER_CONTENT_VERSION {
@@ -845,6 +877,7 @@ fn prepare_storage_format(
         )?;
         read_leader_transfer_history(connection)?;
         SqliteRaftStore::validate_controller_supervision(connection)?;
+        crate::upgrades::validate_storage(connection, base_parent_version, application_schema)?;
         return Ok(());
     }
     if version != 0 || marker.is_some() {
@@ -1184,6 +1217,11 @@ fn read_view(connection: &Connection) -> Result<ReplicaView, StorageError<u64>> 
         return Err(io_error("replica checkpoint digest differs"));
     }
     Ok(ReplicaView {
+        application_upgrade: read_meta::<Option<ApplicationUpgradeAuthority>>(
+            connection,
+            crate::upgrades::AUTHORITY_KEY,
+        )?
+        .flatten(),
         revision: read_meta(connection, "revision")?.unwrap_or(0),
         checkpoint,
         events,
@@ -1337,7 +1375,7 @@ impl SqliteRaftStore {
         content: ReplicaContentStore,
     ) -> Result<Self, String> {
         if content.identity().profile_identity != profile
-            || application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            || !supports_application_generation(application_schema)
         {
             return Err("complete-content Replica requires its actual original profile/current application schema".into());
         }
@@ -1360,7 +1398,7 @@ impl SqliteRaftStore {
     ) -> Result<Self, String> {
         if !content.streams_enabled()
             || content.identity().profile_identity != profile
-            || application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            || !supports_application_generation(application_schema)
         {
             return Err(
                 "network content parent requires its actual original Root4/profile/schema".into(),
@@ -1385,7 +1423,7 @@ impl SqliteRaftStore {
     ) -> Result<Self, String> {
         if !content.streams_enabled()
             || content.identity().profile_identity != profile
-            || application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            || !supports_application_generation(application_schema)
         {
             return Err(
                 "owned Controller parent requires actual original Root4/profile/schema".into(),
@@ -1422,7 +1460,7 @@ impl SqliteRaftStore {
     ) -> Result<Self, String> {
         if !content.staging_reclamation_enabled()
             || content.identity().profile_identity != profile
-            || application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            || !supports_application_generation(application_schema)
         {
             return Err(
                 "existing initialization parent requires exact Root8/profile/schema".into(),
@@ -1465,7 +1503,7 @@ impl SqliteRaftStore {
     ) -> Result<Self, String> {
         if !content.staging_reclamation_enabled()
             || content.identity().profile_identity != profile
-            || application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            || !supports_application_generation(application_schema)
         {
             return Err(
                 "initialization parent requires original Root8/profile/current schema".into(),
@@ -1953,7 +1991,19 @@ impl SqliteRaftStore {
             Some(error)
         } else if initial.is_some() && !read_view(connection)?.is_empty_application() {
             Some("initial content snapshot requires an actual empty receiver".into())
-        } else if batch.checkpoint.schema != self.application_schema {
+        } else if batch.checkpoint.schema
+            != self
+                .application_writer_schema(connection)
+                .map_err(io_error)?
+            && !(initial.is_some()
+                && self.initialization_content
+                && crate::upgrades::can_read_generation(
+                    &batch.checkpoint.schema,
+                    &self
+                        .application_writer_schema(connection)
+                        .map_err(io_error)?,
+                ))
+        {
             Some("replica application schema differs".into())
         } else if batch.commands.first().is_some_and(|command| {
             command_revision.checked_add(1) != Some(command.authority_revision)

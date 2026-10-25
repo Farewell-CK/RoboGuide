@@ -82,6 +82,7 @@ def validate(
         "roboguide.recovery-profile/v0.22",
         "roboguide.recovery-profile/v0.23",
         "roboguide.recovery-profile/v0.24",
+        "roboguide.recovery-profile/v0.25",
     }:
         raise ValueError("Controller storage v1 requires explicit recovery v0.17")
     objects = {
@@ -94,10 +95,11 @@ def validate(
                 f"SELECT 1 FROM {table} WHERE schema='roboguide.controller-checkpoint/v56' LIMIT 1"
             ).fetchone()
             is not None
-            and profile_schema != "roboguide.recovery-profile/v0.24"
+            and profile_schema
+            not in {"roboguide.recovery-profile/v0.24", "roboguide.recovery-profile/v0.25"}
         ):
             raise ValueError("quantitative Controller v56 requires explicit recovery v0.24")
-    if profile_schema == "roboguide.recovery-profile/v0.24":
+    if profile_schema in {"roboguide.recovery-profile/v0.24", "roboguide.recovery-profile/v0.25"}:
         from .capacity_recovery import validate as validate_capacity
 
         validate_capacity(connection)

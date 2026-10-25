@@ -28,6 +28,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.22",
     "roboguide.recovery-profile/v0.23",
     "roboguide.recovery-profile/v0.24",
+    "roboguide.recovery-profile/v0.25",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -426,9 +427,10 @@ def validate(
     seen: dict[str, tuple[str | None, str, str, str]] = {}
     authorities: dict[str, str] = {}
     replica_profiles: dict[str, str] = {}
-    standalone = profile_schema == "roboguide.recovery-profile/v0.24" and not any(
-        item["kind"] in {"replica", "replica-content"} for item in components
-    )
+    standalone = profile_schema in {
+        "roboguide.recovery-profile/v0.24",
+        "roboguide.recovery-profile/v0.25",
+    } and not any(item["kind"] in {"replica", "replica-content"} for item in components)
     bindings: dict[str, set[str]] = {}
     if profile_schema in SUPPORTED:
         for component_id in owners.values():
@@ -472,6 +474,7 @@ def validate(
                         "roboguide.recovery-profile/v0.22",
                         "roboguide.recovery-profile/v0.23",
                         "roboguide.recovery-profile/v0.24",
+                        "roboguide.recovery-profile/v0.25",
                     }
                     and isinstance(authority_id, str)
                     and not standalone
@@ -501,6 +504,7 @@ def validate(
                             "roboguide.recovery-profile/v0.22",
                             "roboguide.recovery-profile/v0.23",
                             "roboguide.recovery-profile/v0.24",
+                            "roboguide.recovery-profile/v0.25",
                         }
                     )
                 ):
@@ -566,7 +570,11 @@ def validate(
             if prefix in seen:
                 if (
                     profile_schema
-                    not in {"roboguide.recovery-profile/v0.23", "roboguide.recovery-profile/v0.24"}
+                    not in {
+                        "roboguide.recovery-profile/v0.23",
+                        "roboguide.recovery-profile/v0.24",
+                        "roboguide.recovery-profile/v0.25",
+                    }
                     or actual_profile is None
                     or seen[prefix] != projection
                 ):

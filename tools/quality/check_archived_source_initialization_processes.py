@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import socket
 import sqlite3
@@ -35,6 +36,8 @@ def run(
     source: Path,
     interrupt_content: Path | None = None,
     catchup: str | None = None,
+    upgrade_controller: Path | None = None,
+    source_stores: Path | None = None,
 ) -> dict[str, Any]:
     """Retain every original failure/PID/wait while composing actual old-voter refusal and first."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -43,7 +46,10 @@ def run(
     exits = json.loads((source / "owned-process-exits.json").read_bytes())
     if prior.get("passed") is not True or exits.get("all_owned_processes_reaped") is not True:
         raise ValueError("actual original source has no complete native wait/evidence")
-    paths = [binary, storage, old, Path(__file__)]
+    application_binary = (upgrade_controller or ROOT / "target/debug/integration-server").resolve(
+        strict=True
+    )
+    paths = [binary, storage, old, application_binary, Path(__file__)]
     paths.append(Path(__file__).with_name("archived_initialization_fault_processes.py"))
     paths.extend((ROOT / "core/controller-replication").rglob("*.rs"))
     paths.extend((ROOT / "core/state").rglob("*.rs"))
@@ -51,8 +57,8 @@ def run(
     identities = {str(path): digest(path) for path in paths}
     save(output / "source-identity.json", identities)
     input_value = {
-        "source_sql": str(source / "controller.sqlite3"),
-        "source_cas": str(source / "cas"),
+        "source_sql": str((source_stores or source) / "controller.sqlite3"),
+        "source_cas": str((source_stores or source) / "cas"),
     }
     input_path = output / "original-source-input.json"
     save(input_path, input_value)
@@ -99,6 +105,27 @@ def run(
             schema = json.loads(subprocess.check_output([str(binary), "schema"], timeout=10))[
                 "schema"
             ]
+            original_schema = json.loads(subprocess.check_output([str(old), "schema"], timeout=10))[
+                "schema"
+            ]
+            actual_application_schema = subprocess.check_output(
+                [str(application_binary), "--application-schema"], text=True, timeout=5
+            ).strip()
+            schema = actual_application_schema
+            upgrade_target = {
+                "application_schema": schema,
+                "binary_digest": "sha256:" + digest(application_binary),
+                "policy_digest": hashlib.sha256(
+                    json.dumps(
+                        {
+                            "original_source": digest(input_path),
+                            "binary": digest(application_binary),
+                            "schema": schema,
+                        },
+                        sort_keys=True,
+                    ).encode()
+                ).hexdigest(),
+            }
             configs: dict[int, dict[str, Any]] = {}
             owners = {}
             profiles = set()
@@ -113,7 +140,7 @@ def run(
                         "replica_id": member,
                         "members": endpoints,
                         "initial_voters": members,
-                        "application_schema": schema,
+                        "application_schema": original_schema,
                         "application_policy_digest": "actual-original-source:" + digest(input_path),
                         "tls": {
                             "ca_cert_path": str(tls / "ca.crt"),
@@ -129,6 +156,8 @@ def run(
                     "staging_gc": True,
                     "initialization_parent": True,
                     "initialization": policy,
+                    "upgrade_binary": str(application_binary),
+                    "upgrade_target": upgrade_target,
                 }
                 path = output / f"configuration-{member}.json"
                 save(path, config)
@@ -156,6 +185,8 @@ def run(
                 """Start only the exact declared real member, retaining every original."""
                 config = dict(configs[member], member_stores=owners)
                 if legacy:
+                    config.pop("upgrade_binary")
+                    config.pop("upgrade_target")
                     config.pop("initialization_parent")
                     config.pop("initialization")
                     config.update(owned_child=True, child_socket=str(ipc / f"member-{member}.sock"))
@@ -236,6 +267,23 @@ def run(
             assert not original_rows(Path(configs[legacy]["parent_sql"]))
             start(legacy)
             leader(current)
+            if original_schema != schema:
+                activated = actors[current].ask(
+                    {
+                        "action": "upgrade-application",
+                        "request": {
+                            "schema": "roboguide.application-upgrade/v0.1",
+                            "command_id": "actual-original-source-application-generation",
+                            "expected_revision": 0,
+                            "from_schema": original_schema,
+                            "target": upgrade_target,
+                            "budget_ms": 120_000,
+                        },
+                    }
+                )
+                assert activated["receipt"]["intent"]["request"]["target"] == upgrade_target
+                assert len(activated["receipt"]["drains"]) == len(members)
+                result["actual_original_profile_generation_upgrade"] = activated
             if interrupt_content is not None and catchup is None:
                 result["actual_source_interruption"] = interrupt(
                     actors[current],
@@ -306,7 +354,9 @@ def run(
             result["actual_original_initialization"] = initialized
             result["actual_complete_quorum"] = complete
             for member in members:
-                assert sql_identity(Path(configs[member]["parent_sql"]))[0] == 9
+                assert sql_identity(Path(configs[member]["parent_sql"]))[0] == (
+                    10 if original_schema != schema else 9
+                )
                 result[f"actual_member_{member}_bytes"] = actual_bytes(
                     Path(configs[member]["content_root"])
                 )
@@ -348,6 +398,8 @@ def main() -> int:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--interrupt-source-content", type=Path)
     parser.add_argument("--catchup", choices=("log", "snapshot"))
+    parser.add_argument("--upgrade-controller", type=Path)
+    parser.add_argument("--source-stores", type=Path)
     args = parser.parse_args()
     if args.catchup is not None and args.interrupt_source_content is None:
         parser.error("--catchup requires the explicit native source payload barrier")
@@ -363,6 +415,8 @@ def main() -> int:
             if args.interrupt_source_content is None
             else args.interrupt_source_content.resolve(strict=True),
             args.catchup,
+            args.upgrade_controller.resolve(strict=True) if args.upgrade_controller else None,
+            args.source_stores.resolve(strict=True) if args.source_stores else None,
         )["passed"]
         else 1
     )

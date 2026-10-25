@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import fcntl
 import hashlib
 import http.client as http_client
@@ -89,8 +90,31 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
     configs = inputs / "configs"
     configs.mkdir(mode=0o700)
     parent_versions = set()
+    binary_inputs: dict[str, dict[str, str]] = {}
     for path in sorted(source.glob("configuration-*.json")):
         config = json.loads(path.read_text())
+        if config.get("application_upgrade") is not None:
+            binary_root = inputs / "binaries"
+            binary_root.mkdir(mode=0o700, exist_ok=True)
+            if "binaries" not in input_trees:
+                input_trees.append("binaries")
+            for declared in [
+                config["controller_binary"],
+                config["application_upgrade"]["binary"],
+                *[
+                    item["binary"]
+                    for item in config["application_upgrade"].get("retained_binaries", [])
+                ],
+            ]:
+                actual = Path(declared).resolve(strict=True)
+                checksum = digest(actual)
+                name = checksum + "-" + actual.name
+                copied = binary_root / name
+                if not copied.exists():
+                    shutil.copyfile(actual, copied)
+                if digest(copied) != checksum:
+                    raise ValueError("original declared upgrade executable changed while copying")
+                binary_inputs[declared] = {"name": name, "sha256": checksum}
         member = config["replica"]["replica_id"]
         shutil.copyfile(path, configs / path.name)
         directory = Path(config["storage_directory"])
@@ -157,6 +181,8 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
             )
         components.append(root_component)
     archive_inputs(source, components)
+    if binary_inputs:
+        save(inputs / "binaries/index.json", binary_inputs)
     components.append(
         {
             "component_id": "inputs",
@@ -170,7 +196,9 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
         }
     )
     generation = (
-        23
+        25
+        if 10 in parent_versions
+        else 23
         if 9 in parent_versions
         else 22
         if any(
@@ -195,7 +223,7 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
         "schema": f"roboguide.recovery-profile/v0.{generation}",
         "profile_id": "actual-complete-content-roots",
         "revision": 1,
-        "max_bytes": 1024**3,
+        "max_bytes": (3 if binary_inputs else 1) * 1024**3,
         "max_files": 20000,
         "budget_seconds": 180,
         "artifact_replica_sets": [],
@@ -258,6 +286,7 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
             for value in receipts["replica_content_bindings"]
             if value["component_id"] == f"root-{member}"
         )
+        original_process = config["schema"]
         config["schema"] = (
             "roboguide.controller-replica-process/v0.7"
             if config["schema"] == "roboguide.controller-replica-process/v0.7"
@@ -269,6 +298,27 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
             if binding["source_root_version"] == 6
             else "roboguide.controller-replica-process/v0.3"
         )
+        if config.get("application_upgrade") is not None:
+            config["schema"] = original_process
+            binary_root = stores / "inputs/binaries"
+            index = json.loads((binary_root / "index.json").read_bytes())
+            for container, key in [
+                (config, "controller_binary"),
+                (config["application_upgrade"], "binary"),
+                *[
+                    (item, "binary")
+                    for item in config["application_upgrade"].get("retained_binaries", [])
+                ],
+            ]:
+                record = index[container[key]]
+                name = record["name"]
+                if Path(name).name != name:
+                    raise ValueError("original upgrade executable input escapes its declared root")
+                executable = binary_root / name
+                if digest(executable) != record["sha256"]:
+                    raise ValueError("restored original upgrade executable bytes differ")
+                executable.chmod(0o700)
+                container[key] = str(executable)
         config["storage_directory"] = str(parent)
         config["content"]["root"] = str(stores / f"root-{member}")
         config["content"]["socket"] = str(ipc / f"{member}.sock")
@@ -299,6 +349,11 @@ def assemble(restored: Path, ipc: Path, supervisor: Path) -> dict[int, tuple[Pat
             .strip()
         )
         assert actual_policy == config["replica"]["application_policy_digest"]
+        if config.get("application_upgrade") is not None:
+            actual_target = subprocess.check_output(
+                [str(supervisor), "--upgrade-policy-digest", str(target)], text=True, timeout=10
+            ).strip()
+            assert actual_target == config["application_upgrade"]["target"]["policy_digest"]
         result[member] = (target, config)
     return result
 
@@ -811,8 +866,17 @@ def run(
         if old_supervisor is not None and digest(old_supervisor) != digest(supervisor):
             original_binaries = json.loads((source / "source-identity.json").read_text())
             assert original_binaries.get(str(old_supervisor)) == digest(old_supervisor)
+            original_writer_path = first_path
+            if configs[min(configs)][1].get("application_upgrade") is not None:
+                original_writer = copy.deepcopy(configs[min(configs)][1])
+                original_writer["schema"] = original_writer["application_upgrade"][
+                    "base_process_schema"
+                ]
+                del original_writer["application_upgrade"]
+                original_writer_path = output / "original-application-writer.json"
+                save(original_writer_path, original_writer)
             rejected = subprocess.run(
-                [str(old_supervisor), str(first_path)], capture_output=True, timeout=10
+                [str(old_supervisor), str(original_writer_path)], capture_output=True, timeout=10
             )
             proof = {
                 "returncode": rejected.returncode,
@@ -878,43 +942,88 @@ def run(
                 raise ValueError("actual restored Controller did not become healthy")
 
             expected = None
-            completed = original["actual_prepared_recovery"]["recovered"]["completion"][
-                "replacement"
-            ]
-            published_digest, published_size = completed["content_digest"], completed["byte_size"]
-            unknown = original["actual_prepared_recovery"]["unknown"]
+            prepared = original.get("actual_prepared_recovery")
+            prepared_completion = (
+                None if prepared is None else prepared["recovered"]["completion"]["replacement"]
+            )
+            published_digest = (
+                None if prepared_completion is None else prepared_completion["content_digest"]
+            )
+            published_size = (
+                None if prepared_completion is None else prepared_completion["byte_size"]
+            )
+            prepared_unknown = None if prepared is None else prepared["prepared_unknown"]
+            if prepared is None:
+                assert "actual_generation_receipt" in original and "original_quota" in original
             for turn in range(len(configs)):
                 member, status = current(expected)
                 _, config = configs[member]
-                code, raw = original_read(
-                    request_http,
-                    output,
-                    f"actual-content-get-{member}",
-                    config["artifact_address"],
-                    "/v1/artifacts/" + published_digest[7:],
-                )
-                assert code == 200 and len(raw) == published_size
-                assert "sha256:" + hashlib.sha256(raw).hexdigest() == published_digest
-                code, assessment = original_read(
-                    request_http,
-                    output,
-                    f"actual-assessment-get-{member}",
-                    config["artifact_address"],
-                    "/v1/artifact-uploads/"
-                    + unknown["upload"]["upload_id"]
-                    + "/recoveries/"
-                    + unknown["command_id"]
-                    + "/assessment",
-                )
-                assert code == 200 and json.loads(assessment)["record"] == unknown
-                result["observed_leaders"].append(
-                    {
-                        "member": member,
-                        "status": status,
-                        "actual_digest": published_digest,
-                        "actual_bytes": len(raw),
-                    }
-                )
+                if prepared is not None:
+                    assert (
+                        published_digest is not None
+                        and published_size is not None
+                        and prepared_unknown is not None
+                    )
+                    code, raw = original_read(
+                        request_http,
+                        output,
+                        f"actual-content-get-{member}",
+                        config["artifact_address"],
+                        "/v1/artifacts/" + published_digest[7:],
+                    )
+                    assert code == 200 and len(raw) == published_size
+                    assert "sha256:" + hashlib.sha256(raw).hexdigest() == published_digest
+                    code, assessment = original_read(
+                        request_http,
+                        output,
+                        f"actual-assessment-get-{member}",
+                        config["artifact_address"],
+                        "/v1/artifact-uploads/"
+                        + prepared_unknown["upload"]["upload_id"]
+                        + "/recoveries/"
+                        + prepared_unknown["command_id"]
+                        + "/assessment",
+                    )
+                    assert code == 200 and json.loads(assessment)["record"] == prepared_unknown
+                    result["observed_leaders"].append(
+                        {
+                            "member": member,
+                            "status": status,
+                            "actual_digest": published_digest,
+                            "actual_bytes": len(raw),
+                        }
+                    )
+                else:
+                    code, raw = original_read(
+                        request_http,
+                        output,
+                        f"actual-quota-get-{member}",
+                        config["http_address"],
+                        "/v1/resource-quotas",
+                    )
+                    assert code == 200 and json.loads(raw)["registry"] == original["original_quota"]
+                    database = Path(config["storage_directory"]) / "replica.sqlite3"
+                    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as sql:
+                        values = dict(sql.execute("SELECT key,value FROM replica_v1_meta"))
+                    authority = json.loads(values["application_upgrade_authority_v1"])
+                    assert original["actual_generation_receipt"] in authority["receipts"]
+                    code, inventory = original_read(
+                        request_http,
+                        output,
+                        f"actual-nodes-get-{member}",
+                        config["http_address"],
+                        "/v1/inventory",
+                    )
+                    assert code == 200 and json.loads(inventory)["nodes"] == []
+                    result["observed_leaders"].append(
+                        {
+                            "member": member,
+                            "status": status,
+                            "original_generation_receipt": original["actual_generation_receipt"],
+                            "original_quota": original["original_quota"],
+                            "embodied_nodes": 0,
+                        }
+                    )
                 remaining = set(configs) - {value["member"] for value in result["observed_leaders"]}
                 if not remaining:
                     break

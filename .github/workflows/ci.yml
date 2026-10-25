@@ -376,6 +376,33 @@ jobs:
           --source /tmp/rg-ci-catalog-archive
           --output "${RUNNER_TEMP}/roboguide-archived-initialization"
 
+      - name: Build genuine original v55 application and supervisor for rolling upgrades
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/tarball/dbe7c1e7ad9c4b43b85909be4dff7b61676d55dd > "${RUNNER_TEMP}/roboguide-original-v55.tar.gz"
+          mkdir "${RUNNER_TEMP}/roboguide-original-v55"
+          tar -xzf "${RUNNER_TEMP}/roboguide-original-v55.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-original-v55"
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-original-v55-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-original-v55/Cargo.toml" -p integration-server -p controller-replica
+
+      - name: Verify real rolling infrastructure and v55 to v56 application upgrades
+        run: >
+          uv run --frozen python tools/quality/check_application_upgrade_processes.py
+          --supervisor target/debug/controller-replica
+          --controller target/debug/integration-server
+          --old-supervisor "${RUNNER_TEMP}/roboguide-original-v55-target/debug/controller-replica"
+          --old-controller "${RUNNER_TEMP}/roboguide-original-v55-target/debug/integration-server"
+          --storage-probe target/debug/examples/content_stream_probe
+          --output "${RUNNER_TEMP}/roboguide-application-upgrade"
+
+      - name: Verify complete upgraded v0.25 cold restore and all actual leaders
+        run: >
+          uv run --frozen python tools/quality/check_replica_content_recovery_processes.py
+          --source "${RUNNER_TEMP}/roboguide-application-upgrade"
+          --supervisor target/debug/controller-replica
+          --old-supervisor "${RUNNER_TEMP}/roboguide-original-v55-target/debug/controller-replica"
+          --output "${RUNNER_TEMP}/roboguide-application-upgrade-recovery"
+
       - name: Verify original Unknown and missed archived-source Log and Snapshot
         run: |
           uv run --frozen python - <<'PY'

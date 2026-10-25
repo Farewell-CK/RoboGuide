@@ -648,7 +648,7 @@ impl SqliteRaftStore {
         }
         if !content.producer_journal_enabled()
             || content.identity().profile_identity != profile
-            || application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
+            || !supports_application_generation(application_schema)
         {
             return Err(
                 "original parent adoption requires its exact upgraded root/profile/application"

@@ -7,6 +7,12 @@
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
 
+[ADR-0207](../../decisions/0207-explicit-application-generation-upgrade.md)明确原 Replica profile
+与当前应用 writer 代次独立。有限旧版本读取兼容不授予新版本写入；所有真实成员支持、
+原 child 的实际退出和持久化授权切换共同约束升级。实际滚动、Unknown 对账、SQL 失败后
+显式放弃、同 schema 补丁和完整冷恢复已通过[软件进程验收](../../development/acceptance/2026-10-25-application-generation-upgrade.md)，
+设备与跨主机证据独立保留。
+
 [ADR-0206](../../decisions/0206-quantitative-resource-allocation.md)在本开发分支明确了
 可分割 Compute 的权威边界：Mission 声明单位类别与 Context 容量上限，Control 统一
 承诺、额度与精确释放，Node 校验原始执行授权并保留 Unknown 占用。资源 ID 不变，

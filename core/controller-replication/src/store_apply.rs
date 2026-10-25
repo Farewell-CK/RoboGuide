@@ -135,6 +135,18 @@ impl SqliteRaftStore {
                 Some(crate::content_store::ProducerAdmission::Existing(_))
             );
             let receipt = match &entry.payload {
+                EntryPayload::Normal(ReplicaCommand::ApplicationUpgradeAbort {
+                    application_upgrade_abort,
+                }) => self.apply_application_upgrade_abort(
+                    &transaction,
+                    application_upgrade_abort.as_ref().clone(),
+                )?,
+                EntryPayload::Normal(ReplicaCommand::ApplicationUpgrade {
+                    application_upgrade,
+                }) => self.apply_application_upgrade(
+                    &transaction,
+                    application_upgrade.as_ref().clone(),
+                )?,
                 EntryPayload::Blank => CommitReceipt::default(),
                 EntryPayload::Membership(membership) => {
                     write_meta(

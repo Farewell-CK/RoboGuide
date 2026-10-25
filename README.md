@@ -1,5 +1,12 @@
 # RoboGuide
 
+[应用代次升级与失败修复](docs/development/application-generation-upgrade-v0.1.md)已通过真实三副本
+v55 → v56 滚动升级、原 child wait、Unknown 重启对账、SQL 失败后的显式放弃、同 schema
+补丁及完整 v0.25 冷恢复。原 profile/policy/Root 保持；不支持的程序和退休版本回退被拒绝。
+[验收记录](docs/development/acceptance/2026-10-25-application-generation-upgrade.md)保留原坏版本、
+原时钟/退出和实际二进制身份。本包创建 0 embodied Node/设备/模型/模拟器，
+全局引用/Archive、typed-map 完整组合、资源、协调、Federation 和最终验收继续执行。
+
 [原 producer 退休与 CAS 回收](docs/development/acceptance/2026-10-25-complete-producer-retirement.md)
 已通过实际 Snapshot/purge、原 transfer 对账、三个成员最终删除、重启及完整冷恢复。
 `store_prefix.rs` 将 durable Raft prefix ACK 与有界 owned Root 清理分离，保留原预算、

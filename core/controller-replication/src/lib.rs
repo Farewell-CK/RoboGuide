@@ -26,6 +26,8 @@ mod tests;
 mod tls;
 mod transport;
 mod transport_budget;
+mod upgrade_network;
+mod upgrades;
 
 use openraft::Raft;
 use serde::{Deserialize, Serialize};
@@ -76,6 +78,11 @@ pub use store::{
 pub use supervision::{ControllerDrainProof, ControllerProcessExit, ControllerProcessIdentity};
 pub use transport::{ReplicaFenceClient, ReplicaServer};
 pub use transport_budget::{ReplicaTransportLimits, ReplicaTransportSnapshot};
+pub use upgrades::{
+    ApplicationUpgradeAbort, ApplicationUpgradeAuthority, ApplicationUpgradeDrain,
+    ApplicationUpgradeIntent, ApplicationUpgradeReceipt, ApplicationUpgradeRequest,
+    ApplicationUpgradeSupport, UpgradeBinary, supports_application_generation,
+};
 
 openraft::declare_raft_types!(
     /// Consensus types use infrastructure replica identities independently of embodied Node identities.
@@ -341,6 +348,72 @@ impl ReplicaAdminClient {
         transport::admin_certificate_observation(&self.config, self.leader, self.tls.clone()).await
     }
 
+    /// Performs one original authenticated generation operation; caller observes uncertainty separately.
+    pub async fn upgrade_application_generation(
+        &self,
+        request: ApplicationUpgradeRequest,
+    ) -> Result<ApplicationUpgradeReceipt, String> {
+        let epoch = self.epoch().await?;
+        let budget = request.budget_ms;
+        match transport::admin_upgrade(
+            &self.config,
+            self.leader,
+            self.tls.clone(),
+            upgrade_network::UpgradeWire::Activate { epoch, request },
+            budget,
+        )
+        .await?
+        {
+            upgrade_network::UpgradeReply::Activated(receipt) => Ok(receipt),
+            _ => Err("application upgrade did not return an original activation receipt".into()),
+        }
+    }
+
+    /// Reads actual retained authority/pending IDs without sending another stop or activation.
+    pub async fn observe_application_upgrade(
+        &self,
+    ) -> Result<(Option<ApplicationUpgradeAuthority>, Vec<String>), String> {
+        match transport::admin_upgrade(
+            &self.config,
+            self.leader,
+            self.tls.clone(),
+            upgrade_network::UpgradeWire::Observe,
+            5000,
+        )
+        .await?
+        {
+            upgrade_network::UpgradeReply::Observation { authority, pending } => {
+                Ok((authority, pending))
+            }
+            _ => Err("application upgrade observation reply differs".into()),
+        }
+    }
+
+    /// Abandons only a genuinely retained uncertain operation; active generations cannot roll back.
+    pub async fn abort_application_generation(
+        &self,
+        original_command_id: String,
+        command_id: String,
+    ) -> Result<ApplicationUpgradeAbort, String> {
+        let epoch = self.epoch().await?;
+        match transport::admin_upgrade(
+            &self.config,
+            self.leader,
+            self.tls.clone(),
+            upgrade_network::UpgradeWire::Abort {
+                epoch,
+                original_command_id,
+                command_id,
+            },
+            15000,
+        )
+        .await?
+        {
+            upgrade_network::UpgradeReply::Aborted(receipt) => Ok(receipt),
+            _ => Err("application upgrade abandonment did not return its original receipt".into()),
+        }
+    }
+
     /// Submits only the closed request; the leader independently collects actual TLS evidence.
     pub async fn rotate_certificate(
         &self,
@@ -436,7 +509,7 @@ impl ReplicaConfig {
                 && self.tls.is_none())
             || self.application_schema.trim().is_empty()
             || (self.streams_content()
-                && self.application_schema != state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA)
+                && !supports_application_generation(&self.application_schema))
             || self.application_policy_digest.trim().is_empty()
             || self
                 .shared_secret
@@ -536,6 +609,9 @@ pub struct ReplicaNode {
     pub(crate) tls: Option<Arc<tls::TlsMaterial>>,
     /// Explicit owned-profile observation window; legacy constructors retain one original query.
     quorum_observation_ms: Option<u64>,
+    /// Actual locally configured next executable and original infrastructure executable digest.
+    upgrade_binary:
+        Arc<std::sync::RwLock<BTreeMap<String, (upgrades::LocalUpgradeBinary, String)>>>,
 }
 
 impl ReplicaNode {
@@ -721,6 +797,9 @@ impl ReplicaNode {
             )
         };
         if config.streams_content() {
+            if crate::content::hex_digest(&config.application_policy_digest) {
+                store.bind_original_application_policy(&config.application_policy_digest)?;
+            }
             let original = store.clone();
             tokio::task::spawn_blocking(move || original.reconcile_snapshot_receives())
                 .await
@@ -813,6 +892,7 @@ impl ReplicaNode {
             member_writer: Arc::new(tokio::sync::Mutex::new(())),
             network_online,
             config: Arc::new(config),
+            upgrade_binary: Arc::new(std::sync::RwLock::new(BTreeMap::new())),
             raft,
             store,
             tls,
@@ -883,6 +963,21 @@ impl ReplicaNode {
 
     /// Confirms infrastructure epoch/quorum and the original transfer fence; content child ingress is separate.
     pub async fn check_epoch(&self, epoch: ControllerEpoch) -> Result<(), String> {
+        if self.store.application_upgrade_blocks()? {
+            return Err("application authority is fenced by original upgrade intent".into());
+        }
+        self.check_infrastructure_epoch(epoch).await?;
+        if self.store.application_upgrade_blocks()? {
+            return Err("application upgrade was admitted during the original quorum check".into());
+        }
+        Ok(())
+    }
+
+    /// Confirms only original infrastructure epoch/quorum; this grants no fenced application effect.
+    pub(crate) async fn check_infrastructure_epoch(
+        &self,
+        epoch: ControllerEpoch,
+    ) -> Result<(), String> {
         self.check_source_transfer_fence()?;
         self.check_consensus_epoch(epoch).await?;
         self.check_source_transfer_fence()
@@ -1409,10 +1504,11 @@ impl ReplicaNode {
 
     /// Holds owned application processes until an original operation has independent completion.
     pub fn leader_transfer_blocks_controller(&self) -> Result<bool, String> {
-        Ok(self
-            .store
-            .leader_transfer_record()?
-            .is_some_and(|record| !matches!(record.state.as_str(), "completed" | "rejected")))
+        Ok(self.store.application_upgrade_blocks()?
+            || self
+                .store
+                .leader_transfer_record()?
+                .is_some_and(|record| !matches!(record.state.as_str(), "completed" | "rejected")))
     }
 
     /// Returns whether an envelope sender is a current member or a configured bootstrap voter.

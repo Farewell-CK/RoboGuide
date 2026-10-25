@@ -33,6 +33,9 @@ pub(super) struct Status {
     /// Bounded actual consensus/storage failure; absence is not readiness or complete content proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) raft_error: Option<String>,
+    /// Bounded unexpected application failure; infrastructure remains available for explicit repair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) application_error: Option<String>,
 }
 
 /// Owns exactly one child and the epoch under which it was originally started.
@@ -73,7 +76,11 @@ async fn start_controller(
         .open(directory.join(format!("controller-term-{}.log", epoch.term)))
         .map_err(|error| error.to_string())?;
     let error_output = output.try_clone().map_err(|error| error.to_string())?;
-    let mut command = Command::new(&configuration.controller_binary);
+    let upgraded_binary = node.active_application_upgrade_binary().await?;
+    let selected_binary = upgraded_binary
+        .as_deref()
+        .unwrap_or(&configuration.controller_binary);
+    let mut command = Command::new(selected_binary);
     command
         .env_clear()
         .envs(&configuration.controller_environment)
@@ -242,10 +249,13 @@ async fn write_status(
     node: &ReplicaNode,
     epoch: Option<ControllerEpoch>,
     owned: &Option<OwnedController>,
+    application_error: Option<&str>,
 ) -> Result<(), String> {
     let node = node.clone();
     let directory = configuration.storage_directory.clone();
     let child_pid = owned.as_ref().and_then(|controller| controller.child.id());
+    let application_error =
+        application_error.map(|error| error.chars().take(1024).collect::<String>());
     tokio::task::spawn_blocking(move || {
         let status = Status {
             observed_unix_ms: crate::metrics::unix_ms()?,
@@ -255,6 +265,7 @@ async fn write_status(
             revision: node.accepted_revision()?,
             transport: Some(node.transport_snapshot()),
             raft_error: node.infrastructure_error(),
+            application_error,
         };
         let temporary = directory.join("status.pending.json");
         std::fs::write(
@@ -275,7 +286,11 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
         .as_ref()
         .is_some_and(|content| content.initialization.is_some())
     {
-        let mut command = Command::new(&configuration.controller_binary);
+        let selected_binary = configuration
+            .application_upgrade
+            .as_ref()
+            .map_or(&configuration.controller_binary, |upgrade| &upgrade.binary);
+        let mut command = Command::new(selected_binary);
         command
             .arg("--replica-initialization-contract")
             .env_clear()
@@ -327,7 +342,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
     )?;
     let (node, _server) = if let Some(content) = &configuration.content {
         let root = if matches!(
-            configuration.schema.as_str(),
+            configuration.base_process_schema(),
             "roboguide.controller-replica-process/v0.6"
                 | "roboguide.controller-replica-process/v0.7"
         ) {
@@ -337,14 +352,16 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                 configuration.replica.replica_id,
                 content.restore_binding_digest.as_deref(),
             )
-        } else if configuration.schema == "roboguide.controller-replica-process/v0.5" {
+        } else if configuration.base_process_schema() == "roboguide.controller-replica-process/v0.5"
+        {
             controller_replication::ReplicaContentStore::open_with_reclamation(
                 &content.root,
                 &configuration.replica.profile_identity(),
                 configuration.replica.replica_id,
                 content.restore_binding_digest.as_deref(),
             )
-        } else if configuration.schema == "roboguide.controller-replica-process/v0.4" {
+        } else if configuration.base_process_schema() == "roboguide.controller-replica-process/v0.4"
+        {
             controller_replication::ReplicaContentStore::open_with_snapshot_receives(
                 &content.root,
                 &configuration.replica.profile_identity(),
@@ -366,7 +383,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                 ),
             }
         }?;
-        if configuration.schema == "roboguide.controller-replica-process/v0.7" {
+        if configuration.base_process_schema() == "roboguide.controller-replica-process/v0.7" {
             ReplicaNode::start_with_content_initialization(
                 configuration.replica.clone(),
                 &configuration.storage_directory.join("replica.sqlite3"),
@@ -396,6 +413,14 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
         )
         .await?
     };
+    if let Some(upgrade) = &configuration.application_upgrade {
+        node.configure_application_upgrade_binary(&upgrade.binary, upgrade.target.clone())
+            .await?;
+        for retained in &upgrade.retained_binaries {
+            node.configure_application_upgrade_binary(&retained.binary, retained.target.clone())
+                .await?;
+        }
+    }
     node.enable_controller_supervision()?;
     let _content_ingress = if let Some(content) = &configuration.content {
         Some(node.serve_controller_ingress(&content.socket).await?)
@@ -403,6 +428,8 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
         None
     };
     let mut owned = None;
+    let mut failed_generation: Option<(ControllerEpoch, u64)> = None;
+    let mut application_error: Option<String> = None;
     let metrics_task = crate::metrics::start(
         configuration.metrics_address,
         configuration.storage_directory.join("status.json"),
@@ -440,11 +467,17 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     None => None,
                 };
                 let child_dead = child_exit.is_some();
+                let generation = node.application_upgrade_authority()?.map_or(0, |authority| authority.receipts.len() as u64);
+                if child_dead && let Some(controller) = &owned {
+                    failed_generation = Some((controller.epoch, generation));
+                    application_error = Some(format!("original application exited unexpectedly: {child_exit:?}; explicit supervisor restart or a new activation/epoch is required"));
+                }
                 if child_dead || owned.as_ref().is_some_and(|controller| Some(controller.epoch) != current) {
                     eprintln!("Stopping owned Controller: exit_status={child_exit:?}, current_epoch={current:?}");
                     stop_controller(&mut owned, &node).await?;
                 }
                 let _transfer_reconciled = node.reconcile_leader_transfer().await?;
+                node.reconcile_application_upgrade_drains().await?;
                 if initialization_task.as_ref().is_some_and(|task| task.is_finished()) {
                     let task = initialization_task.take().ok_or("original initialization task disappeared")?;
                     let result = task.await.map_err(|error| error.to_string())?;
@@ -460,6 +493,11 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                 if let Some(content) = &configuration.content
                     && let Some(policy) = &content.initialization
                     && revision == 0 {
+                    if let Some(upgrade) = &configuration.application_upgrade
+                        && node.application_upgrade_authority()?.as_ref().is_none_or(|authority| authority.active_schema() != upgrade.target.application_schema) {
+                        write_status(&configuration, &node, current, &owned, application_error.as_deref()).await?;
+                        continue;
+                    }
                     if let Some(epoch) = current {
                         if epoch.replica_id == policy.source_member && !initialization_started {
                             initialization_started = true;
@@ -475,7 +513,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                             }
                         }
                     }
-                    write_status(&configuration, &node, current, &owned).await?;
+                    write_status(&configuration, &node, current, &owned, application_error.as_deref()).await?;
                     continue;
                 }
                 if !leader_transfer_attempted
@@ -507,6 +545,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                 if owned.is_none()
                     && !transfer_blocks
                     && let Some(epoch) = current
+                    && failed_generation != Some((epoch, generation))
                 {
                     configuration.validate()?;
                     if configuration.content.is_some() && revision > 0 {
@@ -516,7 +555,7 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                         };
                         if let Err(error)=ready{
                             eprintln!("original complete content not ready before Controller spawn: {error}");
-                            write_status(&configuration,&node,None,&owned).await?;
+                            write_status(&configuration,&node,None,&owned,application_error.as_deref()).await?;
                             continue;
                         }
                     }
@@ -529,19 +568,33 @@ pub(super) async fn run(configuration: ProcessConfig) -> Result<(), String> {
                     };
                     let schema = configuration.replica.application_schema.clone();
                     let profile = node.profile_identity();
-                    tokio::task::spawn_blocking(move || {
+                    let prepared = tokio::task::spawn_blocking(move || {
                         let view = projected_node.accepted_view()?;
-                        materialize(&directory, &view, format, &schema, &profile)
+                        view.validate_for_materialization(&schema, &profile)?;
+                        let original_schema = view.checkpoint.as_ref().map_or(schema.as_str(), |checkpoint| checkpoint.schema.as_str());
+                        materialize(&directory, &view, format, original_schema, &profile)
                     })
-                        .await.map_err(|error| error.to_string())??;
+                        .await.map_err(|error| error.to_string())?;
+                    if let Err(error) = prepared {
+                        failed_generation = Some((epoch, generation));
+                        application_error = Some(format!("original application projection refused: {error}"));
+                        write_status(&configuration, &node, current, &owned, application_error.as_deref()).await?;
+                        continue;
+                    }
                     if node.check_epoch(epoch).await.is_ok() {
                         if let Some(result) = ready_shutdown(shutdown_signal.as_mut()).await {
                             break result.map_err(|error| error.to_string());
                         }
-                        owned = Some(start_controller(&configuration, &node, epoch).await?);
+                        match start_controller(&configuration, &node, epoch).await {
+                            Ok(controller) => { owned = Some(controller); application_error = None; },
+                            Err(error) => {
+                                failed_generation = Some((epoch, generation));
+                                application_error = Some(format!("original application startup refused: {error}"));
+                            }
+                        }
                     }
                 }
-                write_status(&configuration, &node, current, &owned).await?;
+                write_status(&configuration, &node, current, &owned, application_error.as_deref()).await?;
             }
         }
     };

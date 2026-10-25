@@ -90,7 +90,7 @@ pub(crate) fn new_process_instance() -> Result<String, String> {
 }
 
 /// Checks exact UUID syntax without treating it as hardware or manufacturer attestation.
-fn valid_instance(instance: &str) -> bool {
+pub(crate) fn valid_instance(instance: &str) -> bool {
     instance.len() == 36
         && instance.bytes().enumerate().all(|(index, byte)| {
             if [8, 13, 18, 23].contains(&index) {
@@ -197,6 +197,71 @@ pub(crate) fn require_retained_process(
         .any(|record| record.process.as_ref() == Some(process))
     {
         return Err("original Controller ingress lost its exact retained process journal".into());
+    }
+    Ok(())
+}
+
+/// Freezes the original complete process-journal prefix under the same actual upgrade writer.
+pub(crate) fn freeze_upgrade_process(
+    connection: &rusqlite::Connection,
+    epoch: ControllerEpoch,
+) -> Result<(Option<ControllerProcessIdentity>, u64), String> {
+    if read_meta::<bool>(connection, LEGACY_CONTINUITY_KEY).map_err(|error| error.to_string())?
+        != Some(false)
+    {
+        return Err("original process continuity is unknown during upgrade".into());
+    }
+    let records = history(connection)?;
+    if records.iter().any(|record| {
+        record.outcome.is_none() && (record.epoch != epoch || record.process.is_none())
+    }) {
+        return Err("spawning or foreign-epoch child lacks original wait proof".into());
+    }
+    let process = records
+        .iter()
+        .rev()
+        .find(|record| record.epoch == epoch)
+        .and_then(|record| record.process.clone());
+    Ok((process, records.len() as u64))
+}
+
+/// Joins a retained upgrade's original prefix and wait evidence without consulting a replacement PID.
+pub(crate) fn validate_upgrade_process(
+    connection: &rusqlite::Connection,
+    epoch: ControllerEpoch,
+    process: Option<&ControllerProcessIdentity>,
+    head: u64,
+    proof: Option<&ControllerDrainProof>,
+) -> Result<(), String> {
+    let records = history(connection)?;
+    let prefix = records
+        .get(..usize::try_from(head).map_err(|error| error.to_string())?)
+        .ok_or("original upgrade process journal prefix is absent")?;
+    let expected = prefix
+        .iter()
+        .rev()
+        .find(|record| record.epoch == epoch)
+        .and_then(|record| record.process.as_ref());
+    if expected != process
+        || (process.is_none() && prefix.iter().any(|record| record.outcome.is_none()))
+    {
+        return Err("original upgrade process/prefix differs from retained actual journal".into());
+    }
+    if let Some(proof) = proof {
+        proof.validate(epoch)?;
+        match (process, proof) {
+            (Some(process), ControllerDrainProof::ProcessExit { outcome })
+                if prefix.iter().any(|record| {
+                    record.process.as_ref() == Some(process)
+                        && record.outcome.as_ref() == Some(outcome)
+                }) => {}
+            (None, ControllerDrainProof::NoApplicationProcess { .. }) => {}
+            _ => {
+                return Err(
+                    "upgrade stop receipt lacks its exact original independent OS wait".into(),
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -334,6 +399,9 @@ impl SqliteRaftStore {
             return Err("Controller spawn requires its original supervised store".into());
         }
         let mut records = history(&transaction)?;
+        if Self::upgrade_blocks(&transaction)? {
+            return Err("Controller spawn is fenced by original application upgrade".into());
+        }
         if read_meta::<Vec<LeaderTransferRecord>>(&transaction, "leader_transfers_v2")
             .map_err(|error| error.to_string())?
             .is_none_or(|records| {

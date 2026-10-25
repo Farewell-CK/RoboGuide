@@ -427,7 +427,16 @@ async fn handle(stream: tokio::net::UnixStream, node: ReplicaNode, pid: u32) -> 
                 }
                 ChildCommand::View => {
                     fence(&node, &peer).await?;
-                    let view = node.store.network_view().await?;
+                    let mut view = node.store.network_view().await?;
+                    if view
+                        .application_upgrade
+                        .as_ref()
+                        .is_some_and(|authority| authority.receipts.is_empty())
+                    {
+                        // Original children keep their old DTO when only infrastructure abandonment occurred.
+                        // The full committed history remains in Raft/storage/admin observation.
+                        view.application_upgrade = None;
+                    }
                     peer_process(&node, peer).await?;
                     write(&mut stream, &ChildReply::View(Box::new(view)), &node).await
                 }

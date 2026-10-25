@@ -200,14 +200,15 @@ impl SqliteRaftStore {
         let version: i64 = transaction
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|error| error.to_string())?;
-        if version
-            != if self.initialization_content {
-                INITIALIZATION_CONTENT_VERSION
-            } else if self.controller_content {
-                CONTROLLER_CONTENT_VERSION
-            } else {
-                NETWORK_CONTENT_VERSION
-            }
+        let base_parent = if self.initialization_content {
+            INITIALIZATION_CONTENT_VERSION
+        } else if self.controller_content {
+            CONTROLLER_CONTENT_VERSION
+        } else {
+            NETWORK_CONTENT_VERSION
+        };
+        if (version != base_parent
+            && !(self.controller_content && version == crate::upgrades::STORAGE_VERSION))
             || read_meta::<String>(&transaction, NETWORK_CONTENT_KEY)
                 .map_err(|error| error.to_string())?
                 .as_deref()
@@ -217,6 +218,9 @@ impl SqliteRaftStore {
                 != Some((self.profile.clone(), self.application_schema.clone()))
         {
             return Err("original readonly network generation/profile is unavailable".into());
+        }
+        if version == crate::upgrades::STORAGE_VERSION {
+            crate::upgrades::validate_storage(&transaction, base_parent, &self.application_schema)?;
         }
         if self.controller_content {
             crate::controller_ingress::require_marker(&transaction)?;

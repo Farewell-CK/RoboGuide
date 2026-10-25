@@ -921,6 +921,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args().skip(1).peekable();
     if arguments
         .peek()
+        .is_some_and(|argument| argument == "--application-upgrade-contract")
+    {
+        arguments.next();
+        if arguments.next().is_some() {
+            return Err("upgrade contract inspection accepts no storage or configuration".into());
+        }
+        println!("roboguide.application-upgrade/v0.1");
+        return Ok(());
+    }
+    if arguments
+        .peek()
         .is_some_and(|argument| argument == "--replica-initialization-contract")
     {
         arguments.next();
@@ -1299,19 +1310,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(error) =
                 validate_replication_checkpoint(&saved, event_log.replication_profile())
             {
-                if saved.replication_profile.is_some() || saved.schema != SERVER_CHECKPOINT_SCHEMA {
-                    return Err(error.into());
-                }
                 let source = replica_fence
                     .as_ref()
                     .and_then(|fence| fence.content_reader())
-                    .ok_or(error)?;
+                    .ok_or_else(|| error.clone())?;
                 let original = checkpoint.clone();
-                tokio::task::spawn_blocking(move || {
-                    source.require_initialization_checkpoint(&original)
-                })
-                .await??;
-                adopted_initialization = true;
+                if saved.replication_profile.is_none() {
+                    tokio::task::spawn_blocking(move || {
+                        source.require_initialization_checkpoint(&original)
+                    })
+                    .await??;
+                    adopted_initialization = true;
+                } else if saved.replication_profile.as_deref() == event_log.replication_profile()
+                    && controller_replication::supports_application_generation(&saved.schema)
+                {
+                    tokio::task::spawn_blocking(move || {
+                        source.require_generation_upgrade_checkpoint(&original)
+                    })
+                    .await??;
+                } else {
+                    return Err(error.into());
+                }
             }
             application::validate_isolation_checkpoint_schema(&saved)?;
             application::federation::validate_wrapper(&saved)?;
