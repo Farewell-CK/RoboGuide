@@ -172,6 +172,54 @@ def test_original_uncertain_request_is_not_completed_or_rewritten() -> None:
     assert value == before
 
 
+@pytest.mark.parametrize("budget", [100, 10001, 30000])
+def test_explicit_budget_upgrade_keeps_original_unknown_and_clock(budget: int) -> None:
+    """A new profile is readonly history, never a renewal of an old uncertain request."""
+    value = original_intent()
+    modern = copy.deepcopy(value["profiles"]["1"])
+    modern.update(
+        schema_version="roboguide.federation-peers/v0.2",
+        budget_scope="intent-publication-and-peer-io",
+        revision=2,
+        request_budget_ms=budget,
+    )
+    value["profiles"]["2"] = modern
+    before = copy.deepcopy(value)
+    _coordinator(value)
+    assert value == before
+
+
+@pytest.mark.parametrize(
+    "damage", ["legacy-range", "missing-scope", "wrong-scope", "new-range", "downgrade"]
+)
+def test_request_budget_contract_refuses_shape_changes_and_downgrade(damage: str) -> None:
+    """Do not interpret new request limits under old authority or erase original generations."""
+    value = original_intent()
+    modern = copy.deepcopy(value["profiles"]["1"])
+    modern.update(
+        schema_version="roboguide.federation-peers/v0.2",
+        budget_scope="intent-publication-and-peer-io",
+        revision=2,
+        request_budget_ms=30000,
+    )
+    value["profiles"]["2"] = modern
+    if damage == "legacy-range":
+        value["profiles"]["1"]["request_budget_ms"] = 10001
+    elif damage == "missing-scope":
+        del modern["budget_scope"]
+    elif damage == "wrong-scope":
+        modern["budget_scope"] = "peer-io-only"
+    elif damage == "new-range":
+        modern["request_budget_ms"] = 30001
+    else:
+        value["profiles"]["3"] = copy.deepcopy(value["profiles"]["1"])
+        value["profiles"]["3"]["revision"] = 3
+    before = copy.deepcopy(value)
+    with pytest.raises(ValueError):
+        _coordinator(value)
+    assert value == before
+
+
 @pytest.mark.parametrize("damage", ["wire", "nonce", "profile", "decision", "release", "budget"])
 def test_original_global_identity_cannot_be_replaced(damage: str) -> None:
     """Refuse changed effect bytes, borrowed peer authority and invented phase completion."""

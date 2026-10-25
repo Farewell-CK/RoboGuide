@@ -344,6 +344,9 @@ def _profiles(profiles: dict[str, Any]) -> None:
     for index, (key, profile) in enumerate(
         sorted(profiles.items(), key=lambda item: int(item[0])), 1
     ):
+        if not isinstance(profile, dict):
+            raise ValueError("original peer profile is not an object")
+        modern = profile.get("schema_version") == "roboguide.federation-peers/v0.2"
         _closed(
             profile,
             {
@@ -354,22 +357,26 @@ def _profiles(profiles: dict[str, Any]) -> None:
                 "max_drift_ppm",
                 "request_budget_ms",
                 "peers",
-            },
+            }
+            | ({"budget_scope"} if modern else set()),
         )
         if (
             str(index) != key
             or profile["revision"] != index
-            or profile["schema_version"] != "roboguide.federation-peers/v0.1"
+            or profile["schema_version"]
+            not in {"roboguide.federation-peers/v0.1", "roboguide.federation-peers/v0.2"}
+            or (modern and profile["budget_scope"] != "intent-publication-and-peer-io")
             or not profile["profile_id"]
             or not _integer(profile["max_drift_ppm"], 1000)
-            or not _integer(profile["request_budget_ms"], 10_000)
+            or not _integer(profile["request_budget_ms"], 30_000 if modern else 10_000)
             or profile["request_budget_ms"] < 100
             or not 2 <= len(profile["peers"]) <= 16
             or profile["local_domain"] not in profile["peers"]
         ):
             raise ValueError("original peer profile identity, budget or revision differs")
         if previous is not None and (
-            profile["profile_id"] != previous["profile_id"]
+            (previous["schema_version"] == "roboguide.federation-peers/v0.2" and not modern)
+            or profile["profile_id"] != previous["profile_id"]
             or profile["local_domain"] != previous["local_domain"]
             or not set(previous["peers"]) <= set(profile["peers"])
         ):

@@ -20,8 +20,32 @@ pub(crate) struct Profile {
     max_drift_ppm: u64,
     /// Per-request original owned network budget.
     request_budget_ms: u64,
+    /// Explicit v0.2 SQL-publication/I/O interpretation; old closed decoders refuse this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    budget_scope: Option<String>,
     /// Exact independently declared participant endpoints and actual TLS inputs.
     peers: BTreeMap<String, Peer>,
+}
+
+impl Profile {
+    /// Validates retained shape without requiring historical private credentials to remain mounted.
+    fn validate_shape(&self) -> Result<(), String> {
+        let maximum = match (self.schema_version.as_str(), self.budget_scope.as_deref()) {
+            ("roboguide.federation-peers/v0.1", None) => 10_000,
+            ("roboguide.federation-peers/v0.2", Some("intent-publication-and-peer-io")) => 30_000,
+            _ => return Err("unsupported explicit Federation request-budget contract".into()),
+        };
+        if self.profile_id.is_empty()
+            || self.revision == 0
+            || !(2..=16).contains(&self.peers.len())
+            || !self.peers.contains_key(&self.local_domain)
+            || self.max_drift_ppm > 1000
+            || !(100..=maximum).contains(&self.request_budget_ms)
+        {
+            return Err("invalid explicit Federation peer profile".into());
+        }
+        Ok(())
+    }
 }
 
 /// Reads a closed explicit profile without leaking key bytes or inventing default peers.
@@ -40,17 +64,11 @@ pub(crate) fn configured() -> Result<Option<Profile>, String> {
         return Err("Federation peer profile exceeds bound".into());
     }
     let profile: Profile = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-    if profile.schema_version != "roboguide.federation-peers/v0.1"
-        || profile.profile_id.is_empty()
-        || profile.revision == 0
-        || !(2..=16).contains(&profile.peers.len())
-        || !profile.peers.contains_key(&profile.local_domain)
-        || profile.max_drift_ppm > 1000
-        || !(100..=10_000).contains(&profile.request_budget_ms)
-        || profile.local_domain
-            != configured_policy()?
-                .ok_or("Federation authorization is absent")?
-                .local_domain
+    profile.validate_shape()?;
+    if profile.local_domain
+        != configured_policy()?
+            .ok_or("Federation authorization is absent")?
+            .local_domain
     {
         return Err("invalid explicit Federation peer profile".into());
     }
@@ -271,11 +289,13 @@ impl Work {
 
 /// Installs only an exact unchanged or consecutive same-root peer profile, retaining old source facts.
 fn install_profile(state: &mut State, profile: Profile) -> Result<(), String> {
+    profile.validate_shape()?;
     if let Some((revision, previous)) = state.profiles.last_key_value() {
         if previous == &profile {
             return Ok(());
         }
-        if revision.checked_add(1) != Some(profile.revision)
+        if previous.schema_version.ends_with("/v0.2") && !profile.schema_version.ends_with("/v0.2")
+            || revision.checked_add(1) != Some(profile.revision)
             || previous.profile_id != profile.profile_id
             || previous.local_domain != profile.local_domain
             || !previous
@@ -1041,6 +1061,65 @@ pub(crate) fn validate(controller: &ControllerState) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Builds a synthetic shape-only profile; no endpoint or credential is admitted as real.
+    fn profile() -> Profile {
+        let peer = serde_json::json!({
+            "address":"127.0.0.1:1","server_name":"localhost",
+            "server_leaf":"synthetic","ca_file":"/synthetic/ca","ca_digest":"synthetic",
+            "client_cert":"/synthetic/cert","client_leaf":"synthetic",
+            "client_key":"/synthetic/key","principal_id":"synthetic-principal"
+        });
+        serde_json::from_value(serde_json::json!({
+            "schema_version":"roboguide.federation-peers/v0.1","profile_id":"synthetic",
+            "revision":1,"local_domain":"synthetic-a","max_drift_ppm":100,
+            "request_budget_ms":10_000,"peers":{"synthetic-a":peer,"synthetic-b":peer}
+        }))
+        .unwrap()
+    }
+
+    /// A longer request needs the exact opted-in contract, never a legacy range relaxation.
+    #[test]
+    fn request_budget_requires_exact_explicit_generation_and_scope() {
+        let mut value = profile();
+        assert!(value.validate_shape().is_ok());
+        value.request_budget_ms = 10_001;
+        assert!(value.validate_shape().is_err());
+        value.schema_version = "roboguide.federation-peers/v0.2".into();
+        assert!(value.validate_shape().is_err());
+        value.budget_scope = Some("intent-publication-and-peer-io".into());
+        value.request_budget_ms = 30_000;
+        assert!(value.validate_shape().is_ok());
+        value.request_budget_ms = 30_001;
+        assert!(value.validate_shape().is_err());
+        value.request_budget_ms = 100;
+        value.budget_scope = Some("peer-io-only".into());
+        assert!(value.validate_shape().is_err());
+        value.budget_scope = None;
+        value.schema_version = "roboguide.federation-peers/v0.1".into();
+        value.request_budget_ms = 99;
+        assert!(value.validate_shape().is_err());
+    }
+
+    /// Profile upgrade preserves the original row and refuses downgrade without any mutation.
+    #[test]
+    fn explicit_budget_upgrade_retains_original_and_cannot_downgrade() {
+        let original = profile();
+        let mut state = State::default();
+        install_profile(&mut state, original.clone()).unwrap();
+        let mut modern = original.clone();
+        modern.revision = 2;
+        modern.schema_version = "roboguide.federation-peers/v0.2".into();
+        modern.budget_scope = Some("intent-publication-and-peer-io".into());
+        modern.request_budget_ms = 30_000;
+        install_profile(&mut state, modern).unwrap();
+        assert_eq!(state.profiles[&1], original);
+        let before = serde_json::to_value(&state).unwrap();
+        let mut downgrade = original;
+        downgrade.revision = 3;
+        assert!(install_profile(&mut state, downgrade).is_err());
+        assert_eq!(serde_json::to_value(&state).unwrap(), before);
+    }
 
     /// An actual owned TCP listener receives no connection after the original SQL intent expires.
     #[test]

@@ -251,23 +251,13 @@ def recover(cases: list[ReplicatedCase], output: Path) -> dict[str, Any]:
                 reader.boot()
             for index, reader in enumerate(readers):
                 original = cases[index]
-                transactions = []
-                expected: dict[str, Any] = {}
-                # Read only the exact original completed and uncertain application records.
-                for config in original.configurations.values():
-                    path = Path(config["storage_directory"]) / "controller.sqlite3"
-                    if not path.exists():
-                        continue
-                    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as sql:
-                        wrapper = json.loads(
-                            sql.execute(
-                                "SELECT checkpoint_json FROM controller_checkpoint"
-                            ).fetchone()[0]
-                        )
-                    transactions = list(wrapper["federation"]["coordinations"]["transactions"])
-                    if transactions:
-                        expected = wrapper["federation"]["coordinations"]["transactions"]
-                        break
+                # The actual final leader was sampled before drain. An arbitrary older child's
+                # nonempty SQL is insufficient to cover every original global transaction.
+                wrapper = json.loads(
+                    (original.root / "final-original-application.json").read_bytes()
+                )
+                expected = wrapper["federation"]["coordinations"]["transactions"]
+                transactions = list(expected)
                 views = [
                     reader.exchange("/v1/federation/transactions/" + identity)
                     for identity in transactions

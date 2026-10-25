@@ -180,9 +180,11 @@ def configure(
     request_budget_ms: int = 3000,
     transaction_budget_ms: int = 120000,
     max_clock_uncertainty_ms: int = 1500,
+    peer_schema: str = "roboguide.federation-peers/v0.1",
 ) -> tuple[dict[str, Any], ReplyLoss | None]:
     """Bind declared domains to actual independent endpoints and TLS credentials."""
-    assert 100 <= request_budget_ms <= 10000
+    assert peer_schema in {"roboguide.federation-peers/v0.1", "roboguide.federation-peers/v0.2"}
+    assert 100 <= request_budget_ms <= (30000 if peer_schema.endswith("/v0.2") else 10000)
     assert 1000 <= transaction_budget_ms <= 300000
     assert 1 <= max_clock_uncertainty_ms <= 10000
     assert max_clock_uncertainty_ms < transaction_budget_ms
@@ -232,7 +234,7 @@ def configure(
     if relay is not None:
         threading.Thread(target=relay.serve_forever, daemon=True).start()
     profile = {
-        "schema_version": "roboguide.federation-peers/v0.1",
+        "schema_version": peer_schema,
         "profile_id": uuid.uuid4().hex,
         "revision": 1,
         "local_domain": domains[0],
@@ -254,6 +256,8 @@ def configure(
             for index, (domain, case) in enumerate(zip(domains, cases, strict=True))
         },
     }
+    if peer_schema.endswith("/v0.2"):
+        profile["budget_scope"] = "intent-publication-and-peer-io"
     path = coordinator.root / "federation-peers.json"
     save(path, profile)
     coordinator.environment["ROBOGUIDE_FEDERATION_PEERS"] = str(path)

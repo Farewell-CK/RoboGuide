@@ -82,7 +82,22 @@ impl FederationInputs {
         }
         let peers = self.peers.as_deref().map(document).transpose()?;
         if peers.as_ref().is_some_and(|(_, profile)| {
-            profile["schema_version"] != "roboguide.federation-peers/v0.1"
+            let limit = match profile["schema_version"].as_str() {
+                Some("roboguide.federation-peers/v0.1")
+                    if profile.get("budget_scope").is_none() =>
+                {
+                    10_000
+                }
+                Some("roboguide.federation-peers/v0.2")
+                    if profile["budget_scope"] == "intent-publication-and-peer-io" =>
+                {
+                    30_000
+                }
+                _ => return true,
+            };
+            profile["request_budget_ms"]
+                .as_u64()
+                .is_none_or(|budget| !(100..=limit).contains(&budget))
                 || profile["local_domain"].as_str() != Some(self.domain.as_str())
         }) {
             return Err(

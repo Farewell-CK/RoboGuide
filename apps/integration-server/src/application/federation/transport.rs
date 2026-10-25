@@ -114,7 +114,7 @@ pub(crate) fn request(
     budget_ms: u64,
 ) -> Result<Reply, String> {
     if budget_ms == 0
-        || budget_ms > 10_000
+        || budget_ms > 30_000
         || !path.starts_with("/v1/federation/")
         || path.bytes().any(|value| matches!(value, b'\r' | b'\n'))
         || tenant.bytes().any(|value| value.is_ascii_control())

@@ -194,7 +194,8 @@ class ReplicatedCase(FederatedCase):
 
     def boot(self) -> None:
         """Configure original Roots and real mTLS voters before enrolling any software Node."""
-        self.prepare_cluster()
+        if not self.configurations:
+            self.prepare_cluster()
         for member, config in self.configurations.items():
             path = self.root / f"configuration-{member}.json"
             save(path, config)

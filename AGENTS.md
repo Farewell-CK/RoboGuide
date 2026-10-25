@@ -1,3 +1,12 @@
+ADR-0217 adds explicit Federation peer profile v0.2 with mandatory
+`budget_scope=intent-publication-and-peer-io` and an original 100–30,000 ms request bound.
+Legacy v0.1 retains 100–10,000 ms and cannot carry the new field. SQL intent publication consumes
+the same original kernel budget as actual peer I/O; upgrade never renews existing intents,
+transaction clocks or Unknown. Profile downgrade refuses. The closed required field fences old
+application decoders; the genuine prior supervisor must reject actual new deployment inputs with
+unchanged original storage before any Node starts. Recovery validates both exact nested generations.
+No wrapper, Node or physical authority changes. See `0217-explicit-federation-request-budget.md`.
+
 ADR-0216 reuses only a successful `read_view` data frame on the same private SQLite connection.
 Actual total_changes/data_version/schema_version/user_version/journal mode are sampled before and
 after reuse; transactions, rollback, foreign writes, DDL and errors invalidate it. Fresh reads use

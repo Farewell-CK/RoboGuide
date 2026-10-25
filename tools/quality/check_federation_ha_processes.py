@@ -41,6 +41,44 @@ def next_manifest(original: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def previous_refusal(case: ReplicatedCase, previous: Path) -> dict[str, Any]:
+    """Require genuine old-code refusal before any owned storage changes."""
+    before = {
+        str(path): digest(path)
+        for member in case.configurations
+        for path in (case.root / ("member-" + str(member))).rglob("*")
+        if path.is_file()
+    }
+    member = next(iter(case.configurations))
+    arguments = [str(previous), str(case.root / f"configuration-{member}.json")]
+    actual = subprocess.run(arguments, capture_output=True, timeout=15, check=False)
+    record: dict[str, Any] = {
+        "binary": str(previous),
+        "binary_sha256": digest(previous),
+        "arguments": arguments,
+        "actual_exit": actual.returncode,
+        "stdout": actual.stdout.decode(),
+        "stderr": actual.stderr.decode(),
+        "original_storage_sha256": before,
+        "software_nodes": 0,
+        "devices": 0,
+    }
+    save(case.root / "previous-supervisor-refusal.json", record)
+    assert actual.returncode != 0 and "peer profile changed its declared domain/schema" in (
+        record["stdout"] + record["stderr"]
+    ), record
+    after = {
+        str(path): digest(path)
+        for member in case.configurations
+        for path in (case.root / ("member-" + str(member))).rglob("*")
+        if path.is_file()
+    }
+    assert after == before
+    record["storage_unchanged"] = True
+    save(case.root / "previous-supervisor-refusal.json", record)
+    return record
+
+
 def transfer(case: ReplicatedCase, label: str, target_member: int | None = None) -> dict[str, Any]:
     """Send one actual original V3 transfer and retain native source drain and real newer epoch."""
     source, before = case.current()
@@ -232,7 +270,12 @@ def rotate_replica_leaf(case: ReplicatedCase) -> dict[str, Any]:
 
 
 def run(
-    output: Path, supervisor: Path, storage: Path, controller: Path, node: Path
+    output: Path,
+    supervisor: Path,
+    storage: Path,
+    controller: Path,
+    node: Path,
+    previous_supervisor: Path,
 ) -> dict[str, Any]:
     """Retain actual independent domains through normal, partition, epoch and content cases."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -244,9 +287,10 @@ def run(
     manifest, relay = configure(
         cases,
         False,
-        request_budget_ms=10000,
+        request_budget_ms=30000,
         transaction_budget_ms=300000,
         max_clock_uncertainty_ms=10000,
+        peer_schema="roboguide.federation-peers/v0.2",
     )
     assert relay is not None
     result: dict[str, Any] = {
@@ -260,6 +304,7 @@ def run(
     }
     paths = [
         supervisor,
+        previous_supervisor,
         storage,
         cases[0].binary,
         cases[0].node_binary,
@@ -281,6 +326,9 @@ def run(
     save(output / "source-identity.json", identities)
     cleanup_errors: list[str] = []
     try:
+        for case in cases:
+            case.prepare_cluster()
+        result["previous_budget_profile_refusal"] = previous_refusal(cases[0], previous_supervisor)
         for case in reversed(cases):
             case.boot()
         root = cases[0]
@@ -293,9 +341,7 @@ def run(
         result["normal"] = finish(cases, manifest, [0, 0])
         save(output / "normal-global-proof.json", result["normal"])
         counts = [len(case.backend.jobs) for case in cases]
-        result["completed_private_archives"] = [
-            archive(case, "completed-prefix") for case in cases
-        ]
+        result["completed_private_archives"] = [archive(case, "completed-prefix") for case in cases]
         # Both actual domains retain original authority after independent real source drains.
         result["completed_transfers"] = [transfer(case, "completed") for case in cases]
         assert root.exchange(path)["global_completed"]
@@ -310,7 +356,7 @@ def run(
         relay.prepare_held.clear()
         relay.release_reply.clear()
         root.exchange("/v1/federation/transactions", interrupted)
-        wait_for(relay.prepare_held.is_set, "actual original remote Prepared before partition", 60)
+        wait_for(relay.prepare_held.is_set, "actual original remote Prepared before partition", 180)
         before = original_state(root)["federation"]["coordinations"]["transactions"][
             interrupted["transaction_id"]
         ]
@@ -374,6 +420,8 @@ def run(
         assert [len(case.backend.jobs) for case in cases] == counts
         relay.replace_tls(original_context)
         result["private_archives"] = [archive(case, "original") for case in cases]
+        for case in cases:
+            save(case.root / "final-original-application.json", original_state(case))
         assert identities == {str(path): digest(path) for path in paths}
         result["online_cases_passed"] = True
     finally:
@@ -402,7 +450,14 @@ def run(
 def main() -> None:
     """Require current real products and preserve every original actual failure/effect evidence."""
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ["output", "supervisor", "storage_probe", "controller", "node"]:
+    for name in [
+        "output",
+        "supervisor",
+        "storage_probe",
+        "controller",
+        "node",
+        "previous_supervisor",
+    ]:
         parser.add_argument("--" + name.replace("_", "-"), type=Path, required=True)
     args = parser.parse_args()
     if not run(
@@ -411,6 +466,7 @@ def main() -> None:
         args.storage_probe.resolve(strict=True),
         args.controller.resolve(strict=True),
         args.node.resolve(strict=True),
+        args.previous_supervisor.resolve(strict=True),
     )["passed"]:
         raise SystemExit(1)
 

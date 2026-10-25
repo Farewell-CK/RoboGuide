@@ -195,6 +195,17 @@ jobs:
           --example content_network_probe --example prepared_source_probe
           --example owned_content_source_probe
 
+      - name: Build genuine previous Federation supervisor for explicit budget refusal
+        env:
+          FEDERATION_PREVIOUS_COMMIT: a993121a23f166ba74316fd0f777820e3affcc6a
+        run: |
+          set -o pipefail
+          git fetch --no-tags origin "${FEDERATION_PREVIOUS_COMMIT}"
+          mkdir "${RUNNER_TEMP}/roboguide-federation-previous-source"
+          git archive "${FEDERATION_PREVIOUS_COMMIT}" | tar -x -C "${RUNNER_TEMP}/roboguide-federation-previous-source"
+          CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target" cargo build --release --locked --manifest-path "${RUNNER_TEMP}/roboguide-federation-previous-source/Cargo.toml" -p controller-replica
+          cp target/release/controller-replica "${RUNNER_TEMP}/roboguide-federation-previous-supervisor"
+
       - name: Build optimized real HA processes for their declared transport budgets
         run: cargo build --release --locked -p integration-server -p controller-replica -p roboguide-node
 
@@ -206,6 +217,7 @@ jobs:
           --controller target/release/integration-server
           --node target/release/roboguide-node
           --storage-probe target/debug/examples/content_stream_probe
+          --previous-supervisor "${RUNNER_TEMP}/roboguide-federation-previous-supervisor"
 
       - name: Verify actual original owned Unix and State content commits with zero Nodes
         run: >

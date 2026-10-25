@@ -69,10 +69,18 @@ Stage/Retire、错误 peer leaf pin、私有 Archive 和完整双域恢复。基
 连续性或长期 SLO。总体状态以[唯一执行队列](roboguide-software-completion-plan-2026-10-15.md)为准。
 
 该 HA 软件 profile 在首个命令前声明：两类 State export 间隔 1 秒，各自原 TTL 保持；
-每次跨域请求原预算 10 秒、全局事务原预算 300 秒、最大时钟区间宽度 10 秒。它是有界的
+每次跨域请求通过显式 peer profile v0.2 声明原预算 30 秒、全局事务原预算 300 秒、最大时钟区间宽度 10 秒。它是有界的
 部署输入，不能给已存在的事务、Unknown 或重启续期。原 standalone profile 仍为 3 秒 /
 120 秒 / 1.5 秒。原 HA 3 秒 profile 的排队超时保留为失败，不改写为后续配置的成功；
-软件延迟与长期 SLO 另按真实采样报告。
+软件延迟与长期 SLO 另按真实采样报告。原 v0.1 最高 10 秒的配置也保留其实际失败；
+正常执行、换主和在线归档曾通过，后续原请求超时不改写。新配置只对新声明生效。
+
+[ADR-0217](../decisions/0217-explicit-federation-request-budget.md)和
+[peer profile v0.2](../../contracts/control/federation-peers-v0.2/README.md)要求字段
+`budget_scope=intent-publication-and-peer-io`，明确 SQL publication 与 peer I/O 使用
+同一份不续期预算。原 v0.1 范围仍为 100–10,000 ms，v0.2 为 100–30,000 ms；
+必须显式选代次，禁止降级。真实旧 supervisor 在原存储上拒绝新配置，且不改动 SQL/CAS。
+旧闭合 application/recovery decoder 也不能把该新字段作为旧权限接受。
 
 独立目标测量在原 Runtime 完整报告 Completed 后重新读取真实文件；新证据在首次发送前
 声明 10 秒有效期，受原 verifier source 的 10 秒上限约束。已过期的旧测量仍不可用于完成，
