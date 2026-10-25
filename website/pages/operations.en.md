@@ -38,6 +38,8 @@ For explicit replication, check quorum/epoch, actual member leaves and original 
 
 Certificate rotation, binary/profile upgrade, cold recovery and online content recovery are separate procedures. Metadata quorum does not establish CAS or device continuity.
 
+[Application generation upgrades](docs/development/application-generation-upgrade-v0.1.md) explicitly use process v0.8, parent10 and recovery v0.25. Roll infrastructure first, then collect actual all-member support, original child waits and the complete predecessor before a separate activation. A failed application keeps the repair plane available. Observation never resends the original command; abandonment cannot undo activation, and same-schema repair refuses original/retired code. Complete recovery retains original upgrade, abort, budget and exit history without starting services.
+
 ## Incident order
 
 Preserve logs/receipts → inspect exact identity/session/attempt → determine current write authority → check original State/Memory budgets → use formal read-only observation/reconciliation → recover after original stop/revoke and policy gates. Repeating work cannot resolve uncertain side effects.

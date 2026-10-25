@@ -1,20 +1,20 @@
 # Implementation status and evidence limits
 
-[Historical retained-Log content catch-up](docs/development/acceptance/2026-10-24-retained-log-content-catchup.md) passed the stable-membership native restart/mTLS/SQL/Root/failover slice and independent original Log/pin/CAS checks. Network Snapshots, learner/joint membership, first admission of archived sources, complete GC/upgrade and all other non-release requirements remain required.
-
-
-[Complete Replica cold data recovery and native restart](docs/development/acceptance/2026-10-24-replica-content-cold-recovery.md) passed explicit v0.19, a second restore and three leaders' catchup/transfer/original-byte reads. Original intents/receipts, budgets and Unknown remain; zero Nodes/devices are added. Full online Archive/Snapshot/GC, absent historical-content routing, joint/upgrade/rollback and all other non-release matrices remain required.
-Content baseline: `815ffcd` (ADR-0177–0180), reviewed 2026-10-24; [Reference](reference.md) records the full code baseline. This table uses code and retained acceptance records. See the [October 22 audit](docs/development/roboguide-branch-audit-2026-10-22.md).
+Content baseline: `910054bb`, reviewed 2026-10-25. [Reference](reference.md) extracts current source versions.
+[Quantitative allocation](docs/development/acceptance/2026-10-25-quantitative-resources.md) and
+[application generation upgrades](docs/development/acceptance/2026-10-25-application-generation-upgrade.md)
+pass actual software process acceptance. The complete non-release scope and independent device,
+cross-host and long-term evidence requirements remain; SoftwareComplete is not declared.
 
 | Area | Existing software paths | Remaining or independently validated work |
 | --- | --- | --- |
 | MI / Orchestration | Clarification, Review, admission, DAG, satisfaction, versioned revision and automatic MI work | Complex topologies, other Memory types and composed fault matrix |
-| Control / quota | Match/Commit/Bind, calendar, recovery, atomic tenant/category quota and usage view | Divisible allocation, local enforcement of all resources, full space/time/cost evidence |
+| Control / quota | Match/Commit/Bind, exact quota/release, source-bound costs, explicit divisible Compute/Context envelopes, weighted calendar, Node grant admission and active-grant recovery | Complete time/space, other local enforcement and actual deployment GPU/traffic sources |
 | Runtime / stop | Attempts/generations, durable intents, relations, whole-Group stop and original-process exit proof | Running preemption, coupled Role migration, hazard/regrasp and device stopping |
 | State / verifier | Source policies, Belief lineage, TTL, original Task verifiers and CAS proof | Actual deployment sources, conflicts and continuous physical effects |
-| Memory / Spatial | Preparation/use/revoke/handoff, file algorithms, provider-local GC; original import Replica, Catalog/lineage, Snapshot/Archive references, relocated provider Snapshot retirement, Archive abort/private recipient GC, source upload retirement and offline GC over supported standalone reference closure | Complete Raft/online producer coverage, cross-host content and composed recovery |
-| Replica / recovery | Certificate rotation, original child drain, V3 transfer, inode/writer fences, supported quiescent bundles, qualified Root reads, Prepared recovery, cross-owner upload release and original recovery assessment | Root reader provenance, parent8/Root4 bundles, complete readiness/online recovery, upgrade/rollback, online GC and cross-host faults |
-| Federation | Durable Control sessions | Actual cross-domain transport, authorization, routing and dual-domain recovery |
+| Memory / Spatial | Preparation/use/revoke/handoff, file algorithms, provider-local GC; original import Replica, Catalog/lineage, Snapshot/Archive references, relocated provider Snapshot retirement, Archive abort/private recipient GC, source upload retirement and offline GC over supported standalone reference closure | Complete global Archive/reference coverage, typed-map handoff/revision/current-use/GC composition and cross-host content |
+| Replica / recovery | Certificate rotation, original child drain, V3 transfer, inode/writer fences, supported quiescent bundles, qualified Root reads, Prepared recovery, cross-owner upload release and original recovery assessment, Root8/parent10, Log/Snapshot/learners, final member GC, v55-to-v56 rolling/bad-target repair and v0.25 three-leader cold recovery | Complete global content/reference composition and cross-host fault matrix |
+| Federation | Actual independent participant HTTP, tenant/domain mTLS grants, original prepare/commit/abort receipts and restart reconciliation | Durable coordinator, real peer requests, resource/epoch and cross-host recovery; global dispatch remains disabled |
 | Operations | Write-disabled, committed views, recovery probes and short real monitoring checks | Remaining listener/blocking paths, complete runbooks, long-term SLO and overall exit criteria |
 
 Original content Archive and actual Catalog compaction/restart/cold recovery are recorded in [this acceptance](docs/development/acceptance/2026-10-22-original-content-archive.md). Storage v3 validates known consumers, original budgets and same-owner bytes together. These process checks create no device or external-model facts. The complete non-release remediation plan remains required.

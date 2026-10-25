@@ -16,7 +16,7 @@
 
 [参考页](reference.md)生成当前版本。按所需功能显式选择 config/Node Contract；`config/node.toml` 是保留的旧版基础示例，不会因新代码存在就获得 Memory 或安全代际权限。
 
-[Node catalog](https://github.com/Farewell-CK/RoboGuide/tree/main/contracts/node/v0.15)和[设备扩展规范](docs/extensions/device-extension-conformance-v0.2.md)解释具体字段。MCP/HTTP/gRPC 是本地 driver，不改变 Control/Runtime 权威。
+[Node catalog](https://github.com/Farewell-CK/RoboGuide/tree/main/contracts/node/v0.16)和[设备扩展规范](docs/extensions/device-extension-conformance-v0.2.md)解释具体字段。MCP/HTTP/gRPC 是本地 driver，不改变 Control/Runtime 权威。
 
 ## 添加独立验证
 

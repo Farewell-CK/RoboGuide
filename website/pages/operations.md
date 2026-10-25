@@ -38,6 +38,8 @@ PYTHONPATH=apps/recovery-tool python -m roboguide_recovery restore   --bundle /a
 
 证书轮换、binary/profile 升级、冷恢复、在线内容恢复是不同流程。不要因 metadata quorum 成立就声称 CAS 或设备连续性成立。
 
+[应用代次升级](docs/development/application-generation-upgrade-v0.1.md)显式使用 process v0.8、parent10 和 recovery v0.25：先滚动基础设施，再收集所有实际成员支持、原 child wait 和完整 predecessor，最后提交独立 activation。失败应用不关闭管理面；观察不重发原命令，显式放弃不能撤销已启用版本，同 schema 修复禁止原/退休代码回退。完整恢复保留原升级、放弃、预算和退出历史，不启动服务。
+
 ## 故障处置顺序
 
 保留原日志与 receipt → 检查 exact ID/session/attempt → 判定当前 authority 是否可写 → 核对 State 与 Memory 原期限 → 使用正式只读 observation/reconcile → 满足原 stop/revoke 与 policy 后恢复。禁止以“重新跑一次”消除未知副作用。

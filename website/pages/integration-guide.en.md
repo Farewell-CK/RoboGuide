@@ -16,7 +16,7 @@ Connect an existing Local EAIOS through Node Service without modifying RoboGuide
 
 [Reference](reference.md) generates current versions. Explicitly choose the config/Node Contract required by each feature. `config/node.toml` remains an older basic example and acquires no Memory or safety-generation permission from newer code.
 
-The [Node catalog](https://github.com/Farewell-CK/RoboGuide/tree/main/contracts/node/v0.15) and [extension specification](docs/extensions/device-extension-conformance-v0.2.md) document fields. Local MCP/HTTP/gRPC drivers do not change Control/Runtime authority.
+The [Node catalog](https://github.com/Farewell-CK/RoboGuide/tree/main/contracts/node/v0.16) and [extension specification](docs/extensions/device-extension-conformance-v0.2.md) document fields. Local MCP/HTTP/gRPC drivers do not change Control/Runtime authority.
 
 ## Independent verification
 
