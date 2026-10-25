@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from roboguide_recovery.scoped_map_recovery import WRAPPER, _projection, validate
+from roboguide_recovery.scoped_map_recovery import WRAPPER, _projection, validate, validate_catalog
 from test_capacity_recovery import database, wrapper
 
 
@@ -112,6 +112,39 @@ def test_transitive_scoped_recovery_preserves_legacy_meaning_without_writes(tmp_
         before = list(sql.iterdump())
         validate(sql)
         assert list(sql.iterdump()) == before
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_omitted_empty_revision_history_matches_actual_serde(tmp_path: Path, present: bool) -> None:
+    """Ordinary non-revision workloads can recover without inventing an empty-history field."""
+    value = lineage()
+    if not present:
+        del value["runtime_revisions"]
+    typed = value["memory_handoffs"]["first"]["request"]["typed_map"]
+    publications = {(typed["map_id"], typed["revision_id"]): ("MapArtifactPublished", typed)}
+    with closing(database(tmp_path / "ordinary.sqlite3", value)) as sql:
+        sql.execute("UPDATE controller_checkpoint SET schema=?", (WRAPPER,))
+        sql.commit()
+        before = list(sql.iterdump())
+        validate(sql)
+        validate_catalog(sql, publications)
+        assert list(sql.iterdump()) == before
+
+
+@pytest.mark.parametrize("invalid", [None, [], "unavailable"])
+def test_present_invalid_revision_history_is_not_treated_as_empty(
+    tmp_path: Path, invalid: Any
+) -> None:
+    """A present corrupt authority table refuses instead of gaining omitted-empty semantics."""
+    value = lineage()
+    value["runtime_revisions"] = invalid
+    with closing(database(tmp_path / "invalid.sqlite3", value)) as sql:
+        sql.execute("UPDATE controller_checkpoint SET schema=?", (WRAPPER,))
+        sql.commit()
+        with pytest.raises(ValueError, match="revision history"):
+            validate(sql)
+        with pytest.raises(ValueError, match="revision history"):
+            validate_catalog(sql, {})
 
 
 @pytest.mark.parametrize(

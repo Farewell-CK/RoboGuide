@@ -12,6 +12,14 @@ PREPARATION = "roboguide.memory-preparation/v0.3"
 AVAILABILITY = "roboguide.memory-provider-availability/v0.2"
 
 
+def _revisions(wrapper: dict[str, Any]) -> dict[str, Any]:
+    """Read serde's omitted-empty revision history without accepting malformed present authority."""
+    result = wrapper.get("runtime_revisions", {})
+    if not isinstance(result, dict):
+        raise ValueError("scoped recovery runtime revision history must be an object")
+    return result
+
+
 def _projection(typed: dict[str, Any]) -> dict[str, Any]:
     """Reproduce immutable global metadata while retaining the complete typed root."""
     if typed.get("schema") not in {
@@ -129,7 +137,7 @@ def validate(connection: sqlite3.Connection) -> None:
             if key in edges:
                 raise ValueError("scoped typed publication has ambiguous original owners")
             edges[key] = request["child"], parent, typed
-    for state in wrapper["runtime_revisions"].values():
+    for state in _revisions(wrapper).values():
         applied = {
             switch["ticket_id"] for switch in state["switches"] if switch["phase"] == "applied"
         }
@@ -196,7 +204,7 @@ def validate_catalog(
     roots = [record["request"].get("typed_map") for record in wrapper["memory_handoffs"].values()]
     roots += [
         record["request"].get("typed_map")
-        for state in wrapper["runtime_revisions"].values()
+        for state in _revisions(wrapper).values()
         for candidate in state["candidates"].values()
         for record in candidate.get("memory", {}).values()
     ]
