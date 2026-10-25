@@ -2030,6 +2030,34 @@ where
             }
         }
         ("GET", path)
+            if path.starts_with("/v1/missions/") && path.ends_with("/scheduling-costs") =>
+        {
+            let mission = domain::MissionId::new(
+                path.trim_start_matches("/v1/missions/")
+                    .trim_end_matches("/scheduling-costs"),
+            )?;
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            if live.orchestrator.execution(&mission).is_none() {
+                (
+                    "404 Not Found",
+                    serde_json::json!({"error":"Mission is absent"}),
+                )
+            } else {
+                let evidence = live.bridge.control().scheduling_cost_assessments(
+                    &live.bridge.decision_state(),
+                    &mission,
+                    clock.now(),
+                );
+                (
+                    "200 OK",
+                    serde_json::json!({"schema_version":"roboguide.scheduling-cost-view/v0.1", "mission_id":mission,
+                    "assessments":evidence, "planning_only":true}),
+                )
+            }
+        }
+        ("GET", path)
             if path.starts_with("/v1/missions/") && path.ends_with("/execution-attempts") =>
         {
             let mission = domain::MissionId::new(
@@ -2968,6 +2996,7 @@ where
                         "snapshot_version": decision.snapshot_version(),
                         "expansions": decision.expansions(),
                         "reason": reservation.reason(),
+                        "policy_cost_evidence": decision.policy_cost_evidence(),
                         "selections": decision.selections().iter().map(|selection| {
                             serde_json::json!({
                                 "role_id": selection.role_id(),

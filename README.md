@@ -1616,3 +1616,5 @@ canonical operation 的请求解析、代次校验、SQLite 和真实 loopback H
 或启动仿真前停止，保存 `habitat-runtime-check.json`；主 Python 3.13 测试通过不代表独立
 Python 3.9 worker 已兼容。运行该解释器回归时设置 `ROBOGUIDE_HABITAT_PYTHON`。详见
 [部署兼容性检查](integrations/habitat-local-eaios/README.md#deployment-python-compatibility)。
+
+Scheduling cost sources: [ADR-0205](docs/decisions/0205-current-state-scheduling-costs.md) binds explicit current-session State admission to normal/recovery ordering, original audit and a readonly Mission view. The local provider measures host load; unsupported queue, route, traffic and GPU metrics stay unavailable.

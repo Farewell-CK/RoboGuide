@@ -48,6 +48,9 @@ from memory_use_profile import request
 from memory_use_query_processes import Setup as UseQuerySetup
 from memory_use_query_processes import run as run_use_query
 from monitoring_processes import MonitoringProcesses
+from scheduling_cost_processes import SchedulingCostCheck
+from scheduling_cost_processes import configuration as cost_configuration
+from scheduling_cost_processes import refuse_old as refuse_old_cost
 from spatial_content_policy import digest
 
 
@@ -80,6 +83,7 @@ def identity() -> dict[str, str]:
             "catalog_retention_processes.py",
             "catalog_archive_processes.py",
             "monitoring_processes.py",
+            "scheduling_cost_processes.py",
         )
     ]
     result = {
@@ -141,6 +145,7 @@ def run(
     revision_old_controller: Path | None = None,
     artifact_retention: bool = False,
     content_archive: bool = False,
+    scheduling_costs: bool = False,
 ) -> dict[str, Any]:
     """Use only public Controller APIs, formal Node commands and actual local file backends."""
     if not 1 <= async_workers <= 64:
@@ -331,6 +336,8 @@ def run(
                 # The provider's explicit discover/export contract rehashes the real source file;
                 # give that local HTTP call the same bounded large-file window as the data plane.
                 configured = configured.replace("timeout_ms = 3000", "timeout_ms = 120000")
+            if scheduling_costs:
+                configured = cost_configuration(configured, nodes[index])
             config.write_text(configured)
             command = [
                 sys.executable,
@@ -710,6 +717,7 @@ def run(
             )
             save(directory / "result.json", result)
             return result
+        cost_check = SchedulingCostCheck(directory, nodes, exchange) if scheduling_costs else None
         accepted = mission(mission_id, manifest)
         if use_lifecycle:
             accepted["tasks"][0]["roles"][0]["execution_intent"]["parameters"]["rounds"] = 1
@@ -719,6 +727,8 @@ def run(
         save(directory / "mission.json", accepted)
         status, response = exchange("/v1/missions", accepted)
         assert status == 202, response
+        if cost_check is not None:
+            cost_check.observe(mission_id, available=True)
         if catalog_retention is not None:
             catalog_retention.blocked()
         receipts = []
@@ -950,6 +960,8 @@ def run(
             ),
             "actual route loss after both Node processes stop",
         )
+        if cost_check is not None:
+            cost_check.observe(mission_id, available=False)
         received_before = {
             item["node_id"]: item["received_at_ms"]
             for item in exchange("/v1/inventory")[1]["nodes"]
@@ -1047,9 +1059,22 @@ def run(
             + hashlib.sha256(path.read_bytes()).hexdigest()
             for path in configuration_paths
         } == configuration_identity
+        cost_result = (
+            None if cost_check is None else cost_check.durable(directory / "controller.sqlite3")
+        )
+        if cost_result is not None and revision_old_controller is not None:
+            stop(controller)
+            cost_result["old_binary"] = refuse_old_cost(
+                revision_old_controller,
+                directory / "controller.sqlite3",
+                directory / "cas",
+                environment,
+                directory,
+            )
         result = {
             "passed": True,
             "devices": 0,
+            "scheduling_costs": cost_result,
             "models": 0,
             "simulators": 0,
             "software_nodes": 2,
@@ -1134,6 +1159,7 @@ def main() -> None:
     parser.add_argument("--process-workers", action="store_true")
     parser.add_argument("--artifact-retention", action="store_true")
     parser.add_argument("--content-archive", action="store_true")
+    parser.add_argument("--scheduling-costs", action="store_true")
     parser.add_argument("--old-controller", type=Path)
     parser.add_argument(
         "--handoff-case",
@@ -1156,6 +1182,14 @@ def main() -> None:
         "--use-case", choices=("revoke", "expire", "backend-restart", "controller-restart")
     )
     arguments = parser.parse_args()
+    if arguments.scheduling_costs and (
+        arguments.handoff_case
+        or arguments.group_lifecycle
+        or arguments.use_case
+        or arguments.use_query_recovery
+        or arguments.use_query_case
+    ):
+        parser.error("--scheduling-costs composes the actual complete file/Node/restart profile")
     if arguments.content_archive and (not arguments.artifact_retention or arguments.handoff_case):
         parser.error("--content-archive requires the completed --artifact-retention file profile")
     if arguments.artifact_retention and (
@@ -1175,8 +1209,12 @@ def main() -> None:
         "revision-mi",
     ):
         parser.error("--artifact-retention requires a complete original child publication profile")
-    if arguments.old_controller and not (arguments.handoff_case or "").startswith("revision"):
-        parser.error("--old-controller is an actual revision Memory downgrade check")
+    if (
+        arguments.old_controller
+        and not arguments.scheduling_costs
+        and not (arguments.handoff_case or "").startswith("revision")
+    ):
+        parser.error("--old-controller requires an actual revision Memory or scheduling cost check")
     if (arguments.handoff_case or "").startswith("revision") and not arguments.process_workers:
         parser.error("revision Memory requires original OS-process exit evidence")
     if arguments.monitoring_tools and not arguments.authority_recovery:
@@ -1215,6 +1253,7 @@ def main() -> None:
                     arguments.old_controller,
                     arguments.artifact_retention,
                     arguments.content_archive,
+                    arguments.scheduling_costs,
                 ),
                 sort_keys=True,
             )

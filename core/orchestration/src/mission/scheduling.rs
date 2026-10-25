@@ -324,7 +324,14 @@ impl MissionOrchestrator {
         let decision = if let Some(decision) = reusable_decision {
             decision
         } else {
-            let snapshot = control.scheduling_snapshot_for_task(timestamp, &group_id, task_ref)?;
+            let snapshot = control
+                .scheduling_snapshot_for_task(timestamp, &group_id, task_ref)?
+                .with_policy_cost_evidence(control.scheduling_cost_assessments(
+                    state,
+                    task_ref.mission_id(),
+                    timestamp,
+                ))
+                .map_err(|error| OrchestrationError::Mission(error.to_string()))?;
             let scheduler = BoundedJointScheduler::new();
             let outcome = match scheduler.schedule_task_with_snapshot_and_estimate(
                 state,
@@ -362,6 +369,17 @@ impl MissionOrchestrator {
                 }
                 Err(error) => return Err(OrchestrationError::Mission(error.to_string())),
             };
+            if let TaskSchedulingOutcome::SelectedNow(decision)
+            | TaskSchedulingOutcome::SelectedFuture(decision) = &outcome
+            {
+                control.audit_scheduling_costs(
+                    task_ref,
+                    decision.policy_cost_evidence(),
+                    timestamp,
+                    correlation_id,
+                    events,
+                )?;
+            }
             match outcome {
                 TaskSchedulingOutcome::SelectedNow(decision) => {
                     self.clear_scheduling_deferral(mission_id, task_ref);

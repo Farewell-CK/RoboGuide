@@ -450,7 +450,15 @@ pub(crate) fn resume_role_recovery(
             events,
         )?;
     let scheduler = control::BoundedJointScheduler::new();
-    let scheduling_snapshot = controller.bridge.control().scheduling_snapshot(timestamp);
+    let scheduling_snapshot = controller
+        .bridge
+        .control()
+        .scheduling_snapshot(timestamp)
+        .with_policy_cost_evidence(controller.bridge.control().scheduling_cost_assessments(
+            &state,
+            need.task_ref().mission_id(),
+            timestamp,
+        ))?;
     let selection = scheduler.schedule_recovery(
         &state,
         &requirement,
@@ -463,6 +471,13 @@ pub(crate) fn resume_role_recovery(
     let control::RecoverySchedulingOutcome::Selected(selection) = selection else {
         return Ok(());
     };
+    controller.bridge.control().audit_scheduling_costs(
+        need.task_ref(),
+        selection.policy_cost_evidence(),
+        timestamp,
+        correlation_id,
+        events,
+    )?;
     let proposal = controller.bridge.control().propose_role_recovery(
         &state,
         &candidates,

@@ -24,6 +24,7 @@ mod quota;
 mod reconciliation;
 mod registry_provenance;
 mod scheduler;
+mod scheduling_cost;
 mod tenant;
 mod verifier_registry;
 

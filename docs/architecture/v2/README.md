@@ -170,6 +170,10 @@ units 与 immutable Mission tenant 进入持久 tenant/category quota ledger。q
 Group Commit、recovery Commit 和 exact release，超额拒绝先于 reservation/event 变化。
 未设 limit 的现有 claim 仍显示 usage，limit/remaining 为 `null`。
 
+ADR-0205 将显式 source/tenant/session/schema/TTL 策略接到普通与恢复调度成本排序，保留原始
+State、单位、策略和审计；缺失值不补零。本地 provider 只提供实际 host load，GPU、交通和
+路线观测缺席时保持 unavailable。成本不能放宽 eligibility、Commit 或停止门禁。
+
 该 quota 是逻辑核算，不表示 divisible allocation、GPU/OS 隔离或硬实时保证。部署侧 Memory 文件 worker
 的原 CPU/address-space `rlimit` 与实际 PID/kernel receipt 是单独的进程约束。Time 的 future interval
 属于 Control 日历，不能等同普通整数容量；完整空间/交通承诺仍需独立合同和验收。

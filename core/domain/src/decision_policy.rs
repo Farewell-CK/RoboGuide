@@ -20,6 +20,8 @@ pub const DECISION_EVIDENCE_POLICY_SCHEMA_V0_1: &str = "roboguide.decision-evide
 pub enum DecisionKind {
     /// Explicit raw evidence consumption for a separately attributed conservative Belief derivation.
     BeliefFusion,
+    /// Non-authoritative deterministic scheduling cost ordering.
+    Schedule,
     /// Capability and eligibility matching.
     Match,
     /// Resource and ownership commitment.

@@ -35,6 +35,7 @@ fn registry(node: &str) -> DecisionPolicyRegistry {
         schema_version: "roboguide.decision-policy-registry/v0.1".into(),
         registry_id: "deployment-policy".into(),
         revision: 1,
+        scheduling_costs: BTreeMap::new(),
         gates: BTreeMap::from([(
             "hazard-clear".into(),
             DecisionGate {

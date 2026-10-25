@@ -281,6 +281,21 @@ impl ControlPlane {
         &self,
         registry: &DecisionPolicyRegistry,
     ) -> Result<(), ControlError> {
+        for cost in registry.scheduling_costs.values() {
+            if !self
+                .node_identity_registry()
+                .map_or(cost.tenant_id == "local", |identities| {
+                    identities
+                        .records
+                        .get(cost.node_id.as_str())
+                        .is_some_and(|identity| identity.tenant_id == cost.tenant_id)
+                })
+            {
+                return Err(ControlError::InvalidProposal(
+                    "cost source is outside its tenant/candidate authority".into(),
+                ));
+            }
+        }
         for gate in registry.gates.values() {
             for source in &gate.policy.allowed_sources {
                 let allowed = match source {

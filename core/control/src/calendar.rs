@@ -80,6 +80,10 @@ impl ControlPlane {
         let reservations = self.scheduled_tasks.values().collect::<Vec<_>>();
         for (index, reservation) in reservations.iter().enumerate() {
             let decision = reservation.decision();
+            self.validate_scheduling_cost_history(
+                decision.task_ref().mission_id(),
+                decision.policy_cost_evidence(),
+            )?;
             let Some(ends_at) = decision.ends_at() else {
                 return Err(ControlError::InvalidProposal(
                     "checkpoint scheduling reservation has no bounded end".to_string(),
@@ -256,6 +260,10 @@ impl ControlPlane {
         decision: TaskSchedulingDecision,
         now: TimestampMs,
     ) -> Result<&ScheduledTaskReservation, ControlError> {
+        self.validate_scheduling_cost_history(
+            decision.task_ref().mission_id(),
+            decision.policy_cost_evidence(),
+        )?;
         if decision.snapshot_version() != self.calendar_version {
             return Err(ControlError::InvalidProposal(
                 "Scheduler decision uses a stale Control calendar snapshot".to_string(),

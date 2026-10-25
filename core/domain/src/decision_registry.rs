@@ -158,18 +158,37 @@ pub struct DecisionPolicyRegistry {
     pub revision: u64,
     /// Policy IDs with full independent source and decision contracts.
     pub gates: BTreeMap<String, DecisionGate>,
+    /// Explicit v0.2 planning-only cost sources; omitted to preserve original v0.1 digests.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub scheduling_costs: BTreeMap<String, crate::SchedulingCostPolicy>,
 }
 
 impl DecisionPolicyRegistry {
     /// Validates bounded policy contents without changing State, eligibility or ownership.
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema_version != "roboguide.decision-policy-registry/v0.1"
+        if !matches!(
+            self.schema_version.as_str(),
+            "roboguide.decision-policy-registry/v0.1" | "roboguide.decision-policy-registry/v0.2"
+        ) || self.schema_version.ends_with("/v0.1") && !self.scheduling_costs.is_empty()
+            || self.scheduling_costs.len() > 128
             || self.registry_id.trim().is_empty()
             || self.registry_id.len() > 128
             || self.revision == 0
             || self.gates.len() > 128
         {
             return Err("decision policy registry envelope is invalid".into());
+        }
+        let mut candidates = std::collections::BTreeSet::new();
+        for (id, cost) in &self.scheduling_costs {
+            cost.validate()?;
+            if id != &cost.policy.policy_id
+                || self.gates.contains_key(id)
+                || cost.enabled && !candidates.insert((&cost.tenant_id, &cost.node_id))
+            {
+                return Err(
+                    "scheduling cost identity or candidate has conflicting policies".into(),
+                );
+            }
         }
         for (id, gate) in &self.gates {
             gate.policy.validate().map_err(|error| error.to_string())?;
@@ -182,7 +201,8 @@ impl DecisionPolicyRegistry {
                 || gate
                     .policy
                     .allowed_decisions
-                    .contains(&DecisionKind::BeliefFusion)
+                    .iter()
+                    .any(|kind| matches!(kind, DecisionKind::BeliefFusion | DecisionKind::Schedule))
             {
                 return Err("decision gate identity/tenant/schema is invalid".into());
             }
@@ -193,7 +213,8 @@ impl DecisionPolicyRegistry {
     /// Fences rollback, silent removal and same-revision interpretation changes.
     pub fn validates_successor(&self, next: &Self) -> Result<(), String> {
         next.validate()?;
-        if self.registry_id != next.registry_id
+        if self.schema_version.ends_with("/v0.2") && !next.schema_version.ends_with("/v0.2")
+            || self.registry_id != next.registry_id
             || self.revision > next.revision
             || self.revision == next.revision && self != next
             || next.revision > self.revision
@@ -204,6 +225,19 @@ impl DecisionPolicyRegistry {
                         .ok_or("policy revision exhausted")?
         {
             return Err("decision registry revision conflicts".into());
+        }
+        for (id, old) in &self.scheduling_costs {
+            let new = next
+                .scheduling_costs
+                .get(id)
+                .ok_or("cost policies must be retained and disabled, not removed")?;
+            if old.tenant_id != new.tenant_id
+                || old.node_id != new.node_id
+                || old.policy.revision > new.policy.revision
+                || old != new && old.policy.revision == new.policy.revision
+            {
+                return Err("cost policy attribution/revision conflicts".into());
+            }
         }
         for (id, old) in &self.gates {
             let new = next

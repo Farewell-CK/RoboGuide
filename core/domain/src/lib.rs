@@ -33,6 +33,11 @@ mod capability_requirement;
 mod context;
 mod decision_policy;
 mod decision_registry;
+mod scheduling_cost;
+pub use scheduling_cost::{
+    SCHEDULING_METRICS_SCHEMA, SchedulingCostAssessment, SchedulingCostFailure,
+    SchedulingCostPolicy, SchedulingCostTerm, SchedulingMetric, SchedulingMetrics,
+};
 mod duration_estimate;
 mod error;
 mod event;

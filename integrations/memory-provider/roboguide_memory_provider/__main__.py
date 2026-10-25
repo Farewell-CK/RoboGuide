@@ -18,6 +18,7 @@ from typing import Any
 
 from .active_map import ActiveMapLedger
 from .content_references import ContentReferences
+from .cost_metrics import scheduling_metrics
 from .jobs import FileJobs
 from .process_jobs import DEFAULT_ADDRESS_SPACE_BYTES, ProcessFileJobs
 from .reclamation import ContentReclamation
@@ -115,6 +116,8 @@ def handler_type(
                     self._respond(200, jobs.quota_evidence(self._body()["execution_id"]))
                 elif jobs is not None and self.path == "/v1/file-jobs/safe-state":
                     self._respond(200, jobs.safe_state())
+                elif self.path == "/v1/scheduling-cost":
+                    self._respond(200, scheduling_metrics())
                 elif self.path == "/v1/instance":
                     self._respond(200, store.identity())
                 elif self.path == "/v1/import-query":

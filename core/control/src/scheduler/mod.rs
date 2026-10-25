@@ -179,6 +179,9 @@ pub struct TaskSchedulingDecision {
     /// Fresh cost evidence retained as planning provenance; it never grants resource authority.
     #[serde(default)]
     cost_evidence: Vec<SchedulingCostEvidence>,
+    /// Original authorized current State costs and explicit unavailable results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    policy_cost_evidence: Vec<domain::SchedulingCostAssessment>,
 }
 
 impl TaskSchedulingDecision {
@@ -227,6 +230,11 @@ impl TaskSchedulingDecision {
         &self.cost_evidence
     }
 
+    /// Returns complete original policy-based cost observations, including unknown/stale outcomes.
+    pub fn policy_cost_evidence(&self) -> &[domain::SchedulingCostAssessment] {
+        &self.policy_cost_evidence
+    }
+
     /// Builds fresh proposal-validation inputs without granting proposal authority.
     pub fn proposed_assignments(&self) -> Vec<RoleAssignment> {
         self.selections
@@ -251,6 +259,8 @@ pub struct RecoverySchedulingDecision {
     replacement_node_id: NodeId,
     /// Non-authoritative resources suggested for proposal validation.
     resource_ids: Vec<ResourceId>,
+    /// Original policy-cost observations used for this recovery selection.
+    policy_cost_evidence: Vec<domain::SchedulingCostAssessment>,
 }
 
 impl RecoverySchedulingDecision {
@@ -270,7 +280,22 @@ impl RecoverySchedulingDecision {
             previous_node_id,
             replacement_node_id,
             resource_ids,
+            policy_cost_evidence: Vec::new(),
         }
+    }
+
+    /// Attaches exact planning-only source evidence after bounded recovery selection.
+    fn with_policy_cost_evidence(
+        mut self,
+        evidence: Vec<domain::SchedulingCostAssessment>,
+    ) -> Self {
+        self.policy_cost_evidence = evidence;
+        self
+    }
+
+    /// Returns original source assessments without claiming Commit or physical recovery.
+    pub fn policy_cost_evidence(&self) -> &[domain::SchedulingCostAssessment] {
+        &self.policy_cost_evidence
     }
 
     /// Returns the existing Group awaiting the replacement.
@@ -365,6 +390,8 @@ pub struct SchedulingSnapshot {
     role_constraints: BTreeMap<RoleId, SchedulingRoleConstraint>,
     /// Fresh source-aware cost evidence, keyed by candidate Node.
     cost_evidence: BTreeMap<NodeId, SchedulingCostEvidence>,
+    /// Exact deployment-authorized observations, including unavailable evidence.
+    policy_cost_evidence: BTreeMap<NodeId, domain::SchedulingCostAssessment>,
 }
 
 /// Bounded source-aware scheduling cost evidence used only for deterministic candidate ordering.
@@ -419,7 +446,7 @@ impl SchedulingCostEvidence {
             + u128::from(self.travel_distance_um)
             + u128::from(self.traffic_delay_ms) * 1_000
             + u128::from(self.load_millionths)
-            + u128::from(self.gpu_memory_bytes.unwrap_or(0) / (1024 * 1024))
+            + u128::from(((1_u64 << 50) - self.gpu_memory_bytes.unwrap_or(0)) / (1024 * 1024))
     }
 }
 
@@ -438,6 +465,7 @@ impl SchedulingSnapshot {
             occupancies,
             role_constraints: BTreeMap::new(),
             cost_evidence: BTreeMap::new(),
+            policy_cost_evidence: BTreeMap::new(),
         }
     }
 
@@ -448,6 +476,7 @@ impl SchedulingSnapshot {
             occupancies: Vec::new(),
             role_constraints: BTreeMap::new(),
             cost_evidence: BTreeMap::new(),
+            policy_cost_evidence: BTreeMap::new(),
         }
     }
 
@@ -482,6 +511,56 @@ impl SchedulingSnapshot {
             }
         }
         Ok(self)
+    }
+
+    /// Adds complete policy observations without substituting unavailable values or changing eligibility.
+    pub fn with_policy_cost_evidence(
+        mut self,
+        evidence: Vec<domain::SchedulingCostAssessment>,
+    ) -> Result<Self, SchedulerError> {
+        for receipt in evidence {
+            receipt
+                .validate()
+                .map_err(SchedulerError::InvalidCostEvidence)?;
+            if self
+                .policy_cost_evidence
+                .insert(receipt.policy.node_id.clone(), receipt)
+                .is_some()
+            {
+                return Err(SchedulerError::InvalidCostEvidence(
+                    "duplicate candidate cost policy".into(),
+                ));
+            }
+        }
+        Ok(self)
+    }
+
+    /// Returns original policy-based observations in deterministic candidate order.
+    pub fn policy_cost_evidence(&self) -> impl Iterator<Item = &domain::SchedulingCostAssessment> {
+        self.policy_cost_evidence.values()
+    }
+
+    /// Ranks measured costs before unknown; explicit unknown policy never borrows compatibility scores.
+    pub fn candidate_cost(&self, node: &NodeId, now: TimestampMs) -> u128 {
+        if let Some(receipt) = self.policy_cost_evidence.get(node) {
+            return receipt
+                .record
+                .as_ref()
+                .filter(|record| {
+                    receipt.decided_at <= now
+                        && !record.is_stale_at(now)
+                        && now
+                            .as_millis()
+                            .saturating_sub(record.received_at().as_millis())
+                            <= receipt.policy.policy.max_age_ms
+                })
+                .and(receipt.score)
+                .map_or(u128::MAX, u128::from);
+        }
+        self.cost_evidence
+            .get(node)
+            .filter(|cost| cost.validate_at(now).is_ok())
+            .map_or(u128::MAX, SchedulingCostEvidence::score)
     }
 
     /// Returns the Control version represented by this snapshot.

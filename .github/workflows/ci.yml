@@ -232,7 +232,7 @@ jobs:
       - name: Verify actual Catalog acquisition and original retirement
         run: >
           uv run --frozen python tools/quality/check_memory_preparation_processes.py
-          --output /tmp/rg-ci-catalog-retirement --process-workers --artifact-retention
+          --output /tmp/rg-ci-catalog-retirement --process-workers --artifact-retention --scheduling-costs
           --async-workers 1
 
       - name: Verify actual network content ACK and native process failover with zero Nodes

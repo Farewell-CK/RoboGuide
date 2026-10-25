@@ -22,3 +22,5 @@ mod federation;
 mod memory_authority;
 mod node_identity;
 mod ownership_model;
+
+mod scheduling_cost;
