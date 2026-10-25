@@ -11,7 +11,7 @@
 | Control / quota | Match/Commit/Bind、精确 quota/释放、来源成本与显式 divisible Compute/Context envelope、加权 calendar、Node 原授权准入和活动授权恢复 | 完整时空、其他本地强制与当前部署的 GPU/交通等实际来源 |
 | Runtime / stop | attempt/generation、durable intent、relations、whole-Group stop、原进程 exit proof | 运行中抢占、耦合多 Role 迁移、hazard/regrasp 与设备 stop |
 | State / verifier | 来源策略、Belief lineage、TTL、原 Task verifier 与 CAS proof | 当前部署的物理来源、冲突与持续效果证明 |
-| Memory / Spatial | 准备/use/revoke/handoff、文件空间算法、provider 局部 GC；原 import Replica、Catalog/lineage、Snapshot/Archive 引用、恢复后原 provider Snapshot 退休、Archive abort/私有接收 GC、源上传退休和 standalone 已知引用闭包离线 GC | 完整全局 Archive/引用、typed-map 交接/修订/current-use/GC 组合与跨主机内容 |
+| Memory / Spatial | 准备/use/revoke/handoff、文件空间算法、provider 局部 GC、完整 scoped typed-map/current-use/交接/自动 MI/原目标/冷恢复/旧 writer 拒绝组合；原 import Replica、Catalog/lineage、Snapshot/Archive 引用、恢复后原 provider Snapshot 退休、Archive abort/私有接收 GC、源上传退休和 standalone 已知引用闭包离线 GC | 完整全局 Archive/引用与跨主机内容 |
 | Replica / recovery | 证书轮换、原 child drain、V3 transfer、writer/inode fence、已支持静止 bundle、qualified Root HTTP read、Prepared 恢复、跨 owner 上传放弃/退休及原恢复事实对账、Root8/parent10、Log/Snapshot/learner、最终成员 GC、v55→v56 滚动/坏版本补丁和 v0.25 三 leader 冷恢复 | 完整全局内容/引用组合与跨主机故障矩阵 |
 | Federation | 实际独立 participant HTTP、tenant/domain mTLS 授权、原 prepare/commit/abort 回执与重启对账 | 持久 coordinator、真实 peer 请求、资源/epoch 与跨主机恢复；global dispatch 仍关闭 |
 | 运维 | write-disabled、已提交视图、恢复探针、真实短窗口监控检查 | 全 listener/阻塞收敛、完整 runbook、长期 SLO 与总体退出条件 |
@@ -48,3 +48,5 @@
 ## 状态维护
 
 按“合同 → 实际代码 → 原始验收 → 当前缺口”更新本页，中英文同提交维护。依赖版本由[构建参考](reference.md)提取。不能仅因合并、类型定义、测试替身或 ADR 状态而宣布 SoftwareComplete。
+
+[Scoped typed-map 完整软件验收](docs/development/acceptance/2026-10-25-scoped-typed-map-lifecycle.md)通过两条实际 retained-storage 进程链和完整 v0.26 冷恢复。每个 Task 有独立 preparation/import/use，原生产信息保持不变。设备、跨主机与其他阶段证据独立。

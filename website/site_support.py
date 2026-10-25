@@ -72,6 +72,9 @@ def contract_versions() -> dict[str, str]:
         "MissionPlan (explicit quantitative resources)": read_constant(
             "core/domain/src/lib.rs", "MISSION_PLAN_SCHEMA_V0_10"
         ),
+        "MissionPlan (explicit scoped typed Memory)": read_constant(
+            "core/domain/src/lib.rs", "MISSION_PLAN_SCHEMA_V0_11"
+        ),
         "Node journal (storage fence)": "v" + journal_version.group(1),
         "Node wire catalog": max(
             wire_catalogs, key=lambda value: tuple(map(int, value[1:].split(".")))
@@ -84,6 +87,9 @@ def contract_versions() -> dict[str, str]:
         ),
         "Node Contract (explicit quantitative profile)": read_constant(
             grpc, "CAPACITY_NODE_CONTRACT_VERSION"
+        ),
+        "Node Contract (explicit scoped typed Memory profile)": read_constant(
+            grpc, "SCOPED_MAP_NODE_CONTRACT_VERSION"
         ),
         "Node config (latest explicit profile)": max(
             config, key=lambda value: int(value.rsplit(".", 1)[1])
@@ -154,13 +160,15 @@ def write_reference(destination: Path) -> None:
         )
         notes = (
             "MissionPlan defaults to v0.8; explicit v0.9 retains Memory prerequisites and v0.10 "
-            "declares quantitative resources. Older compatibility inputs retain their meaning. "
+            "declares quantitative resources; v0.11 retains scoped typed-map source semantics. "
+            "Older compatibility inputs retain their meaning. "
             "A later Node profile requires explicit negotiation; the basic example config remains "
             "v0.7. Node journal " + versions["Node journal (storage fence)"] + " is an independent "
             "storage fence. Node wire catalog " + versions["Node wire catalog"] + " is distinct "
             "from Capability Catalog. Logical allocation does not prove OS/GPU/device enforcement."
             if en
-            else "MissionPlan 默认 v0.8，显式 v0.9 保留 Memory 前提，v0.10 声明量化资源；"
+            else "MissionPlan 默认 v0.8，显式 v0.9 保留 Memory 前提，v0.10 声明量化资源，"
+            "v0.11 保留 scoped typed source；"
             "旧兼容输入保留原语义。新的 Node profile 必须显式协商，基础示例 config 仍为 v0.7。"
             "Node journal " + versions["Node journal (storage fence)"] + " 是独立存储 fence。"
             "Node wire catalog " + versions["Node wire catalog"] + " 与 Capability Catalog 不同；"

@@ -1,17 +1,19 @@
 {
-  "code_commit": "910054bb55fd952fad2b117449be14b7d6595970",
+  "code_commit": "2577a8597b977827f9ee61d193042cea33967c44",
   "reviewed_at": "2026-10-25",
   "versions": {
     "MissionPlan (configured default)": "roboguide.mission-plan/v0.8",
     "MissionPlan (explicit Memory)": "roboguide.mission-plan/v0.9",
     "MissionPlan (explicit quantitative resources)": "roboguide.mission-plan/v0.10",
-    "Node journal (storage fence)": "v14",
-    "Node wire catalog": "v0.16",
+    "MissionPlan (explicit scoped typed Memory)": "roboguide.mission-plan/v0.11",
+    "Node journal (storage fence)": "v15",
+    "Node wire catalog": "v0.17",
     "Node Protocol": "roboguide.node-protocol/v0.4",
     "Node Contract (explicit safety/Memory profile)": "roboguide.node.v0.12",
     "Node Contract (explicit quantitative profile)": "roboguide.node.v0.13",
-    "Node config (latest explicit profile)": "roboguide.node-config/v0.14",
-    "Controller checkpoint": "roboguide.controller-checkpoint/v56",
+    "Node Contract (explicit scoped typed Memory profile)": "roboguide.node.v0.14",
+    "Node config (latest explicit profile)": "roboguide.node-config/v0.15",
+    "Controller checkpoint": "roboguide.controller-checkpoint/v57",
     "Capability Catalog": "roboguide.capability-catalog/v0.3"
   }
 }

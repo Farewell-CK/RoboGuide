@@ -43,3 +43,5 @@ Certificate rotation, binary/profile upgrade, cold recovery and online content r
 ## Incident order
 
 Preserve logs/receipts → inspect exact identity/session/attempt → determine current write authority → check original State/Memory budgets → use formal read-only observation/reconciliation → recover after original stop/revoke and policy gates. Repeating work cannot resolve uncertain side effects.
+
+Explicit scoped typed maps use MissionPlan v0.11, Node v0.14/config v0.15, preparation v0.3, Memory SQL v5 and recovery v0.26. Older generations cannot borrow new authority. See the [complete lifecycle](docs/development/scoped-typed-map-lifecycle-v0.1.md).

@@ -43,3 +43,5 @@ PYTHONPATH=apps/recovery-tool python -m roboguide_recovery restore   --bundle /a
 ## 故障处置顺序
 
 保留原日志与 receipt → 检查 exact ID/session/attempt → 判定当前 authority 是否可写 → 核对 State 与 Memory 原期限 → 使用正式只读 observation/reconcile → 满足原 stop/revoke 与 policy 后恢复。禁止以“重新跑一次”消除未知副作用。
+
+显式 scoped typed-map 使用 MissionPlan v0.11、Node v0.14/config v0.15、preparation v0.3、Memory SQL v5 和 recovery v0.26；旧版本不得借用新授权。见[完整生命周期](docs/development/scoped-typed-map-lifecycle-v0.1.md)。
