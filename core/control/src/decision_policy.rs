@@ -28,6 +28,11 @@ impl ControlPlane {
                 task.assignments().iter().any(|assignment| {
                     assignment.role_id() == command.role_id()
                         && assignment.node_id() == command.node_id()
+                        && self.bound_topology_allowed(
+                            command.task_ref(),
+                            std::slice::from_ref(assignment),
+                            now,
+                        )
                         && state.node(command.node_id()).is_some_and(|node| {
                             self.selected_resources_match_registration(
                                 node.registration(),
@@ -167,6 +172,10 @@ impl ControlPlane {
                 .map(serde_json::to_value),
             domain::RegistryCommandKind::ResourceQuota => self
                 .resource_quota_history
+                .get(&receipt.revision)
+                .map(serde_json::to_value),
+            domain::RegistryCommandKind::ResourceTopology => self
+                .resource_topology_history
                 .get(&receipt.revision)
                 .map(serde_json::to_value),
         }

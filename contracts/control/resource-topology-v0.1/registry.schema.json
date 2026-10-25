@@ -1,0 +1,267 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "roboguide.resource-topology/v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "registry_id",
+    "revision",
+    "clock",
+    "stop_timeout_ms",
+    "resources",
+    "booking_duration_ms",
+    "booking_max_age_ms"
+  ],
+  "properties": {
+    "schema": {
+      "const": "roboguide.resource-topology/v0.1"
+    },
+    "registry_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615
+    },
+    "clock": {
+      "const": "controller_receive_time"
+    },
+    "stop_timeout_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600000
+    },
+    "resources": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resource_id",
+          "node_id",
+          "kind",
+          "space",
+          "windows",
+          "time_domain"
+        ],
+        "properties": {
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "node_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "kind": {
+            "enum": [
+              "Space",
+              "Time"
+            ]
+          },
+          "space": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "conflict_domain",
+                  "frame",
+                  "anchor_revision",
+                  "lower_mm",
+                  "upper_mm",
+                  "clearance_mm"
+                ],
+                "properties": {
+                  "conflict_domain": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "frame": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "anchor_revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "lower_mm": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "integer",
+                      "minimum": -9223372036854775808,
+                      "maximum": 9223372036854775807
+                    }
+                  },
+                  "upper_mm": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "integer",
+                      "minimum": -9223372036854775808,
+                      "maximum": 9223372036854775807
+                    }
+                  },
+                  "clearance_mm": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
+                  }
+                }
+              }
+            ]
+          },
+          "windows": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "starts_at",
+                "ends_at"
+              ],
+              "properties": {
+                "starts_at": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709551615
+                },
+                "ends_at": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709551615
+                }
+              }
+            }
+          },
+          "time_domain": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "Time"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "space": {
+                  "type": "null"
+                },
+                "windows": {
+                  "minItems": 1
+                },
+                "time_domain": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "space": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "conflict_domain",
+                    "frame",
+                    "anchor_revision",
+                    "lower_mm",
+                    "upper_mm",
+                    "clearance_mm"
+                  ],
+                  "properties": {
+                    "conflict_domain": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "frame": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "anchor_revision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "lower_mm": {
+                      "type": "array",
+                      "minItems": 3,
+                      "maxItems": 3,
+                      "items": {
+                        "type": "integer",
+                        "minimum": -9223372036854775808,
+                        "maximum": 9223372036854775807
+                      }
+                    },
+                    "upper_mm": {
+                      "type": "array",
+                      "minItems": 3,
+                      "maxItems": 3,
+                      "items": {
+                        "type": "integer",
+                        "minimum": -9223372036854775808,
+                        "maximum": 9223372036854775807
+                      }
+                    },
+                    "clearance_mm": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4294967295
+                    }
+                  }
+                },
+                "time_domain": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "booking_duration_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600000
+    },
+    "booking_max_age_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 604800000
+    }
+  }
+}

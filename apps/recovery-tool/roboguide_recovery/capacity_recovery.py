@@ -11,7 +11,7 @@ from typing import Any
 from .snapshot_references import canonical
 
 WRAPPER = "roboguide.controller-checkpoint/v56"
-WRAPPERS = {WRAPPER, "roboguide.controller-checkpoint/v57"}
+WRAPPERS = {WRAPPER, "roboguide.controller-checkpoint/v57", "roboguide.controller-checkpoint/v58"}
 CHAIN = "roboguide.checkpoint-chain/v1"
 MAXIMUM = 64 * 1024 * 1024
 

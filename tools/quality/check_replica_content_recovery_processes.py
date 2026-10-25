@@ -91,6 +91,7 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
     configs.mkdir(mode=0o700)
     parent_versions = set()
     scoped_generation = False
+    topology_generation = False
     binary_inputs: dict[str, dict[str, str]] = {}
     for path in sorted(source.glob("configuration-*.json")):
         config = json.loads(path.read_text())
@@ -126,6 +127,13 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
             metadata = dict(parent_sql.execute("SELECT key,value FROM replica_v1_meta"))
             original_identity = json.loads(metadata["identity"])
             upgrade = json.loads(metadata.get("application_upgrade_authority_v1", "null"))
+            topology_generation |= original_identity[
+                1
+            ] == "roboguide.controller-checkpoint/v58" or (
+                upgrade is not None
+                and upgrade.get("target", {}).get("application_schema")
+                == "roboguide.controller-checkpoint/v58"
+            )
             scoped_generation |= original_identity[1] == "roboguide.controller-checkpoint/v57" or (
                 upgrade is not None
                 and upgrade.get("target", {}).get("application_schema")
@@ -205,7 +213,9 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
         }
     )
     generation = (
-        26
+        27
+        if topology_generation
+        else 26
         if scoped_generation
         else 25
         if 10 in parent_versions
@@ -558,6 +568,7 @@ def private_staging_refusal(output: Path, bundle: Path) -> dict[str, Any] | None
         "roboguide.recovery-profile/v0.24",
         "roboguide.recovery-profile/v0.25",
         "roboguide.recovery-profile/v0.26",
+        "roboguide.recovery-profile/v0.27",
     }:
         return None
     root = next(

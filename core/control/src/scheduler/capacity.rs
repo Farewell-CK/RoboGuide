@@ -141,6 +141,32 @@ impl SchedulingSnapshot {
         selected: &[RoleSchedulingSelection],
     ) -> bool {
         let occupancies = self.selected_occupancies(selected, start, end);
+        if let Some(registry) = &self.resource_topology {
+            if matches!(
+                resource.kind(),
+                domain::ResourceKind::Space | domain::ResourceKind::Time
+            ) && registry.entry(resource.id()).is_none()
+            {
+                return false;
+            }
+            if let Some(entry) = registry.entry(resource.id())
+                && (!entry.permits_interval(start, end)
+                    || occupancies.iter().any(|occupied| {
+                        occupied.resource_id() != resource.id()
+                            && crate::resource_topology::overlaps(
+                                start,
+                                end,
+                                occupied.starts_at(),
+                                occupied.ends_at(),
+                            )
+                            && registry
+                                .entry(occupied.resource_id())
+                                .is_some_and(|other| entry.conflicts(other))
+                    }))
+            {
+                return false;
+            }
+        }
         let physical = || {
             occupancies
                 .iter()

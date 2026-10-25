@@ -93,6 +93,7 @@ mod resource;
 mod resource_grant;
 pub use resource_grant::ResourceAllocationGrant;
 mod resource_quota;
+mod resource_topology;
 mod role_assignment;
 mod spatial_memory;
 mod spatial_replica;
@@ -195,6 +196,10 @@ pub use physical_safety::{
 };
 pub use resource::{Resource, ResourceAllocationMode, ResourceKind, ResourceRequirement};
 pub use resource_quota::{ResourceQuotaLimit, ResourceQuotaRegistry};
+pub use resource_topology::{
+    ResourceSpaceFootprint, ResourceTimeWindow, ResourceTopologyEntry, ResourceTopologyRegistry,
+    ResourceTopologyReservation,
+};
 pub use role_assignment::RoleAssignment;
 pub use spatial_memory::{
     ContentDigest, MAP_MANIFEST_SCHEMA_V0_1, MapArtifactManifest, MapArtifactRef, MapId,

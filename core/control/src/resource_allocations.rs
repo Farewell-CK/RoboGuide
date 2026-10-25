@@ -228,6 +228,7 @@ impl CapacityLedger {
             CapacityAllocation {
                 original: grant.clone(),
                 reservation: Reservation {
+                    topology: None,
                     task_ref: request.task_ref.clone(),
                     role_id: request.role_id.clone(),
                     group_id: None,

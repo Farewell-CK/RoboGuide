@@ -1,3 +1,15 @@
+ADR-0209 owns explicit resource-topology v0.1 in Domain/Control `resource_topology`, the original
+reservation and immutable scheduling snapshot. Actual Node/resource IDs are deployment inputs;
+integer geometry, exact frame/anchor, clearance and local Controller openings create no inventory
+or physical observation. Complete normal/Group/recovery batches recheck cross-ID intersections
+before quota/events. Original declaration/window and policy history persist in wrapper v58 and
+explicit recovery v0.27. Canonical MissionPlan remains unchanged; explicit deployment booking
+budgets use the existing duration port, anchored to original Mission acceptance without renewal.
+Bind/Rebind/outbox and the application timer preserve stop/revoke/release boundaries. The maintained
+actual software CPU gate is `check_state_verifier_processes.py --resource-calendar`; it includes
+active/cold recovery and genuine old-writer refusal. Local software acceptance passed;
+software declarations/waits never prove devices, physical space exclusion or hard realtime.
+
 ADR-0208 implements the scoped typed-map lifecycle across Domain/Control, application
 `scoped_maps`, Memory preparation v0.3, Group handoff v0.3 and runtime revision v0.5.
 MissionPlan v0.11 requests semantic `source_contract=scoped_typed_map`; actual Node Contract

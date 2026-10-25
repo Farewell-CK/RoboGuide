@@ -22,6 +22,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.24",
     "roboguide.recovery-profile/v0.25",
     "roboguide.recovery-profile/v0.26",
+    "roboguide.recovery-profile/v0.27",
 }
 WRAPPER = "roboguide.controller-checkpoint/v51"
 WRAPPERS = {
@@ -32,6 +33,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v55",
     "roboguide.controller-checkpoint/v56",
     "roboguide.controller-checkpoint/v57",
+    "roboguide.controller-checkpoint/v58",
 }
 CODEC = "domain.EventPayload.json/v30"
 

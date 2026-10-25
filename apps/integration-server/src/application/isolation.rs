@@ -336,7 +336,47 @@ pub(crate) fn flush_unisolated_commands(
 
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
+    if saved.schema == SERVER_CHECKPOINT_SCHEMA {
+        let integration: serde_json::Value =
+            serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
+        let control = integration
+            .get("control")
+            .and_then(serde_json::Value::as_object)
+            .ok_or("current wrapper lacks complete Control authority")?;
+        if !control.contains_key("resource_topology_registry")
+            || !control.contains_key("resource_topology_history")
+        {
+            return Err("current wrapper lacks mandatory spatial/calendar reference tables".into());
+        }
+    }
     if saved.schema != SERVER_CHECKPOINT_SCHEMA {
+        let integration: serde_json::Value =
+            serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
+        let control = &integration["control"];
+        if !control["resource_topology_registry"].is_null()
+            || control["resource_topology_history"]
+                .as_object()
+                .is_some_and(|history| !history.is_empty())
+            || control["reservations"]
+                .as_object()
+                .is_some_and(|held| held.values().any(|held| !held["topology"].is_null()))
+            || control["scheduled_tasks"]
+                .as_array()
+                .is_some_and(|records| {
+                    records.iter().any(|record| {
+                        record["topology_recovery_assignments"]
+                            .as_object()
+                            .is_some_and(|assignments| !assignments.is_empty())
+                    })
+                })
+        {
+            return Err("legacy wrapper cannot carry spatial/calendar resource authority".into());
+        }
+    }
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
+    ) {
         let integration: serde_json::Value =
             serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
         let orchestration: serde_json::Value =
@@ -362,6 +402,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
             | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
     ) && saved
@@ -407,6 +448,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     let current_isolation_contract = matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
             | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA

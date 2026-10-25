@@ -178,6 +178,7 @@ fn mission_task_bind_uses_commit_authority_and_releases_task_scope() {
     control.reservations.insert(
         resource.clone(),
         crate::coordination::Reservation {
+            topology: None,
             task_ref: task.clone(),
             role_id: role.clone(),
             group_id: None,
@@ -262,6 +263,7 @@ fn task_release_preserves_context_assignment() {
     control.reservations.insert(
         resource.clone(),
         crate::coordination::Reservation {
+            topology: None,
             task_ref: task.clone(),
             role_id: role.clone(),
             group_id: None,
@@ -346,6 +348,7 @@ fn context_scope_outlives_task_and_releases_explicitly() {
     control.reservations.insert(
         resource.clone(),
         crate::coordination::Reservation {
+            topology: None,
             task_ref: task.clone(),
             role_id: role.clone(),
             group_id: None,
@@ -418,6 +421,7 @@ fn context_bind_conflict_is_atomic() {
             resource,
             crate::coordination::Reservation {
                 task_ref,
+                topology: None,
                 role_id,
                 group_id: None,
                 scope: ResourceBindingScope::Context,
@@ -495,6 +499,7 @@ fn omitted_role_scope_defaults_to_task() {
     control.reservations.insert(
         resource.clone(),
         crate::coordination::Reservation {
+            topology: None,
             task_ref: task.clone(),
             role_id: role.clone(),
             group_id: None,
@@ -542,6 +547,7 @@ fn released_mission_group_clears_task_bindings_for_restore() {
     control.reservations.insert(
         resource.clone(),
         crate::coordination::Reservation {
+            topology: None,
             task_ref: task.clone(),
             role_id: role.clone(),
             group_id: None,

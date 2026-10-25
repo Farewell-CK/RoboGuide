@@ -100,6 +100,7 @@ fn drive_application_timer_synchronous(
         let mut events = event_log.clone();
         apply_runtime_events(&mut candidate, now, &correlation, &mut events)?;
         safety_stop::tick(&mut candidate, now)?;
+        super::resource_topology::monitor(&mut candidate, now)?;
         super::plan_revision::tick(&mut candidate, clock, None, verifier_feed)?;
         super::memory_handoff::tick(&mut candidate, now)?;
         begin_current_ambiguity_recoveries(&mut candidate, now, &correlation, &mut events)?;

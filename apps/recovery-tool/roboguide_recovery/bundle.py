@@ -36,6 +36,10 @@ from .profile import (
 )
 
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
+RESTORE_RECEIPT_SCHEMAS = {
+    f"roboguide.recovery-profile/v0.{version}": f"roboguide.restore-receipt/v0.{version}"
+    for version in range(1, 28)
+}
 CHUNK = 1024 * 1024
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
@@ -60,6 +64,7 @@ def _private_root_staging(component: dict[str, Any], schema: str, name: str) -> 
             "roboguide.recovery-profile/v0.24",
             "roboguide.recovery-profile/v0.25",
             "roboguide.recovery-profile/v0.26",
+            "roboguide.recovery-profile/v0.27",
         }
         and component["kind"] == "replica-content"
         and component["storage_schema"] == "roboguide.replica-content-layout/v0.8"
@@ -518,6 +523,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                     "roboguide.recovery-profile/v0.24",
                     "roboguide.recovery-profile/v0.25",
                     "roboguide.recovery-profile/v0.26",
+                    "roboguide.recovery-profile/v0.27",
                 },
             )
             if profile["schema"]
@@ -530,6 +536,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                 "roboguide.recovery-profile/v0.24",
                 "roboguide.recovery-profile/v0.25",
                 "roboguide.recovery-profile/v0.26",
+                "roboguide.recovery-profile/v0.27",
             }
             else None
         )
@@ -730,6 +737,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                     "roboguide.recovery-profile/v0.24",
                     "roboguide.recovery-profile/v0.25",
                     "roboguide.recovery-profile/v0.26",
+                    "roboguide.recovery-profile/v0.27",
                 }
                 else set()
             )
@@ -928,6 +936,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.24",
                 "roboguide.recovery-profile/v0.25",
                 "roboguide.recovery-profile/v0.26",
+                "roboguide.recovery-profile/v0.27",
             }
             else databases
         )
@@ -1042,70 +1051,7 @@ def restore(
     budget.deadline_ns = started_ns + manifest["profile"]["budget_seconds"] * 1_000_000_000
     budget.check()
     replica_placements = _replica_placements(manifest)
-    receipt_schema = (
-        "roboguide.restore-receipt/v0.26"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.26"
-        else "roboguide.restore-receipt/v0.25"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.25"
-        else "roboguide.restore-receipt/v0.24"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.24"
-        else "roboguide.restore-receipt/v0.23"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.23"
-        else "roboguide.restore-receipt/v0.22"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.22"
-        else "roboguide.restore-receipt/v0.21"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.21"
-        else "roboguide.restore-receipt/v0.20"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.20"
-        else "roboguide.restore-receipt/v0.19"
-        if manifest["profile"]["schema"]
-        in {
-            "roboguide.recovery-profile/v0.19",
-            "roboguide.recovery-profile/v0.20",
-            "roboguide.recovery-profile/v0.21",
-            "roboguide.recovery-profile/v0.22",
-            "roboguide.recovery-profile/v0.23",
-            "roboguide.recovery-profile/v0.24",
-            "roboguide.recovery-profile/v0.25",
-            "roboguide.recovery-profile/v0.26",
-        }
-        else "roboguide.restore-receipt/v0.18"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.18"
-        else "roboguide.restore-receipt/v0.17"
-        if manifest["profile"]["schema"]
-        in {"roboguide.recovery-profile/v0.17", "roboguide.recovery-profile/v0.18"}
-        else "roboguide.restore-receipt/v0.16"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.16"
-        else "roboguide.restore-receipt/v0.15"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.15"
-        else "roboguide.restore-receipt/v0.14"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.14"
-        else "roboguide.restore-receipt/v0.13"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.13"
-        else "roboguide.restore-receipt/v0.12"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.12"
-        else "roboguide.restore-receipt/v0.11"
-        if manifest["profile"]["schema"] in artifact_snapshots.SUPPORTED
-        else "roboguide.restore-receipt/v0.10"
-        if manifest["profile"]["schema"] == catalog_references.SCHEMA
-        else "roboguide.restore-receipt/v0.9"
-        if manifest["profile"]["schema"] == artifact_layout.SCHEMA
-        else "roboguide.restore-receipt/v0.8"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.8"
-        else "roboguide.restore-receipt/v0.7"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.7"
-        else "roboguide.restore-receipt/v0.6"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.6"
-        else "roboguide.restore-receipt/v0.5"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.5"
-        else "roboguide.restore-receipt/v0.4"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.4"
-        else "roboguide.restore-receipt/v0.3"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.3"
-        else "roboguide.restore-receipt/v0.2"
-        if manifest["profile"]["schema"] == "roboguide.recovery-profile/v0.2"
-        else "roboguide.restore-receipt/v0.1"
-    )
+    receipt_schema = RESTORE_RECEIPT_SCHEMAS[manifest["profile"]["schema"]]
     if destination.is_dir() and not destination.is_symlink():
         receipt_path = destination / "restore-receipt.json"
         if not receipt_path.is_file() or receipt_path.is_symlink():
@@ -1194,6 +1140,7 @@ def restore(
             "roboguide.recovery-profile/v0.24",
             "roboguide.recovery-profile/v0.25",
             "roboguide.recovery-profile/v0.26",
+            "roboguide.recovery-profile/v0.27",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:
@@ -1238,6 +1185,7 @@ def restore(
         "roboguide.recovery-profile/v0.24",
         "roboguide.recovery-profile/v0.25",
         "roboguide.recovery-profile/v0.26",
+        "roboguide.recovery-profile/v0.27",
     }:
         receipt["original_authority_bytes_preserved"] = False
         receipt["original_operational_rows_preserved"] = True

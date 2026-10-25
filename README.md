@@ -1,5 +1,11 @@
 # RoboGuide
 
+ADR-0209 的时空资源模块已通过本地软件验收：Control 的显式 resource-topology v0.1 定义原 frame/anchor、
+整数空间边界与 clearance、Controller 本地时间窗口及部署 booking budget。不同资源 ID 的空间冲突
+参与联合调度和完整 Commit；原承诺随 wrapper v58 / recovery v0.27 保存。实际入口为
+`tools/quality/check_state_verifier_processes.py --resource-calendar`，创建真实软件 CPU 进程而非设备。
+这些逻辑承诺、进程退出与设备/物理安全证据分别保留。
+
 [应用代次升级与失败修复](docs/development/application-generation-upgrade-v0.1.md)已通过真实三副本
 v55 → v56 滚动升级、原 child wait、Unknown 重启对账、SQL 失败后的显式放弃、同 schema
 补丁及完整 v0.25 冷恢复。原 profile/policy/Root 保持；不支持的程序和退休版本回退被拒绝。

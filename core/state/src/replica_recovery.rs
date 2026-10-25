@@ -588,6 +588,7 @@ impl ReplicaRecoveryProjection {
                 | "roboguide.controller-checkpoint/v54"
                 | "roboguide.controller-checkpoint/v55"
                 | "roboguide.controller-checkpoint/v56"
+                | "roboguide.controller-checkpoint/v57"
         ) || events.len() > MAX_ROWS
             || floor.checked_add(events.len() as u64) != Some(checkpoint.event_sequence)
         {

@@ -196,6 +196,13 @@ State、单位、策略和审计；缺失值不补零。本地 provider 只提�
 的原 CPU/address-space `rlimit` 与实际 PID/kernel receipt 是单独的进程约束。Time 的 future interval
 属于 Control 日历，不能等同普通整数容量；完整空间/交通承诺仍需独立合同和验收。
 
+ADR-0209 定义 Control 的显式 resource-topology v0.1 部署约束：不同 ResourceId 的原空间
+边界也参与冲突检查；frame、anchor revision、整数毫米边界与 clearance 必须明确，未知变换
+不能证明互不相交。Time 的半开可用窗口只属于当前 Controller 的接收时钟，不能直接比较远端
+时钟。Scheduler 提供候选，正常、Group 与恢复 Commit 分别核对完整批次，再核算 quota 和
+持有资源。原活动或 Unknown 仍需正常 stop/revoke/release，计划结束和窗口到期不会自动释放。
+原拓扑版本和声明随承诺持久保存；这些是逻辑排他与软件准入，不能形成设备或物理停止证明。
+
 ### Embodied Execution Group（具身执行组）
 
 Actor 是 Mission 内连续的逻辑参与者；ContextRole 将 Actor 放入长期协作上下文；TaskRole 引用

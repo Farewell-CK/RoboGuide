@@ -106,7 +106,7 @@ def validate(connection: sqlite3.Connection) -> None:
     This check preserves released history and never demands content that was legitimately deleted.
     """
     wrapper = _checkpoint(connection)
-    if wrapper is None or wrapper["schema"] != WRAPPER:
+    if wrapper is None or wrapper["schema"] not in {WRAPPER, "roboguide.controller-checkpoint/v58"}:
         return
     preparations = [
         record["preparation"]
@@ -199,7 +199,7 @@ def validate_catalog(
 ) -> None:
     """Bind typed roots to original hot/archived publication without re-encoding floats."""
     wrapper = _checkpoint(connection)
-    if wrapper is None or wrapper["schema"] != WRAPPER:
+    if wrapper is None or wrapper["schema"] not in {WRAPPER, "roboguide.controller-checkpoint/v58"}:
         return
     roots = [record["request"].get("typed_map") for record in wrapper["memory_handoffs"].values()]
     roots += [

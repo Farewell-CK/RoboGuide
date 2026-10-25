@@ -386,6 +386,7 @@ impl ControlPlane {
         if committed.stopped_owner_allowed()
             || self.node_identity_registry().is_some()
             || self.decision_policy_registry().is_some()
+            || self.resource_topology_registry().is_some()
         {
             return Err(ControlError::InvalidProposal(
                 "stopped recovery requires current State at Rebind".into(),
@@ -403,6 +404,20 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<RecoveryOutcome, ControlError> {
+        let topology_assignment = domain::RoleAssignment::new(
+            committed.role_id().clone(),
+            committed.replacement_node_id().clone(),
+            committed.committed_resource_ids().to_vec(),
+        );
+        if !self.bound_topology_allowed(
+            committed.task_ref(),
+            std::slice::from_ref(&topology_assignment),
+            timestamp,
+        ) {
+            return Err(ControlError::AssignmentUnavailable(
+                "original replacement topology interval expired".into(),
+            ));
+        }
         let group = self
             .groups
             .get(committed.group_id())
@@ -668,6 +683,18 @@ impl ControlPlane {
             committed.task_ref().clone(),
             committed.role_id().clone(),
         ));
+        if self.resource_topology_registry.is_some()
+            && let Some(record) = self.scheduled_tasks.get_mut(committed.task_ref())
+        {
+            record.topology_recovery_assignments.insert(
+                committed.role_id().clone(),
+                RoleAssignment::new(
+                    committed.role_id().clone(),
+                    committed.replacement_node_id().clone(),
+                    committed.committed_resource_ids().to_vec(),
+                ),
+            );
+        }
         events.append(
             timestamp,
             correlation_id,

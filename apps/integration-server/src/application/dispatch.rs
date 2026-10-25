@@ -141,21 +141,36 @@ fn drive_ready_task(
         .ok_or_else(|| "Ready TaskExecution disappeared".to_string())?;
     let unbound = current.assignments().is_empty();
     let prepared = if unbound {
+        let booking = super::resource_topology::booking(controller, task_ref)?;
         let state = controller.bridge.decision_state();
         let ControllerState {
             bridge,
             orchestrator,
             ..
         } = controller;
-        match orchestrator.prepare_task(
-            mission_id,
-            task_ref,
-            &state,
-            bridge.control_mut(),
-            timestamp,
-            correlation_id,
-            events,
-        ) {
+        let preparation = if let Some(booking) = &booking {
+            orchestrator.prepare_task_with_duration_estimate(
+                mission_id,
+                task_ref,
+                &state,
+                bridge.control_mut(),
+                timestamp,
+                correlation_id,
+                events,
+                booking,
+            )
+        } else {
+            orchestrator.prepare_task(
+                mission_id,
+                task_ref,
+                &state,
+                bridge.control_mut(),
+                timestamp,
+                correlation_id,
+                events,
+            )
+        };
+        match preparation {
             Ok(prepared) => prepared,
             Err(error) if deferred_dispatch(&error) => return Ok(false),
             Err(error) => return Err(error.into()),

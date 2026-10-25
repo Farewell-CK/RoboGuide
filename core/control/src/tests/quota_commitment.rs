@@ -31,6 +31,7 @@ fn resource_claims_enforce_tenant_quota_and_survive_checkpoint() {
     control.reservations.insert(
         first_resource.clone(),
         crate::coordination::Reservation {
+            topology: None,
             task_ref: task.clone(),
             role_id: RoleId::new("worker").unwrap(),
             group_id: None,
@@ -51,6 +52,7 @@ fn resource_claims_enforce_tenant_quota_and_survive_checkpoint() {
     control.reservations.insert(
         second_resource.clone(),
         crate::coordination::Reservation {
+            topology: None,
             task_ref: task.clone(),
             role_id: RoleId::new("worker").unwrap(),
             group_id: None,
@@ -92,6 +94,7 @@ fn resource_claims_enforce_tenant_quota_and_survive_checkpoint() {
     control.reservations.insert(
         second_resource.clone(),
         crate::coordination::Reservation {
+            topology: None,
             task_ref: task.clone(),
             role_id: RoleId::new("worker").unwrap(),
             group_id: None,
@@ -157,6 +160,7 @@ fn legacy_reservations_do_not_receive_fabricated_quota_units() {
     legacy.reservations.insert(
         resource.clone(),
         crate::coordination::Reservation {
+            topology: None,
             task_ref: task_ref.clone(),
             role_id: role,
             group_id: None,
@@ -246,6 +250,7 @@ fn identity_profile_fences_legacy_reservations_with_unknown_tenant() {
     control.reservations.insert(
         resource.clone(),
         crate::coordination::Reservation {
+            topology: None,
             task_ref: task_ref.clone(),
             role_id: role,
             group_id: None,

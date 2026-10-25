@@ -242,7 +242,10 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<TaskExecution, ControlError> {
-        if self.decision_policy_registry().is_some() || plan.decision_policy_digest().is_some() {
+        if self.decision_policy_registry().is_some()
+            || plan.decision_policy_digest().is_some()
+            || self.resource_topology_registry().is_some()
+        {
             return Err(ControlError::InvalidProposal(
                 "State-policy binding requires current evidence".into(),
             ));
@@ -260,6 +263,11 @@ impl ControlPlane {
         correlation: &CorrelationId,
         events: &mut E,
     ) -> Result<TaskExecution, ControlError> {
+        if !self.bound_topology_allowed(plan.task_ref(), plan.assignments(), timestamp) {
+            return Err(ControlError::AssignmentUnavailable(
+                "original topology interval no longer permits binding".into(),
+            ));
+        }
         let current = self
             .decision_policy_registry()
             .map(|registry| registry.digest().expect("validated registry"));

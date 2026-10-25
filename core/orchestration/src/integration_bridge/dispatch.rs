@@ -394,7 +394,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             if held_groups.contains(intent.command.group_id()) {
                 continue;
             }
-            if self.control.decision_policy_registry().is_some() {
+            if self.control.decision_policy_registry().is_some()
+                || self.control.resource_topology_registry().is_some()
+            {
                 let Some(now) = clock.map(ports::Clock::now) else {
                     continue;
                 };

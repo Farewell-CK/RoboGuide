@@ -453,7 +453,7 @@ pub(crate) fn resume_role_recovery(
     let scheduling_snapshot = controller
         .bridge
         .control()
-        .scheduling_snapshot(timestamp)
+        .recovery_scheduling_snapshot(timestamp, need.group_id(), need.task_ref())?
         .with_policy_cost_evidence(controller.bridge.control().scheduling_cost_assessments(
             &state,
             need.task_ref().mission_id(),

@@ -36,6 +36,7 @@ mod physical_entity_registry;
 pub(crate) mod plan_revision;
 pub(crate) mod plan_validation;
 mod recovery;
+pub(crate) mod resource_topology;
 pub(crate) mod safety_stop;
 pub(crate) mod scoped_maps;
 pub(crate) mod semantic_verifier;

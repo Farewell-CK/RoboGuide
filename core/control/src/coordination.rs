@@ -101,6 +101,9 @@ impl CommittedPlan {
 /// The task and role that currently hold a resource commitment.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Reservation {
+    /// Exact original spatial/calendar declaration; expiry is never a release certificate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) topology: Option<domain::ResourceTopologyReservation>,
     /// Mission-scoped task currently holding the resource.
     pub(crate) task_ref: TaskRef,
     /// Role currently holding the resource.
@@ -254,9 +257,16 @@ impl ControlPlane {
 
         for assignment in proposal.assignments() {
             for resource_id in assignment.resource_ids() {
+                let topology = self.original_topology_reservation(
+                    resource_id,
+                    proposal.task_ref(),
+                    timestamp,
+                    false,
+                );
                 self.reservations.insert(
                     resource_id.clone(),
                     Reservation {
+                        topology,
                         task_ref: proposal.task_ref().clone(),
                         role_id: assignment.role_id().clone(),
                         group_id: None,
@@ -503,9 +513,16 @@ impl ControlPlane {
                 {
                     continue;
                 }
+                let topology = self.original_topology_reservation(
+                    resource_id,
+                    proposal.task_ref(),
+                    timestamp,
+                    scope == ResourceBindingScope::Context,
+                );
                 self.reservations
                     .entry(resource_id.clone())
                     .or_insert_with(|| Reservation {
+                        topology,
                         task_ref: proposal.task_ref().clone(),
                         role_id: assignment.role_id().clone(),
                         group_id: None,
@@ -540,6 +557,12 @@ impl ControlPlane {
         proposal: &AssignmentProposal,
         timestamp: TimestampMs,
     ) -> Result<(), ControlError> {
+        self.validate_topology_assignments(
+            state,
+            proposal.task_ref(),
+            proposal.assignments(),
+            timestamp,
+        )?;
         let scoped = self.tenant_state(state, proposal.task_ref().mission_id());
         let state = &scoped;
         for assignment in proposal.assignments() {

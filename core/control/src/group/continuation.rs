@@ -194,6 +194,15 @@ impl ControlPlane {
                         && assignment.node_id() == command.node_id()
                 })
                 .ok_or_else(|| invalid("continuation cannot change the original owner"))?;
+            if !self.bound_topology_allowed(
+                command.task_ref(),
+                std::slice::from_ref(assignment),
+                now,
+            ) {
+                return Err(invalid(
+                    "continuation cannot extend original spatial/calendar ownership",
+                ));
+            }
             let node = state
                 .node(command.node_id())
                 .ok_or_else(|| invalid("continuation Node is absent"))?;

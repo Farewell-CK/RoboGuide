@@ -18,6 +18,8 @@ pub enum RegistryCommandKind {
     ArtifactAuthorization,
     /// Complete revisioned tenant/category resource quota limits.
     ResourceQuota,
+    /// Original deployment spatial exclusion and local Controller availability calendars.
+    ResourceTopology,
 }
 
 /// Original authenticated result of one idempotent registry change.

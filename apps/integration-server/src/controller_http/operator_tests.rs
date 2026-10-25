@@ -498,6 +498,86 @@ async fn resource_quota_policy_requires_admin_and_commits_idempotently() {
     assert_eq!(restored.resource_quota_registry().unwrap().revision, 2);
 }
 
+/// Original topology administration requires global authority and rolls back a real SQL writer failure.
+#[tokio::test]
+async fn resource_topology_admin_sql_rollback_and_original_receipt() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("topology.sqlite3");
+    let log = state::SqliteEventLog::open(&database).unwrap();
+    let controller = controller(&log);
+    let admin = OperatorPrincipal {
+        tenants: Some(BTreeSet::from(["*".into()])),
+        subject: Some("topology-admin".into()),
+        role: Some("recovery-admin".into()),
+        ..Default::default()
+    };
+    let operator = OperatorPrincipal {
+        role: Some("operator".into()),
+        ..admin.clone()
+    };
+    let body = serde_json::to_vec(&serde_json::json!({
+        "command_id":"original-topology-policy", "expected_revision":0,
+        "registry":{"schema":"roboguide.resource-topology/v0.1", "registry_id":"unit-calendar", "revision":1,
+            "clock":"controller_receive_time", "stop_timeout_ms":1000, "booking_duration_ms":100, "booking_max_age_ms":10000,
+            "resources":[{"resource_id":"unit-calendar-resource", "node_id":"unit-unregistered-owner", "kind":"Time", "space":null, "time_domain":"unit-calendar-domain",
+                "windows":[{"starts_at":1,"ends_at":1000}]}]}
+    })).unwrap();
+    for method in ["GET", "POST"] {
+        let denied = route(
+            &controller,
+            &log,
+            &operator,
+            &request(
+                method,
+                "/v1/resource-topology",
+                if method == "POST" { &body } else { b"" },
+                None,
+            ),
+        )
+        .await;
+        assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
+    }
+    let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
+    let writer = rusqlite::Connection::open(&database).unwrap();
+    writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let failed = route(
+        &controller,
+        &log,
+        &admin,
+        &request("POST", "/v1/resource-topology", &body, None),
+    )
+    .await;
+    writer.execute_batch("ROLLBACK").unwrap();
+    assert!(failed.starts_with("HTTP/1.1 409"), "{failed}");
+    assert_eq!(
+        before,
+        server_checkpoint_json(&controller.lock().unwrap()).unwrap()
+    );
+    assert_eq!(log.control_command_count().unwrap(), 0);
+    let accepted = route(
+        &controller,
+        &log,
+        &admin,
+        &request("POST", "/v1/resource-topology", &body, None),
+    )
+    .await;
+    assert!(accepted.starts_with("HTTP/1.1 200"), "{accepted}");
+    let duplicate = route(
+        &controller,
+        &log,
+        &admin,
+        &request("POST", "/v1/resource-topology", &body, None),
+    )
+    .await;
+    assert_eq!(accepted, duplicate);
+    assert_eq!(log.control_command_count().unwrap(), 1);
+    let restored =
+        control::ControlPlane::restore(controller.lock().unwrap().bridge.control().checkpoint())
+            .unwrap();
+    assert_eq!(restored.resource_topology_registry().unwrap().revision, 1);
+    assert!(restored.group_ids().is_empty());
+}
+
 /// Review distinguishes a SQL outage from contract rejection, rolls back clearing, and can be retried once.
 #[tokio::test]
 async fn review_sql_failure_preserves_quarantine_and_next_review_succeeds() {

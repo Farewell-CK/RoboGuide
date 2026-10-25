@@ -843,6 +843,7 @@ fn context_reuse_model_keeps_one_owner_until_context_release() {
     control.reservations.insert(
         resource.clone(),
         Reservation {
+            topology: None,
             task_ref: first.task_ref().clone(),
             role_id: first.roles()[0].role_id().clone(),
             group_id: None,

@@ -58,6 +58,11 @@ jobs:
           uv run --frozen python tools/quality/check_state_verifier_processes.py
           --output "${RUNNER_TEMP}/roboguide-quantitative-resources"
           --skip-build --quantitative-resources
+      - name: Verify original software Time calendar, overrun and active cold recovery
+        run: >-
+          uv run --frozen python tools/quality/check_state_verifier_processes.py
+          --output "${RUNNER_TEMP}/roboguide-resource-calendar"
+          --skip-build --resource-calendar
 
       - name: Build the actual Controller connection lifetime probe
         run: cargo build --locked -p state --example controller_storage_probe

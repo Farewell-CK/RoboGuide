@@ -16,6 +16,7 @@ from typing import Any
 from check_recovery_bundle_processes import logical_rows
 from check_state_verifier_processes import ROOT, address, save
 from memory_preparation_profile import node_environment
+from recovery_profile_selection import restore_schema, standalone_schema
 
 
 def retained_rows(path: Path) -> dict[str, set[str]]:
@@ -99,8 +100,8 @@ def run(
                     "depends_on": ["controller"],
                 }
             )
-    profile = {
-        "schema": "roboguide.recovery-profile/v0.26",
+    profile: dict[str, Any] = {
+        "schema": standalone_schema(source / "controller.sqlite3"),
         "profile_id": "actual-scoped-map-lifecycle",
         "revision": 1,
         "max_bytes": 2 * 1024**3,
@@ -181,7 +182,7 @@ def run(
         "--command-id",
         restore_id,
     )
-    assert receipt["schema"] == "roboguide.restore-receipt/v0.26"
+    assert receipt["schema"] == restore_schema(profile["schema"])
     assert (
         execute(
             "backup",
@@ -238,7 +239,10 @@ def run(
         schema, raw = sql.execute(
             "SELECT schema,checkpoint_json FROM controller_checkpoint"
         ).fetchone()
-        assert schema == "roboguide.controller-checkpoint/v57"
+        assert schema in {
+            "roboguide.controller-checkpoint/v57",
+            "roboguide.controller-checkpoint/v58",
+        }
         authority = json.loads(raw)
         assert authority["memory_handoffs"] and authority["runtime_revisions"]
     with closing(sqlite3.connect(roots["memory"] / "memory.sqlite3")) as sql:

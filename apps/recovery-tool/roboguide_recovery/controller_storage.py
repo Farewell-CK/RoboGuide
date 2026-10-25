@@ -84,6 +84,7 @@ def validate(
         "roboguide.recovery-profile/v0.24",
         "roboguide.recovery-profile/v0.25",
         "roboguide.recovery-profile/v0.26",
+        "roboguide.recovery-profile/v0.27",
     }:
         raise ValueError("Controller storage v1 requires explicit recovery v0.17")
     objects = {
@@ -93,10 +94,20 @@ def validate(
         if (
             table in objects
             and connection.execute(
+                f"SELECT 1 FROM {table} WHERE schema='roboguide.controller-checkpoint/v58' LIMIT 1"
+            ).fetchone()
+            is not None
+            and profile_schema != "roboguide.recovery-profile/v0.27"
+        ):
+            raise ValueError("spatial/calendar Controller v58 requires explicit recovery v0.27")
+        if (
+            table in objects
+            and connection.execute(
                 f"SELECT 1 FROM {table} WHERE schema='roboguide.controller-checkpoint/v57' LIMIT 1"
             ).fetchone()
             is not None
-            and profile_schema != "roboguide.recovery-profile/v0.26"
+            and profile_schema
+            not in {"roboguide.recovery-profile/v0.26", "roboguide.recovery-profile/v0.27"}
         ):
             raise ValueError("scoped typed-map Controller v57 requires explicit recovery v0.26")
         if (
@@ -110,6 +121,7 @@ def validate(
                 "roboguide.recovery-profile/v0.24",
                 "roboguide.recovery-profile/v0.25",
                 "roboguide.recovery-profile/v0.26",
+                "roboguide.recovery-profile/v0.27",
             }
         ):
             raise ValueError("quantitative Controller v56 requires explicit recovery v0.24")
@@ -117,14 +129,24 @@ def validate(
         "roboguide.recovery-profile/v0.24",
         "roboguide.recovery-profile/v0.25",
         "roboguide.recovery-profile/v0.26",
+        "roboguide.recovery-profile/v0.27",
     }:
         from .capacity_recovery import validate as validate_capacity
 
         validate_capacity(connection)
-    if profile_schema == "roboguide.recovery-profile/v0.26":
+    if profile_schema in {"roboguide.recovery-profile/v0.26", "roboguide.recovery-profile/v0.27"}:
         from .scoped_map_recovery import validate as validate_scoped_maps
 
         validate_scoped_maps(connection)
+    if profile_schema in {
+        "roboguide.recovery-profile/v0.24",
+        "roboguide.recovery-profile/v0.25",
+        "roboguide.recovery-profile/v0.26",
+        "roboguide.recovery-profile/v0.27",
+    }:
+        from .topology_recovery import validate as validate_topology
+
+        validate_topology(connection)
     if expected is not None and actual != expected:
         raise ValueError("declared Controller storage format differs from actual original SQL")
 

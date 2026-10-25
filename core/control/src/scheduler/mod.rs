@@ -435,6 +435,10 @@ impl SchedulingOccupancy {
 /// Immutable Control calendar input consumed by the stateless Scheduler.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchedulingSnapshot {
+    /// Exact original Task and unexpired booking end for recovery, never a new duration grant.
+    pub(crate) topology_recovery_interval: Option<(TaskRef, TimestampMs)>,
+    /// Explicit Control-owned geometry/calendar declarations; absent retains historical semantics.
+    pub(crate) resource_topology: Option<domain::ResourceTopologyRegistry>,
     /// Monotonic Control calendar version.
     version: u64,
     /// Existing active and future resource intervals.
@@ -516,6 +520,8 @@ impl SchedulingSnapshot {
             ))
         });
         Self {
+            resource_topology: None,
+            topology_recovery_interval: None,
             version,
             occupancies,
             role_constraints: BTreeMap::new(),
@@ -528,6 +534,8 @@ impl SchedulingSnapshot {
     /// Returns the empty initial Control calendar.
     pub const fn empty() -> Self {
         Self {
+            resource_topology: None,
+            topology_recovery_interval: None,
             version: 0,
             occupancies: Vec::new(),
             role_constraints: BTreeMap::new(),

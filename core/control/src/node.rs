@@ -396,7 +396,11 @@ impl ControlPlane {
             .is_some_and(|lease| lease.is_active_at(timestamp))
         {
             Some(CandidateExclusionReason::LeaseInactive)
-        } else if !snapshot.registration().supports_role(role) {
+        } else if self
+            .validate_topology_registration(snapshot.registration())
+            .is_err()
+            || !snapshot.registration().supports_role(role)
+        {
             Some(CandidateExclusionReason::RoleContractUnavailable)
         } else if !self.decision_gates_allow(
             state,
@@ -476,6 +480,7 @@ impl ControlPlane {
         &self,
         registration: &NodeRegistration,
     ) -> Result<(), ControlError> {
+        self.validate_topology_registration(registration)?;
         for record in self
             .capacity_ledger
             .allocations

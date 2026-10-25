@@ -22,6 +22,10 @@ pub enum SchedulingReservationPhase {
 /// Durable Control commitment for one Ready Task's future joint decision.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScheduledTaskReservation {
+    /// Current exact replacements after successful Control Rebind; the original decision is immutable.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub(crate) topology_recovery_assignments:
+        std::collections::BTreeMap<domain::RoleId, domain::RoleAssignment>,
     /// Mission-level Group that will own the Task binding.
     group_id: ExecutionGroupId,
     /// Complete deterministic joint decision retained for activation revalidation.
@@ -36,6 +40,7 @@ impl ScheduledTaskReservation {
     /// Creates a live future reservation from one current Scheduler decision.
     fn new(group_id: ExecutionGroupId, decision: TaskSchedulingDecision) -> Self {
         Self {
+            topology_recovery_assignments: std::collections::BTreeMap::new(),
             group_id,
             decision,
             phase: SchedulingReservationPhase::Scheduled,
@@ -56,6 +61,20 @@ impl ScheduledTaskReservation {
     /// Returns the immutable joint decision retained for activation.
     pub const fn decision(&self) -> &TaskSchedulingDecision {
         &self.decision
+    }
+
+    /// Projects current bindings while retaining original Role/resource/time selection history.
+    pub fn current_assignments(&self) -> Vec<domain::RoleAssignment> {
+        self.decision
+            .proposed_assignments()
+            .into_iter()
+            .map(|original| {
+                self.topology_recovery_assignments
+                    .get(original.role_id())
+                    .cloned()
+                    .unwrap_or(original)
+            })
+            .collect()
     }
 
     /// Returns the future reservation lifecycle.
@@ -113,9 +132,16 @@ impl ControlPlane {
                 .task_execution(decision.task_ref())
                 .expect("restore validated Task");
             validate_decision_against_group(group, decision)?;
-            if !task.assignments().is_empty()
-                && task.assignments() != decision.proposed_assignments()
-            {
+            let expected_assignments = reservation
+                .current_assignments()
+                .into_iter()
+                .filter(|assignment| {
+                    group
+                        .recovery_unbound_role(decision.task_ref(), assignment.role_id())
+                        .is_none()
+                })
+                .collect::<Vec<_>>();
+            if !task.assignments().is_empty() && task.assignments() != expected_assignments {
                 return Err(ControlError::InvalidProposal(
                     "checkpoint scheduling decision differs from committed Task bindings"
                         .to_string(),
@@ -248,11 +274,18 @@ impl ControlPlane {
                             .get(&physical.task_ref)
                             .filter(|reservation| {
                                 reservation.phase == SchedulingReservationPhase::Activated
-                                    && reservation.decision.selections().iter().any(|selection| {
+                                    && reservation.current_assignments().iter().any(|selection| {
                                         selection.resource_ids().contains(resource_id)
                                     })
                             });
-                    match planned.and_then(|reservation| reservation.decision.ends_at()) {
+                    let end = if physical.topology.is_some()
+                        && physical.scope == ResourceBindingScope::Context
+                    {
+                        None
+                    } else {
+                        planned.and_then(|reservation| reservation.decision.ends_at())
+                    };
+                    match end {
                         Some(planned_end) if planned_end > now => SchedulingOccupancy::new(
                             resource_id.clone(),
                             planned
@@ -290,7 +323,7 @@ impl ControlPlane {
             }
         }
         occupancies.extend(self.quantitative_occupancies(&self.capacity_ledger, now, None));
-        SchedulingSnapshot::new(self.calendar_version, occupancies)
+        self.with_resource_topology(SchedulingSnapshot::new(self.calendar_version, occupancies))
     }
 
     /// Atomically records one future decision if its Scheduler snapshot is still current.
@@ -402,6 +435,7 @@ impl ControlPlane {
             ControlError::AllocationInvariant("Control calendar version overflow".to_string())
         })?;
         let snapshot = self.scheduling_snapshot_for_task(now, &group_id, decision.task_ref())?;
+        self.validate_topology_decision(&decision)?;
         self.validate_capacity_decision(state, &snapshot, &group_id, &decision)?;
         let task_ref = decision.task_ref().clone();
         self.scheduled_tasks.insert(

@@ -219,6 +219,7 @@ fn authorize_tenant_path(
             | "/v1/memory-authorizations"
             | "/v1/artifact-authorizations"
             | "/v1/resource-quotas"
+            | "/v1/resource-topology"
     ) {
         return Err(
             "global administration/diagnostics require an explicitly delegated global principal"
@@ -262,6 +263,7 @@ fn authorize_operator_request(
             | "/v1/memory-authorizations"
             | "/v1/artifact-authorizations"
             | "/v1/resource-quotas"
+            | "/v1/resource-topology"
             | "/v1/maintenance/archive/operations",
         ) => 2,
         ("GET", _)
@@ -292,7 +294,10 @@ fn authorize_operator_request(
             | "/v1/belief-policies"
             | "/v1/memory-authorizations",
         ) => 2,
-        ("POST", "/v1/artifact-authorizations" | "/v1/resource-quotas") => 2,
+        (
+            "POST",
+            "/v1/artifact-authorizations" | "/v1/resource-quotas" | "/v1/resource-topology",
+        ) => 2,
         ("POST", "/v1/verifier-evidence" | "/v1/mission-goal-evidence") => 1,
         ("POST", "/v1/attestation/challenges" | "/v1/attestation/evidence") => 2,
         ("POST", path)
@@ -1316,6 +1321,25 @@ where
             }
         };
     }
+    if method == "POST" && path == "/v1/resource-topology" {
+        return match application::state_policy::submit_resource_topology(
+            controller,
+            event_log,
+            event_write_gate,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin"),
+            clock.now(),
+        ) {
+            Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
     if method == "POST" && path == "/v1/resource-quotas" {
         return match application::state_policy::submit_resource_quotas(
             controller,
@@ -1670,6 +1694,22 @@ where
             (
                 "200 OK",
                 serde_json::json!({"schema_version":"roboguide.resource-allocation-view/v0.1","projected_at_ms":view.projected_at().as_millis(),"allocations":allocations}),
+            )
+        }
+        ("GET", "/v1/resource-topology") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            (
+                "200 OK",
+                serde_json::json!({
+                    "schema_version":"roboguide.resource-topology-view/v0.1",
+                    "registry": live.bridge.control().resource_topology_registry(),
+                    "projected_at_ms": clock.now().as_millis(),
+                    "reservations": live.bridge.control().resource_topology_reservations().into_iter().map(|(id, task, role, group, original)| serde_json::json!({"resource_id":id,"task_ref":task,"role_id":role,"group_id":group,"original":original})).collect::<Vec<_>>(),
+                    "clock_scope":"local_controller_receive_time",
+                    "physical_occupancy":"unavailable",
+                }),
             )
         }
         ("GET", "/v1/resource-quotas") => {

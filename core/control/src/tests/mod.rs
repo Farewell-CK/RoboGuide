@@ -28,3 +28,4 @@ mod scheduling_cost;
 mod selected_resource_capacity;
 
 mod quantitative_allocations;
+mod resource_topology;

@@ -618,6 +618,7 @@ def run(
     skip_build: bool,
     quantitative: bool = False,
     previous_controller: Path | None = None,
+    calendar: bool = False,
 ) -> dict[str, Any]:
     """Exercise protocol execution, independent CAS verification and restore."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -636,7 +637,7 @@ def run(
     node, mission = "posix-" + uuid.uuid4().hex, "files-" + uuid.uuid4().hex
     count = 3 if quantitative else 2
     provider = ComputeServer(
-        directory, capacity=2 if quantitative else 1, hold_before_read=quantitative
+        directory, capacity=2 if quantitative else 1, hold_before_read=quantitative or calendar
     )
     thread = threading.Thread(target=provider.serve_forever, daemon=True)
     thread.start()
@@ -646,6 +647,13 @@ def run(
         from quantitative_resource_processes import QuantitativeCheck, configuration
 
         configured = configuration(configured)
+    if calendar:
+        from resource_calendar_processes import CalendarCheck
+
+        calendar_check = CalendarCheck(directory, origin, node, provider)
+        configured = calendar_check.configuration(configured)
+    else:
+        calendar_check = None
     config.write_text(configured)
     processes: list[subprocess.Popen[bytes]] = []
     logs: list[BinaryIO] = []
@@ -655,7 +663,7 @@ def run(
         if not key.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
     }
     environment["ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN"] = "1"
-    if quantitative:
+    if quantitative or calendar:
         environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = "roboguide.artifact-storage/v3"
         environment["ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA"] = "1"
 
@@ -681,6 +689,8 @@ def run(
         controller = start(controller_command, "controller")
         wait_for(lambda: request(origin, "/healthz")[0] == 200, "Controller startup")
         install_policies(origin, node)
+        if calendar_check is not None:
+            calendar_check.install()
         node_command = [str(ROOT / "target/debug/roboguide-node"), str(config)]
         node_process = start(node_command, "node")
         wait_for(
@@ -688,6 +698,8 @@ def run(
             "actual software Node registration",
         )
         selected_plan = plan(mission)
+        if calendar_check is not None:
+            selected_plan = calendar_check.mission_plan(selected_plan)
         if quantitative:
             from quantitative_resource_processes import mission_plan
 
@@ -697,6 +709,15 @@ def run(
         assert request(origin, "/v1/execution-attempts")[1]["attempts"] == []
         assert provider.invocations == [], "false observed admission started an actual process"
         save(directory / "admission.json", {"enabled": True})
+        if calendar_check is not None:
+            calendar_check.freeze()
+            stop(controller)
+            stop(node_process)
+            calendar_check.quiescent_recovery(previous_controller)
+            controller = start(controller_command, "controller-calendar-restored")
+            node_process = start(node_command, "node-calendar-restored")
+            wait_for(lambda: request(origin, "/healthz")[0] == 200, "calendar Controller restore")
+            calendar_check.restored()
         quantity = QuantitativeCheck(directory, origin, provider, mission) if quantitative else None
         if quantity is not None:
             quantity.freeze()
@@ -712,6 +733,8 @@ def run(
             task = f"hash-{index}"
             if quantity is not None:
                 quantity.release(task)
+            if calendar_check is not None:
+                calendar_check.release(task)
             attempts = wait_for(
                 lambda task=task: [
                     entry
@@ -831,6 +854,7 @@ def run(
             ).hexdigest(),
             "receipts": receipts,
             "quantitative_resources": quantity.finish() if quantity is not None else None,
+            "resource_calendar": calendar_check.finish() if calendar_check is not None else None,
             "hardware_evidence": "HardwareEvidencePending",
         }
         save(directory / "result.json", result)
@@ -852,6 +876,7 @@ def main() -> None:
     parser.add_argument("--compute", nargs=2, type=Path)
     parser.add_argument("--read-permit", type=int)
     parser.add_argument("--quantitative-resources", action="store_true")
+    parser.add_argument("--resource-calendar", action="store_true")
     parser.add_argument("--previous-controller", type=Path)
     parser.add_argument("--verify", nargs=2, type=Path)
     arguments = parser.parse_args()
@@ -868,12 +893,24 @@ def main() -> None:
     elif arguments.verify:
         verify(*arguments.verify)
     elif arguments.output:
+        if arguments.quantitative_resources and arguments.resource_calendar:
+            parser.error("choose one complete quantitative or calendar process module")
         result = run(
             arguments.output.resolve(),
             arguments.skip_build,
             arguments.quantitative_resources,
             arguments.previous_controller,
+            arguments.resource_calendar,
         )
+        if arguments.resource_calendar:
+            from topology_recovery_processes import recover
+
+            result["calendar_final_recovery"] = recover(
+                arguments.output.resolve(),
+                arguments.output.resolve().with_name(arguments.output.name + "-final-recovery"),
+                arguments.previous_controller,
+            )
+            save(arguments.output.resolve() / "result.json", result)
         print(
             json.dumps({key: value for key, value in result.items() if key != "receipts"}, indent=2)
         )

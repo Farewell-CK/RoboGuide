@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper without original spatial/calendar declaration and reservation authority.
+const PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v57";
 /// Previous wrapper without scoped typed-map preparations and transitive lifecycle authority.
 const PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v56";
 /// Previous wrapper without exact quantitative parent and borrower capacity authority.
@@ -1206,6 +1208,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -1270,6 +1273,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -1283,6 +1287,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
                     | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
@@ -1444,6 +1449,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .control()
         .validate_mission_tenant_authority()?;
     application::scoped_maps::validate_restored(&controller)?;
+    application::resource_topology::validate_restored(&controller)?;
     application::memory_import::validate_restored(&controller)?;
     application::memory_handoff::validate_restored(&controller)?;
     application::plan_revision::attach_deployment(&mut controller, deployment_feasibility.clone())?;

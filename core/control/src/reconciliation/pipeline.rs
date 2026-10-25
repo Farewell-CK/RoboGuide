@@ -1091,6 +1091,12 @@ impl ControlPlane {
             proposal.replacement_node_id().clone(),
             proposal.replacement_resource_ids().to_vec(),
         );
+        self.validate_topology_assignments(
+            state,
+            proposal.task_ref(),
+            std::slice::from_ref(&recovery_assignment),
+            timestamp,
+        )?;
         let quantity = self.capacity_commit_candidate(
             state,
             proposal.group_id(),
@@ -1140,9 +1146,16 @@ impl ControlPlane {
                 .group_id = Some(proposal.group_id().clone());
                 continue;
             }
+            let topology = self.original_topology_reservation(
+                resource_id,
+                proposal.task_ref(),
+                timestamp,
+                false,
+            );
             self.reservations.insert(
                 resource_id.clone(),
                 Reservation {
+                    topology,
                     task_ref: proposal.task_ref().clone(),
                     role_id: proposal.role_id().clone(),
                     group_id: Some(proposal.group_id().clone()),

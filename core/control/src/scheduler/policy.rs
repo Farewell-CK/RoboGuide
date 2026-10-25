@@ -156,6 +156,15 @@ impl BoundedJointScheduler {
                     .iter()
                     .filter_map(SchedulingOccupancy::ends_at),
             );
+            if let Some(topology) = &snapshot.resource_topology {
+                starts.extend(
+                    topology
+                        .resources
+                        .iter()
+                        .flat_map(|entry| entry.windows.iter())
+                        .map(|window| window.starts_at),
+                );
+            }
         }
         starts.sort();
         starts.dedup();
@@ -246,7 +255,11 @@ impl BoundedJointScheduler {
             candidates.candidate_node_ids(),
             snapshot,
             timestamp,
-            &BTreeSet::new(),
+            snapshot
+                .topology_recovery_interval
+                .as_ref()
+                .filter(|(task, _)| task == candidates.task_ref())
+                .map(|(_, end)| *end),
         )?;
         let Some(selection) = selection else {
             events.append(
@@ -513,6 +526,17 @@ fn resource_choices(
                 if ids.contains(resource.id()) {
                     continue;
                 }
+                if snapshot.resource_topology.as_ref().is_some_and(|registry| {
+                    registry.entry(resource.id()).is_some_and(|entry| {
+                        ids.iter().any(|other| {
+                            registry
+                                .entry(other)
+                                .is_some_and(|other| entry.conflicts(other))
+                        })
+                    })
+                }) {
+                    continue;
+                }
                 let mut next_ids = ids.clone();
                 let mut next_units = units.clone();
                 next_ids.push(resource.id().clone());
@@ -547,7 +571,7 @@ fn select_role<S: SharedNodeStateReader>(
     candidate_node_ids: &[NodeId],
     snapshot: &SchedulingSnapshot,
     starts_at: TimestampMs,
-    selected_resources: &BTreeSet<ResourceId>,
+    ends_at: Option<TimestampMs>,
 ) -> Result<Option<RoleSchedulingSelection>, SchedulerError> {
     let mut stable_candidates = candidate_node_ids.to_vec();
     stable_candidates.sort_by_key(|node| (snapshot.candidate_cost(node, starts_at), node.clone()));
@@ -561,7 +585,7 @@ fn select_role<S: SharedNodeStateReader>(
             role,
             snapshot,
             starts_at,
-            None,
+            ends_at,
             &[],
             None,
         )
@@ -569,12 +593,6 @@ fn select_role<S: SharedNodeStateReader>(
         .next() else {
             continue;
         };
-        if resource_ids
-            .iter()
-            .any(|id| selected_resources.contains(id))
-        {
-            continue;
-        }
         return Ok(Some(
             RoleSchedulingSelection::new(
                 role.role_id().clone(),

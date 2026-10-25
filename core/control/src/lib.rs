@@ -25,6 +25,7 @@ mod quota;
 mod reconciliation;
 mod registry_provenance;
 mod resource_allocations;
+mod resource_topology;
 mod scheduler;
 mod scheduling_cost;
 mod tenant;
@@ -75,6 +76,12 @@ pub const DEFAULT_NODE_LEASE_TTL_MS: u64 = ports::DEFAULT_NODE_LEASE_DURATION_MS
 /// authoritative after a process restart.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ControlCheckpoint {
+    /// Explicit original deployment geometry/calendar authority; absent for older interpretations.
+    #[serde(default)]
+    resource_topology_registry: Option<domain::ResourceTopologyRegistry>,
+    /// Complete immutable accepted resource topology generations.
+    #[serde(default)]
+    resource_topology_history: BTreeMap<u64, domain::ResourceTopologyRegistry>,
     /// Current data-plane certificates; independent content scope is checked separately.
     #[serde(default)]
     artifact_authorization_registry: Option<domain::ArtifactAuthorizationRegistry>,
@@ -470,6 +477,10 @@ impl std::error::Error for ControlError {}
 /// Authoritative in-process Control Plane state for the bootstrap.
 #[derive(Debug, Clone)]
 pub struct ControlPlane {
+    /// Current explicit deployment geometry and local time constraints.
+    resource_topology_registry: Option<domain::ResourceTopologyRegistry>,
+    /// Original complete topology policy generations used by reservations and command receipts.
+    resource_topology_history: BTreeMap<u64, domain::ResourceTopologyRegistry>,
     /// Current data-plane stable principal and certificate authority.
     artifact_authorization_registry: Option<domain::ArtifactAuthorizationRegistry>,
     /// Retained original certificate grants, including irrevocable retirement.
@@ -905,6 +916,8 @@ impl ControlPlane {
     /// Creates an empty Control Plane with explicit receive-time freshness TTL.
     pub const fn with_status_ttl(max_status_age_ms: u64) -> Self {
         Self {
+            resource_topology_registry: None,
+            resource_topology_history: BTreeMap::new(),
             artifact_authorization_registry: None,
             artifact_authorization_history: BTreeMap::new(),
             resource_quota_registry: None,
@@ -952,6 +965,8 @@ impl ControlPlane {
     /// Captures durable Control authority without process-local lease timestamps.
     pub fn checkpoint(&self) -> ControlCheckpoint {
         ControlCheckpoint {
+            resource_topology_registry: self.resource_topology_registry.clone(),
+            resource_topology_history: self.resource_topology_history.clone(),
             artifact_authorization_registry: self.artifact_authorization_registry.clone(),
             artifact_authorization_history: self.artifact_authorization_history.clone(),
             resource_quota_registry: self.resource_quota_registry.clone(),
@@ -1252,6 +1267,8 @@ impl ControlPlane {
             }
         }
         let restored = Self {
+            resource_topology_registry: checkpoint.resource_topology_registry,
+            resource_topology_history: checkpoint.resource_topology_history,
             artifact_authorization_registry: checkpoint.artifact_authorization_registry,
             artifact_authorization_history: checkpoint.artifact_authorization_history,
             resource_quota_registry: checkpoint.resource_quota_registry,
@@ -1327,6 +1344,7 @@ impl ControlPlane {
         restored.capacity_ledger.validate()?;
         restored.validate_capacity_checkpoint()?;
         restored.validate_resource_quota_checkpoint()?;
+        restored.validate_resource_topology_checkpoint()?;
         if restored.reservations.keys().any(|resource_id| {
             !restored
                 .quota_ledger
@@ -1911,6 +1929,7 @@ mod checkpoint_tests {
         control.reservations.insert(
             ResourceId::new("space-a").expect("resource id valid"),
             Reservation {
+                topology: None,
                 task_ref: TaskRef::new(
                     MissionId::new("mission-a").expect("mission id valid"),
                     domain::TaskId::new("task-a").expect("task id valid"),

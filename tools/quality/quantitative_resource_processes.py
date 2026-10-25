@@ -81,6 +81,7 @@ class QuantitativeCheck:
         if schema not in {
             "roboguide.controller-checkpoint/v56",
             "roboguide.controller-checkpoint/v57",
+            "roboguide.controller-checkpoint/v58",
         }:
             raise ValueError("actual quantitative gate requires the original v56 full checkpoint")
         wrapper = json.loads(raw)
@@ -292,6 +293,7 @@ class QuantitativeCheck:
         assert schema in {
             "roboguide.controller-checkpoint/v56",
             "roboguide.controller-checkpoint/v57",
+            "roboguide.controller-checkpoint/v58",
         }
         control = json.loads(json.loads(raw)["integration_json"])["control"]
         assert control["capacity_ledger"] == self.original
