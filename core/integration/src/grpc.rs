@@ -44,11 +44,24 @@ pub mod v0_4 {
     /// Unified Memory and original-attempt safety contract; old v0.8 is map-only.
     pub const SAFETY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.12";
 
+    /// Explicit quantitative execution grants beside the unchanged original safety and Memory contracts.
+    pub const CAPACITY_NODE_CONTRACT_VERSION: &str = "roboguide.node.v0.13";
+
+    /// Checks original-attempt safety semantics without relabeling older contracts.
+    pub fn supports_safety(version: &str) -> bool {
+        matches!(
+            version,
+            SAFETY_NODE_CONTRACT_VERSION | CAPACITY_NODE_CONTRACT_VERSION
+        )
+    }
+
     /// Checks independently budgeted readonly revoke observation support.
     pub fn supports_memory_use_query(version: &str) -> bool {
         matches!(
             version,
-            MEMORY_USE_QUERY_NODE_CONTRACT_VERSION | SAFETY_NODE_CONTRACT_VERSION
+            MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
+                | SAFETY_NODE_CONTRACT_VERSION
+                | CAPACITY_NODE_CONTRACT_VERSION
         )
     }
 
@@ -59,6 +72,7 @@ pub mod v0_4 {
             MEMORY_USE_NODE_CONTRACT_VERSION
                 | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
                 | SAFETY_NODE_CONTRACT_VERSION
+                | CAPACITY_NODE_CONTRACT_VERSION
         )
     }
 
@@ -70,6 +84,7 @@ pub mod v0_4 {
                 | MEMORY_USE_NODE_CONTRACT_VERSION
                 | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
                 | SAFETY_NODE_CONTRACT_VERSION
+                | CAPACITY_NODE_CONTRACT_VERSION
         )
     }
 
@@ -83,6 +98,7 @@ pub mod v0_4 {
                 | MEMORY_USE_NODE_CONTRACT_VERSION
                 | MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
                 | SAFETY_NODE_CONTRACT_VERSION
+                | CAPACITY_NODE_CONTRACT_VERSION
         )
     }
     /// Prior profile-and-intent contract retained for explicit session compatibility.

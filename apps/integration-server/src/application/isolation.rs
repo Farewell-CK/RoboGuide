@@ -339,17 +339,49 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     // Wrappers v45-v51 add infrastructure/content/quota authority while retaining exactly the
     // original v45 scoped revision, safety and Memory isolation contract checked by this function.
     // Their independent SQL/checkpoint journals remain subject to their own strict storage gates.
-    if saved.schema != SERVER_CHECKPOINT_SCHEMA
-        && saved
-            .runtime_revisions
-            .values()
-            .any(|state| state.uses_typed_revision_memory_authority())
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
+    ) && saved
+        .runtime_revisions
+        .values()
+        .any(|state| state.uses_typed_revision_memory_authority())
     {
         return Err("legacy wrapper cannot carry typed-map revision Memory authority".into());
+    }
+    let integration: serde_json::Value =
+        serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
+    let control = integration
+        .get("control")
+        .ok_or("Controller wrapper lacks original Control authority")?;
+    let ledger = control.get("capacity_ledger");
+    if saved.schema == SERVER_CHECKPOINT_SCHEMA && ledger.is_none() {
+        return Err("current wrapper lacks mandatory quantitative capacity ledger".into());
+    }
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA {
+        let active_ledger = ledger.is_some_and(|ledger| {
+            ledger.get("generation").and_then(serde_json::Value::as_u64) != Some(0)
+                || ledger
+                    .get("allocations")
+                    .and_then(serde_json::Value::as_object)
+                    .is_none_or(|rows| !rows.is_empty())
+        });
+        let orchestration: serde_json::Value =
+            serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
+        if active_ledger
+            || contains_capacity_authority(&integration)
+            || contains_capacity_authority(&orchestration)
+        {
+            return Err(
+                "legacy wrapper cannot carry quantitative resource or MissionPlan v0.10 authority"
+                    .into(),
+            );
+        }
     }
     let current_isolation_contract = matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
             | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
             | PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_UPLOAD_RECOVERY_SERVER_CHECKPOINT_SCHEMA
@@ -924,6 +956,27 @@ fn contains_typed_map_policy(value: &serde_json::Value) -> bool {
                 || contains_typed_map_policy(value)
         }),
         serde_json::Value::Array(values) => values.iter().any(contains_typed_map_policy),
+        _ => false,
+    }
+}
+
+/// Detects explicit new authority in bounded checkpoint values without interpreting model parameters.
+fn contains_capacity_authority(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(fields) => fields.iter().any(|(key, value)| match key.as_str() {
+            "allocation_mode" => value.as_str() == Some("divisible"),
+            "resource_grants" | "resource_envelope" | "context_resource_envelopes" => {
+                value.as_array().is_none_or(|items| !items.is_empty())
+            }
+            "resource_grants_json" => value.as_str().is_none_or(|text| !text.is_empty()),
+            "schema_version" => value.as_str() == Some(domain::MISSION_PLAN_SCHEMA_V0_10),
+            "contract_version" | "node_contract_version" => {
+                value.as_str() == Some(domain::NODE_CONTRACT_VERSION_V0_13)
+            }
+            "parameters" => false,
+            _ => contains_capacity_authority(value),
+        }),
+        serde_json::Value::Array(items) => items.iter().any(contains_capacity_authority),
         _ => false,
     }
 }

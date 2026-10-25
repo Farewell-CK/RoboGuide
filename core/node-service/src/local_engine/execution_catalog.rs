@@ -308,6 +308,16 @@ impl CompiledExecutionStateMapping {
 }
 
 impl CompiledResource {
+    /// Returns exact configured quantitative semantics; it creates no OS or device enforcement.
+    pub const fn allocation_mode(&self) -> domain::ResourceAllocationMode {
+        self.allocation_mode
+    }
+
+    /// Returns the explicit versioned semantic unit class.
+    pub fn resource_class(&self) -> Option<&str> {
+        self.resource_class.as_deref()
+    }
+
     /// Returns the stable resource identity.
     pub fn id(&self) -> &str {
         &self.id

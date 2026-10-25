@@ -427,8 +427,20 @@ pub(super) fn lock_keys(
     resource_ids: &[String],
     invocation: &serde_json::Value,
 ) -> Result<BTreeSet<String>, EngineError> {
+    let grants: Vec<domain::ResourceAllocationGrant> = invocation
+        .get("resource_grants")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(EngineError::Json)?
+        .unwrap_or_default();
+    let shared = grants
+        .iter()
+        .map(|grant| grant.resource_id.as_str())
+        .collect::<BTreeSet<_>>();
     let mut keys = resource_ids
         .iter()
+        .filter(|resource| !shared.contains(resource.as_str()))
         .map(|resource| format!("resource:{resource}"))
         .chain(
             capability
@@ -487,6 +499,24 @@ pub(super) fn canonical_invocation_json(
     let object = normalized
         .as_object_mut()
         .expect("canonical invocation object is constructed locally");
+    if !invocation.resource_grants_json.is_empty() {
+        if invocation.resource_grants_json.len() > 131072 {
+            return Err(EngineError::Protocol(
+                "resource grants exceed their bound".into(),
+            ));
+        }
+        let grants: Vec<domain::ResourceAllocationGrant> =
+            serde_json::from_str(&invocation.resource_grants_json).map_err(EngineError::Json)?;
+        if grants.len() > 64 {
+            return Err(EngineError::Protocol(
+                "resource grant count exceeds its bound".into(),
+            ));
+        }
+        for grant in &grants {
+            grant.validate().map_err(EngineError::Protocol)?;
+        }
+        object.insert("resource_grants".into(), serde_json::json!(grants));
+    }
     if legacy {
         object.insert(
             "capability_contract".to_string(),

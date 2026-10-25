@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Default)]
 pub struct InMemoryAllocationState {
     /// Current normalized records in deterministic resource order.
-    allocations: BTreeMap<ResourceId, ResourceAllocation>,
+    allocations: BTreeMap<(ResourceId, Option<String>), ResourceAllocation>,
     /// RoboGuide-local time of the current complete projection.
     projected_at: Option<TimestampMs>,
 }
@@ -26,7 +26,12 @@ impl InMemoryAllocationState {
 impl AllocationStateReader for InMemoryAllocationState {
     /// Returns one projected allocation by resource identity.
     fn allocation(&self, resource_id: &ResourceId) -> Option<&ResourceAllocation> {
-        self.allocations.get(resource_id)
+        let mut matches = self
+            .allocations
+            .values()
+            .filter(|allocation| allocation.resource_id() == resource_id);
+        let first = matches.next()?;
+        matches.next().is_none().then_some(first)
     }
 
     /// Returns all current records in deterministic ResourceId order.
@@ -58,8 +63,28 @@ impl AllocationStateWriter for InMemoryAllocationState {
         let mut replacement = BTreeMap::new();
         for allocation in snapshot.allocations() {
             if replacement
-                .insert(allocation.resource_id().clone(), allocation.clone())
+                .insert(
+                    (
+                        allocation.resource_id().clone(),
+                        allocation
+                            .quantitative_grant()
+                            .map(|grant| grant.allocation_id.clone()),
+                    ),
+                    allocation.clone(),
+                )
                 .is_some()
+            {
+                return Err(AllocationStateError::DuplicateResource(
+                    allocation.resource_id().clone(),
+                ));
+            }
+        }
+        let mut modes = BTreeMap::new();
+        for allocation in replacement.values() {
+            let shared = allocation.quantitative_grant().is_some();
+            if modes
+                .insert(allocation.resource_id(), shared)
+                .is_some_and(|old| !old || !shared)
             {
                 return Err(AllocationStateError::DuplicateResource(
                     allocation.resource_id().clone(),

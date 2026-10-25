@@ -19,8 +19,16 @@ SNAPSHOT_PROFILE = "roboguide.recovery-profile/v0.20"
 GC_PROFILE = "roboguide.recovery-profile/v0.21"
 STAGING_PROFILE = "roboguide.recovery-profile/v0.22"
 INITIALIZATION_PROFILE = "roboguide.recovery-profile/v0.23"
+CAPACITY_PROFILE = "roboguide.recovery-profile/v0.24"
 PROFILES = frozenset(
-    {PROFILE, SNAPSHOT_PROFILE, GC_PROFILE, STAGING_PROFILE, INITIALIZATION_PROFILE}
+    {
+        PROFILE,
+        SNAPSHOT_PROFILE,
+        GC_PROFILE,
+        STAGING_PROFILE,
+        INITIALIZATION_PROFILE,
+        CAPACITY_PROFILE,
+    }
 )
 LAYOUT4 = "roboguide.replica-content-layout/v0.4"
 LAYOUT5 = "roboguide.replica-content-layout/v0.5"
@@ -80,9 +88,15 @@ def metadata_files(component: dict[str, Any]) -> list[str]:
     return result
 
 
-def validate_pairing(components: list[dict[str, Any]]) -> None:
+def validate_pairing(components: list[dict[str, Any]], *, allow_standalone: bool = False) -> None:
     """Require one complete Root per declared parent, with no inferred or repeated member roots."""
     parents = {item["component_id"] for item in components if item["kind"] == "replica"}
+    if (
+        allow_standalone
+        and not parents
+        and not any(item["kind"] == "replica-content" for item in components)
+    ):
+        return
     paired: set[str] = set()
     for item in components:
         if item["kind"] != "replica-content":

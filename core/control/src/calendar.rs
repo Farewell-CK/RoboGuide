@@ -137,15 +137,42 @@ impl ControlPlane {
                 ) {
                     continue;
                 }
-                let left = decision
-                    .selections()
-                    .iter()
-                    .flat_map(|selection| selection.resource_ids());
+                let left = decision.selections().iter().flat_map(|selection| {
+                    selection
+                        .resource_ids()
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, _)| {
+                            selection
+                                .resource_requirements()
+                                .get(*index)
+                                .is_none_or(|demand| {
+                                    demand.allocation_mode()
+                                        == domain::ResourceAllocationMode::Exclusive
+                                })
+                        })
+                        .map(|(_, id)| id)
+                });
                 let right = later
                     .decision()
                     .selections()
                     .iter()
-                    .flat_map(|selection| selection.resource_ids())
+                    .flat_map(|selection| {
+                        selection
+                            .resource_ids()
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, _)| {
+                                selection
+                                    .resource_requirements()
+                                    .get(*index)
+                                    .is_none_or(|demand| {
+                                        demand.allocation_mode()
+                                            == domain::ResourceAllocationMode::Exclusive
+                                    })
+                            })
+                            .map(|(_, id)| id)
+                    })
                     .collect::<BTreeSet<_>>();
                 if left
                     .into_iter()
@@ -157,6 +184,7 @@ impl ControlPlane {
                 }
             }
         }
+        self.validate_capacity_calendar_history()?;
         Ok(())
     }
 
@@ -195,9 +223,13 @@ impl ControlPlane {
                 binding.assignment().resource_ids().to_vec(),
             ));
         }
-        Ok(self
-            .scheduling_snapshot_excluding(now, &reusable)
-            .with_role_constraints(constraints))
+        self.with_capacity_contexts(
+            self.scheduling_snapshot_excluding(now, &reusable)
+                .with_role_constraints(constraints),
+            group_id,
+            task_ref,
+            now,
+        )
     }
 
     /// Builds one snapshot while treating exact same-Context resources as reusable.
@@ -239,15 +271,25 @@ impl ControlPlane {
             .filter(|reservation| reservation.phase == SchedulingReservationPhase::Scheduled)
         {
             for selection in reservation.decision.selections() {
-                occupancies.extend(selection.resource_ids().iter().cloned().map(|resource_id| {
-                    SchedulingOccupancy::new(
-                        resource_id,
+                for (index, resource_id) in selection.resource_ids().iter().enumerate() {
+                    if selection
+                        .resource_requirements()
+                        .get(index)
+                        .is_some_and(|demand| {
+                            demand.allocation_mode() == domain::ResourceAllocationMode::Divisible
+                        })
+                    {
+                        continue;
+                    }
+                    occupancies.push(SchedulingOccupancy::new(
+                        resource_id.clone(),
                         reservation.decision.starts_at(),
                         reservation.decision.ends_at(),
-                    )
-                }));
+                    ));
+                }
             }
         }
+        occupancies.extend(self.quantitative_occupancies(&self.capacity_ledger, now, None));
         SchedulingSnapshot::new(self.calendar_version, occupancies)
     }
 
@@ -345,6 +387,8 @@ impl ControlPlane {
                         resource.id() == resource_id
                             && resource.kind() == required.kind()
                             && resource.capacity() >= required.units()
+                            && resource.allocation_mode() == required.allocation_mode()
+                            && resource.resource_class() == required.resource_class()
                     })
                 })
             {
@@ -358,23 +402,7 @@ impl ControlPlane {
             ControlError::AllocationInvariant("Control calendar version overflow".to_string())
         })?;
         let snapshot = self.scheduling_snapshot_for_task(now, &group_id, decision.task_ref())?;
-        for selection in decision.selections() {
-            for resource_id in selection.resource_ids() {
-                if snapshot.occupancies().iter().any(|occupancy| {
-                    occupancy.resource_id() == resource_id
-                        && intervals_overlap(
-                            decision.starts_at(),
-                            decision.ends_at(),
-                            occupancy.starts_at(),
-                            occupancy.ends_at(),
-                        )
-                }) {
-                    return Err(ControlError::InvalidProposal(format!(
-                        "resource {resource_id} conflicts with current Control calendar"
-                    )));
-                }
-            }
-        }
+        self.validate_capacity_decision(state, &snapshot, &group_id, &decision)?;
         let task_ref = decision.task_ref().clone();
         self.scheduled_tasks.insert(
             task_ref.clone(),
@@ -535,7 +563,7 @@ fn validate_decision_against_group(
         .map(|selection| selection.role_id())
         .collect::<BTreeSet<_>>();
     let required_roles = task.role_scopes().keys().collect::<BTreeSet<_>>();
-    let mut selected_resources = BTreeSet::new();
+    let mut selected_resources = std::collections::BTreeMap::new();
     if selected_roles != required_roles
         || selected_roles.len() != decision.selections().len()
         || decision.selections().iter().any(|selection| {
@@ -545,6 +573,23 @@ fn validate_decision_against_group(
                 return true;
             };
             let resources = requirement.resource_requirements();
+            let shared = resources.iter().any(|demand| {
+                demand.allocation_mode() == domain::ResourceAllocationMode::Divisible
+            });
+            if shared
+                && (selection.resource_requirements() != resources.as_ref()
+                    || selection.resource_capacities().len() != resources.len()
+                    || selection
+                        .resource_capacities()
+                        .iter()
+                        .zip(resources.iter())
+                        .any(|(capacity, demand)| *capacity < demand.units()))
+                || !shared
+                    && (!selection.resource_requirements().is_empty()
+                        || !selection.resource_capacities().is_empty())
+            {
+                return true;
+            }
             selection.resource_ids().len() != resources.len()
                 || selection.resource_units().len() != resources.len()
                 || selection
@@ -552,10 +597,17 @@ fn validate_decision_against_group(
                     .iter()
                     .zip(resources.iter())
                     .any(|(selected, required)| *selected != required.units())
-                || selection
-                    .resource_ids()
-                    .iter()
-                    .any(|resource_id| !selected_resources.insert(resource_id))
+                || selection.resource_ids().iter().zip(resources.iter()).any(
+                    |(resource_id, demand)| {
+                        selected_resources
+                            .insert(resource_id, demand.allocation_mode())
+                            .is_some_and(|old| {
+                                old != domain::ResourceAllocationMode::Divisible
+                                    || demand.allocation_mode()
+                                        != domain::ResourceAllocationMode::Divisible
+                            })
+                    },
+                )
         })
     {
         return Err(ControlError::InvalidProposal(

@@ -165,7 +165,8 @@ pub(super) fn registration_from_wire(
 ) -> Result<domain::NodeRegistration, IntegrationRuntimeError> {
     let semantic_profiles = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
@@ -176,7 +177,8 @@ pub(super) fn registration_from_wire(
     );
     let independent_operation_support = matches!(
         wire.node_contract_version.as_str(),
-        integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
@@ -317,11 +319,34 @@ pub(super) fn registration_from_wire(
     for resource in wire.resources {
         let resource_id = ResourceId::new(resource.id)?;
         let owner = LocalSystemId::new(resource.local_system_id)?;
-        resources.push(Resource::new(
-            resource_id.clone(),
-            resource_kind(&resource.kind)?,
-            resource.capacity,
-        )?);
+        let declaration = if resource.allocation_mode == "divisible" {
+            if wire.node_contract_version != integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+                || resource.kind != "compute"
+            {
+                return Err(IntegrationRuntimeError::Protocol(
+                    "divisible resource requires explicit Node v0.13 Compute units".into(),
+                ));
+            }
+            Resource::new_divisible(resource_id.clone(), resource.capacity)?
+                .with_resource_class(resource.resource_class)?
+        } else {
+            if !matches!(resource.allocation_mode.as_str(), "" | "exclusive")
+                || !resource.resource_class.is_empty()
+                || !resource.allocation_mode.is_empty()
+                    && wire.node_contract_version
+                        != integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            {
+                return Err(IntegrationRuntimeError::Protocol(
+                    "resource allocation fields exceed negotiated Node contract".into(),
+                ));
+            }
+            Resource::new(
+                resource_id.clone(),
+                resource_kind(&resource.kind)?,
+                resource.capacity,
+            )?
+        };
+        resources.push(declaration);
         resource_owners.insert(resource_id, owner);
     }
     Ok(
@@ -518,6 +543,16 @@ pub(super) fn parse_contract(
 /// Converts existing canonical ExecutionCommand into formal wire invocation.
 pub(super) fn invocation_from_command(command: &ExecutionCommand) -> CanonicalInvocation {
     CanonicalInvocation {
+        resource_grants_json: if !command.resource_grants().is_empty()
+            || command.registration_evidence().is_some_and(|evidence| {
+                evidence.contract_version().as_str()
+                    == integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            }) {
+            serde_json::to_string(command.resource_grants())
+                .expect("typed execution grants serialize")
+        } else {
+            String::new()
+        },
         mission_id: command.mission_id().as_str().to_string(),
         task_id: command.task_id().as_str().to_string(),
         group_id: command.group_id().as_str().to_string(),

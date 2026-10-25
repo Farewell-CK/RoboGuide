@@ -6,7 +6,7 @@ use domain::{
     TaskRef, TaskRequirement, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 /// A Scheduler selection accepted for validation but not yet committed.
 #[derive(Debug, Clone, PartialEq)]
@@ -118,7 +118,7 @@ impl ControlPlane {
             ));
         }
 
-        let mut proposed_resources = BTreeSet::new();
+        let mut proposed_resources = BTreeMap::new();
         for role in requirement.roles() {
             let assignment = assignments
                 .iter()
@@ -178,6 +178,8 @@ impl ControlPlane {
                             resource.id() == resource_id
                                 && resource.kind() == required.kind()
                                 && resource.capacity() >= required.units()
+                                && resource.allocation_mode() == required.allocation_mode()
+                                && resource.resource_class() == required.resource_class()
                         })
                     })
             {
@@ -186,8 +188,14 @@ impl ControlPlane {
                     role.role_id()
                 )));
             }
-            for resource_id in assignment.resource_ids() {
-                if !proposed_resources.insert(resource_id) {
+            for (resource_id, demand) in assignment.resource_ids().iter().zip(requirements.iter()) {
+                if proposed_resources
+                    .insert(resource_id, demand.allocation_mode())
+                    .is_some_and(|previous| {
+                        previous != domain::ResourceAllocationMode::Divisible
+                            || demand.allocation_mode() != domain::ResourceAllocationMode::Divisible
+                    })
+                {
                     return Err(ControlError::InvalidProposal(format!(
                         "resource {resource_id} is assigned more than once"
                     )));

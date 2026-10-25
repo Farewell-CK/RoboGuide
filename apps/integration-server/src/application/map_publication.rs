@@ -119,6 +119,7 @@ pub(crate) fn validate(
                 domain::NODE_CONTRACT_VERSION_V0_8
                     | domain::NODE_CONTRACT_VERSION_V0_9
                     | domain::NODE_CONTRACT_VERSION_V0_12
+                    | domain::NODE_CONTRACT_VERSION_V0_13
             )
             || evidence.source_session_id().is_none_or(str::is_empty)
             || evidence
@@ -135,6 +136,7 @@ pub(crate) fn validate(
         domain::NODE_CONTRACT_VERSION_V0_8
             | domain::NODE_CONTRACT_VERSION_V0_9
             | domain::NODE_CONTRACT_VERSION_V0_12
+            | domain::NODE_CONTRACT_VERSION_V0_13
     ) || registration.operation_owner(source.command().intent().operation())
         != manifest.producer_local_system_id()
         || registration.operation_owner(command.intent().operation())

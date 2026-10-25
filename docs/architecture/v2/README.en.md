@@ -1,5 +1,13 @@
 # RoboGuide V2 current architecture
 
+[ADR-0206](../../decisions/0206-quantitative-resource-allocation.md) defines explicit quantitative
+Compute authority on the development branch. Mission declares semantic units and original Context
+envelopes; Control owns Commit, quota and exact release; Node validates original grants and retains
+Unknown capacity. Allocation IDs create no Nodes or devices. Local How operation locks and final
+safety remain independent. [Actual software process acceptance](../../development/acceptance/2026-10-25-quantitative-resources.md)
+passes original-grant restart, active-data recovery and old-binary refusal under explicit versions.
+Complete time/space, upgrades and the other remaining stages are still required.
+
 [ADR-0176](../../decisions/0176-owned-controller-qualified-content-reads.md) defines bounded
 owned-child reads of qualified Root bytes with separate published/integrity purposes. Original
 Artifact owners remain intact; actual HTTP ACL/scope/use checks still precede every returned chunk.
@@ -472,7 +480,7 @@ effects or end independently owned storage work. This is not an OS/RSS or comple
 | --- | --- | --- |
 | Memory / Spatial | Selective import/use/revoke, Group handoff, Active Map/GC, stored-reference recovery checks, file algorithms | All external reference producer lifecycles, typed-map/multi-kind fault combinations, online content consistency |
 | HA / recovery | Dynamic membership, original-child drain, transfer, certificate rotation, SQL/CAS cold recovery | Complete online content/archive/catalog recovery, rolling upgrades/rollback, independent-domain RTO/RPO |
-| Resources | Bounded selection, attributed costs, future calendar, logical quota, file-worker POSIX proof | Divisible allocation, GPU/load/traffic costs/enforcement, complete spatial commitments |
+| Resources | Bounded selection, current-source costs, weighted future calendar, logical quota, explicit divisible Compute, file-worker POSIX proof | Complete time/space commitments and other deployed resource costs/enforcement |
 | Coordination / revision | Relation stop/hold, continuation, runtime MI, original goal/Review, scoped Memory file paths and explicit complete typed-map source declarations | Running preemption, complex migration/handoff, more Memory and complete cross-stage combinations |
 | Federation | Participant HTTP, mTLS/revisioned tenant/domain grants, original receipts and two-SQLite restart/fault reconciliation | Durable coordinator, actual peer requests, resource/epoch proofs, cross-host clocks and combined recovery; global dispatch remains false |
 | Operations | Write-disabled, metrics-reader, monitoring config, short software alert gates, partial I/O isolation | Remaining listeners/blocking paths, long-term SLO/runbooks, complete version/fault matrix and hardware evidence |

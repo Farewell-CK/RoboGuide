@@ -110,11 +110,18 @@ impl ControlPlane {
         }
         for assignment in plan.assignments() {
             for resource_id in assignment.resource_ids() {
-                let reservation = self.reservations.get(resource_id).ok_or_else(|| {
-                    ControlError::InvalidProposal(format!(
-                        "committed resource {resource_id} has no reservation"
-                    ))
-                })?;
+                let reservation = self
+                    .binding_reservation(
+                        resource_id,
+                        &group_id,
+                        plan.task_ref(),
+                        assignment.role_id(),
+                    )
+                    .ok_or_else(|| {
+                        ControlError::InvalidProposal(format!(
+                            "committed resource {resource_id} has no reservation"
+                        ))
+                    })?;
                 if reservation.task_ref != *plan.task_ref()
                     || reservation.role_id != *assignment.role_id()
                     || reservation.group_id.is_some()
@@ -226,11 +233,13 @@ impl ControlPlane {
         let node_id = assignment.node_id().clone();
         let resource_ids = assignment.resource_ids().to_vec();
         for resource_id in &resource_ids {
-            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
-                ControlError::InvalidProposal(format!(
-                    "group {group_id} binding {resource_id} has no reservation"
-                ))
-            })?;
+            let reservation = self
+                .binding_reservation(resource_id, group_id, &task_ref, role_id)
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(format!(
+                        "group {group_id} binding {resource_id} has no reservation"
+                    ))
+                })?;
             if reservation.task_ref != task_ref
                 || reservation.role_id != *role_id
                 || reservation.group_id.as_ref() != Some(group_id)
@@ -331,6 +340,7 @@ impl ControlPlane {
                 self.release_resource_quota(resource_id);
             }
         }
+        self.release_capacity_task(group_id, task_ref, Some(role_id));
         let group = self
             .groups
             .get_mut(group_id)
@@ -403,7 +413,7 @@ impl ControlPlane {
         if !state
             .node(committed.replacement_node_id())
             .is_some_and(|node| {
-                Self::selected_resources_match_registration(
+                self.selected_resources_match_registration(
                     node.registration(),
                     role,
                     committed.committed_resource_ids(),
@@ -810,6 +820,9 @@ impl ControlPlane {
         let mut expected_resources = BTreeMap::<ResourceId, RoleId>::new();
         for assignment in &group.assignments {
             for resource_id in assignment.resource_ids() {
+                if self.capacity_conflict(resource_id).is_some() {
+                    continue;
+                }
                 if expected_resources
                     .insert(resource_id.clone(), assignment.role_id().clone())
                     .is_some()
@@ -823,7 +836,10 @@ impl ControlPlane {
         for execution in group.task_executions.values() {
             for assignment in execution.assignments() {
                 for resource_id in assignment.resource_ids() {
-                    if execution.binding_scope(resource_id) == ResourceBindingScope::Context {
+                    if self.capacity_conflict(resource_id).is_some() {
+                        continue;
+                    }
+                    if execution.role_scope(assignment.role_id()) == ResourceBindingScope::Context {
                         continue;
                     }
                     if expected_resources
@@ -839,6 +855,9 @@ impl ControlPlane {
         }
         for binding in group.context_bindings.values() {
             for resource_id in binding.assignment().resource_ids() {
+                if self.capacity_conflict(resource_id).is_some() {
+                    continue;
+                }
                 if expected_resources
                     .insert(resource_id.clone(), binding.assignment().role_id().clone())
                     .is_some()
@@ -865,6 +884,9 @@ impl ControlPlane {
                     )));
                 }
                 for resource_id in committed.committed_resource_ids() {
+                    if self.capacity_conflict(resource_id).is_some() {
+                        continue;
+                    }
                     if expected_resources
                         .insert(resource_id.clone(), committed.role_id().clone())
                         .is_some()
@@ -896,7 +918,8 @@ impl ControlPlane {
                 )));
             }
         }
-        let resource_ids = self
+        self.validate_capacity_checkpoint()?;
+        let mut resource_ids = self
             .reservations
             .iter()
             .filter(|(_, reservation)| reservation.group_id.as_ref() == Some(group_id))
@@ -914,6 +937,16 @@ impl ControlPlane {
             })
             .collect::<Result<Vec<_>, ControlError>>()?;
 
+        resource_ids.extend(
+            self.capacity_ledger
+                .allocations
+                .values()
+                .filter(|record| &record.original.group_id == group_id)
+                .map(|record| record.original.resource_id.clone()),
+        );
+        resource_ids.sort();
+        resource_ids.dedup();
+        self.release_capacity_group(group_id);
         for resource_id in &resource_ids {
             self.reservations.remove(resource_id);
             self.release_resource_quota(resource_id);

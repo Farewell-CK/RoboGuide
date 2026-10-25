@@ -315,6 +315,7 @@ fn previous_profile_contract_rejects_new_operation_support_field() {
 #[test]
 fn node_contract_versions_reject_mixed_or_downgraded_semantics() {
     let current = crate::grpc::v0_4::CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "m".to_string(),
         task_id: "t".to_string(),
         group_id: "g".to_string(),
@@ -340,6 +341,7 @@ fn node_contract_versions_reject_mixed_or_downgraded_semantics() {
     );
 
     let legacy = crate::grpc::v0_4::CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "m".to_string(),
         task_id: "t".to_string(),
         group_id: "g".to_string(),
@@ -357,6 +359,7 @@ fn node_contract_versions_reject_mixed_or_downgraded_semantics() {
     );
 
     let compatible = crate::grpc::v0_4::CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "m".to_string(),
         task_id: "t".to_string(),
         group_id: "g".to_string(),
@@ -675,6 +678,7 @@ fn pending_registration_cannot_route_commands() {
             "command-1".to_string(),
             "execution-1".to_string(),
             crate::grpc::v0_4::CanonicalInvocation {
+                resource_grants_json: String::new(),
                 mission_id: "m".to_string(),
                 task_id: "t".to_string(),
                 group_id: "g".to_string(),
@@ -720,6 +724,7 @@ fn execution_session_requires_registration_metadata() {
             "command-1".to_string(),
             "execution-1".to_string(),
             crate::grpc::v0_4::CanonicalInvocation {
+                resource_grants_json: String::new(),
                 mission_id: "m".to_string(),
                 task_id: "t".to_string(),
                 group_id: "g".to_string(),
@@ -768,6 +773,7 @@ fn safety_route_requires_generation_and_transports_it() {
         },
     );
     let invocation = crate::grpc::v0_4::CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "m".to_string(),
         task_id: "t".to_string(),
         group_id: "g".to_string(),
@@ -844,6 +850,7 @@ fn expired_lease_rejects_new_commands() {
                 "command-1".to_string(),
                 "execution-1".to_string(),
                 crate::grpc::v0_4::CanonicalInvocation {
+                    resource_grants_json: String::new(),
                     mission_id: "m".to_string(),
                     task_id: "t".to_string(),
                     group_id: "g".to_string(),

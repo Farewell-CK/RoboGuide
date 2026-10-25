@@ -141,6 +141,8 @@ fn valid_config(_descriptor_set: PathBuf) -> NodeServiceConfig {
         capability_profiles: Vec::new(),
         operations: Vec::new(),
         resources: vec![ResourceConfig {
+            allocation_mode: None,
+            resource_class: None,
             id: "base".to_string(),
             kind: "space".to_string(),
             capacity: 1,

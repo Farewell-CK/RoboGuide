@@ -7,6 +7,13 @@
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
 
+[ADR-0206](../../decisions/0206-quantitative-resource-allocation.md)在本开发分支明确了
+可分割 Compute 的权威边界：Mission 声明单位类别与 Context 容量上限，Control 统一
+承诺、额度与精确释放，Node 校验原始执行授权并保留 Unknown 占用。资源 ID 不变，
+授权 ID 不创建 Node 或设备；Local How 的操作锁和最终安全权威保持独立。新合同与
+恢复版本显式协商。[实际软件进程验收](../../development/acceptance/2026-10-25-quantitative-resources.md)
+已通过并保留原授权重启、活动数据恢复和旧二进制拒绝证据；完整时空资源、升级和其他剩余阶段继续必需。
+
 [ADR-0176](../../decisions/0176-owned-controller-qualified-content-reads.md)定义原 child
 从 qualified Root 读取的有界只读通道。公开已发布内容与 startup integrity 分开，原
 Artifact owner 不改写；HTTP 的实际 ACL/scope/use 每块仍检查，Prepared 不变成公开 CAS。
@@ -465,7 +472,7 @@ Controller 投影在实际源 SQL inode/sidecar 租约与原生排空后，使�
 | --- | --- | --- |
 | Memory / Spatial | selective import、use/revoke、双 Group handoff、Active Map/GC、已存活动引用恢复校验、空间文件算法 | 全外部引用 producer 生命周期、typed-map/多类型与复杂故障组合、在线跨服务内容一致性 |
 | HA / 恢复 | 动态成员、原 child 排空、transfer、证书轮换、SQL/CAS 静止恢复 | 在线内容/完整 archive/catalog 恢复、滚动升级/回退、独立故障域与 RTO/RPO |
-| 资源 / 调度 | 有界搜索、来源化成本、future calendar、逻辑 quota、文件 worker POSIX proof | divisible allocation、GPU/load/traffic 成本与执行、完整空间交通承诺 |
+| 资源 / 调度 | 有界搜索、当前来源成本、加权 future calendar、逻辑 quota、显式 divisible Compute、文件 worker POSIX proof | 完整时间/空间交通承诺、其他部署资源成本与实际强制 |
 | 协调 / 计划修订 | relation stop/hold、continuation、运行期 MI、原目标、Review、scoped Memory 文件链路、显式完整 typed-map 来源声明 | 运行中抢占、复杂耦合迁移/handoff、更多 Memory 与完整跨阶段组合 |
 | Federation | participant session HTTP、mTLS/版本化 tenant/domain 授权、原回执、双 SQLite 重启/故障对账 | 持久 coordinator、实际域间请求与资源/epoch 证明、跨主机时钟与恢复组合；全局 dispatch 保持 false |
 | 运维 | write-disabled、metrics-reader、监控配置、短窗口软件 firing/resolved、部分 I/O 隔离 | 其余 listener/阻塞路径、长期 SLO、完整 runbook/告警/版本组合及硬件证据 |

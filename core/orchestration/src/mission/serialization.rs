@@ -10,11 +10,23 @@ pub fn mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
     normalized_mission_plan_json(plan)
 }
 
+/// Serializes semantic units losslessly while preserving unchanged exclusive canonical bytes.
+fn resource_requirement_json(resource: &domain::ResourceRequirement) -> serde_json::Value {
+    let mut value = serde_json::json!({"kind": format!("{:?}", resource.kind()).to_lowercase(), "units": resource.units()});
+    if resource.allocation_mode() == domain::ResourceAllocationMode::Divisible {
+        value["allocation_mode"] = serde_json::json!(resource.allocation_mode());
+        value["resource_class"] = serde_json::json!(resource.resource_class());
+    }
+    value
+}
+
 /// Returns whether the plan carries v0.8 actor binding semantics.
 fn has_binding_semantics(plan: &MissionPlan) -> bool {
     matches!(
         plan.schema_version(),
-        domain::MISSION_PLAN_SCHEMA_V0_8 | domain::MISSION_PLAN_SCHEMA_V0_9
+        domain::MISSION_PLAN_SCHEMA_V0_8
+            | domain::MISSION_PLAN_SCHEMA_V0_9
+            | domain::MISSION_PLAN_SCHEMA_V0_10
     )
 }
 
@@ -26,10 +38,11 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
         .map(|context| {
             let mut value = serde_json::json!({
                 "id": context.context_id().as_str(),
-                "roles": context.roles().iter().map(|role| serde_json::json!({
-                    "id": role.context_role_id().as_str(),
-                    "actor": role.actor_id().as_str(),
-                })).collect::<Vec<_>>(),
+                "roles": context.roles().iter().map(|role| {
+                    let mut value = serde_json::json!({"id": role.context_role_id().as_str(), "actor": role.actor_id().as_str()});
+                    if !role.resource_envelope().is_empty() { value["resource_envelope"] = serde_json::Value::Array(role.resource_envelope().iter().map(resource_requirement_json).collect()); }
+                    value
+                }).collect::<Vec<_>>(),
                 "coupling_mode": coupling_mode_name(context.coupling_mode()),
                 "relations": context.relations().iter().map(relation_json).collect::<Vec<_>>(),
             });
@@ -86,10 +99,7 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
                         "context_role": task.continuity().context_role(role.role_id()).expect("normalized MissionPlan Role has a ContextRole").as_str(),
                         "requirements": {
                             "capabilities": role.capability_requirements().iter().map(capability_requirement_json).collect::<Vec<_>>(),
-                            "resources": role.resource_requirements().iter().map(|resource| serde_json::json!({
-                                "kind": format!("{:?}", resource.kind()).to_lowercase(),
-                                "units": resource.units(),
-                            })).collect::<Vec<_>>(),
+                            "resources": role.resource_requirements().iter().map(resource_requirement_json).collect::<Vec<_>>(),
                         },
                         "resource_scope": scope,
                         "execution_intent": {
@@ -98,7 +108,7 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
                             "parameters": intent.parameters().iter().map(|(key, value)| (key.clone(), execution_value_json(value))).collect::<serde_json::Map<_,_>>(),
                         }
                     });
-                    if plan.schema_version() == domain::MISSION_PLAN_SCHEMA_V0_9 {
+                    if matches!(plan.schema_version(), domain::MISSION_PLAN_SCHEMA_V0_9 | domain::MISSION_PLAN_SCHEMA_V0_10) {
                         value["requirements"]["memories"] = serde_json::json!(role.memories());
                     }
                     value
@@ -175,7 +185,9 @@ fn normalized_mission_plan_json(plan: &MissionPlan) -> serde_json::Value {
 fn is_v0_6_compatible(plan: &MissionPlan) -> bool {
     if matches!(
         plan.schema_version(),
-        domain::MISSION_PLAN_SCHEMA_V0_8 | domain::MISSION_PLAN_SCHEMA_V0_9
+        domain::MISSION_PLAN_SCHEMA_V0_8
+            | domain::MISSION_PLAN_SCHEMA_V0_9
+            | domain::MISSION_PLAN_SCHEMA_V0_10
     ) {
         return false;
     }

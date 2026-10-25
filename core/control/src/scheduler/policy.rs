@@ -174,7 +174,6 @@ impl BoundedJointScheduler {
                 continue;
             }
             let mut selections = Vec::new();
-            let mut selected = BTreeSet::new();
             let mut actor_entities = BTreeMap::new();
             if search_roles(
                 state,
@@ -185,7 +184,6 @@ impl BoundedJointScheduler {
                 ends_at,
                 0,
                 &mut selections,
-                &mut selected,
                 &mut actor_entities,
                 &mut expansions,
                 self.max_expansions,
@@ -350,7 +348,6 @@ fn search_roles<S: SharedNodeStateReader>(
     ends_at: Option<TimestampMs>,
     role_index: usize,
     selections: &mut Vec<RoleSchedulingSelection>,
-    selected_resources: &mut BTreeSet<ResourceId>,
     selected_actor_entities: &mut BTreeMap<domain::ActorId, domain::PhysicalEntityId>,
     expansions: &mut u32,
     limit: u32,
@@ -411,7 +408,7 @@ fn search_roles<S: SharedNodeStateReader>(
             snapshot,
             starts_at,
             ends_at,
-            selected_resources,
+            selections,
             constraint,
         );
         for (resource_ids, resource_units) in choices {
@@ -421,13 +418,15 @@ fn search_roles<S: SharedNodeStateReader>(
             if *expansions > limit {
                 return Err(SchedulerError::SearchLimited);
             }
-            selected_resources.extend(resource_ids.iter().cloned());
-            selections.push(RoleSchedulingSelection::new(
-                role.role_id().clone(),
-                node_id.clone(),
-                resource_ids.clone(),
-                resource_units,
-            ));
+            selections.push(
+                RoleSchedulingSelection::new(
+                    role.role_id().clone(),
+                    node_id.clone(),
+                    resource_ids.clone(),
+                    resource_units,
+                )
+                .with_resources(role, node.registration()),
+            );
             let previous_actor_entity = candidates
                 .actor_for_role(role.role_id())
                 .cloned()
@@ -445,7 +444,6 @@ fn search_roles<S: SharedNodeStateReader>(
                 ends_at,
                 role_index + 1,
                 selections,
-                selected_resources,
                 selected_actor_entities,
                 expansions,
                 limit,
@@ -460,9 +458,6 @@ fn search_roles<S: SharedNodeStateReader>(
                 }
             }
             selections.pop();
-            for resource_id in resource_ids {
-                selected_resources.remove(&resource_id);
-            }
         }
     }
     Ok(false)
@@ -475,7 +470,7 @@ fn resource_choices(
     snapshot: &SchedulingSnapshot,
     starts_at: TimestampMs,
     ends_at: Option<TimestampMs>,
-    selected_resources: &BTreeSet<ResourceId>,
+    selected: &[RoleSchedulingSelection],
     constraint: Option<&SchedulingRoleConstraint>,
 ) -> Vec<(Vec<ResourceId>, Vec<u32>)> {
     let demands = role.resource_requirements();
@@ -491,14 +486,25 @@ fn resource_choices(
             .resources()
             .iter()
             .filter(|resource| {
-                resource.kind() == demand.kind() && resource.capacity() >= demand.units()
+                resource.kind() == demand.kind()
+                    && resource.capacity() >= demand.units()
+                    && resource.allocation_mode() == demand.allocation_mode()
+                    && resource.resource_class() == demand.resource_class()
             })
             .filter(|resource| {
                 constraint
                     .is_none_or(|constraint| constraint.resource_ids().contains(resource.id()))
             })
-            .filter(|resource| !selected_resources.contains(resource.id()))
-            .filter(|resource| resource_available(snapshot, resource.id(), starts_at, ends_at))
+            .filter(|resource| {
+                snapshot.capacity_available(
+                    role.role_id(),
+                    resource,
+                    demand,
+                    starts_at,
+                    ends_at,
+                    selected,
+                )
+            })
             .collect::<Vec<_>>();
         resources.sort_by_key(|resource| resource.id());
         let mut next = Vec::new();
@@ -520,25 +526,6 @@ fn resource_choices(
         combinations.retain(|(ids, _)| ids == constraint.resource_ids());
     }
     combinations
-}
-
-/// Tests half-open interval availability against active and future commitments.
-fn resource_available(
-    snapshot: &SchedulingSnapshot,
-    resource_id: &ResourceId,
-    starts_at: TimestampMs,
-    ends_at: Option<TimestampMs>,
-) -> bool {
-    snapshot
-        .occupancies()
-        .iter()
-        .filter(|item| item.resource_id() == resource_id)
-        .all(|item| match (ends_at, item.ends_at()) {
-            (Some(end), Some(existing_end)) => end <= item.starts_at() || existing_end <= starts_at,
-            (Some(end), None) => end <= item.starts_at(),
-            (None, Some(existing_end)) => existing_end <= starts_at,
-            (None, None) => false,
-        })
 }
 
 /// Adds one duration to a timestamp without saturating a scheduling boundary.
@@ -575,19 +562,28 @@ fn select_role<S: SharedNodeStateReader>(
             snapshot,
             starts_at,
             None,
-            selected_resources,
+            &[],
             None,
         )
         .into_iter()
         .next() else {
             continue;
         };
-        return Ok(Some(RoleSchedulingSelection::new(
-            role.role_id().clone(),
-            node_id,
-            resource_ids,
-            resource_units,
-        )));
+        if resource_ids
+            .iter()
+            .any(|id| selected_resources.contains(id))
+        {
+            continue;
+        }
+        return Ok(Some(
+            RoleSchedulingSelection::new(
+                role.role_id().clone(),
+                node_id,
+                resource_ids,
+                resource_units,
+            )
+            .with_resources(role, node.registration()),
+        ));
     }
     Ok(None)
 }

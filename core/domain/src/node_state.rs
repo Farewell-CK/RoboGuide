@@ -497,6 +497,7 @@ impl NodeRegistration {
                     | crate::NODE_CONTRACT_VERSION_V0_10
                     | crate::NODE_CONTRACT_VERSION_V0_11
                     | crate::NODE_CONTRACT_VERSION_V0_12
+                    | crate::NODE_CONTRACT_VERSION_V0_13
             )
         {
             return Err(DomainError::InvalidMissionPlan {
@@ -724,7 +725,10 @@ impl NodeRegistration {
             .all(|required| self.capability_requirement_is_available(required));
         let has_resource = requirement.resource_requirements().iter().all(|required| {
             self.resources.iter().any(|resource| {
-                resource.kind() == required.kind() && resource.capacity() >= required.units()
+                resource.kind() == required.kind()
+                    && resource.capacity() >= required.units()
+                    && resource.allocation_mode() == required.allocation_mode()
+                    && resource.resource_class() == required.resource_class()
             })
         });
         let has_memory = requirement.memories().is_empty()
@@ -733,6 +737,7 @@ impl NodeRegistration {
                 crate::NODE_CONTRACT_VERSION_V0_10
                     | crate::NODE_CONTRACT_VERSION_V0_11
                     | crate::NODE_CONTRACT_VERSION_V0_12
+                    | crate::NODE_CONTRACT_VERSION_V0_13
             ) && crate::MemoryRequirement::validate_set(requirement.memories()).is_ok()
                 && requirement.memories().iter().all(|required| {
                     self.memory_providers().iter().any(|provider| {

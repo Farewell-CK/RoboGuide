@@ -89,6 +89,8 @@ mod physical_entity;
 mod physical_safety;
 mod registry_command;
 mod resource;
+mod resource_grant;
+pub use resource_grant::ResourceAllocationGrant;
 mod resource_quota;
 mod role_assignment;
 mod spatial_memory;
@@ -103,8 +105,8 @@ mod verifier_registry;
 
 pub use actor::{ActorBinding, MissionActor, MissionBindingSemantics};
 pub use allocation::{
-    AllocationOwner, AllocationPhase, AllocationViewSnapshot, ResourceAllocation,
-    ResourceBindingScope,
+    AllocationBorrower, AllocationOwner, AllocationPhase, AllocationViewSnapshot,
+    ResourceAllocation, ResourceBindingScope,
 };
 pub use attestation::{
     AttestationChallenge, AttestationEvidence, AttestationPolicy, AttestationReport,
@@ -190,7 +192,7 @@ pub use physical_safety::{
     SAFE_STATE_OBSERVATION_SCHEMA, SafetyAssurance, SafetyStopError, SafetyStopIdentity,
     SafetyStopPhase, SafetyStopRecord,
 };
-pub use resource::{Resource, ResourceKind, ResourceRequirement};
+pub use resource::{Resource, ResourceAllocationMode, ResourceKind, ResourceRequirement};
 pub use resource_quota::{ResourceQuotaLimit, ResourceQuotaRegistry};
 pub use role_assignment::RoleAssignment;
 pub use spatial_memory::{
@@ -239,6 +241,9 @@ pub const MISSION_PLAN_SCHEMA_V0_8: &str = "roboguide.mission-plan/v0.8";
 /// Version with explicit semantic Memory prerequisites and Control-selected receivers.
 pub const MISSION_PLAN_SCHEMA_V0_9: &str = "roboguide.mission-plan/v0.9";
 
+/// Explicit typed quantitative resource requirements and Context capacity envelopes.
+pub const MISSION_PLAN_SCHEMA_V0_10: &str = "roboguide.mission-plan/v0.10";
+
 /// Version identifier implemented by the first heterogeneous Node Contract.
 pub const NODE_CONTRACT_VERSION_V0_1: &str = "roboguide.node.v0.1";
 
@@ -262,6 +267,9 @@ pub const NODE_CONTRACT_VERSION_V0_7: &str = "roboguide.node.v0.7";
 pub const NODE_CONTRACT_VERSION_V0_8: &str = "roboguide.node.v0.8";
 /// Unified Memory and generation-bound execution-safety contract.
 pub const NODE_CONTRACT_VERSION_V0_12: &str = "roboguide.node.v0.12";
+
+/// Explicit quantitative resource execution contract.
+pub const NODE_CONTRACT_VERSION_V0_13: &str = "roboguide.node.v0.13";
 /// Node Contract with durable pre-execution Memory context and current backend observation.
 pub const NODE_CONTRACT_VERSION_V0_9: &str = "roboguide.node.v0.9";
 

@@ -137,7 +137,12 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         });
         if command.registration_evidence().is_some_and(|registration| {
             registration.contract_version().as_str()
-                == integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+                == integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+        }) {
+            value["resource_grants"] = serde_json::json!(command.resource_grants());
+        }
+        if command.registration_evidence().is_some_and(|registration| {
+            integration::grpc::v0_4::supports_safety(registration.contract_version().as_str())
         }) {
             let generation = command
                 .execution_generation()

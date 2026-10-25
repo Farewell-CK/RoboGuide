@@ -167,6 +167,7 @@ fn legacy_reservations_do_not_receive_fabricated_quota_units() {
     legacy
         .quota_ledger
         .track(QuotaClaim {
+                    allocation_id: None,
             claim_id: crate::quota::resource_claim_id(resource.as_str()),
             tenant_id: "local".into(),
             kind: ResourceKind::Compute,

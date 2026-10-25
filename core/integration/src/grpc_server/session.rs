@@ -379,7 +379,8 @@ pub(super) fn validate_registration(
     if registration.node_id.trim().is_empty()
         || !matches!(
             registration.node_contract_version.as_str(),
-            SAFETY_NODE_CONTRACT_VERSION
+            crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+                | SAFETY_NODE_CONTRACT_VERSION
                 | MEMORY_USE_NODE_CONTRACT_VERSION
                 | crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
                 | PREPARATION_NODE_CONTRACT_VERSION
@@ -394,7 +395,7 @@ pub(super) fn validate_registration(
             "registration node and contract identities are invalid",
         ));
     }
-    if registration.node_contract_version != SAFETY_NODE_CONTRACT_VERSION
+    if !crate::grpc::v0_4::supports_safety(&registration.node_contract_version)
         && registration
             .local_systems
             .iter()
@@ -463,6 +464,28 @@ pub(super) fn validate_registration(
     let mut resource_ids = BTreeSet::new();
     for resource in &registration.resources {
         require_known_owner(&resource.local_system_id, &local_system_ids)?;
+        let valid_mode = match resource.allocation_mode.as_str() {
+            "" => resource.resource_class.is_empty(),
+            "exclusive" => {
+                registration.node_contract_version
+                    == crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+                    && resource.resource_class.is_empty()
+            }
+            "divisible" => {
+                registration.node_contract_version
+                    == crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+                    && resource.kind == "compute"
+                    && !resource.resource_class.trim().is_empty()
+                    && resource.resource_class.len() <= 128
+            }
+            _ => false,
+        };
+        if !valid_mode {
+            return Err(Status::invalid_argument(
+                "resource allocation semantics exceed the negotiated contract",
+            ));
+        }
+
         if resource.id.trim().is_empty()
             || !matches!(resource.kind.as_str(), "space" | "compute" | "time")
             || resource.capacity == 0
@@ -566,7 +589,8 @@ fn validate_operation_support(
 ) -> Result<(), Status> {
     if !matches!(
         registration.node_contract_version.as_str(),
-        SAFETY_NODE_CONTRACT_VERSION
+        crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            | SAFETY_NODE_CONTRACT_VERSION
             | NODE_CONTRACT_VERSION
             | CONTINUITY_NODE_CONTRACT_VERSION
             | PROVIDER_MAP_NODE_CONTRACT_VERSION

@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import secrets
+import select
 import shutil
 import socket
 import sqlite3
@@ -146,13 +147,29 @@ def verify(directory: Path, output: Path) -> None:
 class ComputeServer(ThreadingHTTPServer):
     """Expose actual owned POSIX computation through the configured Local How boundary."""
 
-    def __init__(self, directory: Path) -> None:
-        """Own a bounded queue of real processes with immutable invocation identities."""
+    def __init__(
+        self, directory: Path, *, capacity: int = 1, hold_before_read: bool = False
+    ) -> None:
+        """Own declared process slots and optional actual kernel read barriers for conformance."""
+        if not 1 <= capacity <= 8:
+            raise ValueError("actual process-slot declaration must stay in 1..8")
         super().__init__(("127.0.0.1", 0), ComputeHandler)
         self.directory = directory
+        self.capacity = capacity
+        self.hold_before_read = hold_before_read
+        self.read_permits: dict[str, int] = {}
         self.lock = threading.RLock()
         self.jobs: dict[str, tuple[subprocess.Popen[bytes], Path, dict[str, Any]]] = {}
         self.invocations: list[dict[str, Any]] = []
+
+    def release_read(self, identity: str) -> None:
+        """Permit one original owned child to read; completion still requires its actual exit."""
+        with self.lock:
+            descriptor = self.read_permits.pop(identity)
+            try:
+                os.write(descriptor, b"1")
+            finally:
+                os.close(descriptor)
 
     @property
     def origin(self) -> str:
@@ -163,6 +180,9 @@ class ComputeServer(ThreadingHTTPServer):
         """Stop only child processes and listener owned by this conformance invocation."""
         self.shutdown()
         self.server_close()
+        for descriptor in self.read_permits.values():
+            os.close(descriptor)
+        self.read_permits.clear()
         for process, _, _ in self.jobs.values():
             stop(process)
 
@@ -203,23 +223,39 @@ class ComputeHandler(BaseHTTPRequestHandler):
                     self.respond({"execution_id": identity})
                     return
                 if (
-                    any(process.poll() is None for process, _, _ in server.jobs.values())
+                    sum(process.poll() is None for process, _, _ in server.jobs.values())
+                    >= server.capacity
                     or len(server.jobs) >= 8
                 ):
                     self.respond({"error": "actual software queue is occupied/full"}, 409)
                     return
                 output = server.directory / (str(uuid.uuid4()) + ".result.json")
-                process = subprocess.Popen(
-                    [
-                        sys.executable,
-                        str(Path(__file__)),
-                        "--compute",
-                        str(server.directory),
-                        str(output),
-                    ],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+                command = [
+                    sys.executable,
+                    str(Path(__file__)),
+                    "--compute",
+                    str(server.directory),
+                    str(output),
+                ]
+                read_fd, write_fd = os.pipe() if server.hold_before_read else (-1, -1)
+                if read_fd >= 0:
+                    command.extend(["--read-permit", str(read_fd)])
+                try:
+                    process = subprocess.Popen(
+                        command,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        pass_fds=(read_fd,) if read_fd >= 0 else (),
+                    )
+                except BaseException:
+                    if write_fd >= 0:
+                        os.close(write_fd)
+                    raise
+                finally:
+                    if read_fd >= 0:
+                        os.close(read_fd)
+                if write_fd >= 0:
+                    server.read_permits[identity] = write_fd
                 server.jobs[identity] = (process, output, invocation)
                 server.invocations.append({"attempt_id": identity, "invocation": invocation})
                 save(server.directory / "actual-invocations.json", server.invocations)
@@ -577,7 +613,12 @@ def stop(process: subprocess.Popen[bytes]) -> None:
             process.wait(timeout=5)
 
 
-def run(directory: Path, skip_build: bool) -> dict[str, Any]:
+def run(
+    directory: Path,
+    skip_build: bool,
+    quantitative: bool = False,
+    previous_controller: Path | None = None,
+) -> dict[str, Any]:
     """Exercise protocol execution, independent CAS verification and restore."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     (directory / "inputs").mkdir()
@@ -593,11 +634,19 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
     grpc, http, artifact = (address() for _ in range(3))
     origin, cas = "http://" + http, "http://" + artifact
     node, mission = "posix-" + uuid.uuid4().hex, "files-" + uuid.uuid4().hex
-    provider = ComputeServer(directory)
+    count = 3 if quantitative else 2
+    provider = ComputeServer(
+        directory, capacity=2 if quantitative else 1, hold_before_read=quantitative
+    )
     thread = threading.Thread(target=provider.serve_forever, daemon=True)
     thread.start()
     config = directory / "node.toml"
-    config.write_text(node_config(directory, node, grpc, provider.origin))
+    configured = node_config(directory, node, grpc, provider.origin)
+    if quantitative:
+        from quantitative_resource_processes import QuantitativeCheck, configuration
+
+        configured = configuration(configured)
+    config.write_text(configured)
     processes: list[subprocess.Popen[bytes]] = []
     logs: list[BinaryIO] = []
     environment = {
@@ -606,6 +655,9 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
         if not key.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
     }
     environment["ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN"] = "1"
+    if quantitative:
+        environment["ROBOGUIDE_ARTIFACT_STORAGE_SCHEMA"] = "roboguide.artifact-storage/v3"
+        environment["ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA"] = "1"
 
     def start(command: list[str], name: str) -> subprocess.Popen[bytes]:
         """Track the exact new process and its private diagnostic stream."""
@@ -629,19 +681,37 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
         controller = start(controller_command, "controller")
         wait_for(lambda: request(origin, "/healthz")[0] == 200, "Controller startup")
         install_policies(origin, node)
-        start([str(ROOT / "target/debug/roboguide-node"), str(config)], "node")
+        node_command = [str(ROOT / "target/debug/roboguide-node"), str(config)]
+        node_process = start(node_command, "node")
         wait_for(
             lambda: len(request(origin, "/v1/inventory")[1]["nodes"]) == 1,
             "actual software Node registration",
         )
-        assert request(origin, "/v1/missions", plan(mission))[0] == 202
+        selected_plan = plan(mission)
+        if quantitative:
+            from quantitative_resource_processes import mission_plan
+
+            selected_plan = mission_plan(selected_plan)
+        assert request(origin, "/v1/missions", selected_plan)[0] == 202
         time.sleep(0.35)
         assert request(origin, "/v1/execution-attempts")[1]["attempts"] == []
         assert provider.invocations == [], "false observed admission started an actual process"
         save(directory / "admission.json", {"enabled": True})
+        quantity = QuantitativeCheck(directory, origin, provider, mission) if quantitative else None
+        if quantity is not None:
+            quantity.freeze()
+            stop(controller)
+            stop(node_process)
+            quantity.quiescent_recovery(previous_controller)
+            controller = start(controller_command, "controller-quantities-restored")
+            node_process = start(node_command, "node-quantities-restored")
+            wait_for(lambda: request(origin, "/healthz")[0] == 200, "quantity Controller restore")
+            quantity.restored()
         receipts = []
-        for index in range(2):
+        for index in range(count):
             task = f"hash-{index}"
+            if quantity is not None:
+                quantity.release(task)
             attempts = wait_for(
                 lambda task=task: [
                     entry
@@ -655,6 +725,8 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
             assert request(origin, f"/v1/missions/{mission}")[1]["status"] != "Completed"
             process, output, _ = provider.jobs[attempt["execution_id"]]
             assert process.poll() == 0
+            if quantity is not None:
+                quantity.completed_before_verifier(index)
             subprocess.run(
                 [sys.executable, str(Path(__file__)), "--verify", str(directory), str(output)],
                 check=True,
@@ -676,7 +748,7 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
                 )[0]
                 == 201
             )
-            if index == 0:
+            if index == 0 and not quantitative:
                 previous_epoch = next(
                     record["value"]["source_epoch"]
                     for record in request(origin, "/v1/state/records")[1]["records"]
@@ -728,7 +800,7 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
             lambda: request(origin, f"/v1/missions/{mission}")[1]["status"] == "Completed",
             "independently verified software Mission completion",
         )
-        assert len(provider.invocations) == 2
+        assert len(provider.invocations) == count
         with (
             closing(
                 sqlite3.connect(f"file:{directory / 'controller.sqlite3'}?mode=ro", uri=True)
@@ -747,8 +819,8 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
             "schema": checkpoint["schema"],
             "devices": 0,
             "software_nodes": 1,
-            "actual_compute_processes": 2,
-            "independent_verifier_processes": 2,
+            "actual_compute_processes": count,
+            "independent_verifier_processes": count,
             "duplicate_executions": 0,
             "configuration_digest": "sha256:" + hashlib.sha256(config.read_bytes()).hexdigest(),
             "controller_sha256": hashlib.sha256(
@@ -758,6 +830,7 @@ def run(directory: Path, skip_build: bool) -> dict[str, Any]:
                 (ROOT / "target/debug/roboguide-node").read_bytes()
             ).hexdigest(),
             "receipts": receipts,
+            "quantitative_resources": quantity.finish() if quantity is not None else None,
             "hardware_evidence": "HardwareEvidencePending",
         }
         save(directory / "result.json", result)
@@ -777,14 +850,30 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--compute", nargs=2, type=Path)
+    parser.add_argument("--read-permit", type=int)
+    parser.add_argument("--quantitative-resources", action="store_true")
+    parser.add_argument("--previous-controller", type=Path)
     parser.add_argument("--verify", nargs=2, type=Path)
     arguments = parser.parse_args()
     if arguments.compute:
+        if arguments.read_permit is not None:
+            descriptor = arguments.read_permit
+            try:
+                ready, _, _ = select.select([descriptor], [], [], 30)
+                if not ready or os.read(descriptor, 1) != b"1":
+                    raise ValueError("original process read permit expired or closed")
+            finally:
+                os.close(descriptor)
         compute(*arguments.compute)
     elif arguments.verify:
         verify(*arguments.verify)
     elif arguments.output:
-        result = run(arguments.output.resolve(), arguments.skip_build)
+        result = run(
+            arguments.output.resolve(),
+            arguments.skip_build,
+            arguments.quantitative_resources,
+            arguments.previous_controller,
+        )
         print(
             json.dumps({key: value for key, value in result.items() if key != "receipts"}, indent=2)
         )

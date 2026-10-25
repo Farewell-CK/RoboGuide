@@ -27,6 +27,7 @@ impl ControlPlane {
         &self,
         projected_at: TimestampMs,
     ) -> Result<AllocationViewSnapshot, ControlError> {
+        self.validate_capacity_checkpoint()?;
         let active = self.active_allocation_ownership()?;
         let pending = self.pending_allocation_ownership()?;
         let mut allocations = Vec::with_capacity(self.reservations.len());
@@ -84,6 +85,53 @@ impl ControlPlane {
 
         self.ensure_expected_resources_have_reservations(&active)?;
         self.ensure_expected_resources_have_reservations(&pending)?;
+        for record in self.capacity_ledger.allocations.values() {
+            let grant = &record.original;
+            let pending = record.borrowers.iter().any(|borrower| {
+                self.pending_recovery_commitments.contains_key(&(
+                    grant.group_id.clone(),
+                    borrower.task_ref.clone(),
+                    borrower.role_id.clone(),
+                ))
+            });
+            let phase = if record.reservation.group_id.is_none() {
+                AllocationPhase::Committed
+            } else if pending {
+                AllocationPhase::RecoveryPending
+            } else {
+                AllocationPhase::Bound
+            };
+            let borrowers = record
+                .borrowers
+                .iter()
+                .map(|borrower| domain::AllocationBorrower {
+                    task_ref: borrower.task_ref.clone(),
+                    role_id: borrower.role_id.clone(),
+                    units: borrower.units,
+                })
+                .collect();
+            allocations.push(
+                ResourceAllocation::new(
+                    grant.resource_id.clone(),
+                    grant.task_ref.clone(),
+                    grant.role_id.clone(),
+                    Some(grant.group_id.clone()),
+                    phase,
+                    grant.owner.clone(),
+                )
+                .with_quantitative(grant.clone(), borrowers),
+            );
+        }
+        allocations.sort_by(|left, right| {
+            (
+                left.resource_id(),
+                left.quantitative_grant().map(|grant| &grant.allocation_id),
+            )
+                .cmp(&(
+                    right.resource_id(),
+                    right.quantitative_grant().map(|grant| &grant.allocation_id),
+                ))
+        });
         Ok(AllocationViewSnapshot::new(projected_at, allocations))
     }
 
@@ -116,7 +164,15 @@ impl ControlPlane {
             for execution in group.task_executions() {
                 for assignment in execution.assignments() {
                     for resource_id in assignment.resource_ids() {
-                        if execution.binding_scope(resource_id)
+                        if self.shared_selection(
+                            group_id,
+                            execution.task_ref(),
+                            assignment.role_id(),
+                            resource_id,
+                        ) {
+                            continue;
+                        }
+                        if execution.role_scope(assignment.role_id())
                             == domain::ResourceBindingScope::Context
                         {
                             continue;
@@ -142,6 +198,7 @@ impl ControlPlane {
             }
             for binding in group.context_bindings() {
                 for resource_id in binding.assignment().resource_ids() {
+                    if self.capacity_ledger.allocations.values().any(|record| &record.original.group_id==group_id && &record.original.resource_id==resource_id && matches!(&record.original.owner,AllocationOwner::Context {context_id,context_role_id,..} if context_id==binding.context_id() && context_role_id==binding.context_role_id())) { continue; }
                     let key = (group_id.clone(), resource_id.clone());
                     if ownership
                         .insert(
@@ -195,6 +252,9 @@ impl ControlPlane {
                 )));
             }
             for resource_id in commitment.committed_resource_ids() {
+                if self.shared_selection(group_id, task_ref, role_id, resource_id) {
+                    continue;
+                }
                 let key = (group_id.clone(), resource_id.clone());
                 if ownership
                     .insert(

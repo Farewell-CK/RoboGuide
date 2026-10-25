@@ -81,8 +81,26 @@ def validate(
         "roboguide.recovery-profile/v0.21",
         "roboguide.recovery-profile/v0.22",
         "roboguide.recovery-profile/v0.23",
+        "roboguide.recovery-profile/v0.24",
     }:
         raise ValueError("Controller storage v1 requires explicit recovery v0.17")
+    objects = {
+        row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    for table in ("controller_checkpoint", "controller_checkpoint_head"):
+        if (
+            table in objects
+            and connection.execute(
+                f"SELECT 1 FROM {table} WHERE schema='roboguide.controller-checkpoint/v56' LIMIT 1"
+            ).fetchone()
+            is not None
+            and profile_schema != "roboguide.recovery-profile/v0.24"
+        ):
+            raise ValueError("quantitative Controller v56 requires explicit recovery v0.24")
+    if profile_schema == "roboguide.recovery-profile/v0.24":
+        from .capacity_recovery import validate as validate_capacity
+
+        validate_capacity(connection)
     if expected is not None and actual != expected:
         raise ValueError("declared Controller storage format differs from actual original SQL")
 

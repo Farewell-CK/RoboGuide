@@ -338,6 +338,7 @@ fn supports_original_provider_continuity(schema: &str) -> bool {
             | crate::CONFIG_SCHEMA_V0_11
             | crate::CONFIG_SCHEMA_V0_12
             | crate::CONFIG_SCHEMA_V0_13
+            | crate::CONFIG_SCHEMA_V0_14
     )
 }
 

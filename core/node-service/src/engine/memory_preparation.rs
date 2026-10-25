@@ -96,6 +96,16 @@ impl LocalIntegrationEngine {
         preparation: &MemoryPreparation,
     ) -> Result<String, EngineError> {
         preparation.validate().map_err(EngineError::Configuration)?;
+        if self.catalog().node_contract_version()
+            == integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            && preparation.invocation.get("resource_grants").is_none()
+        {
+            return Err(EngineError::Protocol(
+                "Node v0.13 preparation lacks its original resource grant array".into(),
+            ));
+        }
+        super::capacity::invocation_grants(self.catalog(), &preparation.invocation)?;
+
         if !integration::grpc::v0_4::supports_memory_preparation(
             self.catalog().node_contract_version(),
         ) || preparation.node_id.as_str() != self.catalog().node_id()
@@ -563,8 +573,7 @@ impl LocalIntegrationEngine {
             &execute.memory_preparation_digest,
             &execute.session_id,
         )?;
-        if self.catalog().node_contract_version()
-            == integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+        if integration::grpc::v0_4::supports_safety(self.catalog().node_contract_version())
             && record
                 .preparation
                 .invocation

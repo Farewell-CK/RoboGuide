@@ -9,6 +9,7 @@ from enum import StrEnum
 from mission.contract_values import (
     CAPABILITIES,
     MISSION_PLAN_ACTOR_VERSION,
+    MISSION_PLAN_CAPACITY_VERSION,
     MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_SATISFACTION_VERSION,
     MISSION_PLAN_SCHEDULING_VERSION,
@@ -251,23 +252,71 @@ class ResourceRequirement:
 
     kind: str
     units: int
+    allocation_mode: str = "exclusive"
+    resource_class: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject malformed direct construction before JSON compatibility conversion."""
+        if (
+            self.kind not in RESOURCE_KINDS
+            or isinstance(self.units, bool)
+            or not isinstance(self.units, int)
+            or not 0 < self.units <= U32_MAX
+        ):
+            raise MissionPlanError(
+                "resource demand requires a known category and positive 32-bit units"
+            )
+        if self.allocation_mode == "divisible":
+            if (
+                self.kind != "compute"
+                or self.resource_class is None
+                or not self.resource_class.strip()
+                or len(self.resource_class) > 128
+            ):
+                raise MissionPlanError(
+                    "divisible Compute requires an explicit bounded resource_class"
+                )
+        elif self.allocation_mode != "exclusive" or self.resource_class is not None:
+            raise MissionPlanError("unsupported allocation mode or exclusive unit class")
 
     @classmethod
-    def from_json(cls, value: JSONValue, path: str) -> ResourceRequirement:
+    def from_json(
+        cls, value: JSONValue, path: str, version: str = MISSION_PLAN_VERSION
+    ) -> ResourceRequirement:
         """Parse a positive resource demand from current MissionPlan JSON."""
         item = _object(value, path)
-        _exact_keys(item, {"kind", "units"}, path)
+        _bounded_keys(
+            item,
+            {"kind", "units"},
+            {"allocation_mode", "resource_class"}
+            if version == MISSION_PLAN_CAPACITY_VERSION
+            else set(),
+            path,
+        )
         kind = _text(item["kind"], f"{path}.kind")
         if kind not in RESOURCE_KINDS:
             raise MissionPlanError(f"{path}.kind is unsupported: {kind}")
         units = item["units"]
         if isinstance(units, bool) or not isinstance(units, int) or units <= 0 or units > U32_MAX:
             raise MissionPlanError(f"{path}.units must be a positive 32-bit integer")
-        return cls(kind=kind, units=units)
+        mode = _text(item.get("allocation_mode", "exclusive"), f"{path}.allocation_mode")
+        resource_class = (
+            _text(item["resource_class"], f"{path}.resource_class")
+            if "resource_class" in item
+            else None
+        )
+        return cls(kind=kind, units=units, allocation_mode=mode, resource_class=resource_class)
 
-    def to_json(self) -> JSONObject:
-        """Serialize one provider-independent quantitative resource demand."""
-        return {"kind": self.kind, "units": self.units}
+    def to_json(self, version: str = MISSION_PLAN_VERSION) -> JSONObject:
+        """Serialize exact semantic units, refusing lossy output through an older contract."""
+        result: JSONObject = {"kind": self.kind, "units": self.units}
+        if self.allocation_mode == "divisible":
+            if version != MISSION_PLAN_CAPACITY_VERSION:
+                raise MissionPlanError("divisible allocation requires exact MissionPlan v0.10")
+            result.update(
+                {"allocation_mode": self.allocation_mode, "resource_class": self.resource_class}
+            )
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,6 +341,7 @@ class RoleRequirement:
             MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
+            MISSION_PLAN_CAPACITY_VERSION,
         }:
             _exact_keys(
                 item,
@@ -302,7 +352,9 @@ class RoleRequirement:
             _bounded_keys(
                 requirements,
                 {"capabilities", "resources"},
-                {"memories"} if version == MISSION_PLAN_MEMORY_VERSION else set(),
+                {"memories"}
+                if version in {MISSION_PLAN_MEMORY_VERSION, MISSION_PLAN_CAPACITY_VERSION}
+                else set(),
                 f"{path}.requirements",
             )
             memory_values = _array(
@@ -332,7 +384,9 @@ class RoleRequirement:
             if len(set(contracts)) != len(contracts):
                 raise MissionPlanError(f"{path}.requirements.capabilities contains duplicates")
             resources = tuple(
-                ResourceRequirement.from_json(resource, f"{path}.requirements.resources[{index}]")
+                ResourceRequirement.from_json(
+                    resource, f"{path}.requirements.resources[{index}]", version
+                )
                 for index, resource in enumerate(
                     _array(requirements["resources"], f"{path}.requirements.resources")
                 )
@@ -426,6 +480,7 @@ class RoleRequirement:
             MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
+            MISSION_PLAN_CAPACITY_VERSION,
         }:
             if self.context_role is None:
                 raise MissionPlanError("normalized Role requires a ContextRole reference")
@@ -434,12 +489,12 @@ class RoleRequirement:
                 "context_role": self.context_role,
                 "requirements": {
                     "capabilities": [capability.to_json() for capability in self.capabilities],
-                    "resources": [resource.to_json() for resource in self.resources],
+                    "resources": [resource.to_json(version) for resource in self.resources],
                 },
                 "execution_intent": self.execution.to_json(),
                 "resource_scope": self.resource_scope,
             }
-            if version == MISSION_PLAN_MEMORY_VERSION:
+            if version in {MISSION_PLAN_MEMORY_VERSION, MISSION_PLAN_CAPACITY_VERSION}:
                 requirements = _object(result["requirements"], "requirements")
                 requirements["memories"] = [memory.to_json() for memory in self.memories]
             elif self.memories:
@@ -458,7 +513,7 @@ class RoleRequirement:
             "resource_scope": self.resource_scope,
         }
         if version in {MISSION_PLAN_SCHEDULING_VERSION, MISSION_PLAN_SATISFACTION_VERSION}:
-            result["resources"] = [resource.to_json() for resource in self.resources]
+            result["resources"] = [resource.to_json(version) for resource in self.resources]
         else:
             result["resource_kind"] = self.resources[0].kind if len(self.resources) == 1 else None
         return result

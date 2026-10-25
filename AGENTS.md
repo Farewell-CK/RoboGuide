@@ -1,3 +1,15 @@
+ADR-0206's quantitative Compute module is implemented and actual process acceptance passed.
+Typed allocation is owned by Domain resource grants, Control's `resource_allocations`
+and `capacity_calendar`, and Node Engine admission. Context envelopes come from the original
+MissionPlan v0.10. Node config v0.14 / Contract v0.13 and wire v0.16 negotiate the new fields;
+Controller v56, Node journal v14 and explicit recovery v0.24 fence older writers. Original live and
+Unknown borrowers retain capacity. The maintained `check_state_verifier_processes.py
+--quantitative-resources` runs one actual software Node, three owned CPU computations and independent
+verifiers, exact Controller/Node restart, active-grant recovery and optional old-binary refusal.
+Recovery v0.24 explicitly accepts standalone v56 only after checking actual non-Replica authority;
+declared Replica deployments retain every original paired Root. No device or physical facts follow.
+Complete time/space commitments, other supported local enforcement and remaining stages still apply.
+
 # Repository Guidelines
 
 ADR-0205 adds explicit decision-policy registry v0.2 current-session State scheduling costs,

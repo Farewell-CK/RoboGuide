@@ -547,6 +547,8 @@ pub(crate) fn validate_recovery_resources(
                 resource.id() == resource_id
                     && resource.kind() == required.kind()
                     && resource.capacity() >= required.units()
+                    && resource.allocation_mode() == required.allocation_mode()
+                    && resource.resource_class() == required.resource_class()
             })
         })
     {

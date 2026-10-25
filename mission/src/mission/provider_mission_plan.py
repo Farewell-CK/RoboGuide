@@ -13,6 +13,7 @@ from typing import cast
 
 from mission.contract_values import (
     MISSION_PLAN_ACTOR_VERSION,
+    MISSION_PLAN_CAPACITY_VERSION,
     MISSION_PLAN_MEMORY_VERSION,
     MISSION_PLAN_VERSION,
     JSONObject,
@@ -29,10 +30,15 @@ def _canonical_provider_version(schema: JSONObject) -> str:
     properties = _object(schema.get("properties"), "schema.properties")
     version = _object(properties.get("schema_version"), "schema.properties.schema_version")
     selected = version.get("const")
-    if selected not in (MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION):
+    if selected not in (
+        MISSION_PLAN_VERSION,
+        MISSION_PLAN_MEMORY_VERSION,
+        MISSION_PLAN_CAPACITY_VERSION,
+    ):
         raise ProviderMissionPlanError(
             "provider MissionPlan adapter requires "
-            f"{MISSION_PLAN_VERSION} or explicit {MISSION_PLAN_MEMORY_VERSION}"
+            f"{MISSION_PLAN_VERSION}, explicit {MISSION_PLAN_MEMORY_VERSION} "
+            f"or {MISSION_PLAN_CAPACITY_VERSION}"
         )
     return selected
 
@@ -134,7 +140,7 @@ def normalize_mission_plan_provider_output(
     accepted = (
         {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}
         if selected == MISSION_PLAN_VERSION
-        else {MISSION_PLAN_MEMORY_VERSION}
+        else {selected}
     )
     if normalized.get("schema_version") not in accepted:
         raise ProviderMissionPlanError(

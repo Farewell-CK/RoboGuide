@@ -35,6 +35,8 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 /// The wrapper advances when a previous binary would silently ignore a new
 /// authority field, fencing downgrade even though the inner JSON is compatible.
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
+/// Previous wrapper without exact quantitative parent and borrower capacity authority.
+const PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v55";
 /// Previous wrapper without complete typed-map runtime revision authority.
 const PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v54";
 /// Previous wrapper without durable Federation participant policy and original receipts.
@@ -1168,6 +1170,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_UPLOAD_RECOVERY_SERVER_CHECKPOINT_SCHEMA
@@ -1229,7 +1232,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             if matches!(
                 checkpoint.schema.as_str(),
-                SERVER_CHECKPOINT_SCHEMA | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
+                SERVER_CHECKPOINT_SCHEMA
+                    | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
+                    | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
             ) && value.get("federation").is_none()
             {
                 return Err(
@@ -1240,6 +1245,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_CAPACITY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TYPED_REVISION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_FEDERATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_UPLOAD_RECOVERY_SERVER_CHECKPOINT_SCHEMA

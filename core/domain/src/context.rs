@@ -3,7 +3,7 @@
 use crate::{
     ActorId, ContextRoleId, CoordinationContextId, CoordinationMechanism, DomainError,
     ExecutionCouplingMode, ExecutionRelationSpec, GroupSharedViewSpec, PeerChannelSpec,
-    ResourceBindingScope, RoleId,
+    ResourceAllocationMode, ResourceBindingScope, ResourceKind, ResourceRequirement, RoleId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -14,6 +14,9 @@ pub struct ContextRole {
     context_role_id: ContextRoleId,
     /// Mission actor represented by this continuous role.
     actor_id: ActorId,
+    /// Explicit original shared capacity retained across Task borrowers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    resource_envelope: Vec<ResourceRequirement>,
 }
 
 impl ContextRole {
@@ -22,7 +25,34 @@ impl ContextRole {
         Self {
             context_role_id,
             actor_id,
+            resource_envelope: Vec::new(),
         }
+    }
+
+    /// Freezes positive typed Compute capacity without selecting a Node or deriving it from a Task.
+    pub fn with_resource_envelope(
+        mut self,
+        envelope: Vec<ResourceRequirement>,
+    ) -> Result<Self, DomainError> {
+        if envelope.len() > 1
+            || envelope.iter().any(|demand| {
+                demand.kind() != ResourceKind::Compute
+                    || demand.allocation_mode() != ResourceAllocationMode::Divisible
+                    || demand.units() == 0
+                    || demand
+                        .resource_class()
+                        .is_none_or(|value| value.trim().is_empty() || value.len() > 128)
+            })
+        {
+            return Err(DomainError::InvalidMissionPlan {reason: "Context capacity envelope requires one explicit typed positive Compute allocation".into()});
+        }
+        self.resource_envelope = envelope;
+        Ok(self)
+    }
+
+    /// Returns only the original semantic capacity envelope; it supplies no placement or grant.
+    pub fn resource_envelope(&self) -> &[ResourceRequirement] {
+        &self.resource_envelope
     }
 
     /// Returns the stable ContextRole identity.

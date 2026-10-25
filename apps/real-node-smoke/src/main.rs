@@ -219,6 +219,8 @@ fn smoke_registration(node_id: &str, capability_contract: &str) -> NodeRegistrat
         }],
         sensors: vec![],
         resources: vec![Resource {
+            allocation_mode: String::new(),
+            resource_class: String::new(),
             id: smoke_resource_id(node_id),
             kind: "compute".to_string(),
             capacity: 1,

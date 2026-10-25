@@ -253,6 +253,7 @@ async fn control_bound_command_round_trips_through_generic_engine() {
         Some(RemoteExecutionStatus::Completed)
     );
     let competing = CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "mission-a".to_string(),
         task_id: "task-b".to_string(),
         group_id: "group-b".to_string(),
@@ -363,6 +364,7 @@ async fn reconciliation_required_execution_fences_local_resources_after_restart(
         "restart ambiguity has diagnostic evidence"
     );
     let competing = integration::grpc::v0_4::CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "mission-a".to_string(),
         task_id: "task-a".to_string(),
         group_id: "group-a".to_string(),
@@ -443,6 +445,7 @@ async fn handle_bearing_dispatch_resumes_status_only_recovery_after_restart() {
     );
 
     let competing = integration::grpc::v0_4::CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "mission-a".to_string(),
         task_id: "task-b".to_string(),
         group_id: "group-a".to_string(),
@@ -463,6 +466,7 @@ async fn handle_bearing_dispatch_resumes_status_only_recovery_after_restart() {
 /// Builds one canonical invocation accepted by the status-reacquisition fixture.
 fn flaky_status_invocation() -> integration::grpc::v0_4::CanonicalInvocation {
     integration::grpc::v0_4::CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "mission-status-reacquisition".to_string(),
         task_id: "navigate".to_string(),
         group_id: "group-status-reacquisition".to_string(),

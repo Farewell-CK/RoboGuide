@@ -89,6 +89,8 @@ fn registration(index: usize) -> wire::NodeRegistration {
             local_system_id: "worker-runtime".into(),
         }],
         resources: vec![wire::Resource {
+            allocation_mode: String::new(),
+            resource_class: String::new(),
             id: format!("cpu-{index}"),
             kind: "compute".into(),
             capacity: 1,

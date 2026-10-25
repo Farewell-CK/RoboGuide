@@ -215,7 +215,7 @@ impl GrpcNodeRouter {
             ));
         }
         self.send_preparation_payload(node_id, |route, controller_epoch| {
-            if route.node_contract_version == crate::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+            if crate::grpc::v0_4::supports_safety(&route.node_contract_version)
                 && command.execution_generation == 0
             {
                 return Err(Status::failed_precondition(

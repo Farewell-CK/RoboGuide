@@ -27,6 +27,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.21",
     "roboguide.recovery-profile/v0.22",
     "roboguide.recovery-profile/v0.23",
+    "roboguide.recovery-profile/v0.24",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -37,6 +38,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v53",
     "roboguide.controller-checkpoint/v54",
     "roboguide.controller-checkpoint/v55",
+    "roboguide.controller-checkpoint/v56",
 }
 MAX_HISTORY_BYTES = 256 * 1024 * 1024
 MAX_CATALOG_BYTES = 64 * 1024 * 1024
@@ -424,6 +426,9 @@ def validate(
     seen: dict[str, tuple[str | None, str, str, str]] = {}
     authorities: dict[str, str] = {}
     replica_profiles: dict[str, str] = {}
+    standalone = profile_schema == "roboguide.recovery-profile/v0.24" and not any(
+        item["kind"] in {"replica", "replica-content"} for item in components
+    )
     bindings: dict[str, set[str]] = {}
     if profile_schema in SUPPORTED:
         for component_id in owners.values():
@@ -458,13 +463,19 @@ def validate(
             current = checkpoint is not None and checkpoint[0] in WRAPPERS
             if current:
                 authority_id = _metadata(connection, "archive_authority_id")
-                if profile_schema in {
-                    "roboguide.recovery-profile/v0.19",
-                    "roboguide.recovery-profile/v0.20",
-                    "roboguide.recovery-profile/v0.21",
-                    "roboguide.recovery-profile/v0.22",
-                    "roboguide.recovery-profile/v0.23",
-                } and isinstance(authority_id, str):
+                if (
+                    profile_schema
+                    in {
+                        "roboguide.recovery-profile/v0.19",
+                        "roboguide.recovery-profile/v0.20",
+                        "roboguide.recovery-profile/v0.21",
+                        "roboguide.recovery-profile/v0.22",
+                        "roboguide.recovery-profile/v0.23",
+                        "roboguide.recovery-profile/v0.24",
+                    }
+                    and isinstance(authority_id, str)
+                    and not standalone
+                ):
                     from .replica_content_bundle import projection_authority
 
                     actual_profile = projection_authority(
@@ -480,14 +491,18 @@ def validate(
                     replica_profiles[authority_id] = actual_profile
                 if not isinstance(authority_id, str) or (
                     authority_id in authorities
-                    and profile_schema
-                    not in {
-                        "roboguide.recovery-profile/v0.19",
-                        "roboguide.recovery-profile/v0.20",
-                        "roboguide.recovery-profile/v0.21",
-                        "roboguide.recovery-profile/v0.22",
-                        "roboguide.recovery-profile/v0.23",
-                    }
+                    and (
+                        standalone
+                        or profile_schema
+                        not in {
+                            "roboguide.recovery-profile/v0.19",
+                            "roboguide.recovery-profile/v0.20",
+                            "roboguide.recovery-profile/v0.21",
+                            "roboguide.recovery-profile/v0.22",
+                            "roboguide.recovery-profile/v0.23",
+                            "roboguide.recovery-profile/v0.24",
+                        }
+                    )
                 ):
                     raise ValueError(
                         "original Controller reference authority is absent or repeated"
@@ -509,6 +524,7 @@ def validate(
                     "roboguide.controller-checkpoint/v53",
                     "roboguide.controller-checkpoint/v54",
                     "roboguide.controller-checkpoint/v55",
+                    "roboguide.controller-checkpoint/v56",
                 },
             )
             cleanups: dict[str, list[tuple[dict[str, Any], dict[str, Any] | None]]] = {}
@@ -549,7 +565,8 @@ def validate(
             )
             if prefix in seen:
                 if (
-                    profile_schema != "roboguide.recovery-profile/v0.23"
+                    profile_schema
+                    not in {"roboguide.recovery-profile/v0.23", "roboguide.recovery-profile/v0.24"}
                     or actual_profile is None
                     or seen[prefix] != projection
                 ):

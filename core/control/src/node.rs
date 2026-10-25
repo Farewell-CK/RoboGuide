@@ -191,6 +191,7 @@ impl ControlPlane {
         }
         self.ensure_resource_identities_available(state, &registration)?;
         self.ensure_committed_resources_remain_declared(&current, &registration)?;
+        self.ensure_declared_capacity_covers_commitments(&registration)?;
         let lease_id = lease.lease_id().clone();
         state
             .record_node(NodeStateSnapshot::new(
@@ -475,7 +476,50 @@ impl ControlPlane {
         &self,
         registration: &NodeRegistration,
     ) -> Result<(), ControlError> {
+        for record in self
+            .capacity_ledger
+            .allocations
+            .values()
+            .filter(|record| &record.original.node_id == registration.node_id())
+        {
+            if !registration
+                .resources()
+                .iter()
+                .any(|resource| resource.id() == &record.original.resource_id)
+            {
+                return Err(ControlError::InvalidProposal(
+                    "registration removed an original quantitatively allocated resource".into(),
+                ));
+            }
+        }
         for resource in registration.resources() {
+            let shared = self.capacity_ledger.committed_units(resource.id());
+            if shared > 0
+                && (resource.allocation_mode() != domain::ResourceAllocationMode::Divisible
+                    || resource.kind() != domain::ResourceKind::Compute
+                    || shared > u64::from(resource.capacity())
+                    || self.capacity_ledger.allocations.values().any(|record| {
+                        record.original.resource_id == *resource.id()
+                            && (record.original.node_id != *registration.node_id()
+                                || Some(record.original.resource_class.as_str())
+                                    != resource.resource_class())
+                    }))
+            {
+                return Err(ControlError::InvalidProposal(
+                    "registration cannot replace or understate original quantitative ownership"
+                        .into(),
+                ));
+            }
+            if resource.allocation_mode() == domain::ResourceAllocationMode::Divisible
+                && (registration.contract_version().as_str() != domain::NODE_CONTRACT_VERSION_V0_13
+                    || resource.kind() != domain::ResourceKind::Compute
+                    || resource.resource_class().is_none())
+            {
+                return Err(ControlError::InvalidProposal(
+                    "quantitative resources require explicit Node Contract v0.13 and unit class"
+                        .into(),
+                ));
+            }
             if self.reservations.contains_key(resource.id())
                 && self.quota_ledger.claims().iter().any(|claim| {
                     claim.resource_id.as_ref() == Some(resource.id())
@@ -505,10 +549,14 @@ impl ControlPlane {
                 .iter()
                 .find(|claim| claim.resource_id.as_ref() == Some(resource.id()))
                 .map_or(u64::from(resource.capacity()), |claim| claim.units);
-            if self.reservations.contains_key(resource.id())
+            let shared = self.capacity_ledger.committed_units(resource.id());
+            let required_units = if shared > 0 { shared } else { required_units };
+            if (self.reservations.contains_key(resource.id()) || shared > 0)
                 && !replacement.resources().iter().any(|next| {
                     next.id() == resource.id()
                         && next.kind() == resource.kind()
+                        && next.allocation_mode() == resource.allocation_mode()
+                        && next.resource_class() == resource.resource_class()
                         && u64::from(next.capacity()) >= required_units
                 })
             {

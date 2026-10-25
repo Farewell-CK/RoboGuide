@@ -586,6 +586,7 @@ impl ReplicaRecoveryProjection {
             crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA
                 | "roboguide.controller-checkpoint/v53"
                 | "roboguide.controller-checkpoint/v54"
+                | "roboguide.controller-checkpoint/v55"
         ) || events.len() > MAX_ROWS
             || floor.checked_add(events.len() as u64) != Some(checkpoint.event_sequence)
         {

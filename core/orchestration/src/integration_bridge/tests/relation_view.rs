@@ -89,6 +89,8 @@ fn peer_readiness_is_owner_checked_expires_and_restores_fenced() {
             "mobility.navigate@v1",
             "mobility",
             vec![integration::grpc::v0_4::Resource {
+                allocation_mode: String::new(),
+                resource_class: String::new(),
                 id: "guide-space".to_string(),
                 kind: "space".to_string(),
                 capacity: 1,
@@ -299,6 +301,8 @@ fn peer_readiness_is_owner_checked_expires_and_restores_fenced() {
                                 "mobility.navigate@v1",
                                 "mobility",
                                 vec![integration::grpc::v0_4::Resource {
+                                    allocation_mode: String::new(),
+                                    resource_class: String::new(),
                                     id: "guide-space".to_string(),
                                     kind: "space".to_string(),
                                     capacity: 1,

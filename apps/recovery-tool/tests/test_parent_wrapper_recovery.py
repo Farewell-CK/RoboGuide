@@ -50,7 +50,7 @@ def parent(path: Path, encoded_identity: list[str]) -> tuple[dict[str, Any], dic
     }
 
 
-@pytest.mark.parametrize("version", ["v53", "v54", "v55"])
+@pytest.mark.parametrize("version", ["v53", "v54", "v55", "v56"])
 def test_complete_empty_original_parent_accepts_each_supported_wrapper(
     tmp_path: Path, version: str
 ) -> None:
@@ -66,7 +66,7 @@ def test_complete_empty_original_parent_accepts_each_supported_wrapper(
     [
         ["a" * 64, "roboguide.controller-checkpoint/v54", "roboguide.controller-checkpoint/v55"],
         ["b" * 64, "roboguide.controller-checkpoint/v55"],
-        ["a" * 64, "roboguide.controller-checkpoint/v56"],
+        ["a" * 64, "roboguide.controller-checkpoint/v57"],
         ["a" * 64],
     ],
 )

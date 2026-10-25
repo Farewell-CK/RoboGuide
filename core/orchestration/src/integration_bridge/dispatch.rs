@@ -154,6 +154,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                             | domain::NODE_CONTRACT_VERSION_V0_10
                             | domain::NODE_CONTRACT_VERSION_V0_11
                             | domain::NODE_CONTRACT_VERSION_V0_12
+                            | domain::NODE_CONTRACT_VERSION_V0_13
                     )
                 })
                 .map(|node| {
@@ -787,6 +788,10 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         {
             command = command.with_execution_generation(generation);
         }
+        command = command.with_resource_grants(
+            self.control
+                .resource_allocation_grants(group_id, task_ref, role_id)?,
+        )?;
         let command = self.command_with_dispatch_registration(&execution_id, command)?;
         self.runtime
             .prepare_dispatch(execution_id, command.clone(), resource_ids)

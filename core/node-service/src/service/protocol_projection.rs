@@ -164,7 +164,8 @@ pub(super) fn registration_from_readiness(
         .collect();
     let current_contract = matches!(
         catalog.node_contract_version(),
-        integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+        integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+            | integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::MEMORY_USE_NODE_CONTRACT_VERSION
             | integration::grpc::v0_4::PREPARATION_NODE_CONTRACT_VERSION
@@ -230,6 +231,14 @@ pub(super) fn registration_from_readiness(
             id: resource.id().to_string(),
             kind: resource.kind().to_string(),
             capacity: resource.capacity(),
+            allocation_mode: if resource.allocation_mode()
+                == domain::ResourceAllocationMode::Divisible
+            {
+                "divisible".into()
+            } else {
+                String::new()
+            },
+            resource_class: resource.resource_class().unwrap_or_default().into(),
             metadata: resource.metadata().clone().into_iter().collect(),
             local_system_id: resource.owner().to_string(),
         })

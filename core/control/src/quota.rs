@@ -39,6 +39,9 @@ pub struct QuotaClaim {
     /// Exact Control reservation, absent on legacy/operator-only logical claims.
     #[serde(default)]
     pub resource_id: Option<ResourceId>,
+    /// Exact quantitative parent allocation; absent legacy claims retain resource-wide identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allocation_id: Option<String>,
 }
 
 /// Errors from the durable logical quota ledger.
@@ -223,6 +226,9 @@ impl QuotaLedger {
             ));
         }
         validate_claim(&claim)?;
+        if claim.allocation_id.is_some() {
+            return self.track(claim);
+        }
         if let Some(index) = self
             .claims
             .iter()
@@ -267,8 +273,15 @@ impl QuotaLedger {
     /// Removes one exact resource-backed claim when Control releases its reservation.
     pub(crate) fn release_resource(&mut self, resource_id: &str) {
         self.claims.retain(|claim| {
-            claim.resource_id.as_ref().map(ResourceId::as_str) != Some(resource_id)
+            claim.allocation_id.is_some()
+                || claim.resource_id.as_ref().map(ResourceId::as_str) != Some(resource_id)
         });
+    }
+
+    /// Releases one exact quantitative allocation, never another owner of the same resource.
+    pub(crate) fn release_allocation(&mut self, allocation_id: &str) {
+        self.claims
+            .retain(|claim| claim.allocation_id.as_deref() != Some(allocation_id));
     }
 
     /// Returns whether one resource identity has retained logical quota evidence.
@@ -367,13 +380,15 @@ impl QuotaLedger {
             ));
         }
         let mut checked = Self::new();
-        let mut resource_ids = std::collections::BTreeSet::new();
+        let mut resource_ids = std::collections::BTreeMap::new();
         for limit in &self.limits {
             checked.set_limit(limit.tenant_id.clone(), limit.kind, limit.max_units)?;
         }
         for claim in &self.claims {
             if let Some(resource_id) = &claim.resource_id
-                && !resource_ids.insert(resource_id.as_str())
+                && resource_ids
+                    .insert(resource_id.as_str(), claim.allocation_id.is_some())
+                    .is_some_and(|shared| !shared || claim.allocation_id.is_none())
             {
                 return Err(QuotaError::Invalid(
                     "duplicate resource-backed quota claim".into(),
@@ -399,10 +414,21 @@ fn validate_claim(claim: &QuotaClaim) -> Result<(), QuotaError> {
             "claim units are outside their bound".into(),
         ));
     }
-    if claim
-        .resource_id
-        .as_ref()
-        .is_some_and(|resource_id| claim.claim_id != resource_claim_id(resource_id.as_str()))
+    if claim.allocation_id.as_ref().is_some_and(|id| {
+        claim.resource_id.is_none()
+            || claim.kind != ResourceKind::Compute
+            || &claim.claim_id != id
+            || !id.strip_prefix("allocation:sha256:").is_some_and(|hex| {
+                hex.len() == 64
+                    && hex
+                        .bytes()
+                        .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value))
+            })
+    }) || claim.allocation_id.is_none()
+        && claim
+            .resource_id
+            .as_ref()
+            .is_some_and(|resource_id| claim.claim_id != resource_claim_id(resource_id.as_str()))
     {
         return Err(QuotaError::Invalid(
             "resource quota claim identity does not match its reservation".into(),
@@ -430,6 +456,7 @@ mod tests {
             .set_limit("tenant", ResourceKind::Compute, 3)
             .unwrap();
         let claim = QuotaClaim {
+            allocation_id: None,
             claim_id: "claim-1".into(),
             tenant_id: "tenant".into(),
             kind: ResourceKind::Compute,
@@ -442,6 +469,7 @@ mod tests {
         assert!(
             ledger
                 .reserve(QuotaClaim {
+                    allocation_id: None,
                     claim_id: "claim-2".into(),
                     units: 2,
                     ..claim
@@ -457,6 +485,7 @@ mod tests {
     fn tracked_reservations_are_counted_before_a_limit_is_installed() {
         let mut ledger = QuotaLedger::new();
         let claim = QuotaClaim {
+            allocation_id: None,
             claim_id: resource_claim_id("resource-1"),
             tenant_id: "tenant".into(),
             kind: ResourceKind::Compute,
@@ -469,6 +498,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             ledger.track(QuotaClaim {
+                allocation_id: None,
                 claim_id: resource_claim_id("resource-2"),
                 units: 2,
                 resource_id: Some(ResourceId::new("resource-2").unwrap()),
@@ -489,6 +519,7 @@ mod tests {
         let mut ledger = QuotaLedger::new();
         ledger
             .track(QuotaClaim {
+                allocation_id: None,
                 claim_id: resource_claim_id("resource-without-policy"),
                 tenant_id: "tenant-a".into(),
                 kind: ResourceKind::Compute,
@@ -511,6 +542,7 @@ mod tests {
     #[test]
     fn restored_ledger_rejects_duplicate_claim_and_limit_identities() {
         let claim = QuotaClaim {
+            allocation_id: None,
             claim_id: "claim-1".into(),
             tenant_id: "tenant".into(),
             kind: ResourceKind::Compute,

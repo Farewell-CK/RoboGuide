@@ -136,6 +136,7 @@ fn authorize_tenant_path(
             path,
             "/v1/missions"
                 | "/v1/inventory"
+                | "/v1/resource-allocations"
                 | "/v1/node-identities"
                 | "/v1/verifier-evidence"
                 | "/v1/mission-goal-evidence"
@@ -1655,6 +1656,20 @@ where
             (
                 "200 OK",
                 serde_json::json!({"schema_version":"roboguide.decision-policy-view/v0.1","registry":live.bridge.control().decision_policy_registry()}),
+            )
+        }
+        ("GET", "/v1/resource-allocations") => {
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            let view = live.bridge.control().allocation_snapshot(clock.now())?;
+            let allocations = view.allocations().iter().filter(|record| tenant.as_deref().is_none_or(|tenant| live.bridge.control().mission_tenant(record.task_ref().mission_id()) == Some(tenant))).map(|record| {
+                let phase = match record.phase() { domain::AllocationPhase::Committed => "committed", domain::AllocationPhase::Bound => "bound", domain::AllocationPhase::RecoveryPending => "recovery-pending" };
+                serde_json::json!({"resource_id":record.resource_id(),"task_ref":record.task_ref(),"role_id":record.role_id(),"group_id":record.group_id(),"owner":record.owner(),"phase":phase,"quantitative_grant":record.quantitative_grant(),"borrowers":record.borrowers().iter().map(|borrower|serde_json::json!({"task_ref":borrower.task_ref,"role_id":borrower.role_id,"units":borrower.units})).collect::<Vec<_>>()})
+            }).collect::<Vec<_>>();
+            (
+                "200 OK",
+                serde_json::json!({"schema_version":"roboguide.resource-allocation-view/v0.1","projected_at_ms":view.projected_at().as_millis(),"allocations":allocations}),
             )
         }
         ("GET", "/v1/resource-quotas") => {

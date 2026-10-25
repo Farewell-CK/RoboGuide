@@ -31,6 +31,17 @@ impl ControlPlane {
             .clone();
         let mut group =
             ExecutionGroup::new_mission(group_id.clone(), mission_id.clone(), initial_task_ref);
+        group.context_resource_envelopes = plan
+            .contexts()
+            .iter()
+            .flat_map(|context| {
+                context
+                    .roles()
+                    .iter()
+                    .filter(|role| !role.resource_envelope().is_empty())
+                    .map(|role| (context.context_id().clone(), role.clone()))
+            })
+            .collect();
         for task in plan.task_graph().tasks() {
             let continuity = task.continuity();
             for role in task.requirement().roles() {
@@ -125,6 +136,22 @@ impl ControlPlane {
         if planned_tasks != registered_tasks {
             return Err(ControlError::InvalidProposal(
                 "MissionPlan Task DAG differs from the restored Execution Group".to_string(),
+            ));
+        }
+        let envelopes = plan
+            .contexts()
+            .iter()
+            .flat_map(|context| {
+                context
+                    .roles()
+                    .iter()
+                    .filter(|role| !role.resource_envelope().is_empty())
+                    .map(|role| (context.context_id().clone(), role.clone()))
+            })
+            .collect::<Vec<_>>();
+        if group.context_resource_envelopes != envelopes {
+            return Err(ControlError::InvalidProposal(
+                "restored Context capacity declarations differ from accepted MissionPlan".into(),
             ));
         }
         for task in plan.task_graph().tasks() {
@@ -250,7 +277,7 @@ impl ControlPlane {
                 .role_requirement(plan.task_ref(), assignment.role_id())
                 .ok_or_else(|| ControlError::InvalidProposal("Bind Role is absent".into()))?;
             if !state.node(assignment.node_id()).is_some_and(|node| {
-                Self::selected_resources_match_registration(
+                self.selected_resources_match_registration(
                     node.registration(),
                     role,
                     assignment.resource_ids(),
@@ -356,11 +383,13 @@ impl ControlPlane {
             let scope = execution.role_scope(assignment.role_id());
             let context_role_id = execution.context_role(assignment.role_id()).cloned();
             for resource_id in assignment.resource_ids() {
-                let reservation = self.reservations.get(resource_id).ok_or_else(|| {
-                    ControlError::InvalidProposal(format!(
-                        "committed resource {resource_id} has no reservation"
-                    ))
-                })?;
+                let reservation = self
+                    .binding_reservation(resource_id, group_id, task_ref, assignment.role_id())
+                    .ok_or_else(|| {
+                        ControlError::InvalidProposal(format!(
+                            "committed resource {resource_id} has no reservation"
+                        ))
+                    })?;
                 let valid = match scope {
                     ResourceBindingScope::Task => {
                         reservation.task_ref == *task_ref
@@ -411,8 +440,7 @@ impl ControlPlane {
             let context_role_id = execution.context_role(assignment.role_id()).cloned();
             for resource_id in assignment.resource_ids() {
                 let reservation = self
-                    .reservations
-                    .get_mut(resource_id)
+                    .binding_reservation_mut(resource_id, group_id, task_ref, assignment.role_id())
                     .expect("reservation validated above");
                 reservation.group_id = Some(group_id.clone());
                 if scope == ResourceBindingScope::Context {

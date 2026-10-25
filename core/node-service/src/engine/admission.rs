@@ -169,8 +169,7 @@ impl LocalIntegrationEngine {
 
     /// Rejects missing generation only when the peer explicitly negotiated the combined contract.
     pub(crate) fn validate_execution_generation(&self, generation: u64) -> Result<(), EngineError> {
-        if self.catalog().node_contract_version()
-            == integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
+        if integration::grpc::v0_4::supports_safety(self.catalog().node_contract_version())
             && generation == 0
         {
             return Err(EngineError::Protocol(
@@ -191,6 +190,15 @@ impl LocalIntegrationEngine {
         preparation: Option<&domain::MemoryPreparation>,
     ) -> Result<ExecuteDisposition, EngineError> {
         self.validate_execution_generation(execution_generation)?;
+        if (self.catalog().node_contract_version()
+            == integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION)
+            == invocation.resource_grants_json.is_empty()
+        {
+            return Err(EngineError::Protocol(
+                "resource grant array must exactly match the negotiated Node contract".into(),
+            ));
+        }
+
         validate_invocation_identity(&execution_id, &invocation)?;
         let session = if execution_session_json.is_empty() {
             None
@@ -215,13 +223,12 @@ impl LocalIntegrationEngine {
         let capability = self.operation(&operation)?.clone();
         validate_resources(&self.inner.catalog, &capability, &resource_ids)?;
         resource_ids.sort();
-        let normalized_generation = if self.catalog().node_contract_version()
-            == integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
-        {
-            execution_generation
-        } else {
-            0
-        };
+        let normalized_generation =
+            if integration::grpc::v0_4::supports_safety(self.catalog().node_contract_version()) {
+                execution_generation
+            } else {
+                0
+            };
         let mut invocation_json =
             canonical_invocation_json(&invocation, &resource_ids, normalized_generation)?;
         if let Some(session) = session {
@@ -267,6 +274,11 @@ impl LocalIntegrationEngine {
             resource_ids.clone(),
         )?;
 
+        let _capacity_gate = self
+            .inner
+            .capacity_admission_gate
+            .lock()
+            .map_err(|_| EngineError::LockState)?;
         if self.inner.journal.get(&execution_id)?.is_some() {
             return match self.inner.journal.prepare_dispatch(&execution_id, &spec)? {
                 PrepareDispatch::Existing(record) => {
@@ -296,6 +308,7 @@ impl LocalIntegrationEngine {
             };
         }
 
+        self.validate_capacity_admission(Some((&execution_id, &invocation_json)))?;
         self.acquire_locks(&execution_id, &capability, &resource_ids, &invocation_json)?;
         let prepared = match self.inner.journal.prepare_dispatch(&execution_id, &spec) {
             Ok(prepared) => prepared,

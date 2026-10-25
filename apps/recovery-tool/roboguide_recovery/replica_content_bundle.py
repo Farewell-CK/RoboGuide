@@ -27,10 +27,10 @@ def _membership(raw: str, expected: dict[int, str]) -> None:
 
 
 def capture_sources(
-    components: list[dict[str, Any]], budget: OperationBudget
+    components: list[dict[str, Any]], budget: OperationBudget, *, allow_standalone: bool = False
 ) -> list[dict[str, Any]]:
     """Observe exact source backing only while the caller owns every actual original writer."""
-    content.validate_pairing(components)
+    content.validate_pairing(components, allow_standalone=allow_standalone)
     by_id = {item["component_id"]: item for item in components}
     result = []
     members: dict[int, str] = {}
@@ -163,6 +163,7 @@ def _parent(
                 [identity["profile_identity"], "roboguide.controller-checkpoint/v53"],
                 [identity["profile_identity"], "roboguide.controller-checkpoint/v54"],
                 [identity["profile_identity"], "roboguide.controller-checkpoint/v55"],
+                [identity["profile_identity"], "roboguide.controller-checkpoint/v56"],
             )
             or json.loads(metadata.get("network_content_membership_schema", "null"))
             != "roboguide.replica-storage/v0.7"
@@ -474,8 +475,22 @@ def validate_bundle(
         if sources is not None:
             raise ValueError("old recovery profile contains hidden Replica content authority")
         return
-    content.validate_pairing(components)
+    standalone = schema == content.CAPACITY_PROFILE and not any(
+        item["kind"] in {"replica", "replica-content"} for item in components
+    )
+    content.validate_pairing(components, allow_standalone=standalone)
     source_map = _source_map(sources, components)
+    if standalone:
+        from .capacity_recovery import validate_standalone
+
+        for component in components:
+            if component["kind"] != "controller":
+                continue
+            path = root / "stores" / component["component_id"] / component["database"]
+            budget.check()
+            with closing(sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)) as sql:
+                validate_standalone(sql)
+        return
     by_id = {item["component_id"]: item for item in components}
     originals, states = [], []
     expected_members = {}

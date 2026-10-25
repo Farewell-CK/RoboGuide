@@ -118,6 +118,7 @@ impl LocalIntegrationEngine {
         Ok(Self {
             inner: Arc::new(EngineInner {
                 memory_context_gate: Mutex::new(()),
+                capacity_admission_gate: Mutex::new(()),
                 memory_use_provider_workers: Arc::new(tokio::sync::Semaphore::new(4)),
                 memory_use_workers: Mutex::new(BTreeMap::new()),
                 publication_session: Mutex::new(None),

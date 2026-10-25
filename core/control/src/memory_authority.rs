@@ -33,6 +33,7 @@ impl ControlPlane {
             domain::NODE_CONTRACT_VERSION_V0_10
                 | domain::NODE_CONTRACT_VERSION_V0_11
                 | domain::NODE_CONTRACT_VERSION_V0_12
+                | domain::NODE_CONTRACT_VERSION_V0_13
         ) {
             return Err(denied(
                 "Memory preparation requires explicitly negotiated Node Contract v0.10",

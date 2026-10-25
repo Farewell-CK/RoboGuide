@@ -38,7 +38,9 @@ def standalone_binary_schema(binary: Path) -> str:
     if not schema.startswith("roboguide.controller-checkpoint/v") or "\n" in schema:
         raise ValueError("actual Controller binary returned an invalid schema header")
     return (
-        "roboguide.recovery-profile/v0.18"
+        "roboguide.recovery-profile/v0.24"
+        if schema == "roboguide.controller-checkpoint/v56"
+        else "roboguide.recovery-profile/v0.18"
         if schema
         in {
             "roboguide.controller-checkpoint/v53",
@@ -56,7 +58,9 @@ def standalone_schema(database: Path) -> str:
     if row is None or not isinstance(row[0], str):
         raise ValueError("actual Controller checkpoint header is unavailable")
     return (
-        "roboguide.recovery-profile/v0.18"
+        "roboguide.recovery-profile/v0.24"
+        if row[0] == "roboguide.controller-checkpoint/v56"
+        else "roboguide.recovery-profile/v0.18"
         if row[0]
         in {
             "roboguide.controller-checkpoint/v53",
@@ -73,6 +77,7 @@ def restore_schema(profile_schema: str) -> str:
         "roboguide.recovery-profile/v0.16",
         "roboguide.recovery-profile/v0.17",
         "roboguide.recovery-profile/v0.18",
+        "roboguide.recovery-profile/v0.24",
     }:
         raise ValueError("unsupported explicit standalone recovery declaration")
     return profile_schema.replace("recovery-profile", "restore-receipt")

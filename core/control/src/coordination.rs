@@ -99,7 +99,7 @@ impl CommittedPlan {
 }
 
 /// The task and role that currently hold a resource commitment.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Reservation {
     /// Mission-scoped task currently holding the resource.
     pub(crate) task_ref: TaskRef,
@@ -117,6 +117,7 @@ pub(crate) struct Reservation {
 impl ControlPlane {
     /// Revalidates exact selected IDs/kinds/positive demand units without borrowing alternative resources.
     pub(crate) fn selected_resources_match_registration(
+        &self,
         registration: &domain::NodeRegistration,
         role: &domain::RoleRequirement,
         selected: &[domain::ResourceId],
@@ -134,6 +135,10 @@ impl ControlPlane {
                         resource.id() == id
                             && resource.kind() == demand.kind()
                             && resource.capacity() >= demand.units()
+                            && u64::from(resource.capacity())
+                                >= self.capacity_ledger.committed_units(id)
+                            && resource.allocation_mode() == demand.allocation_mode()
+                            && resource.resource_class() == demand.resource_class()
                     })
             })
     }
@@ -199,6 +204,19 @@ impl ControlPlane {
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CommittedPlan, ControlError> {
+        if proposal.assignments().iter().any(|assignment| {
+            proposal
+                .requirement_for_role(assignment.role_id())
+                .is_some_and(|role| {
+                    role.resource_requirements().iter().any(|demand| {
+                        demand.allocation_mode() == domain::ResourceAllocationMode::Divisible
+                    })
+                })
+        }) {
+            return Err(ControlError::InvalidProposal(
+                "quantitative Commit requires its original Mission Group".into(),
+            ));
+        }
         if self.scheduled_task(proposal.task_ref()).is_some() {
             return Err(ControlError::InvalidProposal(
                 "a scheduled Task must commit through its owning Execution Group".to_string(),
@@ -206,7 +224,11 @@ impl ControlPlane {
         }
         for assignment in proposal.assignments() {
             for resource_id in assignment.resource_ids() {
-                if let Some(reservation) = self.reservations.get(resource_id) {
+                if let Some(reservation) = self
+                    .reservations
+                    .get(resource_id)
+                    .or_else(|| self.capacity_conflict(resource_id))
+                {
                     return Err(ControlError::ResourceConflict {
                         resource_id: resource_id.clone(),
                         owner_task_ref: reservation.task_ref.clone(),
@@ -290,7 +312,7 @@ impl ControlPlane {
                 "resource assignments require current State at Group Commit".to_string(),
             ));
         }
-        self.commit_for_group_validated(group_id, proposal, timestamp, correlation_id, events)
+        self.commit_for_group_validated(group_id, proposal, None, timestamp, correlation_id, events)
     }
 
     /// Revalidates operation support before committing a normalized ready Task to its Group.
@@ -309,19 +331,51 @@ impl ControlPlane {
             proposal.task_ref().mission_id(),
             &Self::proposal_quota_demands(proposal)?,
         )?;
+        let capacity = self.capacity_commit_candidate(
+            state,
+            group_id,
+            proposal.task_ref(),
+            proposal.assignments(),
+            timestamp,
+        )?;
         self.audit_committed_decision(state, proposal, timestamp, correlation_id, events);
-        self.commit_for_group_validated(group_id, proposal, timestamp, correlation_id, events)
+        self.commit_for_group_validated(
+            group_id,
+            proposal,
+            capacity,
+            timestamp,
+            correlation_id,
+            events,
+        )
     }
 
     /// Applies Group-scoped reservation authority after operation validation succeeds.
+    #[allow(clippy::too_many_arguments)]
     fn commit_for_group_validated<E: EventSink>(
         &mut self,
         group_id: &ExecutionGroupId,
         proposal: &AssignmentProposal,
+        capacity: Option<(
+            crate::resource_allocations::CapacityLedger,
+            crate::QuotaLedger,
+        )>,
         timestamp: TimestampMs,
         correlation_id: &CorrelationId,
         events: &mut E,
     ) -> Result<CommittedPlan, ControlError> {
+        if capacity.is_none()
+            && proposal.assignments().iter().any(|assignment| {
+                proposal
+                    .requirement_for_role(assignment.role_id())
+                    .is_some_and(|role| {
+                        role.resource_requirements().iter().any(|demand| {
+                            demand.allocation_mode() == domain::ResourceAllocationMode::Divisible
+                        })
+                    })
+            })
+        {
+            return Err(ControlError::InvalidProposal("quantitative Group Commit requires current State and its complete original capacity batch".into()));
+        }
         let group = self
             .groups
             .get(group_id)
@@ -335,6 +389,18 @@ impl ControlPlane {
             ));
         }
         validate_task_assignments(execution, proposal.assignments())?;
+        for assignment in proposal.assignments() {
+            if group
+                .role_requirement(proposal.task_ref(), assignment.role_id())
+                .is_some_and(|required| {
+                    Some(required) != proposal.requirement_for_role(assignment.role_id())
+                })
+            {
+                return Err(ControlError::InvalidProposal(
+                    "Commit requirements differ from the original Group Role".into(),
+                ));
+            }
+        }
         self.validate_proposal_physical_bindings(group, execution, proposal)?;
         if let Some(scheduled) = self.scheduled_task(proposal.task_ref())
             && (scheduled.group_id() != group_id
@@ -379,8 +445,20 @@ impl ControlPlane {
             owners.push((assignment, scope, owner));
         }
         for (assignment, _, owner) in &owners {
-            for resource_id in assignment.resource_ids() {
-                if let Some(reservation) = self.reservations.get(resource_id)
+            for (index, resource_id) in assignment.resource_ids().iter().enumerate() {
+                let shared = proposal
+                    .requirement_for_role(assignment.role_id())
+                    .is_some_and(|role| {
+                        role.resource_requirements()[index].allocation_mode()
+                            == domain::ResourceAllocationMode::Divisible
+                    });
+                if shared {
+                    continue;
+                }
+                if let Some(reservation) = self
+                    .reservations
+                    .get(resource_id)
+                    .or_else(|| self.capacity_conflict(resource_id))
                     && (&reservation.owner != owner
                         || reservation.group_id.as_ref() != Some(group_id))
                 {
@@ -401,12 +479,30 @@ impl ControlPlane {
                 }
             }
         }
-        self.commit_resource_quotas(
-            proposal.task_ref().mission_id(),
-            Self::proposal_quota_demands(proposal)?,
-        )?;
+        if let Some((ledger, quota)) = capacity {
+            let version = self.calendar_version.checked_add(1).ok_or_else(|| {
+                ControlError::InvalidProposal("calendar generation exhausted".into())
+            })?;
+            self.capacity_ledger = ledger;
+            self.quota_ledger = quota;
+            self.calendar_version = version;
+        } else {
+            self.commit_resource_quotas(
+                proposal.task_ref().mission_id(),
+                Self::proposal_quota_demands(proposal)?,
+            )?;
+        }
         for (assignment, scope, owner) in owners {
-            for resource_id in assignment.resource_ids() {
+            for (index, resource_id) in assignment.resource_ids().iter().enumerate() {
+                if proposal
+                    .requirement_for_role(assignment.role_id())
+                    .is_some_and(|role| {
+                        role.resource_requirements()[index].allocation_mode()
+                            == domain::ResourceAllocationMode::Divisible
+                    })
+                {
+                    continue;
+                }
                 self.reservations
                     .entry(resource_id.clone())
                     .or_insert_with(|| Reservation {
@@ -524,6 +620,8 @@ impl ControlPlane {
                     resource.id() == resource_id
                         && resource.kind() == required.kind()
                         && resource.capacity() >= required.units()
+                        && resource.allocation_mode() == required.allocation_mode()
+                        && resource.resource_class() == required.resource_class()
                 }) {
                     return Err(ControlError::AssignmentUnavailable(format!(
                         "selected resource {resource_id} is absent or no longer satisfies role {} on node {}",

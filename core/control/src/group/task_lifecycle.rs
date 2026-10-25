@@ -25,6 +25,7 @@ impl ControlPlane {
         resources.sort();
         resources.dedup();
         for resource_id in &resources {
+            if self.capacity_ledger.allocations.values().any(|record| &record.original.resource_id==resource_id && &record.original.group_id==group_id && matches!(&record.original.owner,domain::AllocationOwner::Context{context_id:owner,..} if owner==context_id)){continue;}
             let reservation = self.reservations.get(resource_id).ok_or_else(|| {
                 ControlError::InvalidProposal(format!(
                     "Context resource {resource_id} has no reservation"
@@ -42,6 +43,7 @@ impl ControlPlane {
             self.reservations.remove(resource_id);
             self.release_resource_quota(resource_id);
         }
+        self.release_capacity_context(group_id, context_id);
         let group_mut = self
             .groups
             .get_mut(group_id)
@@ -63,7 +65,11 @@ impl ControlPlane {
                         assignment
                             .resource_ids()
                             .iter()
-                            .filter(|resource_id| !resources.contains(resource_id))
+                            .filter(|resource_id| {
+                                execution.role_scope(assignment.role_id())
+                                    != ResourceBindingScope::Context
+                                    || !resources.contains(resource_id)
+                            })
                             .cloned()
                             .collect(),
                     )
@@ -391,14 +397,15 @@ impl ControlPlane {
         let expected = execution
             .assignments()
             .iter()
-            .flat_map(|assignment| assignment.resource_ids())
-            .filter(|resource_id| {
-                execution.binding_scope(resource_id) == ResourceBindingScope::Task
+            .filter(|assignment| {
+                execution.role_scope(assignment.role_id()) == ResourceBindingScope::Task
             })
+            .flat_map(|assignment| assignment.resource_ids())
             .cloned()
             .collect::<Vec<_>>();
         let mut expected_sorted = expected;
         expected_sorted.sort();
+        expected_sorted.dedup();
         let mut supplied = resource_ids.to_vec();
         supplied.sort();
         supplied.dedup();
@@ -408,6 +415,7 @@ impl ControlPlane {
             ));
         }
         for resource_id in &expected_sorted {
+            if self.capacity_ledger.allocations.values().any(|record| &record.original.resource_id==resource_id && &record.original.group_id==group_id && matches!(&record.original.owner,domain::AllocationOwner::Task(owner) if owner==task_ref)){continue;}
             let reservation = self.reservations.get(resource_id).ok_or_else(|| {
                 ControlError::InvalidProposal(format!(
                     "Task resource {resource_id} has no reservation"
@@ -436,6 +444,7 @@ impl ControlPlane {
             self.reservations.remove(resource_id);
             self.release_resource_quota(resource_id);
         }
+        self.release_capacity_task(group_id, task_ref, None);
         let group = self
             .groups
             .get_mut(group_id)

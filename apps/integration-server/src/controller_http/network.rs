@@ -19,12 +19,12 @@ pub(super) fn parse_connection_limit(value: Option<&str>) -> Result<usize, Strin
 }
 
 /// Returns the network worker before each synchronous poll; Pending retains only the original future.
-pub(super) async fn isolate_synchronous_polls<F: Future>(future: F) -> F::Output {
-    let mut future = std::pin::pin!(future);
-    poll_fn(|context| {
+pub(super) fn isolate_synchronous_polls<F: Future>(future: F) -> impl Future<Output = F::Output> {
+    // Keep the complete dispatcher off every parent future and default worker stack.
+    let mut future = Box::pin(future);
+    poll_fn(move |context| {
         crate::application::run_synchronous_transaction(|| future.as_mut().poll(context))
     })
-    .await
 }
 
 /// Samples fixed process-local budgets; permit ownership, not these observations, limits transports.

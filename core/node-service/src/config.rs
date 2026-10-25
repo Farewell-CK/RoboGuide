@@ -705,6 +705,12 @@ pub struct ResourceConfig {
     pub kind: String,
     /// Non-zero capacity exposed for matching and commitment.
     pub capacity: u32,
+    /// Explicit quantitative interpretation, requiring node-config v0.14 even when exclusive.
+    #[serde(default)]
+    pub allocation_mode: Option<domain::ResourceAllocationMode>,
+    /// Versioned Compute unit class; absence never guesses a shared dimension.
+    #[serde(default)]
+    pub resource_class: Option<String>,
     /// Local system responsible for observing and using the resource.
     pub owner: String,
     /// Non-secret registration metadata.

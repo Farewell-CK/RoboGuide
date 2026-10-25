@@ -46,7 +46,9 @@ impl RoleRequirement {
             capabilities: Vec::new(),
             resource_kind,
             resources: resource_kind
-                .map(|kind| vec![ResourceRequirement { kind, units: 1 }])
+                .map(|kind| {
+                    vec![ResourceRequirement::new(kind, 1).expect("positive compatibility demand")]
+                })
                 .unwrap_or_default(),
         }
     }
@@ -68,7 +70,9 @@ impl RoleRequirement {
             capabilities: vec![CapabilityRequirement::exact(contract)],
             resource_kind,
             resources: resource_kind
-                .map(|kind| vec![ResourceRequirement { kind, units: 1 }])
+                .map(|kind| {
+                    vec![ResourceRequirement::new(kind, 1).expect("positive compatibility demand")]
+                })
                 .unwrap_or_default(),
         }
     }
@@ -210,7 +214,9 @@ impl RoleRequirement {
     /// Returns all quantitative requirements used by joint scheduling.
     pub fn resource_requirements(&self) -> Cow<'_, [ResourceRequirement]> {
         match (self.resources.is_empty(), self.resource_kind) {
-            (true, Some(kind)) => Cow::Owned(vec![ResourceRequirement { kind, units: 1 }]),
+            (true, Some(kind)) => Cow::Owned(vec![
+                ResourceRequirement::new(kind, 1).expect("positive compatibility demand"),
+            ]),
             _ => Cow::Borrowed(&self.resources),
         }
     }

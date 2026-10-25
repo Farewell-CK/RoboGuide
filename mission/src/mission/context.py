@@ -9,6 +9,7 @@ from mission.contract_values import (
     GROUP_VIEW_FIELDS,
     MAP_ID_PATTERN,
     MISSION_PLAN_ACTOR_VERSION,
+    MISSION_PLAN_CAPACITY_VERSION,
     MISSION_PLAN_COMPAT_VERSION,
     MISSION_PLAN_COUPLING_VERSION,
     MISSION_PLAN_MEMORY_VERSION,
@@ -25,6 +26,7 @@ from mission.contract_values import (
     _object,
     _text,
 )
+from mission.role import ResourceRequirement
 
 
 def _validate_coordination_mechanisms(context: MissionContext, mode: str, path: str) -> None:
@@ -46,20 +48,49 @@ class ContextRole:
 
     role_id: str
     actor_id: str
+    resource_envelope: tuple[ResourceRequirement, ...] = ()
 
     @classmethod
-    def from_json(cls, value: JSONValue, path: str) -> ContextRole:
+    def from_json(
+        cls, value: JSONValue, path: str, version: str = MISSION_PLAN_VERSION
+    ) -> ContextRole:
         """Parse one ContextRole without introducing runtime node placement."""
         item = _object(value, path)
-        _exact_keys(item, {"id", "actor"}, path)
+        _bounded_keys(
+            item,
+            {"id", "actor"},
+            {"resource_envelope"} if version == MISSION_PLAN_CAPACITY_VERSION else set(),
+            path,
+        )
+        envelope = tuple(
+            ResourceRequirement.from_json(resource, f"{path}.resource_envelope[{index}]", version)
+            for index, resource in enumerate(
+                _array(item.get("resource_envelope", []), f"{path}.resource_envelope")
+            )
+        )
+        if len(envelope) > 1 or any(
+            resource.kind != "compute" or resource.allocation_mode != "divisible"
+            for resource in envelope
+        ):
+            raise MissionPlanError(
+                f"{path}.resource_envelope requires one explicit typed Compute allocation"
+            )
         return cls(
             role_id=_text(item["id"], f"{path}.id"),
             actor_id=_text(item["actor"], f"{path}.actor"),
+            resource_envelope=envelope,
         )
 
-    def to_json(self) -> JSONObject:
-        """Serialize one semantic ContextRole."""
-        return {"id": self.role_id, "actor": self.actor_id}
+    def to_json(self, version: str = MISSION_PLAN_VERSION) -> JSONObject:
+        """Serialize the original Context envelope without inventing a physical placement."""
+        result: JSONObject = {"id": self.role_id, "actor": self.actor_id}
+        if self.resource_envelope:
+            if version != MISSION_PLAN_CAPACITY_VERSION:
+                raise MissionPlanError("Context capacity requires exact MissionPlan v0.10")
+            result["resource_envelope"] = [
+                resource.to_json(version) for resource in self.resource_envelope
+            ]
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,14 +394,18 @@ class MissionContext:
         """Parse one versioned Context and reject duplicate ContextRole identities."""
         item = _object(value, path)
         base_keys = {"id", "roles", "relations"}
-        if version in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION}:
+        if version in {
+            MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
+            MISSION_PLAN_CAPACITY_VERSION,
+        }:
             base_keys.add("executor_constraints")
         if version == MISSION_PLAN_COMPAT_VERSION:
             _exact_keys(item, base_keys, path)
         else:
             _bounded_keys(item, base_keys, {"coupling_mode", "shared_view", "peer_channel"}, path)
         roles = tuple(
-            ContextRole.from_json(role, f"{path}.roles[{index}]")
+            ContextRole.from_json(role, f"{path}.roles[{index}]", version)
             for index, role in enumerate(_array(item["roles"], f"{path}.roles"))
         )
         if len({role.role_id for role in roles}) != len(roles):
@@ -384,7 +419,8 @@ class MissionContext:
                     _array(item["executor_constraints"], f"{path}.executor_constraints")
                 )
             )
-            if version in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION}
+            if version
+            in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION, MISSION_PLAN_CAPACITY_VERSION}
             else ()
         )
         roles_by_id = {role.role_id: role for role in roles}
@@ -442,7 +478,7 @@ class MissionContext:
         """Serialize one Context in its declared MissionPlan version."""
         result: JSONObject = {
             "id": self.context_id,
-            "roles": [role.to_json() for role in self.roles],
+            "roles": [role.to_json(version) for role in self.roles],
             "relations": [relation.to_json() for relation in self.relations],
         }
         if version in {
@@ -452,13 +488,18 @@ class MissionContext:
             MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
+            MISSION_PLAN_CAPACITY_VERSION,
         }:
             result["coupling_mode"] = self.coupling_mode
             if self.shared_view is not None:
                 result["shared_view"] = self.shared_view.to_json()
             if self.peer_channel is not None:
                 result["peer_channel"] = self.peer_channel.to_json()
-        if version in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION}:
+        if version in {
+            MISSION_PLAN_VERSION,
+            MISSION_PLAN_MEMORY_VERSION,
+            MISSION_PLAN_CAPACITY_VERSION,
+        }:
             result["executor_constraints"] = [
                 constraint.to_json() for constraint in self.executor_constraints
             ]

@@ -98,6 +98,7 @@ async fn lagged_replay_during_dispatch_preserves_one_local_execution() {
     let node = NodeService::new(engine.clone());
     let mut events = engine.subscribe();
     let invocation = CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "parallel-mission".into(),
         task_id: "task-a".into(),
         group_id: "parallel-group".into(),

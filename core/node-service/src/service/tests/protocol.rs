@@ -173,6 +173,7 @@ async fn execution_identity_canonicalizes_resource_order() {
     )
     .expect("engine initializes");
     let invocation = integration::grpc::v0_4::CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "mission-a".to_string(),
         task_id: "task-a".to_string(),
         group_id: "group-a".to_string(),
@@ -218,6 +219,7 @@ async fn transport_timeout_requires_reconciliation_without_replay() {
     )
     .expect("engine initializes");
     let invocation = integration::grpc::v0_4::CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "mission-a".to_string(),
         task_id: "task-timeout".to_string(),
         group_id: "group-a".to_string(),

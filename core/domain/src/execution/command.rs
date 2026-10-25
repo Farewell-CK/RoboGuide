@@ -15,6 +15,9 @@ pub struct ExecutionCommand {
     /// Original semantic Memory prerequisites; transport preparation remains outside model intent.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     memory_requirements: Vec<crate::MemoryRequirement>,
+    /// Exact Control capacity grants outside semantic parameters; absent on historical contracts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    resource_grants: Vec<crate::ResourceAllocationGrant>,
     /// Original dispatch registration evidence; absent history never gains a later provider snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     registration_evidence: Option<ExecutionRegistrationEvidence>,
@@ -55,6 +58,7 @@ impl ExecutionCommand {
         Self {
             registration_evidence: None,
             memory_requirements: Vec::new(),
+            resource_grants: Vec::new(),
             task_ref: TaskRef::new(mission_id, task_id),
             group_id,
             role_id,
@@ -76,6 +80,41 @@ impl ExecutionCommand {
             .map_err(|reason| crate::DomainError::InvalidMissionPlan { reason })?;
         self.memory_requirements = requirements;
         Ok(self)
+    }
+
+    /// Attaches only complete original Control grants for this exact physical execution owner.
+    pub fn with_resource_grants(
+        mut self,
+        grants: Vec<crate::ResourceAllocationGrant>,
+    ) -> Result<Self, crate::DomainError> {
+        let mut resources = std::collections::BTreeSet::new();
+        if grants.len() > 64 {
+            return Err(crate::DomainError::InvalidMissionPlan {
+                reason: "execution capacity grants exceed their bound".into(),
+            });
+        }
+        for grant in &grants {
+            grant
+                .validate()
+                .map_err(|reason| crate::DomainError::InvalidMissionPlan { reason })?;
+            if grant.task_ref != self.task_ref
+                || grant.role_id != self.role_id
+                || grant.group_id != self.group_id
+                || grant.node_id != self.node_id
+                || !resources.insert(&grant.resource_id)
+            {
+                return Err(crate::DomainError::InvalidMissionPlan {
+                    reason: "execution capacity grant changed original Task/Role/Group/Node".into(),
+                });
+            }
+        }
+        self.resource_grants = grants;
+        Ok(self)
+    }
+
+    /// Returns exact original shared commitments, independently of newer Node observations.
+    pub fn resource_grants(&self) -> &[crate::ResourceAllocationGrant] {
+        &self.resource_grants
     }
 
     /// Returns exact original semantic prerequisites retained across retry and restore.

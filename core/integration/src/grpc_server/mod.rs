@@ -794,7 +794,8 @@ impl GrpcNodeRouter {
                 "Node registration does not advertise roboguide.execution-session/v0.1",
             ));
         }
-        if route.node_contract_version == SAFETY_NODE_CONTRACT_VERSION && execution_generation == 0
+        if crate::grpc::v0_4::supports_safety(&route.node_contract_version)
+            && execution_generation == 0
         {
             return Err(Status::failed_precondition(
                 "safety-capable Node requires non-zero execution generation",
@@ -1191,6 +1192,7 @@ async fn run_grpc_session(
         ));
     }
     let node_contract = [
+        crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION,
         SAFETY_NODE_CONTRACT_VERSION,
         crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION,
         MEMORY_USE_NODE_CONTRACT_VERSION,
@@ -1468,8 +1470,46 @@ fn invocation_for_contract(
     mut invocation: crate::grpc::v0_4::CanonicalInvocation,
     node_contract_version: &str,
 ) -> Result<crate::grpc::v0_4::CanonicalInvocation, Status> {
+    if node_contract_version != crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+        && !invocation.resource_grants_json.is_empty()
+    {
+        return Err(Status::failed_precondition(
+            "quantitative invocation cannot pass through a historical Node contract",
+        ));
+    }
+    if node_contract_version == crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION {
+        if invocation.resource_grants_json.len() > 131072 {
+            return Err(Status::invalid_argument(
+                "resource grants exceed their bound",
+            ));
+        }
+        let grants: Vec<domain::ResourceAllocationGrant> =
+            serde_json::from_str(&invocation.resource_grants_json).map_err(|_| {
+                Status::invalid_argument(
+                    "Node v0.13 requires an explicit exact resource grant array",
+                )
+            })?;
+        if grants.len() > 64 {
+            return Err(Status::invalid_argument(
+                "resource grant count exceeds its bound",
+            ));
+        }
+        for grant in grants {
+            grant.validate().map_err(Status::invalid_argument)?;
+            if grant.task_ref.mission_id().as_str() != invocation.mission_id
+                || grant.task_ref.task_id().as_str() != invocation.task_id
+                || grant.role_id.as_str() != invocation.role_id
+                || grant.group_id.as_str() != invocation.group_id
+            {
+                return Err(Status::invalid_argument(
+                    "resource grant differs from original invocation owner",
+                ));
+            }
+        }
+    }
     match node_contract_version {
-        SAFETY_NODE_CONTRACT_VERSION
+        crate::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+        | SAFETY_NODE_CONTRACT_VERSION
         | MEMORY_USE_NODE_CONTRACT_VERSION
         | crate::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION
         | PREPARATION_NODE_CONTRACT_VERSION

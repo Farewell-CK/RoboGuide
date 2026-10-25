@@ -281,11 +281,18 @@ impl ControlPlane {
         committed: &CommittedRecoveryAssignment,
     ) -> Result<(), ControlError> {
         for resource_id in committed.committed_resource_ids() {
-            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
-                ControlError::InvalidProposal(format!(
-                    "pending recovery resource {resource_id} has no reservation"
-                ))
-            })?;
+            let reservation = self
+                .binding_reservation(
+                    resource_id,
+                    committed.group_id(),
+                    committed.task_ref(),
+                    committed.role_id(),
+                )
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(format!(
+                        "pending recovery resource {resource_id} has no reservation"
+                    ))
+                })?;
             if reservation.task_ref != *committed.task_ref()
                 || reservation.role_id != *committed.role_id()
                 || reservation.group_id.as_ref() != Some(committed.group_id())
@@ -548,11 +555,18 @@ impl ControlPlane {
                 )
             })?;
         for resource_id in assignment.resource_ids() {
-            let reservation = self.reservations.get(resource_id).ok_or_else(|| {
-                ControlError::InvalidProposal(format!(
-                    "recovery binding {resource_id} has no reservation"
-                ))
-            })?;
+            let reservation = self
+                .binding_reservation(
+                    resource_id,
+                    need.group_id(),
+                    need.task_ref(),
+                    need.role_id(),
+                )
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal(format!(
+                        "recovery binding {resource_id} has no reservation"
+                    ))
+                })?;
             if reservation.task_ref != *need.task_ref()
                 || reservation.role_id != *need.role_id()
                 || reservation.group_id.as_ref() != Some(need.group_id())
@@ -1044,8 +1058,17 @@ impl ControlPlane {
             ));
         }
         validate_recovery_resources(replacement, &role, proposal.replacement_resource_ids())?;
-        for resource_id in proposal.replacement_resource_ids() {
-            if let Some(reservation) = self.reservations.get(resource_id) {
+        for (index, resource_id) in proposal.replacement_resource_ids().iter().enumerate() {
+            if role.resource_requirements()[index].allocation_mode()
+                == domain::ResourceAllocationMode::Divisible
+            {
+                continue;
+            }
+            if let Some(reservation) = self
+                .reservations
+                .get(resource_id)
+                .or_else(|| self.capacity_conflict(resource_id))
+            {
                 return Err(ControlError::ResourceConflict {
                     resource_id: resource_id.clone(),
                     owner_task_ref: reservation.task_ref.clone(),
@@ -1063,9 +1086,27 @@ impl ControlPlane {
             }
         }
 
+        let recovery_assignment = domain::RoleAssignment::new(
+            proposal.role_id().clone(),
+            proposal.replacement_node_id().clone(),
+            proposal.replacement_resource_ids().to_vec(),
+        );
+        let quantity = self.capacity_commit_candidate(
+            state,
+            proposal.group_id(),
+            proposal.task_ref(),
+            std::slice::from_ref(&recovery_assignment),
+            timestamp,
+        )?;
         let quota_demands = recovery_quota_demands(&role, proposal.replacement_resource_ids())?;
         self.validate_resource_quotas(requirement.mission_id(), &quota_demands)?;
-        self.commit_resource_quotas(requirement.mission_id(), quota_demands)?;
+        if let Some((ledger, quota)) = quantity {
+            self.capacity_ledger = ledger;
+            self.quota_ledger = quota;
+            self.calendar_version = self.calendar_version.saturating_add(1);
+        } else {
+            self.commit_resource_quotas(requirement.mission_id(), quota_demands)?;
+        }
 
         let mut committed = CommittedRecoveryAssignment::new_with_operation(
             proposal.group_id().clone(),
@@ -1079,6 +1120,26 @@ impl ControlPlane {
         committed.stopped_owner_allowed = proposal.stopped_owner_allowed;
         committed.actor_takeover = proposal.actor_takeover.clone();
         for resource_id in proposal.replacement_resource_ids() {
+            if self
+                .capacity_ledger
+                .binding(
+                    resource_id,
+                    proposal.group_id(),
+                    proposal.task_ref(),
+                    proposal.role_id(),
+                )
+                .is_some()
+            {
+                self.binding_reservation_mut(
+                    resource_id,
+                    proposal.group_id(),
+                    proposal.task_ref(),
+                    proposal.role_id(),
+                )
+                .expect("admitted capacity")
+                .group_id = Some(proposal.group_id().clone());
+                continue;
+            }
             self.reservations.insert(
                 resource_id.clone(),
                 Reservation {
@@ -1137,6 +1198,11 @@ impl ControlPlane {
             self.reservations.remove(resource_id);
             self.release_resource_quota(resource_id);
         }
+        self.release_capacity_task(
+            committed.group_id(),
+            committed.task_ref(),
+            Some(committed.role_id()),
+        );
         self.pending_recovery_commitments
             .remove(&recovery_commitment_key(
                 committed.group_id(),
@@ -1173,6 +1239,7 @@ fn recovery_quota_demands(
         .iter()
         .cloned()
         .zip(role.resource_requirements().iter())
+        .filter(|(_, demand)| demand.allocation_mode() == domain::ResourceAllocationMode::Exclusive)
         .map(|(resource, demand)| (resource, demand.kind(), demand.units()))
         .collect())
 }

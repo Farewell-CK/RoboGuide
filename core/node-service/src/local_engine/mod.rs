@@ -66,6 +66,8 @@ pub const CONFIG_SCHEMA_V0_10: &str = "roboguide.node-config/v0.10";
 /// Explicit independent revoke-observation configuration.
 /// Unified Memory and generation-bound safety configuration.
 pub const CONFIG_SCHEMA_V0_13: &str = "roboguide.node-config/v0.13";
+/// Configuration explicitly negotiating typed quantitative resource grants.
+pub const CONFIG_SCHEMA_V0_14: &str = "roboguide.node-config/v0.14";
 /// Explicit independent revoke-observation configuration without combined generation semantics.
 pub const CONFIG_SCHEMA_V0_12: &str = "roboguide.node-config/v0.12";
 /// Original continuous content-use configuration.
@@ -546,6 +548,10 @@ pub struct CompiledResource {
     kind: String,
     /// Non-zero capacity.
     capacity: u32,
+    /// Explicit shared allocation interpretation.
+    allocation_mode: domain::ResourceAllocationMode,
+    /// Exact versioned Compute unit interpretation.
+    resource_class: Option<String>,
     /// Owning local system.
     owner: String,
     /// Non-secret metadata.

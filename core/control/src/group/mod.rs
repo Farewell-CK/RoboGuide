@@ -132,6 +132,10 @@ pub struct ExecutionGroup {
     pub(crate) role_requirements: BTreeMap<(TaskRef, RoleId), RoleRequirement>,
     /// Context-scoped bindings retained independently from TaskExecution bindings.
     pub(crate) context_bindings: BTreeMap<String, ContextBinding>,
+    /// Complete original nonempty ContextRole capacity declarations from the accepted plan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) context_resource_envelopes:
+        Vec<(domain::CoordinationContextId, domain::ContextRole)>,
 }
 
 /// Encodes TaskRef-keyed execution units as JSON arrays for cross-process checkpoints.
@@ -253,6 +257,7 @@ impl ExecutionGroup {
             task_executions: BTreeMap::new(),
             role_requirements: BTreeMap::new(),
             context_bindings: BTreeMap::new(),
+            context_resource_envelopes: Vec::new(),
         }
         .with_initial_membership()
     }
@@ -276,6 +281,7 @@ impl ExecutionGroup {
             task_executions: BTreeMap::new(),
             role_requirements: BTreeMap::new(),
             context_bindings: BTreeMap::new(),
+            context_resource_envelopes: Vec::new(),
         }
         .with_initial_membership()
     }

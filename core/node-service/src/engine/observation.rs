@@ -256,6 +256,7 @@ impl LocalIntegrationEngine {
 
     /// Recovers status polling for known active executions without redispatching them.
     pub fn recover(&self) -> Result<(), EngineError> {
+        self.validate_capacity_admission(None)?;
         for record in self.inner.journal.replay_records()? {
             if !matches!(
                 record.status(),

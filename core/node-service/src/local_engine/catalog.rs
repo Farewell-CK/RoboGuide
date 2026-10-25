@@ -15,6 +15,7 @@ impl CompiledLocalCatalog {
                     | CONFIG_SCHEMA_V0_11
                     | CONFIG_SCHEMA_V0_12
                     | CONFIG_SCHEMA_V0_13
+                    | CONFIG_SCHEMA_V0_14
             ) || config
                 .memory_providers
                 .iter()
@@ -25,7 +26,10 @@ impl CompiledLocalCatalog {
         require(
             matches!(
                 config.schema.as_str(),
-                CONFIG_SCHEMA_V0_11 | CONFIG_SCHEMA_V0_12 | CONFIG_SCHEMA_V0_13
+                CONFIG_SCHEMA_V0_11
+                    | CONFIG_SCHEMA_V0_12
+                    | CONFIG_SCHEMA_V0_13
+                    | CONFIG_SCHEMA_V0_14
             ) || config
                 .memory_providers
                 .iter()
@@ -46,6 +50,7 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_11
                 | CONFIG_SCHEMA_V0_12
                 | CONFIG_SCHEMA_V0_13
+                | CONFIG_SCHEMA_V0_14
         );
         let requires_readiness = matches!(
             config.schema.as_str(),
@@ -59,6 +64,7 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_11
                 | CONFIG_SCHEMA_V0_12
                 | CONFIG_SCHEMA_V0_13
+                | CONFIG_SCHEMA_V0_14
         );
         let supports_state_memory = matches!(
             config.schema.as_str(),
@@ -71,6 +77,7 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_11
                 | CONFIG_SCHEMA_V0_12
                 | CONFIG_SCHEMA_V0_13
+                | CONFIG_SCHEMA_V0_14
         );
         let supports_peer_observers = matches!(
             config.schema.as_str(),
@@ -82,6 +89,7 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_11
                 | CONFIG_SCHEMA_V0_12
                 | CONFIG_SCHEMA_V0_13
+                | CONFIG_SCHEMA_V0_14
         );
         let separates_capabilities_and_operations = matches!(
             config.schema.as_str(),
@@ -92,6 +100,7 @@ impl CompiledLocalCatalog {
                 | CONFIG_SCHEMA_V0_11
                 | CONFIG_SCHEMA_V0_12
                 | CONFIG_SCHEMA_V0_13
+                | CONFIG_SCHEMA_V0_14
         );
         require(
             matches!(
@@ -108,6 +117,7 @@ impl CompiledLocalCatalog {
                     | CONFIG_SCHEMA_V0_11
                     | CONFIG_SCHEMA_V0_12
                     | CONFIG_SCHEMA_V0_13
+                    | CONFIG_SCHEMA_V0_14
             ),
             "schema",
             format!(
@@ -127,6 +137,7 @@ impl CompiledLocalCatalog {
                         | CONFIG_SCHEMA_V0_11
                         | CONFIG_SCHEMA_V0_12
                         | CONFIG_SCHEMA_V0_13
+                        | CONFIG_SCHEMA_V0_14
                 ),
             "fallback_server_endpoints",
             "requires node-config/v0.7",
@@ -164,12 +175,14 @@ impl CompiledLocalCatalog {
             "must contain at least one local system",
         )?;
         require(
-            config.schema == CONFIG_SCHEMA_V0_13
-                || local_systems.values().all(|system| {
-                    !system
-                        .metadata()
-                        .contains_key(domain::EXECUTION_SAFETY_METADATA_KEY)
-                }),
+            matches!(
+                config.schema.as_str(),
+                CONFIG_SCHEMA_V0_13 | CONFIG_SCHEMA_V0_14
+            ) || local_systems.values().all(|system| {
+                !system
+                    .metadata()
+                    .contains_key(domain::EXECUTION_SAFETY_METADATA_KEY)
+            }),
             "local_systems.execution-safety",
             "generation-bound safety declarations require explicit node-config/v0.13",
         )?;
@@ -208,6 +221,7 @@ impl CompiledLocalCatalog {
                     | CONFIG_SCHEMA_V0_11
                     | CONFIG_SCHEMA_V0_12
                     | CONFIG_SCHEMA_V0_13
+                    | CONFIG_SCHEMA_V0_14
             ) || config
                 .memory_providers
                 .iter()
@@ -230,7 +244,16 @@ impl CompiledLocalCatalog {
                     | CONFIG_SCHEMA_V0_11
                     | CONFIG_SCHEMA_V0_12
                     | CONFIG_SCHEMA_V0_13
+                    | CONFIG_SCHEMA_V0_14
             ),
+        )?;
+        require(
+            config.schema == CONFIG_SCHEMA_V0_14
+                || config.resources.iter().all(|resource| {
+                    resource.allocation_mode.is_none() && resource.resource_class.is_none()
+                }),
+            "resources.allocation_mode",
+            "explicit quantitative declarations require node-config/v0.14",
         )?;
         let resources = compile_resources(config.resources, &local_systems)?;
         let sensors = compile_sensors(config.sensors, &local_systems)?;
@@ -362,6 +385,7 @@ impl CompiledLocalCatalog {
                             | CONFIG_SCHEMA_V0_11
                             | CONFIG_SCHEMA_V0_12
                             | CONFIG_SCHEMA_V0_13
+                            | CONFIG_SCHEMA_V0_14
                     ) {
                         provenance.is_some()
                     } else {
@@ -481,7 +505,9 @@ impl CompiledLocalCatalog {
 
     /// Returns the semantic Node Contract selected by this configuration generation.
     pub fn node_contract_version(&self) -> &'static str {
-        if self.schema == CONFIG_SCHEMA_V0_13 {
+        if self.schema == CONFIG_SCHEMA_V0_14 {
+            integration::grpc::v0_4::CAPACITY_NODE_CONTRACT_VERSION
+        } else if self.schema == CONFIG_SCHEMA_V0_13 {
             integration::grpc::v0_4::SAFETY_NODE_CONTRACT_VERSION
         } else if self.schema == CONFIG_SCHEMA_V0_12 {
             integration::grpc::v0_4::MEMORY_USE_QUERY_NODE_CONTRACT_VERSION

@@ -13,6 +13,7 @@ use ports::{EventSink, SharedNodeStateReader};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
+pub(crate) mod capacity;
 mod policy;
 
 pub use policy::BoundedJointScheduler;
@@ -82,6 +83,12 @@ pub struct RoleSchedulingSelection {
     resource_ids: Vec<ResourceId>,
     /// Minimum capacity required from each selected resource.
     resource_units: Vec<u32>,
+    /// Exact typed resource semantics, present only for quantitative selections.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    resource_requirements: Vec<domain::ResourceRequirement>,
+    /// Original selected capacities, parallel to typed requirements and never current facts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    resource_capacities: Vec<u32>,
 }
 
 impl RoleSchedulingSelection {
@@ -97,7 +104,47 @@ impl RoleSchedulingSelection {
             node_id,
             resource_ids,
             resource_units,
+            resource_requirements: Vec::new(),
+            resource_capacities: Vec::new(),
         }
+    }
+
+    /// Freezes explicit shared semantics and original selected capacities without changing legacy bytes.
+    fn with_resources(
+        mut self,
+        role: &RoleRequirement,
+        registration: &domain::NodeRegistration,
+    ) -> Self {
+        if role
+            .resource_requirements()
+            .iter()
+            .any(|demand| demand.allocation_mode() == domain::ResourceAllocationMode::Divisible)
+        {
+            self.resource_requirements = role.resource_requirements().to_vec();
+            self.resource_capacities = self
+                .resource_ids
+                .iter()
+                .map(|id| {
+                    registration
+                        .resources()
+                        .iter()
+                        .find(|resource| resource.id() == id)
+                        .expect("selected resource exists")
+                        .capacity()
+                })
+                .collect();
+        }
+        self
+    }
+
+    /// Returns original typed demands; historical exclusive selections carry no new authority.
+    pub fn resource_requirements(&self) -> &[domain::ResourceRequirement] {
+        &self.resource_requirements
+    }
+
+    /// Returns original source capacities for offline history validation, never fresh capacity.
+    pub fn resource_capacities(&self) -> &[u32] {
+        &self.resource_capacities
     }
 
     /// Returns the selected role.
@@ -347,6 +394,10 @@ pub struct SchedulingOccupancy {
     starts_at: TimestampMs,
     /// Exclusive planning end; `None` means physical occupancy has no proven end.
     ends_at: Option<TimestampMs>,
+    /// Positive units for shared occupancy; absence retains whole-resource exclusion.
+    pub(crate) units: Option<u32>,
+    /// Typed original Context borrower axis; absence is the actual physical resource axis.
+    pub(crate) owner_axis: Option<String>,
 }
 
 impl SchedulingOccupancy {
@@ -360,6 +411,8 @@ impl SchedulingOccupancy {
             resource_id,
             starts_at,
             ends_at,
+            units: None,
+            owner_axis: None,
         }
     }
 
@@ -386,8 +439,10 @@ pub struct SchedulingSnapshot {
     version: u64,
     /// Existing active and future resource intervals.
     occupancies: Vec<SchedulingOccupancy>,
+    /// Explicit Context parent limits and their independently counted borrower axes.
+    pub(crate) context_capacities: BTreeMap<RoleId, capacity::ContextCapacity>,
     /// Existing ContextRole bindings that this Task must reuse exactly.
-    role_constraints: BTreeMap<RoleId, SchedulingRoleConstraint>,
+    pub(crate) role_constraints: BTreeMap<RoleId, SchedulingRoleConstraint>,
     /// Fresh source-aware cost evidence, keyed by candidate Node.
     cost_evidence: BTreeMap<NodeId, SchedulingCostEvidence>,
     /// Exact deployment-authorized observations, including unavailable evidence.
@@ -464,6 +519,7 @@ impl SchedulingSnapshot {
             version,
             occupancies,
             role_constraints: BTreeMap::new(),
+            context_capacities: BTreeMap::new(),
             cost_evidence: BTreeMap::new(),
             policy_cost_evidence: BTreeMap::new(),
         }
@@ -475,6 +531,7 @@ impl SchedulingSnapshot {
             version: 0,
             occupancies: Vec::new(),
             role_constraints: BTreeMap::new(),
+            context_capacities: BTreeMap::new(),
             cost_evidence: BTreeMap::new(),
             policy_cost_evidence: BTreeMap::new(),
         }

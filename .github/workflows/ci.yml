@@ -53,6 +53,12 @@ jobs:
       - name: Build the actual Controller composition
         run: cargo build --locked -p integration-server -p controller-replica -p roboguide-node
 
+      - name: Verify original quantitative Compute, restart and active-grant cold recovery
+        run: >
+          uv run --frozen python tools/quality/check_state_verifier_processes.py
+          --output "${RUNNER_TEMP}/roboguide-quantitative-resources"
+          --skip-build --quantitative-resources
+
       - name: Build the actual Controller connection lifetime probe
         run: cargo build --locked -p state --example controller_storage_probe
 

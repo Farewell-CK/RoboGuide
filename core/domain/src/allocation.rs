@@ -48,6 +48,17 @@ pub enum AllocationPhase {
     RecoveryPending,
 }
 
+/// One exact active borrower of an original quantitative parent allocation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllocationBorrower {
+    /// Exact original consumer Task.
+    pub task_ref: TaskRef,
+    /// Exact Task-local Role.
+    pub role_id: RoleId,
+    /// Frozen positive borrower units.
+    pub units: u32,
+}
+
 /// One non-authoritative view record projected from Control reservation authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceAllocation {
@@ -63,6 +74,10 @@ pub struct ResourceAllocation {
     phase: AllocationPhase,
     /// Task- or Context-scoped commitment owner.
     owner: AllocationOwner,
+    /// Original quantitative parent, absent for historical exclusive reservations.
+    grant: Option<crate::ResourceAllocationGrant>,
+    /// Current exact borrowers; an empty retained Context still owns its parent capacity.
+    borrowers: Vec<AllocationBorrower>,
 }
 
 impl ResourceAllocation {
@@ -82,7 +97,30 @@ impl ResourceAllocation {
             group_id,
             phase,
             owner,
+            grant: None,
+            borrowers: Vec::new(),
         }
+    }
+
+    /// Attaches a complete original parent and exact current borrowers to an observable projection.
+    pub fn with_quantitative(
+        mut self,
+        grant: crate::ResourceAllocationGrant,
+        borrowers: Vec<AllocationBorrower>,
+    ) -> Self {
+        self.grant = Some(grant);
+        self.borrowers = borrowers;
+        self
+    }
+
+    /// Returns the original quantitative allocation identity and units, never a new permission.
+    pub const fn quantitative_grant(&self) -> Option<&crate::ResourceAllocationGrant> {
+        self.grant.as_ref()
+    }
+
+    /// Returns current exact borrowers without treating the parent capacity as free when empty.
+    pub fn borrowers(&self) -> &[AllocationBorrower] {
+        &self.borrowers
     }
 
     /// Returns the projected resource identity.

@@ -85,6 +85,9 @@ pub(super) struct ContextRoleDocument {
     pub(super) id: String,
     /// Mission actor identity.
     pub(super) actor: String,
+    /// Explicit original shared Context capacity, available only in v0.10.
+    #[serde(default)]
+    pub(super) resource_envelope: Option<Vec<ResourceRequirementDocument>>,
 }
 
 /// Wire execution-time coordination relation.
@@ -341,6 +344,12 @@ pub(super) struct ResourceRequirementDocument {
     pub(super) kind: ResourceDocument,
     /// Minimum declared capacity.
     pub(super) units: u32,
+    /// Exact shared interpretation, rejected by historical contracts even when exclusive.
+    #[serde(default)]
+    pub(super) allocation_mode: Option<domain::ResourceAllocationMode>,
+    /// Explicit semantic units, mandatory for divisible Compute.
+    #[serde(default)]
+    pub(super) resource_class: Option<String>,
 }
 
 /// Wire exact capability contract reference.

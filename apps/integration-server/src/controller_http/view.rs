@@ -42,11 +42,16 @@ pub(crate) fn inventory_json(
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
                 "resources": registration.resources().iter().map(|resource| {
-                    serde_json::json!({
+                    let mut value = serde_json::json!({
                         "resource_id": resource.id().as_str(),
                         "kind": format!("{:?}", resource.kind()).to_ascii_lowercase(),
                         "capacity": resource.capacity(),
-                    })
+                    });
+                    if resource.allocation_mode() == domain::ResourceAllocationMode::Divisible {
+                        value["allocation_mode"] = serde_json::json!(resource.allocation_mode());
+                        value["resource_class"] = serde_json::json!(resource.resource_class());
+                    }
+                    value
                 }).collect::<Vec<_>>(),
             })
         })

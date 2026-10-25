@@ -154,6 +154,7 @@ async fn artifact_preparation_marker_blocks_mutable_source_reread_after_restart(
     );
 
     let invocation = integration::grpc::v0_4::CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "mission-a".to_string(),
         task_id: "build-map".to_string(),
         group_id: "group-a".to_string(),
@@ -322,6 +323,7 @@ async fn artifact_input_retry_reproves_local_bytes_before_replica_evidence() {
         ),
     ]);
     let invocation = CanonicalInvocation {
+        resource_grants_json: String::new(),
         mission_id: "mission-consume".to_string(),
         task_id: "import-map".to_string(),
         group_id: "group-consume".to_string(),

@@ -7,6 +7,7 @@
 mod allocation;
 mod belief;
 mod calendar;
+mod capacity_calendar;
 mod coordination;
 mod decision_policy;
 mod federation;
@@ -23,6 +24,7 @@ mod proposal;
 mod quota;
 mod reconciliation;
 mod registry_provenance;
+mod resource_allocations;
 mod scheduler;
 mod scheduling_cost;
 mod tenant;
@@ -144,6 +146,9 @@ pub struct ControlCheckpoint {
     registry_provenance: Option<RegistryProvenance>,
     /// Unique resource commitments keyed by resource identity.
     reservations: BTreeMap<ResourceId, Reservation>,
+    /// Explicit original quantitative allocations; v56 writers always retain the complete ledger.
+    #[serde(default)]
+    capacity_ledger: resource_allocations::CapacityLedger,
     /// Future Ready-Task reservations owned by the Control calendar.
     #[serde(default)]
     scheduled_tasks: Vec<ScheduledTaskReservation>,
@@ -515,6 +520,8 @@ pub struct ControlPlane {
     pub(crate) node_sessions: BTreeMap<NodeId, node_session::NodeSessionAnchor>,
     /// Unique resource commitment authority.
     pub(crate) reservations: BTreeMap<ResourceId, Reservation>,
+    /// Current quantitative claims, never inferred from legacy exclusive reservations.
+    pub(crate) capacity_ledger: resource_allocations::CapacityLedger,
     /// Future Ready-Task interval reservations keyed by mission-scoped Task.
     pub(crate) scheduled_tasks: BTreeMap<TaskRef, ScheduledTaskReservation>,
     /// Monotonic Control calendar version.
@@ -667,6 +674,7 @@ impl ControlPlane {
         for (resource_id, kind, units) in &demands {
             candidate
                 .track_resource(QuotaClaim {
+                    allocation_id: None,
                     claim_id: crate::quota::resource_claim_id(resource_id.as_str()),
                     tenant_id: tenant_id.clone(),
                     kind: *kind,
@@ -712,6 +720,7 @@ impl ControlPlane {
         for (resource_id, kind, units) in demands {
             candidate
                 .track_resource(QuotaClaim {
+                    allocation_id: None,
                     claim_id: crate::quota::resource_claim_id(resource_id.as_str()),
                     tenant_id: tenant_id.clone(),
                     kind: *kind,
@@ -775,6 +784,9 @@ impl ControlPlane {
                     .iter()
                     .cloned()
                     .zip(requirement.resource_requirements().iter())
+                    .filter(|(_, demand)| {
+                        demand.allocation_mode() == domain::ResourceAllocationMode::Exclusive
+                    })
                     .map(|(resource, demand)| (resource, demand.kind(), demand.units())),
             );
         }
@@ -918,6 +930,7 @@ impl ControlPlane {
             leases: BTreeMap::new(),
             node_sessions: BTreeMap::new(),
             reservations: BTreeMap::new(),
+            capacity_ledger: resource_allocations::CapacityLedger::new(),
             scheduled_tasks: BTreeMap::new(),
             calendar_version: 0,
             actor_bindings: BTreeMap::new(),
@@ -963,6 +976,7 @@ impl ControlPlane {
             mission_tenants: self.mission_tenants.clone(),
             registry_provenance: self.registry_provenance.clone(),
             reservations: self.reservations.clone(),
+            capacity_ledger: self.capacity_ledger.clone(),
             scheduled_tasks: self.scheduled_tasks.values().cloned().collect(),
             calendar_version: self.calendar_version,
             actor_bindings: self.actor_bindings.values().cloned().collect(),
@@ -1028,7 +1042,12 @@ impl ControlPlane {
             .map(|resource_id| resource_id.as_str().to_owned())
             .collect::<BTreeSet<_>>();
         let mut resource_claim_ids = BTreeSet::new();
-        for claim in checkpoint.quota_ledger.claims() {
+        for claim in checkpoint
+            .quota_ledger
+            .claims()
+            .iter()
+            .filter(|claim| claim.allocation_id.is_none())
+        {
             if let Some(resource_id) = &claim.resource_id
                 && (!reservation_ids.contains(resource_id.as_str())
                     || !resource_claim_ids.insert(resource_id.as_str().to_owned()))
@@ -1258,6 +1277,7 @@ impl ControlPlane {
             leases: BTreeMap::new(),
             node_sessions: BTreeMap::new(),
             reservations: checkpoint.reservations,
+            capacity_ledger: checkpoint.capacity_ledger,
             scheduled_tasks,
             calendar_version: checkpoint.calendar_version,
             actor_bindings,
@@ -1278,7 +1298,12 @@ impl ControlPlane {
             .quota_ledger
             .validate()
             .map_err(|error| ControlError::InvalidProposal(error.to_string()))?;
-        for claim in restored.quota_ledger.claims() {
+        for claim in restored
+            .quota_ledger
+            .claims()
+            .iter()
+            .filter(|claim| claim.allocation_id.is_none())
+        {
             if let Some(resource_id) = &claim.resource_id {
                 let reservation = restored.reservations.get(resource_id).ok_or_else(|| {
                     ControlError::InvalidProposal(
@@ -1299,6 +1324,8 @@ impl ControlPlane {
                 }
             }
         }
+        restored.capacity_ledger.validate()?;
+        restored.validate_capacity_checkpoint()?;
         restored.validate_resource_quota_checkpoint()?;
         if restored.reservations.keys().any(|resource_id| {
             !restored

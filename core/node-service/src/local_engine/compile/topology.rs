@@ -152,10 +152,27 @@ pub(super) fn compile_resources(
             format!("unknown local system `{}`", config.owner),
         )?;
         let id = config.id.clone();
+        let mode = config.allocation_mode.unwrap_or_default();
+        require(
+            match mode {
+                domain::ResourceAllocationMode::Exclusive => config.resource_class.is_none(),
+                domain::ResourceAllocationMode::Divisible => {
+                    config.kind == "compute"
+                        && config
+                            .resource_class
+                            .as_ref()
+                            .is_some_and(|value| !value.trim().is_empty() && value.len() <= 128)
+                }
+            },
+            "resources.resource_class",
+            "divisible Compute requires explicit typed units; exclusive resources carry no class",
+        )?;
         let resource = CompiledResource {
             id: config.id,
             kind: config.kind,
             capacity: config.capacity,
+            allocation_mode: mode,
+            resource_class: config.resource_class,
             owner: config.owner,
             metadata: config.metadata,
         };

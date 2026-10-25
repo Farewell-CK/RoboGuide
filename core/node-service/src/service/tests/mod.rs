@@ -858,6 +858,8 @@ fn gated_catalog_for_contract(
             operations,
             resources: vec![
                 ResourceConfig {
+                    allocation_mode: None,
+                    resource_class: None,
                     id: "base".to_string(),
                     kind: "space".to_string(),
                     capacity: 1,
@@ -865,6 +867,8 @@ fn gated_catalog_for_contract(
                     metadata: BTreeMap::new(),
                 },
                 ResourceConfig {
+                    allocation_mode: None,
+                    resource_class: None,
                     id: "aux".to_string(),
                     kind: "compute".to_string(),
                     capacity: 1,

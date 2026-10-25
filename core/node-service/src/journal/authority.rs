@@ -715,6 +715,17 @@ impl ExecutionJournal {
         load_execution(&connection, execution_id)
     }
 
+    /// Reads bounded current capacity holders; uncertain and cancellation-pending attempts remain included.
+    pub(crate) fn capacity_records(&self) -> Result<Vec<JournalExecution>, JournalError> {
+        let records = self.query_records("SELECT execution_id, invocation_content, invocation_digest, workflow_digest, resource_ids, local_handle, cancellation_requested, sequence, status, reason FROM execution_authority_v7 WHERE status NOT IN ('completed','failed','cancelled') ORDER BY execution_id LIMIT 16385")?;
+        if records.len() > 16384 {
+            return Err(JournalError::Corrupt(
+                "live resource capacity record bound exceeded".into(),
+            ));
+        }
+        Ok(records)
+    }
+
     /// Returns every known execution in stable execution-ID order for reconnect snapshots.
     pub fn replay_records(&self) -> Result<Vec<JournalExecution>, JournalError> {
         self.query_records(

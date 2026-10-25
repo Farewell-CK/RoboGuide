@@ -23,6 +23,7 @@ from mission.contract_values import (
     GROUP_VIEW_FIELDS,
     MAP_ID_PATTERN,
     MISSION_PLAN_ACTOR_VERSION,
+    MISSION_PLAN_CAPACITY_VERSION,
     MISSION_PLAN_COMPAT_VERSION,
     MISSION_PLAN_COUPLING_VERSION,
     MISSION_PLAN_MEMORY_VERSION,
@@ -87,6 +88,7 @@ __all__ = [
     "MISSION_PLAN_SCHEDULING_VERSION",
     "MISSION_PLAN_VERSION",
     "MISSION_PLAN_MEMORY_VERSION",
+    "MISSION_PLAN_CAPACITY_VERSION",
     "MissionActor",
     "MissionContext",
     "MissionPlan",
@@ -129,7 +131,8 @@ class MissionActor:
             item,
             {"id"},
             {"physical_entity"}
-            if version in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION}
+            if version
+            in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION, MISSION_PLAN_CAPACITY_VERSION}
             else set(),
             path,
         )
@@ -146,6 +149,7 @@ class MissionActor:
         if self.physical_entity is not None and version in {
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
+            MISSION_PLAN_CAPACITY_VERSION,
         }:
             result["physical_entity"] = self.physical_entity
         return result
@@ -157,6 +161,7 @@ def _actor_contract(version: str) -> bool:
         MISSION_PLAN_ACTOR_VERSION,
         MISSION_PLAN_VERSION,
         MISSION_PLAN_MEMORY_VERSION,
+        MISSION_PLAN_CAPACITY_VERSION,
     }
 
 
@@ -225,6 +230,7 @@ class MissionPlan:
             MISSION_PLAN_ACTOR_VERSION,
             MISSION_PLAN_VERSION,
             MISSION_PLAN_MEMORY_VERSION,
+            MISSION_PLAN_CAPACITY_VERSION,
         }:
             raise MissionPlanError(f"unsupported schema_version: {version}")
         tasks = tuple(
@@ -273,7 +279,11 @@ class MissionPlan:
             context_roles = {role.role_id: role for role in task_context.roles}
             for role in task.roles:
                 if role.context_role is None:
-                    if self.schema_version in {MISSION_PLAN_VERSION, MISSION_PLAN_MEMORY_VERSION}:
+                    if self.schema_version in {
+                        MISSION_PLAN_VERSION,
+                        MISSION_PLAN_MEMORY_VERSION,
+                        MISSION_PLAN_CAPACITY_VERSION,
+                    }:
                         raise MissionPlanError(
                             f"task {task.task_id} role {role.role_id} lacks context role"
                         )
@@ -283,11 +293,41 @@ class MissionPlan:
                     raise MissionPlanError(
                         f"task {task.task_id} role {role.role_id} references unknown context role"
                     )
+                for demand in role.resources:
+                    if demand.allocation_mode != "divisible":
+                        continue
+                    if self.schema_version != MISSION_PLAN_CAPACITY_VERSION:
+                        raise MissionPlanError(
+                            "shared resource declarations require exact MissionPlan v0.10"
+                        )
+                    if role.resource_scope == "context":
+                        limits = [
+                            limit
+                            for limit in referenced_context_role.resource_envelope
+                            if limit.resource_class == demand.resource_class
+                        ]
+                        if len(limits) != 1 or demand.units > limits[0].units:
+                            raise MissionPlanError(
+                                "Context borrower exceeds or lacks its original "
+                                "typed resource envelope"
+                            )
                 if role.actor_id is not None and referenced_context_role.actor_id != role.actor_id:
                     raise MissionPlanError(
                         f"task {task.task_id} role {role.role_id} actor differs from context role"
                     )
         for context in self.contexts:
+            for context_role in context.roles:
+                if context_role.resource_envelope and (
+                    self.schema_version != MISSION_PLAN_CAPACITY_VERSION
+                    or len(context_role.resource_envelope) > 1
+                    or any(
+                        limit.kind != "compute" or limit.allocation_mode != "divisible"
+                        for limit in context_role.resource_envelope
+                    )
+                ):
+                    raise MissionPlanError(
+                        "Context capacity requires exact typed MissionPlan v0.10 declarations"
+                    )
             shared_view_role_ids = {role.role_id for role in context.roles}
             if context.shared_view is not None:
                 for binding in context.shared_view.bindings:

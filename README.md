@@ -1620,3 +1620,10 @@ Python 3.9 worker 已兼容。运行该解释器回归时设置 `ROBOGUIDE_HABIT
 Scheduling cost sources: [ADR-0205](docs/decisions/0205-current-state-scheduling-costs.md) binds explicit current-session State admission to normal/recovery ordering, original audit and a readonly Mission view. The local provider measures host load; unsupported queue, route, traffic and GPU metrics stay unavailable.
 
 Control rechecks the exact selected resource IDs, kinds and original demand at Bind, recovery Rebind and dispatch readiness; Node registration cannot erase retained capacity commitments.
+
+Quantitative Compute allocation is implemented in [ADR-0206](docs/decisions/0206-quantitative-resource-allocation.md):
+Control owns original Task/Context capacity and Node admission validates exact grants. Explicit
+Mission v0.10, Node config v0.14/Contract v0.13, wrapper v56/journal v14 and recovery v0.24 preserve
+legacy exclusive semantics. [Actual process/recovery acceptance](docs/development/acceptance/2026-10-25-quantitative-resources.md)
+uses one software Node and no devices. Complete time/space and the remaining software queue stay
+in [the completion plan](docs/development/roboguide-software-completion-plan-2026-10-15.md).

@@ -340,6 +340,9 @@ pub struct MissionPlan {
     /// Retains explicit v0.9 admission even when the initial prerequisite sets are empty.
     #[serde(default)]
     declared_memory_contract: bool,
+    /// Retains explicit quantitative admission even when declarations are empty.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    declared_capacity_contract: bool,
 }
 
 impl MissionPlan {
@@ -457,6 +460,42 @@ impl MissionPlan {
                     });
                 }
             }
+            for role in task.requirement().roles() {
+                for demand in role.resource_requirements().iter() {
+                    if demand.allocation_mode() != ResourceAllocationMode::Divisible {
+                        continue;
+                    }
+                    if demand.kind() != ResourceKind::Compute
+                        || demand.units() == 0
+                        || demand
+                            .resource_class()
+                            .is_none_or(|value| value.trim().is_empty() || value.len() > 128)
+                    {
+                        return Err(DomainError::InvalidMissionPlan {
+                            reason:
+                                "shared allocation requires explicit typed positive Compute units"
+                                    .into(),
+                        });
+                    }
+                    if task.continuity().resource_scope(role.role_id())
+                        == ResourceBindingScope::Context
+                    {
+                        let envelope = task
+                            .continuity()
+                            .context_role(role.role_id())
+                            .and_then(|id| context.role(id))
+                            .and_then(|role| {
+                                role.resource_envelope().iter().find(|item| {
+                                    item.kind() == demand.kind()
+                                        && item.resource_class() == demand.resource_class()
+                                })
+                            });
+                        if envelope.is_none_or(|limit| demand.units() > limit.units()) {
+                            return Err(DomainError::InvalidMissionPlan {reason: "Context borrower exceeds or lacks its original typed capacity envelope".into()});
+                        }
+                    }
+                }
+            }
             let coupling_mode = task
                 .continuity()
                 .coupling_mode_override()
@@ -506,6 +545,7 @@ impl MissionPlan {
             contexts,
             declared_binding_contract,
             declared_memory_contract: false,
+            declared_capacity_contract: false,
         })
     }
 
@@ -522,11 +562,38 @@ impl MissionPlan {
         self
     }
 
+    /// Retains explicit quantitative admission without changing the default provider contract.
+    pub fn with_v0_10_contract(mut self) -> Self {
+        self.declared_binding_contract = true;
+        self.declared_memory_contract = true;
+        self.declared_capacity_contract = true;
+        self
+    }
+
     /// Returns the minimum wire schema able to represent this domain shape.
     ///
     /// Retains an admitted v0.8 version even when optional binding semantics are empty.
     /// Legacy plans without them remain serializable as v0.7.
     pub fn schema_version(&self) -> &'static str {
+        if self.declared_capacity_contract
+            || self
+                .contexts
+                .iter()
+                .flat_map(CoordinationContext::roles)
+                .any(|role| !role.resource_envelope().is_empty())
+            || self
+                .task_graph
+                .tasks()
+                .iter()
+                .flat_map(|task| task.requirement().roles())
+                .any(|role| {
+                    role.resource_requirements()
+                        .iter()
+                        .any(|demand| demand.allocation_mode() == ResourceAllocationMode::Divisible)
+                })
+        {
+            return MISSION_PLAN_SCHEMA_V0_10;
+        }
         if self.declared_memory_contract
             || self.task_graph().tasks().iter().any(|task| {
                 task.requirement()

@@ -8,12 +8,12 @@ use domain::{
     ExecutionRelationSpec, ExecutionRelationType, FreshnessPolicyRef, GroupSharedViewSpec,
     GroupViewBinding, GroupViewField, MISSION_PLAN_SCHEMA_V0_2, MISSION_PLAN_SCHEMA_V0_3,
     MISSION_PLAN_SCHEMA_V0_4, MISSION_PLAN_SCHEMA_V0_5, MISSION_PLAN_SCHEMA_V0_6,
-    MISSION_PLAN_SCHEMA_V0_7, MISSION_PLAN_SCHEMA_V0_8, MISSION_PLAN_SCHEMA_V0_9, MapId,
-    MapRevisionId, MapRevisionSelector, MissionActor, MissionGoal, MissionId, MissionPlan,
-    OperationRef, PeerChannelSpec, PhysicalEntityId, PlannedExecutionRef, PlannedTask,
-    RelationStateRequirement, ResourceRequirement, RoleId, RoleRequirement, SharedSpatialReference,
-    TaskContinuity, TaskGraph, TaskId, TaskRequirement, TaskSatisfactionBasis, TaskTiming,
-    VerifierSatisfactionSpec,
+    MISSION_PLAN_SCHEMA_V0_7, MISSION_PLAN_SCHEMA_V0_8, MISSION_PLAN_SCHEMA_V0_9,
+    MISSION_PLAN_SCHEMA_V0_10, MapId, MapRevisionId, MapRevisionSelector, MissionActor,
+    MissionGoal, MissionId, MissionPlan, OperationRef, PeerChannelSpec, PhysicalEntityId,
+    PlannedExecutionRef, PlannedTask, RelationStateRequirement, ResourceRequirement, RoleId,
+    RoleRequirement, SharedSpatialReference, TaskContinuity, TaskGraph, TaskId, TaskRequirement,
+    TaskSatisfactionBasis, TaskTiming, VerifierSatisfactionSpec,
 };
 use std::collections::BTreeMap;
 
@@ -23,6 +23,34 @@ use super::enum_conversion::{
 use super::execution_value::execution_value;
 use super::nullable_millis::NullableMillisField;
 use super::wire::*;
+
+/// Decodes explicit typed quantities while preserving the historical whole-resource default.
+fn resource_requirement_from_document(
+    resource: ResourceRequirementDocument,
+) -> Result<ResourceRequirement, OrchestrationError> {
+    let result = match resource.allocation_mode.unwrap_or_default() {
+        domain::ResourceAllocationMode::Exclusive if resource.resource_class.is_none() => {
+            ResourceRequirement::new(resource_from_document(resource.kind), resource.units)
+        }
+        domain::ResourceAllocationMode::Divisible
+            if matches!(resource.kind, ResourceDocument::Compute) =>
+        {
+            let class = resource.resource_class.ok_or_else(|| {
+                OrchestrationError::Mission(
+                    "divisible Compute requires explicit resource_class".into(),
+                )
+            })?;
+            ResourceRequirement::new_divisible(resource.units)
+                .and_then(|value| value.with_resource_class(class))
+        }
+        _ => {
+            return Err(OrchestrationError::Mission(
+                "unsupported quantitative resource category or units".into(),
+            ));
+        }
+    };
+    result.map_err(|error| OrchestrationError::Mission(error.to_string()))
+}
 
 /// Decodes historical or current MissionPlan input, classifying rejection as an invalid contract.
 pub fn decode_mission_plan(json: &str) -> Result<MissionPlan, OrchestrationError> {
@@ -44,6 +72,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_7
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
+            | MISSION_PLAN_SCHEMA_V0_10
     ) {
         return Err(OrchestrationError::Mission(format!(
             "unsupported MissionPlan schema {}",
@@ -59,6 +88,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_7
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
+            | MISSION_PLAN_SCHEMA_V0_10
     );
     let mode_contract = matches!(
         document.schema_version.as_str(),
@@ -68,6 +98,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_7
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
+            | MISSION_PLAN_SCHEMA_V0_10
     );
     let scheduling_contract = matches!(
         document.schema_version.as_str(),
@@ -76,6 +107,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_7
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
+            | MISSION_PLAN_SCHEMA_V0_10
     );
     let satisfaction_contract = matches!(
         document.schema_version.as_str(),
@@ -83,12 +115,49 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
             | MISSION_PLAN_SCHEMA_V0_7
             | MISSION_PLAN_SCHEMA_V0_8
             | MISSION_PLAN_SCHEMA_V0_9
+            | MISSION_PLAN_SCHEMA_V0_10
     );
     let normalized_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_7 | MISSION_PLAN_SCHEMA_V0_8 | MISSION_PLAN_SCHEMA_V0_9
+        MISSION_PLAN_SCHEMA_V0_7
+            | MISSION_PLAN_SCHEMA_V0_8
+            | MISSION_PLAN_SCHEMA_V0_9
+            | MISSION_PLAN_SCHEMA_V0_10
     );
-    let memory_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_9;
+    let capacity_contract = document.schema_version == MISSION_PLAN_SCHEMA_V0_10;
+    let memory_contract = matches!(
+        document.schema_version.as_str(),
+        MISSION_PLAN_SCHEMA_V0_9 | MISSION_PLAN_SCHEMA_V0_10
+    );
+    let has_capacity = |resources: &[ResourceRequirementDocument]| {
+        resources
+            .iter()
+            .any(|resource| resource.allocation_mode.is_some() || resource.resource_class.is_some())
+    };
+    if !capacity_contract
+        && (document
+            .contexts
+            .iter()
+            .flat_map(|context| &context.roles)
+            .any(|role| role.resource_envelope.is_some())
+            || document
+                .tasks
+                .iter()
+                .flat_map(|task| &task.roles)
+                .any(|role| {
+                    role.resources
+                        .as_ref()
+                        .is_some_and(|resources| has_capacity(resources))
+                        || role
+                            .requirements
+                            .as_ref()
+                            .is_some_and(|requirements| has_capacity(&requirements.resources))
+                }))
+    {
+        return Err(OrchestrationError::Mission(
+            "quantitative allocation declarations require exact MissionPlan v0.10".into(),
+        ));
+    }
     if !memory_contract
         && document.tasks.iter().any(|task| {
             task.roles.iter().any(|role| {
@@ -104,7 +173,7 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
     }
     let binding_semantics_contract = matches!(
         document.schema_version.as_str(),
-        MISSION_PLAN_SCHEMA_V0_8 | MISSION_PLAN_SCHEMA_V0_9
+        MISSION_PLAN_SCHEMA_V0_8 | MISSION_PLAN_SCHEMA_V0_9 | MISSION_PLAN_SCHEMA_V0_10
     );
     let MissionDocument {
         id,
@@ -182,7 +251,9 @@ fn decode_contract(json: &str) -> Result<MissionPlan, OrchestrationError> {
     if normalized_contract {
         MissionPlan::new_with_actors(goal, actors, graph, contexts)
             .map(|plan| {
-                if memory_contract {
+                if capacity_contract {
+                    plan.with_v0_10_contract()
+                } else if memory_contract {
                     plan.with_v0_9_contract()
                 } else if binding_semantics_contract {
                     plan.with_v0_8_contract()
@@ -210,12 +281,20 @@ fn context_from_document(
         .roles
         .into_iter()
         .map(|role| {
-            Ok(ContextRole::new(
+            ContextRole::new(
                 ContextRoleId::new(role.id)
                     .map_err(|error| OrchestrationError::Mission(error.to_string()))?,
                 ActorId::new(role.actor)
                     .map_err(|error| OrchestrationError::Mission(error.to_string()))?,
-            ))
+            )
+            .with_resource_envelope(
+                role.resource_envelope
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(resource_requirement_from_document)
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+            .map_err(|error| OrchestrationError::Mission(error.to_string()))
         })
         .collect::<Result<Vec<_>, OrchestrationError>>()?;
     let constraints = match (binding_semantics_contract, context.executor_constraints) {
@@ -595,10 +674,7 @@ fn normalized_role_from_document(
     let resources = requirements
         .resources
         .into_iter()
-        .map(|resource| {
-            ResourceRequirement::new(resource_from_document(resource.kind), resource.units)
-                .map_err(|error| OrchestrationError::Mission(error.to_string()))
-        })
+        .map(resource_requirement_from_document)
         .collect::<Result<Vec<_>, _>>()?;
     let requirement =
         RoleRequirement::new_normalized(role_id.clone(), Some(actor_id), capabilities, resources)

@@ -24,6 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 
 mod admission;
+mod capacity;
 mod execution;
 mod memory_continuity;
 mod memory_operations;
@@ -141,6 +142,8 @@ impl LocalIntegrationEngine {
 struct EngineInner {
     /// Orders prepared Execute admission against irreversible context revocation.
     memory_context_gate: Mutex<()>,
+    /// Orders complete original capacity admission through the durable dispatch commit.
+    capacity_admission_gate: Mutex<()>,
     /// Global bound on provider observation/control I/O across all contexts.
     memory_use_provider_workers: Arc<tokio::sync::Semaphore>,
     /// Process-local ordering; the journal remains the sole lease/effect authority.
