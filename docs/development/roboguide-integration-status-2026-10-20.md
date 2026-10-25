@@ -1,5 +1,11 @@
 # RoboGuide 分支同步与剩余整改核对（2026-10-20）
 
+本页保留原分支核对与后续历史切片；当前 2026-10-26 的实现基线是唯一分支上的 `f961a69e`。
+[A1–F 当前队列](roboguide-software-completion-plan-2026-10-15.md)与
+[R01–R20 总矩阵](nonrelease-acceptance-matrix-2026-10-26.md)记录已经完成的 scoped-map/MI、
+资源、协调、Archive/GC/升级与运维模块，以及最终跨域 HA、CI/main 尚需通过的门禁。
+下文“仍需完成”保留原时点，不能用来否认其后已有的实际实现和验收。
+
 2026-10-23 同一分支 `codex/nonrelease-remediation-closure` 接续 `51af590` 完成
 [源 Artifact 离线回收与 MI 历史释放](acceptance/2026-10-23-source-artifact-reclamation.md)。
 原上传/Catalog/lineage 独立退休，实际 writer/引用闭包与原 tombstone 先于 unlink；

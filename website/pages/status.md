@@ -1,20 +1,24 @@
 # 实现状态与证据边界
 
-内容核对基线：`375eef7d`（2026-10-25）；[版本参考](reference.md)从当前源码提取版本。
-[量化资源](docs/development/acceptance/2026-10-25-quantitative-resources.md)与
-[应用代次升级](docs/development/acceptance/2026-10-25-application-generation-upgrade.md)
-已有实际软件进程验收。原全部非发布范围与设备/跨主机/长期证据边界保持，尚未 SoftwareComplete。
+内容基线：`f961a69e`，核对日期 2026-10-26。[构建参考](reference.md)提取当前源码版本。
+[唯一执行队列](docs/development/roboguide-software-completion-plan-2026-10-15.md)与
+[总验收矩阵](docs/development/nonrelease-acceptance-matrix-2026-10-26.md)保留完整非发布范围。
+最终双域 HA/完整恢复、当前完整 CI 和 main 集成继续，尚未签署 SoftwareComplete。
 
-| 方面 | 已有软件路径 | 仍需完成或独立验证 |
+| 方面 | 已实现并有实际局部软件验收 | 最终组合或独立证据 |
 | --- | --- | --- |
-| MI / Orchestration | 澄清、Review、计划接纳、DAG、satisfaction、版本化运行期修订与自动 MI work | 复杂拓扑、其他 Memory 类型与复合故障矩阵 |
-| Control / quota | Match/Commit/Bind、精确 quota/释放、来源成本、divisible Compute/Context envelope、Node 准入和恢复；显式空间边界/共享 time domain、原 booking budget、恢复原截止时间与 v0.27 冷恢复 | 跨域/HA 时钟组合与当前部署 GPU/交通等实际来源 |
-| Runtime / stop | attempt/generation、durable intent、relations、whole-Group stop、原进程 exit proof、独立 Review 的运行中抢占/同事务受益 admission、耦合恢复、持续 hazard 与 v59/v0.28 恢复 | 设备 handoff/regrasp/stop 观测与全局组合 |
-| State / verifier | 来源策略、Belief lineage、TTL、原 Task verifier 与 CAS proof | 当前部署的物理来源、冲突与持续效果证明 |
-| Memory / Spatial | 准备/use/revoke/handoff、文件空间算法、provider 局部 GC、完整 scoped typed-map/current-use/交接/自动 MI/原目标/冷恢复/旧 writer 拒绝组合；原 import Replica、Catalog/lineage、Snapshot/Archive 引用、恢复后原 provider Snapshot 退休、Archive abort/私有接收 GC、源上传退休和 standalone 已知引用闭包离线 GC | 完整全局 Archive/引用与跨主机内容 |
-| Replica / recovery | 证书轮换、原 child drain、V3 transfer、writer/inode fence、已支持静止 bundle、qualified Root HTTP read、Prepared 恢复、跨 owner 上传放弃/退休及原恢复事实对账、Root8/parent10、Log/Snapshot/learner、最终成员 GC、v55→v56 滚动/坏版本补丁和 v0.25 三 leader 冷恢复 | 完整全局内容/引用组合与跨主机故障矩阵 |
-| Federation | 持久 root coordinator、真实 pinned mTLS peer、正常 Control 资源准备、实际 writer epoch、原 kernel/clock 证明、全体 Commit 后 release、独立原目标及 v60/v0.29 恢复 | 证书/分区/HA/全局内容的完整组合与独立跨主机证据 |
-| 运维 | write-disabled、已提交视图、恢复探针、真实短窗口监控检查 | 全 listener/阻塞收敛、完整 runbook、长期 SLO 与总体退出条件 |
+| MI / Orchestration | 原 Request/provenance/Review、自动运行期 MI、独立原目标与完整 scoped typed-map 修订 | 最终全局组合；实际部署模型与物理目标来源 |
+| Control / 资源 | 当前来源成本、quota/divisible Compute/Context、POSIX proof、time/space/booking、正常与 recovery Commit、到期 stop/revoke | 当前 HA 时钟组合；实际 GPU/traffic/物理强制 |
+| Runtime / 协调 | 原 attempt/intent/stop、同事务受益 admission 的运行中抢占、耦合恢复和活动 hazard | 当前全局组合；设备 stop/handoff/regrasp |
+| State / verifier | 来源/冲突/TTL/Belief 消费策略、原 Task/attempt/CAS proof 与独立目标 | 当前物理来源与持续效果 |
+| Memory / Spatial | 每 Task import/use/revoke、Group handoff、Active Map、scoped typed-map/自动 MI、原 producer/GC 与完整冷恢复 | 当前域间/Archive 组合；实际跨主机字节与定位 |
+| Replica / recovery | 原 child drain、V3 transfer、换证、learner/joint、升级/拒绝回退、完整内容、在线 private Archive 与原 GC | 最终多域 v0.31 整包验收；部署 RTO/RPO |
+| Federation | 持久 root/真实 pinned peer/正常 Control、原 clock/intent/Unknown、全 Commit barrier 与独立目标；显式 peer v0.2 | 最终分区/换证/HA/内容组合；实际跨主机证据 |
+| 运维 | 全 listener/本地 adapter 容量与有限等待、真实原生告警、默认 128 健康采样、明确 SLO 分母和 runbook | 当前完整 CI/main；长期 SLO 与人工响应 |
+
+## 历史验收记录
+
+下述记录保留其原版本和当时剩余项。当前闭合情况以上述队列与矩阵为准，旧待办不能否认后续实现。
 
 原内容 Archive 及实际 Catalog 归档/重启/冷恢复见[本轮验收](docs/development/acceptance/2026-10-22-original-content-archive.md)。storage v3 的已知 consumer 清单、原预算与同 owner 内容一并校验；这些进程证据没有创建设备或外部模型事实。原全部非发布整改计划继续适用。
 

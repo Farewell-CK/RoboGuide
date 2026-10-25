@@ -4,6 +4,31 @@
 唯一 owned Controller child。每个域保留独立 Raft、Control、原子事务和原进程日志；Root
 Orchestration 仍只通过原持久 probe/Prepare/全局决定/Commit/release 与独立目标推进。
 
+下面是职责拓扑模板；域、成员、Host、路径与 Local EAIOS 都由部署声明，产品不内置两个
+域、三个副本或任何设备清单。同域 Controller 的内部职责仍按 V2 共址，跨域只交换原协议。
+
+```mermaid
+flowchart LR
+  P[独立 Plan / Review / 原目标] --> O
+  subgraph A[声明的控制域 A]
+    O[Root Orchestration<br/>原意图 / 全局决定 / 全 Commit barrier]
+    CA[正常 Control / Runtime]
+    RA[独立 Replica quorum<br/>成员进程日志 + qualified Roots]
+    CA --> RA
+    O --> CA
+  end
+  subgraph B[声明的其他控制域]
+    CB[正常 Control / Runtime]
+    RB[独立 Replica quorum<br/>成员进程日志 + qualified Roots]
+    CB --> RB
+  end
+  O <-->|pinned mTLS<br/>probe / Prepare / Commit / release / 原 ID GET| CB
+  CA --> LA[显式 Node / Local EAIOS 合同]
+  CB --> LB[显式 Node / Local EAIOS 合同]
+  RA -.静止完整原 authority + 内容.-> Q[同一验证恢复包<br/>按 profile + member 区分原身份]
+  RB -.静止完整原 authority + 内容.-> Q
+```
+
 实际进程配置新增可选闭合字段，下面仅为参数模板，不创建控制域、Node 或设备：
 
 ```json
@@ -91,3 +116,12 @@ CPU 结果出现也不替代原 Runtime 报告。验收使用明确冻结的优�
 再换主并接纳后续独立事务。cutoff、pending、实际包字节、原 floor/Catalog 与当前日志都由
 原协议产生；归档不删除原命令、Unknown、预算或尚需的引用。最终再做完整 Archive/恢复。
 早期未归档的真实长历史超时仍保留，不改写旧事务或以清库重跑替代维护。
+
+[ADR-0218](../decisions/0218-federation-current-decision-time.md)区分原 HTTP receive time 与
+取得 writer 后的当前决策时间。当前资格不能在排队后借用较早接收时点越过过期边界；
+原 State/lease/freshness 与全部正常 Control 门禁不放松。真实命令 4xx 只触发原停止对账，
+不推断无副作用或重发，原失败回包仍保留。
+
+原 coordinator 的 barrier/backoff 无变化 turn 不再反复竞争 writer 并做空 SQL 事务。
+调度 hint 只观察当前已提交原记录；真实归约、首次到期、权限/epoch 变化与实际工作仍
+走原 writer/最终检查。到期 cleanup 保留 Unknown，不能用空轮询重建新预算。

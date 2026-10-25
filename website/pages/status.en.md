@@ -1,21 +1,26 @@
 # Implementation status and evidence limits
 
-Content baseline: `375eef7d`, reviewed 2026-10-25. [Reference](reference.md) extracts current source versions.
-[Quantitative allocation](docs/development/acceptance/2026-10-25-quantitative-resources.md) and
-[application generation upgrades](docs/development/acceptance/2026-10-25-application-generation-upgrade.md)
-pass actual software process acceptance. The complete non-release scope and independent device,
-cross-host and long-term evidence requirements remain; SoftwareComplete is not declared.
+Content baseline: `f961a69e`, reviewed 2026-10-26. [Reference](reference.md) extracts source versions.
+The [single queue](docs/development/roboguide-software-completion-plan-2026-10-15.md) and
+[acceptance matrix](docs/development/nonrelease-acceptance-matrix-2026-10-26.md) retain the complete
+non-release scope. Final independent-domain HA/recovery, current full CI and main integration
+remain in progress; SoftwareComplete has not been signed.
 
-| Area | Existing software paths | Remaining or independently validated work |
+| Area | Accepted software implementation and actual local evidence | Final or independent evidence |
 | --- | --- | --- |
-| MI / Orchestration | Clarification, Review, admission, DAG, satisfaction, versioned revision and automatic MI work | Complex topologies, other Memory types and composed fault matrix |
-| Control / quota | Match/Commit/Bind, exact quota/release, source costs, divisible Compute/Context envelopes, Node admission and recovery; explicit spatial footprints/shared time domains, original booking budgets, recovery deadlines and v0.27 cold recovery | Cross-domain/HA clock composition and actual GPU/traffic or other deployment measurements |
-| Runtime / stop | Attempts/generations, durable intents, relations, whole-Group stop, original-process exit proof, reviewed running preemption with atomic beneficiary admission, coupled recovery and active hazards; v59/v0.28 recovery | Device handoff/regrasp/stop observations and global composition |
-| State / verifier | Source policies, Belief lineage, TTL, original Task verifiers and CAS proof | Actual deployment sources, conflicts and continuous physical effects |
-| Memory / Spatial | Preparation/use/revoke/handoff, file algorithms, provider-local GC, complete scoped typed-map/current-use/handoff/automatic MI/original-goal/cold-recovery/old-writer composition; original import Replica, Catalog/lineage, Snapshot/Archive references, relocated provider Snapshot retirement, Archive abort/private recipient GC, source upload retirement and offline GC over supported standalone reference closure | Complete global Archive/reference coverage and cross-host content |
-| Replica / recovery | Certificate rotation, original child drain, V3 transfer, inode/writer fences, supported quiescent bundles, qualified Root reads, Prepared recovery, cross-owner upload release and original recovery assessment, Root8/parent10, Log/Snapshot/learners, final member GC, v55-to-v56 rolling/bad-target repair and v0.25 three-leader cold recovery | Complete global content/reference composition and cross-host fault matrix |
-| Federation | Durable root coordinator, real pinned mTLS peers, normal Control resource preparation, actual writer epochs, original kernel/clock proofs, all-Commit release, independent original goals and v60/v0.29 recovery | Complete certificate/partition/HA/global-content composition and independent cross-host evidence |
-| Operations | Write-disabled, committed views, recovery probes and short real monitoring checks | Remaining listener/blocking paths, complete runbooks, long-term SLO and overall exit criteria |
+| MI / Orchestration | Original Request/provenance/Review, automatic runtime MI, original goals and complete scoped typed-map revisions | Final global combination; deployed models and physical goal sources |
+| Control / resources | Current-source costs, quota/divisible Compute/Context, POSIX proof, time/space/bookings, normal and recovery Commit, expiry stop/revoke | Current HA clock combination; deployed GPU/traffic/physical enforcement |
+| Runtime / coordination | Original attempts/intents/stop, running preemption with atomic beneficiary admission, coupled recovery and active hazards | Current global combination; actual device stop/handoff/regrasp |
+| State / verifier | Source/conflict/TTL/Belief consumer policies, exact Task/attempt/CAS proofs and independent original goals | Current physical sources and continuous effects |
+| Memory / Spatial | Per-Task import/use/revoke, Group handoff, Active Map, scoped typed-map/automatic MI, original producer/GC and full cold recovery | Current domain/Archive combination; actual cross-host bytes and localization |
+| Replica / recovery | Original child drain, V3 transfer, certificates, learner/joint, upgrades/refused rollback, complete content, online private Archive and original GC | Final multi-domain bundle v0.31 acceptance; deployed RTO/RPO |
+| Federation | Durable root/actual pinned peer/normal Control, original clock/intent/Unknown, all-Commit barrier and independent goals; explicit peer v0.2 | Final partition/certificate/HA/content combination; actual cross-host evidence |
+| Operations | All listener/local-adapter capacities and finite waits, real native alerts, default-128 health samples, explicit SLO denominators and runbooks | Current full CI/main; long-term SLO and human response |
+
+## Historical acceptance records
+
+The records below preserve their original versions and pending work at that time. Current closure
+is tracked by the queue and matrix above; an old pending item does not erase later implementation.
 
 Original content Archive and actual Catalog compaction/restart/cold recovery are recorded in [this acceptance](docs/development/acceptance/2026-10-22-original-content-archive.md). Storage v3 validates known consumers, original budgets and same-owner bytes together. These process checks create no device or external-model facts. The complete non-release remediation plan remains required.
 

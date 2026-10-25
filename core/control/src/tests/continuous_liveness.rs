@@ -134,6 +134,73 @@ fn continuous_ingress_renews_control_without_refreshing_health() {
     ));
 }
 
+/// A queued command's stale receive time cannot authorize expired health and lease at decision.
+#[test]
+fn queued_decision_must_recheck_expired_health_and_lease_without_renewal() {
+    let (mut control, mut state, mut events, mut evidence) = fixture();
+    evidence.last_sequence = 2;
+    evidence.first_received_at = TimestampMs::new(1_000);
+    evidence.last_received_at = TimestampMs::new(2_000);
+    evidence.maximum_gap_ms = 1_000;
+    control
+        .accept_session_liveness(
+            &state,
+            &evidence,
+            TimestampMs::new(2_000),
+            &trace(),
+            &mut events,
+        )
+        .unwrap();
+    control
+        .accept_received_heartbeat(
+            &mut state,
+            NodeHeartbeat::new(
+                evidence.node_id.clone(),
+                evidence.lease_id.clone(),
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(99_999)),
+            ),
+            TimestampMs::new(2_000),
+            TimestampMs::new(2_000),
+            15_000,
+            &trace(),
+            &mut events,
+        )
+        .unwrap();
+    let required = requirement("queued-work", "worker", CapabilityKind::Compute);
+    assert!(
+        control
+            .match_capabilities(
+                &state,
+                &required,
+                TimestampMs::new(1_500),
+                &trace(),
+                &mut events,
+            )
+            .is_ok()
+    );
+    assert!(matches!(
+        control.match_capabilities(
+            &state,
+            &required,
+            TimestampMs::new(20_000),
+            &trace(),
+            &mut events,
+        ),
+        Err(ControlError::NoCandidate(_))
+    ));
+    assert_eq!(
+        control.node_lease(&evidence.node_id).unwrap().issued_at(),
+        TimestampMs::new(2_000)
+    );
+    assert_eq!(
+        state
+            .node(&evidence.node_id)
+            .unwrap()
+            .reported_status_received_at(),
+        TimestampMs::new(2_000)
+    );
+}
+
 /// Gap/identity/sequence/future/replay/expiry/route-loss proofs cannot refresh any authority.
 #[test]
 fn continuity_rejections_and_expiry_are_atomic() {

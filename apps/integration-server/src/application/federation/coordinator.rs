@@ -534,6 +534,18 @@ fn reduce(record: &mut Transaction, profile: &Profile) -> Result<(), String> {
             continue;
         };
         for (phase, intent) in intents {
+            if matches!(phase.as_str(), "probe" | "prepare" | "commit" | "release")
+                && intent
+                    .reply
+                    .as_ref()
+                    .is_some_and(|reply| (400..500).contains(&reply.status))
+            {
+                // Rejection permits only original stop/reconciliation; it does not prove that
+                // the peer has no effects, erase Unknown or repeat the rejected command.
+                record
+                    .stopping
+                    .get_or_insert_with(|| "actual-participant-command-refused".into());
+            }
             if std::iter::once(intent.reply.as_ref())
                 .chain(intent.observations.iter().map(|query| query.reply.as_ref()))
                 .flatten()
@@ -677,6 +689,53 @@ fn phase(record: &Transaction, domain: &str) -> Option<&'static str> {
         return Some("observe");
     }
     None
+}
+
+/// Readonly scheduling hint avoids empty writer transactions; every actual turn rechecks authority.
+fn turn_ready(
+    record: &Transaction,
+    domain: &str,
+    profile: &Profile,
+    kernel: &KernelTime,
+    now: domain::TimestampMs,
+) -> bool {
+    let mut reduced = record.clone();
+    if reduce(&mut reduced, profile).is_err()
+        || !serde_json::to_vec(record)
+            .and_then(|original| {
+                serde_json::to_vec(&reduced).map(|candidate| original == candidate)
+            })
+            .unwrap_or(false)
+        || record.stopping.is_none() && record.budget.remaining(kernel) == 0
+        || record.stopping.is_some() && record.cleanup_budget.is_none()
+    {
+        return true;
+    }
+    let Some(phase) = phase(record, domain) else {
+        return false;
+    };
+    let remaining = record
+        .cleanup_budget
+        .as_ref()
+        .filter(|_| record.stopping.is_some())
+        .unwrap_or(&record.budget)
+        .remaining(kernel);
+    if remaining == 0 {
+        return false;
+    }
+    let Some(intent) = record
+        .intents
+        .get(domain)
+        .and_then(|phases| phases.get(phase))
+    else {
+        return true;
+    };
+    let last = intent
+        .observations
+        .last()
+        .map_or(intent.sent_at_ms, |query| query.sent_at_ms);
+    let backoff = (500_u64 << intent.observations.len().min(6)).min(30_000);
+    intent.observations.len() < 16 && now.as_millis().saturating_sub(last) >= backoff
 }
 
 /// Keeps all new retained metadata below the existing complete-checkpoint byte limit.
@@ -958,6 +1017,39 @@ pub(crate) fn step(
     }
     let (id, domain) = &turns[*cursor % turns.len()];
     *cursor = cursor.wrapping_add(1);
+    let (record, authorized) = {
+        let live = controller
+            .lock()
+            .map_err(|_| "Federation root unavailable")?;
+        let record = live.federation.coordinations.transactions[id].clone();
+        let caller = Caller {
+            leaf: record.leaf.clone(),
+            principal: record.principal.clone(),
+            tenant: record.manifest.tenant_id.clone(),
+        };
+        let authorized = execution::authorize(&live, &caller, &record.manifest).is_ok();
+        (record, authorized)
+    };
+    let wall = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    if authorized
+        && events
+            .current_writer_epoch()
+            .map_err(|error| error.to_string())?
+            == record.root_epoch
+        && wall < u128::from(record.certificate_expires_at_ms)
+        && !turn_ready(
+            &record,
+            domain,
+            &profile,
+            &KernelTime::observe()?,
+            clock.now(),
+        )
+    {
+        return Ok(());
+    }
     if let Some(work) = admit_work(controller, events, gate, clock, id, domain, &profile)? {
         perform(controller, events, gate, clock, work)?;
     }
@@ -1119,6 +1211,110 @@ mod tests {
         downgrade.revision = 3;
         assert!(install_profile(&mut state, downgrade).is_err());
         assert_eq!(serde_json::to_value(&state).unwrap(), before);
+    }
+
+    /// Builds synthetic retained history only; this fixture establishes no peer, Node or resource.
+    fn sample_transaction(original: Intent) -> Transaction {
+        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "schema_version":SCHEMA,"transaction_id":"synthetic","coordinator_domain":"synthetic-a",
+            "tenant_id":"synthetic","objective":"synthetic","budget_ms":5000,"max_clock_uncertainty_ms":100,
+            "participants": (["synthetic-a","synthetic-b"].into_iter().map(|domain| (domain,
+                serde_json::json!({"plan":{},"goal_verifier":{"verifier":{"namespace":"observation","name":"synthetic","version":"v1"},"predicate":"synthetic","max_evidence_age_ms":1000}}))).collect::<BTreeMap<_,_>>())
+        })).unwrap();
+        Transaction {
+            manifest,
+            root_epoch: "synthetic".into(),
+            principal: "synthetic".into(),
+            leaf: "synthetic".into(),
+            certificate_expires_at_ms: 10000,
+            budget: original.budget.clone(),
+            nonces: BTreeMap::new(),
+            probes: BTreeMap::from([(
+                "synthetic-a".into(),
+                serde_json::json!({"epoch":"synthetic"}),
+            )]),
+            clocks: BTreeMap::new(),
+            prepared: BTreeMap::new(),
+            decision: None,
+            commits: BTreeMap::new(),
+            released: BTreeSet::new(),
+            intents: BTreeMap::from([(
+                "synthetic-a".into(),
+                BTreeMap::from([("prepare".into(), original)]),
+            )]),
+            completed: BTreeMap::new(),
+            stopping: None,
+            cleanup_budget: None,
+            stopped: BTreeSet::new(),
+        }
+    }
+
+    /// An actual client rejection enters stop-only reconciliation without claiming absence of effects.
+    #[test]
+    fn rejected_original_command_preserves_evidence_and_never_seals_a_decision() {
+        let mut rejected = intent(serde_json::json!({"error":"original local admission refused"}));
+        rejected.reply.as_mut().unwrap().status = 409;
+        let mut record = sample_transaction(rejected);
+        let original = serde_json::to_value(&record.intents).unwrap();
+        reduce(&mut record, &profile()).unwrap();
+        assert_eq!(
+            record.stopping.as_deref(),
+            Some("actual-participant-command-refused")
+        );
+        assert!(record.decision.is_none() && record.stopped.is_empty());
+        assert_eq!(phase(&record, "synthetic-a"), Some("abort"));
+        assert_eq!(serde_json::to_value(&record.intents).unwrap(), original);
+    }
+
+    /// Backoff skips no-effect SQL turns, while first expiry still admits the original stop transition.
+    #[test]
+    fn readonly_turn_hint_preserves_unknown_backoff_and_original_deadlines() {
+        let mut pending = intent(serde_json::json!({}));
+        pending.reply = None;
+        pending.error = Some("original response unknown".into());
+        let mut record = sample_transaction(pending);
+        record.probes.insert(
+            "synthetic-b".into(),
+            serde_json::json!({"epoch":"synthetic-b"}),
+        );
+        let original = serde_json::to_value(&record).unwrap();
+        let kernel = KernelTime::observe().unwrap();
+        assert!(!turn_ready(
+            &record,
+            "synthetic-a",
+            &profile(),
+            &kernel,
+            domain::TimestampMs::new(1001)
+        ));
+        assert!(turn_ready(
+            &record,
+            "synthetic-a",
+            &profile(),
+            &kernel,
+            domain::TimestampMs::new(1600)
+        ));
+        assert_eq!(serde_json::to_value(&record).unwrap(), original);
+        let mut expired = serde_json::to_value(&kernel).unwrap();
+        expired["elapsed_ms"] = u64::MAX.into();
+        let expired: KernelTime = serde_json::from_value(expired).unwrap();
+        assert!(turn_ready(
+            &record,
+            "synthetic-a",
+            &profile(),
+            &expired,
+            domain::TimestampMs::new(1600)
+        ));
+        record.stopping = Some("original-stop".into());
+        record.cleanup_budget = Some(record.budget.clone());
+        let stopped = serde_json::to_value(&record).unwrap();
+        assert!(!turn_ready(
+            &record,
+            "synthetic-a",
+            &profile(),
+            &expired,
+            domain::TimestampMs::new(1600)
+        ));
+        assert_eq!(serde_json::to_value(&record).unwrap(), stopped);
     }
 
     /// An actual owned TCP listener receives no connection after the original SQL intent expires.

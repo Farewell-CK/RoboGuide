@@ -422,6 +422,10 @@ pub(crate) fn submit(
         body,
         |candidate, audit| {
             let policy = authorize(candidate, caller, &request.manifest)?;
+            // The original receive clock owns evidence and budgets. A later committed Node
+            // heartbeat, expiry or policy may change while this request waits for the writer;
+            // Control decisions use a fresh sample after acquiring that same writer.
+            let decision_at = clock.now();
             let id = &request.manifest.transaction_id;
             if action == "probe" {
                 if request.epoch.is_some()
@@ -481,7 +485,7 @@ pub(crate) fn submit(
                 );
             }
             if action == "abort" || action == "stop" {
-                return stop(candidate, id, action, audit, received);
+                return stop(candidate, id, action, audit, decision_at);
             }
             if probe.aborted.is_some()
                 || probe.budget.remaining(&KernelTime::observe()?) == 0
@@ -501,7 +505,7 @@ pub(crate) fn submit(
                     &probe,
                     &policy.local_domain,
                     audit,
-                    received,
+                    decision_at,
                     deployment,
                     feed,
                 ),
@@ -513,7 +517,7 @@ pub(crate) fn submit(
                         .get(id)
                         .is_some_and(|record| record.committed.is_none())
                     {
-                        validate_current_bindings(candidate, id, received)?;
+                        validate_current_bindings(candidate, id, decision_at)?;
                     }
                     let decision = request
                         .decision
@@ -555,7 +559,7 @@ pub(crate) fn submit(
                         .get(id)
                         .is_some_and(|record| record.release.is_none())
                     {
-                        validate_current_bindings(candidate, id, received)?;
+                        validate_current_bindings(candidate, id, decision_at)?;
                     }
                     let commits = request
                         .commits
@@ -700,6 +704,29 @@ fn prepare(
     if goal.source.producer_principals.contains(&probe.principal) {
         return Err("original Federation goal requires an independent verifier principal".into());
     }
+    // Bounded observation of the same first-use predicates before Group admission installs
+    // binding semantics. These counts never select a Node or relax actual Control matching.
+    let state = controller.bridge.decision_state();
+    let diagnostics: BTreeMap<_, _> = plan
+        .task_graph()
+        .tasks()
+        .iter()
+        .filter(|task| task.dependencies().is_empty())
+        .take(256)
+        .map(|task| {
+            let report = controller.bridge.control().first_use_candidate_diagnostics(
+                &state,
+                &plan,
+                task.requirement(),
+                now,
+            );
+            let value = match report {
+                Ok(report) => serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+                Err(error) => serde_json::json!({"unavailable":error.to_string()}),
+            };
+            (task.requirement().task_ref().clone(), value)
+        })
+        .collect();
     controller
         .orchestrator
         .submit(
@@ -748,7 +775,12 @@ fn prepare(
                 events,
             )
         }
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| {
+            format!(
+                "{error}; original candidate diagnostics: {}",
+                diagnostics.get(&task).unwrap_or(&serde_json::Value::Null)
+            )
+        })?;
         if prepared.assignments().len()
             != plan
                 .task_graph()

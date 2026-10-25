@@ -1,3 +1,12 @@
+ADR-0218 keeps original Federation receive clocks/budgets immutable and samples Control decision
+time only after acquiring the original writer and current candidate. A queued request cannot authorize
+using a stale receive-time sample after current evidence or leases expire. Prepare, current Commit/release bindings
+and stop/abort retain normal Control gates. Actual original command 4xx enters stop-only
+reconciliation, never absence-of-effects proof, invented stopped/decision or POST replay.
+Readonly scheduling hints skip empty barrier/backoff/expired-cleanup SQL turns only; actual
+work, source/permission changes and first expiry retain the original writer and all final checks.
+No persisted format changes. Actual independent-domain HA acceptance remains mandatory.
+
 ADR-0217 adds explicit Federation peer profile v0.2 with mandatory
 `budget_scope=intent-publication-and-peer-io` and an original 100–30,000 ms request bound.
 Legacy v0.1 retains 100–10,000 ms and cannot carry the new field. SQL intent publication consumes

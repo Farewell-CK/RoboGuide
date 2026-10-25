@@ -1,5 +1,25 @@
 # RoboGuide
 
+## 当前整改状态 · 2026-10-26
+
+通用非发布整改在唯一分支 `codex/nonrelease-remediation-closure` 收尾。
+已完成的实现与原进程验收按 [A1–F 唯一队列](docs/development/roboguide-software-completion-plan-2026-10-15.md)
+和 [R01–R20 总矩阵](docs/development/nonrelease-acceptance-matrix-2026-10-26.md)逐项对账。
+当前代码基线 `f961a69e`；跨域 HA/完整恢复、当前完整 CI 和 main 集成尚在验收，尚未签署 SoftwareComplete。
+
+现行合同保留 Controller v60、Node v0.14/config v0.15、Memory SQL v5；
+显式跨域恢复使用 v0.31，peer profile v0.2 独立声明不续期的 SQL-publication/I/O 预算。
+每个实际部署仍须明确选择所用代次，历史回执和存储布局不因应用版本自动升级。
+软件 Node 只执行明确配置的文件/CPU 工作；设备、外部模型和模拟器未被当作验收来源。
+
+[现行 V2 架构](docs/architecture/v2/README.md)说明职责与生命周期；
+[部署与运维](website/pages/operations.md)说明正式入口、完整备份、升级和故障处置。
+物理停止、交接、硬实时、硬件来源、跨主机与长期 SLO 保留独立证据要求。
+
+## 历史切片与演进记录
+
+以下各切片的版本、状态和剩余项保留其原时点；当前是否完成以上述唯一队列和总矩阵为准。
+
 [跨域 HA 部署接线](docs/development/replicated-federation-deployment-v0.1.md)显式传递原
 Federation 配置，并以 recovery v0.31 区分独立 profile 的同编号成员、原 Root 和活动事务。
 当前整包软件验收进行中；应用代次不会隐式更换物理存储布局或续原预算。

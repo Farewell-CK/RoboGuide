@@ -1,5 +1,12 @@
 # 架构与实现待决事项
 
+2026-10-26 复核：下文按日期保留历史决策缺口，后续实现不回写为当时已经具备。
+当前 [A1–F 队列](development/roboguide-software-completion-plan-2026-10-15.md)与
+[R01–R20 验收矩阵](development/nonrelease-acceptance-matrix-2026-10-26.md)是整改进度入口。
+完整 scoped typed-map/MI、原 producer/GC、在线 Archive、升级/回退、divisible/time/space、
+运行中抢占/耦合/hazard 和 standalone Federation 已有实际软件验收。跨域 HA/完整恢复、
+当前 CI/main 尚在最后验收；物理与跨主机/长期证据独立，不重复把已实现模块列作待开发。
+
 2026-10-21 [ADR-0141](decisions/0141-unconfigured-resource-quota-usage-view.md)修复 quota 运维视图
 只枚举已配置限额而隐藏既有 commitment 的问题；v0.2 汇总 configured limits 与原 claims 并集，
 无上限/剩余量明确返回 `null`。零 Node 的实际 API/SQLite 重启门禁持续验收。

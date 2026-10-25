@@ -90,18 +90,12 @@ requires the same complete byte/metadata members in every current/joint voting s
 supervisor remains fenced until its original child and Prepared-source contracts are connected;
 all remaining upgrade/recovery/routing and original remediation gates remain independent.
 
-Reviewed: 2026-10-23. Committed remediation baseline: `b372d95`
-plus ADR-0169 actual network content integration; runnable supervisor and full online gates remain in progress,
-on the single development branch `codex/nonrelease-remediation-closure`. The atlas retains its
-October 22 source baseline `495a6d2`. These later remediation changes have not merged back to main;
-they are not claims about the current remote main branch.
-This page and accepted ADRs define V2 authority. It reorganizes the implemented architecture without
-introducing new decisions. The Chinese source and accepted ADRs govern interpretation. [中文](README.md).
-
-The [architecture atlas](current-architecture.en.md) provides overview, execution, deployment and evaluation
-views. The [handbook](architecture-handbook.en.md) supplies a reading path. The
-[alignment review](../../development/architecture-code-alignment-2026-10-22.md) records code evidence and
-corrections; the [historical text](architecture-history-2026-10-22.md) retains the preceding document.
+Reviewed 2026-10-26 against implementation baseline `f961a69e` on the sole development branch
+`codex/nonrelease-remediation-closure`. Final cross-domain HA acceptance and main integration
+remain in progress. The [acceptance matrix](../../development/nonrelease-acceptance-matrix-2026-10-26.md)
+separates accepted implementations, original failures and missing evidence. Diagrams retain the
+2026-10-22 responsibility structure; accepted ADRs describe current wiring. This page and accepted
+ADRs remain the V2 authority. [中文](README.md).
 
 ### Current code overview · 2026-10-22
 
@@ -519,19 +513,20 @@ frames retain their permits; rejection never queues. Deployment limits and obser
 no cluster, checkpoint or execution authority. Network cancellation cannot disprove committed
 effects or end independently owned storage work. This is not an OS/RSS or complete HA guarantee.
 
-| Area | Reviewed implementation | Still required |
+| Area | Implemented with local actual software acceptance | Final combination or independent deployment evidence |
 | --- | --- | --- |
-| Memory / Spatial | Selective import/use/revoke, Group handoff, Active Map/GC, stored-reference recovery checks, file algorithms | All external reference producer lifecycles, typed-map/multi-kind fault combinations, online content consistency |
-| HA / recovery | Dynamic membership, original-child drain, transfer, certificate rotation, SQL/CAS cold recovery | Complete online content/archive/catalog recovery, rolling upgrades/rollback, independent-domain RTO/RPO |
-| Resources | Bounded selection, current-source costs, weighted future calendar, logical quota, explicit divisible Compute, file-worker POSIX proof | Complete time/space commitments and other deployed resource costs/enforcement |
-| Coordination / revision | Relation stop/hold, continuation, runtime MI, original goal/Review, scoped Memory file paths and explicit complete typed-map source declarations | Running preemption, complex migration/handoff, more Memory and complete cross-stage combinations |
-| Federation | Participant HTTP, mTLS/revisioned tenant/domain grants, original receipts and two-SQLite restart/fault reconciliation | Durable coordinator, actual peer requests, resource/epoch proofs, cross-host clocks and combined recovery; global dispatch remains false |
-| Operations | Write-disabled, metrics-reader, monitoring config, short software alert gates, partial I/O isolation | Remaining listeners/blocking paths, long-term SLO/runbooks, complete version/fault matrix and hardware evidence |
+| Memory / Spatial | Scoped typed maps/automatic MI, per-Task import/use, Group handoff, Active Map, original producers/GC and complete cold recovery | Current cross-domain HA/content combination; actual cross-host and physical localization |
+| HA / recovery | Original-child drain/transfer, learner/joint, certificates, rolling upgrade/rollback refusal, online private Archive and original-content recovery | Final independent three-voter domain combination; deployed RTO/RPO |
+| Resources | Current-source costs, divisible Compute/Context/quota, original POSIX proof, explicit time/space/bookings and expiry stop/revoke | Current inter-domain budget combination; deployed GPU/traffic/physical sources and enforcement |
+| Coordination / revision | Atomic beneficiary admission for running preemption, coupled recovery, continuous hazards, independent Review/original goal and typed-map revisions | Global HA combination; device handoff/regrasp/stop assurance |
+| Federation | Durable root, actual pinned peers, normal domain Control, original epochs/clocks/intents, complete Commit barrier and independent goals | Final certificate/partition/HA/content combination; actual cross-host evidence |
+| Operations | Every listener/local adapter capacity and finite wait, fixed metrics, actual native alerts, runbook and explicit SLO denominators | Current full CI/main; long-term SLO and human response |
 
-The [non-release completion plan](../../development/roboguide-software-completion-plan-2026-10-15.md) retains full
-acceptance requirements. The [inventory review](../../development/roboguide-branch-audit-2026-10-22.md) is a frozen
-snapshot. Neither announces SoftwareComplete. Branch implementations become mainline claims only after merge
-and a fresh review.
+The [non-release plan](../../development/roboguide-software-completion-plan-2026-10-15.md) retains
+every required gate. The [acceptance matrix](../../development/nonrelease-acceptance-matrix-2026-10-26.md)
+records final sign-off. The [older branch audit](../../development/roboguide-branch-audit-2026-10-22.md)
+retains its original baseline. SoftwareComplete has not been declared; existing implementations
+are not relabeled as missing development.
 
 [ADR-0177](../../decisions/0177-explicit-prepared-upload-recovery.md) defines explicit Prepared recovery. A separately durable original-uploader intent precedes reading or a replacement upload. Original qualified content and the new CAS owner remain distinct; actual reader closure and a normal replacement Completed receipt precede recovery completion. Original Prepared/Unknown/references remain intact, retries only observe, and the original kernel budget never renews. Wrapper v53 / codec v32 fence prior writers; process acceptance remains separate.
 
