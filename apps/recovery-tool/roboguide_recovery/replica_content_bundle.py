@@ -161,11 +161,8 @@ def _parent(
             or json.loads(metadata.get("identity", "null"))
             not in (
                 [identity["profile_identity"], "roboguide.controller-checkpoint/v53"],
-                [
-                    identity["profile_identity"],
-                    "roboguide.controller-checkpoint/v54",
-                    "roboguide.controller-checkpoint/v55",
-                ],
+                [identity["profile_identity"], "roboguide.controller-checkpoint/v54"],
+                [identity["profile_identity"], "roboguide.controller-checkpoint/v55"],
             )
             or json.loads(metadata.get("network_content_membership_schema", "null"))
             != "roboguide.replica-storage/v0.7"
