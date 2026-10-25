@@ -1,6 +1,6 @@
 # 实现状态与证据边界
 
-内容核对基线：`fe82daec`（2026-10-25）；[版本参考](reference.md)从当前源码提取版本。
+内容核对基线：`375eef7d`（2026-10-25）；[版本参考](reference.md)从当前源码提取版本。
 [量化资源](docs/development/acceptance/2026-10-25-quantitative-resources.md)与
 [应用代次升级](docs/development/acceptance/2026-10-25-application-generation-upgrade.md)
 已有实际软件进程验收。原全部非发布范围与设备/跨主机/长期证据边界保持，尚未 SoftwareComplete。
@@ -13,7 +13,7 @@
 | State / verifier | 来源策略、Belief lineage、TTL、原 Task verifier 与 CAS proof | 当前部署的物理来源、冲突与持续效果证明 |
 | Memory / Spatial | 准备/use/revoke/handoff、文件空间算法、provider 局部 GC、完整 scoped typed-map/current-use/交接/自动 MI/原目标/冷恢复/旧 writer 拒绝组合；原 import Replica、Catalog/lineage、Snapshot/Archive 引用、恢复后原 provider Snapshot 退休、Archive abort/私有接收 GC、源上传退休和 standalone 已知引用闭包离线 GC | 完整全局 Archive/引用与跨主机内容 |
 | Replica / recovery | 证书轮换、原 child drain、V3 transfer、writer/inode fence、已支持静止 bundle、qualified Root HTTP read、Prepared 恢复、跨 owner 上传放弃/退休及原恢复事实对账、Root8/parent10、Log/Snapshot/learner、最终成员 GC、v55→v56 滚动/坏版本补丁和 v0.25 三 leader 冷恢复 | 完整全局内容/引用组合与跨主机故障矩阵 |
-| Federation | 实际独立 participant HTTP、tenant/domain mTLS 授权、原 prepare/commit/abort 回执与重启对账 | 持久 coordinator、真实 peer 请求、资源/epoch 与跨主机恢复；global dispatch 仍关闭 |
+| Federation | 持久 root coordinator、真实 pinned mTLS peer、正常 Control 资源准备、实际 writer epoch、原 kernel/clock 证明、全体 Commit 后 release、独立原目标及 v60/v0.29 恢复 | 证书/分区/HA/全局内容的完整组合与独立跨主机证据 |
 | 运维 | write-disabled、已提交视图、恢复探针、真实短窗口监控检查 | 全 listener/阻塞收敛、完整 runbook、长期 SLO 与总体退出条件 |
 
 原内容 Archive 及实际 Catalog 归档/重启/冷恢复见[本轮验收](docs/development/acceptance/2026-10-22-original-content-archive.md)。storage v3 的已知 consumer 清单、原预算与同 owner 内容一并校验；这些进程证据没有创建设备或外部模型事实。原全部非发布整改计划继续适用。
@@ -54,3 +54,5 @@
 [时空资源软件验收](docs/development/acceptance/2026-10-25-resource-topology.md)通过明确部署声明、跨 ID 冲突、原预算与活动/未确认停止恢复。实际 CPU 进程不能证明物理排他或设备停止；其余 A/E/F 继续必需。
 
 [运行协调验收](docs/development/acceptance/2026-10-25-execution-coordination.md)通过真实 CPU 抢占、耦合恢复、文件完整性 hazard、原实例重启和完整声明数据冷恢复。设备协调保留原 reviewed Memory 与独立设备 assurance 门禁；没有设备或外部模型。
+
+[跨域软件验收](docs/development/acceptance/2026-10-25-federation-execution.md)通过正常执行、真实 Prepare 响应丢失、原 Root SIGKILL、完成后原实例重启和六份声明数据冷恢复。只读观察不声称瞬时全局就绪；实际执行仍消费原完整决定、全体 Commit 回执和本域当前门禁。

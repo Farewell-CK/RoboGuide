@@ -48,8 +48,12 @@ Explicit scoped typed maps use MissionPlan v0.11, Node v0.14/config v0.15, prepa
 
 ## Original resource bookings
 
-The recovery-admin view `/v1/resource-topology` separates declarations, original reservations and unavailable physical occupancy. Time expiry enters the existing whole-Group stop/revoke workflow and preserves ownership until original release gates pass. Actual OS exit and Controller stop confirmation are separate. Current wrapper v59 requires explicit recovery v0.28, which retains all previous scoped-map and upgrade requirements; original older receipts keep their versions.
+The recovery-admin view `/v1/resource-topology` separates declarations, original reservations and unavailable physical occupancy. Time expiry enters the existing whole-Group stop/revoke workflow and preserves ownership until original release gates pass. Actual OS exit and Controller stop confirmation are separate. Current wrapper v60 requires explicit recovery v0.29, which retains all previous scoped-map and upgrade requirements; original older receipts keep their versions.
 
 ## Reviewed coordination
 
 Use the [coordination contract](docs/development/execution-coordination-v0.1.md) to declare the original complete cohort before candidate output and independent Review. Receipt, terminal status, original process exit and device stopping are separate. Active v0.3 Readiness policies retain original gates through revocation and expiry; inspect plan-revisions and original stop/revoke evidence before resuming.
+
+## Cross-domain transactions
+
+Declare actual peers, CA/leaf/client identity files, domain grants and clock bounds before [coordinated execution](docs/development/federation-coordination-v0.1.md). A lost reply remains Unknown; query the original transaction instead of creating a replacement. Root replacement fences its original dispatch epoch. Cold recovery preserves original goal/clock/intent/decision tables and starts no services. Secrets and real cross-host/physical validation remain explicit deployment responsibilities.

@@ -48,8 +48,12 @@ PYTHONPATH=apps/recovery-tool python -m roboguide_recovery restore   --bundle /a
 
 ## 原资源预订
 
-recovery-admin 的 `/v1/resource-topology` view 区分声明、原 reservation 与未获证明的物理占用。窗口到期进入既有 whole-Group stop/revoke，原释放门禁通过前保留资源。实际 OS exit 与 Controller stop confirmation 是不同证据。当前 wrapper v59 使用显式 recovery v0.28，保留之前 scoped-map、升级与全部原恢复要求；旧回执保留原版本。
+recovery-admin 的 `/v1/resource-topology` view 区分声明、原 reservation 与未获证明的物理占用。窗口到期进入既有 whole-Group stop/revoke，原释放门禁通过前保留资源。实际 OS exit 与 Controller stop confirmation 是不同证据。当前 wrapper v60 使用显式 recovery v0.29，保留之前 scoped-map、升级与全部原恢复要求；旧回执保留原版本。
 
 ## 经审查的运行协调
 
 按[协调合同](docs/development/execution-coordination-v0.1.md)在候选输出和独立 Review 前冻结完整原 cohort。回执、终态、原进程退出与设备停止分别核对。活动 v0.3 Readiness 策略在撤销和过期后仍保留原保护；恢复前检查 plan-revisions 和原 stop/revoke 证据。
+
+## 跨域事务
+
+按[跨域协调合同](docs/development/federation-coordination-v0.1.md)显式声明 peer、CA/leaf/client 身份文件、domain grant 与时钟上界。回复丢失保留 Unknown，查询原事务，不能换 ID 消除不确定结果。Root 替换会 fence 原 dispatch epoch。冷恢复保留原 goal/clock/intent/decision 表且不启动服务；Secrets 和实际跨主机/物理验证仍是显式部署责任。

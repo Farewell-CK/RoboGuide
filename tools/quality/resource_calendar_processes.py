@@ -84,6 +84,7 @@ class CalendarCheck:
         assert schema in {
             "roboguide.controller-checkpoint/v58",
             "roboguide.controller-checkpoint/v59",
+            "roboguide.controller-checkpoint/v60",
         }
         result: dict[str, Any] = json.loads(raw)
         return result

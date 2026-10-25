@@ -254,6 +254,7 @@ class Case:
             "roboguide.recovery-profile/v0.26",
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
+            "roboguide.recovery-profile/v0.29",
         }:
             self.profile["schema"] = "roboguide.recovery-profile/v0.17"
         self.profile["components"][0]["storage_schema"] = "roboguide.controller-storage/v1"

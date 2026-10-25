@@ -37,3 +37,7 @@ Rust 使用 `rust-toolchain.toml`，Python 使用 `pyproject.toml` 与锁文件�
 ## 协调与活动 hazard
 
 [Revision v0.6](docs/development/execution-coordination-v0.1.md)使用实际登记的 recovery/safety 支持和 canonical successor operations，不生成厂商动作。设备 handoff/regrasp 要求原 reviewed Memory/context 和 DeviceObservation。显式 decision-policy v0.3 活动 Readiness gate 消费真实 source/session/TTL/conflict 证据；Node 与 MissionPlan 合同保留版本与原义。
+
+## 域间接入
+
+[Federation execution v0.1](docs/development/federation-coordination-v0.1.md)接纳已审查的本域语义计划，各域仍走正常 Control 和已有 Node/Memory/verifier 合同。显式 authorization v0.2 委托实际服务身份；Rust/Python 事务标识保留浮点类型和精确 bits。本域 replan policy 不能替换原分布式 manifest。

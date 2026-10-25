@@ -1,6 +1,6 @@
 # Implementation status and evidence limits
 
-Content baseline: `fe82daec`, reviewed 2026-10-25. [Reference](reference.md) extracts current source versions.
+Content baseline: `375eef7d`, reviewed 2026-10-25. [Reference](reference.md) extracts current source versions.
 [Quantitative allocation](docs/development/acceptance/2026-10-25-quantitative-resources.md) and
 [application generation upgrades](docs/development/acceptance/2026-10-25-application-generation-upgrade.md)
 pass actual software process acceptance. The complete non-release scope and independent device,
@@ -14,7 +14,7 @@ cross-host and long-term evidence requirements remain; SoftwareComplete is not d
 | State / verifier | Source policies, Belief lineage, TTL, original Task verifiers and CAS proof | Actual deployment sources, conflicts and continuous physical effects |
 | Memory / Spatial | Preparation/use/revoke/handoff, file algorithms, provider-local GC, complete scoped typed-map/current-use/handoff/automatic MI/original-goal/cold-recovery/old-writer composition; original import Replica, Catalog/lineage, Snapshot/Archive references, relocated provider Snapshot retirement, Archive abort/private recipient GC, source upload retirement and offline GC over supported standalone reference closure | Complete global Archive/reference coverage and cross-host content |
 | Replica / recovery | Certificate rotation, original child drain, V3 transfer, inode/writer fences, supported quiescent bundles, qualified Root reads, Prepared recovery, cross-owner upload release and original recovery assessment, Root8/parent10, Log/Snapshot/learners, final member GC, v55-to-v56 rolling/bad-target repair and v0.25 three-leader cold recovery | Complete global content/reference composition and cross-host fault matrix |
-| Federation | Actual independent participant HTTP, tenant/domain mTLS grants, original prepare/commit/abort receipts and restart reconciliation | Durable coordinator, real peer requests, resource/epoch and cross-host recovery; global dispatch remains disabled |
+| Federation | Durable root coordinator, real pinned mTLS peers, normal Control resource preparation, actual writer epochs, original kernel/clock proofs, all-Commit release, independent original goals and v60/v0.29 recovery | Complete certificate/partition/HA/global-content composition and independent cross-host evidence |
 | Operations | Write-disabled, committed views, recovery probes and short real monitoring checks | Remaining listener/blocking paths, complete runbooks, long-term SLO and overall exit criteria |
 
 Original content Archive and actual Catalog compaction/restart/cold recovery are recorded in [this acceptance](docs/development/acceptance/2026-10-22-original-content-archive.md). Storage v3 validates known consumers, original budgets and same-owner bytes together. These process checks create no device or external-model facts. The complete non-release remediation plan remains required.
@@ -55,3 +55,5 @@ Update both languages together, following contract → actual code → original 
 [Spatial and Time software acceptance](docs/development/acceptance/2026-10-25-resource-topology.md) covers explicit deployment declarations, cross-ID conflicts, original budgets and active/uncertain-stop recovery. Actual CPU processes do not establish physical exclusion or device stopping. Remaining A/E/F work stays mandatory.
 
 [Reviewed execution coordination](docs/development/acceptance/2026-10-25-execution-coordination.md) passes actual CPU preemption, coupled recovery, file-integrity hazards, original-instance restart and complete declared-data cold recovery. Device coordination retains reviewed Memory and independent device-assurance gates. No devices or external models were used.
+
+[Cross-domain software acceptance](docs/development/acceptance/2026-10-25-federation-execution.md) passes normal execution, actual lost Prepare replies, original Root SIGKILL, completed-owner restart and six declared-data cold recoveries. Observation never claims instantaneous global readiness; execution consumes the original complete decision and all participant Commit receipts through current local gates.

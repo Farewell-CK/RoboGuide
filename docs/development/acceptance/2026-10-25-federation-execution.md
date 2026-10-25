@@ -35,3 +35,11 @@ genuine v59 Controller SHA-256：`caf8d4d7d748c3154671bc6a5b0d2ed14f4a6920cd5393
 TLS 凭证仍是显式部署输入，声明数据恢复不代替证书/Secrets 重新部署。
 本模块证明完整三案例及声明数据恢复；原证书/分区/HA/全局内容组合仍需在固定最终 profile 中完成。
 未合并 main、未部署或发布；所有开发保持同一分支。
+
+附随兼容验收：固定 `/tmp/rg-federation-compat-v60-controller` SHA-256
+`98bb684c7ec95156d19270c227240b9e277e215df67ebeb3890e134a0f8aa29d`，
+实际旧 participant v0.2 的响应丢失、SQL 回滚/恢复、分区、原预算过期、策略回退、撤销/重启均通过
+`/tmp/rgf60-participant-2`；Artifact SQL 的十个真实故障案例通过 `/tmp/rgf60-artifact-sql-2`。
+前一 Artifact 批次完成十例后因并发构建替换二进制而拒绝整批；该失败保留，不计通过。
+单 package 与 Controller/Node 联合构建的实际二进制身份分别记录，不把不同 SHA 当成同一文件。
+双语站点严格构建通过：851 HTML、46 条维护路由、0 个 unresolved archive anchors、9 项站点测试。

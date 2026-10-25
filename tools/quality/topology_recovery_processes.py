@@ -119,7 +119,12 @@ def recover(source: Path, output: Path, old_controller: Path | None) -> dict[str
         ).fetchone()
     authority = json.loads(json.loads(raw)["integration_json"])["control"]
     assert (
-        schema in {"roboguide.controller-checkpoint/v58", "roboguide.controller-checkpoint/v59"}
+        schema
+        in {
+            "roboguide.controller-checkpoint/v58",
+            "roboguide.controller-checkpoint/v59",
+            "roboguide.controller-checkpoint/v60",
+        }
         and authority["resource_topology_history"]
     )
     refusal = None
@@ -130,6 +135,7 @@ def recover(source: Path, output: Path, old_controller: Path | None) -> dict[str
         ).decode().strip() in {
             "roboguide.controller-checkpoint/v57",
             "roboguide.controller-checkpoint/v58",
+            "roboguide.controller-checkpoint/v59",
         }
         before = logical_rows(roots["controller"] / "controller.sqlite3")
         old_environment = environment | {

@@ -65,6 +65,9 @@ def contract_versions() -> dict[str, str]:
     if journal_version is None:
         raise SystemExit("Node journal storage fence declaration is missing")
     return {
+        "Federation (explicit resource-bearing execution)": json.loads(
+            (ROOT / "contracts/control/federation-execution-v0.1/command.schema.json").read_text()
+        )["properties"]["schema_version"]["const"],
         "Runtime revision (explicit coordination)": json.loads(
             (ROOT / "contracts/mission/runtime-plan-revision-v0.6/command.schema.json").read_text()
         )["properties"]["schema_version"]["const"],

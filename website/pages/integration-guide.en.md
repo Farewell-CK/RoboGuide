@@ -37,3 +37,7 @@ Global recovery-admin installs [resource-topology v0.1](docs/development/resourc
 ## Coordination and active hazards
 
 [Revision v0.6](docs/development/execution-coordination-v0.1.md) uses actual registered recovery/safety support and canonical successor operations; it supplies no vendor motion. Device handoff/regrasp requires original reviewed Memory/context and DeviceObservation. Explicit decision-policy v0.3 active Readiness gates consume actual source/session/TTL/conflict evidence. Node and MissionPlan contracts retain their versions and meaning.
+
+## Domain composition
+
+[Federation execution v0.1](docs/development/federation-coordination-v0.1.md) accepts reviewed semantic local plans; each domain uses normal Control and its existing Node/Memory/verifier contracts. Explicit authorization v0.2 delegates the service identity. JSON transaction identities retain exact floating-point types across Rust/Python. Domain-local replan policies cannot replace the original distributed manifest.

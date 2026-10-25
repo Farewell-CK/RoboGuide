@@ -446,6 +446,7 @@ def run(source: Path, output: Path, old_controller: Path | None) -> dict[str, An
                 "roboguide.recovery-profile/v0.26",
                 "roboguide.recovery-profile/v0.27",
                 "roboguide.recovery-profile/v0.28",
+                "roboguide.recovery-profile/v0.29",
             }
             else "recovery v0.18"
             if profile["schema"].endswith("/v0.18")

@@ -494,6 +494,9 @@ def run(
         )
     binary = (binary or ROOT / "target/debug/integration-server").resolve()
     binary_hash = hashlib.sha256(binary.read_bytes()).hexdigest()
+    application_schema = subprocess.check_output(
+        [str(binary), "--application-schema"], text=True, timeout=5
+    ).strip()
     certificates = output / "pki"
     digests = pki(certificates)
     listeners = ports(6)
@@ -506,7 +509,7 @@ def run(
         proof = faults(a, b, output, digests["admin"])
         for participant in (a, b):
             assert participant.call("/v1/inventory")[1]["nodes"] == []
-            assert participant.observe()["schema"] == "roboguide.controller-checkpoint/v55"
+            assert participant.observe()["schema"] == application_schema
         if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_hash:
             raise ValueError("actual Controller binary changed during acceptance")
         if source_identity() != original_source:
@@ -516,7 +519,7 @@ def run(
             "passed": True,
             "schema": SCHEMA,
             "binary_sha256": binary_hash,
-            "application_schema": "roboguide.controller-checkpoint/v55",
+            "application_schema": application_schema,
             "registered_nodes": 0,
             "devices": 0,
             "models": 0,
@@ -524,7 +527,7 @@ def run(
             "proof": proof,
             "old_writer": old,
             "global_dispatch_ready": False,
-            "coordinator": "not_implemented",
+            "coordinator": "not_exercised_in_this_participant_profile",
             "cross_host_evidence": "unavailable",
             "hardware_evidence": "HardwareEvidencePending",
             "logs": a.logs + b.logs,

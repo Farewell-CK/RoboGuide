@@ -243,6 +243,7 @@ def run(
             "roboguide.controller-checkpoint/v57",
             "roboguide.controller-checkpoint/v58",
             "roboguide.controller-checkpoint/v59",
+            "roboguide.controller-checkpoint/v60",
         }
         authority = json.loads(raw)
         assert authority["memory_handoffs"] and authority["runtime_revisions"]
