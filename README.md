@@ -1,5 +1,9 @@
 # RoboGuide
 
+[跨域持久协调](docs/development/federation-coordination-v0.1.md)已接入真实 peer mTLS、正常 Control 资源准备、
+原预算/epoch、持久全局决定和独立原目标。wrapper v60/recovery v0.29 保留原请求、Unknown 与恢复；
+实际双域 CPU、响应丢失和原实例重启组合正在完成最终随包检查，设备与跨主机证据独立。
+
 [运行协调](docs/development/execution-coordination-v0.1.md)接入完整原 cohort 的审批、停止/撤权、
 原目标与新 Group；运行中抢占须在同一事务让受益任务实际获得原冲突资源，持续 hazard
 策略保留原保护。新权威显式使用 Controller v59/recovery v0.28；设备类交接与 regrasp

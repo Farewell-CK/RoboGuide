@@ -150,7 +150,7 @@ fn authorize_tenant_path(
         && !path.starts_with("/v1/executions/")
         && !path.starts_with("/v1/groups/")
         && !path.starts_with("/v1/memory/handoffs/")
-        && !path.starts_with("/v1/federation/sessions/")
+        && !path.starts_with("/v1/federation/")
     {
         return Err("global projection requires explicit global delegation".into());
     }
@@ -269,7 +269,7 @@ fn authorize_operator_request(
         ("GET", _)
         | ("POST", "/v1/missions/assess-initial-support" | "/v1/missions/validate-plan") => 0,
         ("POST", "/v1/missions") => 1,
-        ("POST", "/v1/federation/sessions/prepare") => 2,
+        ("POST", path) if path.starts_with("/v1/federation/") => 2,
         ("POST", path)
             if path.starts_with("/v1/federation/sessions/")
                 && (path.ends_with("/commit") || path.ends_with("/abort")) =>
@@ -955,14 +955,7 @@ where
             }
         };
     }
-    if method == "POST" && path == "/v1/federation/sessions/prepare"
-        || path.starts_with("/v1/federation/sessions/")
-            && ((method == "POST" && (path.ends_with("/commit") || path.ends_with("/abort")))
-                || (method == "GET"
-                    && path != "/v1/federation/sessions/prepare"
-                    && !path.ends_with("/commit")
-                    && !path.ends_with("/abort")))
-    {
+    if path.starts_with("/v1/federation/") && matches!(method, "GET" | "POST") {
         return handle_federation_route(
             stream,
             controller,
@@ -972,6 +965,8 @@ where
             &request,
             principal,
             tenant.as_deref(),
+            deployment_feasibility,
+            verifier_feed,
         )
         .await;
     }
@@ -3507,6 +3502,8 @@ async fn handle_federation_route<S>(
     request: &ControlHttpRequest,
     principal: &OperatorPrincipal,
     tenant: Option<&str>,
+    deployment: Option<&DeploymentFeasibility>,
+    feed: Option<&TaskVerifierFeed>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -3529,9 +3526,52 @@ where
         principal: subject.to_string(),
         tenant: tenant.to_string(),
     };
-    let result = (|| {
+    let result = application::run_synchronous_transaction(|| {
         application::federation::synchronize_policy(controller, event_log, event_write_gate)?;
         let path = request.target.split('?').next().unwrap_or("");
+        if let Some(action) = path.strip_prefix("/v1/federation/executions/") {
+            if request.method == "GET" {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "Federation local authority unavailable")?;
+                return application::federation::execution::view(
+                    &live,
+                    event_log,
+                    action,
+                    &caller,
+                    clock.now(),
+                );
+            }
+            return application::federation::execution::submit(
+                controller,
+                event_log,
+                event_write_gate,
+                clock,
+                &request.body,
+                action,
+                &caller,
+                deployment,
+                feed,
+            );
+        }
+        if path == "/v1/federation/transactions" && request.method == "POST" {
+            return application::federation::coordinator::submit(
+                controller,
+                event_log,
+                event_write_gate,
+                &request.body,
+                &caller,
+                certificate.expires_at_ms,
+            );
+        }
+        if let Some(id) = path.strip_prefix("/v1/federation/transactions/")
+            && request.method == "GET"
+        {
+            let live = controller
+                .lock()
+                .map_err(|_| "Federation root authority unavailable")?;
+            return application::federation::coordinator::view(&live, id, &caller);
+        }
         let prefix = "/v1/federation/sessions/";
         if request.method == "GET" {
             return application::federation::view(
@@ -3566,7 +3606,7 @@ where
             id,
             &caller,
         )
-    })();
+    });
     match result {
         Ok(body) => {
             write_http_response(

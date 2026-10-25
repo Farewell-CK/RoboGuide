@@ -108,6 +108,70 @@ fn validate_input(
     Ok(())
 }
 
+/// Reads original per-Mission evidence without inventing a plan-revision policy for another authority.
+fn progress<'a>(
+    controller: &'a ControllerState,
+    mission: &domain::MissionId,
+) -> Option<&'a BTreeMap<String, GoalProgress>> {
+    controller
+        .runtime_revisions
+        .get(mission.as_str())
+        .map(|state| &state.goal_evidence)
+        .or_else(|| {
+            super::super::federation::execution::goal_owner(controller, mission)
+                .map(|record| &record.goal_evidence)
+        })
+}
+
+/// Mutates only the original unique goal owner under the actual application writer.
+fn progress_mut<'a>(
+    controller: &'a mut ControllerState,
+    mission: &domain::MissionId,
+) -> Result<&'a mut BTreeMap<String, GoalProgress>, String> {
+    if controller.runtime_revisions.contains_key(mission.as_str()) {
+        Ok(&mut controller
+            .runtime_revisions
+            .get_mut(mission.as_str())
+            .expect("original revision goal")
+            .goal_evidence)
+    } else {
+        super::super::federation::execution::goal_owner_mut(controller, mission)
+            .map(|record| &mut record.goal_evidence)
+            .ok_or_else(|| "original independent goal authority missing".into())
+    }
+}
+
+/// Refreshes current grants from the original goal owner's actual registry while retaining its receive anchor.
+fn refresh_goal_authority(
+    controller: &mut ControllerState,
+    mission: &domain::MissionId,
+) -> Result<(domain::TimestampMs, String), String> {
+    if let Some(state) = controller.runtime_revisions.get(mission.as_str()).cloned() {
+        admission::refresh_authority(controller, &state)?;
+        Ok((state.accepted_at, state.tenant))
+    } else {
+        let record = super::super::federation::execution::goal_owner(controller, mission)
+            .ok_or("Mission has no original independent goal authority")?
+            .clone();
+        admission::refresh_operator_authority(
+            controller,
+            &record.authorization_path,
+            &record.authorization_registry_id,
+        )?;
+        let execution = controller
+            .orchestrator
+            .execution(mission)
+            .ok_or("original local goal Mission absent")?;
+        let tenant = controller
+            .bridge
+            .control()
+            .mission_tenant(mission)
+            .ok_or("original goal tenant absent")?
+            .to_string();
+        Ok((execution.accepted_at(), tenant))
+    }
+}
+
 /// Persists original independently authenticated measurements and application timing before completion.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn submit_goal(
@@ -130,14 +194,9 @@ pub(crate) fn submit_goal(
         .lock()
         .map_err(|_| "Controller authority unavailable")?
         .clone();
-    let state = candidate
-        .runtime_revisions
-        .get(input.mission_id.as_str())
-        .ok_or("Mission has no original independent goal authority")?
-        .clone();
-    admission::refresh_authority(&mut candidate, &state)?;
+    let (accepted_at, _tenant) = refresh_goal_authority(&mut candidate, &input.mission_id)?;
     let now = clock.now();
-    if ingress.received_at < state.accepted_at {
+    if ingress.received_at < accepted_at {
         return Err("goal request predates the original frozen interpretation".into());
     }
     if !admission::authorized_caller(&candidate, caller, now) {
@@ -171,22 +230,16 @@ pub(crate) fn submit_goal(
     // Source/principal/shape checks precede expensive proof reads on this private candidate.
     validate_input(&candidate, &receipt.evidence)?;
     let late = !current(&candidate, &receipt.evidence);
-    let key = receipt.evidence.mission_id.as_str().to_string();
-    candidate
-        .runtime_revisions
-        .get_mut(&key)
-        .expect("original goal authority")
-        .goal_evidence
-        .insert(
-            receipt.input_digest.clone(),
-            GoalProgress {
-                budget,
-                completed_time: None,
-                incident: late.then(|| {
-                    "retained old-version goal evidence; no current completion authority".into()
-                }),
-            },
-        );
+    progress_mut(&mut candidate, &receipt.evidence.mission_id)?.insert(
+        receipt.input_digest.clone(),
+        GoalProgress {
+            budget,
+            completed_time: None,
+            incident: late.then(|| {
+                "retained old-version goal evidence; no current completion authority".into()
+            }),
+        },
+    );
     log.begin_batch().map_err(|e| e.to_string())?;
     let transaction: Result<(), String> = (|| {
         let trace = domain::CorrelationId::new("mission-goal-ingress").expect("fixed trace");
@@ -216,8 +269,17 @@ pub(crate) fn submit_goal(
                 .map_err(|e| e.to_string())?,
         );
         log.save_checkpoint_with_command(SERVER_CHECKPOINT_SCHEMA, &checkpoint, journal)
-            .and_then(|()| log.commit_batch())
-            .map_err(|e| e.to_string())
+            .map_err(|error| error.to_string())?;
+        gate.validate_locked()?;
+        let before_authority = candidate.bridge.control().operator_authorization().cloned();
+        refresh_goal_authority(&mut candidate, &receipt.evidence.mission_id)?;
+        if candidate.bridge.control().operator_authorization() != before_authority.as_ref() {
+            return Err("goal registry changed before actual Commit".into());
+        }
+        if !admission::authorized_caller(&candidate, caller, clock.now()) {
+            return Err("original goal producer grant expired before actual Commit".into());
+        }
+        log.commit_batch().map_err(|e| e.to_string())
     })();
     if let Err(error) = transaction {
         let rollback = log.rollback_batch();
@@ -242,13 +304,9 @@ pub(crate) fn apply_pending(
     controller: &mut ControllerState,
     clock: &impl Clock,
 ) -> Result<(), String> {
-    if controller.runtime_revisions.is_empty() {
-        return Ok(());
-    }
-    let missions: Vec<_> = controller.runtime_revisions.keys().cloned().collect();
-    for key in missions {
-        let mission = domain::MissionId::new(&key).map_err(|e| e.to_string())?;
-        if controller.runtime_revisions[&key].goal_evidence.is_empty()
+    let missions = controller.orchestrator.mission_ids();
+    for mission in missions {
+        if progress(controller, &mission).is_none_or(BTreeMap::is_empty)
             || controller
                 .orchestrator
                 .execution(&mission)
@@ -259,11 +317,13 @@ pub(crate) fn apply_pending(
         {
             continue;
         }
-        let state = controller.runtime_revisions[&key].clone();
-        // Goal constraints survive replan-policy expiry/revocation. Their own source and receive budgets govern.
-        if admission::refresh_authority(controller, &state).is_err() {
+        // Each owner retains its own original registry and receive budgets; no replan permission is created.
+        let Ok((_, tenant)) = refresh_goal_authority(controller, &mission) else {
             continue;
-        }
+        };
+        let original_progress = progress(controller, &mission)
+            .ok_or("original goal progress absent")?
+            .clone();
         let Ok(kernel) = KernelTime::observe() else {
             continue;
         };
@@ -290,14 +350,14 @@ pub(crate) fn apply_pending(
         else {
             continue;
         };
-        let Some(progress) = state.goal_evidence.get(&receipt.input_digest) else {
+        let Some(progress) = original_progress.get(&receipt.input_digest) else {
             return Err("goal source lacks original receive budget".into());
         };
         if progress.budget.remaining(&kernel) == 0
             || !admission::authorized_subject(
                 controller,
                 &receipt.authority_subject,
-                &state.tenant,
+                &tenant,
                 false,
                 now,
             )
@@ -311,12 +371,14 @@ pub(crate) fn apply_pending(
             && progress.incident.is_none()
         {
             let trace = domain::CorrelationId::new("mission-goal-rejected").expect("fixed trace");
-            if !switching::observe_trigger(
-                controller,
-                &mission,
-                Trigger::SatisfactionRejected,
-                now,
-            )? {
+            if !(controller.runtime_revisions.contains_key(mission.as_str())
+                && switching::observe_trigger(
+                    controller,
+                    &mission,
+                    Trigger::SatisfactionRejected,
+                    now,
+                )?)
+            {
                 controller
                     .orchestrator
                     .hold_for_safety(
@@ -352,8 +414,7 @@ pub(crate) fn apply_pending(
                         .map_err(|e| e.to_string())?;
                 }
             }
-            controller.runtime_revisions.get_mut(&key).expect("original goal authority")
-                .goal_evidence.get_mut(&receipt.input_digest).expect("original receive budget").incident=
+            progress_mut(controller,&mission)?.get_mut(&receipt.input_digest).expect("original receive budget").incident=
                 Some("final independent original goal rejection; ownership held or bounded reviewed revision requested".into());
             continue;
         }
@@ -372,11 +433,7 @@ pub(crate) fn apply_pending(
             .map_err(|e| e.to_string())?;
         if completed {
             super::super::close_terminal_mission_coordination(controller, &mission);
-            controller
-                .runtime_revisions
-                .get_mut(&key)
-                .expect("original goal authority")
-                .goal_evidence
+            progress_mut(controller, &mission)?
                 .get_mut(&receipt.input_digest)
                 .expect("original receive budget")
                 .completed_time = Some(kernel.clone());
@@ -410,8 +467,17 @@ pub(super) fn validate_restored(
     {
         return Err("revision changed its independently frozen original goal/source".into());
     }
+    validate_goal_progress(controller, mission, &state.goal_evidence)
+}
+
+/// Verifies original receive/decision clocks for every unique goal owner without refreshing source evidence.
+pub(crate) fn validate_goal_progress(
+    controller: &ControllerState,
+    mission: &domain::MissionId,
+    evidence: &BTreeMap<String, GoalProgress>,
+) -> Result<(), String> {
     let receipts = controller.bridge.control().mission_goal_receipts(mission);
-    if receipts.len() != state.goal_evidence.len() {
+    if receipts.len() != evidence.len() {
         return Err("goal receive-budget coverage is incomplete".into());
     }
     let execution = controller
@@ -419,16 +485,14 @@ pub(super) fn validate_restored(
         .execution(mission)
         .ok_or("goal Mission absent")?;
     if execution.goal_receipt_digest().is_some_and(|digest| {
-        state
-            .goal_evidence
+        evidence
             .get(digest)
             .is_none_or(|progress| progress.completed_time.is_none())
     }) {
         return Err("completed goal lost its original kernel decision evidence".into());
     }
     for receipt in receipts {
-        let progress = state
-            .goal_evidence
+        let progress = evidence
             .get(&receipt.input_digest)
             .ok_or("goal evidence original budget is missing")?;
         progress.budget.validate()?;

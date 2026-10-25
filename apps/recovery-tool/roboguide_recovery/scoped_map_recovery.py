@@ -110,6 +110,7 @@ def validate(connection: sqlite3.Connection) -> None:
         WRAPPER,
         "roboguide.controller-checkpoint/v58",
         "roboguide.controller-checkpoint/v59",
+        "roboguide.controller-checkpoint/v60",
     }:
         return
     preparations = [
@@ -207,6 +208,7 @@ def validate_catalog(
         WRAPPER,
         "roboguide.controller-checkpoint/v58",
         "roboguide.controller-checkpoint/v59",
+        "roboguide.controller-checkpoint/v60",
     }:
         return
     roots = [record["request"].get("typed_map") for record in wrapper["memory_handoffs"].values()]

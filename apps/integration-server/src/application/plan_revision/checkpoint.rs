@@ -362,6 +362,7 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
         if let Some(execution) = controller.orchestrator.execution(&mission) {
             if execution.goal_gate().is_some()
                 && !controller.runtime_revisions.contains_key(mission.as_str())
+                && super::super::federation::execution::goal_owner(controller, &mission).is_none()
             {
                 return Err(
                     "original Mission goal gate lost its application receive-budget authority"

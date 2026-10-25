@@ -69,6 +69,11 @@ jobs:
           uv run --frozen python tools/quality/check_execution_coordination_processes.py
           --output "${RUNNER_TEMP}/roboguide-execution-coordination"
 
+      - name: Verify actual cross-domain resource decisions and original recovery
+        run: >-
+          uv run --frozen python tools/quality/check_federation_execution_processes.py
+          --output "${RUNNER_TEMP}/roboguide-federation-execution" --skip-build
+
       - name: Build the actual Controller connection lifetime probe
         run: cargo build --locked -p state --example controller_storage_probe
 

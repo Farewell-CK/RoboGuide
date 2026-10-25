@@ -1,5 +1,8 @@
 # 开发基线
 
+ADR-0211 的[跨域持久协调](federation-coordination-v0.1.md)保留实际资源/epoch、原 clock 区间、
+全局决定和独立原目标；显式 wrapper v60/recovery v0.29 的整包软件验收正在收尾。
+
 ADR-0210 的[运行协调与活动 hazard](execution-coordination-v0.1.md)已接入原 revision/stop/revoke/Control，
 Controller v59/recovery v0.28；[实际 CPU/独立原目标与冷恢复组合](acceptance/2026-10-25-execution-coordination.md)通过本地软件验收。
 后续全局/跨域/运维矩阵仍按唯一队列继续。

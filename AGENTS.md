@@ -1,3 +1,13 @@
+ADR-0211 owns resource-bearing Federation in application `federation/execution`, root `coordinator`
+and bounded pinned-mTLS `transport`. Normal Control Prepare retains the complete initial local cohort;
+all original Commit proofs precede release, and actual writer epochs/kernel budgets fence restart.
+Outgoing SQL intent precedes I/O; response loss reconciles readonly without replacing Unknown.
+Independent local/global goal progress uses the common original-goal ingress without inventing a
+revision policy. Wrapper v60/recovery v0.29 retain mandatory probe, clock, goal and decision tables.
+New execution identities encode JSON types and exact float bits; legacy participant v0.2 keeps its
+original identity. `check_federation_execution_processes.py` owns actual CPU/TLS/SQL acceptance.
+No software service, certificate or wait establishes devices, physical safety or cross-host evidence.
+
 ADR-0210 owns reviewed execution coordination in Domain `execution_coordination`, Control's exact
 preemption conflict view, application `plan_revision/coordination` and `hazards`. Explicit revision
 v0.6 freezes the original complete cohort and purpose before output/claim/Review. Running preemption

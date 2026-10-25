@@ -5,9 +5,12 @@ use control::{FederationSession, FederationSessionState};
 use ports::Clock;
 use sha2::{Digest as _, Sha256};
 
+pub(crate) mod coordinator;
+pub(crate) mod execution;
 mod policy;
 #[cfg(test)]
 mod tests;
+mod transport;
 use super::plan_revision::time::{KernelTime, OriginalBudget};
 pub(crate) use policy::{Policy, configured_policy};
 
@@ -88,6 +91,12 @@ struct Record {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct FederationState {
+    /// Original resource-bearing participants, distinct from legacy metadata sessions.
+    #[serde(default)]
+    executions: execution::State,
+    /// Root Orchestration intents and immutable distributed decisions.
+    #[serde(default)]
+    coordinations: coordinator::State,
     /// Consecutive accepted policy revisions, including retired actual leaves.
     policies: BTreeMap<u64, Policy>,
     /// Bounded original transaction records; timeouts never erase their ownership evidence.
@@ -540,14 +549,29 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
             return Err("Federation original receipt, policy, phase or deadline mismatch".into());
         }
     }
+    execution::validate(controller)?;
+    coordinator::validate(controller)?;
     Ok(())
 }
 
 /// Refuses a legacy wrapper that hides the newly versioned participant service authority.
 pub(crate) fn validate_wrapper(saved: &ServerCheckpoint) -> Result<(), String> {
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA
+        && (!saved.federation.executions.probes.is_empty()
+            || !saved.federation.executions.prepared.is_empty()
+            || saved.federation.coordinations.has_authority()
+            || saved
+                .federation
+                .policies
+                .values()
+                .any(|policy| policy.schema_version.ends_with("/v0.2")))
+    {
+        return Err("old Controller wrapper hides resource-bearing Federation authority".into());
+    }
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA

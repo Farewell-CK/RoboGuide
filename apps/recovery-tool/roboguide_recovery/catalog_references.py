@@ -34,6 +34,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.26",
     "roboguide.recovery-profile/v0.27",
     "roboguide.recovery-profile/v0.28",
+    "roboguide.recovery-profile/v0.29",
 }
 WRAPPER = "roboguide.controller-checkpoint/v48"
 WRAPPERS = {
@@ -49,6 +50,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v57",
     "roboguide.controller-checkpoint/v58",
     "roboguide.controller-checkpoint/v59",
+    "roboguide.controller-checkpoint/v60",
 }
 CODEC = "domain.EventPayload.json/v29"
 MAX_EVIDENCE_BYTES = 64 * 1024 * 1024
@@ -213,6 +215,7 @@ def _controller(
                 "roboguide.controller-checkpoint/v57",
                 "roboguide.controller-checkpoint/v58",
                 "roboguide.controller-checkpoint/v59",
+                "roboguide.controller-checkpoint/v60",
             }
             and profile_schema
             not in {
@@ -227,6 +230,7 @@ def _controller(
                 "roboguide.recovery-profile/v0.26",
                 "roboguide.recovery-profile/v0.27",
                 "roboguide.recovery-profile/v0.28",
+                "roboguide.recovery-profile/v0.29",
             }
         ):
             raise ValueError("Prepared recovery wrapper requires explicit recovery v0.18")
@@ -255,6 +259,7 @@ def _controller(
                 "roboguide.recovery-profile/v0.26",
                 "roboguide.recovery-profile/v0.27",
                 "roboguide.recovery-profile/v0.28",
+                "roboguide.recovery-profile/v0.29",
             }
         ):
             raise ValueError("upload-retention wrapper requires explicit recovery v0.16")
@@ -278,6 +283,7 @@ def _controller(
             "roboguide.recovery-profile/v0.26",
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
+            "roboguide.recovery-profile/v0.29",
         } and (
             connection.execute(
                 "SELECT 1 FROM events WHERE payload_schema='domain.EventPayload.json/v32' LIMIT 1"
@@ -312,6 +318,7 @@ def _controller(
             "roboguide.recovery-profile/v0.26",
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
+            "roboguide.recovery-profile/v0.29",
         } and any(row.get("payload_schema") == "domain.EventPayload.json/v32" for row in archived):
             raise ValueError("protected Prepared recovery needs complete parent8/Root4 recovery")
         original_archives = archive_references.operations(
@@ -332,6 +339,7 @@ def _controller(
                 "roboguide.controller-checkpoint/v57",
                 "roboguide.controller-checkpoint/v58",
                 "roboguide.controller-checkpoint/v59",
+                "roboguide.controller-checkpoint/v60",
             },
         )
         from . import archive_aborts
@@ -354,6 +362,7 @@ def _controller(
                 "roboguide.controller-checkpoint/v57",
                 "roboguide.controller-checkpoint/v58",
                 "roboguide.controller-checkpoint/v59",
+                "roboguide.controller-checkpoint/v60",
             },
         )
         history = iter(archived)
@@ -472,6 +481,7 @@ def _controller(
             "roboguide.recovery-profile/v0.26",
             "roboguide.recovery-profile/v0.27",
             "roboguide.recovery-profile/v0.28",
+            "roboguide.recovery-profile/v0.29",
         }:
             from .scoped_map_recovery import validate_catalog
 

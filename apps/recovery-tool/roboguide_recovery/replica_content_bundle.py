@@ -164,7 +164,11 @@ def _parent(
                 [identity["profile_identity"], f"roboguide.controller-checkpoint/v{version}"]
                 for version in range(
                     53,
-                    59
+                    61
+                    if schema == content.FEDERATION_PROFILE
+                    else 60
+                    if schema == content.COORDINATION_PROFILE
+                    else 59
                     if schema == content.TOPOLOGY_PROFILE
                     else 58
                     if schema == content.SCOPED_PROFILE
@@ -499,6 +503,7 @@ def validate_bundle(
         content.SCOPED_PROFILE,
         content.TOPOLOGY_PROFILE,
         content.COORDINATION_PROFILE,
+        content.FEDERATION_PROFILE,
     } and not any(item["kind"] in {"replica", "replica-content"} for item in components)
     content.validate_pairing(components, allow_standalone=standalone)
     source_map = _source_map(sources, components)

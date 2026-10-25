@@ -23,7 +23,7 @@ from check_identity_processes import request as https
 from check_plan_revision_processes import checkpoint
 from check_state_verifier_processes import ROOT, save, stop, wait_for
 from coordination_processes import Case, semantic_plan, successor
-from recovery_profile_selection import declare_controller_storage
+from recovery_profile_selection import declare_controller_storage, restore_schema, standalone_schema
 
 
 def ready_child(case: Case, job: dict[str, Any]) -> bool:
@@ -404,8 +404,8 @@ def cold(case: Case, old_controller: Path | None) -> dict[str, Any]:
             ],
         }
     )
-    profile = {
-        "schema": "roboguide.recovery-profile/v0.28",
+    profile: dict[str, Any] = {
+        "schema": standalone_schema(case.root / "controller.sqlite3"),
         "profile_id": uuid.uuid4().hex,
         "revision": 1,
         "max_bytes": 512 * 1024 * 1024,
@@ -480,7 +480,7 @@ def cold(case: Case, old_controller: Path | None) -> dict[str, Any]:
         "original-coordination-restore",
     ]
     receipt = execute(*restore_arguments)
-    assert receipt["schema"] == "roboguide.restore-receipt/v0.28"
+    assert receipt["schema"] == restore_schema(profile["schema"])
     assert execute(*arguments) == backed_up and execute(*restore_arguments) == receipt
     targets = {
         component["component_id"]: Path(component["root"]) for component in receipt["components"]
@@ -527,7 +527,12 @@ def cold(case: Case, old_controller: Path | None) -> dict[str, Any]:
             rejected.returncode != 0
             and rows(case.root / "controller.sqlite3") == prior["controller"]
         )
-        assert b"v59" in rejected.stdout + rejected.stderr
+        assert (
+            subprocess.check_output([str(case.binary), "--application-schema"], text=True)
+            .strip()
+            .encode()
+            in rejected.stdout + rejected.stderr
+        )
         old_exit = rejected.returncode
     result = {
         "passed": True,

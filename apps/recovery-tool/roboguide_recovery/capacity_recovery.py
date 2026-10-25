@@ -16,6 +16,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v57",
     "roboguide.controller-checkpoint/v58",
     "roboguide.controller-checkpoint/v59",
+    "roboguide.controller-checkpoint/v60",
 }
 CHAIN = "roboguide.checkpoint-chain/v1"
 MAXIMUM = 64 * 1024 * 1024

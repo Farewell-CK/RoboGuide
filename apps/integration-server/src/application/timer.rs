@@ -102,6 +102,7 @@ fn drive_application_timer_synchronous(
         safety_stop::tick(&mut candidate, now)?;
         super::resource_topology::monitor(&mut candidate, now)?;
         super::hazards::monitor(&mut candidate, now)?;
+        super::federation::execution::monitor(&mut candidate, event_log, now)?;
         super::plan_revision::tick(&mut candidate, clock, None, verifier_feed)?;
         super::memory_handoff::tick(&mut candidate, now)?;
         begin_current_ambiguity_recoveries(&mut candidate, now, &correlation, &mut events)?;

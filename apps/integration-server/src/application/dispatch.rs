@@ -20,6 +20,7 @@ pub(crate) fn drive_ready_tasks(
                     .group_recovery_holds_dispatch(execution.group_id(), timestamp)
                     || super::memory_handoff::holds_binding(controller, execution.group_id())
                     || super::plan_revision::blocks_mission(controller, &mission)
+                    || super::federation::execution::blocks_mission(controller, &mission)
             })
         {
             attempted.extend(
@@ -122,6 +123,7 @@ fn drive_ready_task(
                 .group_recovery_holds_dispatch(mission.group_id(), timestamp)
                 || super::memory_handoff::holds_binding(controller, mission.group_id())
                 || super::plan_revision::blocks_mission(controller, mission_id)
+                || super::federation::execution::blocks_mission(controller, mission_id)
         })
     {
         return Ok(false);

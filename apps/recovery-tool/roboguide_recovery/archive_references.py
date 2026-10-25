@@ -32,6 +32,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.26",
     "roboguide.recovery-profile/v0.27",
     "roboguide.recovery-profile/v0.28",
+    "roboguide.recovery-profile/v0.29",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -46,6 +47,7 @@ WRAPPERS = {
     "roboguide.controller-checkpoint/v57",
     "roboguide.controller-checkpoint/v58",
     "roboguide.controller-checkpoint/v59",
+    "roboguide.controller-checkpoint/v60",
 }
 MAX_HISTORY_BYTES = 256 * 1024 * 1024
 MAX_CATALOG_BYTES = 64 * 1024 * 1024
@@ -439,6 +441,7 @@ def validate(
         "roboguide.recovery-profile/v0.26",
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
+        "roboguide.recovery-profile/v0.29",
     } and not any(item["kind"] in {"replica", "replica-content"} for item in components)
     bindings: dict[str, set[str]] = {}
     if profile_schema in SUPPORTED:
@@ -487,6 +490,7 @@ def validate(
                         "roboguide.recovery-profile/v0.26",
                         "roboguide.recovery-profile/v0.27",
                         "roboguide.recovery-profile/v0.28",
+                        "roboguide.recovery-profile/v0.29",
                     }
                     and isinstance(authority_id, str)
                     and not standalone
@@ -520,6 +524,7 @@ def validate(
                             "roboguide.recovery-profile/v0.26",
                             "roboguide.recovery-profile/v0.27",
                             "roboguide.recovery-profile/v0.28",
+                            "roboguide.recovery-profile/v0.29",
                         }
                     )
                 ):
@@ -547,6 +552,7 @@ def validate(
                     "roboguide.controller-checkpoint/v57",
                     "roboguide.controller-checkpoint/v58",
                     "roboguide.controller-checkpoint/v59",
+                    "roboguide.controller-checkpoint/v60",
                 },
             )
             cleanups: dict[str, list[tuple[dict[str, Any], dict[str, Any] | None]]] = {}
@@ -595,6 +601,7 @@ def validate(
                         "roboguide.recovery-profile/v0.26",
                         "roboguide.recovery-profile/v0.27",
                         "roboguide.recovery-profile/v0.28",
+                        "roboguide.recovery-profile/v0.29",
                     }
                     or actual_profile is None
                     or seen[prefix] != projection

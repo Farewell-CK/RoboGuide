@@ -1,5 +1,7 @@
 # RoboGuide V2 current architecture
 
+[ADR-0211](../../decisions/0211-durable-cross-domain-coordination.md) defines root Orchestration's durable global decision and each domain's normal Control ownership. Actual pinned peers, original writer epochs/kernel budgets/clock intervals, complete Commit receipts and independent original goals gate execution. [Local process and recovery acceptance](../../development/acceptance/2026-10-25-federation-execution.md) passes; the complete final fault composition and independent physical/cross-host evidence remain required.
+
 [ADR-0210](../../decisions/0210-reviewed-execution-coordination.md) freezes execution-coordination ownership.
 Running preemption and coupled recovery use complete original stop/revoke, independent Review,
 a fresh Group and normal Control. Explicit handoff/regrasp requires original context and

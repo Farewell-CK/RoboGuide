@@ -73,6 +73,24 @@ def validate(
 ) -> None:
     """Require an explicit compatible profile; neither a declaration nor a view grants authority."""
     actual = actual_format(connection)
+    from .capacity_recovery import _checkpoint
+
+    retained = (
+        _checkpoint(
+            connection,
+            schemas=frozenset(
+                f"roboguide.controller-checkpoint/v{version}" for version in range(49, 61)
+            ),
+        )
+        if actual == STORAGE
+        else None
+    )
+    if (
+        retained is not None
+        and retained["schema"] == "roboguide.controller-checkpoint/v60"
+        and profile_schema != "roboguide.recovery-profile/v0.29"
+    ):
+        raise ValueError("resource-bearing Federation v60 requires explicit recovery v0.29")
     if actual == STORAGE and profile_schema not in {
         PROFILE,
         "roboguide.recovery-profile/v0.18",
@@ -86,11 +104,26 @@ def validate(
         "roboguide.recovery-profile/v0.26",
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
+        "roboguide.recovery-profile/v0.29",
     }:
         raise ValueError("Controller storage v1 requires explicit recovery v0.17")
     objects = {
         row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
+    for current_table in ("controller_checkpoint", "controller_checkpoint_head"):
+        if (
+            current_table in objects
+            and connection.execute(
+                f"SELECT 1 FROM {current_table} "
+                "WHERE schema='roboguide.controller-checkpoint/v60' LIMIT 1"
+            ).fetchone()
+        ):
+            if profile_schema != "roboguide.recovery-profile/v0.29":
+                raise ValueError("resource-bearing Federation v60 requires explicit recovery v0.29")
+            if retained is None:
+                from .federation_recovery import validate as validate_federation
+
+                validate_federation(connection)
     for table in ("controller_checkpoint", "controller_checkpoint_head"):
         if (
             table in objects
@@ -98,7 +131,8 @@ def validate(
                 f"SELECT 1 FROM {table} WHERE schema='roboguide.controller-checkpoint/v59' LIMIT 1"
             ).fetchone()
             is not None
-            and profile_schema != "roboguide.recovery-profile/v0.28"
+            and profile_schema
+            not in {"roboguide.recovery-profile/v0.28", "roboguide.recovery-profile/v0.29"}
         ):
             raise ValueError("cohort/hazard Controller v59 requires explicit recovery v0.28")
         if (
@@ -122,6 +156,7 @@ def validate(
                 "roboguide.recovery-profile/v0.26",
                 "roboguide.recovery-profile/v0.27",
                 "roboguide.recovery-profile/v0.28",
+                "roboguide.recovery-profile/v0.29",
             }
         ):
             raise ValueError("scoped typed-map Controller v57 requires explicit recovery v0.26")
@@ -138,10 +173,15 @@ def validate(
                 "roboguide.recovery-profile/v0.26",
                 "roboguide.recovery-profile/v0.27",
                 "roboguide.recovery-profile/v0.28",
+                "roboguide.recovery-profile/v0.29",
             }
         ):
             raise ValueError("quantitative Controller v56 requires explicit recovery v0.24")
-    if profile_schema == "roboguide.recovery-profile/v0.28":
+    if retained is not None:
+        from .federation_recovery import validate as validate_federation
+
+        validate_federation(connection)
+    if profile_schema in {"roboguide.recovery-profile/v0.28", "roboguide.recovery-profile/v0.29"}:
         from .coordination_recovery import validate as validate_coordination
 
         validate_coordination(connection)
@@ -151,6 +191,7 @@ def validate(
         "roboguide.recovery-profile/v0.26",
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
+        "roboguide.recovery-profile/v0.29",
     }:
         from .capacity_recovery import validate as validate_capacity
 
@@ -159,6 +200,7 @@ def validate(
         "roboguide.recovery-profile/v0.26",
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
+        "roboguide.recovery-profile/v0.29",
     }:
         from .scoped_map_recovery import validate as validate_scoped_maps
 
@@ -169,6 +211,7 @@ def validate(
         "roboguide.recovery-profile/v0.26",
         "roboguide.recovery-profile/v0.27",
         "roboguide.recovery-profile/v0.28",
+        "roboguide.recovery-profile/v0.29",
     }:
         from .topology_recovery import validate as validate_topology
 

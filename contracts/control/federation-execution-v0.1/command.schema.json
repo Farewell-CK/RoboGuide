@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest",
+    "nonce",
+    "epoch",
+    "decision",
+    "commits"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.federation-execution/v0.1"
+    },
+    "manifest": {
+      "$ref": "#/$defs/manifest"
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "epoch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "decision": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "manifest_digest",
+            "prepared",
+            "digest"
+          ],
+          "properties": {
+            "manifest_digest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "prepared": {
+              "type": "object",
+              "minProperties": 2,
+              "maxProperties": 16,
+              "additionalProperties": {
+                "type": "object"
+              }
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          }
+        }
+      ]
+    },
+    "commits": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "minProperties": 2,
+          "maxProperties": 16,
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "transaction_id",
+        "coordinator_domain",
+        "tenant_id",
+        "objective",
+        "budget_ms",
+        "max_clock_uncertainty_ms",
+        "participants"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "roboguide.federation-execution/v0.1"
+        },
+        "transaction_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "coordinator_domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "budget_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000
+        },
+        "max_clock_uncertainty_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "participants": {
+          "type": "object",
+          "minProperties": 2,
+          "maxProperties": 16,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "plan",
+              "goal_verifier"
+            ],
+            "properties": {
+              "plan": {
+                "oneOf": [
+                  {
+                    "$ref": "../../mission/v0.5/mission-plan.schema.json"
+                  },
+                  {
+                    "$ref": "../../mission/v0.6/mission-plan.schema.json"
+                  },
+                  {
+                    "$ref": "../../mission/v0.7/mission-plan.schema.json"
+                  },
+                  {
+                    "$ref": "../../mission/v0.8/mission-plan.schema.json"
+                  },
+                  {
+                    "$ref": "../../mission/v0.9/mission-plan.schema.json"
+                  },
+                  {
+                    "$ref": "../../mission/v0.10/mission-plan.schema.json"
+                  },
+                  {
+                    "$ref": "../../mission/v0.11/mission-plan.schema.json"
+                  }
+                ]
+              },
+              "goal_verifier": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "verifier",
+                  "predicate",
+                  "max_evidence_age_ms"
+                ],
+                "properties": {
+                  "verifier": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "namespace",
+                      "name",
+                      "version"
+                    ],
+                    "properties": {
+                      "namespace": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "version": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "predicate": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "max_evidence_age_ms": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 60000
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

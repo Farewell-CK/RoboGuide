@@ -1,0 +1,35 @@
+[
+  {
+    "value": 1e-07,
+    "digest": "sha256:cb4d659fdde1cc7632b54434e948ca47ff25ff556471c5c0f7117a753d5d9ea3"
+  },
+  {
+    "value": -0.0,
+    "digest": "sha256:755372b40b9c9d3eb83123c848ce755d39ab990b7db6e81400847af6ed626356"
+  },
+  {
+    "value": 1.0,
+    "digest": "sha256:18fae39f6dcb8b720f047f44669f558b514f7b39fac165b6fe3f005b27d1112e"
+  },
+  {
+    "value": 18446744073709551615,
+    "digest": "sha256:8a917e9cb6e5adffc5c17bb4e0ba22ecf6c6d8fe78d6513b800c222d129e38a2"
+  },
+  {
+    "value": {
+      "$f64_bits": "3ff0000000000000"
+    },
+    "digest": "sha256:89350b04c71a744f10dfbbe7a9dabb73cb24a496b458f3bbd29f697c9708fc77"
+  },
+  {
+    "value": {
+      "坐标": [
+        1.23,
+        1e-09
+      ],
+      "active": true,
+      "empty": null
+    },
+    "digest": "sha256:50ed672321952b9862796e24068bb7e2e10503afc556182478cbd9a26ea5b0eb"
+  }
+]

@@ -7,6 +7,8 @@
 本文与已接受 ADR 共同构成 V2 架构权威，按当前职责和生命周期组织，不新增架构决策。
 [English](README.en.md)。
 
+[ADR-0211](../../decisions/0211-durable-cross-domain-coordination.md)规定 Root Orchestration 的持久全局决定和各域正常 Control 所有权。真实 pinned peer、原 writer epoch/kernel budget/clock 区间、全体 Commit 回执与独立原目标共同限制执行。[本地进程及恢复验收](../../development/acceptance/2026-10-25-federation-execution.md)通过；完整最终故障组合、实际跨主机与物理证据仍须独立完成。
+
 [ADR-0210](../../decisions/0210-reviewed-execution-coordination.md)冻结运行协调的职责：
 运行中抢占与耦合恢复通过原完整 stop/revoke、独立 Review、fresh Group 和正常 Control；
 显式 handoff/regrasp 合同要求原上下文和 operation-owned device assurance。活动 hazard

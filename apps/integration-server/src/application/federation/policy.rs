@@ -24,6 +24,9 @@ pub(crate) struct Policy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Grant {
+    /// Explicit v0.2 delegation for resource-bearing coordination, absent in old metadata grants.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) execution_coordinator: bool,
     /// Stable principal must also match the current operator TLS grant.
     pub(crate) principal_id: String,
     /// Exact tenants, without wildcard inheritance.
@@ -37,7 +40,14 @@ pub(crate) struct Grant {
 impl Policy {
     /// Rejects undeclared domains, unbounded grants and wildcard authority.
     pub(crate) fn validate(&self) -> Result<(), String> {
-        if self.schema_version != "roboguide.federation-authorization/v0.1"
+        if !matches!(
+            self.schema_version.as_str(),
+            "roboguide.federation-authorization/v0.1" | "roboguide.federation-authorization/v0.2"
+        ) || self.schema_version.ends_with("/v0.1")
+            && self
+                .grants
+                .values()
+                .any(|grant| grant.execution_coordinator)
             || !valid_name(&self.registry_id)
             || !valid_name(&self.local_domain)
             || self.revision == 0
@@ -77,7 +87,8 @@ impl Policy {
         if self == next {
             return Ok(());
         }
-        if next.registry_id != self.registry_id
+        if self.schema_version.ends_with("/v0.2") && !next.schema_version.ends_with("/v0.2")
+            || next.registry_id != self.registry_id
             || next.local_domain != self.local_domain
             || self.revision.checked_add(1) != Some(next.revision)
             || self
@@ -118,6 +129,11 @@ impl Policy {
         }
         validate_session_route(session, &self.local_domain, Some(&caller.tenant))
     }
+}
+
+/// Preserves original v0.1 grant bytes when the new delegation is absent.
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// Reads only an explicitly configured closed policy; no default local domain is invented.
@@ -162,7 +178,7 @@ fn valid_name(value: &str) -> bool {
 }
 
 /// Checks the actual leaf/digest spelling independently of certificate subject text.
-fn valid_digest(value: &str) -> bool {
+pub(super) fn valid_digest(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
             && hex

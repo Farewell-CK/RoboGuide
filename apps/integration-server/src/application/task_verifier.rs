@@ -175,6 +175,7 @@ pub(crate) fn validate_restored_verifier_source(
     if matches!(
         checkpoint.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_RUNTIME_REVISION_SERVER_CHECKPOINT_SCHEMA

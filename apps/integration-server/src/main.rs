@@ -37,6 +37,9 @@ use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 const SERVER_CHECKPOINT_SCHEMA: &str = state::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA;
 /// Original topology generation has no additional cohort/hazard authority.
 const PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v58";
+/// Original reviewed execution coordination generation, before resource-bearing Federation authority.
+const PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA: &str =
+    "roboguide.controller-checkpoint/v59";
 /// Previous wrapper without original spatial/calendar declaration and reservation authority.
 const PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA: &str = "roboguide.controller-checkpoint/v57";
 /// Previous wrapper without scoped typed-map preparations and transitive lifecycle authority.
@@ -1215,6 +1218,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
@@ -1281,6 +1285,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if matches!(
                 checkpoint.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
@@ -1292,10 +1297,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "current Controller wrapper lacks mandatory Federation reference state".into(),
                 );
             }
+            if value["schema"] == SERVER_CHECKPOINT_SCHEMA
+                && (value
+                    .get("federation")
+                    .and_then(|state| state.get("executions"))
+                    .is_none()
+                    || value
+                        .get("federation")
+                        .and_then(|state| state.get("coordinations"))
+                        .is_none())
+            {
+                return Err(
+                    "current Controller wrapper lacks mandatory Federation execution tables".into(),
+                );
+            }
             let saved: ServerCheckpoint = serde_json::from_value(value)?;
             if !matches!(
                 saved.schema.as_str(),
                 SERVER_CHECKPOINT_SCHEMA
+                    | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
                     | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
                     | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
@@ -1553,9 +1573,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         || actor_placement_path.is_some()
         || physical_entity_registry_path.is_some()
         || restored_localization_evidence
+        || application::federation::execution::has_pending(&controller)
     {
         event_log.begin_batch()?;
         if let Err(error) = application::safety_stop::restore_holds(&mut controller) {
+            let _ = event_log.rollback_batch();
+            return Err(error.into());
+        }
+        if let Err(error) = application::federation::execution::monitor(
+            &mut controller,
+            &event_log,
+            process_clock.now(),
+        ) {
             let _ = event_log.rollback_batch();
             return Err(error.into());
         }
@@ -1601,6 +1630,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &event_log,
         event_write_gate.as_ref(),
     )?;
+    application::federation::coordinator::configured()?;
+    if std::env::var_os("ROBOGUIDE_FEDERATION_PEERS").is_some() {
+        let peer_controller = controller.clone();
+        let peer_events = event_log.clone();
+        let peer_gate = event_write_gate.clone();
+        let peer_clock = process_clock.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(250));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut cursor = 0;
+            loop {
+                interval.tick().await;
+                let owner = peer_controller.clone();
+                let events = peer_events.clone();
+                let gate = peer_gate.clone();
+                let clock = peer_clock.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    let result = application::federation::coordinator::step(
+                        &owner,
+                        &events,
+                        gate.as_ref(),
+                        clock.as_ref(),
+                        &mut cursor,
+                    );
+                    (cursor, result)
+                })
+                .await;
+                match result {
+                    Ok((next, result)) => {
+                        cursor = next;
+                        if let Err(error) = result {
+                            eprintln!("Federation original peer turn deferred: {error}");
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("Federation owned peer worker unavailable: {error}");
+                        return;
+                    }
+                }
+            }
+        });
+    }
     let http_controller = controller.clone();
     let http_deployment_feasibility = deployment_feasibility.clone();
     let http_verifier_feed = verifier_feed.clone();

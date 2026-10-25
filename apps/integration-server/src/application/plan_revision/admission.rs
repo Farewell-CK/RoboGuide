@@ -28,8 +28,21 @@ pub(super) fn refresh_authority(
     controller: &mut ControllerState,
     state: &RevisionState,
 ) -> Result<(), String> {
+    refresh_operator_authority(
+        controller,
+        &state.authorization_path,
+        &state.authorization_registry_id,
+    )
+}
+
+/// Refreshes one original actual operator registry for independently owned goal authorities without granting replanning.
+pub(crate) fn refresh_operator_authority(
+    controller: &mut ControllerState,
+    path: &std::path::Path,
+    registry_id: &str,
+) -> Result<(), String> {
     use std::io::Read;
-    let file = std::fs::File::open(&state.authorization_path).map_err(|e| e.to_string())?;
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
     file.take(2 * 1024 * 1024 + 1)
         .read_to_end(&mut bytes)
@@ -40,7 +53,7 @@ pub(super) fn refresh_authority(
     let profile: domain::OperatorAuthorization =
         serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     profile.validate()?;
-    if profile.registry_id != state.authorization_registry_id {
+    if profile.registry_id != registry_id {
         return Err("original revision authorization registry changed".into());
     }
     controller
@@ -317,6 +330,9 @@ fn apply(
     deployment: Option<&DeploymentFeasibility>,
     feed: Option<&TaskVerifierFeed>,
 ) -> Result<serde_json::Value, String> {
+    if super::super::federation::execution::goal_owner(controller, mission).is_some() {
+        return Err("local revision cannot replace an original distributed manifest; coordinate a complete global stop and new reviewed transaction".into());
+    }
     if matches!(command.action, Action::RevokePolicy) {
         if caller.role != "recovery-admin" {
             return Err("policy revocation requires actual recovery-admin authority".into());

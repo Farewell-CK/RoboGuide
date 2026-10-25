@@ -238,7 +238,7 @@ def validate(connection: sqlite3.Connection) -> None:
     wrapper = _checkpoint(
         connection,
         schemas=frozenset(
-            f"roboguide.controller-checkpoint/v{version}" for version in range(49, 60)
+            f"roboguide.controller-checkpoint/v{version}" for version in range(49, 61)
         ),
     )
     if wrapper is None:
@@ -246,7 +246,7 @@ def validate(connection: sqlite3.Connection) -> None:
     integration = json.loads(wrapper["integration_json"])
     histories = integration["control"].get("decision_policy_history", {})
     revisions = wrapper.get("runtime_revisions", {})
-    if wrapper["schema"] != WRAPPER:
+    if wrapper["schema"] not in {WRAPPER, "roboguide.controller-checkpoint/v60"}:
         if (
             (wrapper.get("hazards") or {}).get("watches")
             or any(

@@ -480,13 +480,13 @@ impl RevisionState {
 /// Application proof of original receive-relative timing, separate from Control source admission.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct GoalProgress {
+pub(crate) struct GoalProgress {
     /// Nonrenewable same-kernel receive budget.
-    budget: OriginalBudget,
+    pub(crate) budget: OriginalBudget,
     /// Actual kernel time when the original goal fact completed the Mission, if it did.
-    completed_time: Option<KernelTime>,
+    pub(crate) completed_time: Option<KernelTime>,
     /// Original bounded late/negative/unavailable disposition; it never rewrites source evidence.
-    incident: Option<String>,
+    pub(crate) incident: Option<String>,
 }
 
 /// Canonical closed mutation; transport authorization remains outside the supplied JSON.
@@ -628,7 +628,7 @@ fn valid_digest(value: &str) -> bool {
 pub(crate) use admission::{candidate_view, submit, view};
 pub(crate) use checkpoint::{attach_deployment, deserialize_states, validate_restored};
 pub(crate) use goal::apply_pending as apply_goal_pending;
-pub(crate) use goal::{observe_goal_ingress, submit_goal};
+pub(crate) use goal::{observe_goal_ingress, submit_goal, validate_goal_progress};
 pub(crate) use memory::{
     catalog_retirement_evidence, install_catalog, permits_parent_reference,
     requires_scoped_preparation, scoped_typed_source,

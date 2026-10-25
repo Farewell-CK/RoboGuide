@@ -82,6 +82,24 @@ pub(super) struct WriteAvailability {
 }
 
 impl SqliteEventLog {
+    /// Observes this actual writer incarnation or current quorum epoch; configured domain numbers grant nothing.
+    pub fn current_writer_epoch(&self) -> Result<String, SqliteEventLogError> {
+        self.require_writes_enabled()?;
+        self.require_read_authority()?;
+        if let Some(replicator) = &self.replicator {
+            let epoch = replicator.controller_epoch().ok_or_else(|| {
+                SqliteEventLogError::Codec("current replica writer epoch is unavailable".into())
+            })?;
+            Ok(format!("{}:{epoch}", replicator.profile_identity()))
+        } else {
+            let process = self.write_status()?.process_id.ok_or_else(|| {
+                SqliteEventLogError::Codec(
+                    "actual standalone writer incarnation is unavailable".into(),
+                )
+            })?;
+            Ok(format!("standalone:{process}"))
+        }
+    }
     /// Enables the application policy before sharing clones; never creates a new authority store.
     pub fn with_write_failure_fence(self, process_id: &str) -> Result<Self, SqliteEventLogError> {
         if process_id.is_empty()

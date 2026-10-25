@@ -157,7 +157,9 @@ pub(crate) fn revalidate_mission_resume(
     now: domain::TimestampMs,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     validate_isolation_authority(controller, now)?;
-    if super::plan_revision::blocks_mission(controller, mission_id) {
+    if super::plan_revision::blocks_mission(controller, mission_id)
+        || super::federation::execution::blocks_mission(controller, mission_id)
+    {
         return Err("Mission resume cannot bypass its original pending revision intent".into());
     }
     if safety_stop::blocks_release(controller, mission_id) {
@@ -290,6 +292,7 @@ pub(crate) fn flush_unisolated_dispatch(
                 .filter(|execution| {
                     execution.isolation().is_some()
                         || super::plan_revision::blocks_mission(controller, &mission)
+                        || super::federation::execution::blocks_mission(controller, &mission)
                         || super::memory_handoff::holds_dispatch(controller, execution.group_id())
                         || super::hazards::requires_delivery_check(controller, execution.group_id())
                             && !super::hazards::delivery_permitted(
@@ -342,10 +345,17 @@ pub(crate) fn flush_unisolated_commands(
 
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
-    if saved.schema == SERVER_CHECKPOINT_SCHEMA && saved.hazards.is_none() {
+    if matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
+    ) && saved.hazards.is_none()
+    {
         return Err("current wrapper lacks mandatory active hazard history".into());
     }
-    if saved.schema != SERVER_CHECKPOINT_SCHEMA {
+    if !matches!(
+        saved.schema.as_str(),
+        SERVER_CHECKPOINT_SCHEMA | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
+    ) {
         let integration: serde_json::Value =
             serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
         let history = integration["control"]["decision_policy_history"].as_object();
@@ -370,7 +380,9 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     }
     if matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
     ) {
         let integration: serde_json::Value =
             serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
@@ -386,7 +398,9 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     }
     if !matches!(
         saved.schema.as_str(),
-        SERVER_CHECKPOINT_SCHEMA | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
+        SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
+            | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
     ) {
         let integration: serde_json::Value =
             serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
@@ -414,6 +428,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
     ) {
@@ -442,6 +457,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
@@ -462,6 +478,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     let has_capacity_contract = matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
@@ -492,6 +509,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     let current_isolation_contract = matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_TOPOLOGY_SERVER_CHECKPOINT_SCHEMA
             | PRE_SCOPED_MAP_SERVER_CHECKPOINT_SCHEMA
@@ -517,6 +535,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -530,6 +549,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -549,6 +569,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -586,6 +607,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -628,6 +650,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -652,6 +675,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -668,6 +692,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -686,6 +711,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -712,6 +738,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -743,6 +770,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -774,6 +802,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -799,6 +828,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -853,6 +883,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -890,6 +921,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -924,6 +956,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -978,6 +1011,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA
@@ -1013,6 +1047,7 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
     if matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA
+            | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
             | PRE_COORDINATION_SERVER_CHECKPOINT_SCHEMA
             | PRE_REVISION_MEMORY_SERVER_CHECKPOINT_SCHEMA
             | PRE_GENERATION_SERVER_CHECKPOINT_SCHEMA

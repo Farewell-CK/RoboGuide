@@ -90,7 +90,7 @@ fn activation() -> ApplicationUpgradeReceipt {
 /// Finite old reading support never includes unknown/future generations or schema aliases.
 #[test]
 fn original_reader_window_is_explicit_and_bounded() {
-    for generation in 53..=59 {
+    for generation in 53..=60 {
         assert!(supports_application_generation(&format!(
             "roboguide.controller-checkpoint/v{generation}"
         )));
@@ -98,7 +98,7 @@ fn original_reader_window_is_explicit_and_bounded() {
     for schema in [
         "",
         "roboguide.controller-checkpoint/v52",
-        "roboguide.controller-checkpoint/v60",
+        "roboguide.controller-checkpoint/v61",
         "roboguide.controller-checkpoint/v056",
         "other/v56",
     ] {
