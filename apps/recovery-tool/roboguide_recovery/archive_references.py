@@ -78,6 +78,34 @@ def _metadata(connection: sqlite3.Connection, key: str) -> str | None:
     return None if row is None else str(row[0])
 
 
+def _supported_catalog_payload(schema: str, payload: dict[str, Any]) -> bool:
+    """Admit only known protected codecs; v33 must retain its exact original Task/attempt trace."""
+    if re.fullmatch(r"domain.EventPayload.json/v(?:[1-9]|[12][0-9]|3[01])", schema):
+        return True
+    if schema != "domain.EventPayload.json/v33" or next(iter(payload)) not in {
+        "MemoryArtifactStaged",
+        "MemoryArtifactImported",
+        "MemoryArtifactRejected",
+        "MapMemoryReplicaRecorded",
+    }:
+        return False
+    value = next(iter(payload.values()))
+    provenance = value.get("provenance") if isinstance(value, dict) else None
+    if not isinstance(provenance, dict) or set(provenance) != {"task_ref", "execution_id"}:
+        return False
+    task = provenance["task_ref"]
+    execution = provenance["execution_id"]
+    return (
+        isinstance(task, dict)
+        and set(task) == {"mission_id", "task_id"}
+        and all(isinstance(part, str) and bool(part.strip()) for part in task.values())
+        and isinstance(execution, str)
+        and 0 < len(execution) <= 1024
+        and execution.strip() == execution
+        and not any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in execution)
+    )
+
+
 def catalog_history(
     connection: sqlite3.Connection, profile_schema: str, budget: OperationBudget
 ) -> list[dict[str, Any]]:
@@ -157,10 +185,7 @@ def catalog_history(
             or len(payload) != 1
             or next(iter(payload)) not in PROTECTED
             or not isinstance(row["payload_schema"], str)
-            or re.fullmatch(
-                r"domain.EventPayload.json/v(?:[1-9]|[12][0-9]|3[01])", row["payload_schema"]
-            )
-            is None
+            or not _supported_catalog_payload(row["payload_schema"], payload)
         ):
             raise ValueError("original Catalog archive contains unsupported evidence")
         previous = sequence

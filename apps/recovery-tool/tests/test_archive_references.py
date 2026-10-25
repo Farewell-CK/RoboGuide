@@ -152,3 +152,65 @@ def test_directory_manifest_repin_cannot_hide_a_missing_actual_directory(
     (target / "manifest.json").write_bytes(raw)
     with pytest.raises((ValueError, OSError)):
         bundle.verify(target, digest(raw))
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "MemoryArtifactStaged",
+        "MemoryArtifactImported",
+        "MemoryArtifactRejected",
+        "MapMemoryReplicaRecorded",
+    ],
+)
+def test_v33_archive_retains_exact_original_consumer_trace(tmp_path: Path, kind: str) -> None:
+    """Parser fixtures preserve original trace without import or device authority."""
+    with sqlite3.connect(tmp_path / "archive.sqlite3") as sql:
+        sql.executescript(
+            "CREATE TABLE event_log_metadata(key TEXT PRIMARY KEY,value TEXT); "
+            "CREATE TABLE catalog_archive_events(sequence INTEGER PRIMARY KEY,data TEXT)"
+        )
+        provenance = {
+            "task_ref": {"mission_id": "original-mission", "task_id": "original-task"},
+            "execution_id": "original-attempt",
+        }
+        payload: dict[str, Any] = {kind: {"provenance": provenance}}
+        row = {
+            "sequence": 7,
+            "event_id": "original-trace-event",
+            "timestamp_ms": 3,
+            "correlation_id": "original-command",
+            "causation_id": None,
+            "payload_schema": "domain.EventPayload.json/v33",
+            "payload_json": json.dumps(payload),
+        }
+        head = {
+            "schema": "roboguide.catalog-archive-checkpoint/v0.1",
+            "through_sequence": 9,
+            "event_count": 1,
+            "digest": digest(canonical([row])),
+        }
+        sql.executemany(
+            "INSERT INTO event_log_metadata VALUES (?,?)",
+            [("history_floor", "9"), ("catalog_archive_checkpoint", json.dumps(head))],
+        )
+        sql.execute("INSERT INTO catalog_archive_events VALUES (?,?)", (7, json.dumps(row)))
+        budget = bundle.Budget({"max_bytes": 1024**2, "max_files": 128, "budget_seconds": 30})
+        assert archive_references.catalog_history(
+            sql, "roboguide.recovery-profile/v0.18", budget
+        ) == [row]
+        for changed in (
+            {},
+            {"task_ref": provenance["task_ref"]},
+            provenance | {"execution_id": ""},
+        ):
+            payload[kind]["provenance"] = changed
+            row["payload_json"] = json.dumps(payload)
+            head["digest"] = digest(canonical([row]))
+            sql.execute("UPDATE catalog_archive_events SET data=?", (json.dumps(row),))
+            sql.execute(
+                "UPDATE event_log_metadata SET value=? WHERE key='catalog_archive_checkpoint'",
+                (json.dumps(head),),
+            )
+            with pytest.raises(ValueError, match="unsupported evidence"):
+                archive_references.catalog_history(sql, "roboguide.recovery-profile/v0.18", budget)
