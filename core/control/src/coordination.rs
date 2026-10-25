@@ -115,6 +115,29 @@ pub(crate) struct Reservation {
 }
 
 impl ControlPlane {
+    /// Revalidates exact selected IDs/kinds/positive demand units without borrowing alternative resources.
+    pub(crate) fn selected_resources_match_registration(
+        registration: &domain::NodeRegistration,
+        role: &domain::RoleRequirement,
+        selected: &[domain::ResourceId],
+    ) -> bool {
+        let required = role.resource_requirements();
+        selected.len() == required.len()
+            && selected
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == selected.len()
+            && selected.iter().zip(required.iter()).all(|(id, demand)| {
+                demand.units() > 0
+                    && registration.resources().iter().any(|resource| {
+                        resource.id() == id
+                            && resource.kind() == demand.kind()
+                            && resource.capacity() >= demand.units()
+                    })
+            })
+    }
+
     /// Commits only resource-free compatibility input; resources require a current State reader.
     pub fn commit<E: EventSink>(
         &mut self,

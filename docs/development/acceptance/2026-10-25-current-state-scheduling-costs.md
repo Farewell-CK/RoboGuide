@@ -65,3 +65,35 @@ This closes the current source cost mechanism. Divisible allocation, complete ti
 commitments, other local resource enforcement, running coordination, complete Federation and
 the final non-release matrix remain required. This run creates zero devices, models or simulators
 and proves neither physical stopping nor `SoftwareComplete`.
+
+## Subsequent selected-capacity protection
+
+The following Control change also rechecks exact selected IDs/kinds/units at Bind, stopped recovery
+Rebind and dispatch readiness. An adequate unselected resource cannot lend capacity. Registration
+updates preserve the retained original quota demand; after process restore the same demand is
+checked even without a previous live Node snapshot. Unaccounted legacy updates conservatively
+retain the previously observed capacity rather than guessing units. Refusal changes no owner,
+quota claim, pending recovery commitment or event evidence. This does not introduce divisible
+allocation or reinterpret existing minimum-capacity semantics.
+
+
+The selected-capacity follow-up passed 178 Control, 282 integration-server and 78 Orchestration
+checks (two existing Control ignores). Five new cases cover live update/refused Bind/current
+readiness/restore/recovery Rebind and unchanged owners/quotas/events. Existing continuation tests
+now first prove registration refusal, then explicitly inject an offline reader counterexample
+for the independent downstream gate; these synthetic inputs are never deployment facts.
+
+The rebuilt Controller SHA-256 is
+`674f98531e2366f645abaa214eb7c2558e1b88ae8a854ab726c15fe29ae5bb28`.
+`/tmp/rg-selected-capacity-legacy-1/result.json` passed the complete actual file/cost/restart path
+and optional old-process refusal. Its actual original unaccounted Catalog then passed
+`check_catalog_adoption_processes.py --from /tmp/rg-selected-capacity-legacy-1 --output
+/tmp/rg-selected-capacity-adoption-1`: explicit adoption, original SQL rollback, complete Archive,
+actual restart and cold backup/verify/restore/retry, with zero new Nodes/devices/models/simulators.
+
+Remote `9d9c3c0b` passed the earlier three-member cold-recovery step and exposed an Archive reader
+that stopped at codec v31. Recovery now accepts v33 only for the four exact Memory replica
+variants, requiring the original Task/attempt provenance; missing or altered-shaped provenance
+and unsupported future codecs remain refused. Original archive hashes, operation bounds and
+profile gates are retained. Four new parser cases plus the existing archive/adoption cases and
+the actual composition above passed; the complete next remote run remains separate evidence.

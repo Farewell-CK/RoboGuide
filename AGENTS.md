@@ -5,6 +5,9 @@ shared by normal and recovery selection. Original source/units/unknown/policy au
 restart; costs never grant eligibility, allocation or device facts. The local provider exposes
 actual host load and null unsupported metrics. The actual maintained file gate gains
 `--scheduling-costs`; divisible allocation and complete time/space work remain required.
+Control also rechecks exact selected resource capacity at Bind/Rebind/readiness and original
+retained demand on Node registration/update. Alternative adequate IDs cannot lend capacity;
+rejection retains ownership and original quotas. No public/checkpoint generation changes apply.
 
 ADR-0204 changes only the default advertised Node heartbeat/health sampling interval to 1,000 ms.
 The independent five-second Control status TTL and fifteen-second lease remain unchanged; explicit

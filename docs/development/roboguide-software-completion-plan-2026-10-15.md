@@ -123,7 +123,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | A2 | N1/N3 | 全 producer 引用产生/退休/GC、learner/joint/readiness | readiness、Root7 GC/恢复、实际 mTLS learner/joint、损坏与旧 epoch 拒绝、Root8 私有 staging/原 Unknown/完整恢复已验收；全 producer 退休与最终 CAS 回收组合继续 |
 | A3 | N3/N7 | 旧部署实际排空、滚动升级、不安全回退拒绝 | 原 Root4 → 6 → 7 排空同 inode 升级、旧入口拒绝与三 leader 冷恢复通过；滚动/回退继续 |
 | B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | ADR-0199 已接通 typed-map handoff 的完整原始 manifest、schema v0.2、Control policy/retry/restore fence；ADR-0203 增加 runtime revision v0.4 的完整原 map/当前消费 preparation/Review/恢复权威，原生产 Mission 不改写。完整跨阶段组合仍须实际验收，不重写空间算法 |
-| C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | ADR-0205 显式当前来源成本合同、普通/恢复排序、原观测审计、真实 host load、实际双 Node/SQL/重启与旧二进制拒绝已验收。divisible allocation、完整时空与其他本地强制继续必需；保留现有 quota/units |
+| C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | ADR-0205 显式当前来源成本合同、普通/恢复排序、原观测审计、真实 host load、实际双 Node/SQL/重启与旧二进制拒绝已验收；选定容量在 Bind/Rebind/readiness 和注册/重启入口重新校验。divisible allocation、完整时空与其他本地强制继续必需；保留现有 quota/units |
 | D | N5/F8 | 运行中抢占、耦合恢复、hazard/handoff/regrasp 与原目标 | 待实现与验收；复用 stop/revoke/revision |
 | E | N6 | 双独立 Control 服务的 mTLS、持久决定及原事务恢复 | ADR-0201/0202 已接入 participant HTTP、持久版本化 tenant/domain grant、原回执、双 SQLite 重启/故障对账；持久 coordinator、真实 peer 请求、资源/epoch 证明和跨主机时钟/恢复组合仍未实现，global dispatch 保持 false |
 | F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | 待全部软件必需项通过 |

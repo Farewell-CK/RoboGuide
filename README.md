@@ -1618,3 +1618,5 @@ Python 3.9 worker 已兼容。运行该解释器回归时设置 `ROBOGUIDE_HABIT
 [部署兼容性检查](integrations/habitat-local-eaios/README.md#deployment-python-compatibility)。
 
 Scheduling cost sources: [ADR-0205](docs/decisions/0205-current-state-scheduling-costs.md) binds explicit current-session State admission to normal/recovery ordering, original audit and a readonly Mission view. The local provider measures host load; unsupported queue, route, traffic and GPU metrics stay unavailable.
+
+Control rechecks the exact selected resource IDs, kinds and original demand at Bind, recovery Rebind and dispatch readiness; Node registration cannot erase retained capacity commitments.

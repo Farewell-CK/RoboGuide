@@ -249,7 +249,13 @@ impl ControlPlane {
             let role = group
                 .role_requirement(plan.task_ref(), assignment.role_id())
                 .ok_or_else(|| ControlError::InvalidProposal("Bind Role is absent".into()))?;
-            if !self.node_is_eligible_for_role(state, assignment.node_id(), role, timestamp)
+            if !state.node(assignment.node_id()).is_some_and(|node| {
+                Self::selected_resources_match_registration(
+                    node.registration(),
+                    role,
+                    assignment.resource_ids(),
+                )
+            }) || !self.node_is_eligible_for_role(state, assignment.node_id(), role, timestamp)
                 || plan
                     .operation_for_role(assignment.role_id())
                     .is_some_and(|operation| {

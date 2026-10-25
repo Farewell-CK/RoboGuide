@@ -132,6 +132,7 @@ impl ControlPlane {
             });
         }
         self.ensure_resource_identities_available(state, &registration)?;
+        self.ensure_declared_capacity_covers_commitments(&registration)?;
         if let Some(current) = state.node(registration.node_id()) {
             self.ensure_committed_resources_remain_declared(current, &registration)?;
         }
@@ -469,6 +470,28 @@ impl ControlPlane {
         Ok(())
     }
 
+    /// Rechecks retained original demand even when process-local Node observations were cleared by restore.
+    fn ensure_declared_capacity_covers_commitments(
+        &self,
+        registration: &NodeRegistration,
+    ) -> Result<(), ControlError> {
+        for resource in registration.resources() {
+            if self.reservations.contains_key(resource.id())
+                && self.quota_ledger.claims().iter().any(|claim| {
+                    claim.resource_id.as_ref() == Some(resource.id())
+                        && (claim.kind != resource.kind()
+                            || claim.units > u64::from(resource.capacity()))
+                })
+            {
+                return Err(ControlError::InvalidProposal(format!(
+                    "resource {} cannot cover its original committed demand",
+                    resource.id()
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Prevents a registration update from invalidating an authoritative reservation.
     fn ensure_committed_resources_remain_declared(
         &self,
@@ -476,8 +499,18 @@ impl ControlPlane {
         replacement: &NodeRegistration,
     ) -> Result<(), ControlError> {
         for resource in current.registration().resources() {
+            let required_units = self
+                .quota_ledger
+                .claims()
+                .iter()
+                .find(|claim| claim.resource_id.as_ref() == Some(resource.id()))
+                .map_or(u64::from(resource.capacity()), |claim| claim.units);
             if self.reservations.contains_key(resource.id())
-                && !replacement.owns_resource(resource.id(), Some(resource.kind()))
+                && !replacement.resources().iter().any(|next| {
+                    next.id() == resource.id()
+                        && next.kind() == resource.kind()
+                        && u64::from(next.capacity()) >= required_units
+                })
             {
                 return Err(ControlError::InvalidProposal(format!(
                     "registration update changes committed resource {}",

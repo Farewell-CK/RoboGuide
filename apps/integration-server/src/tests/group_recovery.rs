@@ -335,6 +335,45 @@ impl Fixture {
         *controller.bridge.state_mut() = state;
     }
 
+    /// Proves registration refusal, then injects only a synthetic reader counterexample for downstream gates.
+    fn observe_incompatible_capacity(&self, index: usize, supported: bool, capacity: u32) {
+        use ports::SharedNodeStateWriter;
+        let mut controller = self.controller.lock().unwrap();
+        let mut state = controller.bridge.state().clone();
+        let changed = registration(index, supported, capacity);
+        let original = state.node(changed.node_id()).unwrap().clone();
+        let before = serde_json::to_value(controller.bridge.control().checkpoint()).unwrap();
+        let sequence = self.events.latest_sequence().unwrap();
+        assert!(
+            controller
+                .bridge
+                .control_mut()
+                .register_node(
+                    &mut state,
+                    changed.clone(),
+                    domain::NodeStatus::new(domain::NodeHealth::Online, TimestampMs::new(15)),
+                    TimestampMs::new(15),
+                    &self.correlation,
+                    &mut self.events.clone()
+                )
+                .is_err()
+        );
+        assert_eq!(
+            serde_json::to_value(controller.bridge.control().checkpoint()).unwrap(),
+            before
+        );
+        assert_eq!(self.events.latest_sequence().unwrap(), sequence);
+        state
+            .record_node(domain::NodeStateSnapshot::new(
+                changed,
+                domain::NodeStatus::new(domain::NodeHealth::Online, TimestampMs::new(15)),
+                TimestampMs::new(15),
+                original.liveness(),
+            ))
+            .unwrap();
+        *controller.bridge.state_mut() = state;
+    }
+
     /// Builds the unchanged wire authorization for HTTP parse/admission checks.
     fn command(&self) -> serde_json::Value {
         serde_json::json!({"schema_version":"roboguide.group-recovery-command/v0.1", "recovery_id":"round-1",
@@ -517,7 +556,11 @@ fn changed_support_or_capacity_prevents_continuation_commit() {
             fixture.fact(attempt, 2, ExecutionPhase::Cancelled, 20);
         }
         let original = fixture.reservations();
-        fixture.update(0, supported, capacity);
+        if capacity < 2 {
+            fixture.observe_incompatible_capacity(0, supported, capacity);
+        } else {
+            fixture.update(0, supported, capacity);
+        }
         fixture.tick(21).unwrap();
         let controller = fixture.controller.lock().unwrap();
         assert_eq!(controller.bridge.attempt_history().len(), 2);
@@ -767,7 +810,7 @@ fn retained_control_commit_rechecks_state_after_proposal_without_releasing_resou
             .unwrap()
     };
     assert_eq!(fixture.reservations(), ownership);
-    fixture.update(0, true, 1);
+    fixture.observe_incompatible_capacity(0, true, 1);
     let sequence = fixture.events.latest_sequence().unwrap();
     let mut live = fixture.controller.lock().unwrap();
     let current = live.bridge.state().clone();

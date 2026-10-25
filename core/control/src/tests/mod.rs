@@ -24,3 +24,5 @@ mod node_identity;
 mod ownership_model;
 
 mod scheduling_cost;
+
+mod selected_resource_capacity;

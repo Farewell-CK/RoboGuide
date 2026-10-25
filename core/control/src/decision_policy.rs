@@ -28,6 +28,13 @@ impl ControlPlane {
                 task.assignments().iter().any(|assignment| {
                     assignment.role_id() == command.role_id()
                         && assignment.node_id() == command.node_id()
+                        && state.node(command.node_id()).is_some_and(|node| {
+                            Self::selected_resources_match_registration(
+                                node.registration(),
+                                role,
+                                assignment.resource_ids(),
+                            )
+                        })
                 })
             });
         owner_matches

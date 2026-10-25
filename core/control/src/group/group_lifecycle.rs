@@ -400,7 +400,21 @@ impl ControlPlane {
         let role = group
             .role_requirement(committed.task_ref(), committed.role_id())
             .ok_or_else(|| ControlError::InvalidProposal("recovery Role is absent".into()))?;
-        if !self.node_is_eligible_for_role(state, committed.replacement_node_id(), role, timestamp)
+        if !state
+            .node(committed.replacement_node_id())
+            .is_some_and(|node| {
+                Self::selected_resources_match_registration(
+                    node.registration(),
+                    role,
+                    committed.committed_resource_ids(),
+                )
+            })
+            || !self.node_is_eligible_for_role(
+                state,
+                committed.replacement_node_id(),
+                role,
+                timestamp,
+            )
             || committed.operation().is_some_and(|operation| {
                 !self.node_is_eligible_for_role_operation(
                     state,
