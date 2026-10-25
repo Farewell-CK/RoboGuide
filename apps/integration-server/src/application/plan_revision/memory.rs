@@ -640,15 +640,23 @@ pub(crate) fn permits_parent_reference(
             switch.phase == Phase::Applied && switch.target_group == import.request.group_id
         }) {
             for record in state.candidates[&switch.ticket_id].memory.values() {
-                if record.parent.artifact() != protected.artifact()
-                    || record.request.child != import.request.manifest
-                {
+                if &record.parent != protected || record.request.child != import.request.manifest {
                     continue;
                 }
-                // The current target has already passed its own exact preparation/import
-                // authority. Its data-plane read may therefore use the original parent CAS
-                // bytes; source/previous-attempt retirement is enforced before publication and
-                // switch admission, rather than by blocking the target's first read.
+                if switch
+                    .attempts
+                    .iter()
+                    .map(|attempt| &attempt.execution_id)
+                    .chain(switch.prior_attempts.iter())
+                    .any(|id| {
+                        !super::super::safety_stop::attempt_confirmed(controller, id)
+                            || super::super::memory_use::blocks_attempt_release(controller, id)
+                    })
+                {
+                    return Err(
+                        "revision parent retains incomplete original stop/revoke evidence".into(),
+                    );
+                }
                 return Ok(true);
             }
         }
