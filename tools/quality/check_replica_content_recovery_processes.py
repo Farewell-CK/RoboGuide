@@ -28,6 +28,21 @@ from check_runnable_content_processes import http
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def committed_application_schema(metadata: dict[str, str]) -> str:
+    """Read the validated original upgrade receipts, independently of a declared target binary."""
+    sys.path.insert(0, str(ROOT / "apps/recovery-tool"))
+    from roboguide_recovery.application_upgrades import _authority
+
+    original = json.loads(metadata["identity"])[1]
+    receipts = _authority(
+        json.loads(metadata.get("application_upgrade_authority_v1", "null")), original
+    )
+    value: str = (
+        receipts[-1]["intent"]["request"]["target"]["application_schema"] if receipts else original
+    )
+    return value
+
+
 def archive_inputs(source: Path, components: list[dict[str, Any]]) -> None:
     """Declare this owned fixture's original Archive outputs without granting product authority."""
     existing = {value["root"] for value in components}
@@ -127,34 +142,11 @@ def profile(source: Path, output: Path) -> dict[str, Any]:
         ) as parent_sql:
             parent_versions.add(parent_sql.execute("PRAGMA user_version").fetchone()[0])
             metadata = dict(parent_sql.execute("SELECT key,value FROM replica_v1_meta"))
-            original_identity = json.loads(metadata["identity"])
-            upgrade = json.loads(metadata.get("application_upgrade_authority_v1", "null"))
-            federation_generation |= original_identity[
-                1
-            ] == "roboguide.controller-checkpoint/v60" or (
-                upgrade is not None
-                and upgrade.get("target", {}).get("application_schema")
-                == "roboguide.controller-checkpoint/v60"
-            )
-            coordination_generation |= original_identity[
-                1
-            ] == "roboguide.controller-checkpoint/v59" or (
-                upgrade is not None
-                and upgrade.get("target", {}).get("application_schema")
-                == "roboguide.controller-checkpoint/v59"
-            )
-            topology_generation |= original_identity[
-                1
-            ] == "roboguide.controller-checkpoint/v58" or (
-                upgrade is not None
-                and upgrade.get("target", {}).get("application_schema")
-                == "roboguide.controller-checkpoint/v58"
-            )
-            scoped_generation |= original_identity[1] == "roboguide.controller-checkpoint/v57" or (
-                upgrade is not None
-                and upgrade.get("target", {}).get("application_schema")
-                == "roboguide.controller-checkpoint/v57"
-            )
+            active_schema = committed_application_schema(metadata)
+            federation_generation |= active_schema == "roboguide.controller-checkpoint/v60"
+            coordination_generation |= active_schema == "roboguide.controller-checkpoint/v59"
+            topology_generation |= active_schema == "roboguide.controller-checkpoint/v58"
+            scoped_generation |= active_schema == "roboguide.controller-checkpoint/v57"
         dependencies = []
         if (directory / "controller.sqlite3").exists():
             components.append(

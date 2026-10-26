@@ -13,6 +13,12 @@ Federation v0.29+ store as v0.14; an explicitly downgraded old profile still ref
 writer or CAS effect. The maintained private-recipient gate projects only genuinely old inputs and
 retains current writer/application schema evidence.
 
+The replica cold checker selects the active application generation from fully validated original
+upgrade authority receipts, never a nonexistent top-level target or the selected executable. Current
+genuine v55-to-v60 rolling upgrade and original v0.29 three-leader cold recovery pass with parent10/
+Root8 preserved. Producer compaction observes actual leader changes: an already current target
+compacts directly, while only a distinct target receives a transfer; no receipt is invented.
+
 ADR-0220 adds optional actual unchanged reported-health data to Integration's exact current-session
 receive evidence. Any health transition disables that session's early health input. Control separately
 checks accepted liveness, identity/session/lease, sequence and actual receive time under the original
@@ -70,8 +76,9 @@ Root map, and joins active original domain/nonce/Prepare/Commit/release evidence
 Application generation and declared physical layout remain independent; no implicit Root upgrade
 or credential deployment follows. `check_federation_ha_processes.py` and
 `federation_ha_recovery_processes.py` own the actual independent-domain process acceptance. See
-`docs/development/replicated-federation-deployment-v0.1.md`. Acceptance is in progress; software,
-single-host, devices and long-term SLO remain distinct.
+`docs/development/replicated-federation-deployment-v0.1.md`. HA16 passed its actual complete
+two-domain chain; software, single-host, devices and long-term SLO remain distinct. Current full
+CI and exact main/source SHA are independent delivery gates in the nonrelease acceptance matrix.
 
 ADR-0213 owns explicit listener capacity in Integration `listener_capacity`, Mission HTTP and
 the independently deployable Memory/Spatial/Robonix local adapters. Actual permits precede TLS or

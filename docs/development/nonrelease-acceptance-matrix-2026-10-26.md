@@ -1,6 +1,7 @@
 # 全部非发布整改最终验收矩阵
 
-状态：实施中，尚未签署 SoftwareComplete。本文对照原 14 层与 R01–R20，不建立新的缩减范围。
+状态：R01–R20 软件实现与本地完整组合验收通过；`SoftwareComplete` 交付同时要求下述
+当前 CI/main 门禁。本文对照原 14 层与 R01–R20，不建立新的缩减范围。
 唯一开发分支为 `codex/nonrelease-remediation-closure`；[原计划](roboguide-software-completion-plan-2026-10-15.md)
 的 A1–F 是执行队列。各项先以公开入口完成实际软件链路，再集中运行全模块检查。
 
@@ -48,9 +49,23 @@ wait。每条 native gate 在启动前固定实际二进制、配置与源码 id
 证据保留原二进制/配置 identity；受变化影响的入口在当前二进制上重新运行。失败、忽略、
 Unavailable、Unknown、样本数与未实测部署条件均独立列出。
 
-当前尚未满足的签署项：当前完整 CI 与 main 集成。双域 HA/完整包最终实际验收已由
-HA16 的真实双域进程、分区、停止对账、证书拒绝、backup/verify/restore、重复恢复和
-两域各三 leader 读取通过；本文仍不会根据单个 JSON `passed`、API 存在或文档状态自动宣布总体完成。
+双域 HA/完整包已由 HA16 的真实进程、分区、停止对账、证书拒绝、backup/verify/restore、
+重复恢复和两域各三 leader 读取通过。当前 typed-map/MI 整链及完整 Archive/producer GC/
+成员故障/最终冷恢复复查通过，原失败和各自 frozen identity 分别保留。
+
+交付必须核对[完整 CI](https://github.com/Farewell-CK/RoboGuide/actions/workflows/ci.yml)与
+[文档 CI](https://github.com/Farewell-CK/RoboGuide/actions/workflows/docs.yml)均对应当前提交，
+且远端 `main` 与该受检提交一致、工作树干净。CI 记录和 Git refs 是这两项外部状态的原证据，
+不能从本文状态、单个 JSON `passed` 或 API 存在推断它们。
+
+| 当前复查 | 原证据 |
+| --- | --- |
+| 双独立三副本域正常/分区/换证/transfer/完整恢复 | `/tmp/rg-federation-ha-16/result.json`；[完整说明](acceptance/2026-10-26-replicated-federation-ha.md) |
+| typed-map/每 Task import/use/自动 MI/独立原目标/恢复 | `/tmp/rgs-current-final-1/result.json`，真实 Python 3.11/Open3D，无设备或外部模型 |
+| 在线 Archive/原 Unknown/跨 owner/首次冷恢复/旧 writer 与负向拒绝 | `/tmp/rg-current-final-archive-1/online/result.json`、`original-cold/result.json`、`refusals/result.json` |
+| producer GC/Snapshot/learner/joint/最终三 leader 冷恢复/原 GC 独立核对 | `/tmp/rg-current-final-archive-followup-1/result.json`；保留上一行原数据，原失败不改写 |
+| 私有 Archive 退休/故障/GC/完整冷恢复与实际旧 profile 拒绝 | `/tmp/rg-archive-recipient-local-7/result.json`，使用当前选定 recovery profile 验证全部原 leases/存量 |
+| genuine v55 → 当前 v60 与完整冷恢复 | `/tmp/rg-upgrade-v60-current-1/result.json`、`/tmp/rg-upgrade-v60-current-cold-1/result.json`；从完整原 activation receipts 选择 v0.29，三个恢复后 leader 读取通过 |
 
 设备停止、物理交接、硬实时、硬件身份、跨主机连续性、长期 SLO 和人工响应保留独立证据
 要求；软件合同完整后可标为 HardwareEvidencePending，不能用它掩盖软件 TEST GAP。

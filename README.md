@@ -2,11 +2,14 @@
 
 ## 当前整改状态 · 2026-10-26
 
-通用非发布整改在唯一分支 `codex/nonrelease-remediation-closure` 收尾。
+通用非发布整改的功能实现与本地组合验收已完成，开发始终使用唯一分支
+`codex/nonrelease-remediation-closure`。
 已完成的实现与原进程验收按 [A1–F 唯一队列](docs/development/roboguide-software-completion-plan-2026-10-15.md)
 和 [R01–R20 总矩阵](docs/development/nonrelease-acceptance-matrix-2026-10-26.md)逐项对账。
-当前代码基线 `f7f0b1f0`；双域 HA/完整恢复已由 `/tmp/rg-federation-ha-16/result.json` 通过，
-当前完整 CI 和 main 集成仍是最后门禁，尚未签署 SoftwareComplete。
+产品二进制基线 `f7f0b1f0`、恢复校验基线 `cbf91ffd`；双域 HA/完整恢复已由 HA16 通过，
+当前 typed-map/MI 与完整 Archive/GC/成员/冷恢复复查也已通过。
+`SoftwareComplete` 交付同时要求[当前完整 CI 绿色](https://github.com/Farewell-CK/RoboGuide/actions/workflows/ci.yml)
+及 main 与该受检提交一致；精确源码由构建参考和 Git refs 记录。
 
 现行合同保留 Controller v60、Node v0.14/config v0.15、Memory SQL v5；
 显式跨域恢复使用 v0.31，peer profile v0.3 独立声明不续期的 SQL-publication/I/O 预算
@@ -28,7 +31,7 @@
 
 [跨域 HA 部署接线](docs/development/replicated-federation-deployment-v0.1.md)显式传递原
 Federation 配置，并以 recovery v0.31 区分独立 profile 的同编号成员、原 Root 和活动事务。
-当前整包软件验收进行中；应用代次不会隐式更换物理存储布局或续原预算。
+[完整软件验收](docs/development/acceptance/2026-10-26-replicated-federation-ha.md)通过；应用代次不会隐式更换物理存储布局或续原预算。
 
 [服务入口容量](docs/development/listener-capacity-v0.1.md)覆盖实际 Node、Operator、Artifact、
 Mission 和 Local Provider TCP/Unix 的 permit、线程与有限等待。固定指标与真实原生告警

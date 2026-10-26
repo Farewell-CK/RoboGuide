@@ -1,6 +1,8 @@
 # RoboGuide 全部非发布整改实施与验收
 
-状态：Accepted，实施中。用户于 2026-10-15 要求执行完整计划。
+状态：Accepted。2026-10-26 全部非发布软件实现与本地组合验收通过；SoftwareComplete
+交付同时要求[最终矩阵](nonrelease-acceptance-matrix-2026-10-26.md)的当前 CI/main 门禁。
+用户于 2026-10-15 要求执行完整计划。
 基线：`main@5285a92a6af8bf4a99bb0852b5cdb80728c9144c` 加已备份的未提交整改工作树。
 实施分支：`codex/remediation-complete-software-2026-10-15`。
 
@@ -131,7 +133,7 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | 本地软件合同通过：ADR-0205 来源成本；ADR-0206 divisible Compute/原 Context envelope/quota/Node 准入及实际 CPU/原 POSIX 限制；ADR-0209 原 frame/anchor/clearance 空间冲突、跨 ID time-domain 日历、部署 booking 原预算、正常/Group/recovery 完整批次、Bind/Rebind/outbox、原超时 stop/revoke 与持有、v58/v0.27 SQL/CAS 恢复和 genuine v57 拒绝均通过。跨域/HA 时钟与全局组合继续随 E、A1/A2、F 闭合；物理/GPU/硬实时未获证明，不用软件声明替代 |
 | D | N5/F8 | 运行中抢占、耦合恢复、hazard/handoff/regrasp 与原目标 | ADR-0210 已接入显式原 cohort 审批、同事务实际受益 admission、完整停止/撤权、独立原目标、活动 hazard 和 v59/v0.28 恢复；实际三案例、完整原数据冷恢复、原实例重启与 genuine v58 拒绝均通过本地软件验收。设备与跨主机证据独立，全局组合仍归 E/F |
 | E | N6 | 双独立 Control 服务的 mTLS、持久决定及原事务恢复 | ADR-0211–0221 已接入持久 root coordinator、真实 pinned mTLS peer、分区 Unknown/停止只读对账、证书拒绝、在线 Archive/transfer、原过程退出和 v0.31 双域完整 backup/verify/restore；HA16 两域各三恢复 leader 读取通过。实际跨主机、设备和总体 SoftwareComplete 仍独立 |
-| F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | ADR-0213/0220 全 listener/本地 adapter 容量、有限等待、健康 ingress 和原生告警已接入；HA16 通过，当前完整 CI 和 main 集成是最后门禁，尚未宣布 SoftwareComplete |
+| F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | ADR-0213/0220 全 listener/本地 adapter 容量、有限等待、健康 ingress 和原生告警已接入；HA16、当前 typed-map/MI、完整 Archive/GC/成员/最终冷恢复复查通过；交付按总矩阵核对当前完整 CI 与 main 的同一受检 SHA |
 
 [当前来源成本验收](acceptance/2026-10-25-current-state-scheduling-costs.md)闭合 N4 的成本机制。
 [typed-map 运行期修订验收](acceptance/2026-10-25-typed-map-runtime-revision.md)闭合 B 的修订组合。

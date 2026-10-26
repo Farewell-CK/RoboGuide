@@ -3,7 +3,7 @@
 2026-10-26 当前合同为 Controller v60、Node v0.14/config v0.15、Memory SQL v5；
 显式双域恢复为 v0.31，旧部署保留实际原布局。已实现能力、原验收与最终未通过门禁
 分别见 [唯一队列](roboguide-software-completion-plan-2026-10-15.md)和
-[总验收矩阵](nonrelease-acceptance-matrix-2026-10-26.md)。双域 HA/完整恢复已通过 HA16，当前 CI/main 集成继续，
+[总验收矩阵](nonrelease-acceptance-matrix-2026-10-26.md)。双域 HA/完整恢复已通过 HA16，交付核对当前 CI/main 的同一受检 SHA，
 不能把下面历史切片中的“尚未完成”当作当前模块零实现。
 
 ADR-0211 的[跨域持久协调](federation-coordination-v0.1.md)保留实际资源/epoch、原 clock 区间、

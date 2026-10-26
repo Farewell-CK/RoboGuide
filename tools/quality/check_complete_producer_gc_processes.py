@@ -215,20 +215,21 @@ def cluster(
                 while remaining:
                     target = min(remaining)
                     source_member = current
-                    actors[current].ask(
-                        {
-                            "action": "transfer-to",
-                            "member": target,
-                            "transfer_id": f"original-producer-gc-{current}-{target}",
-                        }
-                    )
-                    current = leader(actors, target)
-                    assert actors[target].ask({"action": "reconcile-transfer"})[
-                        "original_transfer_reconciled"
-                    ]
-                    assert actors[source_member].ask({"action": "reconcile-transfer"})[
-                        "original_transfer_reconciled"
-                    ]
+                    if target != current:
+                        actors[current].ask(
+                            {
+                                "action": "transfer-to",
+                                "member": target,
+                                "transfer_id": f"original-producer-gc-{current}-{target}",
+                            }
+                        )
+                        current = leader(actors, target)
+                        assert actors[target].ask({"action": "reconcile-transfer"})[
+                            "original_transfer_reconciled"
+                        ]
+                        assert actors[source_member].ask({"action": "reconcile-transfer"})[
+                            "original_transfer_reconciled"
+                        ]
                     record_compaction(current)
                     remaining.remove(current)
             result["passed"] = True

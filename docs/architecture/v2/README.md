@@ -12,9 +12,9 @@ permit 在 TLS/线程前取得，原业务预算和 ownership 独立保留；有
 
 [ADR-0212](../../decisions/0212-coordinated-content-archive.md)明确在线归档由 State 保留原操作和精确归约，Replica 复用原完整内容 quorum，Artifact CAS 保存私有元数据包。pending 先于实际发布；完成只删除已验证前缀，保留原 checkpoint、命令、Catalog、Unknown 与预算。显式 parent11/process v0.9/recovery v0.30 拒绝旧 writer，wrapper v60 与 Node 合同保持。见[实现与运维](../../development/coordinated-content-archive-v0.1.md)。
 
-核对日期：2026-10-26；当前实现基线 `f7f0b1f0`，唯一开发分支为
-`codex/nonrelease-remediation-closure`。双域 HA/完整恢复已通过 HA16；当前 CI 与 main
-集成仍是最后门禁；
+核对日期：2026-10-26；产品二进制基线 `f7f0b1f0`、恢复校验基线 `cbf91ffd`，唯一开发分支为
+`codex/nonrelease-remediation-closure`。双域 HA/完整恢复已通过 HA16；软件交付核对当前 CI 与
+main 的同一受检 SHA。
 [总矩阵](../../development/nonrelease-acceptance-matrix-2026-10-26.md)区分已验收实现、
 原始失败和仍缺的实际证据。图册保留其 2026-10-22 的职责结构，后续 ADR 接线见现行正文。
 本文与已接受 ADR 共同构成 V2 权威，不新立架构版本。[English](README.en.md)。
@@ -518,17 +518,17 @@ Controller 投影在实际源 SQL inode/sidecar 租约与原生排空后，使�
 
 | 主题 | 已实现并有局部实际软件验收 | 最终组合或独立部署证据 |
 | --- | --- | --- |
-| Memory / Spatial | scoped typed-map/自动 MI、逐 Task import/use、Group handoff、Active Map、原引用 producer/GC、完整冷恢复 | 当前跨域 HA/内容组合；实际跨主机和物理定位 |
-| HA / 恢复 | 原 child 排空/transfer、动态 learner/joint、换证、滚动升级/拒绝回退、在线私有 Archive 与完整原内容恢复 | 当前双独立三副本域最终组合；部署 RTO/RPO |
-| 资源 / 调度 | 当前来源成本、divisible Compute/Context/quota、原 POSIX proof、显式 time/space/booking、超时 stop/revoke | 当前域间预算组合；实际 GPU/traffic/物理资源来源与强制 |
-| 协调 / 修订 | 运行中抢占同事务受益 admission、耦合恢复、持续 hazard、独立 Review/原目标、typed-map 修订 | 全局 HA 组合；设备 handoff/regrasp/stop assurance |
-| Federation | 持久 root、真实 pinned peer、各域正常 Control、原 epoch/clock/intent、全 Commit 后 release 和独立目标 | 证书/分区/HA/全内容的最终实际组合，实际跨主机证据 |
-| 运维 | 所有 listener/本地 adapter 容量与有限等待、固定指标、真实原生告警、runbook 与明确 SLO 分母 | 当前完整 CI/main；长期 SLO 与人工响应 |
+| Memory / Spatial | scoped typed-map/自动 MI、逐 Task import/use、Group handoff、Active Map、原引用 producer/GC、完整冷恢复；当前整链复查通过 | 实际跨主机和物理定位 |
+| HA / 恢复 | 原 child 排空/transfer、动态 learner/joint、换证、滚动升级/拒绝回退、在线私有 Archive、完整原内容与双独立三副本域恢复 | 部署 RTO/RPO、跨主机连续性 |
+| 资源 / 调度 | 当前来源成本、divisible Compute/Context/quota、原 POSIX proof、显式 time/space/booking、超时 stop/revoke、HA 原预算组合 | 实际 GPU/traffic/物理资源来源与强制 |
+| 协调 / 修订 | 运行中抢占同事务受益 admission、耦合恢复、持续 hazard、独立 Review/原目标、typed-map 修订与 HA 组合 | 设备 handoff/regrasp/stop assurance |
+| Federation | 持久 root、真实 pinned peer、正常 Control、原 epoch/clock/intent、全 Commit barrier、独立目标、分区/证书/Archive/HA 全内容组合 | 实际跨主机证据 |
+| 运维 | 所有 listener/本地 adapter 容量与有限等待、固定指标、真实原生告警、runbook 与明确 SLO 分母 | CI/main 交付门禁；长期 SLO 与人工响应 |
 
 [全部非发布计划](../../development/roboguide-software-completion-plan-2026-10-15.md)保留完整门禁，
 [总矩阵](../../development/nonrelease-acceptance-matrix-2026-10-26.md)记录最终签署。
 旧 [存量复核](../../development/roboguide-branch-audit-2026-10-22.md)仅表示其冻结时点；
-当前尚未宣布 SoftwareComplete，也不把上述实现误报为未开发。
+SoftwareComplete 软件交付要求完整当前 CI 绿色与 main 同一受检 SHA，不能仅凭本文状态签署。
 
 [ADR-0177](../../decisions/0177-explicit-prepared-upload-recovery.md)规定 Prepared 的显式恢复：原 uploader 的独立持久意图先于新读取/上传，原 qualified source 与新 CAS owner 分开，真实 reader close 和正常新上传 Completed 才能记录恢复完成。原 Prepared/Unknown/引用不改写，同命令仅查询，kernel 预算不续期；wrapper v53 / codec v32 拒绝旧 writer。实际组合仍按阶段验收。
 

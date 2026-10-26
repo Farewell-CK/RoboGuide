@@ -1,8 +1,8 @@
 # 双独立 Control 域、在线归档与完整恢复验收（2026-10-26）
 
 状态：HA16 完整实际门禁通过。正常执行、分区、原未知结果、停止确认、错误证书拒绝、
-在线归档/换主和完整静止恢复均已观察；当前完整 CI、main 集成和总体 SoftwareComplete
-仍是独立最后门禁。
+在线归档/换主和完整静止恢复均已观察；总体 SoftwareComplete 交付同时要求总矩阵的
+当前完整 CI 与 main 同一受检 SHA。
 唯一开发分支为 `codex/nonrelease-remediation-closure`。
 
 ## 权威与固定输入
@@ -45,7 +45,7 @@ Controller 保持 wrapper v60；显式 process v0.9 选择原 v0.6 base/parent11
 
 ```bash
 uv run --frozen python tools/quality/check_federation_ha_processes.py \
-  --output /tmp/rg-federation-ha-14 \
+  --output /tmp/rg-federation-ha-16 \
   --supervisor /tmp/rg-federation-ha-bin-release-6/supervisor \
   --controller /tmp/rg-federation-ha-bin-release-6/controller \
   --node /tmp/rg-federation-ha-bin-release-6/node \
@@ -58,6 +58,7 @@ HA16 结果：`/tmp/rg-federation-ha-16/result.json` 的 `passed=true`、`online
 `devices=0`、`models=0`、`simulators=0`。完整 backup/verify/restore 和缺一 Root 拒绝记录在
 `/tmp/rg-federation-ha-16/complete-recovery/`；恢复启动使用 0700 canonical child-socket
 目录，所有恢复 supervisor 的实际 wait 为 0。
+原完整 bundle manifest 为 `sha256:27dc08b521bf216fe1422aa6596c0bc9cb394bc44ef24df74351bae357320010`。
 
 ## 原反例与修复边界
 

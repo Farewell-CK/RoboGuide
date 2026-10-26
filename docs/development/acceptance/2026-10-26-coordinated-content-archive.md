@@ -8,6 +8,17 @@ quorum，Artifact CAS 保留私有包；元数据维护不改变 Mission、Contr
 和原 native wait 是软件证据；设备停止、跨主机、物理连续性与长期 SLO 分别保持待验证。
 开发始终使用 `codex/nonrelease-remediation-closure`，完整最终运维/跨域组合另行验收。
 
+2026-10-26 当前复查：`/tmp/rg-current-final-archive-1/online/result.json`、
+`original-cold/result.json` 和 `refusals/result.json` 通过；后续
+`/tmp/rg-current-final-archive-followup-1/result.json` 通过完整 producer GC、Snapshot、
+learner/joint、最终三 leader 冷恢复及原 GC/当前 qualified CAS 的独立比较。
+最终 manifest 为 `sha256:04b9ea1fd24e15f433db944bb119239247b4303953fae3c75308958fe98e44f4`。
+
+原 aggregate 的失败保留：内容 quorum 等待期间实际 leader 从 337 变为 307，checker
+随后错误发送 `transfer-to(307)` 给实际 leader 307。当前只在目标不同于当前 leader 时
+创建原 transfer；目标已经通过实际 quorum 成为 leader 时直接执行它自己的 compaction，
+不补造 transfer receipt。原失败退出与全部原记录保留，新工具覆盖三个成员并核对实际 wait。
+
 | 实际入口 | 结果与独立证据 |
 | --- | --- |
 | `/tmp/rga4-native-4/result.json` | 正常归档、精确重复只读、实际丢弃一次 POST 回复后 GET 对账、继续写入、三份同 owner 包实际 hash、Artifact admin 私有读取拒绝通过 |

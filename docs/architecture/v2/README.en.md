@@ -90,9 +90,9 @@ requires the same complete byte/metadata members in every current/joint voting s
 supervisor remains fenced until its original child and Prepared-source contracts are connected;
 all remaining upgrade/recovery/routing and original remediation gates remain independent.
 
-Reviewed 2026-10-26 against implementation baseline `f7f0b1f0` on the sole development branch
+Reviewed 2026-10-26 against product binary baseline `f7f0b1f0` and recovery baseline `cbf91ffd` on the sole development branch
 `codex/nonrelease-remediation-closure`. The complete two-domain HA/recovery gate passed as HA16;
-current CI and main integration remain in progress. The [acceptance matrix](../../development/nonrelease-acceptance-matrix-2026-10-26.md)
+software delivery requires current green CI and main at the same inspected SHA. The [acceptance matrix](../../development/nonrelease-acceptance-matrix-2026-10-26.md)
 separates accepted implementations, original failures and missing evidence. Diagrams retain the
 2026-10-22 responsibility structure; accepted ADRs describe current wiring. This page and accepted
 ADRs remain the V2 authority. [中文](README.md).
@@ -522,18 +522,18 @@ effects or end independently owned storage work. This is not an OS/RSS or comple
 
 | Area | Implemented with local actual software acceptance | Final combination or independent deployment evidence |
 | --- | --- | --- |
-| Memory / Spatial | Scoped typed maps/automatic MI, per-Task import/use, Group handoff, Active Map, original producers/GC and complete cold recovery | Current cross-domain HA/content combination; actual cross-host and physical localization |
-| HA / recovery | Original-child drain/transfer, learner/joint, certificates, rolling upgrade/rollback refusal, online private Archive and original-content recovery | Final independent three-voter domain combination; deployed RTO/RPO |
-| Resources | Current-source costs, divisible Compute/Context/quota, original POSIX proof, explicit time/space/bookings and expiry stop/revoke | Current inter-domain budget combination; deployed GPU/traffic/physical sources and enforcement |
-| Coordination / revision | Atomic beneficiary admission for running preemption, coupled recovery, continuous hazards, independent Review/original goal and typed-map revisions | Global HA combination; device handoff/regrasp/stop assurance |
-| Federation | Durable root, actual pinned peers, normal domain Control, original epochs/clocks/intents, complete Commit barrier and independent goals | Final certificate/partition/HA/content combination; actual cross-host evidence |
-| Operations | Every listener/local adapter capacity and finite wait, fixed metrics, actual native alerts, runbook and explicit SLO denominators | Current full CI/main; long-term SLO and human response |
+| Memory / Spatial | Scoped typed maps/automatic MI, per-Task import/use, Group handoff, Active Map, original producers/GC and complete cold recovery; current complete chain rechecked | Actual cross-host and physical localization |
+| HA / recovery | Original-child drain/transfer, learner/joint, certificates, rolling upgrade/rollback refusal, online private Archive, original content and two independent three-voter domains restored | Deployed RTO/RPO and cross-host continuity |
+| Resources | Current-source costs, divisible Compute/Context/quota, original POSIX proof, explicit time/space/bookings, expiry stop/revoke and original HA budgets | Deployed GPU/traffic/physical sources and enforcement |
+| Coordination / revision | Atomic beneficiary admission for running preemption, coupled recovery, continuous hazards, independent Review/original goal, typed-map revisions and HA composition | Device handoff/regrasp/stop assurance |
+| Federation | Durable root, actual pinned peers, normal Control, original epochs/clocks/intents, complete Commit barrier, independent goals and partition/certificate/Archive/HA content composition | Actual cross-host evidence |
+| Operations | Every listener/local adapter capacity and finite wait, fixed metrics, actual native alerts, runbook and explicit SLO denominators | CI/main delivery gates; long-term SLO and human response |
 
 The [non-release plan](../../development/roboguide-software-completion-plan-2026-10-15.md) retains
 every required gate. The [acceptance matrix](../../development/nonrelease-acceptance-matrix-2026-10-26.md)
 records final sign-off. The [older branch audit](../../development/roboguide-branch-audit-2026-10-22.md)
-retains its original baseline. SoftwareComplete has not been declared; existing implementations
-are not relabeled as missing development.
+retains its original baseline. SoftwareComplete delivery requires current green CI and main at
+that same inspected SHA; page status alone cannot sign it off.
 
 [ADR-0177](../../decisions/0177-explicit-prepared-upload-recovery.md) defines explicit Prepared recovery. A separately durable original-uploader intent precedes reading or a replacement upload. Original qualified content and the new CAS owner remain distinct; actual reader closure and a normal replacement Completed receipt precede recovery completion. Original Prepared/Unknown/references remain intact, retries only observe, and the original kernel budget never renews. Wrapper v53 / codec v32 fence prior writers; process acceptance remains separate.
 

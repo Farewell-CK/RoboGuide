@@ -68,3 +68,17 @@ Ruff/format、函数文档和 warnings-denied 私有 Rustdoc 均通过。
 CI 已接入 genuine 原 v55 独立构建、实际滚动升级及完整 v0.25 三 leader 冷恢复。
 本地结果不冒充远端 CI 状态。发布、设备停止、跨主机故障和长期 SLO 不在本包证据内，
 原完整非发布整改范围保持，尚不宣布总体 SoftwareComplete。
+
+## 2026-10-26 当前应用代次复查
+
+`/tmp/rg-upgrade-v60-current-1/result.json` 实际执行 genuine v55 → 当前 v60，基础设施滚动、
+完整原 child wait、activation、原 quota、旧程序与不支持 target 拒绝均通过；新建 Node/设备/
+模型/模拟器为零。`/tmp/rg-upgrade-v60-current-cold-1/result.json` 的实际 backup/verify/restore、
+重复恢复、旧 writer 拒绝与三个恢复后 leader 读取通过，所有 supervisor wait 为 0；原 manifest
+为 `sha256:bcdd6098a3f619796ba807cb24406c6e8d592f394982a54ee9f64f9de50e4270`。
+
+当前 checker 的 profile 选择从原 `application_upgrade_authority_v1.receipts` 取得经过完整
+原升级 validator 检查的最后激活 schema。旧实现错误查找不存在的顶层 `target`，把原 v55
+profile 中已升级的 v60 存量误选为 v0.25；当前 CLI 正确要求 v0.29 而拒绝。该真实 CI 失败
+保留为 40263320513，修复后的实际新存量正确选择 v0.29，保持 parent10/Root8 和原 SQL/CAS/
+升级回执/预算，既不从目标 binary 推断激活，也不放宽旧 recovery 格式。

@@ -1,21 +1,23 @@
 # Implementation status and evidence limits
 
-Content baseline: `f7f0b1f0`, reviewed 2026-10-26. [Reference](reference.md) extracts source versions.
+Product baseline: `f7f0b1f0`; recovery baseline: `cbf91ffd`, reviewed 2026-10-26. [Reference](reference.md) extracts source versions.
 The [single queue](docs/development/roboguide-software-completion-plan-2026-10-15.md) and
 [acceptance matrix](docs/development/nonrelease-acceptance-matrix-2026-10-26.md) retain the complete
-non-release scope. The complete two-domain HA/recovery gate passed as HA16; current full CI and
-main integration remain in progress; SoftwareComplete has not been signed.
+non-release scope. Implementation and complete local composition acceptance passed, including HA16,
+current typed-map/MI and Archive/GC/member/cold recovery. SoftwareComplete delivery requires
+[current green CI](https://github.com/Farewell-CK/RoboGuide/actions/workflows/ci.yml) and main at
+that same inspected SHA; page status cannot establish external Git/CI state.
 
 | Area | Accepted software implementation and actual local evidence | Final or independent evidence |
 | --- | --- | --- |
-| MI / Orchestration | Original Request/provenance/Review, automatic runtime MI, original goals and complete scoped typed-map revisions | Final global combination; deployed models and physical goal sources |
-| Control / resources | Current-source costs, quota/divisible Compute/Context, POSIX proof, time/space/bookings, normal and recovery Commit, expiry stop/revoke | Current HA clock combination; deployed GPU/traffic/physical enforcement |
-| Runtime / coordination | Original attempts/intents/stop, running preemption with atomic beneficiary admission, coupled recovery and active hazards | Current global combination; actual device stop/handoff/regrasp |
+| MI / Orchestration | Original Request/provenance/Review, automatic runtime MI, original goals and complete scoped typed-map revisions; current chain rechecked | Deployed models and physical goal sources |
+| Control / resources | Current-source costs, quota/divisible Compute/Context, POSIX proof, time/space/bookings, normal and recovery Commit, expiry stop/revoke and original HA budgets | Deployed GPU/traffic/physical enforcement |
+| Runtime / coordination | Original attempts/intents/stop, running preemption with atomic beneficiary admission, coupled recovery, active hazards and HA composition | Actual device stop/handoff/regrasp |
 | State / verifier | Source/conflict/TTL/Belief consumer policies, exact Task/attempt/CAS proofs and independent original goals | Current physical sources and continuous effects |
-| Memory / Spatial | Per-Task import/use/revoke, Group handoff, Active Map, scoped typed-map/automatic MI, original producer/GC and full cold recovery | Current domain/Archive combination; actual cross-host bytes and localization |
-| Replica / recovery | Original child drain, V3 transfer, certificates, learner/joint, upgrades/refused rollback, complete content, online private Archive and original GC | Final multi-domain bundle v0.31 acceptance; deployed RTO/RPO |
-| Federation | Durable root/actual pinned peer/normal Control, partition Unknown/readonly stop reconciliation, certificate refusal, all-Commit barrier, online Archive/transfer and v0.31 two-domain cold recovery; explicit peer v0.3 | Current CI/main; actual cross-host evidence |
-| Operations | All listener/local-adapter capacities and finite waits, real native alerts, default-128 health samples, explicit SLO denominators and runbooks | Current full CI/main; long-term SLO and human response |
+| Memory / Spatial | Per-Task import/use/revoke, Group handoff, Active Map, scoped typed-map/automatic MI, original producer/GC, full cold recovery and domain/Archive composition | Actual cross-host bytes and localization |
+| Replica / recovery | Original child drain, V3 transfer, certificates, learner/joint, upgrades/refused rollback, complete content, online private Archive, original GC and v0.31 two-domain bundle recovery | Deployed RTO/RPO and cross-host continuity |
+| Federation | Durable root/actual pinned peer/normal Control, partition Unknown/readonly stop reconciliation, certificate refusal, all-Commit barrier, online Archive/transfer and v0.31 two-domain cold recovery; explicit peer v0.3 | Actual cross-host evidence |
+| Operations | All listener/local-adapter capacities and finite waits, real native alerts, default-128 health samples, explicit SLO denominators and runbooks | CI/main delivery gates; long-term SLO and human response |
 
 ## Historical acceptance records
 

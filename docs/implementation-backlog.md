@@ -6,7 +6,8 @@
 完整 scoped typed-map/MI、原 producer/GC、在线 Archive、升级/回退、divisible/time/space、
 运行中抢占/耦合/hazard 和 standalone Federation 已有实际软件验收。双域 HA/完整恢复已由
 HA16 实际门禁通过；
-当前 CI/main 尚在最后验收；物理与跨主机/长期证据独立，不重复把已实现模块列作待开发。
+最终软件交付按总矩阵核对当前 CI/main 同一受检 SHA；物理与跨主机/长期证据独立，
+不重复把已实现模块列作待开发。
 
 2026-10-21 [ADR-0141](decisions/0141-unconfigured-resource-quota-usage-view.md)修复 quota 运维视图
 只枚举已配置限额而隐藏既有 commitment 的问题；v0.2 汇总 configured limits 与原 claims 并集，
