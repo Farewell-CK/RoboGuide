@@ -68,6 +68,29 @@ another semantically sound topology merely because a witness exists.
 
 ## Consequences and limits
 
+### Coherent reset entity facts
+
+The v0.4 wire profile's producer revision
+`habitat-local-eaios-reset-entity-geometry/v0.4.1` derives goal-entity region and
+floor facts from the same unrounded actual PDDL position sample used for its
+reset geometry. Earlier static episode transforms cannot override this sample
+or fill an unavailable current region. Missing entities, no containing region,
+ambiguous region/floor overlap and failed readers remain explicit gaps; valid
+position evidence is retained independently. Only an exact declared floor
+relation corroborated by both current locations remains in the reset snapshot.
+An inconsistent episode declaration is recorded as a conflict, never rewritten
+into a benchmark goal. The loaded current episode and scene must match the
+selected metadata before any reset geometry is read.
+
+This corrects missing or internally inconsistent world evidence without
+changing the wire fields, operation semantics, official goals, physical state
+or admission rules. Producer identity and its source bytes distinguish new
+snapshots from historical v0.4 snapshots; old artifacts are not relabeled.
+Pre-reset and older explicit profiles retain their original source behavior.
+The builder still receives no Node inventory and publishes no robot starting
+poses, assignments or route guarantees. It adds no position-reader calls,
+reset, render, step, RNG sample or predicate computation for floor evidence.
+
 This separates task semantics, static environment knowledge, abstract deployment capability,
 and live placement authority. It does not prove a robot can reach a particular target. The
 current Habitat episode records a target transform but does not expose an exact pre-reset

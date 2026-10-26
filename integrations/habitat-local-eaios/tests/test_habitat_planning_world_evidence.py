@@ -156,6 +156,200 @@ def test_reset_geometry_reads_exact_entities_without_reset_render_or_rng(tmp_pat
     assert any(gap["code"] == "entity_geometry_unavailable" for gap in unavailable["gaps"])
 
 
+@pytest.mark.parametrize("has_exact_static_handle", [False, True])
+def test_reset_floor_facts_use_the_same_actual_positions_as_entity_geometry(
+    tmp_path: Path, has_exact_static_handle: bool
+) -> None:
+    """A reset object cannot inherit a missing or stale pre-reset floor assignment."""
+    dataset = tmp_path / "dataset.json.gz"
+    dataset.write_bytes(b"dataset")
+    environment = _environment(dataset)
+    if not has_exact_static_handle:
+        environment.current_episode.rigid_objs = [("template-handle", [[1.0]])]
+    environment.sim.semantic_scene.regions.append(
+        SimpleNamespace(
+            id="room-2",
+            level=SimpleNamespace(id="floor-2"),
+            aabb=SimpleNamespace(center=_Vector(1, 7.5, 3), sizes=_Vector(4, 2, 4)),
+        )
+    )
+    problem = environment.task.pddl_problem
+    reads: list[str] = []
+
+    def position(entity: SimpleNamespace) -> list[float]:
+        """Count existing position reads without rendering, moving or querying an object manager."""
+        reads.append(entity.name)
+        return [1, 7.5, 3] if entity.name == "any_targets|0" else [1.5, 2, 3]
+
+    problem.get_entity = lambda name: SimpleNamespace(name=name)
+    problem.sim_info = SimpleNamespace(robot_at_thresh=1.0, get_entity_pos=position)
+    document = build_authoritative_planning_world_evidence(
+        environment,
+        run_id="reset-facts",
+        episode_id="51",
+        reset_goal_geometry=True,
+        entity_geometry=True,
+    )
+    facts = {fact["entity_id"]: fact for fact in document["facts"]}
+    assert facts["any_targets|0"] == {
+        "entity_id": "any_targets|0",
+        "region_id": "room-2",
+        "floor_id": "floor-2",
+    }
+    assert facts["TARGET_any_targets|0"]["floor_id"] == "floor-1"
+    assert document["relations"] == [
+        {
+            "subject_entity_id": "any_targets|0",
+            "relation": "different_floor",
+            "object_entity_id": "TARGET_any_targets|0",
+        }
+    ]
+    assert document["identity"]["source_revision"] == (
+        "habitat-local-eaios-reset-entity-geometry/v0.4.1"
+    )
+    assert not any(gap["code"] == "object_spatial_fact_unavailable" for gap in document["gaps"])
+    assert len(reads) == 4  # Two witness reads and two geometry/fact reads; no extra floor reads.
+    assert environment.sim.reset_calls == 0
+
+
+@pytest.mark.parametrize("fault", ["outside", "overlap", "missing-entity"])
+def test_reset_floor_unknown_never_falls_back_to_an_old_static_location(
+    tmp_path: Path, fault: str
+) -> None:
+    """Unresolved current spatial evidence stays unknown even when old episode data is available."""
+    dataset = tmp_path / "dataset.json.gz"
+    dataset.write_bytes(b"dataset")
+    environment = _environment(dataset)
+    problem = environment.task.pddl_problem
+    problem.get_entity = lambda name: (
+        None if fault == "missing-entity" else SimpleNamespace(name=name)
+    )
+    problem.sim_info = SimpleNamespace(
+        robot_at_thresh=1.0,
+        get_entity_pos=lambda entity: [1, 10 if fault == "outside" else 2, 3],
+    )
+    if fault == "overlap":
+        environment.sim.semantic_scene.regions.append(environment.sim.semantic_scene.regions[0])
+        environment.sim.semantic_scene.regions[-1] = SimpleNamespace(
+            id="another-room",
+            level=SimpleNamespace(id="another-floor"),
+            aabb=environment.sim.semantic_scene.regions[0].aabb,
+        )
+    document = build_authoritative_planning_world_evidence(
+        environment,
+        run_id="unknown-reset",
+        episode_id="51",
+        reset_goal_geometry=True,
+        entity_geometry=True,
+    )
+    assert document["facts"] == []
+    assert document["relations"] == []
+    assert any(
+        gap["code"] in {"entity_geometry_unavailable", "reset_entity_region_unresolved"}
+        for gap in document["gaps"]
+    )
+
+
+def test_reset_floor_relation_cannot_contradict_current_exact_entity_locations(
+    tmp_path: Path,
+) -> None:
+    """An authored relation is not projected as current truth when reset evidence contradicts it."""
+    dataset = tmp_path / "dataset.json.gz"
+    dataset.write_bytes(b"dataset")
+    environment = _environment(dataset)
+    problem = environment.task.pddl_problem
+    problem.get_entity = lambda name: SimpleNamespace(name=name)
+    problem.sim_info = SimpleNamespace(robot_at_thresh=1.0, get_entity_pos=lambda entity: [1, 2, 3])
+    document = build_authoritative_planning_world_evidence(
+        environment,
+        run_id="relation-conflict",
+        episode_id="51",
+        reset_goal_geometry=True,
+        entity_geometry=True,
+    )
+    assert len(document["facts"]) == 2
+    assert document["relations"] == []
+    assert any(gap["code"] == "reset_floor_relation_conflict" for gap in document["gaps"])
+
+
+def test_floor_containment_uses_the_unrounded_sample_and_retains_geometry(tmp_path: Path) -> None:
+    """Millimetre serialization cannot move an outside point onto an apparent floor boundary."""
+    dataset = tmp_path / "dataset.json.gz"
+    dataset.write_bytes(b"dataset")
+    environment = _environment(dataset)
+    problem = environment.task.pddl_problem
+    problem.get_entity = lambda name: SimpleNamespace(name=name)
+    problem.sim_info = SimpleNamespace(
+        robot_at_thresh=1.0,
+        get_entity_pos=lambda entity: [1, 4.00049 if entity.name == "any_targets|0" else 2, 3],
+    )
+    document = build_authoritative_planning_world_evidence(
+        environment,
+        run_id="unrounded",
+        episode_id="51",
+        reset_goal_geometry=True,
+        entity_geometry=True,
+    )
+    assert [fact["entity_id"] for fact in document["facts"]] == ["TARGET_any_targets|0"]
+    geometry = {entry["entity_id"]: entry for entry in document["entity_geometry"]}
+    assert geometry["any_targets|0"]["position_mm"][1] == 4000
+    assert geometry["TARGET_any_targets|0"]["position_mm"][1] == 2000
+
+
+def test_broken_optional_region_reader_preserves_independent_position_evidence(
+    tmp_path: Path,
+) -> None:
+    """An unreadable possible containing region prevents a floor claim, not the geometry sample."""
+    dataset = tmp_path / "dataset.json.gz"
+    dataset.write_bytes(b"dataset")
+    environment = _environment(dataset)
+
+    class BrokenRegion:
+        """Represent a loaded semantic region whose optional geometry cannot be read."""
+
+        @property
+        def aabb(self) -> None:
+            """Fail without mutating the world or supplying a guessed containing region."""
+            raise RuntimeError("region unavailable")
+
+    environment.sim.semantic_scene.regions.append(BrokenRegion())
+    problem = environment.task.pddl_problem
+    problem.get_entity = lambda name: SimpleNamespace(name=name)
+    problem.sim_info = SimpleNamespace(robot_at_thresh=1.0, get_entity_pos=lambda entity: [1, 2, 3])
+    document = build_authoritative_planning_world_evidence(
+        environment,
+        run_id="region-read-fault",
+        episode_id="51",
+        reset_goal_geometry=True,
+        entity_geometry=True,
+    )
+    assert len(document["entity_geometry"]) == 2
+    assert document["facts"] == []
+    assert not any(gap["code"] == "entity_geometry_unavailable" for gap in document["gaps"])
+
+
+@pytest.mark.parametrize("field", ["episode_id", "scene_id"])
+def test_reset_geometry_cannot_borrow_another_current_episode(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    """The selected metadata cannot relabel live PDDL geometry from a different reset world."""
+    dataset = tmp_path / "dataset.json.gz"
+    dataset.write_bytes(b"dataset")
+    environment = _environment(dataset)
+    selected = SimpleNamespace(**vars(environment.current_episode))
+    setattr(environment.current_episode, field, "other-world")
+    with pytest.raises(PlanningWorldEvidenceBuildError, match="reset world"):
+        build_authoritative_planning_world_evidence(
+            environment,
+            run_id="mismatched-reset",
+            episode_id="51",
+            episode=selected,
+            reset_goal_geometry=True,
+            entity_geometry=True,
+        )
+
+
 def test_reset_goal_witness_uses_official_tolerance_and_exact_entity_positions(
     tmp_path: Path,
 ) -> None:

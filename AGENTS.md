@@ -1669,6 +1669,11 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   shared-world reset, planning-world evidence v0.2 may add an exact official geometric
   single-location witness for a joint terminal goal. It is a snapshot planning option, not a
   route, physical assignment, task completion, or benchmark outcome. See ADR-0044.
+  The v0.4 producer revision `reset-entity-geometry/v0.4.1` derives region/floor facts from
+  its same unrounded actual goal-entity geometry read, with exact current episode/scene
+  binding. Missing or ambiguous current locations never borrow pre-reset floors; conflicting
+  authored relations stay unavailable. Valid position evidence survives optional region errors.
+  Wire fields, older source identities, robot starts and Control placement authority are unchanged.
 - Deployment Planning Profile v0.2 may additionally declare canonical-operation reads and possible
   changes to documented neutral state domains. Mission emits an exact-plan/profile-digest-bound
   advisory composition review to Reviewer and Repairer; possible overlap is not a proven goal

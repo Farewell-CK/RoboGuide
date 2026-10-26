@@ -51,6 +51,15 @@ def build_authoritative_planning_world_evidence(
         raise PlanningWorldEvidenceBuildError(
             "loaded episode identity does not match requested episode"
         )
+    if reset_goal_geometry:
+        current = getattr(environment, "current_episode", None)
+        if (
+            str(getattr(current, "episode_id", "")) != episode_id
+            or getattr(current, "scene_id", None) != scene_id
+        ):
+            raise PlanningWorldEvidenceBuildError(
+                "selected episode does not match the actual reset world"
+            )
     dataset_revision, dataset_sha256 = _dataset_identity(environment)
     facts: list[dict[str, str]] = []
     gaps: list[dict[str, str]] = [
@@ -69,7 +78,7 @@ def build_authoritative_planning_world_evidence(
     ]
     regions = _regions(getattr(environment, "sim", None), gaps)
     relations: list[dict[str, str]] = []
-    if regions:
+    if regions and not entity_geometry:
         _append_object_facts(selected, regions, facts, gaps)
         _append_target_facts(environment, selected, regions, facts, gaps)
     _append_floor_relation(selected, relations, gaps)
@@ -113,15 +122,23 @@ def build_authoritative_planning_world_evidence(
         body["identity"]["source_revision"] = "habitat-local-eaios-reset-object-locations/v0.3"
         body["object_sources"] = [dict(source) for source in object_sources]
     if entity_geometry:
-        body["identity"]["source_revision"] = "habitat-local-eaios-reset-entity-geometry/v0.4"
+        body["identity"]["source_revision"] = "habitat-local-eaios-reset-entity-geometry/v0.4.1"
         body.setdefault("object_sources", [])
-        body["entity_geometry"] = _reset_entity_geometry(environment, scene_id, gaps)
+        body["entity_geometry"] = _reset_entity_geometry(
+            environment, scene_id, gaps, regions, facts
+        )
+        body["facts"] = sorted(facts, key=lambda item: item["entity_id"])
+        body["relations"] = _reset_floor_relations(relations, facts, gaps)
         body["gaps"] = sorted(gaps, key=lambda item: (item["code"], item["detail"]))
     return {**body, "digest": _digest(body)}
 
 
 def _reset_entity_geometry(
-    environment: Any, scene_id: str, gaps: list[dict[str, str]]
+    environment: Any,
+    scene_id: str,
+    gaps: list[dict[str, str]],
+    regions: list[Any],
+    facts: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
     """Read at most 64 goal entities from the already-reset PDDL position interface.
 
@@ -164,6 +181,7 @@ def _reset_entity_geometry(
                         "up_axis": "y",
                     }
                 )
+                _append_reset_location_fact(name, position, regions, facts, gaps)
             except Exception as error:
                 gaps.append(
                     {
@@ -173,6 +191,56 @@ def _reset_entity_geometry(
                 )
     except Exception as error:
         gaps.append({"code": "entity_geometry_unavailable", "detail": type(error).__name__})
+    return result
+
+
+def _append_reset_location_fact(
+    entity_id: str,
+    position: tuple[float, ...],
+    regions: list[Any],
+    facts: list[dict[str, str]],
+    gaps: list[dict[str, str]],
+) -> None:
+    """Locate the exact unrounded geometry sample without borrowing pre-reset transforms."""
+    try:
+        location = _region_location(list(position), regions)
+    except Exception:  # noqa: BLE001 - optional scene readers cannot erase observed geometry
+        location = None
+    if location is None:
+        gaps.append(
+            {
+                "code": "reset_entity_region_unresolved",
+                "detail": f"no unique actual reset semantic region for {entity_id}",
+            }
+        )
+    else:
+        region_id, floor_id = location
+        facts.append({"entity_id": entity_id, "region_id": region_id, "floor_id": floor_id})
+
+
+def _reset_floor_relations(
+    declared: list[dict[str, str]],
+    facts: list[dict[str, str]],
+    gaps: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Retain an authored relation only when both current bound locations corroborate it."""
+    floors = {fact["entity_id"]: fact["floor_id"] for fact in facts}
+    result = []
+    for relation in declared:
+        left = floors.get(relation["subject_entity_id"])
+        right = floors.get(relation["object_entity_id"])
+        expected = "same_floor" if left == right else "different_floor"
+        if left is None or right is None or relation["relation"] != expected:
+            gaps.append(
+                {
+                    "code": "reset_floor_relation_unavailable"
+                    if left is None or right is None
+                    else "reset_floor_relation_conflict",
+                    "detail": "episode floor relation lacks matching actual reset locations",
+                }
+            )
+        else:
+            result.append(relation)
     return result
 
 

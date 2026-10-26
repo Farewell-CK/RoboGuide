@@ -426,6 +426,15 @@ reset snapshot, not a route or success result. Missing exact geometry remains an
 The builder performs no additional reset or simulator step, and MI receives no agent start pose or
 Node selection authority; the separate Control preassignment evidence retains that information.
 
+The live v0.4 world-evidence producer revision `reset-entity-geometry/v0.4.1`
+uses the same actual, unrounded post-reset entity position for geometry and
+region/floor facts. It does not fall back to old episode transforms when a
+current entity or unique region is unavailable. Contradictory authored floor
+relations are reported as gaps, and mismatched reset episode/scene identities
+refuse. Valid geometry survives optional region-reader errors. No extra world
+step, position query, RNG or Node inventory read supplies these facts. The wire
+schema remains v0.4, with its full producer revision and source hashes retained.
+
 ## Stage2 execution contract guard
 
 For the `emos-crabagent` deployment profile, the bridge derives a temporary
