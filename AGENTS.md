@@ -1,3 +1,12 @@
+ADR-0221 verifies retired local Controller projections against exact completed private Archive
+packages in the same uniquely paired parent/member Root when protected/tail coverage has moved.
+Original authority, qualified owner/hash/size, complete package checks, conflicting-prefix refusal
+and original event/byte scan bounds remain. Missing, corrupt, other-member or pending evidence
+never grants coverage. The maintained recovery-only continuation requires actual online success
+and drained original supervisors, preserves failed source receipts and creates zero Nodes/workers;
+new backup/verify/restore and actual restored leaders independently establish cold software facts.
+No schema, original outcome/budget or physical authority changes. See ADR-0221.
+
 ADR-0220 adds optional actual unchanged reported-health data to Integration's exact current-session
 receive evidence. Any health transition disables that session's early health input. Control separately
 checks accepted liveness, identity/session/lease, sequence and actual receive time under the original

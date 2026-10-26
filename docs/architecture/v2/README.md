@@ -12,13 +12,14 @@ permit 在 TLS/线程前取得，原业务预算和 ownership 独立保留；有
 
 [ADR-0212](../../decisions/0212-coordinated-content-archive.md)明确在线归档由 State 保留原操作和精确归约，Replica 复用原完整内容 quorum，Artifact CAS 保存私有元数据包。pending 先于实际发布；完成只删除已验证前缀，保留原 checkpoint、命令、Catalog、Unknown 与预算。显式 parent11/process v0.9/recovery v0.30 拒绝旧 writer，wrapper v60 与 Node 合同保持。见[实现与运维](../../development/coordinated-content-archive-v0.1.md)。
 
-核对日期：2026-10-26；当前实现基线 `f961a69e`，唯一开发分支为
-`codex/nonrelease-remediation-closure`。当前 main 集成与最终跨域 HA 验收尚未完成；
+核对日期：2026-10-26；当前实现基线 `f7f0b1f0`，唯一开发分支为
+`codex/nonrelease-remediation-closure`。双域 HA/完整恢复已通过 HA16；当前 CI 与 main
+集成仍是最后门禁；
 [总矩阵](../../development/nonrelease-acceptance-matrix-2026-10-26.md)区分已验收实现、
 原始失败和仍缺的实际证据。图册保留其 2026-10-22 的职责结构，后续 ADR 接线见现行正文。
 本文与已接受 ADR 共同构成 V2 权威，不新立架构版本。[English](README.en.md)。
 
-[ADR-0211](../../decisions/0211-durable-cross-domain-coordination.md)规定 Root Orchestration 的持久全局决定和各域正常 Control 所有权。真实 pinned peer、原 writer epoch/kernel budget/clock 区间、全体 Commit 回执与独立原目标共同限制执行。[本地进程及恢复验收](../../development/acceptance/2026-10-25-federation-execution.md)通过；完整最终故障组合、实际跨主机与物理证据仍须独立完成。
+[ADR-0211](../../decisions/0211-durable-cross-domain-coordination.md)规定 Root Orchestration 的持久全局决定和各域正常 Control 所有权。真实 pinned peer、原 writer epoch/kernel budget/clock 区间、全体 Commit 回执与独立原目标共同限制执行。[双域 HA 及恢复验收](../../development/acceptance/2026-10-26-replicated-federation-ha.md)已通过；实际跨主机与物理证据仍须独立完成。
 
 [ADR-0210](../../decisions/0210-reviewed-execution-coordination.md)冻结运行协调的职责：
 运行中抢占与耦合恢复通过原完整 stop/revoke、独立 Review、fresh Group 和正常 Control；

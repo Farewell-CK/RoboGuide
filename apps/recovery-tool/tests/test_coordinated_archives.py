@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 from typing import Any
 
 import pytest
 from roboguide_recovery import coordinated_archives as archive
 from roboguide_recovery.archive_references import _checkpoint_identity
+from roboguide_recovery.bundle import Budget
+from roboguide_recovery.replica_content_bundle import projection_authority
 from roboguide_recovery.snapshot_references import canonical, digest
 
 
@@ -212,3 +216,196 @@ def test_rehashed_package_cannot_replace_original_evidence(damage: str) -> None:
     row["intent"]["package"].update(content_digest=digest(raw), byte_size=len(raw))
     with pytest.raises(ValueError):
         archive.validate_package(raw, row)
+
+
+def projection_fixture(root: Path) -> list[dict[str, Any]]:
+    """Retain actual test SQL/CAS for an old projection and a newer archived parent prefix."""
+    row, raw = evidence()
+    package = json.loads(raw)
+    fields = (
+        "sequence",
+        "event_id",
+        "timestamp_ms",
+        "correlation_id",
+        "causation_id",
+        "payload_schema",
+        "payload_json",
+    )
+    second = package["events"][0] | {"sequence": 2, "event_id": "protected-original-event"}
+    package["events"].append(second)
+    package["checkpoint"]["event_sequence"] = 2
+    manifest = package["manifest"]
+    manifest.update(
+        end_sequence=2,
+        event_count=2,
+        checkpoint_sequence=2,
+        checkpoint_digest=_checkpoint_identity(package["checkpoint"]),
+        segment_digest=digest(
+            b"".join(
+                json.dumps(
+                    {name: event[name] for name in fields},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+                for event in package["events"]
+            )
+        ),
+    )
+    row["intent"]["manifest"] = manifest
+    row["intent"]["request"]["end_sequence"] = 2
+    raw = canonical(package)
+    row["intent"]["package"].update(content_digest=digest(raw), byte_size=len(raw))
+    components: list[dict[str, Any]] = [
+        {"component_id": "child", "kind": "controller", "database": "child.sqlite3"},
+        {
+            "component_id": "parent",
+            "kind": "replica",
+            "database": "parent.sqlite3",
+            "depends_on": ["child"],
+        },
+        {"component_id": "original-root", "kind": "replica-content", "depends_on": ["parent"]},
+    ]
+    for component in components:
+        (root / "stores" / component["component_id"]).mkdir(parents=True)
+    recovery = {
+        "schema": archive.RECOVERY,
+        "metadata": {
+            "archive_authority_id": row["intent"]["authority_id"],
+            "archive_operations_schema": archive.STORAGE,
+        },
+        "catalog_archive_events": [second],
+        "coordinated_archives": [row],
+        "archive_manifests": [
+            {"start_sequence": 1, "end_sequence": 2, "manifest_json": json.dumps(manifest)}
+        ],
+    }
+    with closing(sqlite3.connect(root / "stores/parent/parent.sqlite3")) as sql:
+        sql.executescript(
+            "CREATE TABLE replica_v1_meta(key TEXT PRIMARY KEY,value TEXT);"
+            "CREATE TABLE replica_v1_events(sequence INTEGER PRIMARY KEY,data TEXT);"
+        )
+        sql.execute(
+            "INSERT INTO replica_v1_meta VALUES ('content_state',?)",
+            (json.dumps({"candidate": {"profile_identity": "d" * 64, "recovery": recovery}}),),
+        )
+        sql.commit()
+    with closing(sqlite3.connect(root / "stores/child/child.sqlite3")) as sql:
+        sql.execute(
+            "CREATE TABLE events(sequence INTEGER PRIMARY KEY,event_id TEXT,timestamp_ms INTEGER,"
+            "correlation_id TEXT,causation_id TEXT,payload_schema TEXT,payload_json TEXT)"
+        )
+        sql.execute(
+            "INSERT INTO events VALUES (?,?,?,?,?,?,?)",
+            tuple(package["events"][0][name] for name in fields),
+        )
+        sql.commit()
+    key = row["intent"]["package"]
+    path = (
+        root
+        / "stores/original-root/content-v1"
+        / key["source_owner"][15:]
+        / key["content_digest"][7:]
+    )
+    path.parent.mkdir(parents=True)
+    path.write_bytes(raw)
+    return components
+
+
+def test_original_projection_accepts_exact_archived_prefix_without_writing(tmp_path: Path) -> None:
+    """A retired child's exact prefix remains provable through its own parent's actual Archive."""
+    components = projection_fixture(tmp_path)
+    before = {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    assert (
+        projection_authority(
+            tmp_path,
+            components[0],
+            components,
+            "controller-store:" + "a" * 64,
+            Budget({"max_files": 100, "max_bytes": 1048576, "budget_seconds": 30}),
+        )
+        == "d" * 64
+    )
+    assert before == {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in before}
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing",
+        "corrupt",
+        "rehashed",
+        "wrong-root",
+        "ambiguous-root",
+        "changed-local",
+        "conflicting-protected",
+        "wrong-authority",
+        "pending",
+    ],
+)
+def test_archived_projection_keeps_exact_member_prefix_and_package_fences(
+    tmp_path: Path, damage: str
+) -> None:
+    """Another Root, outer hash, pending record or changed fact cannot lend prefix authority."""
+    components = projection_fixture(tmp_path)
+    path = next((tmp_path / "stores/original-root/content-v1").glob("*/*"))
+    with closing(sqlite3.connect(tmp_path / "stores/parent/parent.sqlite3")) as sql:
+        state = json.loads(sql.execute("SELECT value FROM replica_v1_meta").fetchone()[0])
+        recovery = state["candidate"]["recovery"]
+        if damage == "missing":
+            path.unlink()
+        elif damage == "corrupt":
+            raw = path.read_bytes()
+            path.write_bytes(b"!" + raw[1:])
+        elif damage == "rehashed":
+            package = json.loads(path.read_bytes())
+            package["events"][0]["payload_json"] = '{"original":2}'
+            raw = canonical(package)
+            recovery["coordinated_archives"][0]["intent"]["package"].update(
+                content_digest=digest(raw), byte_size=len(raw)
+            )
+            path.with_name(digest(raw)[7:]).write_bytes(raw)
+            path.unlink()
+        elif damage == "wrong-root":
+            other = tmp_path / "stores/another-root/content-v1" / path.parent.name / path.name
+            other.parent.mkdir(parents=True)
+            path.rename(other)
+            components.append(
+                {
+                    "component_id": "another-root",
+                    "kind": "replica-content",
+                    "depends_on": ["other-parent"],
+                }
+            )
+        elif damage == "ambiguous-root":
+            components.append(
+                {
+                    "component_id": "another-root",
+                    "kind": "replica-content",
+                    "depends_on": ["parent"],
+                }
+            )
+        elif damage == "changed-local":
+            with closing(sqlite3.connect(tmp_path / "stores/child/child.sqlite3")) as child:
+                child.execute("UPDATE events SET payload_json='{}'")
+                child.commit()
+        elif damage == "conflicting-protected":
+            recovery["catalog_archive_events"][0]["payload_json"] = "{}"
+        elif damage == "wrong-authority":
+            recovery["metadata"]["archive_authority_id"] = "controller-store:" + "e" * 64
+        else:
+            recovery["coordinated_archives"][0]["completed_ms"] = None
+        sql.execute("UPDATE replica_v1_meta SET value=?", (json.dumps(state),))
+        sql.commit()
+    with pytest.raises((ValueError, OSError)):
+        projection_authority(
+            tmp_path,
+            components[0],
+            components,
+            "controller-store:" + "a" * 64,
+            Budget({"max_files": 100, "max_bytes": 1048576, "budget_seconds": 30}),
+        )

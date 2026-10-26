@@ -1,9 +1,9 @@
 # 实现状态与证据边界
 
-内容基线：`f961a69e`，核对日期 2026-10-26。[构建参考](reference.md)提取当前源码版本。
+内容基线：`f7f0b1f0`，核对日期 2026-10-26。[构建参考](reference.md)提取当前源码版本。
 [唯一执行队列](docs/development/roboguide-software-completion-plan-2026-10-15.md)与
 [总验收矩阵](docs/development/nonrelease-acceptance-matrix-2026-10-26.md)保留完整非发布范围。
-最终双域 HA/完整恢复、当前完整 CI 和 main 集成继续，尚未签署 SoftwareComplete。
+双域 HA/完整恢复已由 HA16 通过；当前完整 CI 和 main 集成继续，尚未签署 SoftwareComplete。
 
 | 方面 | 已实现并有实际局部软件验收 | 最终组合或独立证据 |
 | --- | --- | --- |
@@ -13,7 +13,7 @@
 | State / verifier | 来源/冲突/TTL/Belief 消费策略、原 Task/attempt/CAS proof 与独立目标 | 当前物理来源与持续效果 |
 | Memory / Spatial | 每 Task import/use/revoke、Group handoff、Active Map、scoped typed-map/自动 MI、原 producer/GC 与完整冷恢复 | 当前域间/Archive 组合；实际跨主机字节与定位 |
 | Replica / recovery | 原 child drain、V3 transfer、换证、learner/joint、升级/拒绝回退、完整内容、在线 private Archive 与原 GC | 最终多域 v0.31 整包验收；部署 RTO/RPO |
-| Federation | 持久 root/真实 pinned peer/正常 Control、原 clock/intent/Unknown、全 Commit barrier 与独立目标；显式 peer v0.2 | 最终分区/换证/HA/内容组合；实际跨主机证据 |
+| Federation | 持久 root/真实 pinned peer/正常 Control、分区 Unknown/停止只读对账、证书拒绝、全 Commit barrier、在线 Archive/transfer、v0.31 双域冷恢复；显式 peer v0.3 | 当前 CI/main；实际跨主机证据 |
 | 运维 | 全 listener/本地 adapter 容量与有限等待、真实原生告警、默认 128 健康采样、明确 SLO 分母和 runbook | 当前完整 CI/main；长期 SLO 与人工响应 |
 
 ## 历史验收记录

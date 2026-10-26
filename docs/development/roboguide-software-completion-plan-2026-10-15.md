@@ -130,8 +130,8 @@ Orchestration 管理 Mission 与计划版本，Control 独占资源承诺和绑�
 | B | N2/F8 | typed-map 发布/import/use/撤权/交接/MI/恢复/回收整链 | 通过：ADR-0208 显式 MissionPlan v0.11/Node v0.14/preparation v0.3，完整原 typed root、消费 Group 交接 v0.3、scoped-parent revision v0.5、每 Task 独立 import/use/active-map、原 PID wait/revoke、真实 SQL 回滚与 writer 恢复、自动 MI 原 Request/worker/Review/Unknown、独立原目标、原引用退休和实际本地 GC；完整 retained CAS/SQL v0.26 冷恢复/重试、三类 genuine 旧 writer 拒绝均验收通过。全局 Archive/HA 组合仍归 A1/A2，设备与跨主机证据独立 |
 | C | N4 | divisible allocation、真实成本源、完整时空及实际支持的本地强制 | 本地软件合同通过：ADR-0205 来源成本；ADR-0206 divisible Compute/原 Context envelope/quota/Node 准入及实际 CPU/原 POSIX 限制；ADR-0209 原 frame/anchor/clearance 空间冲突、跨 ID time-domain 日历、部署 booking 原预算、正常/Group/recovery 完整批次、Bind/Rebind/outbox、原超时 stop/revoke 与持有、v58/v0.27 SQL/CAS 恢复和 genuine v57 拒绝均通过。跨域/HA 时钟与全局组合继续随 E、A1/A2、F 闭合；物理/GPU/硬实时未获证明，不用软件声明替代 |
 | D | N5/F8 | 运行中抢占、耦合恢复、hazard/handoff/regrasp 与原目标 | ADR-0210 已接入显式原 cohort 审批、同事务实际受益 admission、完整停止/撤权、独立原目标、活动 hazard 和 v59/v0.28 恢复；实际三案例、完整原数据冷恢复、原实例重启与 genuine v58 拒绝均通过本地软件验收。设备与跨主机证据独立，全局组合仍归 E/F |
-| E | N6 | 双独立 Control 服务的 mTLS、持久决定及原事务恢复 | ADR-0211 已接入持久 root coordinator、真实 pinned mTLS peer 请求、正常 Control 资源/实际 writer epoch、原 kernel budget/clock 区间、原意图/Unknown、全体 Commit 后 release 和独立原目标；双域正常/响应丢失/准备中 SIGKILL、原实例重启及六份 v60/v0.29 冷恢复通过。本地三案例软件验收通过；证书/分区/HA/全局内容的完整最终组合仍须完成，实际跨主机证据独立 |
-| F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | ADR-0213 全 listener/本地 adapter 容量和有限等待已接入；真实零 Node TCP/TLS/Unix/worker/原生 firing/resolved、默认 128 容量和单 worker 256 次实际健康延迟通过。SLO 分母/默认目标/处置顺序已冻结。跨域 HA/内容最终组合、完整当前 CI 和 main 集成继续，尚未宣布 SoftwareComplete |
+| E | N6 | 双独立 Control 服务的 mTLS、持久决定及原事务恢复 | ADR-0211–0221 已接入持久 root coordinator、真实 pinned mTLS peer、分区 Unknown/停止只读对账、证书拒绝、在线 Archive/transfer、原过程退出和 v0.31 双域完整 backup/verify/restore；HA16 两域各三恢复 leader 读取通过。实际跨主机、设备和总体 SoftwareComplete 仍独立 |
+| F | N7 | 运维随包接入，最终固定 profile 全矩阵及 main 集成 | ADR-0213/0220 全 listener/本地 adapter 容量、有限等待、健康 ingress 和原生告警已接入；HA16 通过，当前完整 CI 和 main 集成是最后门禁，尚未宣布 SoftwareComplete |
 
 [当前来源成本验收](acceptance/2026-10-25-current-state-scheduling-costs.md)闭合 N4 的成本机制。
 [typed-map 运行期修订验收](acceptance/2026-10-25-typed-map-runtime-revision.md)闭合 B 的修订组合。

@@ -1,10 +1,10 @@
 # Implementation status and evidence limits
 
-Content baseline: `f961a69e`, reviewed 2026-10-26. [Reference](reference.md) extracts source versions.
+Content baseline: `f7f0b1f0`, reviewed 2026-10-26. [Reference](reference.md) extracts source versions.
 The [single queue](docs/development/roboguide-software-completion-plan-2026-10-15.md) and
 [acceptance matrix](docs/development/nonrelease-acceptance-matrix-2026-10-26.md) retain the complete
-non-release scope. Final independent-domain HA/recovery, current full CI and main integration
-remain in progress; SoftwareComplete has not been signed.
+non-release scope. The complete two-domain HA/recovery gate passed as HA16; current full CI and
+main integration remain in progress; SoftwareComplete has not been signed.
 
 | Area | Accepted software implementation and actual local evidence | Final or independent evidence |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ remain in progress; SoftwareComplete has not been signed.
 | State / verifier | Source/conflict/TTL/Belief consumer policies, exact Task/attempt/CAS proofs and independent original goals | Current physical sources and continuous effects |
 | Memory / Spatial | Per-Task import/use/revoke, Group handoff, Active Map, scoped typed-map/automatic MI, original producer/GC and full cold recovery | Current domain/Archive combination; actual cross-host bytes and localization |
 | Replica / recovery | Original child drain, V3 transfer, certificates, learner/joint, upgrades/refused rollback, complete content, online private Archive and original GC | Final multi-domain bundle v0.31 acceptance; deployed RTO/RPO |
-| Federation | Durable root/actual pinned peer/normal Control, original clock/intent/Unknown, all-Commit barrier and independent goals; explicit peer v0.2 | Final partition/certificate/HA/content combination; actual cross-host evidence |
+| Federation | Durable root/actual pinned peer/normal Control, partition Unknown/readonly stop reconciliation, certificate refusal, all-Commit barrier, online Archive/transfer and v0.31 two-domain cold recovery; explicit peer v0.3 | Current CI/main; actual cross-host evidence |
 | Operations | All listener/local-adapter capacities and finite waits, real native alerts, default-128 health samples, explicit SLO denominators and runbooks | Current full CI/main; long-term SLO and human response |
 
 ## Historical acceptance records

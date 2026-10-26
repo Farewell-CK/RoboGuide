@@ -90,9 +90,9 @@ requires the same complete byte/metadata members in every current/joint voting s
 supervisor remains fenced until its original child and Prepared-source contracts are connected;
 all remaining upgrade/recovery/routing and original remediation gates remain independent.
 
-Reviewed 2026-10-26 against implementation baseline `f961a69e` on the sole development branch
-`codex/nonrelease-remediation-closure`. Final cross-domain HA acceptance and main integration
-remain in progress. The [acceptance matrix](../../development/nonrelease-acceptance-matrix-2026-10-26.md)
+Reviewed 2026-10-26 against implementation baseline `f7f0b1f0` on the sole development branch
+`codex/nonrelease-remediation-closure`. The complete two-domain HA/recovery gate passed as HA16;
+current CI and main integration remain in progress. The [acceptance matrix](../../development/nonrelease-acceptance-matrix-2026-10-26.md)
 separates accepted implementations, original failures and missing evidence. Diagrams retain the
 2026-10-22 responsibility structure; accepted ADRs describe current wiring. This page and accepted
 ADRs remain the V2 authority. [中文](README.md).

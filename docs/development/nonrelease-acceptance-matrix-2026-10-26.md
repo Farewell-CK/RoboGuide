@@ -48,8 +48,9 @@ wait。每条 native gate 在启动前固定实际二进制、配置与源码 id
 证据保留原二进制/配置 identity；受变化影响的入口在当前二进制上重新运行。失败、忽略、
 Unavailable、Unknown、样本数与未实测部署条件均独立列出。
 
-当前尚未满足的签署项：跨域 HA/完整包最终实际验收、当前完整 CI 与 main 集成。任何一项
-失败都继续整改；本文不会根据 JSON `passed`、API 存在或文档状态自动宣布总体完成。
+当前尚未满足的签署项：当前完整 CI 与 main 集成。双域 HA/完整包最终实际验收已由
+HA16 的真实双域进程、分区、停止对账、证书拒绝、backup/verify/restore、重复恢复和
+两域各三 leader 读取通过；本文仍不会根据单个 JSON `passed`、API 存在或文档状态自动宣布总体完成。
 
 设备停止、物理交接、硬实时、硬件身份、跨主机连续性、长期 SLO 和人工响应保留独立证据
 要求；软件合同完整后可标为 HardwareEvidencePending，不能用它掩盖软件 TEST GAP。

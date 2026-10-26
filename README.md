@@ -5,7 +5,8 @@
 通用非发布整改在唯一分支 `codex/nonrelease-remediation-closure` 收尾。
 已完成的实现与原进程验收按 [A1–F 唯一队列](docs/development/roboguide-software-completion-plan-2026-10-15.md)
 和 [R01–R20 总矩阵](docs/development/nonrelease-acceptance-matrix-2026-10-26.md)逐项对账。
-当前代码基线 `f961a69e`；跨域 HA/完整恢复、当前完整 CI 和 main 集成尚在验收，尚未签署 SoftwareComplete。
+当前代码基线 `f7f0b1f0`；双域 HA/完整恢复已由 `/tmp/rg-federation-ha-16/result.json` 通过，
+当前完整 CI 和 main 集成仍是最后门禁，尚未签署 SoftwareComplete。
 
 现行合同保留 Controller v60、Node v0.14/config v0.15、Memory SQL v5；
 显式跨域恢复使用 v0.31，peer profile v0.3 独立声明不续期的 SQL-publication/I/O 预算

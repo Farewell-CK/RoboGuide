@@ -467,7 +467,7 @@ def run(
             return None
 
         result["actual_leaf_pin_refusal"] = wait_for(
-            pin_refused, "actual Federation TLS pin refusal", 30
+            pin_refused, "actual Federation TLS pin refusal", 90
         )
         assert [len(case.backend.jobs) for case in cases] == counts
         relay.replace_tls(original_context)

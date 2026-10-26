@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import copy
 import json
+import os
 import shutil
 import signal
 import sqlite3
@@ -13,9 +15,10 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+from check_identity_processes import client
 from check_replica_content_processes import digest, save
 from check_replica_content_recovery_processes import assemble, command, profile
-from check_state_verifier_processes import wait_for
+from check_state_verifier_processes import address, wait_for
 from federation_ha_processes import ReplicatedCase, RoutingEndpoint
 
 
@@ -162,10 +165,22 @@ def prepare(cases: list[ReplicatedCase], output: Path) -> dict[str, Any]:
     }
 
 
-def recover(cases: list[ReplicatedCase], output: Path) -> dict[str, Any]:
+def recover(
+    cases: list[ReplicatedCase],
+    output: Path,
+    *,
+    retained: Path | None = None,
+    command_id: str = "actual-global-domain-backup",
+) -> dict[str, Any]:
     """Verify the full original bundle and restart real domain leaders with zero Nodes."""
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
-    declaration = prepare(cases, output)
+    if retained is None:
+        declaration = prepare(cases, output)
+    else:
+        declaration = json.loads((retained / "profile.json").read_bytes())
+        credentials = json.loads((retained / "original-credential-inputs.json").read_bytes())
+        assert credentials == {path: digest(Path(path)) for path in credentials}
+        save(output / "original-credential-inputs.json", credentials)
     save(output / "profile.json", declaration)
     backed = command(
         output,
@@ -177,7 +192,7 @@ def recover(cases: list[ReplicatedCase], output: Path) -> dict[str, Any]:
             "--destination",
             str(output / "bundle"),
             "--command-id",
-            "actual-global-domain-backup",
+            command_id,
         ],
     )
     checksum = backed["manifest_digest"]
@@ -237,7 +252,7 @@ def recover(cases: list[ReplicatedCase], output: Path) -> dict[str, Any]:
         with tempfile.TemporaryDirectory(prefix="rg-fed-cold-") as temporary:
             for index, case in enumerate(cases):
                 ipc = Path(temporary) / str(index)
-                ipc.mkdir()
+                ipc.mkdir(mode=0o700)
                 configs = assemble(
                     output / "restored", ipc, case.supervisor, component_prefix=f"domain-{index}-"
                 )
@@ -350,3 +365,99 @@ def recover(cases: list[ReplicatedCase], output: Path) -> dict[str, Any]:
             result["passed"] = False
         save(output / "result.json", result)
     return result
+
+
+class RetainedDomain(ReplicatedCase):
+    """Read a drained domain without constructing a Node, backend or new original store."""
+
+    def __init__(self, root: Path, identities: dict[str, str]) -> None:
+        """Use retained configurations, original credentials and a proven exited supervisor."""
+        self.root = root
+        self.configurations = {
+            configuration["replica"]["replica_id"]: configuration
+            for path in root.glob("configuration-*.json")
+            for configuration in [json.loads(path.read_bytes())]
+        }
+        assert len(self.configurations) == 3
+        records = json.loads((root / "owned-processes.json").read_bytes())
+        supervisors = [row for row in records if row["name"].startswith("supervisor-")]
+        assert len(supervisors) == 3 and all(row["native_wait"] == 0 for row in supervisors)
+        executables = {row["arguments"][0] for row in supervisors}
+        assert len(executables) == 1
+        self.supervisor = Path(next(iter(executables)))
+        for binary in {str(self.supervisor)} | {
+            configuration["controller_binary"] for configuration in self.configurations.values()
+        }:
+            assert digest(Path(binary)) == identities[binary]
+        self.environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith(("ROBOGUIDE_", "OPENAI_", "EMOS_"))
+        } | {"TOKIO_WORKER_THREADS": "1"}
+        self.contexts = {"admin": client(root / "pki", "admin")}
+        self.grpc, self.http, self.artifact = (address() for _ in range(3))
+        configuration = next(iter(self.configurations.values()))
+        peer_path = configuration["federation"]["peers"]
+        if peer_path is not None:
+            peers = json.loads(Path(peer_path).read_bytes())
+            self.http = peers["peers"][configuration["federation"]["domain"]]["address"]
+        assert self.http.startswith("127.0.0.1:")
+        self.origin = "https://" + self.http
+
+
+def resume(source: Path, output: Path, command_id: str) -> dict[str, Any]:
+    """Repeat cold acceptance on exact original data after actual online success and drain."""
+    original = json.loads((source / "result.json").read_bytes())
+    assert original.get("online_cases_passed") is True
+    assert original["cleanup_errors"] == [] and not original.get("final_observation_errors")
+    identities = json.loads((source / "source-identity.json").read_bytes())
+    cases: list[ReplicatedCase] = [
+        RetainedDomain(source / side, identities) for side in ("root", "peer")
+    ]
+    retained = source / "complete-recovery"
+    inputs = {
+        str(path): digest(path)
+        for path in [
+            source / "result.json",
+            source / "source-identity.json",
+            retained / "profile.json",
+            retained / "original-credential-inputs.json",
+            *source.glob("*/configuration-*.json"),
+            *source.glob("*/final-original-application.json"),
+        ]
+    }
+    current = {
+        str(path): digest(path)
+        for path in [
+            Path(__file__),
+            *(Path(__file__).resolve().parents[2] / "apps/recovery-tool/roboguide_recovery").glob(
+                "*.py"
+            ),
+        ]
+    }
+    result = recover(cases, output, retained=retained, command_id=command_id)
+    assert inputs == {path: digest(Path(path)) for path in inputs}
+    assert current == {path: digest(Path(path)) for path in current}
+    result["retained_original_inputs"] = inputs
+    result["current_recovery_code"] = current
+    result["retained_online_result_changed"] = False
+    result["new_backup_command_id"] = command_id
+    save(output / "result.json", result)
+    return result
+
+
+def main() -> None:
+    """Resume only the maintained complete cold gate; never reconstruct original online effects."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--command-id", required=True)
+    arguments = parser.parse_args()
+    if not resume(arguments.source.absolute(), arguments.output.absolute(), arguments.command_id)[
+        "passed"
+    ]:
+        raise SystemExit("original complete cold recovery failed")
+
+
+if __name__ == "__main__":
+    main()

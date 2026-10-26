@@ -489,9 +489,67 @@ def projection_authority(
         raise ValueError("replicated projection's original parent event coverage differs")
     path = root / "stores" / component["component_id"] / component["database"]
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)) as sql:
-        for value in catalog_rows(sql, budget, content.PROFILE):
-            if by_sequence.get(value["sequence"]) != value:
-                raise ValueError("local Controller projection changed its paired committed prefix")
+        local = catalog_rows(sql, budget, content.PROFILE)
+    missing = {value["sequence"] for value in local if value["sequence"] not in by_sequence}
+    if missing:
+        from .coordinated_archives import MAX_BYTES, validate_package, validate_projection
+
+        archives = [
+            row
+            for row in validate_projection(recovery)
+            if row["completed_ms"] is not None
+            and any(
+                row["intent"]["manifest"]["start_sequence"]
+                <= sequence
+                <= row["intent"]["manifest"]["end_sequence"]
+                for sequence in missing
+            )
+        ]
+        roots = [
+            value
+            for value in components
+            if value["kind"] == "replica-content"
+            and value["depends_on"] == [parent["component_id"]]
+        ]
+        if archives and len(roots) != 1:
+            raise ValueError("archived projection lacks its exact paired member Root")
+        scanned = 0
+        total = sum(len(canonical(value)) for value in by_sequence.values())
+        for archive in archives:
+            budget.check()
+            key = archive["intent"]["package"]
+            path = (
+                root
+                / "stores"
+                / roots[0]["component_id"]
+                / "content-v1"
+                / key["source_owner"][15:]
+                / key["content_digest"][7:]
+            )
+            if path.stat().st_size != key["byte_size"] or key["byte_size"] > MAX_BYTES:
+                raise ValueError("paired original Archive package changed its actual size")
+            with path.open("rb") as stream:
+                raw = stream.read(MAX_BYTES + 1)
+            budget.check()
+            validate_package(raw, archive)
+            events = json.loads(raw)["events"]
+            scanned += len(events)
+            if scanned > 32768:
+                raise ValueError("archived projection exceeds its original event scan bound")
+            for value in events:
+                budget.check()
+                previous = by_sequence.get(value["sequence"])
+                if previous is not None:
+                    if previous != value:
+                        raise ValueError("archived projection conflicts with its committed prefix")
+                    continue
+                total += len(canonical(value))
+                if len(by_sequence) >= 32768 or total > 64 * 1024 * 1024:
+                    raise ValueError("archived projection exceeds its original evidence bound")
+                by_sequence[value["sequence"]] = value
+    for value in local:
+        if by_sequence.get(value["sequence"]) != value:
+            raise ValueError("local Controller projection changed its paired committed prefix")
     return str(candidate["profile_identity"])
 
 

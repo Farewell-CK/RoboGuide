@@ -3,7 +3,7 @@
 2026-10-26 当前合同为 Controller v60、Node v0.14/config v0.15、Memory SQL v5；
 显式双域恢复为 v0.31，旧部署保留实际原布局。已实现能力、原验收与最终未通过门禁
 分别见 [唯一队列](roboguide-software-completion-plan-2026-10-15.md)和
-[总验收矩阵](nonrelease-acceptance-matrix-2026-10-26.md)。当前跨域 HA 与最终 CI/main 集成继续，
+[总验收矩阵](nonrelease-acceptance-matrix-2026-10-26.md)。双域 HA/完整恢复已通过 HA16，当前 CI/main 集成继续，
 不能把下面历史切片中的“尚未完成”当作当前模块零实现。
 
 ADR-0211 的[跨域持久协调](federation-coordination-v0.1.md)保留实际资源/epoch、原 clock 区间、
@@ -16,7 +16,7 @@ Controller v59/recovery v0.28；[实际 CPU/独立原目标与冷恢复组合](a
 当前工作按[唯一整改队列](roboguide-software-completion-plan-2026-10-15.md)推进。ADR-0208 的
 scoped typed-map 与自动 MI 本地组合已通过；ADR-0209 的[时空资源合同](resource-topology-v0.1.md)
 及实际 CPU/SQL/CAS 恢复通过本地软件验收。运行中抢占、耦合恢复及 standalone Federation
-也已通过各自软件验收；跨域 HA/全局内容与最终固定 profile 继续，设备和跨主机证据独立保留。
+也已通过各自软件验收；跨域 HA/全局内容组合已通过，设备和跨主机证据独立保留。
 
 运行期候选、计划历史、独立原目标完成 gate 和新 Group 的停止/撤销门禁原切片见
 [运行期计划修订合同](runtime-plan-revision-v0.1.md)与 ADR-0120；其历史版本为 shared
