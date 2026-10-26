@@ -98,6 +98,26 @@ def _validate_operation_sources(run: Path, document: dict[str, Any]) -> None:
         "endpoint_profiles": endpoints,
         "route_reachability": "unknown",
     }
+    if any(not isinstance(record.get("capability_attributes", {}), dict) for record in agents):
+        raise ValueError("operation admission capability attributes are malformed")
+    if any(
+        record.get("capability_attributes", {}).get("location-access") is not None
+        for record in agents
+    ):
+        expected["schema_version"] = "roboguide.deployment-operation-admission/v0.2"
+        expected["location_access_policy"] = "base-floor-for-object-and-destination"
+        for endpoint, record in zip(endpoints, agents, strict=True):
+            attrs = record["capability_attributes"]
+            support = attrs.get("supports-floor-transition")
+            if attrs.get("location-access") != "base-floor" or type(support) is not bool:
+                raise ValueError("relocation floor access has missing typed capability facts")
+            endpoint["supports_floor_transition"] = support
+            if any(
+                item["profile"]["operation_support"].get(item["operation"]) is not support
+                for item in document["records"]
+                if item["node_id"] == record["node_id"]
+            ):
+                raise ValueError("relocation and local navigation floor declarations disagree")
     if (
         _content_digest(admission) != _content_digest(expected)
         or start.get("identity")

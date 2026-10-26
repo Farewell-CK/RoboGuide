@@ -92,7 +92,7 @@ base = {}
 contract = "object.relocate@v1"
 kind = "transport"
 owner = "habitat-local-eaios"
-attributes = {}
+attributes = { "location-access" = "base-floor", "supports-floor-transition" = false }
 
 [capability_profiles.readiness]
 state_pointer = "/state"

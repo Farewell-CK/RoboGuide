@@ -376,7 +376,12 @@ def test_registered_templates_freeze_real_capabilities_and_capacity(tmp_path: Pa
     verify_loaded_robots(profile, environment, (0, 1))
     assert [record["robot_type"] for record in profile["agents"]] == ["FetchRobot", "StretchRobot"]
     assert all(
-        record["capability_attributes"] == {} and record["resource"]["capacity"] == 1
+        record["capability_attributes"]
+        == {
+            "location-access": "base-floor",
+            "supports-floor-transition": False,
+        }
+        and record["resource"]["capacity"] == 1
         for record in profile["agents"]
     )
     with pytest.raises(IntegrationError, match="cover"):

@@ -11,6 +11,8 @@ pub(super) struct DeploymentOperationAdmission {
     pub(super) destinations: BTreeSet<String>,
     /// Startup coverage narrows Control candidates but does not select an executor.
     pub(super) endpoints: BTreeSet<domain::NodeId>,
+    /// Explicit Local How floor-access exclusions; missing facts retain candidates.
+    pub(super) inaccessible_locations: BTreeMap<String, BTreeSet<domain::NodeId>>,
 }
 
 impl DeploymentOperationAdmission {
@@ -20,12 +22,14 @@ impl DeploymentOperationAdmission {
         node_agents: &BTreeMap<domain::NodeId, i64>,
         node_sources: &BTreeMap<domain::NodeId, String>,
         allow_subset: bool,
+        records: &[serde_json::Value],
     ) -> Result<Self, String> {
         super::deployment_sources::load_operation_admission(
             document,
             node_agents,
             node_sources,
             allow_subset,
+            records,
         )
     }
 
@@ -66,7 +70,19 @@ impl DeploymentOperationAdmission {
                 "relocation admission destination is not an observed destination entity".into(),
             );
         }
-        Ok(self.endpoints.clone())
+        Ok(self
+            .endpoints
+            .iter()
+            .filter(|node| {
+                [object, destination].iter().all(|location| {
+                    !self
+                        .inaccessible_locations
+                        .get(*location)
+                        .is_some_and(|nodes| nodes.contains(*node))
+                })
+            })
+            .cloned()
+            .collect())
     }
 }
 
@@ -96,6 +112,60 @@ mod tests {
         let path = directory.path().join("admission.json");
         std::fs::write(&path, document.to_string()).unwrap();
         DeploymentFeasibility::load(&path)
+    }
+
+    /// Declared floor access filters only known mismatches and retains serial whole-Actor reuse.
+    #[test]
+    fn explicit_floor_access_is_not_a_route_or_distinct_robot_requirement() {
+        let mut document = snapshot();
+        document["operation_admission"]["schema_version"] =
+            "roboguide.deployment-operation-admission/v0.2".into();
+        document["operation_admission"]["location_access_policy"] =
+            "base-floor-for-object-and-destination".into();
+        for endpoint in document["operation_admission"]["endpoint_profiles"]
+            .as_array_mut()
+            .unwrap()
+        {
+            endpoint["supports_floor_transition"] = (endpoint["node_id"] == "node-a").into();
+        }
+        for record in document["records"].as_array_mut().unwrap() {
+            let mobile = record["node_id"] == "node-a";
+            record["profile"]["operation_support"]["mobility.move@v1"] = mobile.into();
+            record["profile"]["operation_support"]["mobility.navigate@v1"] = mobile.into();
+            record["start"]["floor_id"] = "upper".into();
+            record["destination_entity"]["floor_id"] = "lower".into();
+            record["status"] = (if mobile { "compatible" } else { "incompatible" }).into();
+        }
+        seal(&mut document);
+        let deployment = load(&document).unwrap();
+        let body = plan(true).to_string();
+        let plan = decode_mission_plan(&body).unwrap();
+        let group = domain::ExecutionGroupId::new("floor-access").unwrap();
+        let restrictions = deployment.restrictions_for_plan(&plan, &group).unwrap();
+        assert_eq!(
+            restrictions[0].1,
+            BTreeSet::from([NodeId::new("node-a").unwrap()])
+        );
+        let parallel = decode_mission_plan(&self::plan(false).to_string()).unwrap();
+        assert!(deployment.restrictions_for_plan(&parallel, &group).is_err());
+        // Unknown floors do not license exclusions, and an old profile cannot inherit the policy.
+        for record in document["records"].as_array_mut().unwrap() {
+            record["destination_entity"]["floor_id"] = serde_json::Value::Null;
+            record["status"] = "unknown".into();
+        }
+        seal(&mut document);
+        let unknown = load(&document).unwrap();
+        assert_eq!(
+            unknown.restrictions_for_plan(&plan, &group).unwrap()[0]
+                .1
+                .len(),
+            2
+        );
+        assert!(unknown.restrictions_for_plan(&parallel, &group).is_ok());
+        document["operation_admission"]["schema_version"] =
+            "roboguide.deployment-operation-admission/v0.1".into();
+        seal(&mut document);
+        assert!(load(&document).is_err());
     }
 
     /// Build generic distinct-object tasks with either parallel Actors or sequential reuse.
@@ -639,6 +709,7 @@ mod tests {
                 &node_agents,
                 &node_sources,
                 true,
+                &[],
             );
             assert_eq!(result.is_ok(), count <= 4, "live count {count}");
             let legacy_agents = node_agents
@@ -652,6 +723,7 @@ mod tests {
                     &legacy_agents,
                     &node_sources,
                     false,
+                    &[],
                 )
                 .is_ok(),
                 count <= 2,

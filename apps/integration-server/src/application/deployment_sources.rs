@@ -358,6 +358,7 @@ impl FrozenFeasibilitySnapshot {
                         "roboguide.deployment-intent-feasibility/v0.5"
                             | "roboguide.deployment-intent-feasibility/v0.6"
                     ),
+                    records,
                 )
             })
             .transpose()?;
@@ -485,24 +486,35 @@ pub(super) fn load_operation_admission(
     node_agents: &BTreeMap<domain::NodeId, i64>,
     node_sources: &BTreeMap<domain::NodeId, String>,
     allow_subset: bool,
+    records: &[serde_json::Value],
 ) -> Result<DeploymentOperationAdmission, String> {
     let body = document
         .as_object()
         .ok_or("operation admission must be an object")?;
-    if body.keys().map(String::as_str).collect::<BTreeSet<_>>()
-        != BTreeSet::from([
-            "schema_version",
-            "operation",
-            "parameter_names",
-            "source_basis",
-            "source_snapshot_digest",
-            "registration_profile_digest",
-            "object_sources",
-            "destination_entities",
-            "endpoint_profiles",
-            "route_reachability",
-        ])
-        || body["schema_version"] != "roboguide.deployment-operation-admission/v0.1"
+    let floor_access = body
+        .get("schema_version")
+        .and_then(serde_json::Value::as_str)
+        == Some("roboguide.deployment-operation-admission/v0.2");
+    let mut fields = BTreeSet::from([
+        "schema_version",
+        "operation",
+        "parameter_names",
+        "source_basis",
+        "source_snapshot_digest",
+        "registration_profile_digest",
+        "object_sources",
+        "destination_entities",
+        "endpoint_profiles",
+        "route_reachability",
+    ]);
+    if floor_access {
+        fields.insert("location_access_policy");
+    }
+    if body.keys().map(String::as_str).collect::<BTreeSet<_>>() != fields
+        || (!floor_access
+            && body["schema_version"] != "roboguide.deployment-operation-admission/v0.1")
+        || (floor_access
+            && body["location_access_policy"] != "base-floor-for-object-and-destination")
         || body["operation"] != "object.relocate@v1"
         || body["parameter_names"] != serde_json::json!(["destination", "object", "source"])
         || body["source_basis"] != "observed-initial-location"
@@ -555,6 +567,7 @@ pub(super) fn load_operation_admission(
         .as_array()
         .ok_or("operation admission lacks endpoint profiles")?;
     let mut endpoints = BTreeSet::new();
+    let mut inaccessible_locations = BTreeMap::<String, BTreeSet<domain::NodeId>>::new();
     let max_endpoints = if allow_subset { 4 } else { 2 };
     if profiles.is_empty() || profiles.len() > max_endpoints {
         return Err("operation admission endpoint coverage is invalid".into());
@@ -563,14 +576,17 @@ pub(super) fn load_operation_admission(
         let profile = profile
             .as_object()
             .ok_or("operation admission endpoint must be an object")?;
-        if profile.keys().map(String::as_str).collect::<BTreeSet<_>>()
-            != BTreeSet::from([
-                "agent_id",
-                "node_id",
-                "node_config_digest",
-                "resource_kind",
-                "resource_capacity",
-            ])
+        let mut fields = BTreeSet::from([
+            "agent_id",
+            "node_id",
+            "node_config_digest",
+            "resource_kind",
+            "resource_capacity",
+        ]);
+        if floor_access {
+            fields.insert("supports_floor_transition");
+        }
+        if profile.keys().map(String::as_str).collect::<BTreeSet<_>>() != fields
             || profile["resource_kind"] != "space"
             || profile["resource_capacity"] != serde_json::json!(1)
         {
@@ -578,6 +594,43 @@ pub(super) fn load_operation_admission(
         }
         let node = domain::NodeId::new(profile["node_id"].as_str().unwrap_or_default())
             .map_err(|error| error.to_string())?;
+        if floor_access {
+            let transition = profile["supports_floor_transition"]
+                .as_bool()
+                .ok_or("relocation floor capability must be an explicit boolean")?;
+            for record in records
+                .iter()
+                .filter(|record| record["node_id"].as_str() == Some(node.as_str()))
+            {
+                let operation = record["operation"].as_str().unwrap_or_default();
+                if record["profile"]["operation_support"][operation].as_bool() != Some(transition) {
+                    return Err(
+                        "relocation and local navigation floor declarations disagree".into(),
+                    );
+                }
+                if !transition {
+                    let start = record["start"]["floor_id"]
+                        .as_str()
+                        .filter(|id| !id.trim().is_empty());
+                    let target = record["destination_entity"]["floor_id"]
+                        .as_str()
+                        .filter(|id| !id.trim().is_empty());
+                    if let (Some(start), Some(target)) = (start, target)
+                        && start != target
+                    {
+                        inaccessible_locations
+                            .entry(
+                                record["destination"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_owned(),
+                            )
+                            .or_default()
+                            .insert(node.clone());
+                    }
+                }
+            }
+        }
         if profile["agent_id"].as_i64() != node_agents.get(&node).copied()
             || profile["node_config_digest"].as_str() != node_sources.get(&node).map(String::as_str)
             || !endpoints.insert(node)
@@ -594,6 +647,7 @@ pub(super) fn load_operation_admission(
         object_sources,
         destinations,
         endpoints,
+        inaccessible_locations,
     })
 }
 

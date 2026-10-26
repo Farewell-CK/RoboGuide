@@ -313,6 +313,50 @@ def test_all_generated_drafts_cross_same_readonly_boundary(stage: str) -> None:
     assert restored.validation_errors == rejected.value.validation_errors
 
 
+def test_relocation_access_feedback_uses_existing_frozen_draft_recovery() -> None:
+    """Logical floor-access errors reach regeneration without inventory or a task recipe."""
+    raw = _raw()
+    mission = cast(JSONObject, raw["mission"])
+    output = _provider_plan(raw)
+    feedback: list[JSONObject] = [
+        {
+            "code": "deployment.actor_placement_unavailable",
+            "path": "/mission/actors",
+            "message": "The declared operation access policy leaves an Actor without a candidate.",
+        }
+    ]
+    transport = FakeTransport([_response(output), _response(output)])
+
+    def validate(plan: MissionPlan) -> None:
+        """Retain the exact typed source-bound incompatibility on every unchanged draft."""
+        validate_assessment(_report(plan, feedback), plan)
+
+    planner = ResponsesMissionPlanner(
+        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport, plan_validator=validate
+    )
+    args = (
+        cast(str, mission["id"]),
+        GroundedIntent(cast(str, mission["objective"]), (), ()),
+        _current_catalog(),
+        _grounding(),
+    )
+    with pytest.raises(RejectedPlanError) as initial:
+        planner.plan(*args)
+    actual_feedback = [dict(issue) for issue in initial.value.validation_errors]
+    with pytest.raises(RejectedPlanError) as regenerated:
+        planner.regenerate(*args, initial.value.provider_output, actual_feedback)
+    assert list(regenerated.value.validation_errors) == actual_feedback
+    assert all(actual_feedback[0][key] == value for key, value in feedback[0].items())
+    assert initial.value.provider_output == regenerated.value.provider_output == output
+    first = json.loads(cast(str, transport.requests[0][2]["input"]))
+    second = json.loads(cast(str, transport.requests[1][2]["input"]))
+    assert second.pop("prevalidation_recovery_feedback") == {
+        "previous_rejected_provider_output": output,
+        "validation_errors": actual_feedback,
+    }
+    assert first == second
+
+
 def test_request_recovery_receives_all_saved_issues_under_existing_budget(tmp_path: Path) -> None:
     """Several findings consume one regeneration, not one call per reported error."""
     rejected = _rejection()

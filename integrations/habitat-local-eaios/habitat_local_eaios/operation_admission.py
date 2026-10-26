@@ -97,8 +97,36 @@ def relocation_operation_admission(
         agent["agent_id"] for agent in start["agents"]
     ]:
         raise IntegrationError("operation admission endpoint coverage is invalid")
+    access = [
+        profile["capability_attributes"].get("location-access")
+        for profile in registration["agents"]
+    ]
+    floor_access = any(value is not None for value in access)
+    if floor_access:
+        for endpoint, profile in zip(endpoints, registration["agents"]):  # noqa: B905 - Python 3.9; records constructed one-for-one
+            attributes = profile["capability_attributes"]
+            support = attributes.get("supports-floor-transition")
+            if attributes.get("location-access") != "base-floor" or type(support) is not bool:
+                raise IntegrationError(
+                    "declared relocation floor access needs exact typed capability facts"
+                )
+            endpoint["supports_floor_transition"] = support
+            records = [
+                record
+                for record in navigation["records"]
+                if record["node_id"] == profile["node_id"]
+            ]
+            if any(
+                record["profile"]["operation_support"].get(record["operation"]) is not support
+                for record in records
+            ):
+                raise IntegrationError(
+                    "relocation and local navigation floor declarations disagree"
+                )
     return {
-        "schema_version": OPERATION_ADMISSION_SCHEMA,
+        "schema_version": "roboguide.deployment-operation-admission/v0.2"
+        if floor_access
+        else OPERATION_ADMISSION_SCHEMA,
         "operation": RELOCATION_OPERATION,
         "parameter_names": ["destination", "object", "source"],
         "source_basis": "observed-initial-location",
@@ -110,6 +138,11 @@ def relocation_operation_admission(
         "destination_entities": [record["entity_id"] for record in start["destinations"]],
         "endpoint_profiles": endpoints,
         "route_reachability": "unknown",
+        **(
+            {"location_access_policy": "base-floor-for-object-and-destination"}
+            if floor_access
+            else {}
+        ),
     }
 
 

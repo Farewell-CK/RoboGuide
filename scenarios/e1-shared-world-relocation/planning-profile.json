@@ -3,13 +3,13 @@
   "authority": "deployment-owned",
   "identity": {
     "profile_id": "shared-world-integrated-relocation",
-    "revision": "relocation-v3",
+    "revision": "relocation-v3-floor-access-v1",
     "source": "deployment://shared-world-relocation"
   },
   "capability_classes": [
     {
       "id": "integrated-single-floor-relocator",
-      "description": "Abstract single-floor mobility with locally observed integrated object relocation; payload limits remain unknown.",
+      "description": "Abstract single-floor mobility with locally observed integrated object relocation; payload limits remain unknown. This integrated relocation profile requires base-floor access to the exact object and destination; the declared floor-transition capability applies to the complete operation. Unknown floor or route evidence is not a reachability guarantee. Logical actors and task order remain the planner decision.",
       "capabilities": [
         {
           "contract": {
@@ -37,7 +37,10 @@
             "name": "relocate",
             "version": "v1"
           },
-          "attributes": {}
+          "attributes": {
+            "location-access": "base-floor",
+            "supports-floor-transition": false
+          }
         }
       ]
     }
@@ -95,7 +98,6 @@
       ]
     }
   ],
-  "digest": "sha256:dfb222c0b7c953fc3f510c8bf6ed9560efb3df378b50400ddb12e95a5f54ec21",
   "state_domains": [
     {
       "id": "entity.location",
@@ -105,5 +107,6 @@
       "id": "participant.position",
       "description": "Current position of the logical participant executing a canonical operation; it does not identify or select a physical entity."
     }
-  ]
+  ],
+  "digest": "sha256:2ae93e60edca50e5c57189ce6d887f84299b9a0e9a2ec932b5c289c5838c226c"
 }

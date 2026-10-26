@@ -65,6 +65,44 @@ def test_operation_source_is_separate_from_navigation_decisions(tmp_path: Path) 
     assert preflight_relocation(run)["deployment_admission_digest"] == matrix["digest"]
 
 
+def test_declared_floor_access_is_versioned_and_cannot_silently_downgrade(tmp_path: Path) -> None:
+    """Exact Node declarations reach operation admission without claiming route feasibility."""
+    navigation, semantic, start, registration = admission_sources(preflight_run(tmp_path))
+    matrix = attach_relocation_admission(navigation, semantic, start, registration)
+    admission = matrix["operation_admission"]
+    assert admission["schema_version"] == "roboguide.deployment-operation-admission/v0.2"
+    assert admission["location_access_policy"] == "base-floor-for-object-and-destination"
+    assert admission["route_reachability"] == "unknown"
+    assert all(
+        endpoint["supports_floor_transition"] is False
+        for endpoint in admission["endpoint_profiles"]
+    )
+    # A truthful old declaration remains old; a partial new declaration must refuse.
+    from habitat_local_eaios.relocation_deployment import _digest as registration_digest
+
+    for profile in registration["agents"]:
+        profile["capability_attributes"].pop("location-access")
+        profile["capability_attributes"].pop("supports-floor-transition")
+    registration["digest"] = registration_digest(
+        {key: value for key, value in registration.items() if key != "digest"}
+    )
+    start["registration_profile_digest"] = registration["digest"]
+    start["digest"] = _digest({key: value for key, value in start.items() if key != "digest"})
+    legacy = attach_relocation_admission(navigation, semantic, start, registration)
+    assert (
+        legacy["operation_admission"]["schema_version"]
+        == "roboguide.deployment-operation-admission/v0.1"
+    )
+    registration["agents"][0]["capability_attributes"]["location-access"] = "base-floor"
+    registration["digest"] = registration_digest(
+        {key: value for key, value in registration.items() if key != "digest"}
+    )
+    start["registration_profile_digest"] = registration["digest"]
+    start["digest"] = _digest({key: value for key, value in start.items() if key != "digest"})
+    with pytest.raises(IntegrationError, match="typed capability"):
+        attach_relocation_admission(navigation, semantic, start, registration)
+
+
 @pytest.mark.parametrize(
     "change", ["schema", "digest", "scene", "seed", "position", "node", "capacity"]
 )

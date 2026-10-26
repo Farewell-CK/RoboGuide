@@ -3,13 +3,13 @@
   "authority": "deployment-owned",
   "identity": {
     "profile_id": "e1-shared-world-rearrangement",
-    "revision": "v4",
+    "revision": "v4-floor-access-v1",
     "source": "deployment://e1-shared-world-rearrangement"
   },
   "capability_classes": [
     {
       "id": "capability-class-0",
-      "description": "Deployment-declared legged mobility with integrated relocation. Loaded class and exact support are independently checked before registration.",
+      "description": "Deployment-declared legged mobility with integrated relocation. Loaded class and exact support are independently checked before registration. This integrated relocation profile requires base-floor access to the exact object and destination; the declared floor-transition capability applies to the complete operation. Unknown floor or route evidence is not a reachability guarantee. Logical actors and task order remain the planner decision.",
       "capabilities": [
         {
           "contract": {
@@ -39,13 +39,16 @@
             "name": "relocate",
             "version": "v1"
           },
-          "attributes": {}
+          "attributes": {
+            "location-access": "base-floor",
+            "supports-floor-transition": true
+          }
         }
       ]
     },
     {
       "id": "capability-class-1",
-      "description": "Deployment-declared wheeled mobility with integrated relocation. Loaded class and exact support are independently checked before registration.",
+      "description": "Deployment-declared wheeled mobility with integrated relocation. Loaded class and exact support are independently checked before registration. This integrated relocation profile requires base-floor access to the exact object and destination; the declared floor-transition capability applies to the complete operation. Unknown floor or route evidence is not a reachability guarantee. Logical actors and task order remain the planner decision.",
       "capabilities": [
         {
           "contract": {
@@ -75,7 +78,10 @@
             "name": "relocate",
             "version": "v1"
           },
-          "attributes": {}
+          "attributes": {
+            "location-access": "base-floor",
+            "supports-floor-transition": false
+          }
         }
       ]
     },
@@ -161,7 +167,6 @@
       ]
     }
   ],
-  "digest": "sha256:015f8c1e51a35b9361f2a6db08c69f7e4a63f1441867bcb5d372bf859edabe3b",
   "state_domains": [
     {
       "id": "entity.location",
@@ -171,5 +176,6 @@
       "id": "participant.position",
       "description": "Current position of the logical participant executing a canonical operation; it does not identify or select a physical entity."
     }
-  ]
+  ],
+  "digest": "sha256:57a9c98bfade93f389a1dd9d8052925b2eab5f56906c995548a972f5916db96f"
 }
