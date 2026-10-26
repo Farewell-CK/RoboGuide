@@ -248,6 +248,7 @@ def _resolve(
     command_id: str,
     expected: str,
     budget: bundle.Budget,
+    profile_schema: str,
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Resolve the original compacted producer through readonly SQL and owners."""
     controllers = [
@@ -260,9 +261,7 @@ def _resolve(
     source = controllers[0]
     database = Path(source["root"]) / source["database"]
     with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
-        originals = archive_references.operations(
-            connection, retirement.SCHEMA, budget, current=True
-        )
+        originals = archive_references.operations(connection, profile_schema, budget, current=True)
     selected = [entry for entry in originals if entry[0]["request"]["command_id"] == command_id]
     if len(selected) != 1:
         raise ValueError("original Archive producer command is absent")
@@ -299,7 +298,7 @@ def _resolve(
     for item in components:
         if item["kind"] != "artifact":
             continue
-        owner = artifact_layout.validate_storage(Path(item["root"]), retirement.SCHEMA)
+        owner = artifact_layout.validate_storage(Path(item["root"]), profile_schema)
         assert owner is not None
         if not artifact_layout.reference_authorities(Path(item["root"]), owner) <= authorities:
             raise ValueError("known original source consumer is absent from maintenance")
@@ -390,10 +389,11 @@ def run(
             "private Archive maintenance requires explicit v0.14, original ID and retention reason"
         )
     components = validate(profile)
+    profile_schema = profile["schema"]
     budget = bundle.Budget(profile)
-    with acquire_all(components, profile_schema=retirement.SCHEMA), ExitStack() as stack:
+    with acquire_all(components, profile_schema=profile_schema), ExitStack() as stack:
         directory, publication, source, source_cas = _resolve(
-            components, controller_id, original_command, expected_intent, budget
+            components, controller_id, original_command, expected_intent, budget, profile_schema
         )
         root = real_directory(directory / "content")
         recipient_writer = _lease(root / ".writer.lock", stack)
@@ -432,7 +432,7 @@ def run(
         else:
             if reclaim:
                 raise ValueError("private Archive GC requires its original retirement tombstone")
-            original = artifact_layout.validate_storage(root, retirement.SCHEMA)
+            original = artifact_layout.validate_storage(root, profile_schema)
             assert original is not None
         if artifact_layout.reference_authorities(
             root,

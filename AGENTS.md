@@ -7,6 +7,12 @@ and drained original supervisors, preserves failed source receipts and creates z
 new backup/verify/restore and actual restored leaders independently establish cold software facts.
 No schema, original outcome/budget or physical authority changes. See ADR-0221.
 
+Archive retirement/reclamation receives the selected recovery profile schema through every
+readonly source/archive/Artifact lease and storage validation. It does not reinterpret a current
+Federation v0.29+ store as v0.14; an explicitly downgraded old profile still refuses before any
+writer or CAS effect. The maintained private-recipient gate projects only genuinely old inputs and
+retains current writer/application schema evidence.
+
 ADR-0220 adds optional actual unchanged reported-health data to Integration's exact current-session
 receive evidence. Any health transition disables that session's early health input. Control separately
 checks accepted liveness, identity/session/lease, sequence and actual receive time under the original

@@ -55,6 +55,11 @@ Unix socket 使用短根目录。已验证功能及时提交，重复全量矩�
 
 ## 私有接收方检查接续
 
+当前 v0.29/v0.31 存量的私有接收方回收已继续修复：`archive_reclamation` 的 source
+Archive、Artifact owner、读写 lease 和 `acquire_all` 全部接收 profile 自身 schema，
+不再把 Federation v60 storage 当成 v0.14。维护 gate 的旧 profile 只在显式构造的
+v0.13 输入上运行，实际当前 writer/profile 仍保留原 schema 与拒绝边界。
+
 CI 40013334284 已通过原 GC/SQL 节点，随后在私有 Archive recipient 的旧 profile
 拒绝断言失败：检查器只接受 v0.14/v0.15 错误，当前 v53 正确要求显式 v0.18。
 断言现按实际选择的 profile 核对，继续要求目标未发布，产品 fence 未放宽。

@@ -26,6 +26,29 @@ def save(path: Path, value: object) -> None:
     path.write_bytes(canonical(value))
 
 
+def legacy_profile(raw_profile: dict[str, Any]) -> dict[str, Any]:
+    """Project current producer metadata onto the explicit old recipient profile contract."""
+    supported = {f"roboguide.recovery-profile/v0.{version}" for version in range(12, 32)}
+    schema = (
+        raw_profile["schema"]
+        if raw_profile["schema"] in supported
+        else "roboguide.recovery-profile/v0.14"
+    )
+    profile = dict(raw_profile)
+    profile["schema"] = schema
+    profile["profile_id"] = "private-recipient"
+    if schema == "roboguide.recovery-profile/v0.14":
+        profile["components"] = [
+            {
+                key: value
+                for key, value in component.items()
+                if key not in {"storage_schema", "restore_binding_digest"}
+            }
+            for component in raw_profile["components"]
+        ]
+    return profile
+
+
 def run(output: Path, writer_controller: Path) -> dict[str, Any]:
     """Own a fresh actual producer before retiring only its explicitly disposable recipient."""
     output.mkdir(parents=True, exist_ok=False)
@@ -49,17 +72,7 @@ def run(output: Path, writer_controller: Path) -> dict[str, Any]:
     original = json.loads((source / "result.json").read_bytes())
     assert original["passed"] is True and original["registered_nodes"] == 0
     raw_profile = json.loads((source / "profile.json").read_bytes())
-    profile = raw_profile | {
-        "schema": raw_profile["schema"]
-        if raw_profile["schema"]
-        in {
-            "roboguide.recovery-profile/v0.15",
-            "roboguide.recovery-profile/v0.16",
-            "roboguide.recovery-profile/v0.18",
-        }
-        else "roboguide.recovery-profile/v0.14",
-        "profile_id": "private-recipient",
-    }
+    profile = legacy_profile(raw_profile)
     archive_root = Path(
         next(item["root"] for item in profile["components"] if item["kind"] == "archive")
     )
@@ -303,11 +316,7 @@ def run(output: Path, writer_controller: Path) -> dict[str, Any]:
         "old-refused",
         passed=False,
     )
-    required = (
-        ("recovery v0.18",)
-        if profile["schema"] == "roboguide.recovery-profile/v0.18"
-        else ("recovery v0.14", "recovery v0.15")
-    )
+    required = (f"recovery v0.{profile['schema'].rsplit('/v0.', 1)[1]}",)
     assert any(version in refused["stderr"] for version in required), refused["stderr"]
     assert not (output / "old-refused").exists()
     damaged = output / "missing-tombstone"
