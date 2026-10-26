@@ -22,7 +22,8 @@ _SCHEMA = "roboguide.deployment-intent-feasibility/v0.3"
 _OPERATION_SCHEMA = "roboguide.deployment-intent-feasibility/v0.4"
 _LIVE_SCHEMA = "roboguide.deployment-intent-feasibility/v0.5"
 _FINALITY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.6"
-_LIVE_SCHEMAS = {_LIVE_SCHEMA, _FINALITY_SCHEMA}
+_GEOMETRY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.7"
+_LIVE_SCHEMAS = {_LIVE_SCHEMA, _FINALITY_SCHEMA, _GEOMETRY_SCHEMA}
 
 
 def _check_reset_source(document: dict[str, Any], schema: str) -> None:
@@ -268,7 +269,11 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             for record in records
         ],
     }
-    compound_observation = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.17"
+    geometry_preferences = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.18"
+    compound_observation = (
+        geometry_preferences
+        or how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.17"
+    )
     declared_compound = any(
         record["condition_format"] == "detected(entity-ref) [AND at(same-entity-ref)]"
         for record in condition_records
@@ -286,6 +291,19 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             "agents": condition_records,
         }:
             raise ValueError("observation condition artifact differs from frozen Node sources")
+    if geometry_preferences:
+        from .b1_observation_preferences import (
+            preference_declaration,
+            validate_preference_source,
+        )
+
+        if how.get("initial_observation_preferences") != preference_declaration():
+            raise ValueError("observation preference Local How declaration differs")
+        validate_preference_source(
+            matrix, registry, load_document(run / "evidence/perception-readiness.json")
+        )
+    elif matrix.get("schema_version") == _GEOMETRY_SCHEMA:
+        raise ValueError("observation preferences lack their loaded Local How profile")
     if matrix.get("execution_profile") != expected_profile:
         raise ValueError("live execution profile differs from frozen registry")
     execution_options = {
@@ -333,6 +351,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.15",
         "roboguide.habitat-local-how-profile/v0.16",
         "roboguide.habitat-local-how-profile/v0.17",
+        "roboguide.habitat-local-how-profile/v0.18",
     }
     view_search = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.13",
@@ -340,6 +359,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.15",
         "roboguide.habitat-local-how-profile/v0.16",
         "roboguide.habitat-local-how-profile/v0.17",
+        "roboguide.habitat-local-how-profile/v0.18",
     }
     navigation_dispatch = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.12",
@@ -348,6 +368,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.15",
         "roboguide.habitat-local-how-profile/v0.16",
         "roboguide.habitat-local-how-profile/v0.17",
+        "roboguide.habitat-local-how-profile/v0.18",
     }
     observation_control = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.11",
@@ -357,6 +378,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.15",
         "roboguide.habitat-local-how-profile/v0.16",
         "roboguide.habitat-local-how-profile/v0.17",
+        "roboguide.habitat-local-how-profile/v0.18",
     }
     if viewpoint_recovery:
         expected_recovery = {
@@ -505,10 +527,13 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             *({"observation_view_search"} if view_search else set()),
             *({"observation_motion_feedback"} if motion_feedback else set()),
             *({"observation_viewpoint_recovery"} if viewpoint_recovery else set()),
+            *({"initial_observation_preferences"} if geometry_preferences else set()),
         }
         or how["schema_version"]
         != (
-            "roboguide.habitat-local-how-profile/v0.17"
+            "roboguide.habitat-local-how-profile/v0.18"
+            if geometry_preferences
+            else "roboguide.habitat-local-how-profile/v0.17"
             if compound_observation
             else "roboguide.habitat-local-how-profile/v0.16"
             if optics_recovery
@@ -735,7 +760,7 @@ def preflight_deployment_feasibility(run: Path) -> dict[str, Any]:
         fields.add("operation_admission")
     if schema in _LIVE_SCHEMAS:
         fields.add("execution_profile")
-    if schema == _FINALITY_SCHEMA:
+    if schema in {_FINALITY_SCHEMA, _GEOMETRY_SCHEMA}:
         fields.add("finality_profile")
         if document.get("finality_profile") != {
             "verifier_publication": "after-all-session-slots",
@@ -743,6 +768,8 @@ def preflight_deployment_feasibility(run: Path) -> dict[str, Any]:
             "resource_release": "after-task-satisfaction",
         }:
             raise ValueError("live deployment finality profile is unsupported")
+    if schema == _GEOMETRY_SCHEMA:
+        fields.add("observation_preferences")
     if set(document) != fields or schema not in {_SCHEMA, _OPERATION_SCHEMA, *_LIVE_SCHEMAS}:
         raise ValueError("preassignment feasibility schema is invalid")
     claimed = document["digest"]

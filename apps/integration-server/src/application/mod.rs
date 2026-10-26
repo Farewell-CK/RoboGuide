@@ -19,6 +19,7 @@ pub(crate) use fact_batch::fact_is_barrier;
 pub(crate) use fact_batch::{NodeFactDriver, collect_fact_batch};
 mod initial_operation_assessment;
 mod initial_operation_preferences;
+mod observation_preferences;
 pub(crate) use initial_operation_assessment::unavailable as unavailable_initial_assessment;
 mod isolation;
 #[cfg(test)]

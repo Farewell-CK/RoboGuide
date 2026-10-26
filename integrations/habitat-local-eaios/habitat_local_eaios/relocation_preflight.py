@@ -117,7 +117,10 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             execution_options["enable_observation_acquisition"]
             or execution_options["contract_recovery_attempts"] > 0
         )
-        compound_observation = actual_schema == "roboguide.habitat-local-how-profile/v0.17"
+        geometry_preferences = actual_schema == "roboguide.habitat-local-how-profile/v0.18"
+        compound_observation = (
+            geometry_preferences or actual_schema == "roboguide.habitat-local-how-profile/v0.17"
+        )
         optics_recovery = (
             compound_observation or actual_schema == "roboguide.habitat-local-how-profile/v0.16"
         )
@@ -129,6 +132,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.15",
             "roboguide.habitat-local-how-profile/v0.16",
             "roboguide.habitat-local-how-profile/v0.17",
+            "roboguide.habitat-local-how-profile/v0.18",
         }
         view_search = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.13",
@@ -136,6 +140,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.15",
             "roboguide.habitat-local-how-profile/v0.16",
             "roboguide.habitat-local-how-profile/v0.17",
+            "roboguide.habitat-local-how-profile/v0.18",
         }
         navigation_dispatch = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.12",
@@ -144,6 +149,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.15",
             "roboguide.habitat-local-how-profile/v0.16",
             "roboguide.habitat-local-how-profile/v0.17",
+            "roboguide.habitat-local-how-profile/v0.18",
         }
         observation_control = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.11",
@@ -153,6 +159,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.15",
             "roboguide.habitat-local-how-profile/v0.16",
             "roboguide.habitat-local-how-profile/v0.17",
+            "roboguide.habitat-local-how-profile/v0.18",
         }
         if viewpoint_recovery:
             from .view_recovery import view_recovery_declaration
@@ -211,7 +218,9 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             not in {"roboguide.e1.b1-deployment-used/v0.3", "roboguide.e1.b1-deployment-used/v0.4"}
             or actual_schema
             != (
-                "roboguide.habitat-local-how-profile/v0.17"
+                "roboguide.habitat-local-how-profile/v0.18"
+                if geometry_preferences
+                else "roboguide.habitat-local-how-profile/v0.17"
                 if compound_observation
                 else "roboguide.habitat-local-how-profile/v0.16"
                 if optics_recovery
@@ -245,6 +254,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
                 *({"observation_view_search"} if view_search else set()),
                 *({"observation_motion_feedback"} if motion_feedback else set()),
                 *({"observation_viewpoint_recovery"} if viewpoint_recovery else set()),
+                *({"initial_observation_preferences"} if geometry_preferences else set()),
             }
             or actual.get("execution_profile") != LIVE_PROFILE
             or actual.get("endpoint_registry_digest") != registry["digest"]
@@ -252,6 +262,16 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             or _read_object(run / "evidence/endpoint-registry-used.json") != registry
         ):
             raise IntegrationError("actual live Local How differs from frozen endpoint sources")
+        if geometry_preferences:
+            from .observation_preferences import preference_declaration, validate_preference_source
+
+            if actual.get("initial_observation_preferences") != preference_declaration():
+                raise IntegrationError("actual observation preference profile is invalid")
+            validate_preference_source(
+                _read_object(run / "evidence/preassignment-feasibility.json"),
+                registry,
+                _read_object(run / "evidence/perception-readiness.json"),
+            )
         if optics_recovery and declaration.get("enable_observation") is True:
             from .observation_optics import read_optics_declaration, validate_optics_readiness
 
@@ -376,13 +396,21 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
     live = matrix.get("schema_version") in {
         "roboguide.deployment-intent-feasibility/v0.5",
         "roboguide.deployment-intent-feasibility/v0.6",
+        "roboguide.deployment-intent-feasibility/v0.7",
     }
     if not live and matrix.get("schema_version") != OPERATION_FEASIBILITY_SCHEMA:
         raise IntegrationError("relocation requires versioned deployment operation admission")
     navigation = {
         key: value
         for key, value in matrix.items()
-        if key not in {"digest", "operation_admission", "execution_profile", "finality_profile"}
+        if key
+        not in {
+            "digest",
+            "operation_admission",
+            "execution_profile",
+            "finality_profile",
+            "observation_preferences",
+        }
     }
     navigation["schema_version"] = PREASSIGNMENT_FEASIBILITY_SCHEMA
     navigation["digest"] = preassignment_digest(navigation)
@@ -390,7 +418,10 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
     if live:
         expected_matrix["schema_version"] = matrix["schema_version"]
         expected_matrix["execution_profile"] = matrix["execution_profile"]
-        if matrix["schema_version"] == "roboguide.deployment-intent-feasibility/v0.6":
+        if matrix["schema_version"] in {
+            "roboguide.deployment-intent-feasibility/v0.6",
+            "roboguide.deployment-intent-feasibility/v0.7",
+        }:
             finality = matrix.get("finality_profile")
             if (
                 not isinstance(finality, dict)
@@ -399,6 +430,15 @@ def preflight_relocation(run: Path) -> dict[str, Any]:
             ):
                 raise IntegrationError("deployment operation admission finality profile is invalid")
             expected_matrix["finality_profile"] = FINALITY_PROFILE
+        if matrix["schema_version"] == "roboguide.deployment-intent-feasibility/v0.7":
+            from .observation_preferences import validate_preference_source
+
+            validate_preference_source(
+                matrix,
+                _read_object(run / "endpoint-registry.json"),
+                _read_object(evidence / "perception-readiness.json"),
+            )
+            expected_matrix["observation_preferences"] = matrix["observation_preferences"]
         expected_matrix["digest"] = preassignment_digest(
             {key: value for key, value in expected_matrix.items() if key != "digest"}
         )

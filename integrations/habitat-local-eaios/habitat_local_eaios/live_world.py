@@ -38,6 +38,7 @@ from .observation_control import (
     observation_control_declaration,
 )
 from .observation_optics import check_loaded_optics, read_optics_declaration
+from .observation_preferences import attach_observation_preferences, preference_declaration
 from .operation_admission import OPERATION_FEASIBILITY_SCHEMA
 from .perception import cached_detection_observations, inspect_perception, observe_detection
 from .perception_diagnostics import PerceptionDiagnostics
@@ -233,14 +234,17 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                     ],
                 },
             )
-            self._write_json(
-                "preassignment-feasibility.json", {**body, "digest": preassignment_digest(body)}
-            )
+            published = {**body, "digest": preassignment_digest(body)}
+            if compound:
+                published = attach_observation_preferences(
+                    published, environment, self.registry, optics, formats
+                )
+            self._write_json("preassignment-feasibility.json", published)
         how = json.loads((self._evidence_dir() / "local-how-profile.json").read_bytes())
         self._write_json(
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.17"
+                "schema_version": "roboguide.habitat-local-how-profile/v0.18"
                 if compound
                 else "roboguide.habitat-local-how-profile/v0.16"
                 if acquisition
@@ -256,6 +260,11 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 **(
                     {
                         "observation_control": observation_control_declaration(compound=compound),
+                        **(
+                            {"initial_observation_preferences": preference_declaration()}
+                            if compound
+                            else {}
+                        ),
                         "navigation_dispatch": navigation_dispatch_declaration(),
                         "observation_view_search": view_scan_declaration(),
                         "observation_motion_feedback": motion_feedback_declaration(),

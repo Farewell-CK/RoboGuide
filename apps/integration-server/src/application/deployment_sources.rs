@@ -28,6 +28,9 @@ pub(super) struct FrozenFeasibilitySnapshot {
     pub(super) registry_digest: Option<String>,
     /// Explicit live v0.2 declares compound acquisition rather than inferring support.
     pub(super) compound_observation: BTreeSet<domain::NodeId>,
+    /// Explicit reset-only advisory geometry, never a negative eligibility source.
+    pub(super) observation_preferences:
+        Option<super::observation_preferences::ObservationPreferences>,
 }
 
 impl FrozenFeasibilitySnapshot {
@@ -63,6 +66,7 @@ impl FrozenFeasibilitySnapshot {
                 schema,
                 "roboguide.deployment-intent-feasibility/v0.5"
                     | "roboguide.deployment-intent-feasibility/v0.6"
+                    | "roboguide.deployment-intent-feasibility/v0.7"
             ) && body.contains_key("operation_admission"))
         {
             fields.insert("operation_admission");
@@ -71,11 +75,19 @@ impl FrozenFeasibilitySnapshot {
             schema,
             "roboguide.deployment-intent-feasibility/v0.5"
                 | "roboguide.deployment-intent-feasibility/v0.6"
+                | "roboguide.deployment-intent-feasibility/v0.7"
         ) {
             fields.insert("execution_profile");
         }
-        if schema == "roboguide.deployment-intent-feasibility/v0.6" {
+        if matches!(
+            schema,
+            "roboguide.deployment-intent-feasibility/v0.6"
+                | "roboguide.deployment-intent-feasibility/v0.7"
+        ) {
             fields.insert("finality_profile");
+        }
+        if schema == "roboguide.deployment-intent-feasibility/v0.7" {
+            fields.insert("observation_preferences");
         }
         if body.keys().map(String::as_str).collect::<BTreeSet<_>>() != fields
             || !matches!(
@@ -84,6 +96,7 @@ impl FrozenFeasibilitySnapshot {
                     | "roboguide.deployment-intent-feasibility/v0.4"
                     | "roboguide.deployment-intent-feasibility/v0.5"
                     | "roboguide.deployment-intent-feasibility/v0.6"
+                    | "roboguide.deployment-intent-feasibility/v0.7"
             )
             || body["authority"] != "deployment-observed-reset-state"
         {
@@ -359,6 +372,7 @@ impl FrozenFeasibilitySnapshot {
                         schema,
                         "roboguide.deployment-intent-feasibility/v0.5"
                             | "roboguide.deployment-intent-feasibility/v0.6"
+                            | "roboguide.deployment-intent-feasibility/v0.7"
                     ),
                     records,
                 )
@@ -368,7 +382,11 @@ impl FrozenFeasibilitySnapshot {
             .get("execution_profile")
             .map(|profile| load_live_endpoints(profile, &node_agents))
             .transpose()?;
-        let terminal_verifier_barrier = schema == "roboguide.deployment-intent-feasibility/v0.6";
+        let terminal_verifier_barrier = matches!(
+            schema,
+            "roboguide.deployment-intent-feasibility/v0.6"
+                | "roboguide.deployment-intent-feasibility/v0.7"
+        );
         if terminal_verifier_barrier
             && body["finality_profile"]
                 != serde_json::json!({
@@ -379,6 +397,17 @@ impl FrozenFeasibilitySnapshot {
         {
             return Err("live deployment finality profile is unsupported".into());
         }
+        let observation_preferences = body
+            .get("observation_preferences")
+            .map(|source| {
+                super::observation_preferences::ObservationPreferences::load(
+                    source,
+                    &document,
+                    &node_agents,
+                    &node_sources,
+                )
+            })
+            .transpose()?;
         Ok(Self {
             digest,
             entries,
@@ -386,6 +415,7 @@ impl FrozenFeasibilitySnapshot {
             initial_positions: body["initial_agent_positions"].clone(),
             node_agents,
             operation_admission,
+            observation_preferences,
             live_operations,
             terminal_verifier_barrier,
             compound_observation: body

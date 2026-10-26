@@ -182,6 +182,12 @@ and the actual own position at the same step. It neither latches past success no
 residence or replaces the independent official verifier. Models still choose organization and actions;
 Local How executes only the committed condition contract.
 
+[ADR-0224](../../decisions/0224-initial-observation-geometry-preferences.md) lets the deployment publish
+bounded initial ordering hints from calibrated same-reset geometry. Control uses positive geometric
+evidence only within currently eligible candidates. A missing candidate remains unknown, never an
+exclusion, route, visibility or official-success proof. MI receives no concrete Node inventory;
+ordinary commitment and binding remain Control responsibilities.
+
 This is an existing optional deployment, not a Habitat dependency for every RoboGuide Node. One separate
 Habitat process owns a shared world, with agent endpoints exposed through configured Node Services.
 

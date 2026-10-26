@@ -169,6 +169,10 @@ MI 通过既有只读计划校验和有界草案恢复获取逻辑合同错误�
 观测 acquisition。局部完成核对同一步的检测缓存与实际自身位置；不锁存先前成功、不要求全过程驻留，
 也不替代独立官方终态 verifier。模型仍选择任务组织与动作，Local How 只执行已提交的条件合同。
 
+[ADR-0224](../../decisions/0224-initial-observation-geometry-preferences.md)让部署侧以同次 reset 的
+标定几何提供有界初始排序建议。Control 只在当前合法候选中使用几何正证据；没有候选点保持 unknown，
+不构成排除、路线、可见性或官方成功证明。MI 不接收具体 Node 清单，正常资源承诺与绑定仍由 Control 负责。
+
 这是已有的可选部署实例，不是所有 RoboGuide Node 都依赖 Habitat。共享 world 由一个独立
 Habitat 进程拥有，各 agent endpoint 通过正式 Node Service 接入。
 

@@ -1180,6 +1180,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .is_some_and(|saved| saved.schema != SERVER_CHECKPOINT_SCHEMA);
     let initialize_checkpoint = checkpoint.is_none() && latest_sequence == 0;
+    if let Some(deployment) = &mut deployment_feasibility {
+        deployment.configure_observation_preferences(process_clock.now(), initialize_checkpoint)?;
+    }
     let initial_preference_path = std::env::var_os("ROBOGUIDE_INITIAL_OPERATION_PREFERENCES_PATH")
         .filter(|path| !path.is_empty());
     let initial_preference_source =

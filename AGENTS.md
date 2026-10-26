@@ -1903,6 +1903,17 @@ no Task success, Control release, Cancel receipt or physical result is synthesiz
 v0.1 and separate unreported dispatch records retain parent/child delivery boundaries; only actual
 child terminal coverage enters normal final verifier publication. Official truth remains unchanged.
 
+ADR-0224 owns optional initial observation geometry ordering in Habitat
+`observation_preferences.py` and Integration `application/observation_preferences.rs`.
+Explicit feasibility v0.7 / Local How v0.18 bind the same reset, Node source bytes,
+loaded fixed-primary optics and a bounded hypothetical stance stencil. Positive
+geometry may order current eligible initial candidates; missing or zero candidates
+remain unknown and never exclude Nodes. The existing first-Mission preference port,
+original ten-minute receive clock, Actor binding, resources and health retain authority.
+Restore cannot acquire or renew the hint. Independent archive/preflight readers
+cross-check exact coverage and derived counts. No route, visibility, physical outcome,
+MI inventory access or official goal is inferred. See ADR-0224 and its shared synthetic fixture.
+
 The v0.13 acquisition tool `scan_for_object` is backed by an independently scoped local HRL
 skill and verified original base-yaw interfaces. Only a real guarded model selection invokes it;
 32-step/90-degree/1.5rad/s bounds clip to the original remaining acquisition budget. Zero

@@ -36,6 +36,8 @@ pub(crate) struct DeploymentFeasibility {
     registry_digest: Option<String>,
     /// Only an explicit versioned acquisition profile may use compound conditions.
     compound_observation: BTreeSet<domain::NodeId>,
+    /// Source-bound observation ordering, disabled after restore and original expiry.
+    observation_preferences: Option<super::observation_preferences::ObservationPreferences>,
 }
 
 /// Check whether concurrent Roles of one Task can use distinct configured endpoints.
@@ -94,6 +96,7 @@ impl DeploymentFeasibility {
             terminal_verifier_barrier: snapshot.terminal_verifier_barrier,
             registry_digest: snapshot.registry_digest,
             compound_observation: snapshot.compound_observation,
+            observation_preferences: snapshot.observation_preferences,
         })
     }
 
@@ -220,6 +223,11 @@ impl DeploymentFeasibility {
         received_at: domain::TimestampMs,
         fresh_controller: bool,
     ) -> Result<(), String> {
+        if self.observation_preferences.is_some() {
+            return Err(
+                "route and observation preference profiles cannot replace one another".into(),
+            );
+        }
         self.initial_preferences = Some(
             super::initial_operation_preferences::InitialOperationPreferences::load(
                 path,
@@ -229,6 +237,18 @@ impl DeploymentFeasibility {
                 fresh_controller,
             )?,
         );
+        Ok(())
+    }
+
+    /// Freeze the original observation receive clock without granting startup inventory or claims.
+    pub(crate) fn configure_observation_preferences(
+        &mut self,
+        received: domain::TimestampMs,
+        fresh: bool,
+    ) -> Result<(), String> {
+        if let Some(source) = &mut self.observation_preferences {
+            source.configure(received, fresh)?;
+        }
         Ok(())
     }
 
@@ -245,6 +265,9 @@ impl DeploymentFeasibility {
         correlation: &domain::CorrelationId,
         events: &mut E,
     ) -> Result<Option<control::InitialCandidatePreferences>, String> {
+        if let Some(source) = &self.observation_preferences {
+            return source.for_plan(plan, control, state, now, correlation, events);
+        }
         self.initial_preferences
             .as_ref()
             .map(|source| source.for_plan(plan, control, state, now, correlation, events))
