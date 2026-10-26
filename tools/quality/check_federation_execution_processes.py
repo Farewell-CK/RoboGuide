@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import socket
 import ssl
 import subprocess
 import threading
@@ -12,7 +13,7 @@ import uuid
 from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from check_execution_coordination_processes import cold as recover
 from check_execution_coordination_processes import complete
@@ -75,14 +76,26 @@ class ReplyLoss(ThreadingHTTPServer):
         )
         context.load_verify_locations(str(coordinator.certificates / "ca.crt"))
         context.verify_mode = ssl.CERT_REQUIRED
-        self.socket = context.wrap_socket(self.socket, server_side=True)
+        self.server_context = context
+        self.server_context_lock = threading.Lock()
+
+    def get_request(self) -> tuple[socket.socket, Any]:
+        """Use the currently declared TLS context for each actual newly accepted connection."""
+        connection, address = super().get_request()
+        with self.server_context_lock:
+            context = self.server_context
+        try:
+            return context.wrap_socket(connection, server_side=True), address
+        except BaseException:
+            connection.close()
+            raise
 
     def replace_tls(self, context: ssl.SSLContext) -> ssl.SSLContext:
         """Change actual future TLS handshakes and retain the original listener context."""
-        socket = cast(ssl.SSLSocket, self.socket)
-        previous = socket.context
-        socket.context = context
-        return previous
+        with self.server_context_lock:
+            previous = self.server_context
+            self.server_context = context
+            return previous
 
 
 class Relay(BaseHTTPRequestHandler):

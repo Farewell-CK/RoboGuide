@@ -1,3 +1,11 @@
+ADR-0220 adds optional actual unchanged reported-health data to Integration's exact current-session
+receive evidence. Any health transition disables that session's early health input. Control separately
+checks accepted liveness, identity/session/lease, sequence and actual receive time under the original
+writer; liveness-only input and replay never refresh health. Only same-class older FIFO heartbeats
+within the accepted original health interval retain ACK/events without regressing State. Other old or
+changed data keeps original refusal. Timer and Federation use the existing authority and durable
+Commit; no Node/checkpoint/event format or physical proof changes. See ADR-0220.
+
 ADR-0219 adds explicit peer profile v0.3 and original stop-only GET observation. Root admission
 freezes the profile/declaration and mandatory complete origins; older transactions retain unavailable
 origin and acquire no new scope. First stopping anchors independent GET and unchanged 30-second

@@ -3,6 +3,35 @@
 use super::*;
 
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
+    /// Reduces actual live receive evidence under the caller's original transaction; no ACK is emitted here.
+    pub fn refresh_node_evidence(
+        &mut self,
+        now: TimestampMs,
+        correlation_id: &CorrelationId,
+    ) -> Result<(), IntegrationRuntimeError> {
+        use ports::NodeLivenessReader;
+        let evidence = self
+            .router
+            .node_liveness_evidence()
+            .map_err(IntegrationRuntimeError::Protocol)?;
+        for evidence in evidence {
+            self.control.accept_session_liveness(
+                &self.state,
+                &evidence,
+                now,
+                correlation_id,
+                &mut self.events,
+            )?;
+            self.control.accept_session_reported_health(
+                &mut self.state,
+                &evidence,
+                now,
+                correlation_id,
+                &mut self.events,
+            )?;
+        }
+        Ok(())
+    }
     /// Lets existing Control authority validate continuous exact-session receive evidence in this transaction.
     pub fn refresh_node_liveness(
         &mut self,
@@ -31,7 +60,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         now: TimestampMs,
         correlation_id: &CorrelationId,
     ) -> Result<Vec<NodeId>, IntegrationRuntimeError> {
-        self.refresh_node_liveness(now, correlation_id)?;
+        self.refresh_node_evidence(now, correlation_id)?;
         self.runtime.refresh_peer_channel_deadlines(now);
         if self.restored_recovery_pending {
             self.restored_recovery_pending = false;

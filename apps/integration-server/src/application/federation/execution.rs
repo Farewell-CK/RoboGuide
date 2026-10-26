@@ -517,6 +517,7 @@ pub(crate) fn submit(
                         .get(id)
                         .is_some_and(|record| record.committed.is_none())
                     {
+                        refresh_current_node_evidence(candidate, decision_at)?;
                         validate_current_bindings(candidate, id, decision_at)?;
                     }
                     let decision = request
@@ -559,6 +560,7 @@ pub(crate) fn submit(
                         .get(id)
                         .is_some_and(|record| record.release.is_none())
                     {
+                        refresh_current_node_evidence(candidate, decision_at)?;
                         validate_current_bindings(candidate, id, decision_at)?;
                     }
                     let commits = request
@@ -622,6 +624,20 @@ pub(crate) fn submit(
     )
 }
 
+/// Admits actual current-session receive evidence only before a new normal Control decision.
+fn refresh_current_node_evidence(
+    controller: &mut ControllerState,
+    now: domain::TimestampMs,
+) -> Result<(), String> {
+    controller
+        .bridge
+        .refresh_node_evidence(
+            now,
+            &domain::CorrelationId::new("federation-current-ingress").expect("fixed trace"),
+        )
+        .map_err(|error| error.to_string())
+}
+
 /// Atomically admits the real local plan and complete initial Ready cohort without any Execute intent.
 #[allow(clippy::too_many_arguments)]
 fn prepare(
@@ -637,6 +653,7 @@ fn prepare(
     if let Some(original) = controller.federation.executions.prepared.get(id) {
         return Ok(original.receipt.clone());
     }
+    refresh_current_node_evidence(controller, now)?;
     let local = &probe.manifest.participants[domain];
     let plan = decode_mission_plan(&local.plan.to_string()).map_err(|error| error.to_string())?;
     if let Some(issue) = super::super::plan_validation::issues(

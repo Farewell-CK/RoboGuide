@@ -1,6 +1,6 @@
 //! Process-local exact-session continuous heartbeat evidence; no physical-stop authority.
 
-use crate::{LeaseId, NodeId, TimestampMs};
+use crate::{LeaseId, NodeId, NodeStatus, TimestampMs};
 
 /// Continuous, wire-validated receive evidence projected by one current Integration session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,4 +23,7 @@ pub struct NodeSessionLivenessEvidence {
     pub last_received_at: TimestampMs,
     /// Maximum elapsed milliseconds from activation/each heartbeat to its successor.
     pub maximum_gap_ms: u64,
+    /// Actual latest health payload only while its classification stayed unchanged in this session.
+    /// None remains liveness-only evidence and cannot refresh any reported health.
+    pub reported_health: Option<NodeStatus>,
 }

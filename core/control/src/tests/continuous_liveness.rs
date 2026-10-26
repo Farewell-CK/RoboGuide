@@ -49,6 +49,7 @@ fn fixture() -> (
         first_received_at: TimestampMs::new(1_000),
         last_received_at: TimestampMs::new(21_000),
         maximum_gap_ms: 5_000,
+        reported_health: None,
     };
     (control, state, events, evidence)
 }
@@ -199,6 +200,167 @@ fn queued_decision_must_recheck_expired_health_and_lease_without_renewal() {
             .reported_status_received_at(),
         TimestampMs::new(2_000)
     );
+}
+
+/// Actual constant-health input retains its receive time; pure liveness and replay cannot refresh it.
+#[test]
+fn actual_unchanged_health_ingress_is_separate_from_liveness_and_does_not_renew_on_replay() {
+    let (mut control, mut state, mut events, mut evidence) = fixture();
+    assert!(
+        !control
+            .accept_session_reported_health(
+                &mut state,
+                &evidence,
+                TimestampMs::new(22_000),
+                &trace(),
+                &mut events
+            )
+            .unwrap()
+    );
+    evidence.reported_health = Some(NodeStatus::new(
+        NodeHealth::Online,
+        TimestampMs::new(21_000),
+    ));
+    assert!(
+        !control
+            .accept_session_reported_health(
+                &mut state,
+                &evidence,
+                TimestampMs::new(22_000),
+                &trace(),
+                &mut events
+            )
+            .unwrap()
+    );
+    control
+        .accept_session_liveness(
+            &state,
+            &evidence,
+            TimestampMs::new(22_000),
+            &trace(),
+            &mut events,
+        )
+        .unwrap();
+    assert!(
+        control
+            .accept_session_reported_health(
+                &mut state,
+                &evidence,
+                TimestampMs::new(22_000),
+                &trace(),
+                &mut events
+            )
+            .unwrap()
+    );
+    assert_eq!(
+        state
+            .node(&evidence.node_id)
+            .unwrap()
+            .reported_status_received_at(),
+        TimestampMs::new(21_000)
+    );
+    let count = events.records.len();
+    assert!(
+        !control
+            .accept_session_reported_health(
+                &mut state,
+                &evidence,
+                TimestampMs::new(24_000),
+                &trace(),
+                &mut events
+            )
+            .unwrap()
+    );
+    assert_eq!(events.records.len(), count);
+    // An exact older same-class FIFO fact remains accepted but cannot regress the new projection.
+    control
+        .accept_received_heartbeat(
+            &mut state,
+            NodeHeartbeat::new(
+                evidence.node_id.clone(),
+                evidence.lease_id.clone(),
+                NodeStatus::new(NodeHealth::Online, TimestampMs::new(1000)),
+            ),
+            TimestampMs::new(1000),
+            TimestampMs::new(24_000),
+            15_000,
+            &trace(),
+            &mut events,
+        )
+        .unwrap();
+    assert_eq!(
+        state
+            .node(&evidence.node_id)
+            .unwrap()
+            .reported_status_received_at(),
+        TimestampMs::new(21_000)
+    );
+    assert_eq!(events.records.len(), count + 1);
+    assert!(
+        control
+            .accept_received_heartbeat(
+                &mut state,
+                NodeHeartbeat::new(
+                    evidence.node_id.clone(),
+                    evidence.lease_id.clone(),
+                    NodeStatus::new(NodeHealth::Offline, TimestampMs::new(1000))
+                ),
+                TimestampMs::new(1000),
+                TimestampMs::new(24_000),
+                15_000,
+                &trace(),
+                &mut events
+            )
+            .is_err()
+    );
+}
+
+/// Session mismatch, future input, changed health and expiry cannot lend any health freshness.
+#[test]
+fn raw_health_never_crosses_session_state_or_time_fences() {
+    let (mut control, mut state, mut events, mut evidence) = fixture();
+    evidence.reported_health = Some(NodeStatus::new(
+        NodeHealth::Online,
+        TimestampMs::new(21_000),
+    ));
+    control
+        .accept_session_liveness(
+            &state,
+            &evidence,
+            TimestampMs::new(22_000),
+            &trace(),
+            &mut events,
+        )
+        .unwrap();
+    let initial = state.node(&evidence.node_id).unwrap().clone();
+    for damage in ["session", "future", "changed", "expired", "certificate"] {
+        let mut invalid = evidence.clone();
+        let mut at = TimestampMs::new(22_000);
+        match damage {
+            "session" => invalid.session_id = "other".into(),
+            "future" => invalid.last_received_at = TimestampMs::new(23_000),
+            "changed" => {
+                invalid.reported_health = Some(NodeStatus::new(
+                    NodeHealth::Degraded,
+                    TimestampMs::new(21_000),
+                ))
+            }
+            "expired" => at = TimestampMs::new(40_000),
+            _ => {
+                control
+                    .node_sessions
+                    .get_mut(&evidence.node_id)
+                    .unwrap()
+                    .certificate_expires_at_ms = Some(21_999)
+            }
+        }
+        assert!(
+            !control
+                .accept_session_reported_health(&mut state, &invalid, at, &trace(), &mut events)
+                .unwrap()
+        );
+        assert_eq!(state.node(&evidence.node_id).unwrap(), &initial);
+    }
 }
 
 /// Gap/identity/sequence/future/replay/expiry/route-loss proofs cannot refresh any authority.

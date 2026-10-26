@@ -94,7 +94,7 @@ Stage/Retire、错误 peer leaf pin、私有 Archive 和完整双域恢复。基
 连续性或长期 SLO。总体状态以[唯一执行队列](roboguide-software-completion-plan-2026-10-15.md)为准。
 
 该 HA 软件 profile 在首个命令前声明：两类 State export 间隔 1 秒，各自原 TTL 保持；
-每次跨域请求通过显式 peer profile v0.2 声明原预算 30 秒、全局事务原预算 300 秒、最大时钟区间宽度 10 秒。它是有界的
+每次跨域请求通过显式 peer profile v0.3 声明原预算 30 秒、全局事务原预算 300 秒、最大时钟区间宽度 10 秒。它是有界的
 部署输入，不能给已存在的事务、Unknown 或重启续期。原 standalone profile 仍为 3 秒 /
 120 秒 / 1.5 秒。原 HA 3 秒 profile 的排队超时保留为失败，不改写为后续配置的成功；
 软件延迟与长期 SLO 另按真实采样报告。原 v0.1 最高 10 秒的配置也保留其实际失败；
@@ -133,3 +133,12 @@ CPU 结果出现也不替代原 Runtime 报告。验收使用明确冻结的优�
 均失败，再恢复通信，等待对端按原期限停止/释放并核对。正常输入仍为 300 秒，另一份
 故障输入在首次 admission 前明确为 120 秒；旧事务、Unknown 与 clock 不修改。
 独立 GET 最多原 300 秒/十六次观察，确认不会覆写原 abort 的未知回包。
+
+[ADR-0220](../decisions/0220-original-reported-health-ingress.md)修复实际 Prepare 的
+`status_stale` 反例：原 writer 单独接纳同一真实 session 中始终不变的实际健康报告，
+保留原 receive time、身份/lease/sequence 与正常 freshness；任何分类变化关闭提前归约。
+纯 liveness、State payload、任务与停止证据不获得该权限，原 durable ACK 顺序保持。
+
+实际证书负向 gate 在每个新连接接纳时读取当前明确 SSLContext，保留监听端点与已接受
+连接的原上下文。原 Python 3.13 对无 `_sslobj` 的监听 socket 设置 `context` 失败保留为
+测试工具失败；真实三次 TLS 握手独立核对原 leaf、替换 leaf 和恢复 leaf 的 DER digest。

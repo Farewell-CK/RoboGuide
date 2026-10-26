@@ -346,6 +346,13 @@ request and pins cannot be replaced. The original v0.1 receipt/SQL v4 and histor
 unchanged. Actual provider/copy/wait, both writer fences, SQL rollback and cold recovery pass; see the
 [acceptance](../../development/acceptance/2026-10-23-relocated-provider-snapshot.md).
 
+
+[ADR-0220](../../decisions/0220-original-reported-health-ingress.md) admits actual unchanged health
+from the current authenticated session inside the original Control writer. Exact sequence/receive
+time, lease and identity remain checked. Any health transition disables early reduction for that
+session; FIFO facts and commit-before-ACK remain. Liveness, replay or a current clock cannot refresh
+health or confer State/Memory/device permission.
+
 ## 6. Runtime and local autonomy
 
 Runtime retains original attempt history, ordered facts, durable generations, intents and relation fences.

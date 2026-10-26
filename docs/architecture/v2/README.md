@@ -352,6 +352,12 @@ ADR-0158 补齐 provider 原未发布 Snapshot 的恢复后退出：完整原/cu
 provider/copy/wait/双端 writer/SQL rollback/冷恢复已通过，见
 [本轮验收](../../development/acceptance/2026-10-23-relocated-provider-snapshot.md)。
 
+
+[ADR-0220](../../decisions/0220-original-reported-health-ingress.md)允许 Control 在原 writer 内
+接纳当前已认证 session 的实际恒定健康报告；原 sequence/receive time、租约和身份均须
+验证。健康变化关闭该 session 的提前归约，完整事实顺序与 Commit 后 ACK 保持。
+纯 liveness、重复样本或当前时间不能刷新健康，也不提升 State/Memory 或设备权限。
+
 ## 6. Runtime 与本地自治
 
 Runtime 保留原 attempt history、ordered facts、durable generation、命令意图与 relation fence。

@@ -8,13 +8,18 @@
 当前代码基线 `f961a69e`；跨域 HA/完整恢复、当前完整 CI 和 main 集成尚在验收，尚未签署 SoftwareComplete。
 
 现行合同保留 Controller v60、Node v0.14/config v0.15、Memory SQL v5；
-显式跨域恢复使用 v0.31，peer profile v0.2 独立声明不续期的 SQL-publication/I/O 预算。
+显式跨域恢复使用 v0.31，peer profile v0.3 独立声明不续期的 SQL-publication/I/O 预算
+与原停止只读观察 scope；v0.1/v0.2 保持其原权限，不隐式获得新的观察时间。
 每个实际部署仍须明确选择所用代次，历史回执和存储布局不因应用版本自动升级。
 软件 Node 只执行明确配置的文件/CPU 工作；设备、外部模型和模拟器未被当作验收来源。
 
 [现行 V2 架构](docs/architecture/v2/README.md)说明职责与生命周期；
 [部署与运维](website/pages/operations.md)说明正式入口、完整备份、升级和故障处置。
 物理停止、交接、硬实时、硬件来源、跨主机与长期 SLO 保留独立证据要求。
+
+[原健康接收证据](docs/decisions/0220-original-reported-health-ingress.md)仅由同一已验证 session
+的真实不变健康报告提供，Control 在原事务内使用其实际接收时间；健康变化、陈旧来源、
+重放和撤权仍受门禁。它不从连接存活推断设备健康，也不改 State/Memory 的 TTL。
 
 ## 历史切片与演进记录
 
@@ -1322,7 +1327,7 @@ Integration Server 前设置 `ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS` 和
 阶段指标；sink 失败不影响事实接受。见[配置与只读诊断](docs/development/node-protocol-diagnostics.md)。
 
 Control 在持久事务中检查当前精确 session/lease 的连续 reader 心跳证据，先续约再做
-timer expiry。该证据不刷新排队 health，也不提前 Ack 原始事实；实际 ingress time 保留
+timer expiry。纯 liveness 不刷新 health；ADR-0220 单独接纳实际恒定健康报告，不提前 Ack 原始事实。实际 ingress time 保留
 证据年龄，fresh decision time 驱动资格与恢复。已提交 expiry、route loss 或 restart 仍
 要求新 registration。见 [ADR-0076](docs/decisions/0076-continuous-node-liveness-and-decision-time.md)。
 

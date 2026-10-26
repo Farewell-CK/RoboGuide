@@ -197,7 +197,7 @@ async fn custom_policy_and_original_ingress_survive_application_delay() {
         .send(wire::NodeMessage {
             message: Some(NodePayload::Heartbeat(wire::Heartbeat {
                 session_id: session_id.clone(),
-                lease_id,
+                lease_id: lease_id.clone(),
                 sequence: 1,
                 status: Some(wire::NodeStatus {
                     health: "online".into(),
@@ -220,6 +220,13 @@ async fn custom_policy_and_original_ingress_survive_application_delay() {
     assert_eq!(evidence.len(), 1);
     assert_eq!(evidence[0].first_received_at, domain::TimestampMs::new(100));
     assert_eq!(evidence[0].last_sequence, 1);
+    assert_eq!(
+        evidence[0].reported_health,
+        Some(domain::NodeStatus::new(
+            domain::NodeHealth::Online,
+            domain::TimestampMs::new(100)
+        ))
+    );
     assert!(
         tokio::time::timeout(std::time::Duration::ZERO, inbound.message())
             .await
@@ -231,6 +238,38 @@ async fn custom_policy_and_original_ingress_survive_application_delay() {
         response(&mut inbound).await,
         wire::server_message::Message::Ack(wire::Ack { sequence: 1 })
     ));
+    for (sequence, health, at) in [(2, "degraded", 500), (3, "online", 600)] {
+        clock.now.store(at, Ordering::Relaxed);
+        sender
+            .send(wire::NodeMessage {
+                message: Some(NodePayload::Heartbeat(wire::Heartbeat {
+                    session_id: session_id.clone(),
+                    lease_id: lease_id.clone(),
+                    sequence,
+                    status: Some(wire::NodeStatus {
+                        health: health.into(),
+                        detail: String::new(),
+                    }),
+                })),
+            })
+            .unwrap();
+        let delivery = tokio::time::timeout(std::time::Duration::from_secs(2), application.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            router.node_liveness_evidence().unwrap()[0]
+                .reported_health
+                .is_none(),
+            "a real health transition permanently disables early health for this session"
+        );
+        let (_, _, completion) = delivery.into_observed_parts();
+        completion.accept();
+        let wire::server_message::Message::Ack(ack) = response(&mut inbound).await else {
+            panic!("original ACK required")
+        };
+        assert_eq!(ack.sequence, sequence);
+    }
     assert!(observer.attempts.load(Ordering::Relaxed) > 0);
     drop(sender);
     drop(inbound);

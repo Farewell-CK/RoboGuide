@@ -594,6 +594,19 @@ impl GrpcNodeRouter {
         let Some(NodePayload::Heartbeat(heartbeat)) = &message.message else {
             return Ok(());
         };
+        let health = match heartbeat
+            .status
+            .as_ref()
+            .map(|status| status.health.as_str())
+        {
+            Some("online") => domain::NodeHealth::Online,
+            Some("degraded") => domain::NodeHealth::Degraded,
+            Some("offline") => domain::NodeHealth::Offline,
+            _ => return Err(Status::invalid_argument("heartbeat health unavailable")),
+        };
+        // The existing wire has no separate source clock. Preserve its normal receive-time
+        // conversion, and never manufacture a later observation while reading this witness.
+        let reported = domain::NodeStatus::new(health, at);
         let mut sessions = self
             .sessions
             .lock()
@@ -619,6 +632,13 @@ impl GrpcNodeRouter {
             evidence.maximum_gap_ms = evidence.maximum_gap_ms.max(gap);
             evidence.last_sequence = heartbeat.sequence;
             evidence.last_received_at = at;
+            if let Some(previous) = &mut evidence.reported_health {
+                if previous.health() == health {
+                    *previous = reported;
+                } else {
+                    evidence.reported_health = None;
+                }
+            }
         } else {
             route.liveness_evidence = Some(domain::NodeSessionLivenessEvidence {
                 node_id: domain::NodeId::new(node_id)
@@ -632,6 +652,7 @@ impl GrpcNodeRouter {
                 first_received_at: at,
                 last_received_at: at,
                 maximum_gap_ms: gap,
+                reported_health: Some(reported),
             });
         }
         Ok(())

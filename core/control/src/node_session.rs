@@ -26,6 +26,10 @@ pub(crate) struct NodeSessionAnchor {
     accepted_sequence: u64,
     /// Last continuous receive timestamp admitted by Control.
     accepted_received_at: TimestampMs,
+    /// Highest actual unchanged-health source sequence already accepted under the writer.
+    accepted_health_sequence: u64,
+    /// Actual receive limit covered by that health input, never a timer/dequeue timestamp.
+    accepted_health_received_at: TimestampMs,
     /// Durable expiry/route-loss already occurred; only registration clears the fence.
     fenced: bool,
 }
@@ -116,6 +120,8 @@ impl ControlPlane {
                 duration_ms,
                 accepted_sequence: 0,
                 accepted_received_at: lease.issued_at(),
+                accepted_health_sequence: 0,
+                accepted_health_received_at: lease.issued_at(),
                 fenced: false,
             },
         );
@@ -206,6 +212,67 @@ impl ControlPlane {
         Ok(true)
     }
 
+    /// Admits actual unchanged health only after the same exact live evidence was accepted by Control.
+    pub fn accept_session_reported_health<
+        S: SharedNodeStateReader + SharedNodeStateWriter,
+        E: EventSink,
+    >(
+        &mut self,
+        state: &mut S,
+        evidence: &NodeSessionLivenessEvidence,
+        decision_at: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
+    ) -> Result<bool, ControlError> {
+        let Some(status) = evidence.reported_health else {
+            return Ok(false);
+        };
+        let Some(session) = self.node_sessions.get(&evidence.node_id) else {
+            return Ok(false);
+        };
+        if session.fenced
+            || session.session_id != evidence.session_id
+            || session.lease_id != evidence.lease_id
+            || session.accepted_sequence != evidence.last_sequence
+            || session.accepted_received_at != evidence.last_received_at
+            || evidence.last_sequence <= session.accepted_health_sequence
+            || evidence.last_received_at > decision_at
+            || evidence.last_received_at < session.admitted_at
+            || !status.health().is_schedulable()
+            || session
+                .certificate_expires_at_ms
+                .is_some_and(|until| decision_at.as_millis() >= until)
+            || !self.identity_transport_is_current(&evidence.node_id, decision_at)
+            || self.leases.get(&evidence.node_id).is_none_or(|lease| {
+                lease.lease_id() != &evidence.lease_id || !lease.is_active_at(decision_at)
+            })
+            || state.node(&evidence.node_id).is_none_or(|node| {
+                node.reported_status().health() != status.health()
+                    || node.reported_status_received_at() > evidence.last_received_at
+                    || node.liveness().liveness() != NodeLiveness::Reachable
+            })
+        {
+            return Ok(false);
+        }
+        let duration = session.duration_ms;
+        self.accept_received_heartbeat(
+            state,
+            NodeHeartbeat::new(evidence.node_id.clone(), evidence.lease_id.clone(), status),
+            evidence.last_received_at,
+            decision_at,
+            duration,
+            correlation_id,
+            events,
+        )?;
+        let session = self
+            .node_sessions
+            .get_mut(&evidence.node_id)
+            .expect("same original session");
+        session.accepted_health_sequence = evidence.last_sequence;
+        session.accepted_health_received_at = evidence.last_received_at;
+        Ok(true)
+    }
+
     /// Separately accepts original health and maintains non-regressing liveness-only lease authority.
     #[allow(clippy::too_many_arguments)]
     pub fn accept_received_heartbeat<
@@ -256,13 +323,27 @@ impl ControlPlane {
         } else {
             None
         };
-        state
-            .record_node_health(NodeHealthObservation::new(
-                heartbeat.node_id().clone(),
-                heartbeat.status(),
-                received_at,
-            ))
-            .map_err(ControlError::SharedState)?;
+        let covered = state.node(heartbeat.node_id()).is_some_and(|node| {
+            received_at < node.reported_status_received_at()
+                && heartbeat.status().health() == node.reported_status().health()
+                && self
+                    .node_sessions
+                    .get(heartbeat.node_id())
+                    .is_some_and(|session| {
+                        session.accepted_health_sequence > 0
+                            && received_at >= session.admitted_at
+                            && received_at <= session.accepted_health_received_at
+                    })
+        });
+        if !covered {
+            state
+                .record_node_health(NodeHealthObservation::new(
+                    heartbeat.node_id().clone(),
+                    heartbeat.status(),
+                    received_at,
+                ))
+                .map_err(ControlError::SharedState)?;
+        }
         if let Some(renewed) = renewed {
             self.leases.insert(heartbeat.node_id().clone(), renewed);
         }
