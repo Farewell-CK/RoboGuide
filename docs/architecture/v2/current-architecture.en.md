@@ -165,6 +165,11 @@ continuity. Control tenant quota accounts for logical commitments. Local Memory 
 
 ## Habitat and Eval Harness integration
 
+At an Actor's first match, Control checks both all capability requirements and all exact operations
+in the accepted plan. Neither substitutes for the other. This reserves no future availability;
+later Proposal, Commit and Bind still check current facts, and capability withdrawal never silently
+migrates an existing Actor binding.
+
 This is an existing optional deployment, not a Habitat dependency for every RoboGuide Node. One separate
 Habitat process owns a shared world, with agent endpoints exposed through configured Node Services.
 

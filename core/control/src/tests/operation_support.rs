@@ -148,6 +148,94 @@ fn mission_matching_requires_independent_operation_support() {
     );
 }
 
+/// Builds an Actor whose Tasks share one capability but require different operations.
+fn future_operation_plan() -> (MissionPlan, TaskRequirement, TaskRequirement) {
+    let mission = domain::MissionId::new("future-operation").unwrap();
+    let actor = domain::ActorId::new("carrier").unwrap();
+    let context = domain::CoordinationContextId::new("delivery").unwrap();
+    let context_role = domain::ContextRoleId::new("carrier-role").unwrap();
+    let mut tasks = Vec::new();
+    let mut requirements = Vec::new();
+    for (index, operation) in ["inspect", "relocate"].iter().enumerate() {
+        let role = RoleId::new("worker").unwrap();
+        let requirement = TaskRequirement::new(
+            mission.clone(),
+            TaskId::new(format!("task-{index}")).unwrap(),
+            vec![RoleRequirement::new_normalized(
+                role.clone(),
+                Some(actor.clone()),
+                vec![domain::CapabilityRequirement::exact(
+                    CapabilityContractRef::new("object", "relocate", "v1").unwrap(),
+                )],
+                Vec::new(),
+            ).unwrap()],
+        ).unwrap();
+        tasks.push(PlannedTask::new(
+            format!("{operation} the item"),
+            requirement.clone(),
+            BTreeMap::from([(role.clone(), ExecutionIntent::new_semantic(
+                domain::OperationRef::new("object", *operation, "v1").unwrap(),
+                format!("{operation} the item"), BTreeMap::new(),
+            ).unwrap())]),
+            if index == 0 { Vec::new() } else { vec![TaskId::new("task-0").unwrap()] },
+            domain::TaskContinuity::new(context.clone(),
+                BTreeMap::from([(role, context_role.clone())]), BTreeMap::new()),
+        ).unwrap());
+        requirements.push(requirement);
+    }
+    let plan = MissionPlan::new(
+        MissionGoal::new(mission.clone(), "Inspect then relocate the item").unwrap(),
+        TaskGraph::new(mission, tasks).unwrap(),
+        vec![domain::CoordinationContext::new(context,
+            vec![domain::ContextRole::new(context_role, actor)]).unwrap()],
+    ).unwrap();
+    (plan, requirements.remove(0), requirements.remove(0))
+}
+
+/// First binding must support future operations, even when their capability is identical.
+#[test]
+fn first_actor_selection_and_diagnostics_require_all_operations() {
+    let (plan, first, later) = future_operation_plan();
+    let mut control = ControlPlane::new();
+    let mut state = InMemorySharedNodeState::new();
+    let mut events = TestEvents;
+    let now = TimestampMs::new(0);
+    let trace = correlation();
+    let owner = domain::LocalSystemId::new("local-eaios").unwrap();
+    let complete = operation_support_node("node-b", "inspect").with_operation_support(vec![
+        domain::OperationSupport::new(domain::OperationRef::new("object", "inspect", "v1").unwrap(), owner.clone()),
+        domain::OperationSupport::new(domain::OperationRef::new("object", "relocate", "v1").unwrap(), owner),
+    ]).unwrap();
+    for registration in [operation_support_node("node-a", "inspect"), complete] {
+        control.register_node(&mut state, registration, NodeStatus::new(NodeHealth::Online, now),
+            now, &trace, &mut events).unwrap();
+    }
+    let candidates = control.match_capabilities_for_mission(
+        &state, &plan, &first, now, &trace, &mut events).unwrap();
+    assert_eq!(candidates.roles()[0].node_ids(), &[NodeId::new("node-b").unwrap()]);
+    let diagnostics = control.first_use_candidate_diagnostics(&state, &plan, &first, now).unwrap();
+    assert_eq!(diagnostics[0].eligible_count, 1);
+    assert_eq!(diagnostics[0].exclusions.get(&crate::CandidateExclusionReason::OperationUnsupported), Some(&1));
+
+    let group = ExecutionGroupId::new("future-operations").unwrap();
+    control.create_mission_group(group.clone(), &plan, now, &trace, &mut events).unwrap();
+    control.ready_task_execution(&group, first.task_ref(), now, &trace, &mut events).unwrap();
+    let selection = crate::BoundedJointScheduler::new().schedule_task(
+        &state, &first, &candidates, now, &trace, &mut events).unwrap();
+    let proposal = control.propose(&state, &first, &candidates, selection.proposed_assignments(),
+        now, &trace, &mut events).unwrap();
+    let committed = control.commit_with_state(&state, &proposal, now, &trace, &mut events).unwrap();
+    control.bind_task_execution_with_state(&state, &group, &committed, now, &trace, &mut events).unwrap();
+    let later_candidates = control.match_capabilities_for_mission(
+        &state, &plan, &later, now, &trace, &mut events).unwrap();
+    assert_eq!(later_candidates.roles()[0].node_ids(), &[NodeId::new("node-b").unwrap()]);
+
+    // Later declaration loss must still fail closed; first-use filtering grants no future lease.
+    replace_operation_registration(&mut state, operation_support_node("node-b", "inspect"));
+    assert!(control.match_capabilities_for_mission(
+        &state, &plan, &later, now, &trace, &mut events).is_err());
+}
+
 /// Diagnostics and actual matching share one predicate across health, time and contract faults.
 #[test]
 fn first_use_diagnostics_match_actual_eligibility_without_mutation() {

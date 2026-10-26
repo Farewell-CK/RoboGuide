@@ -253,6 +253,7 @@ impl ControlPlane {
             ));
         }
         let actor_requirements = mission.actor_requirements();
+        let actor_operations = mission.actor_operations();
         requirement
             .roles()
             .iter()
@@ -278,6 +279,7 @@ impl ControlPlane {
                         role,
                         operation,
                         &actor_requirements,
+                        &actor_operations,
                         node.node_id(),
                         timestamp,
                     ) {
@@ -299,6 +301,7 @@ impl ControlPlane {
         role: &domain::RoleRequirement,
         operation: &OperationRef,
         actor_requirements: &BTreeMap<domain::ActorId, Vec<CapabilityRequirement>>,
+        actor_operations: &BTreeMap<domain::ActorId, Vec<OperationRef>>,
         node: &NodeId,
         timestamp: TimestampMs,
     ) -> Option<crate::CandidateExclusionReason> {
@@ -340,6 +343,15 @@ impl ControlPlane {
             })
         }) {
             return Some(crate::CandidateExclusionReason::ActorContractUnavailable);
+        }
+        if role.actor_id().is_some_and(|actor| {
+            actor_operations.get(actor).is_none_or(|operations| {
+                !operations
+                    .iter()
+                    .all(|required| registration.supports_operation(required))
+            })
+        }) {
+            return Some(crate::CandidateExclusionReason::OperationUnsupported);
         }
         None
     }
@@ -495,6 +507,7 @@ impl ControlPlane {
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
         let actor_requirements = mission.actor_requirements();
+        let actor_operations = mission.actor_operations();
         let context_id = task.continuity().context_id();
         let mut candidates = self.match_capabilities_with_actor_bindings(
             state,
@@ -570,6 +583,7 @@ impl ControlPlane {
                     role,
                     operation,
                     &actor_requirements,
+                    &actor_operations,
                     node_id,
                     timestamp,
                 )

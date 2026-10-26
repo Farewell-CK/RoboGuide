@@ -157,6 +157,10 @@ ADR-0185 的 producer 对账保留实际仍存活且没有 scope-close 证据的
 
 ## Habitat 与 Eval Harness 的接入位置
 
+同一 Actor 首次匹配时，Control 同时检查已接受计划中的全部 capability 要求和全部精确
+operation 声明；二者不能互相替代。该检查不预订未来可用性，后续 Proposal、Commit、Bind
+仍检查当前事实，能力撤销不会自动迁移已有 Actor 绑定。
+
 这是已有的可选部署实例，不是所有 RoboGuide Node 都依赖 Habitat。共享 world 由一个独立
 Habitat 进程拥有，各 agent endpoint 通过正式 Node Service 接入。
 
