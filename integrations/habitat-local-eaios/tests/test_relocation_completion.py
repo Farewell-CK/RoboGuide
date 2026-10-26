@@ -203,6 +203,7 @@ class CompletionHarness:
             _high_level_policy=SimpleNamespace(llm_agent=self.agent),
         )
         self.rows: list[dict[str, Any]] = []
+        self.action_rows: list[dict[str, Any]] = []
         self.state = RelocationExecutionState(phase="holding", allow_holding_reset=enabled)
         self.binding = RelocationCompletionBinding(self.world, {self.name: self.contract})
         self.feedback = Stage2ExecutionFeedback(
@@ -215,7 +216,7 @@ class CompletionHarness:
         self.restore_guard = install_stage2_contract_guard(
             [self.agent],
             {self.name: self.contract},
-            lambda record: None,
+            self.action_rows.append,
             feedback=self.feedback,
             relocation_states={self.name: self.state},
         )
@@ -624,13 +625,134 @@ def test_offered_navigation_target_matches_the_observed_guard_phase() -> None:
         assert harness.agent.dispatched[-1] == ("nav_to_obj", {"target_obj": harness.destination})
         assert harness.agent.llm_model.actions == original_tools
         harness.state.complete("nav_to_obj", True)
-        harness.state.phase = "before_pick"
+        manager = harness.world.sim.get_agent_data(harness.index).grasp_mgr
+        manager.is_grasped, manager.snap_idx = False, None
         harness.agent.llm_model.response = ("nav_to_obj", {"target_obj": harness.object})
         harness.agent.chat("unchanged original observation")
         tools = harness.agent.llm_model.offered_actions
         assert tools is not None
         offered = next(tool for tool in tools if tool["name"] == "nav_to_obj")
         assert offered["parameters"]["properties"]["target_obj"]["enum"] == [harness.object]
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("actually_holding", [False, True])
+def test_navigation_phase_uses_current_exact_grasp_after_a_skill_exit(
+    actually_holding: bool,
+) -> None:
+    """A prior skill result cannot override a changed canonical-object grasp observation."""
+    harness = CompletionHarness()
+    manager = harness.world.sim.get_agent_data(harness.index).grasp_mgr
+    manager.is_grasped = actually_holding
+    manager.snap_idx = 101 if actually_holding else None
+    harness.state.phase = "before_pick" if actually_holding else "holding"
+    target = harness.destination if actually_holding else harness.object
+    harness.agent.llm_model.response = ("nav_to_obj", {"target_obj": target})
+    try:
+        harness.agent.chat("unchanged original observation")
+        tools = harness.agent.llm_model.offered_actions
+        assert tools is not None
+        navigation = next(tool for tool in tools if tool["name"] == "nav_to_obj")
+        assert navigation["parameters"]["properties"]["target_obj"]["enum"] == [target]
+        assert harness.agent.dispatched == [("nav_to_obj", {"target_obj": target})]
+        assert not harness.feedback.operation_completed(harness.name)
+        decision = harness.action_rows[-1]
+        assert decision["relocation_guard_profile"] == "observed-object-relocation/v0.4"
+        observations = decision["relocation_phase_observation"]
+        for name, timing in (
+            ("model_input", "before-model-call"),
+            ("before_dispatch", "before-tool-dispatch"),
+        ):
+            assert observations[name]["object_released"] is not actually_holding
+            assert observations[name]["source_timing"] == timing
+            assert observations[name]["attempt_id"] == harness.contract.attempt_id
+            assert observations[name]["invocation_digest"] == harness.contract.invocation_digest
+            assert observations[name]["establishes_skill_completion"] is False
+    finally:
+        harness.close()
+
+
+def test_unheld_object_cannot_navigate_to_destination_using_stale_skill_success() -> None:
+    """A stored holding phase cannot authorize transporting an object no longer held."""
+    harness = CompletionHarness()
+    manager = harness.world.sim.get_agent_data(harness.index).grasp_mgr
+    manager.is_grasped, manager.snap_idx = False, None
+    harness.agent.llm_model.response = ("nav_to_obj", {"target_obj": harness.destination})
+    try:
+        with pytest.raises(Stage2ContractViolation, match="phase"):
+            harness.agent.chat("unchanged original observation")
+        assert harness.agent.dispatched == []
+        assert not harness.feedback.operation_completed(harness.name)
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("fault", ["unavailable", "wrong-object", "pending", "placed"])
+def test_fresh_grasp_cannot_bypass_unknown_identity_or_original_action_fences(fault: str) -> None:
+    """Current reads never borrow another object, finish a pending skill or reopen placement."""
+    harness = CompletionHarness()
+    manager = harness.world.sim.get_agent_data(harness.index).grasp_mgr
+    if fault == "unavailable":
+        manager.is_grasped = None
+    elif fault == "wrong-object":
+        manager.snap_idx = 202
+    elif fault == "pending":
+        harness.state.pending_action = "pick"
+    else:
+        harness.state.phase = "placed"
+    harness.agent.llm_model.response = ("nav_to_obj", {"target_obj": harness.destination})
+    try:
+        with pytest.raises(Stage2ContractViolation):
+            harness.agent.chat("unchanged original observation")
+        assert harness.agent.dispatched == []
+        assert not harness.feedback.operation_completed(harness.name)
+        if fault == "pending":
+            assert harness.state.pending_action == "pick"
+        if fault == "placed":
+            assert harness.state.phase == "placed"
+    finally:
+        harness.close()
+
+
+def test_grasp_is_rechecked_after_the_model_response_before_any_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model request's earlier snapshot cannot authorize a later contradictory action."""
+    harness = CompletionHarness()
+    model = harness.agent.llm_model
+    model.response = ("nav_to_obj", {"target_obj": harness.destination})
+    original_chat = model.chat
+
+    def reply_after_release(content: str, crab_planning: bool = False) -> Any:
+        """Retain the raw response while changing only the fake world's actual grasp."""
+        response = original_chat(content, crab_planning)
+        manager = harness.world.sim.get_agent_data(harness.index).grasp_mgr
+        manager.is_grasped, manager.snap_idx = False, None
+        return response
+
+    monkeypatch.setattr(model, "chat", reply_after_release)
+    try:
+        with pytest.raises(Stage2ContractViolation, match="phase"):
+            harness.agent.chat("unchanged original observation")
+        assert harness.agent.dispatched == []
+        observations = harness.action_rows[-1]["relocation_phase_observation"]
+        assert observations["model_input"]["object_released"] is False
+        assert observations["before_dispatch"]["object_released"] is True
+        assert model.response == ("nav_to_obj", {"target_obj": harness.destination})
+    finally:
+        harness.close()
+
+
+def test_disabled_bound_profile_does_not_change_the_legacy_navigation_phase() -> None:
+    """Default-off operation retains the original skill-result phase and tool declaration."""
+    harness = CompletionHarness(enabled=False)
+    harness.state.phase = "before_pick"
+    harness.agent.llm_model.response = ("nav_to_obj", {"target_obj": harness.object})
+    try:
+        harness.agent.chat("unchanged original observation")
+        assert harness.agent.dispatched == [("nav_to_obj", {"target_obj": harness.object})]
+        assert "relocation_phase_observation" not in harness.action_rows[-1]
     finally:
         harness.close()
 

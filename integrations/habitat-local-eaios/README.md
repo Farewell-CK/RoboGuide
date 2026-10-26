@@ -523,6 +523,24 @@ loaded module. This changes model-input feedback in the RoboGuide arm; native
 EMOS keeps its original model client and synthetic receipts. No official
 metric, Formal admission rule, robot ability or physical path filter changes.
 
+With explicit relocation completion binding, feedback v0.5 also supplies the
+exact object's current grasp at model-input and pre-dispatch boundaries.
+The action guard v0.4 uses it for navigation/pick/place admission independently
+of the previous skill's success or failure. Pending skills remain fenced,
+failed receipts remain failed, and only an actually executed, release-qualified
+place confirms completion. Missing or contradictory grasp evidence cannot
+authorize physical relocation actions. Both observations appear in the action
+audit; the selected tool and arguments remain untouched. Current preflight
+requires the declared generation, while historical v0.4 feedback remains
+verifiable under its original identity.
+
+Optional measurement conversions, including vendor device/read exceptions,
+are isolated per field as `unavailable` in observation evidence. Valid sibling
+values such as an actual official `pddl_success` Boolean remain intact. Identity
+and contract artifacts retain strict serialization, and the original actor or
+Gym exception still propagates. An unavailable measurement is never converted
+to success or an official false.
+
 Records stream at model-call frequency, one bounded record at a time (64 KiB
 maximum), rather than at simulator-step frequency. The existing episode budget
 bounds the synchronous actor loop and therefore the number of selected actions.

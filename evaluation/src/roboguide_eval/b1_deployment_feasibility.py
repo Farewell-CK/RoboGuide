@@ -244,13 +244,21 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     if extended and how.get("execution_options") != execution_options:
         raise ValueError("loaded execution options differ from declaration")
     bound_relocation = declared["relocation_completion_binding"]
+    base_profile = how.get("base_profile", {})
+    bound_feedback = (
+        "observed-local-skill-feedback/v0.5"
+        if isinstance(base_profile, dict)
+        and base_profile.get("stage2_execution_feedback_profile")
+        == "observed-local-skill-feedback/v0.5"
+        else "observed-local-skill-feedback/v0.4"
+    )
     expected_base = {
         "schema_version": "roboguide.habitat-local-how-profile/v0.8"
         if bound_relocation
         else "roboguide.habitat-local-how-profile/v0.2",
         "navigation_point_resolver": "original-emos-oracle",
         "official_success_authority": "habitat-pddl",
-        "stage2_execution_feedback_profile": "observed-local-skill-feedback/v0.4"
+        "stage2_execution_feedback_profile": bound_feedback
         if bound_relocation
         else "observed-local-skill-feedback/v0.1",
         "reset_route_support_enabled": False,

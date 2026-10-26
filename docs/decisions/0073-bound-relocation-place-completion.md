@@ -28,7 +28,9 @@ below now makes that choice explicit before launch. Existing disabled and naviga
 retain their earlier behavior. Enabled execution discloses Local How v0.8,
 feedback v0.3 and `exact-object-released-place/v0.1`.
 The follow-up sparse-state and communication scope described below emits
-feedback v0.4. Historical v0.3 evidence is not relabeled.
+feedback v0.4. Current exact-grasp admission emits feedback v0.5 and action
+guard `observed-object-relocation/v0.4`. Historical evidence keeps its original
+profile identity.
 
 The adapter freezes agent, canonical attempt/invocation digest, exact object,
 destination and absolute rigid-object identity for each execution segment.
@@ -66,6 +68,27 @@ object nor advances the relocation phase. Pending actions and wrong objects,
 destinations or actual grasp identities remain fenced. The offered navigation
 enum follows the same observed phase: object before pick, destination while
 holding. This narrows existing authority; it invents no recovery action or goal.
+
+Feedback v0.5 refreshes the admission phase from the exact canonical object's
+current grasp immediately before each model request and again before dispatch.
+`observed-relocation-phase/v0.1` binds both reads to the agent, attempt,
+invocation, world and absolute rigid-object identity. A changed grasp can make
+the next admissible navigation target differ from the last skill-result phase.
+The model receives the actual observation and chooses its own action; neither
+its raw response nor its selected target is rewritten. A response inconsistent
+with the dispatch-time observation is rejected through the existing bounded
+contract recovery, without a new attempt or renewed budget.
+
+This admission projection is separate from action completion. It cannot clear
+an unresolved pending skill, rewrite a failed pick receipt, declare a place
+successful from distance alone, or reopen an already confirmed place. Unknown
+and contradictory identity cannot authorize navigation, pick, place or arm
+reset. A real grasp after a budget exit can authorize carrying that exact
+object while the original skill remains recorded as budget-exhausted. A lost
+grasp requires reacquisition; past pick success cannot authorize empty-handed
+destination navigation. Disabled completion binding and ordinary navigation
+retain their earlier path. These are generic relocation preconditions, not
+benchmark-specific goals or Task reassignment.
 
 ## Evidence and lifecycle
 
@@ -127,7 +150,9 @@ The runner freezes the final choice in deployment-used v0.2 and a separate
 local-execution-profile-required v0.1, binding the run and original input/
 deployment bytes. Before Controller or MI startup, relocation preflight v0.3
 checks the actual child Local How and loaded-interface/reset-reader completion
-readiness. Enabled execution requires Local How v0.8 and feedback v0.4. Missing,
+readiness. New enabled execution requires Local How v0.8 and feedback v0.5. The
+offline evaluator still accepts exact historical v0.4 declarations without
+relabeling them; unknown generations refuse. Missing,
 contradictory or unavailable evidence stops startup and preserves raw files as
 a harness evidence failure. The check does not call a model or simulator, alter
 completion, or change Formal/benchmark admission. Preflight archives the exact

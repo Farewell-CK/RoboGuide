@@ -77,6 +77,24 @@ class RelocationExecutionState:
         elif action_name == "place":
             self.phase = "placed"
 
+    def observe(self, observation: Mapping[str, Any] | None) -> None:
+        """Refresh admission from exact grasp evidence without completing a pending skill.
+
+        A failed pick can still leave the actual object held, and a previous
+        successful pick does not prove it remains held. Neither observation
+        changes the original action receipt or proves placement.
+        """
+        if (
+            observation is None
+            or self.pending_action is not None
+            or self.phase == "placed"
+            or observation.get("status") != "observed"
+        ):
+            return
+        released = observation.get("object_released")
+        if isinstance(released, bool):
+            self.phase = "before_pick" if released else "holding"
+
 
 @dataclass(frozen=True)
 class Stage2ExecutionContract:
@@ -637,8 +655,16 @@ def _guard_agent(
 
         def one_model_call(content: str, crab_planning: bool = False) -> Any:
             """Keep the original response intact and fence the selected execution tool."""
+            phase_observation = None
             if not crab_planning and feedback is not None:
                 content = feedback.before_call(agent_name, model, content)
+                phase_observation = feedback.relocation_observation(agent_name, "before-model-call")
+                if relocation_state is not None:
+                    relocation_state.observe(phase_observation)
+                if phase_observation is not None:
+                    content += "\n\nCurrent relocation admission observation:\n" + json.dumps(
+                        phase_observation, allow_nan=False, sort_keys=True
+                    )
             history_length = _raw_history_length(model) if not crab_planning else None
             original_actions = getattr(model, "actions", _MISSING)
             bound_actions = not crab_planning and contract.expected_destination is not None
@@ -709,6 +735,7 @@ def _guard_agent(
                 else result
             )
             error = None
+            dispatch_observation = None
             provider_tool_call_count = _latest_tool_call_count(model, history_length)
             try:
                 if provider_tool_call_count is None:
@@ -735,6 +762,12 @@ def _guard_agent(
                     )
                     else peer_names
                 )
+                if feedback is not None:
+                    dispatch_observation = feedback.relocation_observation(
+                        agent_name, "before-tool-dispatch"
+                    )
+                    if relocation_state is not None:
+                        relocation_state.observe(dispatch_observation)
                 contract.validate(agent_name, action, active_peers, relocation_state)
                 if (
                     offered_message_targets is not None
@@ -745,7 +778,7 @@ def _guard_agent(
                         agent_name, action, "peer request target is outside the offered tool schema"
                     )
                 if feedback is not None:
-                    reason = feedback.action_failure(agent_name, action)
+                    reason = feedback.action_failure(agent_name, action, dispatch_observation)
                     if reason is not None:
                         raise Stage2ContractViolation(agent_name, action, reason)
             except Stage2ContractViolation as violation:
@@ -761,7 +794,12 @@ def _guard_agent(
                 "boundary": "before-crab-agent-dispatch",
             }
             if feedback is not None and feedback.has_bound_relocation_completion:
-                document["relocation_guard_profile"] = "observed-object-relocation/v0.3"
+                document["relocation_guard_profile"] = "observed-object-relocation/v0.4"
+                document["relocation_phase_observation"] = {
+                    "model_input": phase_observation,
+                    "before_dispatch": dispatch_observation,
+                    "admission_phase": relocation_state.phase if relocation_state else None,
+                }
             if feedback is not None and (
                 feedback.has_bound_relocation_completion or feedback.has_live_peer_contracts
             ):
@@ -783,7 +821,8 @@ def _guard_agent(
 
             The nonrenewable budget belongs to this exact bound attempt, not
             one step or one rejection. Provider errors propagate unchanged.
-            No rejected action reaches CrabAgent and no phase is advanced.
+            No rejected action reaches CrabAgent or establishes skill completion;
+            current exact grasp may refresh the separate admission phase.
             """
             nonlocal remaining_recoveries
             while True:

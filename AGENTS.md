@@ -1453,8 +1453,10 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   Original termination methods execute once; existing post-step local terminal facts
   may supersede earlier policy-input evidence. This changes local model input, not
   selected actions, robot abilities, simulator/model budgets or official truth.
-  The opt-in bound relocation feedback v0.4 adds sparse exact-object arm/grasp
-  observations and existing peer canonical scopes. Missing reads remain unknown;
+  The opt-in bound relocation feedback v0.5 retains sparse exact-object arm/grasp
+  observations and existing peer canonical scopes. Current exact grasp separately
+  refreshes action admission before model input and dispatch, without clearing pending
+  skills or rewriting failed receipts. Missing reads remain unknown;
   geometric distance or repeated failures never establish manipulation infeasibility.
   Original peer messages cannot transfer Control-owned Tasks. Completed model-free
   idle recipients are withheld and raw requests fail before dispatch; wait completion
@@ -1519,9 +1521,10 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   `relocation_completion.py` owns these local bindings, never Control or Task satisfaction.
   B1 relocation deployment v0.2 explicitly selects completion binding while the generic
   adapter remains default-off. The runner freezes a run/input/deployment-bound requirement
-  and checks actual child Local How v0.8 / feedback v0.4 plus loaded completion readiness
+  and checks actual child Local How v0.8 / feedback v0.5 plus loaded completion readiness
   before Controller/MI startup. Missing or contradictory evidence is a preserved harness
-  failure, never invented benchmark truth. Legacy v0.1 and navigation retain compatibility.
+  failure, never invented benchmark truth. Offline historical feedback v0.4 keeps its
+  original identity. Legacy v0.1 and navigation retain compatibility.
 - Optional goal-region navigation is a deployment-owned Local How variant for direct
   conjunctive official `any_at` goals (ADR-0051). It preserves the exact model-selected
   entity and original Oracle control loop, but may select a different physical target

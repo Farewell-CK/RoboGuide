@@ -43,7 +43,7 @@ def bound_run(tmp_path: Path) -> Path:
     actual = json.loads(actual_path.read_bytes())
     actual.update(
         schema_version="roboguide.habitat-local-how-profile/v0.8",
-        stage2_execution_feedback_profile="observed-local-skill-feedback/v0.4",
+        stage2_execution_feedback_profile="observed-local-skill-feedback/v0.5",
         relocation_completion_profile="exact-object-released-place/v0.1",
     )
     actual_path.write_text(json.dumps(actual))
@@ -85,6 +85,11 @@ def test_loaded_bound_profile_is_required_and_evidence_is_preserved(tmp_path: Pa
             "local-how-profile.json",
             "stage2_execution_feedback_profile",
             "observed-local-skill-feedback/v0.1",
+        ),
+        (
+            "local-how-profile.json",
+            "stage2_execution_feedback_profile",
+            "observed-local-skill-feedback/v0.4",
         ),
         ("local-how-profile.json", "relocation_completion_profile", "invented"),
         ("local-how-profile.json", "official_success_authority", "local-completion"),

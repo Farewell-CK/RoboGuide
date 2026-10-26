@@ -214,6 +214,41 @@ def test_pick_budget_feedback_contains_bound_actual_arm_state_for_next_model_cal
         harness.close()
 
 
+def test_observed_grasp_after_budget_exit_does_not_rewrite_the_failed_skill_receipt() -> None:
+    """Actual held-object authority and the original failed pick result remain distinct."""
+    harness = PeerHarness()
+    try:
+        model = harness.first_model
+        model.response = ("pick", {"target_obj": harness.first.object})
+        harness.first.agent.chat("original observation")
+        harness.feedback.physical_step()
+        harness.pick._cur_skill_step = [100]
+        result = harness.pick.should_terminate(
+            skill_name=["pick"], batch_idx=[0], hl_wants_skill_term=[False]
+        )
+        assert result is harness.pick.last_result
+        original_receipt = model.chat_history[-1][-1]
+        assert json.loads(original_receipt["content"])["status"] == "skill-budget-exhausted"
+        assert harness.first.state.pending_action is None
+        manager = harness.first.world.sim.get_agent_data(0).grasp_mgr
+        manager.is_grasped, manager.snap_idx = True, 202
+        model.response = ("nav_to_obj", {"target_obj": harness.first.destination})
+        harness.first.agent.chat("You have completed your previous action. Select next action.")
+        prior = json.loads(original_receipt["content"])
+        assert prior["status"] == "skill-budget-exhausted"
+        assert prior["local_skill_completed"] is False
+        assert prior["current_manipulation_observation"]["is_grasped"] is True
+        assert harness.pick.base_calls == harness.pick.termination_calls == 1
+        assert not harness.feedback.operation_completed(harness.first.name)
+        assert harness.first.agent.dispatched[-1] == model.response
+        content = model.requests[-1]["content"]
+        admission = json.loads(content.split("Current relocation admission observation:\n")[1])
+        assert admission["bound_object_id"] == 202
+        assert admission["establishes_skill_completion"] is False
+    finally:
+        harness.close()
+
+
 @pytest.mark.parametrize("fault", ["ee-reader", "nonfinite", "joint-budget", "world-changed"])
 def test_optional_arm_faults_remain_unknown_and_preserve_original_budget_result(fault: str) -> None:
     """Unavailable observations never change termination, targets or physical feasibility."""
@@ -288,7 +323,9 @@ def test_active_peer_message_is_scoped_communication_not_task_transfer_or_ack() 
             harness.second.name
         ]
         assert "does not delegate or reassign" in tools["send_request"]["description"]
-        scope = json.loads(request["content"].split("Committed peer execution scope:\n")[1])
+        scope = json.loads(
+            request["content"].split("Committed peer execution scope:\n")[1].split("\n\n")[0]
+        )
         assert scope["operation_delegation_supported"] is False
         peer = scope["peers"][0]
         assert peer["canonical_contract"]["expected_object"] == harness.second.object
@@ -327,7 +364,9 @@ def test_completed_peer_is_not_offered_and_raw_request_rejects_before_dispatch()
             harness.first.agent.chat("original observation")
         request = harness.first_model.requests[-1]
         assert "send_request" not in {tool["name"] for tool in request["tools"]}
-        scope = json.loads(request["content"].split("Committed peer execution scope:\n")[1])
+        scope = json.loads(
+            request["content"].split("Committed peer execution scope:\n")[1].split("\n\n")[0]
+        )
         assert scope["peers"][0]["model_status"] == "completed-idle"
         assert scope["peers"][0]["accepting_model_messages"] is False
         assert harness.first.agent.dispatched == []

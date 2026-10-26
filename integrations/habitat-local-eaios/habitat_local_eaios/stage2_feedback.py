@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 _LOG = logging.getLogger(__name__)
 _MISSING = object()
 FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.1"
-BOUND_FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.4"
+BOUND_FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.5"
 _SCHEMA = "roboguide.stage2-execution-feedback/v0.1"
 _COMPLETED_PREFIX = "You have completed your previous action. "
 
@@ -510,17 +510,46 @@ class Stage2ExecutionFeedback:
             self._emit("retry-terminal-confirmed", pending.document)
             self._notify_completion(agent_name, pending)
 
-    def action_failure(self, agent_name: str, action: Mapping[str, Any]) -> str | None:
+    def relocation_observation(self, agent_name: str, timing: str) -> dict[str, Any] | None:
+        """Read the exact current grasp for action admission, never a skill success receipt."""
+        if self._completion_binding is None or not self._contracts[agent_name].is_relocation:
+            return None
+        return dict(
+            self._completion_binding.observe(agent_name),
+            admission_profile="observed-relocation-phase/v0.1",
+            source_timing=timing,
+            establishes_skill_completion=False,
+        )
+
+    def action_failure(
+        self,
+        agent_name: str,
+        action: Mapping[str, Any],
+        observation: Mapping[str, Any] | None = None,
+    ) -> str | None:
         """Reject contradictory grasp bindings before dispatch under the explicit new profile."""
         if self._completion_binding is None or not self._contracts[agent_name].is_relocation:
             return None
-        observation = self._completion_binding.observe(agent_name)
+        if observation is None:
+            observation = self._completion_binding.observe(agent_name)
         if observation["status"] == "contradictory":
             return "actual grasp does not match the canonical relocation object"
-        if action["name"] in {"place", "reset_arm"} and observation["status"] != "observed":
+        if (
+            action["name"] in {"nav_to_obj", "pick", "place", "reset_arm"}
+            and observation["status"] != "observed"
+        ):
             return "actual relocation object/grasp observation is unavailable"
         if action["name"] == "place" and observation["object_released"] is True:
             return "place requires an actually held canonical object"
+        if action["name"] == "pick" and observation["object_released"] is False:
+            return "pick requires the canonical object to be released"
+        if (
+            action["name"] == "nav_to_obj"
+            and action["arguments"]["target_obj"]
+            == self._contracts[agent_name].expected_destination
+            and observation["object_released"] is True
+        ):
+            return "destination navigation requires an actually held canonical object"
         return None
 
     @property

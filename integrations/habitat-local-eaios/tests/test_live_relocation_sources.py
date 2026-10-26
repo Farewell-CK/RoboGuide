@@ -187,6 +187,36 @@ def test_three_endpoint_preflight_accepts_only_actual_relocators(
     assert preflight_deployment_feasibility(run) == matrix
 
 
+@pytest.mark.parametrize("version", ["v0.4", "v0.5", "v0.99"])
+def test_archived_bound_feedback_versions_are_checked_without_relabeling(
+    tmp_path: Path, version: str
+) -> None:
+    """Evaluation retains old source identity while new startup requires the current profile."""
+    from roboguide_eval.b1_deployment_feasibility import (
+        preflight_deployment_feasibility,
+    )
+
+    run = live_relocation_run(tmp_path)
+    path = run / "evidence/local-how-profile.json"
+    document = json.loads(path.read_bytes())
+    document["base_profile"]["stage2_execution_feedback_profile"] = (
+        f"observed-local-skill-feedback/{version}"
+    )
+    path.write_text(json.dumps(document))
+    before = path.read_bytes()
+    if version == "v0.99":
+        with pytest.raises(ValueError, match="Local How"):
+            preflight_deployment_feasibility(run)
+    else:
+        preflight_deployment_feasibility(run)
+        if version == "v0.4":
+            with pytest.raises(IntegrationError, match="Local How"):
+                preflight_relocation(run)
+        else:
+            assert preflight_relocation(run)["valid"] is True
+    assert path.read_bytes() == before
+
+
 @pytest.mark.parametrize(
     "mutation", ["missing", "capacity", "capacity-bool", "capacity-float", "publication", "release"]
 )
