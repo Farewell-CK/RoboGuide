@@ -92,7 +92,7 @@ def json_observation(value: Any, *, _depth: int = 0, _budget: list[int] | None =
         return [json_observation(item, _depth=_depth + 1, _budget=_budget) for item in value]
     try:
         return json_safe(value, _budget=_budget)
-    except (TypeError, ValueError, OverflowError):
+    except Exception:  # noqa: BLE001 - optional vendor conversions may raise device/read errors
         return {"status": "unavailable", "reason": "non_json_measurement"}
 
 

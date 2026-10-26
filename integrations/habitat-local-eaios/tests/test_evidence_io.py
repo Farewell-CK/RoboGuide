@@ -55,6 +55,26 @@ def test_json_safe_rejects_unsupported_values_instead_of_stringifying() -> None:
         json_safe(object())
 
 
+@pytest.mark.parametrize("official_success", [False, True])
+def test_faulting_vendor_conversion_isolated_from_official_boolean(official_success: bool) -> None:
+    """A failed optional measurement reader cannot erase a genuine official Boolean."""
+
+    class FaultingArray:
+        """Model an existing vendor conversion that raises a runtime device/read error."""
+
+        def tolist(self) -> list[float]:
+            """Fail without materializing a value or generating a substitute measurement."""
+            raise RuntimeError("original conversion sentinel")
+
+    value = FaultingArray()
+    with pytest.raises(RuntimeError, match="original conversion sentinel"):
+        json_safe(value)
+    assert json_observation({"pddl_success": official_success, "distance": value}) == {
+        "pddl_success": official_success,
+        "distance": {"status": "unavailable", "reason": "non_json_measurement"},
+    }
+
+
 def test_vendor_real_preserves_fractional_value() -> None:
     """A NumPy-shaped Real is converted to float rather than truncating to int."""
 

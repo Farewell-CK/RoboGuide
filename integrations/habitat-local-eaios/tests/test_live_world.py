@@ -1090,6 +1090,53 @@ def test_episode_end_and_exception_preserve_original_terminal_evidence(tmp_path:
     assert failure["official_metrics"]["pddl_success"] is False
 
 
+@pytest.mark.parametrize("conversion_raises", [False, True])
+def test_optional_final_info_fault_retains_failure_identity_and_official_metrics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conversion_raises: bool
+) -> None:
+    """One unsupported optional value cannot erase the completed step or primary exception."""
+    actor, gym = Actor(2, fail_at=2), Gym({0: 99})
+    runtime = Runtime(tmp_path, 2, gym, actor)
+    original_step = gym.step
+
+    class FaultingArray:
+        """Represent a failed optional device-to-JSON conversion after the real step."""
+
+        def tolist(self) -> list[float]:
+            """Retain the original read fault without changing the actor's exception."""
+            raise RuntimeError("optional conversion sentinel")
+
+    def step_with_unsupported_detail(action: Any) -> tuple[Any, float, bool, dict[str, Any]]:
+        """Keep the actual step result while adding one non-serializable optional field."""
+        observation, reward, done, info = original_step(action)
+        return (
+            observation,
+            reward,
+            done,
+            dict(info, optional_detail=FaultingArray() if conversion_raises else object()),
+        )
+
+    monkeypatch.setattr(gym, "step", step_with_unsupported_detail)
+    with pytest.raises(RuntimeError, match="original actor sentinel"):
+        runtime.execute_live(
+            {0: invocation(0, ("one",))},
+            lambda: {},
+            lambda: False,
+            lambda *args: None,
+            lambda *args: None,
+            0.1,
+        )
+    failure = json.loads((runtime.directory / "live-world-failure.json").read_bytes())
+    assert failure["identity"]["simulator_steps"] == gym.steps == 1
+    assert failure["termination_reason"] == "execution_exception:RuntimeError"
+    assert failure["official_metrics"]["pddl_success"] is False
+    assert failure["final_info"] == {
+        "pddl_success": False,
+        "optional_detail": {"status": "unavailable", "reason": "non_json_measurement"},
+    }
+    assert runtime.test_diagnostics.terminals == [(1, "execution_exception:RuntimeError")]
+
+
 def test_ledger_rejects_duplicate_overlap_migration_and_coupled_tasks() -> None:
     """Logical bindings remain immutable; this profile never downgrades collaboration."""
     ledger = LiveSlotLedger((0, 1, 2))
